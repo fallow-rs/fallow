@@ -405,7 +405,7 @@ sibling is synthesized only for path-shaped specifiers containing a `/`
 (`./services/api` credits `./services/__mocks__/api`); a sibling that stays in
 package space after alias substitution is dropped so it cannot fabricate a
 phantom `@scope/__mocks__` package (issue #2213). A bare package specifier
-(`vi.mock('axios')`, `jest.mock('@scope/pkg')`) additionally synthesizes a
+(`vi.mock('axios')`, `jest.mock('@scope/pkg')`) also synthesizes a
 root-level `__mocks__/<specifier>` candidate; the resolver probes ancestor
 `__mocks__` directories of the test file up to the analysis root and credits
 the manual mock file when it exists, so root-level node-module mocks do not
@@ -602,7 +602,7 @@ is tested against the path relative to the run root, so on
 which `**/build/**` matches again and the `--root` remedy would recover
 nothing.
 
-Four properties of that count are load-bearing:
+Preserve these properties of the count:
 
 - Attribution reads the index layout of the compiled union. User
   `ignorePatterns` occupy `0..user_ignore_pattern_count` and

@@ -34,12 +34,16 @@ The generator owns the Claude adapter bytes and marks them as generated.
 Hand-edit the canonical `.agents/skills` or `.agents/agents` source, regenerate,
 then commit both surfaces. CI runs check mode and rejects drift.
 
-The generator owns tracked adapters only. A generated file under `.claude` that
-git does not track is somebody's local host directory, not repository content, so
-check mode names it and leaves it alone and generate mode never deletes it. The
-generated marker alone cannot tell the two apart, because a directory copied from
-a released skill contract carries the same marker. Where git cannot answer, every
-marked file is treated as repository content, as before.
+The generator writes expected adapter destinations from canonical sources,
+whether or not Git tracks those destinations. For generated files under
+`.claude` that no longer have a canonical source, tracked status controls
+cleanup. Check mode reports untracked stale files, and generate mode leaves
+them alone. These files may belong to a local host installation.
+
+A generated marker does not prove that a file belongs to the repository.
+A directory copied from a released skill contract has the same marker.
+When Git cannot determine ownership, the generator treats every marked file
+as repository content.
 
 Do not hand-maintain equivalent Claude and Codex workflow prose. Host-specific
 frontmatter or discovery metadata belongs in the generator.
@@ -74,11 +78,10 @@ the `Description` on issue types, MCP tools, MCP resources, and CLI flags, and
 the dead-code filter `Issue Type`) are hand-owned: an existing cell is preserved
 verbatim and only a new row is seeded from the manifest.
 
-Preserving prose forever hides one failure mode. The manifest text a cell was
-written from can move later, leaving a published cell that describes a surface
-that has changed. `scripts/agent-doc-curated-seeds.json` records the seed each
-curated cell was last accepted against. It lives beside the generator, outside
-the vendored skill tree, so the gate never touches the public skills surface.
+A preserved cell can become stale when the manifest text changes.
+`scripts/agent-doc-curated-seeds.json` records the seed each curated cell was
+last accepted against. It lives beside the generator, outside the vendored
+skill tree, so the gate never modifies the published skills.
 
 - `npm run generate:contracts:check` fails when a recorded seed no longer
   matches. It names the cell as `section / row / column` and prints both the

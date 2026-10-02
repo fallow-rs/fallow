@@ -9,7 +9,7 @@ Neovim configuration for [`fallow-lsp`](https://github.com/fallow-rs/fallow), th
 - quick-fix code actions
 - code lens where Neovim surfaces them
 
-This setup is intentionally thin. It launches the existing `fallow-lsp` binary instead of re-implementing analysis logic inside the editor.
+This setup launches `fallow-lsp` to run analysis.
 
 ## Installation
 

@@ -84,9 +84,9 @@ invariants in this file.
    Store the notes outside the repository, for example
    `/tmp/fallow-release-vX.Y.Z.md`, and require the file to be non-empty.
 
-   `scripts/verify-release-metadata.mjs` enforces the machine-checkable half of
-   this list, so skipping the runbook no longer skips the gates. Two surfaces,
-   because the notes and the release exist at different moments:
+   `scripts/verify-release-metadata.mjs` enforces the machine-checkable rules
+   in this list. It checks the changelog at dispatch and the release after
+   publication:
 
    - `release.yml` runs it at dispatch against `CHANGELOG.md`, the source the
      notes are drafted from. It requires one dated `## [X.Y.Z]` section with a
@@ -292,7 +292,7 @@ invariants in this file.
     stage did not come from this run: reject it with `npm stage reject` and
     investigate before anything else. A rejected version can be staged again, so
     recovery is a rerun of the `Publish to npm` job, which skips every package
-    that already landed. No tag exists yet, so nothing is burned.
+    that already landed. The version tag remains available for the recovered run.
 
     After the approval the wait job downloads the public tarball, requires its
     sha256 to equal the digest `Publish to npm` recorded, and releases both VSIX

@@ -6,7 +6,7 @@ license: MIT
 
 # Fallow: codebase intelligence for TypeScript and JavaScript
 
-Codebase intelligence for TypeScript and JavaScript. The static layer analyzes code and styles and reports quality, changed-code risk, cleanup opportunities, circular dependencies, code duplication, complexity hotspots, architecture boundary violations, design-system styling drift, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review and cold-path deletion confidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. Broad framework plugin coverage, zero configuration, sub-second static analysis.
+Fallow analyzes code and styles for changed-code risk, cleanup opportunities, circular dependencies, duplication, complexity hotspots, architecture boundary violations, design-system styling drift, feature flags, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review and cold-path deletion confidence. A single local capture is available by default. Continuous or cloud runtime monitoring is optional.
 
 ## When to Use
 - Find cleanup opportunities: unused files, exports, types, members, dependencies, or feature flags that guard unused exports.
@@ -58,7 +58,23 @@ cargo install fallow-cli   # build from source
 15. **Check production runtime data before an edit or a delete, when Fallow Cloud is connected**. Prefer the scoped reads over the full `get_cloud_runtime_context` pull. Before an edit, run `fallow coverage review-packet --repo <owner/repo>` (MCP `get_cloud_review_packet`) for the changed files and read `hit_count`, `covered_by_test`, and the callers when present. Before a delete, require `period_tracking_state: "never_called"`, not only `tracking_state`, and read `evidence_window.observed_hours`: few observed hours or a low-traffic surface mean "not visited", not "dead". After a deploy, run `fallow coverage deployment-changes --repo <owner/repo>` (MCP `get_cloud_deployment_changes`) and, when `comparable` is `false`, report `reason` and claim no change. Open files by `repo_path`, not `file_path`. Production data is context, never a gate. Details: [references/mcp.md](references/mcp.md#scoped-cloud-reads).
 
 ## Onboarding And Insight
-Offer setup only after a human-requested analysis shows findings and all signals match: `fallow config --path` exits 3, not CI, not a pipeline format, `fallow impact --format json --quiet` has `onboarding_declined: false`, and no offer happened this session. Ask after showing value. Choices: guard commits and PRs, baseline the existing backlog and clean by category, add AGENTS.md guidance, or keep as-is. On decline, run `fallow init --decline --quiet` and stay silent for this project. Mutate only after consent. For guards, inspect `fallow hooks status --format json --quiet`, then use `fallow hooks install --target agent` and `fallow hooks install --target git`; for large backlogs, pair the gate with `--save-baseline` / new-only guidance. Offer `fallow impact enable` as local-only value tracking, never as telemetry; also offer it once on already-configured projects when `fallow impact status --format json` has `enabled: false` and `explicit_decision: false`, and record a no with `fallow impact disable --quiet`. Surface value on clear events: if the agent gate blocked a commit or push and a later retry succeeded, mention what was contained; when `next_steps` carries id `impact-report`, run its command and relay the non-zero numbers to the user in one line. On request, summarize non-zero Impact counts. Ask about telemetry only after such a win, only if `fallow telemetry status --format json` has `explicit_decision: false`, and never run `fallow telemetry enable`.
+Offer setup after showing the findings from a human-requested analysis, only when all these conditions hold:
+
+- `fallow config --path` exits 3.
+- The run is outside CI and does not use a pipeline format.
+- `fallow impact --format json --quiet` has `onboarding_declined: false`.
+- No offer happened this session.
+
+Offer these choices: guard commits and PRs, baseline the existing backlog and clean by category, add AGENTS.md guidance, or keep as-is. Mutate only after consent. On decline, run `fallow init --decline --quiet` and stay silent for this project.
+
+For guards, inspect `fallow hooks status --format json --quiet`, then use `fallow hooks install --target agent` and `fallow hooks install --target git`. For large backlogs, pair the gate with `--save-baseline` and new-only guidance.
+
+Offer `fallow impact enable` for local value tracking. Impact is separate from telemetry. Also offer it once on an already-configured project when `fallow impact status --format json` has `enabled: false` and `explicit_decision: false`. Record a decline with `fallow impact disable --quiet`.
+
+Report value when there is evidence. If the agent gate blocked a commit or push and a later retry succeeded, describe the issues that caused the block. When `next_steps` has id `impact-report`, run its command and report the non-zero numbers in one line. On request, summarize non-zero Impact counts.
+
+Ask about telemetry only after one of these events, and only if `fallow telemetry status --format json` has `explicit_decision: false`. Never run `fallow telemetry enable`.
+
 ## Task Cheat Sheet
 Route by intent before reaching for the big analysis commands. Same matrix as `fallow schema` (`task_matrix`) and the generated AGENTS.md section.
 
@@ -90,7 +106,9 @@ Full command catalogue, one row per command: **[references/cli-reference.md](ref
 
 ## Issue Types
 
-Dead-code filter flags are one per issue type (`--unused-exports`, `--unused-types`, `--unused-deps`, `--circular-deps`, and so on). Passing one or more narrows `fallow dead-code` to those types; passing none reports every type. Every type suppresses the same way: `// fallow-ignore-next-line <issue-type>` above the finding, or `// fallow-ignore-file <issue-type>` at the top of the file; the bare form without a type suppresses all of them.
+Dead-code filter flags select issue categories (`--unused-exports`, `--unused-types`, `--unused-deps`, `--circular-deps`, and so on). Some flags select related types together; `--unused-deps` covers several dependency types. Passing one or more narrows `fallow dead-code` to those categories. Passing none applies no issue-type filter.
+
+For suppressible findings, use the placement listed in the issue catalogue: `// fallow-ignore-next-line <issue-type>` above the finding, or `// fallow-ignore-file <issue-type>` at the top of the file. Some types support only file-level suppression; others have no suppression comment. A bare supported form without a type suppresses all matching findings at that placement.
 
 `fallow explain <issue-type>` describes one type without running analysis, and the MCP server serves the same catalogue as the `fallow://issue-types` resource.
 
@@ -100,7 +118,7 @@ Full catalogue, one row per type: **[references/issue-types.md](references/issue
 
 Fallow ships an MCP server (`fallow-mcp`) that exposes these same analyses as agent tools. When the server is connected, its tools are already in your context with typed params and structured JSON returns, and each maps to a CLI fallback command. Prefer them when you want JSON without shelling out, or `code_execute` (Code Mode) to compose several read-only analyses in one sandboxed snippet (no single-call CLI equivalent). Otherwise use the CLI.
 
-The server also serves read-only reference resources (no subprocess, no analysis run, cacheable by URI; your client reads them through its own resource tool): `fallow://tools`, `fallow://issue-types`, `fallow://explain/{issue_type}`, `fallow://task-matrix`, and the config, plugin, and rule-pack JSON Schemas. Every payload is JSON and carries `fallow_version`.
+The server also serves read-only reference resources (no subprocess, no analysis run, cacheable by URI; your client reads them through its own resource tool): `fallow://tools`, `fallow://issue-types`, `fallow://explain/{issue_type}`, `fallow://task-matrix`, and the config, plugin, and rule-pack JSON Schemas. Every resource payload is JSON. Each content item carries the server version in `_meta.fallow_version`.
 
 Full tool catalogue, resource catalogue, key params, runtime source-map confidence tiers, shared timeouts, and the `next_steps` dispatch mapping: **[references/mcp.md](references/mcp.md)**.
 
@@ -378,10 +396,10 @@ export const deprecatedHelper = () => {};
 
 - **`fix --yes` is required** in non-TTY (agent) environments. Without it, `fix` exits with code 2
 - **Zero config by default.** Built-in framework plugins auto-detect, including Wuchale config, Contentlayer content roots, Kibana `kibana.jsonc` plugin entries, tap and tsd test entry points. Read `fallow schema.plugins` for the current registry and don't create config unless customization is needed
-- **Syntactic analysis only.** No TypeScript compiler, so fully dynamic `import(variable)` is not resolved
+- **Default analysis is syntactic.** Fully dynamic `import(variable)` is not resolved. Optional `--type-aware` analysis adds TypeScript checker evidence
 - **Function overloads are deduplicated.** TypeScript function overload signatures are merged into a single export (not reported as separate unused exports)
-- **Re-export chains are resolved.** Exports through barrel files are tracked, not falsely flagged
-- **`--changed-since` is additive.** Only new issues in changed files, not all issues in the project
+- **Re-export chains are resolved.** Fallow tracks exports through barrel files. Trace reported exports before removal when consumers may be outside static analysis
+- **`--changed-since` scopes findings to changed files.** Existing findings in those files can remain, and dead-code dependency findings remain project-wide. Use `fallow audit --gate new-only` to distinguish introduced findings from inherited ones
 
 For the full list with examples, see [references/gotchas.md](references/gotchas.md).
 

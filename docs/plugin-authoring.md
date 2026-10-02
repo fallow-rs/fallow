@@ -20,7 +20,7 @@ Create a file named `fallow-plugin-<name>.jsonc` in your project root:
 }
 ```
 
-That's it. Fallow automatically discovers `fallow-plugin-*` files in your project root.
+Fallow automatically discovers `fallow-plugin-*` files in your project root.
 
 ## Supported Formats
 
@@ -213,7 +213,7 @@ Files that should always be considered used when this plugin is active, even if 
 
 ### `toolingDependencies`
 
-Packages that are tooling dependencies -- used via CLI commands or config files, not imported in source code. These won't be flagged as unused dev dependencies.
+Packages used through CLI commands or config files, without source imports. Fallow does not flag them as unused dev dependencies.
 
 ```jsonc
 {
@@ -263,8 +263,8 @@ class or implements a named interface. A scoped rule must define `extends` or
 Fallow discovers external plugins in this order (first occurrence of a plugin name wins):
 
 1. **Explicit paths** from the `plugins` config field
-2. **`.fallow/plugins/`** directory -- all `*.jsonc`, `*.json`, `*.toml` files
-3. **Project root** -- `fallow-plugin-*.{jsonc,json,toml}` files
+2. **`.fallow/plugins/`** directory: all `*.jsonc`, `*.json`, `*.toml` files
+3. **Project root**: `fallow-plugin-*.{jsonc,json,toml}` files
 
 ### Using the `plugins` config field
 
@@ -374,7 +374,7 @@ my-project/
 
 ## Sharing Plugins
 
-External plugins are plain files -- share them however you share config:
+Share external plugin files with the rest of your configuration:
 
 - **Git**: check `fallow-plugin-*` files into your repo
 - **Monorepo**: put shared plugins in a central `tools/` directory and reference via `plugins` config
@@ -410,7 +410,7 @@ Reference it in your plugin files:
 | AST-based config parsing | Yes | No |
 | Custom detection logic | Yes | Yes (dependency, fileExists, all/any combinators) |
 
-External plugins cover the vast majority of use cases. AST-based config parsing (extracting entry points from `vite.config.ts`, resolving ESLint plugin short names, etc.) requires a built-in Rust plugin.
+AST-based config parsing requires a built-in Rust plugin. This includes extracting entry points from `vite.config.ts` and resolving ESLint plugin short names.
 
 ## Verifying
 

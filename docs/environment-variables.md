@@ -1,10 +1,9 @@
 # Environment variables
 
-Fallow works with zero configuration, but a handful of environment variables let
-you and your CI operators override defaults without editing a config file or
-passing flags. CLI flags always win over the matching environment variable, and
-environment variables win over the corresponding config-file field unless noted
-otherwise.
+Use environment variables to override defaults without editing a config file or
+passing flags. CLI flags take precedence over matching environment variables.
+Environment variables take precedence over corresponding config-file fields
+unless noted otherwise.
 
 The same user-facing list is emitted as a machine-readable manifest by
 `fallow schema` (under `environment_variables`), so agents and tooling can

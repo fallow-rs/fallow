@@ -6,10 +6,10 @@ Tests fallow against real-world open-source TypeScript/JavaScript projects to ca
 
 The script clones popular JS/TS projects (shallow, depth=1), optionally installs their dependencies, and runs `fallow dead-code --format json --quiet` against each one. It distinguishes between:
 
-- **Exit 0** — fallow ran successfully, no issues found (rare for large projects)
-- **Exit 1** — fallow ran successfully, issues found (expected and normal)
-- **Exit 2+** — fallow crashed (panic, parse error, OOM, etc.) — this is a test failure
-- **Timeout** — fallow took longer than 5 minutes on a single project — treated as a crash
+- **Exit 0**: fallow ran successfully, no issues found (rare for large projects)
+- **Exit 1**: fallow ran successfully, issues found (expected and normal)
+- **Exit 2+**: fallow crashed (panic, parse error, OOM, etc.): this is a test failure
+- **Timeout**: fallow took longer than 5 minutes on a single project: treated as a crash
 
 The test passes if no project causes a crash. Finding dead code issues (exit 1) is expected behavior, not a failure.
 
@@ -56,10 +56,10 @@ Edit the `PROJECTS` array in `run.sh`. Each entry has four fields:
 "org/repo  branch  subdirectory  install_command"
 ```
 
-- **org/repo** — GitHub repository (e.g., `vercel/next.js`)
-- **branch** — Branch to clone (e.g., `main`, `canary`)
-- **subdirectory** — Subdirectory to analyze, use `.` for the repo root
-- **install_command** — Command to install deps, use `-` to skip installation
+- **org/repo**: GitHub repository (e.g., `vercel/next.js`)
+- **branch**: Branch to clone (e.g., `main`, `canary`)
+- **subdirectory**: Subdirectory to analyze, use `.` for the repo root
+- **install_command**: Command to install deps, use `-` to skip installation
 
 Example:
 

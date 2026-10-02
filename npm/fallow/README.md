@@ -2,7 +2,7 @@
 
 **Codebase intelligence for TypeScript and JavaScript.**
 
-One binary finds unused code, circular dependencies, duplication, complexity hotspots, boundary violations, and design-system styling drift. An optional paid product, Fallow Cloud, adds production coverage: which functions run in production. No AI inside the analyzer, and no TypeScript compiler or Node.js runtime needed for static analysis: runs are deterministic, with typed output contracts and traceable explanations.
+One binary finds unused code, circular dependencies, duplication, complexity hotspots, boundary violations, and design-system styling drift. Fallow Cloud optionally adds production coverage: which functions run in production. Default static analysis is deterministic and uses no AI. It needs no TypeScript compiler or Node.js runtime. Reports have typed output contracts and traceable explanations.
 
 [![CI](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg)](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/fallow.svg)](https://www.npmjs.com/package/fallow)
@@ -72,7 +72,7 @@ closed-world evidence and a matching declaration guard.
 
 ## Built for agents
 
-Agents get structured repo truth instead of inferring everything from grep: who imports a symbol, why an export counts as used, what a PR changed, which cleanup action is safest.
+Agents can query symbol importers, usage evidence, PR changes, and available cleanup actions.
 
 The bundled `fallow-mcp` server lives in `node_modules/.bin/` when installed as a devDependency, so launch it through your package manager's runner:
 
@@ -103,7 +103,11 @@ Over 100 built-in framework plugins covering Next.js, Nuxt, Remix, Qwik, SvelteK
 
 ## Configuration
 
-Works out of the box. To customize, let [`fallow recommend`](https://fallow.tools/docs/cli/recommend/) propose a config from the detected stack (read-only; `--format json` returns the full decision set for agents and points TypeScript projects to the optional `--type-aware` pass without enabling it), run `fallow init`, or create a config file in your project root:
+Fallow starts without a config file. To customize the analysis, let [`fallow recommend`](https://fallow.tools/docs/cli/recommend/) propose a config from the detected stack, run `fallow init`, or create a config file in your project root.
+
+`fallow recommend` is read-only. With `--format json`, it returns the full decision set for agents. It points TypeScript projects to the optional `--type-aware` pass without enabling it.
+
+To create a config manually, use a file like this in your project root:
 
 ```jsonc
 // .fallowrc.json

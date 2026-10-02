@@ -1,8 +1,8 @@
 # Security Agent Verification
 
-`fallow security` is a deterministic candidate producer. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this recipe when an agent or out-of-core harness should turn raw candidates into verifier-retained survivors.
+`fallow security` produces deterministic security candidates. It does not call a model, decide exploitability, or emit verified vulnerabilities. Use this workflow to verify the candidates with an agent or a separate verifier harness.
 
-The workflow uses three fallow surfaces:
+The workflow uses these Fallow commands and contracts:
 
 - `fallow security --format json --surface` for the candidate list and attack-surface inventory.
 - The candidate contract: fallow fills `source_kind`, `sink`, `boundary`, `severity`, and reachability context; the verifier owns `impact`.

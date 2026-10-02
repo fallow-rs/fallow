@@ -1,15 +1,13 @@
 # Coverage producer conformance
 
 `crates/engine/src/health/scoring.rs` maps every function Fallow extracts onto
-a record in an Istanbul coverage map. The whole matcher rests on one thing:
-WHERE each producer anchors a function record. Every other geometry expectation
-in the repository is a hand-written JSON literal inside a Rust test, so nothing
-notices when a producer moves an anchor in a minor release.
+a record in an Istanbul coverage map. Matching depends on where each producer
+anchors a function record. Hand-written JSON literals in Rust tests do not
+track changes to those anchors between producer releases.
 
-This corpus records what real producers actually emit, and asserts what Fallow
-does with it. The recorded maps are also the reference the next hand-written
-fixture can be checked against, by a reader: nothing here polices Rust
-literals.
+This corpus records producer output and checks how Fallow matches it. Use the
+recorded maps to review hand-written fixtures. The corpus does not check those
+Rust literals automatically.
 
 ## What is asserted, and what is not
 
@@ -29,10 +27,10 @@ records distinct ratios, the manifest records the collision under
 `fingerprint_collisions` and the self-test escalates that row to moving every
 record at once, because moving one would be invisible.
 
-Geometry is deliberately not asserted. A producer that moves an anchor the
-matcher absorbs shows up as a map diff with an unchanged census, which reviews
-at a glance. Pinning coordinates instead would turn every harmless producer
-bump into a refresh chore, and refresh chores get rubber-stamped.
+Geometry is deliberately not asserted. If a producer changes an anchor and the
+matcher still handles the new position, the census stays unchanged. Review the
+resulting map diff. Pinning coordinates would require a refresh even for producer
+changes that the matcher already handles.
 
 Nothing in this corpus asserts `summary.coverage_model`, the health score, the
 presence of a CRAP score, or a matched/total scalar. Those signals stay
@@ -59,9 +57,8 @@ weaker independent evidence than agreement with a V8-derived row.
 
 ## The probes
 
-Chosen by measured divergence, not by taxonomy. Each probe carries the
-`invariants` it defends, and a census delta names the Rust function that just
-lost its evidence.
+The probes cover measured differences between producers. Each probe names its
+`invariants`, and a census delta identifies the affected Rust function.
 
 - `plain` baseline function declarations.
 - `named-fn-expr` istanbul-lib-instrument anchors `decl` at the identifier
@@ -133,9 +130,9 @@ npm run check:coverage-producer-drift   # compare, never write
 npm run refresh:coverage-producers      # re-record
 ```
 
-Geometry moved and the census is unchanged: land it, the map diff IS the
-change. The census regressed: that is a matcher bug, fix
-`crates/engine/src/health/scoring.rs` and refresh again. There is deliberately
+If geometry changes and the census stays the same, review and accept the map
+diff. If the census regresses, fix `crates/engine/src/health/scoring.rs` and
+refresh again. There is deliberately
 no flag that accepts a census regression, no flag that rewrites the census to
 match observed behavior, and no flag that turns a failure into a report: every
 command here exits non-zero on every finding it makes.

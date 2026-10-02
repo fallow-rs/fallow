@@ -4,7 +4,7 @@ Starting with v1.0, fallow follows [semantic versioning](https://semver.org/).
 
 ## What is stable
 
-These interfaces are covered by semver , breaking changes only happen in major version bumps:
+These interfaces are covered by semver. Breaking changes require a major version bump:
 
 ### Configuration format
 

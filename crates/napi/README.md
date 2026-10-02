@@ -1,6 +1,6 @@
 # @fallow-cli/fallow-node
 
-Native Node.js bindings for fallow’s main analyses.
+Native Node.js bindings for fallow's main analyses.
 
 ## Install
 
@@ -29,9 +29,9 @@ after explicit user confirmation.
 
 Enum-like option values use lowercase CLI-style strings such as `"mild"`, `"cyclomatic"`, `"handle"`, and `"low"`.
 
-Shared options mirror analysis-affecting CLI globals, including `root`, `configPath`, `noCache`, `threads`, `diffFile`, `production`, `changedSince`, `workspace`, `changedWorkspaces`, and `explain`. Object-shaped JSON roots always carry the top-level `kind` discriminator; consumers should branch on `kind`. `diffFile` accepts a path to a unified diff file; stdin diff sources are CLI-only.
+Shared options mirror analysis-affecting CLI globals, including `root`, `configPath`, `noCache`, `threads`, `diffFile`, `production`, `changedSince`, `workspace`, `changedWorkspaces`, and `explain`. Object-shaped JSON roots have a top-level `kind` discriminator. Branch on `kind` when reading a report. `diffFile` accepts a path to a unified diff file. Reading diffs from stdin is CLI-only.
 
-The rich public declarations live in `types/index.d.ts`. The package-level
+The public declarations live in `types/index.d.ts`. The package-level
 `index.d.ts` is a generated entry point that re-exports that canonical source.
 This keeps the package root stable when NAPI-RS regenerates its temporary
 declarations during a native build.

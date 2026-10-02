@@ -2,8 +2,6 @@
 
 > This roadmap covers planned work and is reviewed periodically. For shipped capabilities, see the [releases](https://github.com/fallow-rs/fallow/releases) and [documentation](https://fallow.tools/docs/).
 
-This roadmap tracks planned work on Fallow: what is queued, what is being scoped, and where the project is headed.
-
 ---
 
 ## Next
@@ -12,11 +10,11 @@ Concrete work scoped to the next one or two minor releases.
 
 ### Richer MCP responses
 
-The `inspect_target` tool already combines re-export chains, importers, duplicate siblings, and optional recent churn into one evidence bundle. The remaining work is to bring the same decision-ready context to broader MCP analysis flows where agents currently have to follow up with a separate inspection call.
+The `inspect_target` tool already combines re-export chains, importers, duplicate siblings, and optional recent churn into one evidence bundle. The remaining work is to include the same context in broader MCP analysis responses that currently require a separate inspection call.
 
 ### Coverage sidecar ergonomics
 
-The coverage setup state machine works end to end, but the install handoff still depends on users trusting a download. Target: reproducible sidecar pinning, smoother framework recipe generation, clearer failure messages when the sidecar cannot attach.
+Coverage setup works end to end. Installation still requires users to trust a download. Planned improvements include reproducible sidecar pinning, simpler framework recipe generation, and clearer failure messages when the sidecar cannot attach.
 
 ### Post-fix formatter integration
 
@@ -30,7 +28,7 @@ Broader bets, still being scoped.
 
 ### Agent-driven cleanup loop
 
-Safe removals (unused exports, enum members, dependencies) are already auto-fixable. The open question is the judgment calls: deleting files, consolidating duplicates, restructuring modules. The bet: structured MCP output plus the right review workflow lets an agent propose those changes, a human approves the PR, and fallow verifies nothing regressed.
+Safe removals (unused exports, enum members, dependencies) are already auto-fixable. Deleting files, consolidating duplicates, and restructuring modules still need review. The proposal is to use structured MCP output so an agent can suggest these changes, a human can approve the PR, and fallow can check for regressions.
 
 ### Health score calibration and adoption
 
@@ -38,8 +36,8 @@ Shipped today: `fallow health` provides a 0-100 score, an A-F letter grade,
 badge output, saved vital-sign snapshots, and trend comparisons. Planned work
 focuses on calibrating the formula against a broad real-world corpus, explaining
 how its multiple signals contribute to each result, and helping teams adopt
-baselines and thresholds that fit their project context. This direction improves
-confidence and multi-signal explainability rather than adding another grade.
+baselines and thresholds that fit their project context. The goal is to explain
+the existing score and grade through the signals that contribute to them.
 
 ---
 

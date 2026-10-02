@@ -1,8 +1,8 @@
 # Conformance Test Suite
 
-Compares fallow's dead code detection results against [knip](https://github.com/webpro-nl/knip) on 8 real-world open-source projects, producing a structured report of agreements and disagreements.
+This suite compares fallow's dead code detection with [knip](https://github.com/webpro-nl/knip) on real-world open-source projects. It reports agreements and disagreements.
 
-This suite is **informational** -- it does not fail on disagreements. Differences between the tools are expected due to different analysis strategies and heuristics.
+This suite is informational. It does not fail on disagreements. Differences between the tools are expected due to different analysis strategies and heuristics.
 
 ## Test Projects
 
@@ -68,7 +68,7 @@ Both scripts output:
 
 The report breaks down findings into three categories:
 
-- **Agreed**: Issues found by both fallow and knip. High confidence these are real issues.
+- **Agreed**: Issues found by both fallow and knip. Agreement does not independently establish that these are real issues.
 - **Fallow-only**: Issues found by fallow but not knip. Could be:
   - True positives that knip misses (fallow wins)
   - False positives in fallow (needs investigation)
@@ -80,22 +80,22 @@ The agreement percentage is calculated as `agreed / total_unique_issues * 100`.
 
 ## Adjudication Register
 
-An agreement percentage on its own says nothing about who is right. Every
-disagreement row is therefore joined against `adjudications.json`, keyed on
-`(project, issue_type, path, export_name)`. A record carries a `verdict`
+The agreement percentage does not establish which tool is correct. The report
+joins every disagreement row against `adjudications.json`, keyed on
+`(project, issue_type, path, export_name)`. Each record has a `verdict`
 (`fallow_wrong`, `knip_wrong`, or `model_difference`), a `cause` from the
 pipeline vocabulary the `debug-false-positive` skill uses, plus the
 `knip_version`, `corpus_ref`, `reviewed_on` date, and the tracking `issue`.
 
 The aggregated summary reports `adjudicated_fallow_wrong`,
 `adjudicated_knip_wrong`, `adjudicated_model_difference`, and `unadjudicated`.
-The four buckets partition the disagreements, so `unadjudicated` is the exact
-backlog nobody has reviewed. An unknown verdict, an unknown cause, a duplicate
+The four buckets partition the disagreements. `unadjudicated` records the
+backlog that has not been reviewed. An unknown verdict, an unknown cause, a duplicate
 key, or a record missing a declared field is a hard error.
 
-Write the verdict before the fix. The `conformance-loop` skill records this as
-its own step because a classification that stays in a session or in the ignored
-`.plans/` directory is lost the moment the session ends.
+Write the verdict before the fix. The `conformance-loop` skill makes this a
+separate step so classifications go into the register instead of remaining
+only in session context or the ignored `.plans/` directory.
 
 The register does not gate CI. The lane stays `continue-on-error: true` while
 the unadjudicated count settles.
@@ -157,4 +157,3 @@ the unadjudicated count settles.
   }
 }
 ```
-

@@ -1,6 +1,6 @@
 # Node.js Bindings
 
-When embedding fallow inside a Node.js process (editor extensions, long-running servers, custom tooling), prefer the NAPI bindings over spawning the CLI. Same analysis engine, same JSON envelopes, no subprocess or JSON parsing overhead.
+To embed fallow in a Node.js process, use the NAPI bindings. They use the same analysis engine and JSON envelopes as the CLI without spawning the CLI or parsing its JSON output. Examples include editor extensions, long-running servers, and custom tooling.
 
 ```bash
 npm install @fallow-cli/fallow-node
@@ -15,7 +15,13 @@ const similarCode = await detectSimilarCode({ root: process.cwd(), files: ['src/
 const health = await computeHealth({ root: process.cwd(), score: true, ownershipEmails: 'handle' });
 ```
 
-Eight async functions: `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, `computeHealth`. Each returns the same JSON envelope the CLI emits for `--format json`. `detectSimilarCode` returns a precisely typed `SimilarCodeReport`, including generation provenance, embedding semantics, effective `generation.scope.paths`, completion, skips, cache accounting, diagnostics, and read-only candidate actions. Treat the materialized scope as provenance and preserve the raw report when a candidate may be inspected later. The Node binding exposes discovery only. Use CLI `similar-code inspect --candidates <report.json>` or MCP `inspect_similar_code` with the exact typed candidate snapshot so global retrieval and ranking are not repeated. Its loader resolves and verifies the exact-version local companion; it never downloads the model or authorizes setup. Rejected promises throw a `FallowNodeError` with `message`, `exitCode`, and optional `code`, `help`, `context` fields that mirror the CLI's structured error surface.
+The async functions are `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. Each returns the same JSON envelope the CLI emits for `--format json`.
+
+`detectSimilarCode` returns a precisely typed `SimilarCodeReport` with generation provenance, embedding semantics, effective `generation.scope.paths`, completion, skips, cache accounting, diagnostics, and read-only candidate actions. Treat the materialized scope as provenance. Preserve the raw report when a candidate may be inspected later.
+
+`detectSimilarCode` exposes discovery only. Use CLI `similar-code inspect --candidates <report.json>` or MCP `inspect_similar_code` with the exact typed candidate snapshot. This avoids repeating global retrieval and ranking. The loader resolves and verifies the exact-version local companion. It never downloads the model or authorizes setup.
+
+Rejected promises throw a `FallowNodeError` with `message`, `exitCode`, and optional `code`, `help`, `context` fields. These fields match the CLI's structured errors.
 
 Enum-like fields take lowercase CLI-style literals (`"mild"`, `"cyclomatic"`, `"handle"`, `"low"`). Write-path commands (`fix`, `init`, `hooks install`, `hooks uninstall`, `license activate`, `coverage setup`) are not exposed; use the CLI for those.
 

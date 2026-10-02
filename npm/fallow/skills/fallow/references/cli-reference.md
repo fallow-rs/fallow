@@ -1706,7 +1706,7 @@ The command does not enable tracking. Only the user may opt in with
 
 ## `coverage`: Production-Coverage Workflow
 
-Helper subcommand for runtime coverage setup, focused analysis, and cloud inventory upload. Three subcommands today:
+Use the `coverage` subcommands for runtime setup, analysis, inventory upload, and scoped cloud reads:
 
 - `coverage setup` - resumable state machine that wires sidecar installation, framework-aware coverage recipe writing, optional license activation for continuous monitoring, and automatic handoff into `fallow health --runtime-coverage`.
 - `coverage analyze` - focused runtime coverage analysis. Local mode reads `--runtime-coverage <path>`; cloud mode requires explicit `--cloud`, `--runtime-coverage-cloud`, or `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud` and never triggers from `FALLOW_API_KEY` alone.

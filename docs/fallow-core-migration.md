@@ -24,11 +24,9 @@ where editor, API, and embedding surfaces should depend before using typed
 For the contributor-facing crate rules, IO boundaries, contract rules, and
 final ownership policy, see [`architecture-invariants.md`](architecture-invariants.md).
 
-Fallow should be a deterministic repo-intelligence engine with thin integration
-surfaces, not a CLI with libraries arranged around it. That means new analysis
-flows should start in `fallow-engine`, expose typed contracts through
-`fallow-api`, and serialize only at CLI, LSP, MCP, NAPI, CI, or other protocol
-boundaries.
+Keep analysis deterministic. New analysis flows should start in
+`fallow-engine`, expose typed contracts through `fallow-api`, and serialize
+only at CLI, LSP, MCP, NAPI, CI, or other protocol boundaries.
 
 Use these boundaries when adding new product flows:
 

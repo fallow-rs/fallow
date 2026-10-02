@@ -2,9 +2,7 @@
 
 Fallow compliance defines the maintainability and codebase-quality expectations for a repository.
 
-A compliant project stays within agreed thresholds across the full pillar set: quality score, changed-code risk, complexity hotspots, duplication, architecture boundaries, dependency hygiene, and cleanup opportunities. Cleanup (dead code, unused exports, unused dependencies) is one compliance signal, not the compliance model.
-
-This is the shortest path from "we installed fallow" to "this repo is fallow-compliant."
+A compliant project meets the team's agreed thresholds for quality score, changed-code risk, complexity hotspots, duplication, architecture boundaries, dependency hygiene, and cleanup opportunities. Cleanup includes dead code, unused exports, and unused dependencies.
 
 For most teams, **fallow-compliant** means:
 
@@ -28,7 +26,7 @@ In priority order:
 7. **Cleanup opportunities** -- unused files, exports, types either deleted or explicitly kept with a documented reason
 8. **Suppression hygiene** -- no stale suppression comments, no broad ignore patterns covering real issues
 
-If you want one sentence for agents, it is this:
+Use this goal for agents:
 
 > Keep fixing repo-wide findings across all compliance signals until quality score meets the team's target, `fallow health` has `Above threshold: 0`, and duplication / architecture / cleanup findings are either resolved or narrowly documented; if adoption is staged, use per-analysis baselines so `fallow audit` only gates new issues.
 
@@ -140,9 +138,7 @@ Keep committed baselines outside `.fallow/`; that directory is usually gitignore
 
 ## Notes On Health
 
-For the **health** part of the happy path, yes: the simple target is usually **`Above threshold: 0`**.
-
-That does **not** mean every project must use the same thresholds. It means:
+For **health**, the usual target is **`Above threshold: 0`**. Set thresholds for the project:
 
 - choose thresholds intentionally
 - encode them in config if needed

@@ -3,8 +3,7 @@
 Optional TypeScript-Go semantic refinement sidecar for Fallow. It accepts one
 versioned JSON request on stdin and writes one JSON response to stdout.
 
-The sidecar is deliberately narrower than a general type-aware linter. The wire
-protocol accepts a bounded set of tagged `symbol-use`, `symbol-trace`,
+The wire protocol accepts a bounded set of tagged `symbol-use`, `symbol-trace`,
 `api-surface`, `symbol-impact`, and `type-coupling` queries. Each selected
 TypeScript project creates one Program. Symbol use, trace, and impact queries
 share one indexed source traversal per Program.
@@ -16,7 +15,7 @@ assertion separate from `complete`, `partial`, or `unavailable` status. Evidence
 and every operation-specific array are deterministic and bounded, with totals,
 omissions, reason codes, actions, and truncation reported explicitly.
 
-Unsafe project state never manufactures certainty. Structural diagnostics,
+Structural diagnostics,
 unknown identities, missing projects, unsupported syntax, dynamic behavior,
 and capacity limits retain syntactic findings or produce an explicit advisory
 gap. Required interfaces, abstract members, and overrides are returned as exact
@@ -30,7 +29,7 @@ exports. If source code imports or re-exports such a name and checker resolution
 has no declaration target, the sidecar returns
 `svelte-virtual-module-exports` instead of claiming complete evidence. Run
 `svelte-check` for framework diagnostics; Fallow stays fail-closed until a
-supported host seam can preserve virtual source identity and mappings.
+supported host integration can preserve virtual source identity and mappings.
 
 ## Run locally
 

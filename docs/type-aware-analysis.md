@@ -1,6 +1,6 @@
 # Type-aware TypeScript analysis
 
-Fallow's default analysis remains fast, syntactic, and independent of Node.js
+Fallow's default analysis is syntactic and independent of Node.js
 or TypeScript. `--type-aware` opts into a bounded TypeScript-Go semantic pass
 after Fallow's normal project analysis. The capability is a stable, optional
 Fallow contract. Its exact-version TypeScript-Go adapter uses an upstream
@@ -131,11 +131,11 @@ Every candidate has one of five outcomes:
   or another known gap prevents a closed-world decision, so Fallow keeps the
   finding
 
-`confirmed-no-static-references` is intentionally not called “proven unused”.
+`confirmed-no-static-references` does not prove that a declaration is unused.
 Reflection, framework registration, external consumers, and runtime behavior
 can still exist beyond the checker-visible world. Existing export and type
 removal actions remain automatically applicable only after a complete negative
-semantic decision. Class-member findings additionally require complete evidence
+semantic decision. Class-member findings also require complete evidence
 from every owning project, no contract or dynamic gap, and a matching
 declaration hash. `fallow fix` reruns the same semantic analysis and verifies
 the declaration hash immediately before editing.

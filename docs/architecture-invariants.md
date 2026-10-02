@@ -1,8 +1,6 @@
 # Architecture Invariants
 
-This guide states the crate and protocol boundaries contributors should check
-before adding a feature. It is intentionally shorter than the repo map and
-more concrete than the migration notes.
+Check these crate and protocol boundaries before adding a feature.
 
 ## System Overview
 

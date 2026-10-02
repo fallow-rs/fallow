@@ -1,6 +1,6 @@
 # Telemetry
 
-Fallow's product telemetry is opt-in and off by default. It exists to improve agent, CI, JSON, MCP, and editor workflows.
+Fallow's product telemetry is opt-in and off by default. It collects coarse usage data for agent, CI, JSON, MCP, and editor workflows.
 
 Fallow does not collect repository names, file paths, package names, dependency names, workspace names, source code, config values, environment variable names or values, raw command lines, raw errors, or stack traces.
 
@@ -206,8 +206,8 @@ When telemetry is enabled and sending events:
 - no cookies are used
 - telemetry requests do not carry an authentication token
 - two private headers may accompany the request, both for server-side grouping and never written into the event body: `X-Fallow-Parent-Run` (a sanitized per-run correlation token, only when `--parent-run` was passed) and `X-Fallow-Install` (the anonymous random install grouping token described under "Agent Follow-up"). The install token is deleted on `fallow telemetry disable`
-- your command never waits on the network: at exit Fallow appends the event to a small local spool file (`telemetry-spool.jsonl`, next to `telemetry.json` in your config directory), which is sub-millisecond and network-free, so telemetry adds no latency to the run
-- a later telemetry-enabled run uploads the spooled events on a background thread while it works, so a fast run now defers its event instead of dropping it; delivery is still best-effort and the spool is bounded, so events on a machine that stays offline (or never runs Fallow again) may be dropped, and counts remain a rough, biased sample rather than an exact usage count
+- your command does not wait for a telemetry upload. At exit Fallow appends the event to a local spool file (`telemetry-spool.jsonl`, next to `telemetry.json` in your config directory). This step uses local file I/O and makes no network request
+- a later telemetry-enabled run uploads the spooled events on a background thread while Fallow runs. Delivery is best-effort and the spool is bounded. Events may be dropped if the machine stays offline or never runs Fallow again. Counts are a rough, biased sample of usage
 - network errors are ignored and never affect command output or exit code
 - telemetry is never written to stdout
 - server-side handling must not enrich telemetry with customer, repository, organization, git, package-registry, or license data

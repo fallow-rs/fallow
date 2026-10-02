@@ -47,9 +47,8 @@ selector graph.
 
 Before a release that changes styling detection, read the top findings for
 `css-token-drift` sub-kinds, especially `raw-style-value`. Raw style values are
-low-confidence verify-first candidates by design: the smoke result should prove
-they point at plausible design-system drift, not random one-off CSS that an agent
-would churn.
+low-confidence candidates that need verification. Check that the smoke results
+identify plausible design-system drift before proposing changes to those values.
 
 Useful focused runs:
 

@@ -199,14 +199,14 @@ Focused integration checks:
   committed floor in `results/accuracy-baseline.json`. Runs in `verify:full`.
   The floor is a regression tripwire, not a published accuracy claim.
 
-Both companion parity checks resolve their companion checkout as a sibling of the
-main checkout, which inside a linked git worktree is the clone the worktree
-belongs to and not the worktree directory. `FALLOW_DOCS_DIR` and
-`FALLOW_SKILLS_DIR` override that guess and keep failing closed, which is how
-continuous integration runs them. A guessed companion checkout that is not
-present at all stands down with a `skipped:` line naming where it looked, so a
-checkout without the companion clones reports nothing to fix. A companion
-checkout that exists and has lost an expected document is still reported.
+Both companion parity checks look for a sibling of the main checkout. In a
+linked Git worktree, the main checkout is the clone that owns the worktree.
+`FALLOW_DOCS_DIR` and `FALLOW_SKILLS_DIR` override this lookup. CI sets these
+paths explicitly, and a missing companion at an explicit path fails the check.
+
+When a guessed companion path is absent, the check prints `skipped:` with the
+path it tried. It still reports a missing expected document when the companion
+checkout exists.
 
 ## CI placement
 

@@ -1,12 +1,12 @@
 # Fallow Review (Electron)
 
-A native desktop app for reviewing code changes (especially agent-authored ones),
-grounded in Fallow's deterministic engine and fed back to a coding agent.
+A native desktop app for reviewing code changes with Fallow's deterministic
+analysis.
 
-It turns `fallow review` output into a guided walkthrough (Review Focus, ordered
-stages, per-file facts, a "cleared" panel), lets you screenshot / annotate the
-running app, pick a component on screen to see its grounded facts, and routes all
-of that back to the agent via a local feed.
+It turns `fallow review` output into a guided walkthrough with Review Focus,
+ordered stages, per-file facts, and a "cleared" panel. You can capture and
+annotate screenshots of the running app, or select a component to see its
+analysis facts. A local feed sends selections and annotations to a coding agent.
 
 ## Run
 

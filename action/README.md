@@ -4,7 +4,7 @@ The action runs fallow in GitHub Actions and can publish job summaries, workflow
 
 SARIF upload uses GitHub Code Scanning. Code Scanning is available for public repositories (free, no GitHub Advanced Security needed) and for private or internal repositories with GitHub Advanced Security enabled. On a public repository the action always attempts the upload (the first upload initializes Code Scanning); on a private or internal repository without Advanced Security it warns and skips, and the job summary and primary fallow output still run.
 
-The upload requires the job to grant `permissions: security-events: write`. Without it, `github/codeql-action/upload-sarif` fails the step. On public repositories this surfaces as a job failure rather than a silent skip, so add the permission alongside `sarif: true`.
+The upload requires the job to grant `permissions: security-events: write`. Without it, `github/codeql-action/upload-sarif` fails the step. On public repositories, a missing permission fails the job. Add the permission alongside `sarif: true`.
 
 Inline review comments target the current PR file state (`side: RIGHT`). Findings on deleted lines are not modeled yet; fallow's diagnostics are current-state oriented in normal use.
 
@@ -14,29 +14,34 @@ Clean pull requests do not create a new sticky PR comment. If a previous fallow 
 
 GitHub Check Runs are posted from the typed PR decision sidecar against the PR head SHA, falling back to `GITHUB_SHA` when no PR head is available. Grant `permissions: checks: write` to let the Fallow check appear as a native PR gate; without that permission the action keeps the comment flow and emits a warning. The same render step also writes `fallow-pr-details.json` as a CI artifact for full finding drilldown.
 
-Set `comment-layout: gate-only` when the native Check Run is the primary review surface and the PR timeline should stay compact.
+Set `comment-layout: gate-only` to use the native Check Run for the full result and keep the PR timeline compact.
 
 ### Baselines
 
-A run that loads the `baseline` input reports how much of that baseline still matches. When entries have gone stale the action emits a `::warning::` and repeats it in the job summary, so a stale baseline stops being invisible the way it was before this release, when the same verdict existed on stderr only and `--quiet` removed it.
+A run that loads the `baseline` input reports how much of that baseline still matches. For stale entries, the action emits a `::warning::` and repeats it in the job summary. The warning remains visible with `--quiet`.
 
-A run scoped to changed files cannot judge a whole-project baseline: it compares the baseline against a slice and would report every entry outside that slice as unmatched. On a pull request the action therefore re-reads the baseline once over the whole project before reporting on it. That re-read is not behind an input, because a repository that never asked for a gate still wants to know its baseline has rotted. It carries no narrowing flag and no writing flag, so it writes no baseline, no snapshot and no SARIF, and it feeds no comment, annotation or summary; on a warm cache it costs about as much as the run before it. The step log names it and its wall time.
+A run scoped to changed files cannot judge a whole-project baseline. Entries outside the analyzed files would appear unmatched. On a pull request, the action re-reads the baseline over the whole project before reporting its staleness, even when the stale-baseline gate is off.
 
-Set `fail-on-stale-baseline: true` to turn that verdict into a failing job. It is independent of `fail-on-issues`: a baseline whose entries all went stale on a project that is now clean reports zero issues, which is exactly the case the gate exists for. The verdict comes from the analysis envelope's `baseline_staleness.gate_trips`, not from the CLI exit code, so a findings exit and a gate exit cannot be confused.
+The re-read removes narrowing and writing flags. It writes no baseline, snapshot, or SARIF, and its findings do not feed comments, annotations, or summaries. The step log reports the re-read and its wall time.
 
-When the run still cannot judge the baseline, because of `production: true`, `workspace`, `changed-workspaces`, or a positional path passed through `args`, the action says so instead of passing in silence: a `::warning::` when the gate was asked for and did not get one, a `::notice::` otherwise, since a repository that asked for nothing should not get an unsuppressible warning on every pull request. What it cannot read at runtime fails open: a fallow that predates this feature, or a command that reports no staleness, produces a warning and a green job. Combinations that cannot work at all are rejected up front with exit 2 instead: the gate with no `baseline` set, or the gate on `command: fix` or `command: security`.
+Set `fail-on-stale-baseline: true` to fail the job on a stale baseline. This gate is independent of `fail-on-issues`, so it can fail even when a clean project has no remaining issues. The gate reads `baseline_staleness.gate_trips` from the analysis output. It does not use the CLI exit code.
 
-Two configurations defeat this. Pointing `baseline` and `save-baseline` at the same file means the run saves before it compares, so the baseline is rewritten from the run that was supposed to be judged against it and can never report a stale entry; the action warns when it sees that. And on a pull request the six `baseline-*` outputs and the job-summary line describe the unscoped re-read, not the scoped analysis, so `baseline-change-scoped` reads `false` there even though the analysis itself was narrowed.
+The action can still be unable to judge the baseline with `production: true`, `workspace`, `changed-workspaces`, or a positional path in `args`. It emits a `::warning::` when the gate was requested, or a `::notice::` otherwise.
 
-The PR comment and inline review do not carry the advisory yet.
+If the installed fallow predates this feature or a command reports no staleness, the action warns without failing on the stale-baseline gate. Other gates can still fail the job. Invalid input combinations exit 2 before analysis: the gate without `baseline`, or the gate with `command: fix` or `command: security`.
+
+Do not point `baseline` and `save-baseline` at the same file. The run saves before it compares, so it replaces the reference baseline and cannot report stale entries. The action warns about this configuration.
+
+On a pull request, the `baseline-*` outputs and job-summary line describe the whole-project re-read. As a result, `baseline-change-scoped` is `false` even when the primary analysis is scoped to changed files.
+
+The PR comment and inline review do not include the stale-baseline warning yet.
 
 ### Gates
 
-Every gate the run armed publishes a verdict in the analysis envelope, and the
-action reads that rather than the CLI's exit code, which it discards whenever
-stdout parses as JSON. A gate fails the job when three things hold: the input
-that owns it asked for it, the CLI concluded `fail`, and the CLI marked the
-verdict enforced.
+Each enabled gate reports its result in the analysis output. The action reads
+that result and discards the CLI exit code when stdout parses as JSON. A gate
+fails the job when its input is enabled, the CLI reports `fail`, and the result
+is marked as enforced.
 
 | Gate | Input that owns it |
 |---|---|
@@ -60,14 +65,13 @@ A gate that concluded `fail` without its input being set produces a
 `::warning::` and never fails the job, so a flag passed through `args:` cannot
 override `fail-on-issues: false`. A gate that stood down without judging the run
 produces a `::warning::` when its input asked for it and a `::notice::`
-otherwise. Every failing gate prints its own `::error::` and the step exits once
-at the end, after the outputs and artifacts are written, so the comment,
-annotation and summary steps still run. The security gate keeps its documented
-exit 8 and outranks the generic 1.
+otherwise. Each failing gate prints its own `::error::`. The step exits after
+writing outputs and artifacts, so comments, annotations, and summaries still
+run. The security gate keeps its documented exit 8 and outranks the generic 1.
 
 The outputs `gates-failed`, `gates-warned`, `gates-skipped` and `gates-passed`
-carry the comma-separated names, so a downstream step can report on a gate
-without failing on it.
+contain comma-separated gate names. A downstream step can report a result
+without failing the job.
 
 The CLI reports the default rule of the command (`error-severity-findings`,
 `health-findings`, `audit-verdict`) on every run. A run with findings therefore
@@ -85,9 +89,12 @@ rule off, and the action follows: the `fail-on-issues` count gate stands down
 for that run, so the score is the only thing that decides it. That is what
 `--min-score` means by "complexity findings become informational".
 
-In combined mode (no `command`) the CLI does not enforce the duplication
-threshold, and says so in the envelope. The action honours that and warns rather
-than failing; run `command: dupes` to gate on it.
+By default, combined mode (no `command`) leaves the duplication threshold
+unenforced and reports that in the analysis output. The action warns about an
+unenforced duplication gate without failing on that gate. Other gates can still
+fail the job. Passing `--fail-on-issues` through `args:` can enforce the combined
+threshold; the action fails on it only when its `fail-on-issues` input is true.
+Use `command: dupes` to enforce the threshold directly.
 
 On a fallow older than 3.27.0 the envelope carries no gate verdicts. The action
 falls back to the fields those releases already published for `regression`,
@@ -100,9 +107,8 @@ read. That warning appears only when the matching input is set.
 A run whose findings were computed over less than the whole project reports one
 `::warning::` listing the diagnostic kinds and their counts, and sets the
 `analysis-degraded` output, read from the envelope root or, on `audit`, from its
-`dead_code` section. A run that analyzed no source file at all gets its
-own sentence, because its clean result means nothing was measured rather than
-that nothing was found. It warns and passes by default; set
+`dead_code` section. A run that analyzed no source files gets a separate warning
+because its clean result has no analysis evidence. It passes by default. Set
 `fail-on-empty-analysis: true` to fail instead.
 
 ### Requests the run could not apply
@@ -118,12 +124,10 @@ failure there is reported by the SARIF warning instead.
 
 ### Upgrading from an earlier action
 
-The inline `Check threshold` step is gone. Its logic moved into the analyze
-step, which is what lets the gates be tested and what makes them independent of
-`fail-on-issues`. A workflow that referenced that step by name, through
-`continue-on-error` on it or `steps.*.outcome`, has nothing to reference any
-more: the verdict is now on the analyze step, and the `gates-failed` output
-carries which gates decided it.
+The inline `Check threshold` step moved into the analyze step. Its gates are
+independent of `fail-on-issues`. Update workflows that referenced the old step
+through `continue-on-error` or `steps.*.outcome`. The result is now on the
+analyze step, and `gates-failed` lists the failed gates.
 
 One stale baseline now produces two lines: the action's own advisory, from the
 unscoped re-read it performs on a pull request, and the neutral gate line

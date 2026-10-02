@@ -384,7 +384,7 @@ after every gate set the exit code.
   report with the same added-line overlap predicate. Every retained clone group
   therefore vetoes demotion, so a shared diff can prevent a demotion but cannot
   produce a rendered shared-source demotion note. Demoted groups stay counted
-  as inherited and additionally surface via
+  as inherited and are also reported through
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
 - Audit dependency scope: a dependency-level finding (unused, type-only,

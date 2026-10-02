@@ -66,7 +66,7 @@ fallow dead-code --format json --quiet
 
 ## PR Dead Code Check
 
-Check if a pull request introduces new dead code.
+Report dead-code findings in files changed by a pull request.
 
 ### Step 1: Analyze changed files
 
@@ -74,7 +74,7 @@ Check if a pull request introduces new dead code.
 fallow dead-code --format json --quiet --changed-since main --fail-on-issues
 ```
 
-Exit code 1 if the PR introduces new dead code. Exit code 0 if clean.
+With `--fail-on-issues`, reported warn-severity and error-severity findings exit 1. Existing findings in changed files can also fail this check. Use `fallow audit --gate new-only` when the gate should fail only on introduced findings.
 
 ### Step 2: If issues found, show specifics
 
@@ -82,7 +82,7 @@ Exit code 1 if the PR introduces new dead code. Exit code 0 if clean.
 fallow dead-code --format json --quiet --changed-since main
 ```
 
-Parse the JSON to list specific files and exports that became unused.
+Parse the JSON to list reported files and exports. This command does not distinguish introduced findings from inherited ones.
 
 ---
 
@@ -614,7 +614,7 @@ export const dynamicallyUsed = createHandler();
 
 ### If the trace shows it's NOT used
 
-The export is genuinely unused. Consider removing it or marking it as intentionally kept:
+The trace found no static use. Check dynamic imports, reflection, and external callers before removal. If the export must remain, mark it as intentionally kept:
 
 ```typescript
 // fallow-ignore-next-line unused-export

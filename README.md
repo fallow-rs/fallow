@@ -66,7 +66,7 @@ Audit scope: 73 changed files vs HEAD~15
 
 <sub>Excerpt from fallow 3.30.0 on vitest, over its last 15 commits, with timings removed. The gate failed (exit code 1) on findings in the changed files. It did not count the 98 findings that existed before the change.</sub>
 
-fallow reads your whole repository as one graph: modules, exports, dependencies, functions, and styling tokens. Every analysis uses that graph. It shows where the code is hard to change, where the architecture drifts, what is copied, what nothing uses, and what a pull request puts at risk.
+fallow builds a repository graph of modules, exports, dependencies, functions, and styling tokens. Its analyses use that graph to find complexity, architecture drift, duplication, unused code, and risks in a pull request.
 
 fallow runs in four places. All four read the same config file and use the same analysis engine.
 
@@ -93,18 +93,18 @@ fallow runs in four places. All four read the same config file and use the same 
 
 `npx fallow viz` opens an interactive HTML map of the project with lenses for health, duplication, architecture, and unused code.
 
-Add `--type-aware` for exact TypeScript symbol identity across aliases, re-exports, and packages. This optional pass removes false positives from interfaces and base classes ([how type-aware analysis works](docs/type-aware-analysis.md)). [Runtime coverage](https://fallow.tools/docs/analysis/runtime-coverage/) from production is an optional paid add-on that fallow merges into health and audit reports. Everything else in this README is free.
+Add `--type-aware` for exact TypeScript symbol identity across aliases, re-exports, and packages. This optional pass removes false positives from interfaces and base classes ([how type-aware analysis works](docs/type-aware-analysis.md)). [Runtime coverage](https://fallow.tools/docs/analysis/runtime-coverage/) from production is an optional add-on that fallow merges into health and audit reports.
 
 The [CLI reference](https://fallow.tools/docs/cli/global-flags/) lists every command. `fallow schema` prints all commands, flags, output formats, and exit codes as JSON.
 
 ## Why teams can depend on fallow
 
-A tool that can fail your builds must be predictable. fallow keeps these properties from release to release:
+fallow keeps these properties from release to release:
 
 - The same input gives the same output, with a stable fingerprint for each finding. There is no AI inside the analyzer. Only the opt-in `similar-code` command uses a pinned local model.
 - `fallow audit` fails only on findings that a change introduces. Existing findings do not fail the check.
 - It is fast on large codebases. fallow finds the unused code in the next.js monorepo (20,558 files) in 2.95s. Measured on fallow 2.100.0. [BENCHMARKS.md](BENCHMARKS.md) has the method and all results, and [CodSpeed](https://app.codspeed.io/fallow-rs/fallow) tracks performance on each change.
-- Monorepos are first-class. fallow reads npm, yarn, and pnpm workspaces, and `--workspace <name>` scopes a run to one package.
+- fallow reads npm, yarn, and pnpm workspaces, and `--workspace <name>` scopes a run to one package.
 - Over 100 built-in [framework plugins](https://fallow.tools/docs/frameworks/built-in/) find entry points and framework conventions, so the first run needs no config.
 - Each command has a typed JSON output, documented exit codes, and a published [output schema](docs/output-schema.json).
 - Analysis runs on your machine or CI runner. Telemetry is opt-in ([what fallow collects](docs/telemetry.md)).
@@ -145,7 +145,7 @@ You do not have to fix every finding before you add fallow to CI.
 3. For full runs of `fallow`, `dead-code`, `dupes`, or `health`, save a baseline once with `npx fallow --save-baseline fallow-baseline.json`. Pass `--baseline fallow-baseline.json` on each later run, so that only new findings fail.
 4. Reduce the backlog when your team has time. `fallow fix --dry-run` shows the fixes and changes no files. `fallow fix` applies them.
 
-Most findings on a first run come from a missing entry point or from generated files. Add the missing entry points and exclude the generated files in the config:
+If findings are caused by missing entry points or generated files, add the missing entry points and exclude the generated files in the config:
 
 ```json
 {

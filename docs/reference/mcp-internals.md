@@ -23,12 +23,12 @@ Do not hand-copy the complete tool list into durable prose. Read
 
 ## Resources
 
-Resources are the server's read-only, cacheable reference channel: compile-time
-material an agent lists once (`resources/list`, `resources/templates/list`)
-and reads by URI (`resources/read`) with no subprocess and no analysis run;
-clients cache by URI. (Hosts such as Claude Code still read a resource through
-their own resource tool, so this is not a saved tool call.) Tools remain the
-surface for anything that depends on a project root.
+Resources provide read-only, cacheable references compiled into the server.
+An agent lists them with `resources/list` and `resources/templates/list`, then
+reads them by URI with `resources/read`. These requests start no subprocess
+and run no analysis. Clients cache by URI. Hosts such as Claude Code still
+use a resource tool to read them, so resources do not save a tool call. Use
+tools for operations that depend on a project root.
 
 Sources of truth:
 
@@ -201,7 +201,7 @@ Contract rules:
   repository. So the whole-project analyses (`analyze`, `find_dupes`,
   `check_health`, `audit`) still take the killable subprocess even though a
   typed route exists for them: killing the child is the only stop `timeout_ms`
-  can promise. `check_health` additionally builds its own session below the API
+  can promise. `check_health` also builds its own session below the API
   options, so the token would not reach it, and `audit` runs a second analysis
   in a temporary base worktree whose cleanup under cancellation is unexamined.
   An in-process call that does outlive `timeout_ms` is counted as abandoned,

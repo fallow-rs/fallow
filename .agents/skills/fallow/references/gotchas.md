@@ -55,16 +55,18 @@ fallow dead-code | grep "unused"
 fallow dead-code --format json --quiet
 ```
 
-The `--quiet` flag suppresses progress bars on stderr. Without it, stderr output may interfere with stdout parsing.
+The `--quiet` flag suppresses progress bars on stderr. Keep stderr separate from stdout when parsing JSON.
 
 ---
 
-## `--changed-since` Shows Only New Issues
+<a id="--changed-since-shows-only-new-issues"></a>
 
-The `--changed-since` flag limits analysis to files modified since a git ref. It only reports issues in those files, not all issues in the project. Works with both `dead-code` and `dupes`.
+## `--changed-since` Scopes Findings to Changed Files
+
+The `--changed-since` flag scopes findings to files modified since a git ref. It works with both `dead-code` and `dupes`. Existing findings in those files can remain; dead-code dependency findings remain project-wide. Use `fallow audit --gate new-only` to distinguish introduced findings from inherited ones.
 
 ```bash
-# This only shows issues in files changed since main
+# File-scoped findings are limited to files changed since main
 fallow dead-code --format json --quiet --changed-since main
 
 # Same for duplication, only clone groups involving changed files
@@ -109,10 +111,10 @@ fallow dead-code --format json --quiet
 
 ## Syntactic Analysis: No TypeScript Compiler
 
-Fallow uses Oxc for pure syntactic analysis. It does not run the TypeScript compiler. This means:
+Default analysis uses Oxc for syntactic references. The optional `--type-aware` mode adds TypeScript checker evidence. Syntactic analysis has these limits:
 
 - **Fully dynamic imports** (`import(variable)`) are not resolved. Only static strings, template literals with static prefixes, `import.meta.glob`, and `require.context` patterns
-- **Value-level type narrowing** is not performed. Fallow can't know that `if (x instanceof Foo)` means `Foo` is "used"
+- **General type narrowing** is outside syntactic analysis. Fallow does recognize `if (x instanceof Foo)` guards and credits member calls on `x` as uses of `Foo` members
 - **Conditional exports** based on runtime values are not analyzed
 - **Function overload signatures are deduplicated**: TypeScript function overloads (multiple signatures for the same function name) are merged into a single export. They are not reported as separate unused exports
 
@@ -151,7 +153,7 @@ export * from './utils';
 import { helper } from './index';  // Resolves through the chain
 ```
 
-If an export IS flagged as unused despite being in a barrel file, it means no downstream consumer actually imports it. The barrel file re-exports it, but nobody uses it from there.
+A re-export alone does not prove that an export is used. If Fallow reports an export from a barrel, trace its consumers before removal. Dynamic imports and external callers may be outside static analysis.
 
 ---
 
@@ -163,10 +165,10 @@ If an export IS flagged as unused despite being in a barrel file, it means no do
 | 1 | Error-severity issues found | Review findings |
 | 2 | Runtime error (`fix` without `--yes` in non-TTY, invalid config) | Fix config or add `--yes` |
 
-Exit code 1 is triggered by issues with `"error"` severity in the rules config. Without a rules section, all issue types default to `"error"`. Use the rules system to control which issues fail CI:
+Error-severity findings can trigger exit code 1. Default severity varies by rule: some rules default to `"warn"` or `"off"`. Use the rules system to control which findings fail CI:
 
 ```jsonc
-// Only fail on unused files and deps, warn on everything else
+// Warn on unused exports and types; other rules keep their defaults
 {
   "rules": {
     "unused-files": "error",
@@ -217,7 +219,7 @@ Commit the baseline file to your repo. Update it periodically as you fix existin
 
 ## Duplication Modes Affect What's Detected
 
-The detection mode significantly affects results. Choose based on your needs:
+Each detection mode normalizes different syntax. Choose the mode that fits the comparison:
 
 ```bash
 # strict: exact token match only

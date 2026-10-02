@@ -9,7 +9,7 @@ Zed extension for [`fallow-lsp`](https://github.com/fallow-rs/fallow), the langu
 - quick-fix code actions
 - code lens where Zed surfaces them
 
-This extension is intentionally thin. It launches the existing `fallow-lsp` binary instead of re-implementing analysis logic inside the editor.
+This extension launches `fallow-lsp` to run analysis.
 
 ## Binary resolution
 
@@ -155,7 +155,7 @@ items to verify, not confirmed vulnerabilities.
 
 ## Full Health and Security reports
 
-The Zed extension provides the shared LSP surface. For project-wide Health and
+The Zed extension uses the shared language server. For project-wide Health and
 Security reports, install the `fallow` CLI separately and run it from the
 project root, for example in Zed's terminal:
 
@@ -172,8 +172,8 @@ exit `0` with candidates.
 
 The current Zed extension API does not provide contribution points for a
 Fallow-owned sidebar tree or status-bar item. Use Zed's built-in Problems and
-LSP surfaces for diagnostics, and the CLI for the complete reports. This is the
-best available parity with the current API, not full VS Code UI parity.
+LSP surfaces for diagnostics, and the CLI for the complete reports. The extension
+does not include the full VS Code UI.
 
 ## Development
 

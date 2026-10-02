@@ -18,7 +18,7 @@ Suggested release phrasing:
 
 > Fallow now covers styling alongside TypeScript and JavaScript: CSS, Sass/Less
 > parser-level scans, CSS Modules, Tailwind/shadcn/CVA, StyleX, PandaCSS,
-> vanilla-extract, styled-components, and Emotion. It keeps AI-generated work
-> aligned with the project's existing design system by surfacing new colors,
+> vanilla-extract, styled-components, and Emotion. Audit reports new colors,
 > type sizes, raw style values, duplicate style blocks, broken styling
-> references, and dead styling surface as reviewable audit feedback.
+> references, and dead styling surface for review against the project's
+> existing design system.
