@@ -502,3 +502,32 @@ fn member_read_on_awaited_dynamic_import_credits_that_export() {
         "a member read directly on an awaited dynamic import should credit only that export"
     );
 }
+
+#[test]
+fn promise_all_array_destructuring_credits_each_dynamic_import() {
+    let root = fixture_path("dynamic-import-promise-all");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                e.export.path.file_name().unwrap().to_string_lossy(),
+                e.export.export_name
+            )
+        })
+        .collect();
+    unused.sort();
+
+    // `c` is destructured by name, `d` is a namespace binding. A rest element
+    // keeps the whole module of `e` alive. A hole leaves `f` unbound, so the
+    // import of `f` only loads the module.
+    assert_eq!(
+        unused,
+        vec!["c.ts:unusedC", "d.ts:unusedD", "f.ts:unusedF", "f.ts:usedF",],
+        "only exports that no Promise.all element reads should be unused"
+    );
+}

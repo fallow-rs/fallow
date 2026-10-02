@@ -42,8 +42,8 @@ use super::helpers::{
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
     SideEffectRegistrationTarget, collect_static_import_specifiers, extract_import_expression,
-    try_extract_arrow_wrapped_import, try_extract_import_then_callback,
-    try_extract_property_callback_import, try_extract_require,
+    extract_promise_all_elements, try_extract_arrow_wrapped_import,
+    try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
 };
 
 #[path = "visit_impl_di.rs"]
@@ -2480,6 +2480,13 @@ impl<'a> ModuleInfoExtractor {
             return;
         }
 
+        if let BindingPattern::ArrayPattern(pattern) = &declarator.id
+            && let Some(elements) = extract_promise_all_elements(init)
+        {
+            self.handle_promise_all_dynamic_imports(pattern, elements);
+            return;
+        }
+
         let Some(import_expr) = extract_import_expression(init) else {
             return;
         };
@@ -2488,7 +2495,7 @@ impl<'a> ModuleInfoExtractor {
         if sources.is_empty() {
             return;
         }
-        self.handle_dynamic_import_declaration(declarator, import_expr, &sources);
+        self.handle_dynamic_import_declaration(&declarator.id, import_expr, &sources);
     }
 
     /// Record a CommonJS named export (`module.exports.X = ...` /

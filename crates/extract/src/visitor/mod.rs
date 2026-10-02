@@ -4,9 +4,9 @@ mod react;
 mod visit_impl;
 
 use oxc_ast::ast::{
-    Argument, ArrowFunctionBody, BindingPattern, CallExpression, Expression, ImportExpression,
-    JSXMemberExpression, JSXMemberExpressionObject, ObjectPattern, ObjectProperty,
-    ObjectPropertyKind, Statement,
+    Argument, ArrayExpressionElement, ArrowFunctionBody, BindingPattern, CallExpression,
+    Expression, ImportExpression, JSXMemberExpression, JSXMemberExpressionObject, ObjectPattern,
+    ObjectProperty, ObjectPropertyKind, Statement,
 };
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -3405,6 +3405,49 @@ fn try_extract_property_callback_import<'a, 'b>(
         return None;
     }
     Some((import_expr, sources))
+}
+
+/// The element list of a `Promise.all([...])` initializer, seen through
+/// `await` and parentheses. Each element keeps its array index, so a caller
+/// can pair it with the matching element of an array destructuring pattern.
+/// Returns `None` when the array has a spread element, because a spread
+/// moves every later index. `Promise.allSettled` and `Promise.race` are not
+/// matched: their results do not hold the module objects at each index.
+#[must_use]
+pub(crate) fn extract_promise_all_elements<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> Option<&'b [ArrayExpressionElement<'a>]> {
+    let mut inner = expr;
+    loop {
+        match inner {
+            Expression::AwaitExpression(await_expr) => inner = &await_expr.argument,
+            Expression::ParenthesizedExpression(paren) => inner = &paren.expression,
+            _ => break,
+        }
+    }
+    let Expression::CallExpression(call) = inner else {
+        return None;
+    };
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    if member.property.name != "all"
+        || !matches!(&member.object, Expression::Identifier(object) if object.name == "Promise")
+        || call.arguments.len() != 1
+    {
+        return None;
+    }
+    let Some(Expression::ArrayExpression(array)) = call.arguments[0].as_expression() else {
+        return None;
+    };
+    if array
+        .elements
+        .iter()
+        .any(|element| matches!(element, ArrayExpressionElement::SpreadElement(_)))
+    {
+        return None;
+    }
+    Some(&array.elements)
 }
 
 #[must_use]

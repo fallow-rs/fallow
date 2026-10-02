@@ -4,8 +4,9 @@
 //! declaration AST nodes, binding patterns, and require/import patterns.
 
 use oxc_ast::ast::{
-    Argument, BindingPattern, CallExpression, Declaration, Expression, ImportExpression,
-    TSEnumMemberName, TSImportEqualsDeclaration, TSModuleReference, VariableDeclarator,
+    Argument, ArrayExpressionElement, ArrayPattern, BindingPattern, CallExpression, Declaration,
+    Expression, ImportExpression, TSEnumMemberName, TSImportEqualsDeclaration, TSModuleReference,
+    VariableDeclarator,
 };
 
 use crate::{
@@ -19,7 +20,10 @@ use super::helpers::{
     extract_class_members, extract_class_type_parameter_names, extract_implemented_interface_names,
     extract_super_class_name, extract_super_class_type_args, has_angular_class_decorator,
 };
-use super::{MemberAccess, ModuleInfoExtractor, extract_destructured_names};
+use super::{
+    MemberAccess, ModuleInfoExtractor, collect_static_import_specifiers,
+    extract_destructured_names, extract_import_expression,
+};
 
 impl ModuleInfoExtractor {
     pub(crate) fn record_string_enum_member_values(
@@ -533,11 +537,14 @@ impl ModuleInfoExtractor {
     /// posture; a grouped conditional edge would be needed for branch precision.
     pub(super) fn handle_dynamic_import_declaration(
         &mut self,
-        declarator: &VariableDeclarator<'_>,
+        pattern: &BindingPattern<'_>,
         import_expr: &ImportExpression<'_>,
         sources: &[String],
     ) {
-        match &declarator.id {
+        match pattern {
+            BindingPattern::AssignmentPattern(assign) => {
+                self.handle_dynamic_import_declaration(&assign.left, import_expr, sources);
+            }
             BindingPattern::ObjectPattern(obj_pat) => {
                 let names = extract_destructured_names(obj_pat);
                 self.push_dynamic_import_branches(sources, import_expr.span, &names, None);
@@ -549,7 +556,47 @@ impl ModuleInfoExtractor {
                 self.push_dynamic_import_branches(sources, import_expr.span, &[], Some(&local));
                 self.handled_import_spans.insert(import_expr.span);
             }
-            _ => {}
+            BindingPattern::ArrayPattern(_) => {}
+        }
+    }
+
+    /// Record dynamic-import edges for
+    /// `const [a, b] = await Promise.all([import('./a'), import('./b')])`.
+    ///
+    /// Each pattern element binds the module of the array element at the same
+    /// index, so each pair gets the same credit as a single
+    /// `const a = await import('./a')`. A rest identifier receives every later
+    /// module inside an array, so those modules get a whole-object credit. A
+    /// hole binds nothing, so that `import()` stays a plain load.
+    pub(super) fn handle_promise_all_dynamic_imports(
+        &mut self,
+        pattern: &ArrayPattern<'_>,
+        elements: &[ArrayExpressionElement<'_>],
+    ) {
+        for (index, element) in elements.iter().enumerate() {
+            let Some(import_expr) = element.as_expression().and_then(extract_import_expression)
+            else {
+                continue;
+            };
+            let mut sources = Vec::new();
+            collect_static_import_specifiers(&import_expr.source, &mut sources);
+            if sources.is_empty() {
+                continue;
+            }
+            if let Some(binding) = pattern.elements.get(index) {
+                if let Some(binding) = binding {
+                    self.handle_dynamic_import_declaration(binding, import_expr, &sources);
+                }
+                continue;
+            }
+            if let Some(rest) = &pattern.rest
+                && let BindingPattern::BindingIdentifier(id) = &rest.argument
+            {
+                let local = id.name.to_string();
+                self.push_whole_object_use(local.clone());
+                self.push_dynamic_import_branches(&sources, import_expr.span, &[], Some(&local));
+                self.handled_import_spans.insert(import_expr.span);
+            }
         }
     }
 }

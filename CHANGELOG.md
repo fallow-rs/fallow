@@ -253,6 +253,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/feature.port.ts`. A declaration file that a package copies from
   `src/` without change still resolves.
 
+- **Array destructuring of `Promise.all` credits each dynamic import.**
+  Before, this declaration gave no credit to the exports of `./a` and
+  `./b`:
+  `const [{ a }, b] = await Promise.all([import('./a'), import('./b')])`.
+  Thus fallow reported `a` and the members that the code reads through `b`
+  as unused exports. Now each pattern element gets the credit of the module at
+  the same index. A rest element keeps every later module whole. A hole
+  binds nothing, so that module gets no export credit.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
