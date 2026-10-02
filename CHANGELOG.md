@@ -317,6 +317,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as unused. Now fallow reads `entry` from each object in the array. A spread
   such as `{ ...shared, entry: {...} }` does not stop the lookup.
 
+- **A type that shapes an exported `const` through a wrapper call or a
+  type assertion is no longer an unused type.** Before, fallow read the
+  signature of an exported `const` only when the initializer was a function
+  or an arrow function. Thus the initializers
+  `memo(function Card(p: CardProps) {})`, `forwardRef<Handle, Props>(...)`,
+  `createContext<Value | null>(null)` and `"on" as Mode` did not keep
+  `CardProps`, `Handle`, `Props`, `Value` or `Mode` in use. Now fallow reads
+  the type arguments of a call or `new` initializer, the signature of a
+  function argument of that call, and the type of an `as` or `<T>`
+  assertion. Parentheses and `!` around the initializer have no effect. With
+  `private-type-leaks` on, a type that is not exported and that is in one of
+  these positions is now a private type leak. The extraction cache version
+  changes, so the first run after the upgrade parses all files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

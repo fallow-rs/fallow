@@ -158,3 +158,36 @@ fn route_convention_files_are_skipped() {
         "co-located route helper should still report private-type-leak, found: {helper_leaks:?}"
     );
 }
+
+#[test]
+fn wrapper_call_and_type_assertion_initializers_back_exported_types() {
+    let root = fixture_path("signature-wrapper-initializers");
+    let config = create_private_type_leak_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_types: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+    for backed in ["MemoProps", "RefProps", "ContextValue", "Mode"] {
+        assert!(
+            !unused_types.contains(&backed),
+            "{backed} backs an exported const initializer and should not be an unused type export: {unused_types:?}"
+        );
+    }
+    assert!(
+        unused_types.contains(&"HiddenValue"),
+        "HiddenValue backs only a non-exported const and should stay unused: {unused_types:?}"
+    );
+
+    let leaks: Vec<(&str, &str)> = results
+        .private_type_leaks
+        .iter()
+        .map(|leak| (leak.leak.export_name.as_str(), leak.leak.type_name.as_str()))
+        .collect();
+    assert!(
+        leaks.contains(&("StateContext", "LocalState")),
+        "a non-exported type argument of an exported wrapper call should be a private type leak: {leaks:?}"
+    );
+}

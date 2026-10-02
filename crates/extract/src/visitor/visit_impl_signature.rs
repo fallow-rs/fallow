@@ -296,17 +296,80 @@ impl ModuleInfoExtractor {
             refs.extend(Self::collect_type_refs_from_annotation(annotation));
         }
         if let Some(init) = &declarator.init {
-            match init {
-                Expression::ArrowFunctionExpression(arrow) => {
+            Self::collect_initializer_signature_refs(init, &mut refs);
+        }
+        refs
+    }
+
+    /// Collect the types that shape the inferred type of a variable
+    /// initializer. A type assertion sets the type directly. A call or `new`
+    /// wrapper takes its type from its type arguments and from the signature
+    /// of a function argument, for example `memo(function C(p: Props) {})`.
+    fn collect_initializer_signature_refs(init: &Expression<'_>, refs: &mut Vec<(String, Span)>) {
+        match init {
+            Expression::ParenthesizedExpression(parenthesized) => {
+                Self::collect_initializer_signature_refs(&parenthesized.expression, refs);
+            }
+            Expression::TSNonNullExpression(non_null) => {
+                Self::collect_initializer_signature_refs(&non_null.expression, refs);
+            }
+            Expression::TSAsExpression(assertion) => {
+                Self::collect_asserted_type_refs(&assertion.type_annotation, refs);
+            }
+            Expression::TSTypeAssertion(assertion) => {
+                Self::collect_asserted_type_refs(&assertion.type_annotation, refs);
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                refs.extend(Self::collect_arrow_signature_refs(arrow));
+            }
+            Expression::FunctionExpression(function) => {
+                refs.extend(Self::collect_function_signature_refs(function));
+            }
+            Expression::CallExpression(call) => {
+                Self::collect_wrapper_call_signature_refs(
+                    call.type_arguments.as_deref(),
+                    &call.arguments,
+                    refs,
+                );
+            }
+            Expression::NewExpression(new_expression) => {
+                Self::collect_wrapper_call_signature_refs(
+                    new_expression.type_arguments.as_deref(),
+                    &new_expression.arguments,
+                    refs,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_asserted_type_refs(ty: &TSType<'_>, refs: &mut Vec<(String, Span)>) {
+        let mut collector = SignatureTypeCollector::default();
+        collector.visit_ts_type(ty);
+        refs.extend(collector.refs);
+    }
+
+    fn collect_wrapper_call_signature_refs(
+        type_arguments: Option<&TSTypeParameterInstantiation<'_>>,
+        arguments: &[Argument<'_>],
+        refs: &mut Vec<(String, Span)>,
+    ) {
+        if let Some(type_arguments) = type_arguments {
+            let mut collector = SignatureTypeCollector::default();
+            collector.visit_ts_type_parameter_instantiation(type_arguments);
+            refs.extend(collector.refs);
+        }
+        for argument in arguments {
+            match argument {
+                Argument::ArrowFunctionExpression(arrow) => {
                     refs.extend(Self::collect_arrow_signature_refs(arrow));
                 }
-                Expression::FunctionExpression(function) => {
+                Argument::FunctionExpression(function) => {
                     refs.extend(Self::collect_function_signature_refs(function));
                 }
                 _ => {}
             }
         }
-        refs
     }
 
     /// Collect signature type references from a class's heritage clauses: type
