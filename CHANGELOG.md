@@ -590,6 +590,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unstable_dynamicStaleTime` in `page` files only. Next.js rejects
   `unstable_dynamicStaleTime` in a layout, so fallow still reports it there.
   Route handlers do not change.
+- **The Vite `root` option now moves the default entries.** Before, fallow
+  looked for `index.html`, `src/main.*` and `src/index.*` only in the config
+  directory. Thus with `root: './web'`, it reported the scripts that
+  `web/index.html` loads as unused, and also the files they import. Now
+  fallow reads `root` and adds the same entries under that directory. It
+  resolves `root` against the config directory, and it reads the path
+  helpers `resolve`, `join` and `fileURLToPath(new URL(...))`.
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

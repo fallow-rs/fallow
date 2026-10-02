@@ -1,0 +1,11 @@
+{
+  "name": "vite-root-entries",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "8.0.0"
+  }
+}
