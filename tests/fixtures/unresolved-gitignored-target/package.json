@@ -1,0 +1,5 @@
+{
+  "name": "app",
+  "type": "module",
+  "main": "src/index.ts"
+}

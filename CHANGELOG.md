@@ -166,6 +166,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The extraction cache version changes, so the first run after the upgrade
   rebuilds the cache.
 
+- **A relative import of a missing gitignored path is not unresolved.**
+  Code can import a build output (`../dist/out.js`) or generated code
+  (`./generated/client`) that does not exist before the build. Before,
+  fallow reported each such import as unresolved. Now fallow does not
+  report a relative import when its target does not exist and an ignore
+  rule of the repository ignores the target or a parent directory. Fallow
+  reads the `.gitignore` and `.ignore` files from the repository root down
+  to the target, and `.git/info/exclude`. A nested ignore file applies
+  only below its own directory. The rules apply only inside a git
+  repository, as in source discovery. Fallow does not read the global git
+  excludes file, so the findings are the same on each machine. A target
+  that exists keeps the current behavior.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

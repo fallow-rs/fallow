@@ -777,7 +777,10 @@ detector did not run.
 Dependency credit must distinguish source, scripts, configuration, required
 installed peers, optional peers and runtime-provided built-ins. Dependency
 ignores suppress findings without fabricating resolution edges. Raw-specifier
-unresolved-import ignores are not filesystem globs. Static test coverage is
+unresolved-import ignores are not filesystem globs. A relative import whose
+target is missing and ignored by a repository ignore file is build output, not
+an unresolved import; this check reads no global git excludes file and applies
+only inside a git repository. Static test coverage is
 reference reachability, not runtime line coverage; complexity suppression
 controls findings while aggregate metrics continue to describe the source.
 Security and feature-flag analysis retain their own opt-in contracts and cannot

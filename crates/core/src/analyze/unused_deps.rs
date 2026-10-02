@@ -14,6 +14,7 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use super::gitignored_targets::GitignoredTargets;
 use super::package_json_utils::{find_dep_line_in_json, read_pkg_json_content};
 use super::predicates::{
     is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias, is_virtual_module,
@@ -1857,6 +1858,7 @@ pub fn find_unresolved_imports(
         generated_patterns,
         generated_type_prefixes,
     };
+    let mut gitignored = GitignoredTargets::new(&config.root);
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
@@ -1875,6 +1877,9 @@ pub fn find_unresolved_imports(
                 continue;
             }
             if unresolved_spec_is_silenced(spec, edge.is_type_only(), &filters) {
+                continue;
+            }
+            if gitignored.ignores_missing_target(&module.path, spec) {
                 continue;
             }
             let (line, col, specifier_col) =

@@ -5,6 +5,7 @@ mod deprecated_exports;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 pub mod feature_flags;
+mod gitignored_targets;
 mod graph_confidence;
 mod iconify;
 mod inline_loaders;

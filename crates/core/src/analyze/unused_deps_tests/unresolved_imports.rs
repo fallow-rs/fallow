@@ -1349,3 +1349,142 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         "suppression with wrong issue kind should not suppress unresolved import"
     );
 }
+
+fn module_with_unresolved(path: PathBuf, specifiers: &[&str]) -> ResolvedModule {
+    ResolvedModule {
+        file_id: FileId(0),
+        path,
+        exports: vec![].into(),
+        re_exports: vec![],
+        resolved_imports: specifiers
+            .iter()
+            .map(|specifier| unresolved_import(specifier))
+            .collect(),
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![].into(),
+        semantic_facts: std::sync::Arc::default(),
+        whole_object_uses: std::sync::Arc::default(),
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+        exported_factory_returns: std::sync::Arc::default(),
+        exported_factory_return_object_shapes: std::sync::Arc::default(),
+        type_member_types: std::sync::Arc::default(),
+    }
+}
+
+fn write_file(path: &Path, content: &str) {
+    std::fs::create_dir_all(path.parent().expect("file has a parent")).expect("create parent dir");
+    std::fs::write(path, content).expect("write file");
+}
+
+fn unresolved_specifiers(root: &Path, importer: &str, specifiers: &[&str]) -> Vec<String> {
+    let resolved_modules = vec![module_with_unresolved(root.join(importer), specifiers)];
+    let config = test_config(root.to_path_buf());
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+    find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &[],
+        &[],
+        &line_offsets,
+    )
+    .into_iter()
+    .map(|import| import.specifier)
+    .collect()
+}
+
+/// A temporary project root inside a git repository, with canonical paths so
+/// the module paths share a prefix with the resolved root.
+fn git_project() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path().canonicalize().expect("canonical temp dir");
+    std::fs::create_dir_all(root.join(".git/info")).expect("create .git dir");
+    write_file(&root.join("src/index.ts"), "");
+    (dir, root)
+}
+
+#[test]
+fn missing_target_below_gitignored_dir_is_not_unresolved() {
+    let (_dir, root) = git_project();
+    write_file(&root.join(".gitignore"), "dist/\nbuild/\n");
+    write_file(&root.join("build/present.js"), "");
+
+    let unresolved = unresolved_specifiers(
+        &root,
+        "src/index.ts",
+        &["../dist/out.js", "./missing", "../build/present.js"],
+    );
+
+    assert_eq!(
+        unresolved,
+        vec!["./missing", "../build/present.js"],
+        "only a missing target below an ignored dir is silenced; a present \
+         ignored file and a missing file that no rule ignores stay reported"
+    );
+}
+
+#[test]
+fn nested_gitignore_rules_apply_below_their_dir() {
+    let (_dir, root) = git_project();
+    write_file(&root.join("lib/.gitignore"), "generated/\n");
+    write_file(&root.join("lib/helper.ts"), "");
+
+    let from_lib = unresolved_specifiers(&root, "lib/helper.ts", &["./generated/client"]);
+    let from_src = unresolved_specifiers(
+        &root,
+        "src/index.ts",
+        &["../lib/generated/client", "./generated/client"],
+    );
+
+    assert!(
+        from_lib.is_empty(),
+        "nested rule ignores lib/generated: {from_lib:?}"
+    );
+    assert_eq!(
+        from_src,
+        vec!["./generated/client"],
+        "the rule of lib/.gitignore does not apply to src/generated"
+    );
+}
+
+#[test]
+fn deeper_ignore_file_overrides_a_parent_rule() {
+    let (_dir, root) = git_project();
+    write_file(&root.join(".gitignore"), "*.gen.ts\n");
+    write_file(&root.join("src/.gitignore"), "!keep.gen.ts\n");
+
+    let unresolved =
+        unresolved_specifiers(&root, "src/index.ts", &["./keep.gen.ts", "./other.gen.ts"]);
+
+    assert_eq!(unresolved, vec!["./keep.gen.ts"]);
+}
+
+#[test]
+fn git_info_exclude_rules_apply() {
+    let (_dir, root) = git_project();
+    write_file(&root.join(".git/info/exclude"), "out/\n");
+
+    let unresolved = unresolved_specifiers(&root, "src/index.ts", &["../out/x.js", "./y"]);
+
+    assert_eq!(unresolved, vec!["./y"]);
+}
+
+#[test]
+fn gitignore_rules_do_not_apply_without_a_git_repository() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path().canonicalize().expect("canonical temp dir");
+    write_file(&root.join(".gitignore"), "dist/\n");
+    write_file(&root.join("src/index.ts"), "");
+
+    let unresolved = unresolved_specifiers(&root, "src/index.ts", &["../dist/out.js"]);
+
+    assert_eq!(unresolved, vec!["../dist/out.js"]);
+}
