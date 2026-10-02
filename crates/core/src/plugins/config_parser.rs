@@ -292,6 +292,35 @@ pub(crate) fn extract_config_string_or_array(
     .unwrap_or_default()
 }
 
+/// Extract a string, array, or object-map value from each config of a
+/// default-exported config array, or from the single config object.
+///
+/// Supports `export default [...]` and `export default defineConfig([...])`.
+/// The function reads `prop_path` from each object element of the array. When
+/// the default export is not an array, it reads the config object.
+#[must_use]
+pub(crate) fn extract_config_array_or_object_string_or_array(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let Some(arr) = find_default_export_array(program) else {
+            let obj = find_config_object(program)?;
+            return get_nested_string_or_array(obj, prop_path);
+        };
+        let values = arr
+            .elements
+            .iter()
+            .filter_map(|element| element.as_expression().and_then(object_expression))
+            .filter_map(|element_obj| get_nested_string_or_array(element_obj, prop_path))
+            .flatten()
+            .collect();
+        Some(values)
+    })
+    .unwrap_or_default()
+}
+
 /// Extract a statically recoverable path-like value from a property path.
 #[must_use]
 pub(crate) fn extract_config_path(
@@ -2947,6 +2976,29 @@ mod tests {
             r#"export default { entry: { main: "./src/main.js", vendor: "./src/vendor.js" } };"#;
         let result = extract_config_string_or_array(source, &js_path(), &["entry"]);
         assert_eq!(result, vec!["./src/main.js", "./src/vendor.js"]);
+    }
+
+    #[test]
+    fn array_or_object_string_or_array_reads_each_array_element() {
+        let source = r#"
+            const shared = { format: ["esm"] };
+            export default defineConfig([
+                { entry: "./src/a.ts" },
+                ({ ...shared, entry: { b: "./src/b.ts" } }),
+                { entry: ["./src/c.ts"] } satisfies Options,
+                { format: ["cjs"] },
+                shared,
+            ] as Options[]);
+        "#;
+        let result = extract_config_array_or_object_string_or_array(source, &ts_path(), &["entry"]);
+        assert_eq!(result, vec!["./src/a.ts", "./src/b.ts", "./src/c.ts"]);
+    }
+
+    #[test]
+    fn array_or_object_string_or_array_falls_back_to_config_object() {
+        let source = r#"export default defineConfig({ entry: { main: "./src/main.ts" } });"#;
+        let result = extract_config_array_or_object_string_or_array(source, &ts_path(), &["entry"]);
+        assert_eq!(result, vec!["./src/main.ts"]);
     }
 
     #[test]

@@ -24,7 +24,7 @@ define_plugin! {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
 
-        let entries = config_parser::extract_config_string_or_array(source, config_path, &["entry"]);
+        let entries = config_parser::extract_config_array_or_object_string_or_array(source, config_path, &["entry"]);
         result.extend_config_dir_entry_patterns(entries, config_path, root);
 
         result
@@ -225,5 +225,41 @@ mod tests {
             Path::new("/project/packages/lib"),
         );
         assert_eq!(result.entry_patterns, vec!["src/cli.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_entry_from_each_config_in_array() {
+        let source = r#"
+            import { defineConfig } from 'tsdown';
+            const shared = { format: ["esm"] };
+            export default defineConfig([
+                { entry: ["src/main.ts"] },
+                { ...shared, entry: { worker: "src/worker.ts" } },
+            ]);
+        "#;
+        let plugin = TsdownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_entry_from_plain_exported_array() {
+        let source = r#"
+            export default [
+                { entry: "src/main.ts" },
+                { entry: ["src/worker.ts"] },
+            ];
+        "#;
+        let plugin = TsdownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
     }
 }

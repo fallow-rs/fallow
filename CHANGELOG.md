@@ -310,6 +310,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolves each value from the config directory. A value with a leading `!`
   now excludes its matches from the other `entry` values.
 
+- **A tsup or tsdown config array gives the entry points of each config.**
+  Before, fallow read `entry` only from a single config object. Thus it
+  ignored `export default defineConfig([{ entry: [...] }, { entry: {...} }])`
+  and `export default [...]`, and it reported those files and their imports
+  as unused. Now fallow reads `entry` from each object in the array. A spread
+  such as `{ ...shared, entry: {...} }` does not stop the lookup.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

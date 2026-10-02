@@ -25,7 +25,7 @@ fn assert_object_map_values_are_entries(fixture: &str) {
     for used_path in ["src/main.ts", "src/worker.ts", "src/helper.ts"] {
         assert!(
             !unused_files.iter().any(|unused| unused == used_path),
-            "{used_path} should be reachable through the entry object map, unused files: {unused_files:?}"
+            "{used_path} should be reachable through the configured entry, unused files: {unused_files:?}"
         );
     }
 
@@ -43,4 +43,14 @@ fn tsup_entry_object_map_values_are_entry_points() {
 #[test]
 fn tsdown_entry_object_map_values_are_entry_points() {
     assert_object_map_values_are_entries("tsdown-entry-object-map");
+}
+
+#[test]
+fn tsup_config_array_entries_are_entry_points() {
+    assert_object_map_values_are_entries("tsup-config-array");
+}
+
+#[test]
+fn tsdown_config_array_entries_are_entry_points() {
+    assert_object_map_values_are_entries("tsdown-config-array");
 }
