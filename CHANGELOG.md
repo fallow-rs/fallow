@@ -243,6 +243,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `['run']` and through `.default`. The other exports of the target file
   stay reported.
 
+- **Workspace exports with a declaration target resolve to source.** A
+  package can map a subpath to `./dist/feature.port.d.ts` in the `types`
+  condition. When `dist/` is absent, fallow maps the output file back to
+  `src/`. Before, it kept `.d` in the file name and looked for
+  `src/feature.port.d.ts`. Thus it reported the import as unresolved. Now
+  fallow removes the `.d.ts`, `.d.mts` or `.d.cts` suffix first, and keeps
+  every other dot in the name. The import resolves to
+  `src/feature.port.ts`. A declaration file that a package copies from
+  `src/` without change still resolves.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

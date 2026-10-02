@@ -456,16 +456,58 @@ pub(super) fn try_source_fallback(
     let prefix: PathBuf = components[..first_output_pos].iter().collect();
 
     let suffix: PathBuf = components[last_output_pos + 1..].iter().collect();
-    suffix.file_stem()?; // Ensure the suffix has a filename
+    let file_name = suffix.file_name()?.to_str()?;
+    let stem = output_source_stem(file_name);
+    let source_dir = match suffix.parent() {
+        Some(parent) => prefix.join("src").join(parent),
+        None => prefix.join("src"),
+    };
 
     for ext in SOURCE_EXTS {
-        let source_candidate = prefix.join("src").join(suffix.with_extension(ext));
+        let source_candidate = source_dir.join(format!("{stem}.{ext}"));
         if let Some(&file_id) = path_to_id.get(source_candidate.as_path()) {
             return Some(file_id);
         }
     }
 
+    // A package can copy a hand-written declaration file from `src/` to the
+    // output directory unchanged.
+    if is_declaration_file_name(file_name) {
+        return path_to_id
+            .get(source_dir.join(file_name).as_path())
+            .copied();
+    }
+
     None
+}
+
+/// Declaration suffixes that build tools emit next to the output files.
+const DECLARATION_SUFFIXES: &[&str] = &[".d.ts", ".d.mts", ".d.cts"];
+
+fn declaration_stem(file_name: &str) -> Option<&str> {
+    DECLARATION_SUFFIXES
+        .iter()
+        .find_map(|suffix| file_name.strip_suffix(suffix))
+        .filter(|stem| !stem.is_empty())
+}
+
+fn is_declaration_file_name(file_name: &str) -> bool {
+    declaration_stem(file_name).is_some()
+}
+
+/// Return the source stem of a build output file name.
+///
+/// The stem keeps every dot in the base name. `feature.port.d.ts` and
+/// `feature.port.js` both give `feature.port`. `Path::with_extension` removes
+/// only the last extension, so it keeps `.d` in a declaration file name.
+fn output_source_stem(file_name: &str) -> &str {
+    if let Some(stem) = declaration_stem(file_name) {
+        return stem;
+    }
+    match file_name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => file_name,
+    }
 }
 
 /// Try to resolve a package `imports` entry from the nearest owning package.
@@ -2296,6 +2338,76 @@ mod tests {
             try_source_fallback(&dist_path, &path_to_id),
             Some(FileId(6)),
             "dist/utils.mjs should fall back to src/utils.mts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_declaration_with_dotted_name() {
+        let src_path = PathBuf::from("/project/packages/lib/src/x.port.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/x.port.d.ts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/x.port.d.ts should fall back to src/x.port.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_module_declaration() {
+        let src_path = PathBuf::from("/project/packages/lib/src/x.mts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/x.d.mts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/x.d.mts should fall back to src/x.mts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_commonjs_declaration_in_subdir() {
+        let src_path = PathBuf::from("/project/packages/lib/src/sub/x.cts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/sub/x.d.cts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/sub/x.d.cts should fall back to src/sub/x.cts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_declaration_copied_from_src() {
+        let src_path = PathBuf::from("/project/packages/lib/src/globals.d.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/globals.d.ts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/globals.d.ts should fall back to a copied src/globals.d.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_js_with_dotted_name() {
+        let src_path = PathBuf::from("/project/packages/lib/src/x.port.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/x.port.js");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/x.port.js should fall back to src/x.port.ts"
         );
     }
 
