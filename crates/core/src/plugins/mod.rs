@@ -1427,6 +1427,17 @@ pub trait Plugin: Send + Sync {
         PluginResult::default()
     }
 
+    /// Binaries whose `--config` / `-c` argument in a package script names a
+    /// config file of this plugin.
+    ///
+    /// A script such as `vitest run --config vitest.e2e.config.ts` points the
+    /// tool at a file that no `config_patterns()` entry matches. The plugin
+    /// system sends that file to `resolve_config` and credits its default
+    /// export as used.
+    fn script_config_binaries(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// The key name in package.json that holds inline configuration for this tool.
     /// When set (e.g., `"jest"` for the `"jest"` key in package.json), the plugin
     /// system will extract that key's value and call `resolve_config` with its

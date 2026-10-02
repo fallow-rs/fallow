@@ -2145,10 +2145,12 @@ fn analyze_all_scripts(
 
     let nm_roots = collect_node_modules_roots(config, workspaces);
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, &all_dep_names);
+    let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let deps = ScriptDependencyContext {
         bin_map: &bin_map,
         all_dep_set: &all_dep_set,
         workspace_packages: &workspace_packages,
+        registry: &registry,
     };
 
     analyze_root_scripts(config, root_pkg, &deps, plugin_result);
@@ -2186,6 +2188,7 @@ struct ScriptDependencyContext<'a> {
     bin_map: &'a rustc_hash::FxHashMap<String, String>,
     all_dep_set: &'a FxHashSet<String>,
     workspace_packages: &'a std::sync::Arc<scripts::WorkspacePackages>,
+    registry: &'a plugins::PluginRegistry,
 }
 
 /// The directory of a workspace package relative to the project root, with
@@ -2265,6 +2268,11 @@ fn analyze_root_scripts(
         scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     plugin_result.script_used_packages = script_analysis.used_packages;
+    plugin_result.merge_into(deps.registry.resolve_script_config_files(
+        &script_analysis.binary_config_files,
+        &config.root,
+        "",
+    ));
 
     for config_file in &script_analysis.config_files {
         plugin_result
@@ -2285,6 +2293,7 @@ type WsScriptOut = (
     Vec<String>,
     Vec<(String, String)>,
     Vec<(plugins::PathRule, String)>,
+    plugins::AggregatedPluginResult,
 );
 
 fn analyze_workspace_scripts(
@@ -2297,8 +2306,9 @@ fn analyze_workspace_scripts(
         .par_iter()
         .map(|(ws, ws_pkg)| analyze_one_workspace_scripts(config, ws, ws_pkg, deps))
         .collect();
-    for (used_packages, discovered_always_used, entry_patterns) in ws_results {
+    for (used_packages, discovered_always_used, entry_patterns, config_result) in ws_results {
         plugin_result.script_used_packages.extend(used_packages);
+        plugin_result.merge_into(config_result);
         plugin_result
             .discovered_always_used
             .extend(discovered_always_used);
@@ -2307,7 +2317,8 @@ fn analyze_workspace_scripts(
 }
 
 /// Analyze a single workspace package's scripts, returning its used packages,
-/// always-used config files, and entry patterns (all workspace-prefixed).
+/// always-used config files, entry patterns, and the plugin result of the
+/// config files that scripts pass to a plugin binary (all workspace-prefixed).
 fn analyze_one_workspace_scripts(
     config: &ResolvedConfig,
     ws: &fallow_config::WorkspaceInfo,
@@ -2318,7 +2329,12 @@ fn analyze_one_workspace_scripts(
     let mut discovered_always_used: Vec<(String, String)> = Vec::new();
     let mut entry_patterns: Vec<(plugins::PathRule, String)> = Vec::new();
     let Some(ref ws_scripts) = ws_pkg.scripts else {
-        return (used_packages, discovered_always_used, entry_patterns);
+        return (
+            used_packages,
+            discovered_always_used,
+            entry_patterns,
+            plugins::AggregatedPluginResult::default(),
+        );
     };
     let scripts_to_analyze = if config.production {
         scripts::filter_production_scripts(ws_scripts)
@@ -2337,6 +2353,11 @@ fn analyze_one_workspace_scripts(
         scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     used_packages.extend(ws_analysis.used_packages);
+    let config_result = deps.registry.resolve_script_config_files(
+        &ws_analysis.binary_config_files,
+        &ws.root,
+        &ws_prefix,
+    );
 
     for config_file in &ws_analysis.config_files {
         discovered_always_used.push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
@@ -2346,7 +2367,12 @@ fn analyze_one_workspace_scripts(
             entry_patterns.push((plugins::PathRule::new(pat), "scripts".to_string()));
         }
     }
-    (used_packages, discovered_always_used, entry_patterns)
+    (
+        used_packages,
+        discovered_always_used,
+        entry_patterns,
+        config_result,
+    )
 }
 
 /// Analyze CI config files for binary invocations and merge the results.

@@ -517,6 +517,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   export. The extraction cache version changes, so the first run after the
   upgrade rebuilds the cache.
 
+- **A vitest config that a package script passes with `--config` is read.**
+  Before, a script such as `vitest run --config vitest.e2e.config.ts` only
+  kept the config file itself from the unused-file report. Fallow did not
+  read the `test.include` of that file. Thus it reported the test files that
+  the config selects as unused. Now the vitest plugin reads a config that a
+  script passes to `vitest` with `--config` or `-c`. Its `test.include`
+  patterns become entry points, and its default export is used. These
+  patterns add to the patterns of the default `vitest.config.ts` and do not
+  replace them.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

@@ -586,5 +586,7 @@ mod namespace_spy_call_member;
 mod node_modules_bin_path;
 #[path = "integration_test/pkg_utils_plugin.rs"]
 mod pkg_utils_plugin;
+#[path = "integration_test/vitest_script_config_arg.rs"]
+mod vitest_script_config_arg;
 #[path = "integration_test/webpack_inline_loaders.rs"]
 mod webpack_inline_loaders;

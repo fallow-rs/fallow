@@ -729,6 +729,74 @@ impl PluginRegistry {
             .map(|p| (p.as_ref(), cached_plugin_config_matchers(p.as_ref())))
             .collect()
     }
+
+    /// Resolve the config files that package scripts pass to a plugin binary
+    /// with `--config` / `-c`.
+    ///
+    /// `package_root` is the directory of the `package.json` that holds the
+    /// scripts, and `ws_prefix` is its path relative to the project root
+    /// (empty for the root package). Each file is resolved into its own
+    /// result, so a `test.include` in a script config adds entry patterns
+    /// and does not replace the patterns of the plugin's default config.
+    /// A file that a `config_patterns()` entry matches is skipped, because
+    /// the normal plugin run resolves it already.
+    pub(crate) fn resolve_script_config_files(
+        &self,
+        config_files: &[scripts::BinaryConfigFile],
+        package_root: &Path,
+        ws_prefix: &str,
+    ) -> AggregatedPluginResult {
+        let mut aggregated = AggregatedPluginResult::default();
+        for config_file in config_files {
+            let Some(rel_path) =
+                scripts::normalize_script_entry_pattern(ws_prefix, &config_file.path)
+            else {
+                continue;
+            };
+            for plugin in &self.plugins {
+                let plugin = plugin.as_ref();
+                if !plugin
+                    .script_config_binaries()
+                    .contains(&config_file.binary.as_str())
+                    || cached_plugin_config_matchers(plugin)
+                        .iter()
+                        .any(|m| m.is_match(rel_path.as_str()))
+                {
+                    continue;
+                }
+                let abs_path = package_root.join(config_file.path.trim_start_matches("./"));
+                let Ok(source) = std::fs::read_to_string(&abs_path) else {
+                    continue;
+                };
+                let mut file_result = AggregatedPluginResult::default();
+                file_result
+                    .entry_point_roles
+                    .insert(plugin.name().to_string(), plugin.entry_point_role());
+                let plugin_result = plugin.resolve_config(&abs_path, &source, package_root);
+                if let Err(errors) = process_config_result(
+                    plugin.name(),
+                    plugin_result,
+                    &mut file_result,
+                    Some(&abs_path),
+                ) {
+                    for error in errors {
+                        tracing::warn!("{error}");
+                    }
+                    continue;
+                }
+                if !ws_prefix.is_empty() {
+                    file_result.apply_workspace_prefix(ws_prefix);
+                }
+                // The tool loads the config module and reads its default export.
+                file_result.used_exports.push(PluginUsedExportRule::new(
+                    plugin.name().to_string(),
+                    super::UsedExportRule::new(rel_path.clone(), ["default"]),
+                ));
+                aggregated.merge_into(file_result);
+            }
+        }
+        aggregated
+    }
 }
 
 fn process_workspace_active_plugins(

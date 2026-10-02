@@ -1,0 +1,15 @@
+{
+  "name": "vitest-script-config-arg",
+  "private": true,
+  "main": "src/index.ts",
+  "workspaces": [
+    "packages/widgets"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:snap": "vitest run --config vitest.snap.config.ts"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.4"
+  }
+}

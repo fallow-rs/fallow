@@ -1126,6 +1126,9 @@ pub struct ScriptAnalysis {
     pub used_packages: FxHashSet<String>,
     /// Config file paths extracted from `--config` / `-c` arguments.
     pub config_files: Vec<String>,
+    /// The same config file paths, each with the binary that received it.
+    /// A plugin reads a config file only when its own binary received it.
+    pub binary_config_files: Vec<BinaryConfigFile>,
     /// File paths extracted as positional arguments (entry point candidates).
     pub entry_files: Vec<String>,
 }
@@ -1138,12 +1141,22 @@ impl ScriptAnalysis {
     /// lists into patterns one by one.
     fn dedupe_paths(&mut self) {
         retain_first_seen(&mut self.config_files);
+        retain_first_seen(&mut self.binary_config_files);
         retain_first_seen(&mut self.entry_files);
     }
 }
 
-fn retain_first_seen(values: &mut Vec<String>) {
-    let mut seen: FxHashSet<String> = FxHashSet::default();
+/// A config file argument and the binary that received it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BinaryConfigFile {
+    /// The binary name (e.g., "vitest").
+    pub binary: String,
+    /// The config path as it appeared in the script, relative to the package.
+    pub path: String,
+}
+
+fn retain_first_seen<T: Clone + Eq + std::hash::Hash>(values: &mut Vec<T>) {
+    let mut seen: FxHashSet<T> = FxHashSet::default();
     values.retain(|value| seen.insert(value.clone()));
 }
 
@@ -1415,6 +1428,12 @@ fn accumulate_parsed_commands(
             .entry_files
             .extend_from_slice(cmd.entry_files(ignored));
         result.used_packages.extend(cmd.flag_packages);
+        result
+            .binary_config_files
+            .extend(cmd.config_args.iter().map(|path| BinaryConfigFile {
+                binary: cmd.binary.clone(),
+                path: path.clone(),
+            }));
         result.config_files.extend(cmd.config_args);
     }
 }
@@ -3630,6 +3649,36 @@ mod tests {
         .collect();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"), &FxHashMap::default());
         assert!(result.config_files.contains(&"webpack.prod.js".to_string()));
+    }
+
+    #[test]
+    fn analyze_keeps_binary_of_each_config_file() {
+        let scripts: HashMap<String, String> = [
+            ("snap", "npx vitest run --config vitest.snap.config.ts"),
+            ("e2e", "pnpm exec vitest -c=./vitest.e2e.config.ts"),
+            (
+                "build",
+                "cross-env NODE_ENV=production webpack --config webpack.prod.js",
+            ),
+        ]
+        .into_iter()
+        .map(|(name, body)| (name.to_string(), body.to_string()))
+        .collect();
+        let result = analyze_scripts(&scripts, Path::new("/nonexistent"), &FxHashMap::default());
+        let mut pairs: Vec<(&str, &str)> = result
+            .binary_config_files
+            .iter()
+            .map(|file| (file.binary.as_str(), file.path.as_str()))
+            .collect();
+        pairs.sort_unstable();
+        assert_eq!(
+            pairs,
+            vec![
+                ("vitest", "./vitest.e2e.config.ts"),
+                ("vitest", "vitest.snap.config.ts"),
+                ("webpack", "webpack.prod.js"),
+            ]
+        );
     }
 
     #[test]
