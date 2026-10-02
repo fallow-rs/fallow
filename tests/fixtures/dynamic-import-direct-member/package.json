@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-import-direct-member",
+  "private": true,
+  "main": "src/index.ts"
+}

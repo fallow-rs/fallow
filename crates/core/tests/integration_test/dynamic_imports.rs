@@ -468,3 +468,37 @@ fn webpack_context_makes_files_reachable() {
         "orphan.ts should be unused (not in icons/), found: {unused_file_names:?}"
     );
 }
+
+#[test]
+fn member_read_on_awaited_dynamic_import_credits_that_export() {
+    let root = fixture_path("dynamic-import-direct-member");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            let path = export
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&export.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            format!("{path}:{}", export.export.export_name)
+        })
+        .collect();
+    unused_exports.sort();
+
+    assert_eq!(
+        unused_exports,
+        vec![
+            "src/a.ts:KA".to_string(),
+            "src/a.ts:unusedA".to_string(),
+            "src/b.ts:unusedB".to_string(),
+            "src/b.ts:usedB".to_string(),
+        ],
+        "a member read directly on an awaited dynamic import should credit only that export"
+    );
+}

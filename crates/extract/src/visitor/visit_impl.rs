@@ -4099,6 +4099,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        self.record_awaited_dynamic_import_member(&expr.object, expr.property.name.as_str());
         if is_import_meta_env_object(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: "import.meta.env".to_string(),
@@ -4163,6 +4164,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        if let Some(member) = expr.static_property_name() {
+            self.record_awaited_dynamic_import_member(&expr.object, member.as_str());
+        }
         if let Expression::StaticMemberExpression(key) = &expr.expression
             && let Expression::Identifier(key_object) = &key.object
         {

@@ -235,6 +235,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   points: `.js` maps to `.ts` or `.tsx`, and `.mjs` maps to `.mts`. An
   output path without a source file stays unresolved.
 
+- **A member read directly on an awaited dynamic import counts as a use.**
+  Before, fallow did not credit an export in code such as
+  `(await import('./loader')).run()` or `new (await import('./model')).Model()`.
+  Thus it reported each export of the target file as unused. Now fallow
+  credits the member that the code reads, also through a string key such
+  as `['run']` and through `.default`. The other exports of the target file
+  stay reported.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

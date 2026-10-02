@@ -114,6 +114,36 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    /// Record a member read directly on an awaited dynamic import, such as
+    /// `(await import('./x')).run()` or `new (await import('./x')).Cls()`.
+    /// The read member is the only export the expression uses, so each
+    /// statically resolvable branch credits that one name. The parent member
+    /// expression is visited before the `import()` itself, so marking the span
+    /// as handled stops `visit_import_expression` from adding a second edge.
+    pub(super) fn record_awaited_dynamic_import_member(
+        &mut self,
+        object: &Expression<'_>,
+        member: &str,
+    ) {
+        let Expression::AwaitExpression(await_expr) = object.without_parentheses() else {
+            return;
+        };
+        let Expression::ImportExpression(import_expr) = await_expr.argument.without_parentheses()
+        else {
+            return;
+        };
+        if self.handled_import_spans.contains(&import_expr.span) {
+            return;
+        }
+        let mut sources = Vec::new();
+        collect_static_import_specifiers(&import_expr.source, &mut sources);
+        if sources.is_empty() {
+            return;
+        }
+        self.push_dynamic_import_branches(&sources, import_expr.span, &[member.to_string()], None);
+        self.handled_import_spans.insert(import_expr.span);
+    }
+
     pub(super) fn record_import_callback_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
         if let Some(then_cb) = try_extract_import_then_callback(expr) {
             if let Some(local) = &then_cb.local_name {

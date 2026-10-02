@@ -1737,3 +1737,42 @@ const lazy = import("./lazy-no-await");
     eager.sort_unstable();
     assert_eq!(eager, ["./a", "./b", "./c"]);
 }
+
+#[test]
+fn awaited_dynamic_import_member_call_credits_member() {
+    let info = parse_source("async function f() { await (await import('./a')).usedA(); }");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./a");
+    assert!(info.dynamic_imports[0].local_name.is_none());
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["usedA"]);
+}
+
+#[test]
+fn awaited_dynamic_import_member_new_credits_member() {
+    let info = parse_source("async function f() { return new (await import('./b')).KB(); }");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./b");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["KB"]);
+}
+
+#[test]
+fn awaited_dynamic_import_string_key_and_default_credit_member() {
+    let info = parse_source(
+        "async function f() { (await import('./a'))['usedA'](); (await import('./b')).default(); }",
+    );
+    assert_eq!(info.dynamic_imports.len(), 2);
+    assert_eq!(info.dynamic_imports[0].source, "./a");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["usedA"]);
+    assert_eq!(info.dynamic_imports[1].source, "./b");
+    assert_eq!(info.dynamic_imports[1].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn awaited_conditional_dynamic_import_member_credits_both_branches() {
+    let info = parse_source("async function f() { (await import(cond ? './x' : './y')).run(); }");
+    assert_eq!(info.dynamic_imports.len(), 2);
+    for imp in &info.dynamic_imports {
+        assert_eq!(imp.destructured_names, vec!["run"]);
+        assert!(imp.local_name.is_none());
+    }
+}
