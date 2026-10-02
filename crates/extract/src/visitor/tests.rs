@@ -4352,6 +4352,66 @@ fn destructured_formal_parameter_typed_by_interface_mapped_to_class() {
 }
 
 #[test]
+fn destructure_of_parameter_typed_by_inline_type_literal_mapped_to_class() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            export function run(input: { service: Service }) {
+                const { service } = input;
+                service.used();
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Service" && a.member == "used"),
+        "destructure of a parameter typed by an inline type literal should map service.used() to Service.used, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn renamed_destructure_of_parameter_typed_by_inline_type_literal_mapped_to_class() {
+    let info = parse(
+        r"
+            import { Client } from './services';
+            export function run(options: { client: Client }) {
+                const { client: renamed } = options;
+                renamed.used();
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Client" && a.member == "used"),
+        "renamed destructure of a parameter typed by an inline type literal should map renamed.used() to Client.used, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn nested_destructure_of_parameter_typed_by_inline_type_literal_mapped_to_class() {
+    let info = parse(
+        r"
+            import { Service } from './services';
+            export function run(input: { nested: { service: Service } }) {
+                const { nested: { service } } = input;
+                service.used();
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Service" && a.member == "used"),
+        "nested destructure of a parameter typed by an inline type literal should map service.used() to Service.used, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn untyped_destructure_binding_does_not_map_to_class() {
     let info = parse(
         r"

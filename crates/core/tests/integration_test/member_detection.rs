@@ -21,6 +21,31 @@ fn destructured_class_members_credit_reads_and_opaque_patterns() {
 }
 
 #[test]
+fn destructured_fields_of_typed_parameters_credit_their_classes() {
+    let config = create_config(fixture_path("typed-destructured-class-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(
+        unused,
+        [
+            ("Client", "unused"),
+            ("Service", "unused"),
+            ("Store", "unused")
+        ]
+    );
+}
+
+#[test]
 fn type_guard_subject_member_access_credits_only_its_predicate_class() {
     let project = tempfile::tempdir().expect("create project");
     let source_dir = project.path().join("src");

@@ -2010,6 +2010,23 @@ impl<'a> ModuleInfoExtractor {
             }
         }
 
+        // `const { service } = input` is the destructure form of
+        // `const service = input.service`. Resolve each destructured path the
+        // same way, so a typed source path (for example a parameter typed by
+        // an inline type literal) binds the local to its class.
+        if let BindingPattern::ObjectPattern(pattern) = &declarator.id
+            && let Some(source) = static_member_object_name(unwrap_static_expr(init))
+        {
+            let source = self.qualify_this_scope(&source);
+            for (local, path) in extract_object_pattern_bindings(pattern) {
+                if let Some(BindingTarget::Class(type_name)) =
+                    self.resolve_bound_object_name(&format!("{source}.{path}"))
+                {
+                    self.insert_class_binding_target(local, type_name);
+                }
+            }
+        }
+
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Some(type_name) = self.nullable_asserted_type_name(init)
         {

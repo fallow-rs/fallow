@@ -124,6 +124,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   substring. A file that does not end with the text after the `*` stays out
   of the entry set.
 
+- **A destructured field of an inline-typed parameter now credits its
+  class.** For `function run(input: { service: Service })`, fallow already
+  credited `input.service.used()` to `Service.used`. The destructure form,
+  `const { service } = input; service.used();`, did not bind `service` to
+  `Service`, so fallow reported `Service.used` as an unused class member.
+  Now fallow resolves each destructured path the same way as a member
+  access, so renamed (`{ service: local }`) and nested keys also bind to
+  their class. The extraction cache version changes, so the first run after
+  the upgrade parses all files again.
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
