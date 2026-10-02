@@ -161,6 +161,8 @@ mod signature_backing_unused_backer;
 mod size_limit_plugin;
 #[path = "integration_test/skipped_file_reachability_caveat.rs"]
 mod skipped_file_reachability_caveat;
+#[path = "integration_test/ssr_load_module.rs"]
+mod ssr_load_module;
 #[path = "integration_test/svelte_dead_event.rs"]
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]

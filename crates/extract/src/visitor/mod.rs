@@ -3504,6 +3504,48 @@ pub(crate) fn extract_import_expression<'a, 'b>(
     }
 }
 
+/// Vite dev-server method that loads a module by specifier for SSR.
+const SSR_LOAD_MODULE_METHOD: &str = "ssrLoadModule";
+
+#[must_use]
+/// Match `<receiver>.ssrLoadModule('<literal>')`, with an optional `await` or
+/// parentheses around the call, and return the call span and the specifier.
+///
+/// The Vite dev server loads the module like a dynamic `import()`. A leading
+/// `/` is relative to the Vite root, not to the file system. A computed
+/// argument is not a static edge, so it returns `None`.
+pub(crate) fn ssr_load_module_call(expr: &Expression<'_>) -> Option<(Span, String)> {
+    let call = match expr.without_parentheses() {
+        Expression::AwaitExpression(await_expr) => {
+            match await_expr.argument.without_parentheses() {
+                Expression::CallExpression(call) => call,
+                _ => return None,
+            }
+        }
+        Expression::CallExpression(call) => call,
+        _ => return None,
+    };
+    ssr_load_module_source(call).map(|source| (call.span, source))
+}
+
+#[must_use]
+/// Return the literal specifier of a `<receiver>.ssrLoadModule('<literal>')` call.
+pub(crate) fn ssr_load_module_source(call: &CallExpression<'_>) -> Option<String> {
+    let Expression::StaticMemberExpression(member) = call.callee.without_parentheses() else {
+        return None;
+    };
+    if member.property.name != SSR_LOAD_MODULE_METHOD {
+        return None;
+    }
+    match call.arguments.first()?.as_expression()? {
+        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first().map(|quasi| quasi.value.raw.to_string())
+        }
+        _ => None,
+    }
+}
+
 fn try_extract_arrow_wrapped_import<'a, 'b>(
     arguments: &'b [Argument<'a>],
 ) -> Option<(&'b ImportExpression<'a>, Vec<String>)> {

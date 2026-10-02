@@ -42,8 +42,9 @@ use super::helpers::{
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
     SideEffectRegistrationTarget, collect_static_import_specifiers, extract_import_expression,
-    extract_promise_all_elements, try_extract_arrow_wrapped_import,
-    try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
+    extract_promise_all_elements, ssr_load_module_call, ssr_load_module_source,
+    try_extract_arrow_wrapped_import, try_extract_import_then_callback,
+    try_extract_property_callback_import, try_extract_require,
 };
 
 #[path = "visit_impl_di.rs"]
@@ -2504,6 +2505,11 @@ impl<'a> ModuleInfoExtractor {
             return;
         }
 
+        if let Some((span, source)) = ssr_load_module_call(init) {
+            self.handle_dynamic_import_declaration(&declarator.id, span, &[source]);
+            return;
+        }
+
         let Some(import_expr) = extract_import_expression(init) else {
             return;
         };
@@ -3829,6 +3835,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_require_context_pattern(expr);
         self.record_import_callback_dynamic_imports(expr);
         self.record_arrow_wrapped_dynamic_import(expr);
+        self.record_ssr_load_module(expr);
 
         self.try_record_fluent_chain_access(expr);
         self.record_pinia_map_helpers(expr);

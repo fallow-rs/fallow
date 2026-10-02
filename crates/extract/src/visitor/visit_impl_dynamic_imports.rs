@@ -162,6 +162,19 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    /// Record a namespace edge for a `<receiver>.ssrLoadModule('<literal>')`
+    /// call whose result has no binding. A declaration such as
+    /// `const m = await server.ssrLoadModule(...)` records the edge with its
+    /// bindings first and marks the call span as handled.
+    pub(super) fn record_ssr_load_module(&mut self, expr: &CallExpression<'_>) {
+        if self.handled_import_spans.contains(&expr.span) {
+            return;
+        }
+        if let Some(source) = ssr_load_module_source(expr) {
+            self.push_dynamic_import_branches(&[source], expr.span, &[], None);
+        }
+    }
+
     pub(super) fn record_arrow_wrapped_dynamic_import(&mut self, expr: &CallExpression<'_>) {
         self.record_loader_argument_dynamic_imports(expr);
         if let Some((import_expr, sources)) = try_extract_arrow_wrapped_import(&expr.arguments) {

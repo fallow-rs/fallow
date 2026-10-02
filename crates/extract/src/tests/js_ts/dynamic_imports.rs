@@ -1899,3 +1899,54 @@ const loadPanel = () => import('./panel');
             .any(|name| name == "loadPanel")
     );
 }
+
+fn dynamic_import_bindings(info: &ModuleInfo) -> Vec<(&str, Vec<&str>, Option<&str>)> {
+    info.dynamic_imports
+        .iter()
+        .map(|imp| {
+            (
+                imp.source.as_str(),
+                imp.destructured_names.iter().map(String::as_str).collect(),
+                imp.local_name.as_deref(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn ssr_load_module_with_literal_path_is_a_dynamic_import() {
+    let info = parse_source(
+        r"
+const server = await createServer();
+const mod = await server.ssrLoadModule('/src/a.ts');
+const { used, other } = await server.ssrLoadModule(`/src/b.ts`);
+await server.ssrLoadModule('/src/c.ts');
+mod.used;
+",
+    );
+    assert_eq!(
+        dynamic_import_bindings(&info),
+        [
+            ("/src/a.ts", vec![], Some("mod")),
+            ("/src/b.ts", vec!["used", "other"], None),
+            ("/src/c.ts", vec![], None),
+        ]
+    );
+}
+
+#[test]
+fn ssr_load_module_with_computed_path_is_not_an_edge() {
+    let info = parse_source(
+        r"
+const server = await createServer();
+const computed = await server.ssrLoadModule(path);
+const templated = await server.ssrLoadModule(`/src/${name}.ts`);
+const literal = await server.ssrLoadModule('/src/known.ts');
+",
+    );
+    assert_eq!(
+        dynamic_import_bindings(&info),
+        [("/src/known.ts", vec![], Some("literal"))]
+    );
+    assert!(info.dynamic_import_patterns.is_empty());
+}

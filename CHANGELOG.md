@@ -494,6 +494,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own signature. A type that only its own signature uses, such as a
   recursive tree node, is now also reported.
 
+- **A module that a test loads with `ssrLoadModule` is reachable.** Before,
+  fallow did not see an edge for `await server.ssrLoadModule('/src/a.ts')`
+  on a Vite dev server. Thus it reported the module as an unused file, or
+  reported its exports as unused. Now a call with a string literal argument
+  is a dynamic import. Fallow credits the destructured names, or the members
+  that the code reads from the result. Other exports of the module are still
+  unused exports. A computed argument does not make an edge. A specifier
+  that starts with `/` resolves against the Vite root. Fallow now tries the
+  nearest directory with a `package.json` before the project root, so this
+  also works in a nested package. The parse cache version changes, so the
+  first run after the upgrade parses all files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

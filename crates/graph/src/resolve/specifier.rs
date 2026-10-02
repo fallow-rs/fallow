@@ -247,6 +247,11 @@ fn try_root_relative_specifier(
     if let Some(result) = resolve_root_relative_from_dir(ctx, source_dir, &relative) {
         return Some(result);
     }
+    if let Some(package_dir) = nearest_package_dir_below_root(ctx.root, source_dir)
+        && let Some(result) = resolve_root_relative_from_dir(ctx, package_dir, &relative)
+    {
+        return Some(result);
+    }
     if source_dir != ctx.root
         && let Some(result) = resolve_root_relative_from_dir(ctx, ctx.root, &relative)
     {
@@ -256,6 +261,20 @@ fn try_root_relative_specifier(
         return Some(result);
     }
     Some(ResolveResult::Unresolvable(specifier.to_string()))
+}
+
+/// Return the nearest directory above `source_dir` that holds a
+/// `package.json`, when that directory is below the project root.
+///
+/// A Vite root is usually the package directory, so a root-relative
+/// specifier in a nested package resolves against that package. The source
+/// directory and the project root are tried separately.
+fn nearest_package_dir_below_root<'p>(root: &Path, source_dir: &'p Path) -> Option<&'p Path> {
+    source_dir
+        .ancestors()
+        .skip(1)
+        .take_while(|dir| *dir != root && dir.starts_with(root))
+        .find(|dir| dir.join("package.json").is_file())
 }
 
 fn is_root_relative_importer(from_file: &Path) -> bool {
