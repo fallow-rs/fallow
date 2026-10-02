@@ -205,8 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this number. The number includes the functions that the baseline accepts,
   and the section says so. A `--complexity --baseline` run where the baseline
   accepts every finding stays clean. The human output already gave this
-  number. The
-  job summary also has a blank line before `## Health by <mode>` now.
+  number. The job summary also has a blank line before `## Health by <mode>`
+  now.
 
 ### Changed
 

@@ -482,8 +482,8 @@ both renderers gives that count and names `--complexity`. It does not say
 that no function exceeds a threshold. One rule,
 `fallow_api::complexity_count_unlisted`, decides this for both renderers:
 
-- A score-only run never lists findings. The envelope shows this run because
-  it has no `vital_signs` (`assembly.rs` omits them only when
+- A score-only run never lists findings. An envelope from this run has no
+  `vital_signs` (`assembly.rs` omits them only when
   `score_only_output` is set). This run gives the count also with a
   baseline. The count comes before the baseline, so the note
   (`fallow_api::complexity_not_listed_note`) says that the count includes the
