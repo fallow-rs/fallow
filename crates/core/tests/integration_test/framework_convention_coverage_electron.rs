@@ -93,3 +93,30 @@ fn electron_vite_main_rollup_input_replaces_default_entry() {
 fn electron_vite_main_lib_entry_replaces_default_entry() {
     assert_declared_main_entry_replaces_default("electron-vite-main-lib-entry");
 }
+
+#[test]
+fn electron_builder_default_script_config_files_stay_used() {
+    let root = fixture_path("electron-builder-script-config");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = collect_unused_files(&root, &results);
+
+    for credited in [
+        "electron-builder.js",
+        "electron-builder.cjs",
+        "electron-builder.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == credited),
+            "{credited} is a default electron-builder config file, unused files: {unused_files:?}"
+        );
+    }
+
+    for reportable in ["electron-builder.mjs", "src/orphan.js"] {
+        assert!(
+            unused_files.iter().any(|path| path == reportable),
+            "{reportable} must remain reportable, unused files: {unused_files:?}"
+        );
+    }
+}

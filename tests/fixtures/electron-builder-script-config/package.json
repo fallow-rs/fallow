@@ -1,0 +1,11 @@
+{
+  "name": "electron-builder-script-config",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron-builder": "*"
+  }
+}

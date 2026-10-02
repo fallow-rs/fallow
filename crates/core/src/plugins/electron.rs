@@ -26,7 +26,8 @@ const ENTRY_PATTERNS: &[&str] = &[
 ];
 
 const ALWAYS_USED: &[&str] = &[
-    "electron-builder.{yml,yaml,json,json5,toml}",
+    // electron-builder reads these names without `--config`; it skips `.mjs`.
+    "electron-builder.{yml,yaml,json,json5,toml,js,cjs,ts}",
     "forge.config.{ts,js,cjs}",
     "electron.vite.config.{ts,js,mjs}",
 ];

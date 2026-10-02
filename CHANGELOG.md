@@ -538,6 +538,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read the section, it keeps all files of that directory as entries. A
   project without an electron-vite config keeps the old entries.
 
+- **Default electron-builder script config files stay used.** Before,
+  fallow kept only the YAML, JSON, JSON5 and TOML forms of the
+  electron-builder config. Thus it reported `electron-builder.js`,
+  `electron-builder.cjs` and `electron-builder.ts` as unused files.
+  electron-builder reads these files without `--config`. Now the Electron
+  plugin keeps them. `electron-builder.mjs` is not a default name, so fallow
+  still reports it when nothing references it.
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
