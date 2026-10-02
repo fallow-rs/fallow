@@ -1,0 +1,15 @@
+{
+  "name": "release-it-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "release": "release-it"
+  },
+  "devDependencies": {
+    "@release-it/conventional-changelog": "10.0.0",
+    "release-it": "19.0.0",
+    "release-it-sample-plugin": "1.0.0",
+    "unused-control": "1.0.0"
+  }
+}

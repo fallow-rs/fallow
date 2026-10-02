@@ -7733,6 +7733,7 @@
       "commitizen",
       "commit-and-tag-version",
       "semantic-release",
+      "release-it",
       "danger",
       "hardhat",
       "vercel",

@@ -1837,6 +1837,7 @@ mod react_native;
 mod react_router;
 mod redwoodsdk;
 mod relay;
+mod release_it;
 mod remark;
 mod remix;
 mod rolldown;

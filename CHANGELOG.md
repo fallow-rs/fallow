@@ -441,6 +441,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The rule applies only to a class that extends `AbstractAgent` directly.
   Other methods of the agent class are still reported.
 
+- **A release-it config and its plugins are no longer reported as
+  unused.** Before, fallow did not know release-it. Thus it reported a
+  `.release-it.mjs` config as an unused file, and also each local module
+  that the config imports. Now a built-in `release-it` plugin activates on
+  the `release-it` dependency. It keeps each `.release-it.*` config form
+  that release-it reads. It also reads the `release-it` key in
+  `package.json`. Each key of the `plugins` object and each `extends` value
+  that names a package credits that package as used. A key that is a
+  relative path, such as `./scripts/release-plugin.js`, keeps that file
+  reachable. The JSON5, YAML and TOML config forms are kept, but fallow does not
+  read their contents.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
