@@ -40,7 +40,10 @@ Sources of truth:
   functions because rmcp's `RequestContext` cannot be constructed in tests;
   the `ServerHandler` methods in `crates/mcp/src/server/mod.rs` are one-line
   delegators.
-- Payload data comes from shared crates only: `fallow_types::mcp_manifest`
+- `crates/mcp/src/tool_guides.rs` owns the authored note, summaries, and detail
+  strings served by the `fallow://tools/{name}` guide template.
+- Catalogue, explanation, task-matrix, and schema payloads use shared crates:
+  `fallow_types::mcp_manifest`
   (tools), `fallow_api::explain` plus `fallow_types::issue_meta` (issue types,
   explain index, explain documents), `fallow_types::task_matrix` (task
   matrix), and `fallow_api::schemas` (config, plugin, and rule-pack JSON
