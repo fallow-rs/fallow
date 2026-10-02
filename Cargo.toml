@@ -204,6 +204,7 @@ option_if_let_else = "allow"            # Too many false positives in match-heav
 missing_const_for_fn = "allow"          # Not a const library
 fallible_impl_from = "allow"            # From impls that can fail are intentional
 use_self = "allow"                      # Too noisy with generics
+unused_async_trait_impl = "allow"       # Trait signatures (tower-lsp, rmcp) require async fn without .await
 
 # Allow cargo lints that are unavoidable
 multiple_crate_versions = "allow"       # Transitive dependency version conflicts

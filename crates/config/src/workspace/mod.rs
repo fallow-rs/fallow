@@ -89,9 +89,7 @@ pub struct WorkspaceInfo {
 pub fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
     public_packages.iter().any(|pattern| {
         name == pattern
-            || globset::Glob::new(pattern)
-                .ok()
-                .is_some_and(|glob| glob.compile_matcher().is_match(name))
+            || globset::Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(name))
     })
 }
 

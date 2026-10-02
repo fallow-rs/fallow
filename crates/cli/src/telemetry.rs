@@ -1796,7 +1796,7 @@ fn debug_enabled() -> bool {
 /// True when env var `name` holds a truthy value (`1`, `true`, `yes`, `on`).
 /// Shared with the update check and the cache notice opt-out gate.
 pub fn env_truthy(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
+    std::env::var(name).is_ok_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "1" | "true" | "yes" | "on"

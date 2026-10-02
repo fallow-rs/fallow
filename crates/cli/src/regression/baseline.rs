@@ -53,7 +53,7 @@ fn is_likely_gitignored(path: &Path, root: &Path) -> bool {
         .arg(path)
         .current_dir(root);
     clear_ambient_git_env(&mut command);
-    command.output().ok().is_some_and(|o| o.status.success())
+    command.output().is_ok_and(|o| o.status.success())
 }
 
 /// Get the current git SHA, if available.

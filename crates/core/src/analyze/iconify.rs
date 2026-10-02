@@ -45,9 +45,7 @@ fn iconify_ecosystem_present(pkg: Option<&PackageJson>, workspaces: &[WorkspaceI
         return true;
     }
     workspaces.iter().any(|ws| {
-        PackageJson::load(&ws.root.join("package.json"))
-            .ok()
-            .is_some_and(|pkg| declares_iconify(&pkg))
+        PackageJson::load(&ws.root.join("package.json")).is_ok_and(|pkg| declares_iconify(&pkg))
     })
 }
 

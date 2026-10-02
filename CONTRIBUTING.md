@@ -78,7 +78,7 @@ exclusions.
 
 [Hawk](https://github.com/astral-sh/hawk) audits Rust workspace visibility and
 dead public declarations across crate boundaries. The scheduled workflow uses
-Hawk 0.1.9 with Rust 1.97.1 and keeps the workspace `fallow-api` facade, its
+Hawk 0.1.9 with Rust 1.98.1 and keeps the workspace `fallow-api` facade, its
 re-exported contract crates, and the cross-repo `fallow-license` surface out of
 scope.
 

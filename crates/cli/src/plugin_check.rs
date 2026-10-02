@@ -203,9 +203,7 @@ fn entry_path_exists(root: &Path, entry: &str) -> bool {
     expand_braces(entry).iter().any(|pattern| {
         let full = root.join(pattern);
         if pattern.contains(['*', '?', '[']) {
-            glob::glob(&full.to_string_lossy())
-                .ok()
-                .is_some_and(|mut paths| paths.next().is_some())
+            glob::glob(&full.to_string_lossy()).is_ok_and(|mut paths| paths.next().is_some())
         } else {
             full.exists()
         }
