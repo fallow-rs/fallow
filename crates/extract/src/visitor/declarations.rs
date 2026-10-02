@@ -5,8 +5,7 @@
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrayPattern, BindingPattern, CallExpression, Declaration,
-    Expression, ImportExpression, TSEnumMemberName, TSImportEqualsDeclaration, TSModuleReference,
-    VariableDeclarator,
+    Expression, TSEnumMemberName, TSImportEqualsDeclaration, TSModuleReference, VariableDeclarator,
 };
 
 use crate::{
@@ -538,23 +537,23 @@ impl ModuleInfoExtractor {
     pub(super) fn handle_dynamic_import_declaration(
         &mut self,
         pattern: &BindingPattern<'_>,
-        import_expr: &ImportExpression<'_>,
+        import_span: oxc_span::Span,
         sources: &[String],
     ) {
         match pattern {
             BindingPattern::AssignmentPattern(assign) => {
-                self.handle_dynamic_import_declaration(&assign.left, import_expr, sources);
+                self.handle_dynamic_import_declaration(&assign.left, import_span, sources);
             }
             BindingPattern::ObjectPattern(obj_pat) => {
                 let names = extract_destructured_names(obj_pat);
-                self.push_dynamic_import_branches(sources, import_expr.span, &names, None);
-                self.handled_import_spans.insert(import_expr.span);
+                self.push_dynamic_import_branches(sources, import_span, &names, None);
+                self.handled_import_spans.insert(import_span);
             }
             BindingPattern::BindingIdentifier(id) => {
                 let local = id.name.to_string();
                 self.record_namespace_binding_name(local.clone());
-                self.push_dynamic_import_branches(sources, import_expr.span, &[], Some(&local));
-                self.handled_import_spans.insert(import_expr.span);
+                self.push_dynamic_import_branches(sources, import_span, &[], Some(&local));
+                self.handled_import_spans.insert(import_span);
             }
             BindingPattern::ArrayPattern(_) => {}
         }
@@ -585,7 +584,7 @@ impl ModuleInfoExtractor {
             }
             if let Some(binding) = pattern.elements.get(index) {
                 if let Some(binding) = binding {
-                    self.handle_dynamic_import_declaration(binding, import_expr, &sources);
+                    self.handle_dynamic_import_declaration(binding, import_expr.span, &sources);
                 }
                 continue;
             }

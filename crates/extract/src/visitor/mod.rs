@@ -55,6 +55,18 @@ pub(crate) fn infer_props_field_array_element_type(
     array_element_type_from_type(field_type)
 }
 
+/// A local function that only returns a dynamic `import()`, with the count of
+/// its references and of the references whose shape credits a precise set of
+/// exports. A reference in any other shape credits the whole target module.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalImportLoader {
+    import_span: Span,
+    sources: Vec<String>,
+    references: usize,
+    credited_references: usize,
+    is_exported: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LocalClassExportInfo {
     members: Vec<MemberInfo>,
@@ -347,6 +359,11 @@ pub(crate) struct ModuleInfoExtractor {
     has_angular_component_template_url: bool,
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
+    /// Top-level local loader functions keyed by binding name: a `const`
+    /// arrow or function expression, or a function declaration, whose body
+    /// returns an `import()`. Registered before the body walk because a
+    /// function declaration is hoisted above the code that calls it.
+    local_import_loaders: FxHashMap<String, LocalImportLoader>,
     namespace_binding_names: Vec<String>,
     module_namespace_binding_names: FxHashSet<String>,
     scoped_namespace_binding_names: Vec<FxHashSet<String>>,

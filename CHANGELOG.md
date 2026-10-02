@@ -262,6 +262,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same index. A rest element keeps every later module whole. A hole
   binds nothing, so that module gets no export credit.
 
+- **A dynamic `import()` in a local loader function credits the exports
+  that the code uses.** Before, fallow did not follow a loader function such
+  as `const loadView = () => import('./view')` or
+  `async function loadHelpers() { return await import('./helpers') }`. Thus
+  it reported the exports of the loaded module as unused. Now a loader that
+  is an argument of a call, as in `lazy(loadView)`, credits the `default`
+  export, the same as an inline `() => import('./view')`. A
+  `const m = await loadHelpers()` binding credits the members that the code
+  reads from `m`, and `const { a } = await loadHelpers()` credits `a`. When a
+  loader has a different use, or the file exports it, fallow credits all
+  exports of the loaded module. A loader that the code does not use credits
+  no export.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

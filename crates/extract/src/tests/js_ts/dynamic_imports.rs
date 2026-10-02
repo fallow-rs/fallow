@@ -1776,3 +1776,126 @@ fn awaited_conditional_dynamic_import_member_credits_both_branches() {
         assert!(imp.local_name.is_none());
     }
 }
+
+fn dynamic_import_shapes(info: &ModuleInfo) -> Vec<(&str, Vec<&str>, Option<&str>)> {
+    info.dynamic_imports
+        .iter()
+        .map(|imp| {
+            (
+                imp.source.as_str(),
+                imp.destructured_names.iter().map(String::as_str).collect(),
+                imp.local_name.as_deref(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn local_loader_passed_as_argument_credits_default() {
+    let info = parse_source(
+        r"
+const loadView = () => import('./view');
+export const View = lazy(loadView);
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [("./view", vec!["default"], None)]
+    );
+}
+
+#[test]
+fn awaited_local_loader_call_binds_like_awaited_import() {
+    let info = parse_source(
+        r"
+export async function run() {
+  const helpers = await loadHelpers();
+  helpers.used();
+  const { tool } = await loadTools();
+}
+async function loadHelpers() {
+  return await import('./helpers');
+}
+function loadTools() {
+  return import('./tools');
+}
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [
+            ("./helpers", vec![], Some("helpers")),
+            ("./tools", vec!["tool"], None),
+        ]
+    );
+}
+
+#[test]
+fn local_loader_with_other_use_credits_whole_module() {
+    let info = parse_source(
+        r"
+const loadPanel = () => import('./panel');
+lazy(loadPanel);
+export const ready = loadPanel().then((panel) => panel);
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [
+            ("./panel", vec!["default"], None),
+            ("./panel", vec![], Some("loadPanel")),
+        ]
+    );
+    assert!(
+        info.whole_object_uses
+            .iter()
+            .any(|name| name == "loadPanel")
+    );
+}
+
+#[test]
+fn exported_local_loader_credits_whole_module() {
+    let info = parse_source(
+        r"
+const loadA = () => import('./a');
+export function loadB() {
+  return import('./b');
+}
+export { loadA };
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [
+            ("./a", vec![], Some("loadA")),
+            ("./b", vec![], Some("loadB")),
+        ]
+    );
+}
+
+#[test]
+fn reassignable_loader_binding_keeps_bare_import_edge() {
+    let info = parse_source(
+        r"
+let loadView = () => import('./view');
+lazy(loadView);
+",
+    );
+    assert_eq!(dynamic_import_shapes(&info), [("./view", vec![], None)]);
+}
+
+#[test]
+fn unreferenced_local_loader_keeps_bare_import_edge() {
+    let info = parse_source(
+        r"
+const loadPanel = () => import('./panel');
+",
+    );
+    assert_eq!(dynamic_import_shapes(&info), [("./panel", vec![], None)]);
+    assert!(
+        !info
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "loadPanel")
+    );
+}

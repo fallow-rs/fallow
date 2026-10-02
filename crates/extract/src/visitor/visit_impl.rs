@@ -2480,10 +2480,25 @@ impl<'a> ModuleInfoExtractor {
             return;
         }
 
+        self.record_dynamic_import_declarator(declarator, init);
+    }
+
+    /// Record the dynamic-import edges of a declarator init: a
+    /// `Promise.all([import(...)])` array destructure, a call of a local
+    /// loader function, or a direct `import(...)`.
+    fn record_dynamic_import_declarator(
+        &mut self,
+        declarator: &VariableDeclarator<'a>,
+        init: &Expression<'a>,
+    ) {
         if let BindingPattern::ArrayPattern(pattern) = &declarator.id
             && let Some(elements) = extract_promise_all_elements(init)
         {
             self.handle_promise_all_dynamic_imports(pattern, elements);
+            return;
+        }
+
+        if self.record_loader_call_declaration(declarator, init) {
             return;
         }
 
@@ -2495,7 +2510,7 @@ impl<'a> ModuleInfoExtractor {
         if sources.is_empty() {
             return;
         }
-        self.handle_dynamic_import_declaration(&declarator.id, import_expr, &sources);
+        self.handle_dynamic_import_declaration(&declarator.id, import_expr.span, &sources);
     }
 
     /// Record a CommonJS named export (`module.exports.X = ...` /
@@ -2980,7 +2995,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_program_sanitizer_functions(program);
         self.record_local_function_return_types(program);
         self.preseed_direct_object_binding_targets(&program.body);
+        self.record_program_local_import_loaders(program);
         walk::walk_program(self, program);
+        self.finish_local_import_loaders();
     }
 
     fn visit_formal_parameter(&mut self, param: &FormalParameter<'a>) {
@@ -4474,6 +4491,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
         self.record_bare_namespace_reference(ident);
+        self.count_local_import_loader_reference(ident.name.as_str());
         walk::walk_identifier_reference(self, ident);
     }
 }

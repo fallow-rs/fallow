@@ -1,6 +1,9 @@
 //! Dynamic import capture helpers for the visitor implementation.
 
 use super::*;
+use crate::visitor::{
+    LocalImportLoader, extract_import_from_callable, extract_import_from_return_body,
+};
 
 impl<'a> ModuleInfoExtractor {
     /// Record each `new URL(path, import.meta.url)` passed directly to a
@@ -160,6 +163,7 @@ impl<'a> ModuleInfoExtractor {
     }
 
     pub(super) fn record_arrow_wrapped_dynamic_import(&mut self, expr: &CallExpression<'_>) {
+        self.record_loader_argument_dynamic_imports(expr);
         if let Some((import_expr, sources)) = try_extract_arrow_wrapped_import(&expr.arguments) {
             self.push_dynamic_import_branches(
                 &sources,
@@ -177,6 +181,200 @@ impl<'a> ModuleInfoExtractor {
             if self.is_next_dynamic_ssr_false_call(expr) {
                 self.client_only_dynamic_import_spans
                     .push(import_expr.span.start);
+            }
+        }
+    }
+
+    /// Credit `default` for each argument that names a local loader function,
+    /// the same credit an inline `() => import('./x')` argument gets
+    /// (`const load = () => import('./x'); lazy(load)`).
+    fn record_loader_argument_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
+        if self.local_import_loaders.is_empty() {
+            return;
+        }
+        for arg in &expr.arguments {
+            let Argument::Identifier(ident) = arg else {
+                continue;
+            };
+            let Some(loader) = self.local_import_loaders.get_mut(ident.name.as_str()) else {
+                continue;
+            };
+            loader.credited_references += 1;
+            let import_span = loader.import_span;
+            let sources = loader.sources.clone();
+            self.push_dynamic_import_branches(
+                &sources,
+                import_span,
+                &["default".to_string()],
+                None,
+            );
+            if self.is_next_dynamic_ssr_false_call(expr) {
+                self.client_only_dynamic_import_spans
+                    .push(import_span.start);
+            }
+        }
+    }
+
+    /// Bind `const m = await load()` and `const { a } = await load()` to the
+    /// `import()` that the local loader `load` returns, the same way as
+    /// `const m = await import('./x')`. Returns whether the declarator had
+    /// this shape.
+    pub(super) fn record_loader_call_declaration(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) -> bool {
+        if self.local_import_loaders.is_empty()
+            || !matches!(
+                declarator.id,
+                BindingPattern::ObjectPattern(_) | BindingPattern::BindingIdentifier(_)
+            )
+        {
+            return false;
+        }
+        let Expression::AwaitExpression(await_expr) = init.without_parentheses() else {
+            return false;
+        };
+        let Expression::CallExpression(call) = await_expr.argument.without_parentheses() else {
+            return false;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return false;
+        };
+        let Some(loader) = self.local_import_loaders.get_mut(callee.name.as_str()) else {
+            return false;
+        };
+        loader.credited_references += 1;
+        let import_span = loader.import_span;
+        let sources = loader.sources.clone();
+        self.handle_dynamic_import_declaration(&declarator.id, import_span, &sources);
+        true
+    }
+
+    /// Count one reference to a local loader function. The end of the program
+    /// walk compares this count with the references that credit precise names.
+    pub(super) fn count_local_import_loader_reference(&mut self, name: &str) {
+        if let Some(loader) = self.local_import_loaders.get_mut(name) {
+            loader.references += 1;
+        }
+    }
+
+    /// Register the top-level local loader functions of `program` before the
+    /// body walk. A loader is a `const` arrow or function expression, or a
+    /// function declaration, that returns a static `import()`. The `import()`
+    /// span is marked as handled: the loader references decide its credit.
+    pub(super) fn record_program_local_import_loaders(&mut self, program: &Program<'_>) {
+        self.local_import_loaders.clear();
+        let mut exported_names: Vec<String> = Vec::new();
+        for stmt in &program.body {
+            match stmt {
+                Statement::VariableDeclaration(decl) => self.register_variable_loaders(decl, false),
+                Statement::FunctionDeclaration(func) => self.register_function_loader(func, false),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::VariableDeclaration(decl) => {
+                        self.register_variable_loaders(decl, true);
+                    }
+                    Declaration::FunctionDeclaration(func) => {
+                        self.register_function_loader(func, true);
+                    }
+                    _ => {}
+                },
+                Statement::ExportNamedDeclaration(export) => {
+                    exported_names.extend(
+                        export
+                            .specifiers
+                            .iter()
+                            .map(|spec| spec.local.name().to_string()),
+                    );
+                }
+                _ => {}
+            }
+        }
+        for name in exported_names {
+            if let Some(loader) = self.local_import_loaders.get_mut(&name) {
+                loader.is_exported = true;
+            }
+        }
+    }
+
+    fn register_variable_loaders(&mut self, decl: &VariableDeclaration<'_>, is_exported: bool) {
+        if decl.kind != VariableDeclarationKind::Const {
+            return;
+        }
+        for declarator in &decl.declarations {
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && let Some(init) = &declarator.init
+                && let Some(import_expr) = extract_import_from_callable(init.without_parentheses())
+            {
+                self.register_local_import_loader(id.name.as_str(), import_expr, is_exported);
+            }
+        }
+    }
+
+    fn register_function_loader(&mut self, func: &Function<'_>, is_exported: bool) {
+        if let Some(id) = &func.id
+            && let Some(body) = &func.body
+            && let Some(import_expr) = extract_import_from_return_body(&body.statements)
+        {
+            self.register_local_import_loader(id.name.as_str(), import_expr, is_exported);
+        }
+    }
+
+    fn register_local_import_loader(
+        &mut self,
+        name: &str,
+        import_expr: &ImportExpression<'_>,
+        is_exported: bool,
+    ) {
+        if self.local_import_loaders.contains_key(name) {
+            return;
+        }
+        let mut sources = Vec::new();
+        collect_static_import_specifiers(&import_expr.source, &mut sources);
+        if sources.is_empty() {
+            return;
+        }
+        self.handled_import_spans.insert(import_expr.span);
+        self.local_import_loaders.insert(
+            name.to_string(),
+            LocalImportLoader {
+                import_span: import_expr.span,
+                sources,
+                references: 0,
+                credited_references: 0,
+                is_exported,
+            },
+        );
+    }
+
+    /// Give each local loader that has a reference in an unknown shape, no
+    /// credited reference, or an export the whole-module credit. The loader
+    /// result can reach code that the walk cannot follow, so this credit can
+    /// only remove false positives. A loader without a reference and without
+    /// an export gets a bare edge: the target stays reachable, but the dead
+    /// loader credits no export.
+    pub(super) fn finish_local_import_loaders(&mut self) {
+        let mut loaders: Vec<(String, LocalImportLoader)> =
+            std::mem::take(&mut self.local_import_loaders)
+                .into_iter()
+                .collect();
+        loaders.sort_unstable_by_key(|(_, loader)| loader.import_span.start);
+        for (name, loader) in loaders {
+            if loader.references == 0 && !loader.is_exported {
+                self.push_dynamic_import_branches(&loader.sources, loader.import_span, &[], None);
+                continue;
+            }
+            if loader.is_exported
+                || loader.credited_references == 0
+                || loader.references > loader.credited_references
+            {
+                self.push_dynamic_import_branches(
+                    &loader.sources,
+                    loader.import_span,
+                    &[],
+                    Some(&name),
+                );
+                self.push_whole_object_use(name);
             }
         }
     }

@@ -1,0 +1,4 @@
+{
+  "name": "dynamic-import-local-loader",
+  "main": "src/index.ts"
+}
