@@ -637,7 +637,7 @@ jobs:
       - name: Test drift harness on Windows
         run: cargo test -p fallow-cli --test drift -- --include-ignored
       - name: Clippy platform-specific paths
-        run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall --all-targets -- -D warnings
+        run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall -p fallow-config -p fallow-process -p fallow-types --all-targets -- -D warnings
 
   windows-type-aware:
     name: Windows type-aware npm and transport

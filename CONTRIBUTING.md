@@ -315,7 +315,7 @@ npm run generate:contracts:check
 ## Code style
 
 - Follow existing patterns — the codebase is consistent
-- `cargo clippy --workspace -- -D warnings` must pass (pedantic lints enabled)
+- `cargo clippy --workspace --all-targets -- -D warnings` must pass (pedantic, nursery and selected restriction lints enabled)
 - `cargo fmt --all -- --check` must pass
 - No `unsafe` without justification
 - Prefer early returns with guard clauses
@@ -325,7 +325,7 @@ npm run generate:contracts:check
 1. Fork the repository
 2. Create a feature branch from `main`
 3. Make your changes with conventional commit messages
-4. Ensure `cargo test --workspace` and `cargo clippy --workspace -- -D warnings` pass
+4. Ensure `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass
 5. Open a pull request against `main`
 
 ## Reporting issues

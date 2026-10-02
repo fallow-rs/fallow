@@ -317,6 +317,10 @@ fn trace_symbol_typed_route_does_not_credit_an_unreachable_consumer() {
 
 /// `coverage_source` of the `branchy` finding from a `check_health` call on a
 /// server started with or without the coverage variables.
+#[expect(
+    clippy::unwrap_in_result,
+    reason = "test helper: a panic fails the test"
+)]
 fn branchy_coverage_source(root: &Path, with_env: bool) -> Option<String> {
     let mut server = McpServer::start(with_env);
     let health = server.check_health(root);

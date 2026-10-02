@@ -855,7 +855,7 @@ rename to src/new.ts
 
     #[test]
     fn multibyte_body_truncates_at_char_boundary() {
-        let huge_desc: String = "あ".repeat(MAX_COMMENT_BODY_BYTES);
+        let huge_desc = "あ".repeat(MAX_COMMENT_BODY_BYTES);
         let issue = CiIssue {
             rule_id: "fallow/unused-export".into(),
             description: huge_desc,

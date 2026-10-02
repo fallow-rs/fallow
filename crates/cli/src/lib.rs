@@ -52,6 +52,7 @@ mod cli_startup;
 pub use fallow_engine::codeowners;
 mod combined;
 mod config;
+mod count_delta;
 mod coverage;
 mod discovery_note;
 mod doctor;

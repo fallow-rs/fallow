@@ -3292,7 +3292,7 @@ mod tests {
         assert_eq!(kept.first().copied(), Some(6), "oldest of the tail dropped");
         assert_eq!(
             kept.last().copied(),
-            Some((total - 1) as i64),
+            i64::try_from(total - 1).ok(),
             "newest kept"
         );
     }
@@ -3328,11 +3328,11 @@ mod tests {
         );
         assert_eq!(
             kept.first().copied(),
-            Some((total - SPOOL_MAX_EVENTS) as i64)
+            i64::try_from(total - SPOOL_MAX_EVENTS).ok()
         );
         assert_eq!(
             kept.last().copied(),
-            Some((total - 1) as i64),
+            i64::try_from(total - 1).ok(),
             "newest kept"
         );
     }

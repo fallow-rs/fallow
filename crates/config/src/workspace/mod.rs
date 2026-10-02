@@ -919,6 +919,10 @@ fn dir_name(dir: &Path) -> String {
 ///
 /// Shared with the emission tests in `diagnostics.rs`, which assert that the
 /// aggregated stderr warning counts each directory once.
+///
+/// # Panics
+///
+/// Panics if a fixture directory or file cannot be written.
 #[cfg(test)]
 pub fn write_two_manifest_glob_project(root: &Path) {
     std::fs::create_dir_all(root.join("pkgs/aaa")).unwrap();

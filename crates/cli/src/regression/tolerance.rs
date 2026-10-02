@@ -82,6 +82,10 @@ impl Tolerance {
 
     /// Check whether the delta exceeds this tolerance.
     #[expect(
+        clippy::cast_sign_loss,
+        reason = "saturating cast: a negative percentage allows zero new issues"
+    )]
+    #[expect(
         clippy::cast_possible_truncation,
         reason = "percentage of a count is bounded by the count itself"
     )]

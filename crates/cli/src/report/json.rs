@@ -658,8 +658,8 @@ pub fn regression_output(outcome: &crate::regression::RegressionOutcome) -> Regr
             baseline_total,
             current_total,
         } => {
-            let baseline_total = *baseline_total as i64;
-            let current_total = *current_total as i64;
+            let baseline_total = crate::count_delta::count_to_i64(*baseline_total);
+            let current_total = crate::count_delta::count_to_i64(*current_total);
             RegressionResult {
                 status: RegressionStatus::Pass,
                 baseline_total: Some(baseline_total),
@@ -677,8 +677,8 @@ pub fn regression_output(outcome: &crate::regression::RegressionOutcome) -> Regr
             tolerance,
             ..
         } => {
-            let baseline_total = *baseline_total as i64;
-            let current_total = *current_total as i64;
+            let baseline_total = crate::count_delta::count_to_i64(*baseline_total);
+            let current_total = crate::count_delta::count_to_i64(*current_total);
             let (tolerance, tolerance_kind) = match tolerance {
                 crate::regression::Tolerance::Percentage(percent) => {
                     (*percent, RegressionToleranceKind::Percentage)

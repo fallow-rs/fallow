@@ -120,6 +120,10 @@ const fn char_width(c: char) -> f64 {
 ///
 /// Follows shields.io convention: sum character widths, floor to integer,
 /// then round up to nearest odd number.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "text widths and 0-100 scores are non-negative"
+)]
 fn text_width(s: &str) -> u32 {
     if s.is_empty() {
         return 0;
@@ -205,6 +209,10 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
 }
 
 /// Print a health score badge as shields.io-compatible SVG to stdout.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "text widths and 0-100 scores are non-negative"
+)]
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,

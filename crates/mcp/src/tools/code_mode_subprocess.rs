@@ -308,6 +308,10 @@ mod tests {
         false
     }
 
+    #[expect(
+        clippy::unwrap_in_result,
+        reason = "test helper: a panic fails the test"
+    )]
     fn run_completed_subprocess(
         completion_script: &str,
         max_output_bytes: usize,

@@ -1654,7 +1654,7 @@ fn i7_every_envelope_states_the_verdict_of_the_human_run() {
         for command in VERDICT_COMMANDS {
             let extra = match command.arm {
                 Arm::Default => &[][..],
-                Arm::Regression => &regression[..],
+                Arm::Regression => &*regression,
             };
             project.explain(invariants::i7_verdicts_agree(&verdict_runs(
                 &project, command, extra,
@@ -2002,7 +2002,7 @@ fn config_controls_see_overrides_and_ignored_duplicates() {
         for command in VERDICT_COMMANDS {
             let extra = match command.arm {
                 Arm::Default => &[][..],
-                Arm::Regression => &regression[..],
+                Arm::Regression => &*regression,
             };
             project
                 .explain(invariants::i7_verdicts_agree(&verdict_runs(

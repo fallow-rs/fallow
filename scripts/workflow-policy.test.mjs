@@ -293,6 +293,34 @@ test("every Rust file with Windows-specific code starts a Windows CI job", () =>
   );
 });
 
+// The Windows job lints only the packages it names with `-p`. A crate with
+// Windows-specific code that is not in that list starts the job but is never
+// linted on Windows, so a Windows-only clippy failure reaches main unseen.
+test("the Windows clippy step lints every crate with Windows-specific code", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const clippyLine = indentedBlock(workflow, "windows-rust", 2)
+    .split("\n")
+    .find((line) => line.includes("cargo clippy"));
+  assert.ok(clippyLine, "the windows-rust job must run cargo clippy");
+  const linted = new Set([...clippyLine.matchAll(/-p ([\w-]+)/g)].map((match) => match[1]));
+  const packageOf = (path) => {
+    const manifest = readFileSync(join("crates", path.split("/")[1], "Cargo.toml"), "utf8");
+    return manifest.match(/^name\s*=\s*"([^"]+)"/m)[1];
+  };
+  const windowsPackages = new Set(
+    rustSourceFiles("crates")
+      .filter((path) => hasWindowsSpecificCode(readFileSync(path, "utf8")))
+      .map(packageOf),
+  );
+  const unlinted = [...windowsPackages].filter((name) => !linted.has(name)).toSorted();
+
+  assert.deepEqual(
+    unlinted,
+    [],
+    "add these packages to the windows-rust clippy step in .github/workflows/ci.yml",
+  );
+});
+
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const npmPackage = JSON.parse(readFileSync("npm/fallow/package.json", "utf8"));
@@ -368,7 +396,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(windowsRustJob, /name: nextest-junit-windows-rust/);
   assert.match(
     windowsRustJob,
-    /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall --all-targets -- -D warnings$/m,
+    /^[ \t]+run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall -p fallow-config -p fallow-process -p fallow-types --all-targets -- -D warnings$/m,
   );
   assert.match(windowsTypeAwareJob, /needs: changes/);
   assert.match(windowsTypeAwareJob, /if: "?needs\.changes\.outputs\.windows-type-aware == 'true'/);

@@ -200,13 +200,13 @@ pub fn status(root: &Path) -> TypeAwareStatus {
         Err(error) => {
             // Both the sibling and wrapper paths are installation problems the
             // npm package fixes; only a user-set override keeps the raw error.
-            let remediation = if discovery_source != "environment-override" {
+            let remediation = if discovery_source == "environment-override" {
+                error
+            } else {
                 format!(
                     "Install the matching companion with: npm install --save-dev fallow-type-aware@{}",
                     env!("CARGO_PKG_VERSION")
                 )
-            } else {
-                error
             };
             return TypeAwareStatus {
                 available: false,

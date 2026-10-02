@@ -475,7 +475,7 @@ fn sentence_case(name: &str) -> String {
     let spaced = name.replace('-', " ");
     let mut chars = spaced.chars();
     match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
     }
 }

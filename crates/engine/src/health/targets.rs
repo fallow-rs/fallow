@@ -61,6 +61,10 @@ struct DistributionThresholds {
 
 /// Compute percentile-based thresholds from the file score distribution.
 #[expect(
+    clippy::cast_sign_loss,
+    reason = "percentiles and ratios of non-negative counts; float-to-int casts saturate at zero"
+)]
+#[expect(
     clippy::cast_possible_truncation,
     reason = "percentile values are bounded by fan-in/fan-out counts"
 )]
@@ -90,6 +94,10 @@ fn compute_thresholds(file_scores: &[FileHealthScore]) -> DistributionThresholds
 }
 
 /// Compute a percentile value from a sorted slice of usize values.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "percentiles and ratios of non-negative counts; float-to-int casts saturate at zero"
+)]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "index from percentile of slice length is bounded by slice length"
@@ -242,6 +250,10 @@ fn build_target_for_score(
     })
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "percentiles and ratios of non-negative counts; float-to-int casts saturate at zero"
+)]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "unused export estimate is capped by the value export count"
@@ -454,6 +466,10 @@ fn match_circular_impact(
     ))
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "percentiles and ratios of non-negative counts; float-to-int casts saturate at zero"
+)]
 fn match_high_impact_split(
     score: &FileHealthScore,
     thresholds: &DistributionThresholds,
@@ -476,6 +492,10 @@ fn match_high_impact_split(
     ))
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "percentiles and ratios of non-negative counts; float-to-int casts saturate at zero"
+)]
 fn match_dead_code(
     score: &FileHealthScore,
     value_exports: usize,
@@ -581,6 +601,10 @@ const fn confidence_for_category(category: &RecommendationCategory) -> Confidenc
 /// Compute effort estimate based on file size, function count, and fan-in.
 ///
 /// Uses adaptive thresholds for fan-in.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "percentiles and ratios of non-negative counts; float-to-int casts saturate at zero"
+)]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "percentile threshold values are bounded by project size"

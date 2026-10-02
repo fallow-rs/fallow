@@ -13,7 +13,7 @@
 //!   and prints how production behavior changed between two deployments.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
@@ -429,7 +429,7 @@ fn is_source_file(path: &Path) -> bool {
 }
 
 fn repo_relative(path: &Path, toplevel: &Path) -> Option<String> {
-    let relative: PathBuf = path.strip_prefix(toplevel).ok()?.to_path_buf();
+    let relative = path.strip_prefix(toplevel).ok()?.to_path_buf();
     Some(relative.to_string_lossy().replace('\\', "/"))
 }
 

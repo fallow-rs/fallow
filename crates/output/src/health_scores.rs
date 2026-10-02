@@ -245,6 +245,7 @@ pub struct StylingHealthPenalties {
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
     reason = "score is 0-100, fits in u32"
 )]
 pub const fn letter_grade(score: f64) -> &'static str {

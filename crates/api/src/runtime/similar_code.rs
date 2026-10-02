@@ -1454,6 +1454,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "the guards above leave only finite positive values"
+)]
 fn finite_f64_to_u64(value: f64) -> u64 {
     if !value.is_finite() || value <= 0.0 {
         0
@@ -1985,6 +1989,10 @@ mod tests {
     }
 
     impl EmbeddingSession for FakeEmbeddingSession {
+        #[expect(
+            clippy::unwrap_in_result,
+            reason = "test helper: a panic fails the test"
+        )]
         fn embed(&mut self, functions: &[(u32, &str)]) -> Result<EmbeddingBatch, String> {
             let should_return_partial = {
                 let mut state = self.state.lock().unwrap();
@@ -2026,6 +2034,10 @@ mod tests {
     }
 
     impl EmbeddingSessionFactory for FakeEmbeddingFactory {
+        #[expect(
+            clippy::unwrap_in_result,
+            reason = "test helper: a panic fails the test"
+        )]
         fn spawn(&mut self) -> Result<Box<dyn EmbeddingSession>, String> {
             self.state.lock().unwrap().spawns += 1;
             Ok(Box::new(FakeEmbeddingSession {

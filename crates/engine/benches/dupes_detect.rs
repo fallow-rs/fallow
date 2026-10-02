@@ -219,12 +219,12 @@ fn dupe_detect_50x200_diverse(c: &mut Criterion) {
 fn dupe_detect_100x200_mixed(c: &mut Criterion) {
     use fallow_engine::duplicates::detect::CloneDetector;
     let hashes: Vec<u64> = (1..=200).collect();
-    let data: DupeInput = (0..100)
+    let data: DupeInput = (0..100_u64)
         .map(|i| {
             let h = if i < 20 {
                 make_hashed_tokens(&hashes)
             } else {
-                let base = (i * 10000) as u64;
+                let base = i * 10000;
                 let unique_hashes: Vec<u64> = (base..base + 200).collect();
                 make_hashed_tokens(&unique_hashes)
             };
@@ -250,12 +250,12 @@ fn dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
     use rustc_hash::FxHashSet;
 
     let hashes: Vec<u64> = (1..=200).collect();
-    let data: DupeInput = (0..100)
+    let data: DupeInput = (0..100_u64)
         .map(|i| {
             let h = if i < 20 {
                 make_hashed_tokens(&hashes)
             } else {
-                let base = (i * 10000) as u64;
+                let base = i * 10000;
                 let unique_hashes: Vec<u64> = (base..base + 200).collect();
                 make_hashed_tokens(&unique_hashes)
             };

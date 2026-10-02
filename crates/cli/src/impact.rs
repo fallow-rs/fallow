@@ -1884,7 +1884,7 @@ fn trend_for(records: &[ImpactRecord]) -> Option<TrendSummary> {
     let previous = &records[records.len() - 2];
     let current_total = current.counts.total_issues;
     let previous_total = previous.counts.total_issues;
-    let total_delta = current_total as i64 - previous_total as i64;
+    let total_delta = crate::count_delta::signed_delta(current_total, previous_total);
     Some(TrendSummary {
         direction: direction_for(total_delta),
         total_delta,
@@ -4116,8 +4116,8 @@ mod tests {
 
     fn rtrend(prev: usize, cur: usize) -> TrendSummary {
         TrendSummary {
-            direction: direction_for(cur as i64 - prev as i64),
-            total_delta: cur as i64 - prev as i64,
+            direction: direction_for(crate::count_delta::signed_delta(cur, prev)),
+            total_delta: crate::count_delta::signed_delta(cur, prev),
             previous_total: prev,
             current_total: cur,
         }

@@ -180,6 +180,11 @@ impl ScopedChild {
     /// and stderr. The signal handler may have already killed the
     /// child via the registered termination target; in that case wait returns
     /// normally with a non-zero status.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic in practice: only the terminal wait methods take the
+    /// child, and each consumes `self`.
     #[expect(
         clippy::expect_used,
         reason = "ScopedChild owns inner until one terminal wait method consumes it"
@@ -196,6 +201,11 @@ impl ScopedChild {
 
     /// Wait for the child to exit, returning the status. Same signal-cleanup
     /// semantics as `wait_with_output`.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic in practice: only the terminal wait methods take the
+    /// child, and each consumes `self`.
     #[expect(
         clippy::expect_used,
         reason = "ScopedChild owns inner until one terminal wait method consumes it"

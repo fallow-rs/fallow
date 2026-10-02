@@ -1461,6 +1461,11 @@ fn resolve_plugin_setup_file(root: &Path, setup_file: &Path) -> PathBuf {
 ///
 /// Matches the configured glob patterns against the discovered file list and
 /// marks matching files as entry points so they are never flagged as unused.
+///
+/// # Panics
+///
+/// Panics if a `dynamicallyLoaded` glob pattern is invalid. Config loading
+/// validates these patterns first.
 #[expect(
     clippy::expect_used,
     reason = "dynamicallyLoaded glob patterns are validated before entry point discovery"

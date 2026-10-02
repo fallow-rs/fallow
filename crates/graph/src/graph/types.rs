@@ -509,14 +509,13 @@ impl ReferenceRoutes {
         let mut current = terminal_index;
         loop {
             let node = &self.nodes[graph.nodes.start as usize + current];
-            if current != start_index {
-                hops.push((node.target, node.mechanism));
-            } else {
+            if current == start_index {
                 if let Some(mechanism) = start_mechanism {
                     hops.push((node.target, mechanism));
                 }
                 break;
             }
+            hops.push((node.target, node.mechanism));
             let Some(parent) = predecessor[current] else {
                 return Vec::new();
             };

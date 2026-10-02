@@ -243,7 +243,7 @@ impl CheckCounts {
     }
 
     /// Per-type deltas (current - baseline) for display. Only includes types with changes.
-    pub fn deltas(&self, current: &Self) -> Vec<(&'static str, isize)> {
+    pub fn deltas(&self, current: &Self) -> Vec<(&'static str, i64)> {
         let mut deltas = Vec::new();
         macro_rules! push_delta {
             ($field:ident) => {
@@ -287,12 +287,12 @@ impl CheckCounts {
 }
 
 fn push_count_delta(
-    deltas: &mut Vec<(&'static str, isize)>,
+    deltas: &mut Vec<(&'static str, i64)>,
     name: &'static str,
     baseline: usize,
     current: usize,
 ) {
-    let delta = current as isize - baseline as isize;
+    let delta = crate::count_delta::signed_delta(current, baseline);
     if delta != 0 {
         deltas.push((name, delta));
     }

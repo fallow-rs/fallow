@@ -99,6 +99,10 @@ fn critical_complexity_pct(all_cyclomatic: &[u16]) -> Option<f64> {
 }
 
 #[expect(
+    clippy::cast_sign_loss,
+    reason = "percentile indexes of non-negative counts; float-to-int casts saturate at zero"
+)]
+#[expect(
     clippy::cast_possible_truncation,
     reason = "percentile index is bounded by the cyclomatic collection length"
 )]
@@ -295,6 +299,10 @@ fn maintainability_vitals(scores: Option<&[FileHealthScore]>) -> (Option<f64>, O
     )
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "percentile indexes of non-negative counts; float-to-int casts saturate at zero"
+)]
 fn hotspot_vitals(
     hotspots: Option<&[HotspotEntry]>,
     total_files: usize,
@@ -415,6 +423,10 @@ fn compute_interfacing_risk_profile(param_counts: &[u8]) -> RiskProfile {
 /// per-component distinct-parents distribution; change both together. The
 /// result is assigned onto `VitalSigns` in
 /// `health/vital_data.rs::prepare_health_vital_data`.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "percentile indexes of non-negative counts; float-to-int casts saturate at zero"
+)]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "fan-in values are bounded by project size"
@@ -1279,7 +1291,7 @@ trait RoundTo {
 
 impl RoundTo for f64 {
     fn round_to(self, decimals: u32) -> Self {
-        let factor = 10_f64.powi(decimals as i32);
+        let factor = 10_f64.powi(i32::try_from(decimals).unwrap_or(i32::MAX));
         (self * factor).round() / factor
     }
 }

@@ -944,6 +944,10 @@ fn parse_source_receiver_allowlist(entry: &RawSource) -> Result<Vec<String>, Str
 /// Parse and cache the embedded catalogue once. Unwraps the parse `Result`; in
 /// a released binary this is unreachable because the bytes are compile-time
 /// embedded and gated by `security_catalogue_parses`.
+///
+/// # Panics
+///
+/// Panics if the embedded matcher catalogue does not parse.
 #[expect(
     clippy::expect_used,
     reason = "compile-time-embedded catalogue pinned by security_catalogue_parses"

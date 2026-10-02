@@ -3458,9 +3458,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // (substitution templates and `'./x/' + y` concatenations).
         let mut sources = Vec::new();
         collect_static_import_specifiers(&expr.source, &mut sources);
-        if !sources.is_empty() {
-            self.push_dynamic_import_branches(&sources, expr.span, &[], None);
-        } else {
+        if sources.is_empty() {
             match &expr.source {
                 Expression::TemplateLiteral(tpl)
                     if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
@@ -3483,6 +3481,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 }
                 _ => {}
             }
+        } else {
+            self.push_dynamic_import_branches(&sources, expr.span, &[], None);
         }
 
         walk::walk_import_expression(self, expr);

@@ -1170,7 +1170,7 @@ fn is_og_image_template(rel: &Path) -> bool {
     let (Some(first), Some(_)) = (components.next(), components.next()) else {
         return false;
     };
-    let dir: String = first
+    let dir = first
         .as_os_str()
         .to_string_lossy()
         .chars()
