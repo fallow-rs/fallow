@@ -286,6 +286,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in any function of that scope credits that export, and the other exports
   stay reported. The parse cache version changes, so the first run after the
   upgrade parses all files again.
+- **A tsup or tsdown `entry` given as a string or an object map is read.**
+  Before, fallow read `entry` only as an array. Thus it ignored
+  `entry: "src/index.ts"` and `entry: { main: "src/main.ts" }`, and it
+  reported those files and their imports as unused. Now fallow reads all
+  three forms. Each value of an object map is an entry point.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

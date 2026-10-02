@@ -1,0 +1,8 @@
+{
+  "name": "tsup-entry-object-map",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "tsup": "1.0.0"
+  }
+}

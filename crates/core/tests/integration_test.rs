@@ -23,6 +23,8 @@ mod astro_unused_component_prop;
 mod barrel_exports;
 #[path = "integration_test/basic_analysis.rs"]
 mod basic_analysis;
+#[path = "integration_test/bundler_entry_object_map.rs"]
+mod bundler_entry_object_map;
 #[path = "integration_test/caching.rs"]
 mod caching;
 #[path = "integration_test/css_in_js_styled.rs"]
