@@ -100,7 +100,8 @@ fn starts_windows_path(source: &str) -> bool {
 /// leading flag makes the parser treat the command as a script delegation rather
 /// than guess where the binary starts. Source: Bun runtime docs (oven-sh/bun
 /// docs/runtime/index.mdx, watch-mode.mdx).
-const BUN_RUNTIME_FLAGS: &[&str] = &["--bun", "--watch", "--hot", "--smol", "--no-clear-screen"];
+pub(super) const BUN_RUNTIME_FLAGS: &[&str] =
+    &["--bun", "--watch", "--hot", "--smol", "--no-clear-screen"];
 
 /// Split a script string on shell operators (`&&`, `||`, `;`, `|`, `&`).
 /// Respects single and double quotes.

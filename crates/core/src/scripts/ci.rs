@@ -652,6 +652,41 @@ jobs:
         assert!(analysis.entry_files.is_empty());
     }
 
+    /// Bun runs a declared script first. When no script has the name and the
+    /// argument is a script file, Bun runs that file.
+    #[test]
+    fn github_actions_bun_file_runner_seeds_entry_files() {
+        let content = r"
+jobs:
+  build:
+    steps:
+      - run: bun scripts/a.ts
+      - run: bun run scripts/b.ts
+      - run: bun --watch scripts/c.ts
+      - run: bun run build --minify
+      - run: bun run scripts/d.ts
+      - run: bun run dev
+";
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            &CiContext {
+                root: Path::new("/nonexistent"),
+                bin_map: &FxHashMap::default(),
+                declared_packages: &set(&["esbuild"]),
+                scripts: &catalog(&[("build", "esbuild --bundle"), ("scripts/d.ts", "tsc")]),
+                ignored: IgnoredCommandEntries::NONE,
+            },
+            &mut analysis,
+        );
+        assert_eq!(
+            analysis.entry_files,
+            vec!["scripts/a.ts", "scripts/b.ts", "scripts/c.ts"]
+        );
+        assert!(analysis.used_packages.contains("esbuild"));
+        assert!(!analysis.used_packages.contains("bun"));
+    }
+
     #[test]
     fn github_actions_expression_fragments_not_entry_files() {
         let content = r#"

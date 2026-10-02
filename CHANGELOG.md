@@ -573,6 +573,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The plugin now also activates when `vercel.json` exists at the package
   root. Before, it activated only from a `vercel` or `@vercel/config`
   dependency.
+- **A CI step that runs a file with Bun makes that file an entry point.**
+  Before, fallow read `bun scripts/a.ts`, `bun run scripts/a.ts` and
+  `bun --watch scripts/a.ts` in a GitHub Actions or GitLab CI step as a
+  script call. Thus it reported the file as unused. Now fallow uses the Bun
+  order: a declared package.json script with that name runs first. When no
+  script has the name and the argument is a script file path, the file is
+  an entry point. A name without a script file extension, such as
+  `bun run build`, still resolves to the script.
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

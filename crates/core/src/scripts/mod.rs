@@ -1461,6 +1461,7 @@ pub fn parse_script_with_catalog(script: &str, catalog: &ScriptCatalog) -> Vec<S
         script,
         &|tokens, idx, catalog| {
             script_invocation_target(tokens, idx, catalog)
+                .or_else(|| bun_file_runner_target(tokens, idx, catalog))
                 .or_else(|| {
                     package_manager_exec_binary(tokens, idx).map(|(binary_idx, location)| {
                         PackageManagerTarget::Binary(binary_idx, location)
@@ -1794,6 +1795,10 @@ fn advance_past_package_manager_with_context(
         return Some(target);
     }
 
+    if let Some(target) = bun_file_runner_target(tokens, idx, catalog) {
+        return Some(target);
+    }
+
     if let Some((binary_idx, location)) = package_manager_exec_binary(tokens, idx) {
         return Some(PackageManagerTarget::Binary(binary_idx, location));
     }
@@ -1813,6 +1818,36 @@ fn advance_past_package_manager_with_context(
 
     shell::advance_past_package_manager(tokens, idx)
         .map(|binary_idx| PackageManagerTarget::Binary(binary_idx, RunLocation::Here))
+}
+
+/// Recognize `bun <file>`, `bun run <file>`, and `bun --watch <file>`, where
+/// Bun runs a script file. Bun runs a declared script with that name first, so
+/// a declared name is not a file. The target is `bun` itself, which then takes
+/// the file as a node-runner argument.
+fn bun_file_runner_target(
+    tokens: &[&str],
+    idx: usize,
+    catalog: &ScriptCatalog,
+) -> Option<PackageManagerTarget> {
+    if tokens.get(idx) != Some(&"bun") {
+        return None;
+    }
+    let skip_runtime_flags = |mut i: usize| {
+        while tokens
+            .get(i)
+            .is_some_and(|token| shell::BUN_RUNTIME_FLAGS.contains(token))
+        {
+            i += 1;
+        }
+        i
+    };
+    let mut next = skip_runtime_flags(idx + 1);
+    if matches!(tokens.get(next), Some(&("run" | "run-script"))) {
+        next = skip_runtime_flags(next + 1);
+    }
+    let target = *tokens.get(next)?;
+    (looks_like_script_file(target) && !catalog.declares_script_at(target, &RunLocation::Here))
+        .then_some(PackageManagerTarget::Binary(idx, RunLocation::Here))
 }
 
 /// Recognize a package manager invocation of a package.json script.
@@ -2753,6 +2788,23 @@ fn looks_like_file_path(token: &str) -> bool {
         && !token.contains(char::is_whitespace)
         && !token.starts_with('@')
         && !token.contains("://")
+}
+
+/// Check if a token looks like a standalone script file reference (must have a
+/// script-like source extension and a path-like structure, not a bare command
+/// name).
+#[must_use]
+pub fn looks_like_script_file(token: &str) -> bool {
+    if !could_be_file_path(token) {
+        return false;
+    }
+    let extensions = [
+        ".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".gts", ".gjs",
+    ];
+    if !extensions.iter().any(|ext| token.ends_with(ext)) {
+        return false;
+    }
+    token.contains('/') || token.starts_with("./") || token.starts_with("../")
 }
 
 /// Check if a command is a shell built-in (not an npm package).
@@ -4650,9 +4702,12 @@ mod tests {
     #[test]
     fn bun_treated_as_package_manager() {
         let cmds = parse_script("bun scripts/build.ts");
+        assert_eq!(cmds.len(), 1, "bare `bun <file>` runs the file");
+        assert_eq!(cmds[0].binary, "bun");
+        assert_eq!(cmds[0].file_args, vec!["scripts/build.ts"]);
         assert!(
-            cmds.is_empty(),
-            "bare `bun <arg>` should be treated as running a script (like yarn)"
+            parse_script("bun dev").is_empty(),
+            "bare `bun <name>` runs the script with that name"
         );
     }
 
