@@ -65,7 +65,8 @@ invariants in this file.
 6. Verify the complete `[Unreleased]` changelog against the commit range,
    issues, discussions, and external contributors since the prior tag. Ground
    public names, flags, rule IDs, and contributor handles in source or GitHub,
-   not memory.
+   not memory. Merge each repeated `###` heading into one heading, because a
+   clean merge of several pull requests can leave two `### Fixed` headings.
 7. Draft curated public GitHub release notes before starting the publication
    workflow. They must:
 
@@ -101,9 +102,8 @@ invariants in this file.
      The empty-`[Unreleased]` rule is a dispatch-time rule: anything merged
      during the publish would otherwise fail a correct release.
 
-   A clean merge can leave two `### Fixed` headings in `[Unreleased]`. The
-   gate accepts that there, because the release step merges the repeats when
-   it renames `[Unreleased]` to the new version. The gate checks only the
+   The gate accepts repeated headings in `[Unreleased]`, because step 6
+   merges them before `[Unreleased]` becomes the new version. The gate checks only the
    section of the version under release, so sections that shipped with a
    repeat stay as they are. The error names each repeated heading and its
    line numbers.
