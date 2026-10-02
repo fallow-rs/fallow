@@ -71,6 +71,8 @@ Public examples must be generic or come from an explicitly public fixture.
 The public docs archive records a complete content digest and source commit.
 Private consumers pin both values. The portable skill repository records the
 exact Fallow source commit, source root, target root, and declared transform.
+After a skill change lands on `main`, `node scripts/sync-skills-companion.mjs`
+prepares the signed companion commit. The maintainer pushes it.
 Protocol consumers pin the public crate in their lockfile and verify published
 sidecar parity.
 

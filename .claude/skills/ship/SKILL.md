@@ -11,7 +11,9 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 3. Verify that public contracts and generated files are pushed. Merge each
    companion change into the default branch of its repository (for example
    fallow-docs `main`). A pushed feature branch is not enough: the release
-   then must merge it.
+   then must merge it. When the merged change touches `npm/fallow/skills`,
+   run `node scripts/sync-skills-companion.mjs` and push the fallow-skills
+   commit that it prepares.
 4. Create signed conventional commits only.
 5. Merge through the repository's current protected-main workflow.
 6. Monitor the merged commit until required CI completes. Use

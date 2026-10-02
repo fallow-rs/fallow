@@ -105,7 +105,9 @@ invariants in this file.
    while the public release surface does not.
 8. Apply version changes transactionally. Regenerate every public contract,
    adapter, packaged skill, and version-bearing artifact. Synchronize
-   `fallow-docs` and `fallow-skills` from their canonical sources.
+   `fallow-docs` and `fallow-skills` from their canonical sources. For
+   `fallow-skills`, run `node scripts/sync-skills-companion.mjs`, then push the
+   commit that it prepares.
 
    Two version-bearing manifests sit outside the workspace bump and follow
    opposite rules. `scripts/sync-npm-versions.sh` rewrites both and is wired to
