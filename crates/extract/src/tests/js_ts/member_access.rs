@@ -610,3 +610,76 @@ fn cyclic_object_binding_candidates_terminate() {
     // The direct one-hop path still resolves through the cycle guard.
     assert!(info.member_accesses.iter().any(|m| m.member == "m"));
 }
+
+fn spy_call_credits_one_member(source: &str) {
+    let info = parse_source(source);
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "target" && a.member == "helper"),
+        "spy call must record `target.helper`: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info.whole_object_uses.contains(&"target".to_string()),
+        "spy call with a static member must not use the whole namespace: {source}"
+    );
+}
+
+fn spy_call_uses_whole_namespace(source: &str) {
+    let info = parse_source(source);
+    assert!(
+        info.whole_object_uses.contains(&"target".to_string()),
+        "call must keep the whole-namespace use: {source}"
+    );
+}
+
+#[test]
+fn namespace_spy_call_with_static_member_records_member_access() {
+    for source in [
+        "import { vi } from 'vitest';\nimport * as target from './target';\nvi.spyOn(target, 'helper');",
+        "import * as target from './target';\nvi.spyOn(target, 'helper');",
+        "import * as target from './target';\njest.spyOn(target, `helper`);",
+        "import { jest } from '@jest/globals';\nimport * as target from './target';\njest.spyOn(target, 'helper');",
+        "import { spyOn } from 'bun:test';\nimport * as target from './target';\nspyOn(target, 'helper');",
+        "import * as target from './target';\nit('x', () => { spyOn(target, 'helper'); });",
+        "import { mock } from 'node:test';\nimport * as target from './target';\nmock.method(target, 'helper');",
+        "import { test } from 'node:test';\nimport * as target from './target';\ntest('x', (t) => { t.mock.method(target, 'helper'); });",
+    ] {
+        spy_call_credits_one_member(source);
+    }
+}
+
+#[test]
+fn namespace_spy_call_without_static_member_keeps_whole_object_use() {
+    for source in [
+        // The member name is not a static string.
+        "import * as target from './target';\nconst name = 'helper';\nvi.spyOn(target, name);",
+        "import * as target from './target';\nconst name = 'helper';\nvi.spyOn(target, `${name}`);",
+        // A local function named `spyOn` can read every export.
+        "import * as target from './target';\nconst spyOn = (o: object, k: string) => Reflect.get(o, k);\nspyOn(target, 'helper');",
+        "import * as target from './target';\nit('x', () => { spyOn(target, 'helper'); });\nfunction spyOn(o: object, k: string) { return Object.keys(o).concat(k); }",
+        // A `spyOn` import from a module that is not a test framework.
+        "import { spyOn } from './spy';\nimport * as target from './target';\nspyOn(target, 'helper');",
+        // A `mock` binding that does not come from `node:test`.
+        "import * as target from './target';\nconst mock = { method: (o: object, k: string) => Reflect.get(o, k) };\nmock.method(target, 'helper');",
+        // A local `vi` object.
+        "import * as target from './target';\nconst vi = { spyOn: (o: object, k: string) => Reflect.get(o, k) };\nvi.spyOn(target, 'helper');",
+    ] {
+        spy_call_uses_whole_namespace(source);
+    }
+}
+
+#[test]
+fn namespace_spy_call_on_shadowed_namespace_records_nothing() {
+    let info = parse_source(
+        "import * as target from './target';\nfunction f(target: object) { vi.spyOn(target, 'helper'); }",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "target" && a.member == "helper"),
+        "a shadowed namespace binding must not record a member access"
+    );
+}

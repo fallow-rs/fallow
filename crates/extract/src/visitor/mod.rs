@@ -378,6 +378,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// declaration is legal after the code that reads it, so walk order cannot
     /// answer whether a reference names a namespace object. See issue #2377.
     namespace_import_locals: FxHashSet<String>,
+    /// Test-framework spy APIs that a top-level binding or a global names in
+    /// this program (`vi`, `jest`, `spyOn`, the `mock` of `node:test`), keyed by
+    /// local name. Pre-registered before the body walk, so a declaration later
+    /// in the file still removes the global meaning of its name.
+    spy_api_locals: FxHashMap<String, visit_impl::SpyApi>,
     /// Default-import locals whose target shape is known only after graph
     /// resolution. Bare uses become semantic facts instead of joining the
     /// namespace-wide `whole_object_uses` stream.

@@ -580,6 +580,8 @@ mod issue_739_script_auto_imports;
 mod issue_740_pinia_store_auto_imports;
 #[path = "integration_test/issue_744_tsdown_config.rs"]
 mod issue_744_tsdown_config;
+#[path = "integration_test/namespace_spy_call_member.rs"]
+mod namespace_spy_call_member;
 #[path = "integration_test/node_modules_bin_path.rs"]
 mod node_modules_bin_path;
 #[path = "integration_test/pkg_utils_plugin.rs"]

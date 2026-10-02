@@ -115,7 +115,12 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   JSX member tag, the left side of a dotted type name, a destructure
   initializer, a re-export specifier local (which the graph credits through
   its own rule), and a placement in an object literal bound to a local, whose
-  `api.NS.member` path the object-binding resolver follows. A bare reference
+  `api.NS.member` path the object-binding resolver follows. A test spy call
+  with a static member name (`vi.spyOn(NS, 'm')`, `jest.spyOn`, a
+  test-framework or global `spyOn`, the `mock.method` of `node:test`) is also
+  an exclusion and records `NS.m` (`visit_impl_spy_calls.rs`). The spy API
+  names are pre-registered from the program's statement list, so a top-level
+  binding of the same name removes the global meaning. A bare reference
   to that local hands the namespace on in turn. The locals are pre-registered
   from the program's statement list, because an import declaration is legal
   after the code that reads it. Namespace objects bound by `require` or a

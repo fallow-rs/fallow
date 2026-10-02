@@ -506,6 +506,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also works in a nested package. The parse cache version changes, so the
   first run after the upgrade parses all files again.
 
+- **A test spy call on a namespace import credits only the spied member.**
+  Before, `vi.spyOn(ns, 'helper')` in a test file passed the whole namespace
+  object to a call. Thus fallow credited every export of the module, and
+  unused exports of that module were not reported. Now a spy call with a
+  static member name counts as the member read `ns.helper`. This applies to
+  `vi.spyOn`, `jest.spyOn`, a `spyOn` that is global or imported from a test
+  framework, and the `mock.method` of `node:test`. A spy call with a computed
+  member name, or a local function named `spyOn`, still credits every
+  export. The extraction cache version changes, so the first run after the
+  upgrade rebuilds the cache.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

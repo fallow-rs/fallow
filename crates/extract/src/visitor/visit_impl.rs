@@ -83,6 +83,8 @@ mod visit_security_sinks;
 mod visit_server_actions;
 #[path = "visit_impl_signature.rs"]
 mod visit_signature;
+#[path = "visit_impl_spy_calls.rs"]
+mod visit_spy_calls;
 #[path = "visit_impl_structural.rs"]
 mod visit_structural;
 #[path = "visit_impl_svelte_events.rs"]
@@ -104,6 +106,7 @@ use visit_package_resolution::*;
 use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
+pub(super) use visit_spy_calls::SpyApi;
 
 /// Array iteration methods whose callback's FIRST parameter is an element of the
 /// receiver array (so it can be typed to the receiver's element class). `reduce`
@@ -2998,6 +3001,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.is_server_action_module = visit_server_actions::is_server_action_module(program);
         self.is_module_file = program_has_module_syntax(program);
         self.record_program_namespace_import_locals(program);
+        self.record_program_spy_api_locals(program);
         self.record_program_function_type_aliases(program);
         self.record_program_prologue(program);
         self.record_program_sanitizer_functions(program);
@@ -3831,6 +3835,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.try_record_relative_require_resolve(expr);
         self.record_bare_require_call(expr);
         self.record_whole_object_call_use(expr);
+        self.record_namespace_spy_call(expr);
         self.record_import_meta_glob_patterns(expr);
         self.record_require_context_pattern(expr);
         self.record_import_callback_dynamic_imports(expr);
