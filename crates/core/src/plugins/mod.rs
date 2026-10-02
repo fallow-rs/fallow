@@ -69,6 +69,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "tanstack-router",
     "tsdown",
     "tsup",
+    "vercel",
     "vite",
     "vitepress",
     "waku",

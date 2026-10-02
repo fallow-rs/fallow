@@ -563,6 +563,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replacements with the shared config readers. A helper with more than one
   parameter, or a helper that calls another helper, still gives no value.
 
+- **Vercel functions in the `api/` directory are entry points.** Vercel
+  deploys each file under `api/` as a serverless function, and no code
+  imports these files. Before, fallow reported them as unused files. Now the
+  Vercel plugin makes each `api/**` source file an entry point and credits
+  the handler exports (`default`, `config` and the HTTP method names, such
+  as `GET`). Vercel does not deploy a file or a directory whose name starts
+  with `_`, so fallow still reports such a file when nothing imports it.
+  The plugin now also activates when `vercel.json` exists at the package
+  root. Before, it activated only from a `vercel` or `@vercel/config`
+  dependency.
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

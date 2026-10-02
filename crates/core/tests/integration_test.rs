@@ -179,6 +179,8 @@ mod typed_receiver_scoping;
 mod unmeasured_zero_diagnostics;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
+#[path = "integration_test/vercel_api_directory_functions.rs"]
+mod vercel_api_directory_functions;
 #[path = "integration_test/waku.rs"]
 mod waku;
 #[path = "integration_test/workspaces.rs"]
