@@ -315,8 +315,8 @@ impl ProcessTree {
 
         // SAFETY: waitid initialized the siginfo_t on success.
         let info = unsafe { info.assume_init() };
-        // SAFETY: waitid with WEXITED sets the si_pid field. A zero si_pid
-        // means WNOHANG observed no state change yet.
+        // SAFETY: si_pid reads initialized memory: waitid sets it on a state
+        // change, and the zeroed buffer keeps it 0 when WNOHANG finds none.
         let exited = unsafe { info.si_pid() } != 0;
         // Only the apple EPERM branch of `terminate` reads this cache.
         #[cfg(target_vendor = "apple")]

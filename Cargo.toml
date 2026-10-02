@@ -181,7 +181,6 @@ float_cmp_const = "warn"                # Exact compare against a float constant
 string_lit_chars_any = "warn"           # Use matches! on a char instead
 format_push_string = "warn"             # Use write! instead of a temporary String
 mutex_atomic = "warn"                   # Use an atomic for a single primitive
-string_to_string = "warn"               # Use clone() on a String
 suspicious_xor_used_as_pow = "warn"     # 2 ^ 8 is XOR, not a power
 empty_enum_variants_with_brackets = "warn" # Use `Variant` not `Variant {}`
 multiple_unsafe_ops_per_block = "warn"  # One SAFETY comment per unsafe operation
