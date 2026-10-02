@@ -1885,26 +1885,52 @@ fn is_command_token_char(ch: char) -> bool {
 
 /// Convert an expression to a path-like string if it's statically recoverable.
 pub(crate) fn expression_to_path_string(expr: &Expression) -> Option<String> {
+    path_string_with_param(expr, None)
+}
+
+/// A helper parameter name and the string literal the call site passes for it.
+type ParamBinding<'b> = Option<(&'b str, &'b str)>;
+
+/// Read a path expression. When `param` is set, an identifier with that name
+/// reads as the bound literal. A same-file path helper uses this for its body.
+fn path_string_with_param(expr: &Expression, param: ParamBinding<'_>) -> Option<String> {
     match expr {
-        Expression::ParenthesizedExpression(paren) => expression_to_path_string(&paren.expression),
-        Expression::TSAsExpression(ts_as) => expression_to_path_string(&ts_as.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => expression_to_path_string(&ts_sat.expression),
-        Expression::StaticMemberExpression(member) if member.property.name == "pathname" => {
-            expression_to_path_string(&member.object)
+        Expression::ParenthesizedExpression(paren) => {
+            path_string_with_param(&paren.expression, param)
         }
-        Expression::CallExpression(call) => call_expression_to_path_string(call),
-        Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr),
-        _ => expression_to_string(expr),
+        Expression::TSAsExpression(ts_as) => path_string_with_param(&ts_as.expression, param),
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            path_string_with_param(&ts_sat.expression, param)
+        }
+        Expression::StaticMemberExpression(member) if member.property.name == "pathname" => {
+            path_string_with_param(&member.object, param)
+        }
+        Expression::CallExpression(call) => call_expression_to_path_string(call, param),
+        Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr, param),
+        _ => path_segment_string(expr, param),
     }
 }
 
-fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
+/// Read one string segment: a string literal, or the bound helper parameter.
+fn path_segment_string(expr: &Expression, param: ParamBinding<'_>) -> Option<String> {
+    if let (Expression::Identifier(id), Some((name, value))) = (expr, param)
+        && id.name == name
+    {
+        return Some(value.to_string());
+    }
+    expression_to_string(expr)
+}
+
+fn call_expression_to_path_string(
+    call: &CallExpression,
+    param: ParamBinding<'_>,
+) -> Option<String> {
     if matches!(&call.callee, Expression::Identifier(id) if id.name == "fileURLToPath") {
         return call
             .arguments
             .first()
             .and_then(Argument::as_expression)
-            .and_then(expression_to_path_string);
+            .and_then(|arg| path_string_with_param(arg, param));
     }
 
     let callee_name = match &call.callee {
@@ -1928,7 +1954,7 @@ fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
             return None;
         }
 
-        segments.push(expression_to_string(expr)?);
+        segments.push(path_segment_string(expr, param)?);
     }
 
     (!segments.is_empty()).then(|| join_path_segments(&segments))
@@ -1953,7 +1979,10 @@ fn is_import_meta_expression(expr: &Expression) -> bool {
     matches!(expr, Expression::ImportMeta(_))
 }
 
-fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
+fn new_expression_to_path_string(
+    new_expr: &NewExpression,
+    param: ParamBinding<'_>,
+) -> Option<String> {
     if !matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "URL") {
         return None;
     }
@@ -1962,7 +1991,7 @@ fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
         .arguments
         .first()
         .and_then(Argument::as_expression)
-        .and_then(expression_to_string)?;
+        .and_then(|arg| path_segment_string(arg, param))?;
 
     let base = new_expr
         .arguments
@@ -2056,6 +2085,108 @@ fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
     }
 }
 
+/// Like [`alias_replacement_kinded`], and also reads a call to a same-file
+/// path helper (`here("src/x.ts")`). See [`local_path_helper_call`].
+fn alias_replacement_in_program(program: &Program, expr: &Expression) -> Option<(String, bool)> {
+    alias_replacement_kinded(expr)
+        .or_else(|| local_path_helper_call(program, expr).map(|value| (value, false)))
+}
+
+/// Read a call `helper("literal")` where `helper` is a top-level function in
+/// the same file with one plain parameter and a body that is one path
+/// expression:
+///
+/// - `const helper = (p) => fileURLToPath(new URL(p, import.meta.url))`
+/// - `function helper(p) { return path.resolve(__dirname, p); }`
+///
+/// The literal replaces the parameter in the body. The result is always a
+/// filesystem path, never a bare package alias. Helpers with more than one
+/// parameter, a default value, a conditional body, or an import binding stay
+/// unresolved, because the call site does not fix their value.
+fn local_path_helper_call(program: &Program, expr: &Expression) -> Option<String> {
+    let Expression::CallExpression(call) = expr.without_parentheses() else {
+        return None;
+    };
+    let Expression::Identifier(callee) = &call.callee else {
+        return None;
+    };
+    let [argument] = call.arguments.as_slice() else {
+        return None;
+    };
+    let literal = argument.as_expression().and_then(expression_to_string)?;
+    let (params, body_expr) = find_local_function(program, callee.name.as_str())?;
+    let param = single_plain_parameter(params)?;
+    path_string_with_param(body_expr, Some((param, literal.as_str())))
+}
+
+/// Find a top-level function named `name` in the program and return its
+/// parameters and its returned expression. The function is a function
+/// declaration, or a `const` bound to an arrow function or function
+/// expression.
+fn find_local_function<'a>(
+    program: &'a Program<'a>,
+    name: &str,
+) -> Option<(&'a FormalParameters<'a>, &'a Expression<'a>)> {
+    if let Some(init) = find_variable_init_expression(program, name) {
+        return match init.without_parentheses() {
+            Expression::ArrowFunctionExpression(arrow) => {
+                let body_expr = match &arrow.body {
+                    ArrowFunctionBody::FunctionBody(body) => single_return_expression(body)?,
+                    body => body.as_expression()?,
+                };
+                Some((&arrow.params, body_expr))
+            }
+            Expression::FunctionExpression(func) => Some((
+                &func.params,
+                single_return_expression(func.body.as_deref()?)?,
+            )),
+            _ => None,
+        };
+    }
+    program.body.iter().find_map(|stmt| {
+        let func = match stmt {
+            Statement::FunctionDeclaration(func) => func,
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::FunctionDeclaration(func) => func,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        (func.id.as_ref()?.name == name).then_some(())?;
+        Some((
+            &*func.params,
+            single_return_expression(func.body.as_deref()?)?,
+        ))
+    })
+}
+
+/// The name of the only parameter, when it is a plain identifier without a
+/// default value.
+fn single_plain_parameter<'a>(params: &'a FormalParameters<'a>) -> Option<&'a str> {
+    if params.rest.is_some() {
+        return None;
+    }
+    let [param] = params.items.as_slice() else {
+        return None;
+    };
+    if param.initializer.is_some() {
+        return None;
+    }
+    match &param.pattern {
+        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
+        _ => None,
+    }
+}
+
+/// The expression a block function body returns when the body is exactly one
+/// `return <expr>;` statement.
+fn single_return_expression<'a>(body: &'a FunctionBody<'a>) -> Option<&'a Expression<'a>> {
+    let [Statement::ReturnStatement(ret)] = body.statements.as_slice() else {
+        return None;
+    };
+    ret.argument.as_ref()
+}
+
 /// Maximum identifier-indirection hops the alias resolver follows before giving
 /// up. Each local-variable or imported-binding resolution counts one hop. The
 /// per-file `visited` set is the real cycle guard; this bound additionally
@@ -2131,7 +2262,8 @@ fn resolve_object_alias_pairs_kinded(
         match prop {
             ObjectPropertyKind::ObjectProperty(prop) => {
                 if let Some(find) = property_key_to_string(&prop.key)
-                    && let Some((replacement, is_bare)) = alias_replacement_kinded(&prop.value)
+                    && let Some((replacement, is_bare)) =
+                        alias_replacement_in_program(program, &prop.value)
                 {
                     pairs.push((find, replacement, is_bare));
                 }
@@ -2178,7 +2310,7 @@ fn resolve_array_alias_pairs_kinded(
                     && let Some(find) = find_property(obj, "find")
                         .and_then(|prop| expression_to_string(&prop.value))
                     && let Some((replacement, is_bare)) = find_property(obj, "replacement")
-                        .and_then(|prop| alias_replacement_kinded(&prop.value))
+                        .and_then(|prop| alias_replacement_in_program(program, &prop.value))
                 {
                     pairs.push((find, replacement, is_bare));
                 }

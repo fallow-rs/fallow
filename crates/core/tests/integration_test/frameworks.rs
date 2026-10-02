@@ -988,6 +988,40 @@ fn vite_array_aliases_from_config_resolve_internal_modules() {
     );
 }
 
+/// An alias replacement can call a same-file path helper with one literal
+/// argument. The helper body is a path expression that the parser reads.
+#[test]
+fn vite_alias_replacement_through_local_path_helper_resolves() {
+    let root = fixture_path("vite-alias-helper-replacement");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|u| u.dep.package_name.as_str())
+        .collect();
+    for alias in ["local-widget", "local-format"] {
+        assert!(
+            !unlisted_names.contains(&alias),
+            "alias {alias} must not be an unlisted dependency: {unlisted_names:?}"
+        );
+    }
+
+    let unused_file_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|f| f.file.path.strip_prefix(&root).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    for file in ["src/widget.ts", "src/format.ts"] {
+        assert!(
+            !unused_file_paths.contains(&file.to_string()),
+            "{file} must be reachable through the alias: {unused_file_paths:?}"
+        );
+    }
+}
+
 #[test]
 fn webpack_aliases_from_config_resolve_internal_modules() {
     let root = fixture_path("webpack-alias-project");

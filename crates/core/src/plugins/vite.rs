@@ -352,6 +352,65 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resolve_config_reads_alias_replacement_through_local_path_helper() {
+        let source = r"
+            import { defineConfig } from 'vite';
+            import { fileURLToPath, URL } from 'node:url';
+            import path from 'node:path';
+
+            const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
+            function fromRoot(p) { return path.resolve(__dirname, p); }
+
+            export default defineConfig({
+                resolve: {
+                    alias: [
+                        { find: 'local-a', replacement: here('src/a.ts') },
+                        { find: 'local-b', replacement: fromRoot('lib/b.ts') },
+                    ]
+                }
+            });
+        ";
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![
+                ("local-a".to_string(), "src/a.ts".to_string()),
+                ("local-b".to_string(), "lib/b.ts".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_skips_alias_helper_with_two_parameters_or_a_condition() {
+        let source = r"
+            const two = (base, p) => path.resolve(base, p);
+            const pick = (p) => (process.env.X ? p : './other');
+            export default {
+                resolve: {
+                    alias: {
+                        'two-a': two(__dirname, 'src/a.ts'),
+                        'pick-b': pick('./src/b.ts'),
+                    }
+                }
+            };
+        ";
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(result.path_aliases.is_empty(), "{:?}", result.path_aliases);
+    }
+
     /// Issue #2806: Vite reads a leading `/` as relative to the project root.
     #[test]
     fn resolve_config_reads_a_leading_slash_alias_as_root_relative() {

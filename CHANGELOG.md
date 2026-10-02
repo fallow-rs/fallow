@@ -461,6 +461,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oxlint.config.ts`. String entries, `{ "specifier": ... }` objects and
   local plugin paths work as they do at the top level.
 
+- **An alias replacement that calls a local path helper resolves.** A Vite,
+  Vitest or webpack config can declare a helper such as
+  `const here = (p) => fileURLToPath(new URL(p, import.meta.url))` and use
+  `replacement: here("src/x.ts")`. Before, fallow did not read this
+  replacement. It reported the alias import as an unlisted dependency and
+  the target file as unused. Now fallow reads a call to a top-level helper in
+  the same file that has one parameter and returns one path expression. It
+  puts the string argument in place of the parameter. The helper can be an
+  arrow function, a function expression or a function declaration. Fallow
+  does not read a helper with more parameters, a default value, a
+  conditional body, or an import binding.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
