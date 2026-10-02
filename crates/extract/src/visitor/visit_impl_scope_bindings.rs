@@ -95,6 +95,25 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Record a namespace binding that an assignment fills, in the scope that
+    /// declares the binding rather than the scope of the assignment. A reader
+    /// in a sibling function then sees the same binding, not a shadow.
+    pub(in crate::visitor) fn record_assigned_namespace_binding_name(&mut self, name: String) {
+        self.namespace_binding_names.push(name.clone());
+        let declaring_scope = self
+            .nested_declaration_stack
+            .iter()
+            .rposition(|scope| scope.contains(&name));
+        match declaring_scope.and_then(|index| self.scoped_namespace_binding_names.get_mut(index)) {
+            Some(scope) => {
+                scope.insert(name);
+            }
+            None => {
+                self.module_namespace_binding_names.insert(name);
+            }
+        }
+    }
+
     pub(super) fn record_sanitizer_binding(&mut self, name: &str, scope: Option<SanitizerScope>) {
         if self.is_module_scope() {
             self.module_sanitizer_bindings

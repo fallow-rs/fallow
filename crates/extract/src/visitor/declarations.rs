@@ -5,7 +5,8 @@
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrayPattern, BindingPattern, CallExpression, Declaration,
-    Expression, TSEnumMemberName, TSImportEqualsDeclaration, TSModuleReference, VariableDeclarator,
+    Expression, IdentifierReference, TSEnumMemberName, TSImportEqualsDeclaration,
+    TSModuleReference, VariableDeclarator,
 };
 
 use crate::{
@@ -597,5 +598,32 @@ impl ModuleInfoExtractor {
                 self.handled_import_spans.insert(import_expr.span);
             }
         }
+    }
+
+    /// Record dynamic-import edges for `name = await import(...)`, where `name`
+    /// is a binding declared elsewhere (for example a module-level `let` that a
+    /// setup function fills). The binding then acts as a namespace, the same as
+    /// `const name = await import(...)`: member reads through `name` credit
+    /// only those exports, and a whole-value use credits the whole module. The
+    /// assignment target itself is a write, not a whole-value use.
+    pub(super) fn handle_dynamic_import_assignment(
+        &mut self,
+        target: &IdentifierReference<'_>,
+        right: &Expression<'_>,
+    ) {
+        let Some(import_expr) = super::extract_import_expression(right) else {
+            return;
+        };
+        let mut sources = Vec::new();
+        super::collect_static_import_specifiers(&import_expr.source, &mut sources);
+        if sources.is_empty() {
+            return;
+        }
+        let name = target.name.as_str();
+        self.record_assigned_namespace_binding_name(name.to_string());
+        self.push_dynamic_import_branches(&sources, import_expr.span, &[], Some(name));
+        self.handled_import_spans.insert(import_expr.span);
+        self.structured_namespace_reference_spans
+            .insert(target.span);
     }
 }

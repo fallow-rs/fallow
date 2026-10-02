@@ -275,6 +275,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exports of the loaded module. A loader that the code does not use credits
   no export.
 
+- **A dynamic import assigned to an existing binding credits the members
+  that the code reads.** Code can declare a binding first and fill it later,
+  for example `let api: typeof import('./api')` at module level and
+  `api = await import('./api')` in a setup function. Before, fallow
+  recorded that `import()` only as a load of `./api`. Thus it reported
+  `api.load()` and every other export read through `api` as unused. Now the
+  assignment makes `api` a namespace binding in the scope that declares it,
+  as `const api = await import('./api')` does. A member read through `api`
+  in any function of that scope credits that export, and the other exports
+  stay reported. The parse cache version changes, so the first run after the
+  upgrade parses all files again.
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

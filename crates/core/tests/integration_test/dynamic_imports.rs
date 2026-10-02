@@ -531,3 +531,31 @@ fn promise_all_array_destructuring_credits_each_dynamic_import() {
         "only exports that no Promise.all element reads should be unused"
     );
 }
+
+#[test]
+fn dynamic_import_assigned_to_outer_binding_credits_member_reads() {
+    let root = fixture_path("dynamic-import-assigned-binding");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .filter_map(|export| {
+            let path = export
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&export.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (path == "src/tool.ts").then(|| export.export.export_name.clone())
+        })
+        .collect();
+    assert_eq!(
+        unused_exports,
+        vec!["unusedTool".to_string()],
+        "`tool = await import(...)` must credit the members read through `tool`, \
+         and keep the unread export reported"
+    );
+}

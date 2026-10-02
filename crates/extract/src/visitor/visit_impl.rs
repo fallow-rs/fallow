@@ -4056,6 +4056,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.handle_this_member_assignment(format!("#{}", member.field.name).as_str(), expr);
         }
         self.capture_member_assign_sink(expr);
+        // `tool = await import("./tool")`: mark the import span handled before
+        // the walk so `visit_import_expression` does not record it again.
+        if matches!(expr.operator, AssignmentOperator::Assign)
+            && let AssignmentTarget::AssignmentTargetIdentifier(ident) = &expr.left
+        {
+            self.handle_dynamic_import_assignment(ident, &expr.right);
+        }
         walk::walk_assignment_expression(self, expr);
 
         let is_plain_assignment = matches!(expr.operator, AssignmentOperator::Assign);
