@@ -26,6 +26,9 @@ const PAGE_EXPORTS: &[&str] = &[
     "runtime",
     "preferredRegion",
     "maxDuration",
+    "instant",
+    "prefetch",
+    "unstable_dynamicStaleTime",
 ];
 const LAYOUT_EXPORTS: &[&str] = &[
     "default",
@@ -41,6 +44,8 @@ const LAYOUT_EXPORTS: &[&str] = &[
     "runtime",
     "preferredRegion",
     "maxDuration",
+    "instant",
+    "prefetch",
 ];
 const ROUTE_EXPORTS: &[&str] = &[
     "GET",
@@ -444,6 +449,36 @@ mod tests {
             .find(|(pat, _)| *pat == "mdx-components.{ts,tsx,js,jsx}")
             .expect("should have mdx-components used exports");
         assert!(mdx_entry.1.contains(&"useMDXComponents"));
+    }
+
+    #[test]
+    fn page_and_layout_exports_include_instant_and_prefetch_segment_config() {
+        let plugin = NextJsPlugin;
+        let exports = plugin.used_exports();
+        let lookup = |pattern: &str| -> &[&str] {
+            exports
+                .iter()
+                .find(|(pat, _)| *pat == pattern)
+                .unwrap_or_else(|| panic!("should have used exports for {pattern}"))
+                .1
+        };
+
+        for prefix in ["app", "src/app"] {
+            let page = lookup(&format!("{prefix}/**/page.{{ts,tsx,js,jsx}}"));
+            assert!(page.contains(&"instant"));
+            assert!(page.contains(&"prefetch"));
+            assert!(page.contains(&"unstable_dynamicStaleTime"));
+
+            let layout = lookup(&format!("{prefix}/**/layout.{{ts,tsx,js,jsx}}"));
+            assert!(layout.contains(&"instant"));
+            assert!(layout.contains(&"prefetch"));
+            // Next.js rejects `unstable_dynamicStaleTime` in layout files.
+            assert!(!layout.contains(&"unstable_dynamicStaleTime"));
+
+            let route = lookup(&format!("{prefix}/**/route.{{ts,tsx,js,jsx}}"));
+            assert!(!route.contains(&"instant"));
+            assert!(!route.contains(&"prefetch"));
+        }
     }
 
     #[test]

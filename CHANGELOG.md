@@ -581,6 +581,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   script has the name and the argument is a script file path, the file is
   an entry point. A name without a script file extension, such as
   `bun run build`, still resolves to the script.
+- **Next.js `instant` and `prefetch` segment config exports are used.**
+  Next.js 16 reads `export const instant` and `export const prefetch` from
+  App Router pages and layouts. It also reads
+  `export const unstable_dynamicStaleTime` from pages. Before, fallow
+  reported these exports as unused. Now the Next.js plugin credits `instant`
+  and `prefetch` in `page` and `layout` files, and
+  `unstable_dynamicStaleTime` in `page` files only. Next.js rejects
+  `unstable_dynamicStaleTime` in a layout, so fallow still reports it there.
+  Route handlers do not change.
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
