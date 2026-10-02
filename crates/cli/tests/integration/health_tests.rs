@@ -4872,22 +4872,33 @@ fn health_group_by_package_emits_per_workspace_envelope() {
         .iter()
         .find(|g| g["key"] == "beta")
         .expect("beta group");
+    // The clone has one instance in alpha and two in beta. Each group counts
+    // only the lines of its own instances.
+    let dup_lines = |scope: &serde_json::Value| -> u64 {
+        scope["vital_signs"]["counts"]["duplicated_lines"]
+            .as_u64()
+            .expect("duplicated_lines")
+    };
+    assert!(
+        dup_lines(alpha) > 0,
+        "alpha should count its own instance of the cross-group clone"
+    );
     assert_eq!(
-        alpha["vital_signs"]["duplication_pct"].as_f64(),
-        Some(0.0),
-        "alpha must not inherit beta's duplicate-code score input"
+        dup_lines(beta),
+        dup_lines(alpha) * 2,
+        "beta should count only the lines of its two instances"
+    );
+    assert_eq!(
+        dup_lines(alpha) + dup_lines(beta),
+        dup_lines(&json),
+        "group duplicated lines should sum to the project value"
     );
     assert!(
-        beta["vital_signs"]["duplication_pct"]
+        alpha["health_score"]["penalties"]["duplication"]
             .as_f64()
             .unwrap_or(0.0)
             > 0.0,
-        "beta should carry its own duplicate-code score input"
-    );
-    assert_eq!(
-        alpha["health_score"]["penalties"]["duplication"].as_f64(),
-        Some(0.0),
-        "alpha health score should not be penalized for beta duplication"
+        "alpha health score should include the cross-group clone penalty"
     );
     assert!(
         beta["health_score"]["penalties"]["duplication"]

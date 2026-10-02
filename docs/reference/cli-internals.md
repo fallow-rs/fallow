@@ -461,8 +461,23 @@ after every gate set the exit code.
    Then `GroupListSections` empties each group list that the project report
    omits, with the same gates as `assembly.rs`. Thus a `--score` run keeps
    the score and counts of each group, but no group findings. The group
-   duplication penalty counts only clone groups with two or more instances in
-   the group, so a clone that spans two groups lowers only the project score.
+   duplication penalty counts each clone group with two or more instances in
+   total and one or more in the group. The group counts only the lines and a
+   share of the tokens of its own instances. Thus a clone that spans two
+   groups lowers the score of each group, and the group `duplicated_lines`
+   sum to the project value when the groups partition the files. Each
+   instance carries `token_count * (total - 1) / total` redundant tokens,
+   rounded down, so the group token values do not exceed the project value.
+
+   The three scoped duplication lenses use different rules:
+   - `health --group-by` measures the lines of each group, as above.
+   - `dupes --group-by` assigns each clone group to the largest owner (the
+     owner with the most instances), because it routes each finding to one
+     owner. See `report/dupes_grouping.rs`.
+   - `health --workspace` keeps only the clone instances inside the
+     workspace and drops a clone group with fewer than two instances there.
+     It measures copy-paste inside the workspace, not copy-paste across the
+     workspace boundary.
 5. `apply_group_trends` matches groups by key against the baseline, only for
    the same `grouped_by` mode. A group without a stored entry is
    `new_group` only when the stored `group_filter` keeps its key. Otherwise

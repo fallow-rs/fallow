@@ -12,6 +12,6 @@ expression: "redact_all(&output.stdout, dir.path())"
 
 | Group | Score | Grade | Delta | Files | Critical | Hotspots |
 |:------|------:|:------|:------|------:|---------:|---------:|
-| `@team/a` | 100.0 | A | - | 2 | 2 | 0 |
-| `@team/b` | 100.0 | A | - | 2 | 2 | 0 |
+| `@team/a` | 90.0 | A | - | 2 | 2 | 0 |
+| `@team/b` | 90.0 | A | - | 2 | 2 | 0 |
 | `(unowned)` | 100.0 | A | - | 1 | 0 | 0 |

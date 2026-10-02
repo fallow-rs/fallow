@@ -23,6 +23,7 @@ use fallow_output::{
     LargeFunctionEntry, RefactoringTarget, RefactoringTargetFinding, VitalSigns, VitalSignsCounts,
     summarize_coverage_source_consistency,
 };
+use fallow_types::duplicates::CloneGroup;
 use fallow_types::workspace::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
 
 /// Bucket of file paths sharing a resolver key.
@@ -453,14 +454,35 @@ fn apply_group_duplication_metrics(
     apply_duplication_metrics(vital_signs, counts, &dupes_report);
 }
 
+/// Fewest instances that make a clone group.
+const MIN_CLONE_INSTANCES: usize = 2;
+
+/// A project clone group restricted to the instances inside one health group.
+struct GroupClone {
+    /// The clone group with only the instances inside the health group.
+    clone: CloneGroup,
+    /// Number of instances of the clone group in the whole project.
+    total_instances: usize,
+}
+
+/// Restrict the project duplication report to the files of one health group.
+///
+/// A health group counts a clone group when the clone group has two or more
+/// instances in total and one or more inside the health group. The health
+/// group keeps only its own instances, so it counts only its own lines. A
+/// clone that spans two groups thus lowers the score of each group, and the
+/// group `duplicated_lines` sum to the project value when the groups
+/// partition the files. `dupes --group-by` uses a different rule: it assigns
+/// each clone group to the owner with the most instances.
 fn subset_duplication_report(
     report: &DuplicationReport,
     input: &HealthGroupingInput<'_>,
     paths: &FxHashSet<PathBuf>,
 ) -> DuplicationReport {
-    let clone_groups = report
+    let group_clones = report
         .clone_groups
         .iter()
+        .filter(|group| group.instances.len() >= MIN_CLONE_INSTANCES)
         .filter_map(|group| {
             let instances = group
                 .instances
@@ -468,36 +490,56 @@ fn subset_duplication_report(
                 .filter(|instance| paths.contains(&instance.file))
                 .cloned()
                 .collect::<Vec<_>>();
-            (instances.len() > 1).then_some(fallow_types::duplicates::CloneGroup {
-                instances,
-                token_count: group.token_count,
-                line_count: group.line_count,
-                similarity: group.similarity,
+            (!instances.is_empty()).then_some(GroupClone {
+                clone: CloneGroup {
+                    instances,
+                    token_count: group.token_count,
+                    line_count: group.line_count,
+                    similarity: group.similarity,
+                },
+                total_instances: group.instances.len(),
             })
         })
         .collect::<Vec<_>>();
+    let stats = subset_duplication_stats(report, input, paths, &group_clones);
     DuplicationReport {
-        stats: subset_duplication_stats(report, input, paths, &clone_groups),
-        clone_groups,
+        stats,
+        clone_groups: group_clones.into_iter().map(|group| group.clone).collect(),
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
     }
+}
+
+/// Redundant tokens that `own` of the `total` instances of a clone group
+/// carry.
+///
+/// The project counts `token_count * (total - 1)` redundant tokens for a clone
+/// group. Each instance carries the same share of that value, so the shares of
+/// all instances sum to the project value. Integer division rounds down, so
+/// the sum of the group values never exceeds the project value.
+fn duplicated_token_share(token_count: usize, own: usize, total: usize) -> usize {
+    if total < MIN_CLONE_INSTANCES {
+        return 0;
+    }
+    let share =
+        (token_count as u128) * (own.min(total) as u128) * ((total - 1) as u128) / (total as u128);
+    usize::try_from(share).unwrap_or(usize::MAX)
 }
 
 fn subset_duplication_stats(
     report: &DuplicationReport,
     input: &HealthGroupingInput<'_>,
     paths: &FxHashSet<PathBuf>,
-    clone_groups: &[fallow_types::duplicates::CloneGroup],
+    group_clones: &[GroupClone],
 ) -> fallow_types::duplicates::DuplicationStats {
     let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
-    let mut file_dup_lines: rustc_hash::FxHashMap<&Path, FxHashSet<usize>> =
-        rustc_hash::FxHashMap::default();
+    let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
     let mut duplicated_tokens = 0usize;
     let mut clone_instances = 0usize;
 
-    for group in clone_groups {
-        for instance in &group.instances {
+    for group in group_clones {
+        let own = &group.clone.instances;
+        for instance in own {
             files_with_clones.insert(&instance.file);
             clone_instances += 1;
             let lines = file_dup_lines.entry(&instance.file).or_default();
@@ -505,7 +547,8 @@ fn subset_duplication_stats(
                 lines.insert(line);
             }
         }
-        duplicated_tokens += group.token_count * group.instances.len().saturating_sub(1);
+        duplicated_tokens +=
+            duplicated_token_share(group.clone.token_count, own.len(), group.total_instances);
     }
 
     let duplicated_lines = file_dup_lines.values().map(FxHashSet::len).sum::<usize>();
@@ -517,8 +560,8 @@ fn subset_duplication_stats(
         total_lines,
         duplicated_lines,
         total_tokens: report.stats.total_tokens,
-        duplicated_tokens: duplicated_tokens.min(report.stats.total_tokens),
-        clone_groups: clone_groups.len(),
+        duplicated_tokens: duplicated_tokens.min(report.stats.duplicated_tokens),
+        clone_groups: group_clones.len(),
         // The scoped report carries no families, so nothing is withheld from an
         // empty array.
         clone_families: 0,
@@ -763,6 +806,19 @@ mod tests {
     fn selector_reports_positive_patterns_without_a_match() {
         let s = selector(&["@team/a", "@nobody/*", "!@team/b"]);
         assert_eq!(s.unmatched(&["@team/a", "@team/b"]), vec!["@nobody/*"]);
+    }
+
+    #[test]
+    fn token_shares_of_all_instances_sum_to_the_project_value() {
+        assert_eq!(duplicated_token_share(90, 1, 2), 45);
+        assert_eq!(duplicated_token_share(90, 2, 2), 90);
+        // Three instances split two and one: the project counts 2 * 90.
+        let split = duplicated_token_share(90, 2, 3) + duplicated_token_share(90, 1, 3);
+        assert_eq!(split, 180);
+        // Rounding down keeps each split at or below the project value.
+        let uneven = duplicated_token_share(10, 1, 3) * 3;
+        assert!(uneven <= 10 * 2);
+        assert_eq!(duplicated_token_share(90, 1, 1), 0);
     }
 
     #[test]

@@ -18,7 +18,7 @@ Groups selected with `--group` `@team/b`. Project-level sections are not filtere
 
 | Group | Score | Grade | Delta | Files | Critical | Hotspots |
 |:------|------:|:------|:------|------:|---------:|---------:|
-| `@team/b` | 100.0 | A | - | 2 | 2 | 0 |
+| `@team/b` | 90.0 | A | - | 2 | 2 | 0 |
 
 
 Gate outcomes: passed health-findings (0 at or above error).

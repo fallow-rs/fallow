@@ -82,9 +82,11 @@ pub struct HealthGroup {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
     /// Per-group health score recomputed from the per-group vital signs. Absent
-    /// when --score was not requested. The duplication penalty counts only
-    /// the clone groups with two or more instances in this group, so a clone
-    /// that spans two groups lowers the project score but no group score.
+    /// when --score was not requested. The duplication penalty counts each
+    /// clone group with two or more instances in total and one or more in
+    /// this group, and counts only the lines of the instances in this group.
+    /// A clone that spans two groups thus lowers the score of each group.
+    /// `dupes --group-by` assigns each clone group to one owner instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Trend of this group against the same group in the baseline snapshot.

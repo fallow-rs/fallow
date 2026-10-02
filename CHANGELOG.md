@@ -70,6 +70,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AGENTS.md` alone.** Cursor and fallow also write that file. A `.codex/`
   directory now selects Codex, the same rule that `fallow agent install`
   uses.
+- **`fallow health --group-by` counts a clone that spans two groups in each
+  group.** Before, a group counted a clone group only when two or more
+  instances were inside the group. A clone with one instance in each of two
+  teams then lowered the project score but no team score. Now a group counts
+  each clone group with one or more instances in the group, and counts only
+  the lines of its own instances. The group `duplicated_lines` values sum to
+  the project value. Group scores can drop once after the upgrade.
+  `fallow dupes --group-by` does not change: it assigns each clone group to
+  one owner, the owner with the most instances. `fallow health --group-by`
+  measures the duplicated lines of each group. `fallow health --workspace`
+  does not change: it counts only the clones inside the workspace.
 
 ### Fixed
 

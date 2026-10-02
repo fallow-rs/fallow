@@ -581,3 +581,114 @@ fn grouped_github_summary_renders_the_group_table() {
         .collect();
     insta::assert_snapshot!("github_summary_health_grouped", rendered.join("\n"));
 }
+
+/// A function that the clone detector finds again in each copy.
+fn pair_clone(name: &str) -> String {
+    format!(
+        "export function {name}(items: number[]): number {{
+  let total = 0;
+  for (const item of items) {{
+    if (item > 10) {{
+      total += item * 2;
+    }} else if (item < 0) {{
+      total -= item;
+    }} else {{
+      total += item;
+    }}
+  }}
+  const scaled = total * 3 + items.length;
+  const shifted = scaled - Math.floor(scaled / 7);
+  return shifted > 100 ? shifted - 100 : shifted;
+}}
+"
+    )
+}
+
+/// A second clone with a different structure from [`pair_clone`].
+fn trio_clone(name: &str) -> String {
+    format!(
+        "export function {name}(words: string[]): string {{
+  const seen = new Set<string>();
+  let out = '';
+  while (words.length > 0) {{
+    const word = words.pop();
+    if (word === undefined || seen.has(word)) {{
+      continue;
+    }}
+    seen.add(word);
+    out = out.length > 0 ? `${{out}},${{word}}` : word;
+  }}
+  return out.toUpperCase().trim();
+}}
+"
+    )
+}
+
+/// Two CODEOWNERS teams. One clone has one instance in each team. A second
+/// clone has two instances in team a and one instance in team b.
+fn cross_team_clone_project() -> TempDir {
+    let dir = TempDir::new().expect("temp dir");
+    let root = dir.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "cross-team-clone", "private": true, "main": "src/index.ts" }"#,
+    )
+    .expect("write package.json");
+    std::fs::create_dir_all(root.join(".github")).expect("create .github");
+    std::fs::write(
+        root.join(".github/CODEOWNERS"),
+        "/src/a/ @team/a\n/src/b/ @team/b\n",
+    )
+    .expect("write CODEOWNERS");
+    let files = [
+        ("a/pair", pair_clone("alphaPair")),
+        ("b/pair", pair_clone("betaPair")),
+        ("a/trio_one", trio_clone("alphaTrioOne")),
+        ("a/trio_two", trio_clone("alphaTrioTwo")),
+        ("b/trio", trio_clone("betaTrio")),
+    ];
+    let mut index = String::new();
+    for (module, body) in files {
+        let path = root.join("src").join(format!("{module}.ts"));
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create team dir");
+        std::fs::write(path, body).expect("write clone");
+        let _ = writeln!(index, "export * from './{module}';");
+    }
+    std::fs::write(root.join("src/index.ts"), index).expect("write index");
+    dir
+}
+
+fn duplicated_lines(scope: &Value) -> u64 {
+    scope["vital_signs"]["counts"]["duplicated_lines"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("duplicated_lines missing: {scope:#}"))
+}
+
+/// A clone that spans two teams lowers the score of each team. Each team
+/// counts only the lines of its own instances, so the group values sum to the
+/// project value when the groups partition the files.
+#[test]
+fn cross_team_clone_counts_for_each_team_and_sums_to_the_project() {
+    let dir = cross_team_clone_project();
+    let envelope = health_json(
+        dir.path(),
+        &["--score", "--complexity", "--hotspots", "--report-only"],
+    );
+    let project_lines = duplicated_lines(&envelope);
+    assert!(project_lines > 0, "fixture must give clones: {envelope:#}");
+    let sum: u64 = envelope["groups"]
+        .as_array()
+        .expect("groups array")
+        .iter()
+        .map(duplicated_lines)
+        .sum();
+    assert_eq!(sum, project_lines, "{envelope:#}");
+    for key in ["@team/a", "@team/b"] {
+        let group = group(&envelope, key);
+        assert!(duplicated_lines(group) > 0, "{key}: {group:#}");
+        let penalty = group["health_score"]["penalties"]["duplication"]
+            .as_f64()
+            .unwrap();
+        assert!(penalty > 0.0, "{key}: {group:#}");
+    }
+}

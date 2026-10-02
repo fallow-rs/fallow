@@ -1889,7 +1889,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-group health score recomputed from the per-group vital signs. Absent\nwhen --score was not requested. The duplication penalty counts only\nthe clone groups with two or more instances in this group, so a clone\nthat spans two groups lowers the project score but no group score."
+          "description": "Per-group health score recomputed from the per-group vital signs. Absent\nwhen --score was not requested. The duplication penalty counts each\nclone group with two or more instances in total and one or more in\nthis group, and counts only the lines of the instances in this group.\nA clone that spans two groups thus lowers the score of each group.\n`dupes --group-by` assigns each clone group to one owner instead."
         },
         "trend": {
           "anyOf": [
