@@ -859,6 +859,15 @@ export type CoverageInputFormat = ("istanbul" | "v8")
  */
 export type CoverageSourceConsistency = ("uniform" | "mixed")
 /**
+ * One health section that a run produced.
+ *
+ * A section is in [`HealthReport::sections`] when the run computed it and
+ * the report carries its result, also when that result is empty. The value
+ * set is OPEN: a later release can add a section, so a consumer must accept
+ * a token that it does not know.
+ */
+export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "targets" | "trend" | "runtime-coverage" | "css")
+/**
  * Lifecycle state for a configured threshold override.
  */
 export type ThresholdOverrideStatus = ("active" | "stale" | "insufficient" | "no_match")
@@ -6517,6 +6526,18 @@ stale_entries: number
  */
 current_findings: number
 /**
+ * Health only: the number of functions above a complexity threshold that
+ * the baseline does not accept. This is a count of functions, like
+ * `summary.functions_above_threshold`, not a count of baseline entries,
+ * and it is the value before `--top`. A run that does not list the
+ * complexity findings (for example `--score`) still reports it, so a
+ * reader can tell the new functions from the accepted ones.
+ *
+ * `dead-code` and `dupes` do not emit it. An envelope from a fallow
+ * version before this member does not carry it either.
+ */
+remaining_findings?: (number | null)
+/**
  * True when this run analyzed only part of the project, so a whole-project
  * baseline matches less of it for reasons that are not rot. The channels
  * differ per command and include a diff, a base ref, `--changed-since`,
@@ -7238,6 +7259,15 @@ export interface HealthReport {
  */
 findings: HealthFinding[]
 summary: HealthSummary
+/**
+ * The sections that this run produced, in a fixed order. A renderer
+ * reads it to tell an empty section from a section that the run did not
+ * produce: `findings` is the complexity list only when `complexity` is
+ * in this array. The value set is OPEN (see [`HealthSection`]). Absent
+ * in an envelope from a fallow version before this member, and on a
+ * report that no health run built.
+ */
+sections?: (HealthSection[] | null)
 /**
  * Configured threshold override states. Entries are emitted for active
  * exceptions, stale exceptions, and full-run no-match cleanup hints.
@@ -12508,6 +12538,15 @@ elapsed_ms: ElapsedMs
  */
 findings: HealthFinding[]
 summary: HealthSummary
+/**
+ * The sections that this run produced, in a fixed order. A renderer
+ * reads it to tell an empty section from a section that the run did not
+ * produce: `findings` is the complexity list only when `complexity` is
+ * in this array. The value set is OPEN (see [`HealthSection`]). Absent
+ * in an envelope from a fallow version before this member, and on a
+ * report that no health run built.
+ */
+sections?: (HealthSection[] | null)
 /**
  * Configured threshold override states. Entries are emitted for active
  * exceptions, stale exceptions, and full-run no-match cleanup hints.

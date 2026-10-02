@@ -1547,6 +1547,16 @@
           "description": "Summary statistics.",
           "$ref": "#/definitions/HealthSummary"
         },
+        "sections": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/HealthSection"
+          },
+          "description": "The sections that this run produced, in a fixed order. A renderer\nreads it to tell an empty section from a section that the run did not\nproduce: `findings` is the complexity list only when `complexity` is\nin this array. The value set is OPEN (see [`HealthSection`]). Absent\nin an envelope from a fallow version before this member, and on a\nreport that no health run built."
+        },
         "threshold_overrides": {
           "type": "array",
           "items": {
@@ -2776,6 +2786,16 @@
         "summary": {
           "description": "Summary statistics.",
           "$ref": "#/definitions/HealthSummary"
+        },
+        "sections": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/HealthSection"
+          },
+          "description": "The sections that this run produced, in a fixed order. A renderer\nreads it to tell an empty section from a section that the run did not\nproduce: `findings` is the complexity list only when `complexity` is\nin this array. The value set is OPEN (see [`HealthSection`]). Absent\nin an envelope from a fallow version before this member, and on a\nreport that no health run built."
         },
         "threshold_overrides": {
           "type": "array",
@@ -27556,6 +27576,13 @@
           "type": "integer",
           "description": "Findings this run produced before the baseline filtered them. Zero means\nthere was nothing to compare, either because the project is clean or\nbecause the scope was empty, which is why `stale` stays false there even\nwhen every entry went unmatched."
         },
+        "remaining_findings": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Health only: the number of functions above a complexity threshold that\nthe baseline does not accept. This is a count of functions, like\n`summary.functions_above_threshold`, not a count of baseline entries,\nand it is the value before `--top`. A run that does not list the\ncomplexity findings (for example `--score`) still reports it, so a\nreader can tell the new functions from the accepted ones.\n\n`dead-code` and `dupes` do not emit it. An envelope from a fallow\nversion before this member does not carry it either."
+        },
         "change_scoped": {
           "type": "boolean",
           "description": "True when this run analyzed only part of the project, so a whole-project\nbaseline matches less of it for reasons that are not rot. The channels\ndiffer per command and include a diff, a base ref, `--changed-since`,\n`--workspace`, `--changed-workspaces`, `--scope`, `--file`, an\nissue-type filter, and production mode. Both `stale` and `gate_trips`\nare false whenever this is true. `scope_reasons` names the channels\nthat fired."
@@ -29429,6 +29456,61 @@
         }
       ],
       "description": "Why the declared pnpm version ignores the `overrides` section of\n`pnpm-workspace.yaml`."
+    },
+    "HealthSection": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complexity",
+          "description": "The run lists the complexity findings in `findings`. An empty list then\nmeans that no function above a threshold is left after the baseline.\nWithout this token, `findings` is empty because the run did not list\nthem, and `summary.functions_above_threshold` is the only count."
+        },
+        {
+          "type": "string",
+          "const": "vital-signs",
+          "description": "`vital_signs`."
+        },
+        {
+          "type": "string",
+          "const": "score",
+          "description": "`health_score`."
+        },
+        {
+          "type": "string",
+          "const": "file-scores",
+          "description": "`file_scores`."
+        },
+        {
+          "type": "string",
+          "const": "coverage-gaps",
+          "description": "`coverage_gaps`."
+        },
+        {
+          "type": "string",
+          "const": "hotspots",
+          "description": "`hotspots`. The list can be empty when the run could not read the git\nhistory; `workspace_diagnostics` then tells why."
+        },
+        {
+          "type": "string",
+          "const": "targets",
+          "description": "`targets`."
+        },
+        {
+          "type": "string",
+          "const": "trend",
+          "description": "`health_trend`."
+        },
+        {
+          "type": "string",
+          "const": "runtime-coverage",
+          "description": "`runtime_coverage`."
+        },
+        {
+          "type": "string",
+          "const": "css",
+          "description": "`css_analytics`, `styling_health` and `styling_findings`."
+        }
+      ],
+      "description": "One health section that a run produced.\n\nA section is in [`HealthReport::sections`] when the run computed it and\nthe report carries its result, also when that result is empty. The value\nset is OPEN: a later release can add a section, so a consumer must accept\na token that it does not know."
     }
   }
 }

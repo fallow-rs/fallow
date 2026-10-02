@@ -55,6 +55,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it. `FALLOW_SUGGESTIONS=off` also suppresses it. Claude Code shows the
   prompt only for plugins in an official marketplace, so the hint has no
   effect until that marketplace lists the Fallow plugin.
+- **The health JSON names the sections that the run produced, and the
+  baseline count of new functions.** The new root array `sections` lists
+  each section that the run computed, for example `complexity`, `score`,
+  `hotspots`, `file-scores` or `targets`, also when the section is empty.
+  Without `complexity`, the `findings` list is empty because the run did not
+  list the functions. On a run with `--baseline`, the new
+  `summary.baseline_staleness.remaining_findings` gives the number of
+  functions above a threshold that the baseline does not accept. It counts
+  functions, not baseline entries. `dead-code` and `dupes` do not emit it.
+  Both members are additive and optional, and no `schema_version` changes.
 
 ### Changed
 
@@ -224,6 +234,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepts every finding stays clean. The human output already gave this
   number. The job summary also has a blank line before `## Health by <mode>`
   now.
+- **The job summary of `fallow health --hotspots`, `--file-scores` or
+  `--targets` with a `--baseline` no longer says that no function exceeds a
+  threshold.** These runs do not list complexity findings. Before, the job
+  summary gave "No functions exceed complexity thresholds" when a baseline
+  was loaded, also when a new function exceeded a threshold. Now the job
+  summary gives the number of functions above a threshold. Markdown has no
+  complexity section on these runs, as in the human output. With a baseline,
+  Markdown and the job summary now tell how many functions the baseline
+  accepts and how many are new, for example "3 functions exceed thresholds.
+  The baseline accepts 2. 1 is new." They ask for a `--complexity` run only
+  when a function is new. `fallow report --from` on an envelope from an
+  older fallow keeps the earlier text.
 
 ### Changed
 

@@ -9,6 +9,42 @@ use crate::{
 };
 use fallow_types::output_dead_code::PropDrillingChainFinding;
 
+/// One health section that a run produced.
+///
+/// A section is in [`HealthReport::sections`] when the run computed it and
+/// the report carries its result, also when that result is empty. The value
+/// set is OPEN: a later release can add a section, so a consumer must accept
+/// a token that it does not know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum HealthSection {
+    /// The run lists the complexity findings in `findings`. An empty list then
+    /// means that no function above a threshold is left after the baseline.
+    /// Without this token, `findings` is empty because the run did not list
+    /// them, and `summary.functions_above_threshold` is the only count.
+    Complexity,
+    /// `vital_signs`.
+    VitalSigns,
+    /// `health_score`.
+    Score,
+    /// `file_scores`.
+    FileScores,
+    /// `coverage_gaps`.
+    CoverageGaps,
+    /// `hotspots`. The list can be empty when the run could not read the git
+    /// history; `workspace_diagnostics` then tells why.
+    Hotspots,
+    /// `targets`.
+    Targets,
+    /// `health_trend`.
+    Trend,
+    /// `runtime_coverage`.
+    RuntimeCoverage,
+    /// `css_analytics`, `styling_health` and `styling_findings`.
+    Css,
+}
+
 /// Result of complexity analysis for reporting.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -21,6 +57,14 @@ pub struct HealthReport {
     pub findings: Vec<HealthFinding>,
     /// Summary statistics.
     pub summary: HealthSummary,
+    /// The sections that this run produced, in a fixed order. A renderer
+    /// reads it to tell an empty section from a section that the run did not
+    /// produce: `findings` is the complexity list only when `complexity` is
+    /// in this array. The value set is OPEN (see [`HealthSection`]). Absent
+    /// in an envelope from a fallow version before this member, and on a
+    /// report that no health run built.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sections: Option<Vec<HealthSection>>,
     /// Configured threshold override states. Entries are emitted for active
     /// exceptions, stale exceptions, and full-run no-match cleanup hints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

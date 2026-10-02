@@ -260,6 +260,7 @@ impl BaselineStaleness {
             matched_entries: self.matched,
             stale_entries: self.stale_entries(),
             current_findings: self.current_findings,
+            remaining_findings: None,
             change_scoped: self.change_scoped,
             stale: warning != BaselineStalenessWarning::None,
             warning: match warning {

@@ -1309,43 +1309,106 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
     }
 }
 
-/// Tell if a health complexity section gives the count of functions above a
-/// threshold instead of a clean result.
-///
-/// `listed` is the length of the finding list and `above` is
-/// `summary.functions_above_threshold`, which fallow counts before the
-/// baseline. A score-only run (the report has no `vital_signs`) never lists
-/// findings, so a baseline does not make it clean. On a run that can list
-/// findings, an empty list with a baseline means that the baseline accepts
-/// every finding, and the run is clean. Markdown and the job summary use this
-/// rule, so the two surfaces agree.
-#[must_use]
-pub const fn complexity_count_unlisted(
-    listed: usize,
-    above: usize,
-    score_only: bool,
-    baselined: bool,
-) -> bool {
-    listed == 0 && above > 0 && (score_only || !baselined)
+/// What a health report says about its complexity findings. Markdown and the
+/// job summary build it from the report and use one rule, so the two
+/// surfaces agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComplexityListing {
+    /// The length of the finding list.
+    pub listed: usize,
+    /// `summary.functions_above_threshold`, which fallow counts before the
+    /// baseline.
+    pub above: usize,
+    /// `Some(true)` when `sections` contains `complexity`, `Some(false)` when
+    /// `sections` does not, and `None` for an older report without `sections`.
+    pub complexity_section: Option<bool>,
+    /// True when the report has no `vital_signs`, which only a score-only run
+    /// omits. The rule reads it only when `complexity_section` is `None`.
+    pub score_only: bool,
+    /// True when the run loaded a baseline.
+    pub baselined: bool,
+    /// `summary.baseline_staleness.remaining_findings`: the functions above a
+    /// threshold that the baseline does not accept. `None` without a baseline
+    /// and in an older report.
+    pub remaining: Option<usize>,
 }
 
-/// The sentences after the count of functions that a run does not list.
-///
-/// With a baseline, the count includes the functions that the baseline
-/// accepts, so the note tells the reader how to list only the others.
-#[must_use]
-pub const fn complexity_not_listed_note(baselined: bool) -> &'static str {
-    if baselined {
-        "This run does not list the functions. \
-         The count includes the functions that the baseline accepts. \
-         Run `fallow health --complexity` with the same `--baseline` to list the functions \
-         that the baseline does not accept."
-    } else {
-        "This run does not list the functions. Run `fallow health --complexity` to list them."
+impl ComplexityListing {
+    /// Tell if the complexity section gives the count of functions above a
+    /// threshold instead of a clean result.
+    ///
+    /// A run that did not produce the `complexity` section does not list
+    /// findings, so an empty list does not make it clean. A run that lists
+    /// findings, with an empty list and a baseline, is clean: the baseline
+    /// accepts every finding.
+    ///
+    /// An older report without `sections` falls back to the earlier rule: a
+    /// score-only run gives the count, and another run gives the count only
+    /// without a baseline.
+    #[must_use]
+    pub const fn count_unlisted(&self) -> bool {
+        if self.above == 0 {
+            return false;
+        }
+        match self.complexity_section {
+            Some(listed_section) => !listed_section,
+            None => self.listed == 0 && (self.score_only || !self.baselined),
+        }
+    }
+
+    /// The sentences after the count of functions that the run does not list.
+    ///
+    /// With a baseline, the note tells how many functions the baseline accepts
+    /// and how many are new. An older report without `remaining_findings`
+    /// says that the count includes the accepted functions.
+    #[must_use]
+    pub fn not_listed_note(&self) -> String {
+        const NOT_LISTED: &str = "This run does not list the functions.";
+        if !self.baselined {
+            return format!("{NOT_LISTED} Run `fallow health --complexity` to list them.");
+        }
+        let Some(remaining) = self.remaining else {
+            return format!(
+                "{NOT_LISTED} The count includes the functions that the baseline accepts. \
+                 Run `fallow health --complexity` with the same `--baseline` to list the \
+                 functions that the baseline does not accept."
+            );
+        };
+        let accepted = self.above.saturating_sub(remaining);
+        let verb = if remaining == 1 { "is" } else { "are" };
+        let mut note =
+            format!("The baseline accepts {accepted}. {remaining} {verb} new. {NOT_LISTED}");
+        if remaining > 0 {
+            note.push_str(
+                " Run `fallow health --complexity` with the same `--baseline` to list the \
+                 new functions.",
+            );
+        }
+        note
     }
 }
 
-fn write_complexity_not_listed(out: &mut String, summary: &fallow_output::HealthSummary) {
+/// The complexity listing facts of a typed health report.
+fn complexity_listing(report: &fallow_output::HealthReport) -> ComplexityListing {
+    let staleness = report.summary.baseline_staleness.as_ref();
+    ComplexityListing {
+        listed: report.findings.len(),
+        above: report.summary.functions_above_threshold,
+        complexity_section: report
+            .sections
+            .as_ref()
+            .map(|sections| sections.contains(&fallow_output::HealthSection::Complexity)),
+        score_only: report.vital_signs.is_none(),
+        baselined: staleness.is_some(),
+        remaining: staleness.and_then(|staleness| staleness.remaining_findings),
+    }
+}
+
+fn write_complexity_not_listed(
+    out: &mut String,
+    summary: &fallow_output::HealthSummary,
+    listing: &ComplexityListing,
+) {
     let above = summary.functions_above_threshold;
     let _ = writeln!(
         out,
@@ -1357,7 +1420,7 @@ fn write_complexity_not_listed(out: &mut String, summary: &fallow_output::Health
         summary.max_cyclomatic_threshold,
         summary.max_cognitive_threshold,
         summary.max_crap_threshold,
-        complexity_not_listed_note(summary.baseline_staleness.is_some()),
+        listing.not_listed_note(),
     );
 }
 
@@ -1384,16 +1447,12 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         && report.css_analytics.is_none()
         && report.styling_findings.is_empty()
     {
-        // Only a score-only run omits `vital_signs`.
-        if report.vital_signs.is_none()
-            && complexity_count_unlisted(
-                report.findings.len(),
-                report.summary.functions_above_threshold,
-                true,
-                report.summary.baseline_staleness.is_some(),
-            )
-        {
-            write_complexity_not_listed(&mut out, &report.summary);
+        // Only a score-only run omits `vital_signs`. Another run that does not
+        // list complexity findings has no complexity section, as in the human
+        // output.
+        let listing = complexity_listing(report);
+        if report.vital_signs.is_none() && listing.count_unlisted() {
+            write_complexity_not_listed(&mut out, &report.summary, &listing);
         } else if report.vital_signs.is_none() {
             let _ = write!(
                 out,
@@ -2965,6 +3024,7 @@ mod health_markdown_tests {
             matched_entries: 1,
             stale_entries: 0,
             current_findings: 1,
+            remaining_findings: None,
             change_scoped: false,
             stale: false,
             warning: fallow_output::BaselineStalenessAdvisory::None,
@@ -3017,6 +3077,52 @@ mod health_markdown_tests {
         report.summary.baseline_staleness = Some(accepting_baseline());
         let output = build_health_markdown(&report, root);
         assert!(!output.contains("exceeds complexity"), "{output}");
+        assert!(!output.contains("--complexity"), "{output}");
+    }
+
+    /// A score-only report with `sections` and `remaining_findings` gives the
+    /// number of accepted and new functions instead of the older note.
+    #[test]
+    fn score_only_markdown_names_the_new_functions() {
+        let root = Path::new("/project");
+        let mut report = HealthReport {
+            sections: Some(vec![fallow_output::HealthSection::Score]),
+            ..HealthReport::default()
+        };
+        report.summary.functions_analyzed = 5;
+        report.summary.functions_above_threshold = 3;
+        report.summary.baseline_staleness = Some(fallow_output::BaselineStaleness {
+            remaining_findings: Some(1),
+            ..accepting_baseline()
+        });
+        let output = build_health_markdown(&report, root);
+        assert!(
+            output.contains("## Fallow: 3 functions exceed complexity thresholds"),
+            "{output}"
+        );
+        assert!(
+            output.contains("The baseline accepts 2. 1 is new."),
+            "{output}"
+        );
+        assert!(!output.contains("The count includes"), "{output}");
+    }
+
+    /// A report whose `sections` names `complexity` and has an empty list is
+    /// clean, also without `vital_signs`.
+    #[test]
+    fn listed_markdown_with_sections_stays_clean() {
+        let root = Path::new("/project");
+        let mut report = HealthReport {
+            sections: Some(vec![fallow_output::HealthSection::Complexity]),
+            ..HealthReport::default()
+        };
+        report.summary.functions_above_threshold = 1;
+        report.summary.baseline_staleness = Some(accepting_baseline());
+        let output = build_health_markdown(&report, root);
+        assert!(
+            output.contains("## Fallow: no functions exceed complexity thresholds"),
+            "{output}"
+        );
         assert!(!output.contains("--complexity"), "{output}");
     }
 

@@ -1600,19 +1600,9 @@ fn runtime_finding_row(it: &Value) -> String {
 fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> String {
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let above = u(&summary, "functions_above_threshold");
-    let baselined = summary
-        .get("baseline_staleness")
-        .is_some_and(|value| !value.is_null());
-    // Only a score-only run omits `vital_signs`. The Markdown section reads
-    // the same signal.
-    let score_only = env.get("vital_signs").is_none_or(Value::is_null);
-    if fallow_api::complexity_count_unlisted(
-        complex,
-        usize::try_from(above).unwrap_or(usize::MAX),
-        score_only,
-        baselined,
-    ) {
-        return render_health_complexity_not_listed(&summary, above, baselined, elapsed);
+    let listing = complexity_listing(env, &summary, complex, above);
+    if listing.count_unlisted() {
+        return render_health_complexity_not_listed(&summary, above, &listing, elapsed);
     }
     if complex == 0 {
         return format!(
@@ -1641,12 +1631,42 @@ fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> 
     )
 }
 
+/// The complexity listing facts of a health envelope. The Markdown section
+/// builds the same facts from the typed report.
+fn complexity_listing(
+    env: &Value,
+    summary: &Value,
+    complex: usize,
+    above: u64,
+) -> fallow_api::ComplexityListing {
+    let staleness = summary
+        .get("baseline_staleness")
+        .filter(|value| !value.is_null());
+    fallow_api::ComplexityListing {
+        listed: complex,
+        above: usize::try_from(above).unwrap_or(usize::MAX),
+        // An envelope from an older fallow has no `sections`.
+        complexity_section: env
+            .get("sections")
+            .and_then(Value::as_array)
+            .map(|sections| sections.iter().any(|s| s.as_str() == Some("complexity"))),
+        // Only a score-only run omits `vital_signs`.
+        score_only: env.get("vital_signs").is_none_or(Value::is_null),
+        baselined: staleness.is_some(),
+        remaining: staleness
+            .and_then(|staleness| staleness.get("remaining_findings"))
+            .and_then(Value::as_u64)
+            .map(|remaining| usize::try_from(remaining).unwrap_or(usize::MAX)),
+    }
+}
+
 /// The run counted functions above a threshold but did not list them, for
-/// example a `--score` run. The summary gives the count, not a clean result.
+/// example a `--score` or a `--hotspots` run. The summary gives the count,
+/// not a clean result.
 fn render_health_complexity_not_listed(
     summary: &Value,
     above: u64,
-    baselined: bool,
+    listing: &fallow_api::ComplexityListing,
     elapsed: &str,
 ) -> String {
     format!(
@@ -1657,7 +1677,7 @@ fn render_health_complexity_not_listed(
         num(summary, "max_cyclomatic_threshold"),
         num(summary, "max_cognitive_threshold"),
         threshold_or(summary, "max_crap_threshold", "30"),
-        fallow_api::complexity_not_listed_note(baselined),
+        listing.not_listed_note(),
     )
 }
 
@@ -3301,6 +3321,46 @@ mod tests {
             "{out}"
         );
         assert!(!out.contains("No functions exceed"), "{out}");
+    }
+
+    /// A run with `sections` that does not name `complexity` does not list
+    /// findings, also when it has `vital_signs` and a baseline. The summary
+    /// gives the count and the number of new functions.
+    #[test]
+    fn health_summary_reads_the_sections_member() {
+        let mut env = baselined_envelope(true);
+        env["sections"] = serde_json::json!(["vital-signs", "hotspots"]);
+        env["summary"]["functions_above_threshold"] = serde_json::json!(3);
+        env["summary"]["baseline_staleness"]["remaining_findings"] = serde_json::json!(1);
+        let out = render_health_summary(&env);
+        assert!(out.contains("**3 functions exceed thresholds**"), "{out}");
+        assert!(out.contains("The baseline accepts 2. 1 is new."), "{out}");
+        assert!(
+            out.contains("Run `fallow health --complexity` with the same `--baseline`"),
+            "{out}"
+        );
+        assert!(!out.contains("No functions exceed"), "{out}");
+        assert!(!out.contains("The count includes"), "{out}");
+
+        env["sections"] = serde_json::json!(["complexity", "vital-signs", "hotspots"]);
+        let out = render_health_summary(&env);
+        assert!(
+            out.contains("**No functions exceed complexity thresholds**"),
+            "{out}"
+        );
+    }
+
+    /// When the baseline accepts every function, the note says so and does
+    /// not ask for a rerun.
+    #[test]
+    fn health_summary_with_no_new_function_does_not_ask_for_a_rerun() {
+        let mut env = baselined_envelope(false);
+        env["sections"] = serde_json::json!(["score"]);
+        env["summary"]["baseline_staleness"]["remaining_findings"] = serde_json::json!(0);
+        let out = render_health_summary(&env);
+        assert!(out.contains("**1 function exceeds thresholds**"), "{out}");
+        assert!(out.contains("The baseline accepts 1. 0 are new."), "{out}");
+        assert!(!out.contains("--complexity"), "{out}");
     }
 
     /// Every counted dead-code kind needs a summary row with the registry

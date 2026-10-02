@@ -249,8 +249,10 @@ fn build_health_report_struct(
     action_ctx: &fallow_output::HealthActionContext,
     parts: HealthReportStructParts,
 ) -> HealthReport {
+    let sections = Some(produced_sections(opts, &parts));
     let mut report = HealthReport {
         summary: parts.summary,
+        sections,
         threshold_overrides: build_report_threshold_overrides(opts, parts.threshold_overrides),
         vital_signs: if opts.score_only_output {
             None
@@ -297,6 +299,39 @@ fn build_health_report_struct(
     };
     fill_coverage_intelligence(&mut report, opts);
     report
+}
+
+/// The sections that the report carries, with the same gates as
+/// [`build_health_report_struct`]. Renderers read this list to tell an empty
+/// section from a section that the run did not produce.
+fn produced_sections(
+    opts: &HealthOptions<'_>,
+    parts: &HealthReportStructParts,
+) -> Vec<fallow_output::HealthSection> {
+    use fallow_output::HealthSection;
+
+    let full = !opts.score_only_output;
+    [
+        (HealthSection::Complexity, opts.complexity),
+        (HealthSection::VitalSigns, full),
+        (HealthSection::Score, parts.health_score.is_some()),
+        (HealthSection::FileScores, full && opts.file_scores),
+        (
+            HealthSection::CoverageGaps,
+            full && parts.coverage_gaps.is_some(),
+        ),
+        (HealthSection::Hotspots, opts.hotspots),
+        (HealthSection::Targets, full && opts.targets),
+        (HealthSection::Trend, parts.health_trend.is_some()),
+        (
+            HealthSection::RuntimeCoverage,
+            parts.runtime_coverage.is_some(),
+        ),
+        (HealthSection::Css, opts.css),
+    ]
+    .into_iter()
+    .filter_map(|(section, produced)| produced.then_some(section))
+    .collect()
 }
 
 /// Populate `coverage_intelligence` from the built report unless score-only.

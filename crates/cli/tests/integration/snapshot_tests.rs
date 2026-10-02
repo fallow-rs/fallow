@@ -2104,6 +2104,7 @@ fn baseline_staleness_fixture(
         matched_entries: matched,
         stale_entries: 8 - matched,
         current_findings: 6,
+        remaining_findings: None,
         change_scoped: false,
         stale: !matches!(warning, BaselineStalenessAdvisory::None),
         warning,
@@ -2126,6 +2127,7 @@ fn unrecognised_baseline_fixture() -> BaselineStaleness {
         matched_entries: 0,
         stale_entries: 0,
         current_findings: 6,
+        remaining_findings: None,
         change_scoped: false,
         stale: false,
         warning: BaselineStalenessAdvisory::None,
@@ -2916,6 +2918,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         crap_refactor_band: 5,
     };
     HealthReport {
+        sections: None,
         findings: vec![fallow_output::HealthFinding::with_actions(
             ComplexityViolation {
                 path: root.join("src/complex.ts"),
@@ -3225,6 +3228,7 @@ fn codeclimate_health_with_coverage_intelligence_snapshot() {
 /// Build an empty health report (no findings).
 fn empty_health_report() -> HealthReport {
     HealthReport {
+        sections: None,
         findings: vec![],
         summary: HealthSummary {
             files_analyzed: 50,

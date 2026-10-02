@@ -223,7 +223,7 @@ pub use health_grouped::{
     GroupTrendStatus, HealthGroup, HealthGrouping, group_score_delta_label,
     health_groups_in_display_order,
 };
-pub use health_report::HealthReport;
+pub use health_report::{HealthReport, HealthSection};
 pub use health_runtime_coverage::{
     OPTIMIZATION_TARGET_UNMATCHED_WARNING, RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction,
     RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,

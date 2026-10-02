@@ -491,25 +491,46 @@ Markdown and the GitHub job summary render the group table through one JSON
 renderer (`fallow_api::build_health_groups_markdown`), so `report --from`
 on a saved grouped envelope gives the same summary as the live run.
 
+The health envelope names the sections that the run produced in `sections`
+(`HealthSection` in `crates/output/src/health_report.rs`).
+`produced_sections` in `crates/engine/src/health/assembly.rs` builds the list
+with the same gates that fill the report fields, so a token is in the list
+exactly when the report carries that section. `complexity` means that
+`findings` is the complexity list. Without it, `findings` is empty because
+the run did not list the functions, and `summary.functions_above_threshold`
+is the only count.
+
 When a run does not list findings but `summary.functions_above_threshold` is
-not zero (for example a `--score` run), the project complexity section of
-both renderers gives that count and names `--complexity`. It does not say
-that no function exceeds a threshold. One rule,
-`fallow_api::complexity_count_unlisted`, decides this for both renderers:
+not zero, the complexity section gives that count and names `--complexity`.
+It does not say that no function exceeds a threshold. One rule,
+`fallow_api::ComplexityListing::count_unlisted`, decides this for both
+renderers:
 
-- A score-only run never lists findings. An envelope from this run has no
-  `vital_signs` (`assembly.rs` omits them only when
-  `score_only_output` is set). This run gives the count also with a
-  baseline. The count comes before the baseline, so the note
-  (`fallow_api::complexity_not_listed_note`) says that the count includes the
-  functions that the baseline accepts.
-- On a run that can list findings, an empty list with
-  `summary.baseline_staleness` means that the baseline accepts every finding.
-  This run keeps the clean message.
+- A run whose `sections` does not contain `complexity` gives the count, also
+  with a baseline. This applies to `--score`, `--hotspots`, `--file-scores`
+  and `--targets`.
+- A run whose `sections` contains `complexity` and lists no finding is clean.
+  With a baseline, the baseline accepts every finding.
+- An envelope without `sections` (from an older fallow, read with
+  `report --from`) keeps the earlier rule: a run without `vital_signs`
+  (score-only) gives the count, and another run gives the count only without
+  a baseline.
 
-The envelope has no signal for other runs that do not list findings, for
-example `--file-scores --baseline`. These runs keep the clean message when a
-baseline is loaded.
+The job summary renders only the complexity section, so it gives the count
+for each run without `complexity`. Markdown gives the count only on a
+score-only run. On `--hotspots`, `--file-scores` and `--targets`, Markdown
+has no complexity section, as in the human output.
+
+With a baseline, `summary.baseline_staleness.remaining_findings` is the
+number of functions above a threshold that the baseline does not accept.
+`load_health_baseline` in `crates/engine/src/health/baseline_io.rs` sets it
+from the finding list after the baseline filter and before `--top`. It counts
+functions, not baseline entries, because one function can match more than
+one entry. The note (`ComplexityListing::not_listed_note`) then says "The
+baseline accepts 2. 1 is new.". It asks for a `--complexity` run only when a
+function is new. An envelope without the member keeps the earlier note: the
+count includes the functions that the baseline accepts. `dead-code` and
+`dupes` do not set the member.
 
 ## Compact health populations
 

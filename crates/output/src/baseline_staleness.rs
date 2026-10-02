@@ -273,6 +273,17 @@ pub struct BaselineStaleness {
     /// because the scope was empty, which is why `stale` stays false there even
     /// when every entry went unmatched.
     pub current_findings: usize,
+    /// Health only: the number of functions above a complexity threshold that
+    /// the baseline does not accept. This is a count of functions, like
+    /// `summary.functions_above_threshold`, not a count of baseline entries,
+    /// and it is the value before `--top`. A run that does not list the
+    /// complexity findings (for example `--score`) still reports it, so a
+    /// reader can tell the new functions from the accepted ones.
+    ///
+    /// `dead-code` and `dupes` do not emit it. An envelope from a fallow
+    /// version before this member does not carry it either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_findings: Option<usize>,
     /// True when this run analyzed only part of the project, so a whole-project
     /// baseline matches less of it for reasons that are not rot. The channels
     /// differ per command and include a diff, a base ref, `--changed-since`,
@@ -377,6 +388,7 @@ mod tests {
             matched_entries: 0,
             stale_entries: 8,
             current_findings: 0,
+            remaining_findings: None,
             change_scoped: !scope_reasons.is_empty(),
             stale: false,
             warning: BaselineStalenessAdvisory::None,

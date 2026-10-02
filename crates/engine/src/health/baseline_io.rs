@@ -197,7 +197,13 @@ pub(super) fn load_health_baseline(
         unrecognised_format,
         scope_reasons,
     };
-    let staleness = staleness_from_counts(&counts);
+    // One finding is one function above a threshold, the unit of
+    // `summary.functions_above_threshold`. A function can match more than one
+    // baseline entry, so the entry counts do not give this number.
+    let staleness = fallow_output::BaselineStaleness {
+        remaining_findings: Some(findings.len()),
+        ..staleness_from_counts(&counts)
+    };
     if !quiet {
         warn_on_staleness(&counts, baseline_path);
         if counts.moved_entries > 0 {

@@ -333,6 +333,7 @@ mod status_note_tests {
             matched_entries: 0,
             stale_entries: 8,
             current_findings: 6,
+            remaining_findings: None,
             change_scoped: false,
             stale: true,
             warning: BaselineStalenessAdvisory::ZeroOverlap,

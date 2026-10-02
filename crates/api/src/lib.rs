@@ -158,8 +158,8 @@ pub use list_runtime::{
     serialize_list_boundaries_programmatic_json, serialize_project_info_programmatic_json,
 };
 pub use markdown_output::{
-    build_duplication_markdown, build_grouped_markdown, build_health_markdown, build_markdown,
-    build_walkthrough_markdown, complexity_count_unlisted, complexity_not_listed_note,
+    ComplexityListing, build_duplication_markdown, build_grouped_markdown, build_health_markdown,
+    build_markdown, build_walkthrough_markdown,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,

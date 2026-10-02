@@ -366,6 +366,7 @@ mod tests {
                 matched_entries: matched,
                 stale_entries: 8 - matched,
                 current_findings: 4,
+                remaining_findings: None,
                 change_scoped: false,
                 stale: !matches!(warning, BaselineStalenessAdvisory::None),
                 warning,
