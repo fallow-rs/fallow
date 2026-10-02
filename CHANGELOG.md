@@ -552,6 +552,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unused dependency. Now a local path in these options is a used file, and a
   package name is a used dependency.
 
+- **A config value that calls a local path helper resolves.** A config can
+  declare a helper such as
+  `const p = (rel) => fileURLToPath(new URL(rel, import.meta.url))` and use
+  `p("./src/entry.ts")` as a value. Before, fallow did not read this call.
+  Thus it reported the Vite `build.rollupOptions.input` entry and the
+  `resolve.alias` target as unused files. Now fallow evaluates a call to a
+  module-level helper with one parameter and one returned path expression.
+  The fix applies to all plugins that read entry values and alias
+  replacements with the shared config readers. A helper with more than one
+  parameter, or a helper that calls another helper, still gives no value.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

@@ -596,6 +596,95 @@ mod tests {
         );
     }
 
+    fn entry_pattern_strings(result: &PluginResult) -> Vec<&str> {
+        result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn resolve_config_evaluates_a_local_path_helper_call() {
+        let source = r"
+            import { fileURLToPath } from 'node:url';
+            import { resolve } from 'node:path';
+
+            const fromHere = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
+            function fromDir(rel) {
+                return resolve(__dirname, rel);
+            }
+            const viaPathname = function (rel) { return new URL(rel, import.meta.url).pathname; };
+
+            export default {
+                resolve: { alias: { 'some-mod': fromHere('./src/stub.ts') } },
+                build: {
+                    rollupOptions: {
+                        input: {
+                            main: fromHere('./src/main.ts'),
+                            second: fromDir('src/second.ts'),
+                            third: viaPathname('./src/third.ts'),
+                        },
+                    },
+                },
+            };
+        ";
+        let result = VitePlugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        let patterns = entry_pattern_strings(&result);
+        for expected in ["src/main.ts", "src/second.ts", "src/third.ts"] {
+            assert!(
+                patterns.contains(&expected),
+                "local helper call {expected} should be an entry: {patterns:?}"
+            );
+        }
+        assert_eq!(
+            result.path_aliases,
+            vec![("some-mod".to_string(), "src/stub.ts".to_string())]
+        );
+    }
+
+    #[test]
+    fn resolve_config_ignores_a_local_helper_with_an_unsupported_body() {
+        let source = r"
+            const base = 'src';
+            const fromBase = (rel) => `${base}/${rel}`;
+            const twoArgs = (dir, rel) => dir + rel;
+            const nested = (rel) => fromBase(rel);
+
+            export default {
+                resolve: { alias: { 'some-mod': fromBase('stub.ts') } },
+                build: {
+                    rollupOptions: {
+                        input: {
+                            a: fromBase('a.ts'),
+                            b: twoArgs('src', '/b.ts'),
+                            c: nested('c.ts'),
+                        },
+                    },
+                },
+            };
+        ";
+        let result = VitePlugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        let patterns = entry_pattern_strings(&result);
+        for unexpected in ["a.ts", "src/a.ts", "src/b.ts", "c.ts", "src/c.ts"] {
+            assert!(
+                !patterns.contains(&unexpected),
+                "an unsupported helper body must yield nothing, found {unexpected}: {patterns:?}"
+            );
+        }
+        assert!(result.path_aliases.is_empty(), "{:?}", result.path_aliases);
+    }
+
     #[test]
     fn resolve_config_react_babel_plugin_references_react_compiler_dependency() {
         let source = r#"

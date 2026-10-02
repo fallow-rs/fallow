@@ -322,7 +322,7 @@ pub(crate) fn extract_config_string_or_array(
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
-        get_nested_string_or_array(obj, prop_path)
+        get_nested_string_or_array(obj, prop_path, PathScope::Program(program))
     })
     .unwrap_or_default()
 }
@@ -342,13 +342,15 @@ pub(crate) fn extract_config_array_or_object_string_or_array(
     extract_from_source(source, path, |program| {
         let Some(arr) = find_default_export_array(program) else {
             let obj = find_config_object(program)?;
-            return get_nested_string_or_array(obj, prop_path);
+            return get_nested_string_or_array(obj, prop_path, PathScope::Program(program));
         };
         let values = arr
             .elements
             .iter()
             .filter_map(|element| element.as_expression().and_then(object_expression))
-            .filter_map(|element_obj| get_nested_string_or_array(element_obj, prop_path))
+            .filter_map(|element_obj| {
+                get_nested_string_or_array(element_obj, prop_path, PathScope::Program(program))
+            })
             .flatten()
             .collect();
         Some(values)
@@ -387,7 +389,8 @@ pub(crate) fn extract_config_array_nested_string_or_array(
         let mut results = Vec::new();
         for element in &arr.elements {
             if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
-                && let Some(values) = get_nested_string_or_array(element_obj, inner_path)
+                && let Some(values) =
+                    get_nested_string_or_array(element_obj, inner_path, PathScope::Program(program))
             {
                 results.extend(values);
             }
@@ -426,7 +429,12 @@ pub(crate) fn extract_config_array_object_fields(
                 Some(Expression::ObjectExpression(element_obj)) => Some(
                     keys.iter()
                         .map(|key| {
-                            get_nested_string_or_array(element_obj, &[key]).unwrap_or_default()
+                            get_nested_string_or_array(
+                                element_obj,
+                                &[key],
+                                PathScope::Program(program),
+                            )
+                            .unwrap_or_default()
                         })
                         .collect(),
                 ),
@@ -447,7 +455,7 @@ pub(crate) fn extract_config_object_nested_string_or_array(
     inner_path: &[&str],
 ) -> Vec<String> {
     extract_config_object_nested(source, path, object_path, |value_obj| {
-        get_nested_string_or_array(value_obj, inner_path)
+        get_nested_string_or_array(value_obj, inner_path, PathScope::Bare)
     })
 }
 
@@ -1883,54 +1891,60 @@ fn is_command_token_char(ch: char) -> bool {
     !ch.is_whitespace() && !matches!(ch, '&' | '|' | ';' | '"' | '\'')
 }
 
+/// The identifiers that a path expression can resolve.
+#[derive(Clone, Copy)]
+enum PathScope<'p> {
+    /// No identifier resolves.
+    Bare,
+    /// A call to a module-level path helper of this program resolves.
+    Program(&'p Program<'p>),
+    /// Inside a helper body, the parameter `name` holds the literal `value`.
+    Param { name: &'p str, value: &'p str },
+}
+
 /// Convert an expression to a path-like string if it's statically recoverable.
 pub(crate) fn expression_to_path_string(expr: &Expression) -> Option<String> {
-    path_string_with_param(expr, None)
+    path_string_in(expr, PathScope::Bare)
 }
 
-/// A helper parameter name and the string literal the call site passes for it.
-type ParamBinding<'b> = Option<(&'b str, &'b str)>;
-
-/// Read a path expression. When `param` is set, an identifier with that name
-/// reads as the bound literal. A same-file path helper uses this for its body.
-fn path_string_with_param(expr: &Expression, param: ParamBinding<'_>) -> Option<String> {
+fn path_string_in(expr: &Expression, scope: PathScope<'_>) -> Option<String> {
     match expr {
-        Expression::ParenthesizedExpression(paren) => {
-            path_string_with_param(&paren.expression, param)
-        }
-        Expression::TSAsExpression(ts_as) => path_string_with_param(&ts_as.expression, param),
-        Expression::TSSatisfiesExpression(ts_sat) => {
-            path_string_with_param(&ts_sat.expression, param)
-        }
+        Expression::ParenthesizedExpression(paren) => path_string_in(&paren.expression, scope),
+        Expression::TSAsExpression(ts_as) => path_string_in(&ts_as.expression, scope),
+        Expression::TSSatisfiesExpression(ts_sat) => path_string_in(&ts_sat.expression, scope),
         Expression::StaticMemberExpression(member) if member.property.name == "pathname" => {
-            path_string_with_param(&member.object, param)
+            path_string_in(&member.object, scope)
         }
-        Expression::CallExpression(call) => call_expression_to_path_string(call, param),
-        Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr, param),
-        _ => path_segment_string(expr, param),
+        Expression::CallExpression(call) => call_expression_to_path_string(call, scope),
+        Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr, scope),
+        _ => scoped_string(expr, scope),
     }
 }
 
-/// Read one string segment: a string literal, or the bound helper parameter.
-fn path_segment_string(expr: &Expression, param: ParamBinding<'_>) -> Option<String> {
-    if let (Expression::Identifier(id), Some((name, value))) = (expr, param)
-        && id.name == name
+/// A string literal, or the helper parameter that stands for one.
+fn scoped_string(expr: &Expression, scope: PathScope<'_>) -> Option<String> {
+    match (expr, scope) {
+        (Expression::Identifier(id), PathScope::Param { name, value }) if id.name == name => {
+            Some(value.to_string())
+        }
+        _ => expression_to_string(expr),
+    }
+}
+
+fn call_expression_to_path_string(call: &CallExpression, scope: PathScope<'_>) -> Option<String> {
+    if let PathScope::Program(program) = scope
+        && let Expression::Identifier(id) = &call.callee
+        && let Some(path) = local_helper_call_path(program, &id.name, call)
     {
-        return Some(value.to_string());
+        return Some(path);
     }
-    expression_to_string(expr)
-}
 
-fn call_expression_to_path_string(
-    call: &CallExpression,
-    param: ParamBinding<'_>,
-) -> Option<String> {
     if matches!(&call.callee, Expression::Identifier(id) if id.name == "fileURLToPath") {
         return call
             .arguments
             .first()
             .and_then(Argument::as_expression)
-            .and_then(|arg| path_string_with_param(arg, param));
+            .and_then(|arg| path_string_in(arg, scope));
     }
 
     let callee_name = match &call.callee {
@@ -1954,10 +1968,95 @@ fn call_expression_to_path_string(
             return None;
         }
 
-        segments.push(path_segment_string(expr, param)?);
+        segments.push(scoped_string(expr, scope)?);
     }
 
     (!segments.is_empty()).then(|| join_path_segments(&segments))
+}
+
+/// Evaluate a call to a module-level path helper with one literal argument.
+///
+/// Configs often declare a small helper such as
+/// `const p = (rel) => fileURLToPath(new URL(rel, import.meta.url))` and call
+/// it as `p("./src/main.ts")`. The helper body is evaluated with its parameter
+/// bound to the literal argument. The body can not call another helper.
+fn local_helper_call_path(program: &Program, name: &str, call: &CallExpression) -> Option<String> {
+    let [argument] = call.arguments.as_slice() else {
+        return None;
+    };
+    let value = expression_to_string(argument.as_expression()?)?;
+    let (param, body) = find_local_path_helper(program, name)?;
+    path_string_in(
+        body,
+        PathScope::Param {
+            name: param,
+            value: &value,
+        },
+    )
+}
+
+/// Find a module-level function `name` with one simple parameter and a body
+/// that only returns one expression. Return the parameter name and that
+/// expression.
+fn find_local_path_helper<'a>(
+    program: &'a Program<'a>,
+    name: &str,
+) -> Option<(&'a str, &'a Expression<'a>)> {
+    let declared = program.body.iter().find_map(|stmt| {
+        let func = match stmt {
+            Statement::FunctionDeclaration(func) => func,
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::FunctionDeclaration(func) => func,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        func.id
+            .as_ref()
+            .is_some_and(|id| id.name == name)
+            .then_some(&**func)
+    });
+    if let Some(func) = declared {
+        return function_helper_body(func);
+    }
+    match find_variable_init_expression(program, name)?.without_parentheses() {
+        Expression::ArrowFunctionExpression(arrow) => {
+            let param = single_simple_param(&arrow.params)?;
+            let body = match &arrow.body {
+                ArrowFunctionBody::FunctionBody(body) => single_returned_expression(body)?,
+                body => body.as_expression()?,
+            };
+            Some((param, body))
+        }
+        Expression::FunctionExpression(func) => function_helper_body(func),
+        _ => None,
+    }
+}
+
+fn function_helper_body<'a>(func: &'a Function<'a>) -> Option<(&'a str, &'a Expression<'a>)> {
+    let param = single_simple_param(&func.params)?;
+    let body = single_returned_expression(func.body.as_ref()?)?;
+    Some((param, body))
+}
+
+fn single_simple_param<'a>(params: &'a FormalParameters<'a>) -> Option<&'a str> {
+    let [param] = params.items.as_slice() else {
+        return None;
+    };
+    if params.rest.is_some() || param.initializer.is_some() {
+        return None;
+    }
+    match &param.pattern {
+        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
+        _ => None,
+    }
+}
+
+fn single_returned_expression<'a>(body: &'a FunctionBody<'a>) -> Option<&'a Expression<'a>> {
+    match body.statements.as_slice() {
+        [Statement::ReturnStatement(ret)] => ret.argument.as_ref(),
+        _ => None,
+    }
 }
 
 /// True when an expression is a "current directory" anchor: the `__dirname`
@@ -1979,10 +2078,7 @@ fn is_import_meta_expression(expr: &Expression) -> bool {
     matches!(expr, Expression::ImportMeta(_))
 }
 
-fn new_expression_to_path_string(
-    new_expr: &NewExpression,
-    param: ParamBinding<'_>,
-) -> Option<String> {
+fn new_expression_to_path_string(new_expr: &NewExpression, scope: PathScope<'_>) -> Option<String> {
     if !matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "URL") {
         return None;
     }
@@ -1991,7 +2087,7 @@ fn new_expression_to_path_string(
         .arguments
         .first()
         .and_then(Argument::as_expression)
-        .and_then(|arg| path_segment_string(arg, param))?;
+        .and_then(|arg| scoped_string(arg, scope))?;
 
     let base = new_expr
         .arguments
@@ -2034,7 +2130,8 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
                     return None;
                 };
                 let find = property_key_to_string(&prop.key)?;
-                let (replacement, is_bare) = alias_replacement_kinded(&prop.value)?;
+                let (replacement, is_bare) =
+                    alias_replacement_kinded(&prop.value, PathScope::Bare)?;
                 Some((find, replacement, is_bare))
             })
             .collect(),
@@ -2048,7 +2145,7 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
                 let find = find_property(obj, "find")
                     .and_then(|prop| expression_to_string(&prop.value))?;
                 let (replacement, is_bare) = find_property(obj, "replacement")
-                    .and_then(|prop| alias_replacement_kinded(&prop.value))?;
+                    .and_then(|prop| alias_replacement_kinded(&prop.value, PathScope::Bare))?;
                 Some((find, replacement, is_bare))
             })
             .collect(),
@@ -2062,11 +2159,15 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
 /// (`path.resolve(...)`, `path.join(...)`, `fileURLToPath(...)`, `new URL(...)`)
 /// or a `./`-prefixed string is always a filesystem path. This is the
 /// filesystem-free discriminator the package-to-package gate relies on.
-fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
+fn alias_replacement_kinded(expr: &Expression, scope: PathScope<'_>) -> Option<(String, bool)> {
     match expr {
-        Expression::ParenthesizedExpression(paren) => alias_replacement_kinded(&paren.expression),
-        Expression::TSAsExpression(ts_as) => alias_replacement_kinded(&ts_as.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => alias_replacement_kinded(&ts_sat.expression),
+        Expression::ParenthesizedExpression(paren) => {
+            alias_replacement_kinded(&paren.expression, scope)
+        }
+        Expression::TSAsExpression(ts_as) => alias_replacement_kinded(&ts_as.expression, scope),
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            alias_replacement_kinded(&ts_sat.expression, scope)
+        }
         Expression::StringLiteral(s) => {
             let value = s.value.to_string();
             let is_bare =
@@ -2080,111 +2181,9 @@ fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
             .elements
             .iter()
             .find_map(ArrayExpressionElement::as_expression)
-            .and_then(alias_replacement_kinded),
-        _ => expression_to_path_string(expr).map(|value| (value, false)),
+            .and_then(|element| alias_replacement_kinded(element, scope)),
+        _ => path_string_in(expr, scope).map(|value| (value, false)),
     }
-}
-
-/// Like [`alias_replacement_kinded`], and also reads a call to a same-file
-/// path helper (`here("src/x.ts")`). See [`local_path_helper_call`].
-fn alias_replacement_in_program(program: &Program, expr: &Expression) -> Option<(String, bool)> {
-    alias_replacement_kinded(expr)
-        .or_else(|| local_path_helper_call(program, expr).map(|value| (value, false)))
-}
-
-/// Read a call `helper("literal")` where `helper` is a top-level function in
-/// the same file with one plain parameter and a body that is one path
-/// expression:
-///
-/// - `const helper = (p) => fileURLToPath(new URL(p, import.meta.url))`
-/// - `function helper(p) { return path.resolve(__dirname, p); }`
-///
-/// The literal replaces the parameter in the body. The result is always a
-/// filesystem path, never a bare package alias. Helpers with more than one
-/// parameter, a default value, a conditional body, or an import binding stay
-/// unresolved, because the call site does not fix their value.
-fn local_path_helper_call(program: &Program, expr: &Expression) -> Option<String> {
-    let Expression::CallExpression(call) = expr.without_parentheses() else {
-        return None;
-    };
-    let Expression::Identifier(callee) = &call.callee else {
-        return None;
-    };
-    let [argument] = call.arguments.as_slice() else {
-        return None;
-    };
-    let literal = argument.as_expression().and_then(expression_to_string)?;
-    let (params, body_expr) = find_local_function(program, callee.name.as_str())?;
-    let param = single_plain_parameter(params)?;
-    path_string_with_param(body_expr, Some((param, literal.as_str())))
-}
-
-/// Find a top-level function named `name` in the program and return its
-/// parameters and its returned expression. The function is a function
-/// declaration, or a `const` bound to an arrow function or function
-/// expression.
-fn find_local_function<'a>(
-    program: &'a Program<'a>,
-    name: &str,
-) -> Option<(&'a FormalParameters<'a>, &'a Expression<'a>)> {
-    if let Some(init) = find_variable_init_expression(program, name) {
-        return match init.without_parentheses() {
-            Expression::ArrowFunctionExpression(arrow) => {
-                let body_expr = match &arrow.body {
-                    ArrowFunctionBody::FunctionBody(body) => single_return_expression(body)?,
-                    body => body.as_expression()?,
-                };
-                Some((&arrow.params, body_expr))
-            }
-            Expression::FunctionExpression(func) => Some((
-                &func.params,
-                single_return_expression(func.body.as_deref()?)?,
-            )),
-            _ => None,
-        };
-    }
-    program.body.iter().find_map(|stmt| {
-        let func = match stmt {
-            Statement::FunctionDeclaration(func) => func,
-            Statement::ExportDeclaration(export) => match &export.declaration {
-                Declaration::FunctionDeclaration(func) => func,
-                _ => return None,
-            },
-            _ => return None,
-        };
-        (func.id.as_ref()?.name == name).then_some(())?;
-        Some((
-            &*func.params,
-            single_return_expression(func.body.as_deref()?)?,
-        ))
-    })
-}
-
-/// The name of the only parameter, when it is a plain identifier without a
-/// default value.
-fn single_plain_parameter<'a>(params: &'a FormalParameters<'a>) -> Option<&'a str> {
-    if params.rest.is_some() {
-        return None;
-    }
-    let [param] = params.items.as_slice() else {
-        return None;
-    };
-    if param.initializer.is_some() {
-        return None;
-    }
-    match &param.pattern {
-        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
-        _ => None,
-    }
-}
-
-/// The expression a block function body returns when the body is exactly one
-/// `return <expr>;` statement.
-fn single_return_expression<'a>(body: &'a FunctionBody<'a>) -> Option<&'a Expression<'a>> {
-    let [Statement::ReturnStatement(ret)] = body.statements.as_slice() else {
-        return None;
-    };
-    ret.argument.as_ref()
 }
 
 /// Maximum identifier-indirection hops the alias resolver follows before giving
@@ -2263,7 +2262,7 @@ fn resolve_object_alias_pairs_kinded(
             ObjectPropertyKind::ObjectProperty(prop) => {
                 if let Some(find) = property_key_to_string(&prop.key)
                     && let Some((replacement, is_bare)) =
-                        alias_replacement_in_program(program, &prop.value)
+                        alias_replacement_kinded(&prop.value, PathScope::Program(program))
                 {
                     pairs.push((find, replacement, is_bare));
                 }
@@ -2310,7 +2309,9 @@ fn resolve_array_alias_pairs_kinded(
                     && let Some(find) = find_property(obj, "find")
                         .and_then(|prop| expression_to_string(&prop.value))
                     && let Some((replacement, is_bare)) = find_property(obj, "replacement")
-                        .and_then(|prop| alias_replacement_in_program(program, &prop.value))
+                        .and_then(|prop| {
+                            alias_replacement_kinded(&prop.value, PathScope::Program(program))
+                        })
                 {
                     pairs.push((find, replacement, is_bare));
                 }
@@ -2763,17 +2764,21 @@ fn get_nested_expression<'a>(
 }
 
 /// Navigate a nested path and extract a string, string array, or object string/array values.
-fn get_nested_string_or_array(obj: &ObjectExpression, path: &[&str]) -> Option<Vec<String>> {
+fn get_nested_string_or_array(
+    obj: &ObjectExpression,
+    path: &[&str],
+    scope: PathScope<'_>,
+) -> Option<Vec<String>> {
     if path.is_empty() {
         return None;
     }
     if path.len() == 1 {
         let prop = find_property(obj, path[0])?;
-        return Some(expression_to_string_or_array(&prop.value));
+        return Some(string_or_array_in(&prop.value, scope));
     }
     let prop = find_property(obj, path[0])?;
     if let Expression::ObjectExpression(nested) = &prop.value {
-        get_nested_string_or_array(nested, &path[1..])
+        get_nested_string_or_array(nested, &path[1..], scope)
     } else {
         None
     }
@@ -2787,6 +2792,10 @@ fn get_nested_string_or_array(obj: &ObjectExpression, path: &[&str]) -> Option<V
 /// `{ "input": "src/x.scss", "bundleName": "x", "inject": false }`). Extracting
 /// `input` prevents object-form entries from being silently dropped. See #126.
 pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
+    string_or_array_in(expr, PathScope::Bare)
+}
+
+fn string_or_array_in(expr: &Expression, scope: PathScope<'_>) -> Vec<String> {
     match expr {
         Expression::StringLiteral(s) => vec![s.value.to_string()],
         Expression::TemplateLiteral(t) if t.expressions.is_empty() => t
@@ -2800,9 +2809,9 @@ pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
             .filter_map(|el| el.as_expression())
             .flat_map(|e| match e {
                 Expression::ObjectExpression(obj) => find_property(obj, "input")
-                    .map(|p| expression_to_string_or_array(&p.value))
+                    .map(|p| string_or_array_in(&p.value, scope))
                     .unwrap_or_default(),
-                _ => expression_to_path_string(e).into_iter().collect(),
+                _ => path_string_in(e, scope).into_iter().collect(),
             })
             .collect(),
         Expression::ObjectExpression(obj) => obj
@@ -2811,22 +2820,20 @@ pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
             .flat_map(|p| {
                 if let ObjectPropertyKind::ObjectProperty(p) = p {
                     match &p.value {
-                        Expression::ArrayExpression(_) => expression_to_string_or_array(&p.value),
+                        Expression::ArrayExpression(_) => string_or_array_in(&p.value, scope),
                         Expression::ObjectExpression(value_obj) => {
                             find_property(value_obj, "import")
-                                .map(|import_prop| {
-                                    expression_to_string_or_array(&import_prop.value)
-                                })
+                                .map(|import_prop| string_or_array_in(&import_prop.value, scope))
                                 .unwrap_or_default()
                         }
-                        _ => expression_to_path_string(&p.value).into_iter().collect(),
+                        _ => path_string_in(&p.value, scope).into_iter().collect(),
                     }
                 } else {
                     Vec::new()
                 }
             })
             .collect(),
-        _ => expression_to_path_string(expr).into_iter().collect(),
+        _ => path_string_in(expr, scope).into_iter().collect(),
     }
 }
 
