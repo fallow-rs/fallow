@@ -13048,3 +13048,97 @@ fn interface_heritage_name_reads_like_a_member_expression() {
     );
     assert_eq!(info.whole_object_uses, base.whole_object_uses);
 }
+
+#[test]
+fn nullish_fallback_new_binds_class() {
+    let info = parse(
+        r"
+        class Cache { used() {} }
+        class Pool { used() {} }
+        export function run(o: { cache?: Cache }, x: unknown) {
+          const c = o.cache ?? new Cache();
+          c.used();
+          const p = x || new Pool();
+          p.used();
+        }
+        ",
+    );
+    assert!(
+        has_member_access(&info, "Cache", "used"),
+        "`??` fallback should bind the constructed class: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        has_member_access(&info, "Pool", "used"),
+        "`||` fallback should bind the constructed class: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn nullable_ternary_new_binds_class() {
+    let info = parse(
+        r"
+        class Queue { viaNull() {} viaUndefined() {} viaVoid() {} }
+        export function run(f: boolean) {
+          const a = f ? new Queue() : null;
+          a?.viaNull();
+          const b = f ? undefined : new Queue();
+          b?.viaUndefined();
+          const c = f ? new Queue() : void 0;
+          c?.viaVoid();
+        }
+        ",
+    );
+    for member in ["viaNull", "viaUndefined", "viaVoid"] {
+        assert!(
+            has_member_access(&info, "Queue", member),
+            "nullable ternary should bind the constructed class for {member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn nullable_ternary_static_factory_binds_class() {
+    let info = parse(
+        r"
+        export class Link {
+          static open(path: string): Link { return new Link(); }
+          used() {}
+        }
+        export function run(f: boolean) {
+          const l = f ? Link.open('p') : undefined;
+          l?.used();
+        }
+        ",
+    );
+    assert!(
+        has_member_access(&info, "Link", "used"),
+        "nullable ternary should bind the static factory product: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn fallback_with_two_different_classes_does_not_bind() {
+    let info = parse(
+        r"
+        class Primary { shared() {} }
+        class Backup { shared() {} }
+        export function run(f: boolean) {
+          const primary = new Primary();
+          const v = primary ?? new Backup();
+          v.shared();
+          const w = f ? new Primary() : new Backup();
+          w.shared();
+        }
+        ",
+    );
+    assert!(
+        !has_member_access(&info, "Primary", "shared")
+            && !has_member_access(&info, "Backup", "shared"),
+        "operands with two different classes must not bind one class: {:?}",
+        info.member_accesses
+    );
+}

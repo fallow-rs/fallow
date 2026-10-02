@@ -144,6 +144,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it does not credit the class. The extraction cache version changes, so
   the first run after the upgrade parses all files again.
 
+- **Class members used through a fallback or a nullable ternary are
+  credited.** Before, fallow did not follow a local such as
+  `const cache = options.cache ?? new Cache()`, `pool || new Pool()` or
+  `flag ? Link.open(path) : undefined` to its class. Thus it reported every
+  member that the code called through that local as unused. Now fallow
+  binds the local to the class of the operand that holds the instance. A
+  ternary with `null`, `undefined` or `void 0` in one branch uses the other
+  branch. A `??` or `||` fallback uses `new X()` on the right, or a left
+  operand that fallow already binds to a class. When the two operands give
+  two different classes, fallow binds no class.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

@@ -282,7 +282,7 @@ impl ModuleInfoExtractor {
             Expression::AwaitExpression(await_expr) => (&await_expr.argument, true),
             _ => (init, false),
         };
-        let Some(callee_name) = Self::bare_call_callee_name(call) else {
+        let Some(callee_name) = Self::bare_call_callee_name(self.class_carrying_init(call)) else {
             return;
         };
 
@@ -2029,6 +2029,11 @@ impl<'a> ModuleInfoExtractor {
             }
         }
 
+        // `a ?? new A()`, `f ? new A() : null` and similar inits hold the
+        // class instance in one operand. Bind through that operand.
+        let original_init = init;
+        let init = self.class_carrying_init(init);
+
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Some(source) = static_member_object_name(unwrap_static_expr(init))
         {
@@ -2055,18 +2060,19 @@ impl<'a> ModuleInfoExtractor {
             }
         }
 
+        // `f ? (value as T) : null` binds `T`. A plain `value as T` init
+        // stays out: only an unwrapped nullable operand reads the assertion.
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
-            && let Some(type_name) = self.nullable_asserted_type_name(init)
+            && !std::ptr::eq(init, original_init)
+            && let Some(type_name) = self.asserted_receiver_type_name(init)
         {
             self.insert_class_binding_target(id.name.to_string(), type_name);
         }
 
-        if let Expression::NewExpression(new_expr) = init
-            && let Expression::Identifier(callee) = &new_expr.callee
-            && let BindingPattern::BindingIdentifier(id) = &declarator.id
-            && !super::helpers::is_builtin_constructor(callee.name.as_str())
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(class_name) = constructed_class_name(init)
         {
-            self.insert_class_binding_target(id.name.to_string(), callee.name.to_string());
+            self.insert_class_binding_target(id.name.to_string(), class_name.to_string());
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -2125,23 +2131,55 @@ impl<'a> ModuleInfoExtractor {
         extract_type_reference_name(type_annotation)
     }
 
-    fn nullable_asserted_type_name(&self, expr: &Expression<'_>) -> Option<String> {
-        let Expression::ConditionalExpression(conditional) = unwrap_static_expr(expr) else {
-            return None;
-        };
-        if matches!(
-            unwrap_static_expr(&conditional.alternate),
-            Expression::NullLiteral(_)
-        ) {
-            return self.asserted_receiver_type_name(&conditional.consequent);
+    /// The operand of a declarator init that holds the class instance.
+    ///
+    /// - `f ? X : null` (or `undefined`, or `void 0`) gives `X`.
+    /// - `a ?? new A()` and `a || new A()` give `new A()` when `a` has no
+    ///   bound class, or when `a` is bound to the same class `A`.
+    /// - `a ?? fallback` gives `a` when `a` has a bound class and the
+    ///   fallback constructs no class.
+    ///
+    /// Any other init, and a fallback whose two operands give two different
+    /// classes, comes back unchanged. The binding arms then match nothing.
+    fn class_carrying_init<'e, 'b>(&self, init: &'b Expression<'e>) -> &'b Expression<'e> {
+        match unwrap_static_expr(init) {
+            Expression::ConditionalExpression(conditional) => {
+                if is_nullish_value(&conditional.alternate) {
+                    self.class_carrying_init(&conditional.consequent)
+                } else if is_nullish_value(&conditional.consequent) {
+                    self.class_carrying_init(&conditional.alternate)
+                } else {
+                    init
+                }
+            }
+            Expression::LogicalExpression(logical)
+                if matches!(
+                    logical.operator,
+                    LogicalOperator::Coalesce | LogicalOperator::Or
+                ) =>
+            {
+                let right = unwrap_static_expr(&logical.right);
+                let right_class = constructed_class_name(right);
+                let left_class = self.bound_class_name(&logical.left);
+                match (left_class, right_class) {
+                    (Some(left), Some(right_name)) if left == right_name => right,
+                    (None, Some(_)) => right,
+                    (Some(_), None) => &logical.left,
+                    _ => init,
+                }
+            }
+            _ => init,
         }
-        if matches!(
-            unwrap_static_expr(&conditional.consequent),
-            Expression::NullLiteral(_)
-        ) {
-            return self.asserted_receiver_type_name(&conditional.alternate);
+    }
+
+    /// The class bound to an identifier or static member receiver, if any.
+    fn bound_class_name(&self, expr: &Expression<'_>) -> Option<String> {
+        let source = static_member_object_name(unwrap_static_expr(expr))?;
+        let source = self.qualify_this_scope(&source);
+        match self.resolve_bound_object_name(&source) {
+            Some(BindingTarget::Class(class_name)) => Some(class_name),
+            _ => None,
         }
-        None
     }
 
     fn record_route_loader_data_declarator(
@@ -4464,6 +4502,29 @@ fn is_string_literal_array(array: &ArrayExpression<'_>) -> bool {
         .elements
         .iter()
         .all(|element| matches!(element, ArrayExpressionElement::StringLiteral(_)))
+}
+
+/// `null`, `undefined` or `void <expr>`: a value that holds no instance.
+fn is_nullish_value(expr: &Expression<'_>) -> bool {
+    match unwrap_static_expr(expr) {
+        Expression::NullLiteral(_) => true,
+        Expression::Identifier(id) => id.name == "undefined",
+        Expression::UnaryExpression(unary) => unary.operator == UnaryOperator::Void,
+        _ => false,
+    }
+}
+
+/// The class name of a `new X()` expression, when `X` is a plain identifier
+/// and not a builtin constructor.
+fn constructed_class_name<'e>(expr: &Expression<'e>) -> Option<&'e str> {
+    let Expression::NewExpression(new_expr) = expr else {
+        return None;
+    };
+    let Expression::Identifier(callee) = &new_expr.callee else {
+        return None;
+    };
+    let name = callee.name.as_str();
+    (!super::helpers::is_builtin_constructor(name)).then_some(name)
 }
 
 fn unwrap_static_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {

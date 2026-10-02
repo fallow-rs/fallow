@@ -1176,3 +1176,29 @@ fn ignore_decorators_applies_to_declaring_class_only() {
         "AdminPage has no own members; no findings should be attributed to it, found: {admin_findings:?}"
     );
 }
+
+#[test]
+fn nullish_fallback_and_nullable_ternary_inits_credit_class_members() {
+    let config = create_config(fixture_path("fallback-init-class-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(
+        unused,
+        [
+            ("Cache", "unused"),
+            ("Link", "unused"),
+            ("Pool", "unused"),
+            ("Queue", "unused"),
+        ]
+    );
+}
