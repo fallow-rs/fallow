@@ -12,7 +12,7 @@
 //! integration can read one boolean instead of reimplementing the condition in
 //! jq.
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// One channel that narrowed a run to part of the project.
 ///
@@ -27,7 +27,7 @@ use serde::{Serialize, Serializer};
 /// the flag that produced it is gone. `health` reports `workspace` for both
 /// `--workspace` and `--changed-workspaces` for the same reason. A consumer
 /// must therefore not assume a given command emits a given name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ScopeReason {
@@ -215,12 +215,21 @@ impl Serialize for BaselineScopeReasons {
     }
 }
 
+impl<'de> Deserialize<'de> for BaselineScopeReasons {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let reasons = Vec::<ScopeReason>::deserialize(deserializer)?;
+        Ok(reasons
+            .into_iter()
+            .fold(Self::empty(), |set, reason| set.with(reason)))
+    }
+}
+
 /// Which advisory a loaded baseline earned on this run.
 ///
 /// Mirrors `fallow_engine::baseline::BaselineStalenessWarning` so a consumer can
 /// render the same distinction the stderr warning makes, instead of inferring it
 /// from counts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum BaselineStalenessAdvisory {
@@ -254,7 +263,7 @@ pub enum BaselineStalenessAdvisory {
 /// `stale` and `gate_trips` are false there by construction. The remedy for a
 /// tripped gate is always the same: re-save the baseline from a whole-project
 /// run with `--save-baseline`.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BaselineStaleness {
     /// Entries carried by the loaded baseline file. On health these are the
@@ -346,17 +355,25 @@ pub struct BaselineStaleness {
     /// set is OPEN: a later release can add a writer, so treat an unknown value
     /// as "another command". The CLI computes it once per loaded baseline and
     /// uses the same value for its stderr note.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::static_str::deserialize_option"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub saved_by: Option<&'static str>,
+    pub saved_by: Option<crate::static_str::StaticStr>,
     /// `legacy` when the loaded dead-code baseline has no `identity`, so its
     /// entries use the old key forms and some of them hold a line. The run
     /// still applies the file. `--save-baseline` rewrites it with line-free
     /// keys. Absent for a current baseline and on `dupes` and `health`. The
     /// value set is OPEN.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::static_str::deserialize_option"
+    )]
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
-    pub format: Option<&'static str>,
+    pub format: Option<crate::static_str::StaticStr>,
     /// Which channels narrowed this run, present and non-empty exactly when
     /// `change_scoped` is true. Both members are derived from one function, so
     /// the boolean and the array cannot disagree.
@@ -436,6 +453,30 @@ mod tests {
             serde_json::to_value(backwards).expect("reasons serialize"),
             expected
         );
+    }
+
+    /// `fallow report --from` reads a saved envelope back, so the staleness
+    /// object must read back to the bytes it was written as.
+    #[test]
+    fn a_saved_staleness_reads_back_to_the_same_bytes() {
+        for reasons in [
+            BaselineScopeReasons::empty(),
+            BaselineScopeReasons::empty()
+                .with(ScopeReason::Production)
+                .with(ScopeReason::Diff),
+        ] {
+            let mut written = staleness(reasons);
+            written.saved_by = Some("dead-code");
+            written.format = Some("legacy");
+            let value = serde_json::to_value(written).expect("staleness serializes");
+            let read: BaselineStaleness =
+                serde_json::from_value(value.clone()).expect("staleness deserializes");
+            assert_eq!(read.scope_reasons, reasons);
+            assert_eq!(
+                serde_json::to_value(read).expect("staleness serializes again"),
+                value
+            );
+        }
     }
 
     #[test]

@@ -6,7 +6,7 @@ use fallow_types::output_health::{
 use fallow_types::serde_path;
 
 /// Runtime code that no test dependency path reaches.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedFile {
     /// Absolute file path.
@@ -17,7 +17,7 @@ pub struct UntestedFile {
 }
 
 /// Runtime export that no test-reachable module references.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedExport {
     /// Absolute file path.
@@ -37,7 +37,7 @@ pub struct UntestedExport {
 /// so descriptions match `strip_root_prefix`'s post-pass output on the inner
 /// `path` field. Schemars derives the merged shape natively; this retires
 /// the `augment_finding_definition` graft for `UntestedFile`.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedFileFinding {
     /// The underlying coverage-gap entry.
@@ -76,7 +76,7 @@ impl UntestedFileFinding {
 /// Wire-shape envelope for an [`UntestedExport`] finding. Same pattern as
 /// [`UntestedFileFinding`]: flattens the bare finding and carries a typed
 /// `actions` array computed at construction time.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedExportFinding {
     /// The underlying coverage-gap entry.
@@ -124,7 +124,7 @@ fn relative_display(path: &Path, root: &Path) -> String {
 }
 
 /// Aggregate coverage-gap counters for the current analysis scope.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageGapSummary {
     /// Runtime-reachable files in scope.
@@ -141,7 +141,7 @@ pub struct CoverageGapSummary {
 
 /// Static test coverage gaps derived from the module graph. Shows runtime files
 /// and exports with no test dependency path.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageGaps {
     /// Summary metrics for the current analysis scope.

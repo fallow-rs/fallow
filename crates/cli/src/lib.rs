@@ -2074,7 +2074,7 @@ enum Command {
     /// Render a saved `--format json` results file in another format without
     /// re-running analysis (analyze once, then render every CI surface from
     /// the same file). Supports GitHub annotations/summary, CodeClimate,
-    /// SARIF, and GitHub/GitLab PR-comment and review formats.
+    /// SARIF, markdown, and GitHub/GitLab PR-comment and review formats.
     Report {
         /// Path to a fallow JSON results file produced by `--format json`
         /// (dead-code, dupes, health, audit, security, or bare combined).

@@ -76,7 +76,7 @@ fn is_zero_usize(value: &usize) -> bool {
 }
 
 /// Overall project health score: 100 minus capped per-category penalties.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthScore {
     /// Score formula version; see [`HEALTH_SCORE_FORMULA_VERSION`].
@@ -84,13 +84,14 @@ pub struct HealthScore {
     /// Health score in `[0, 100]`; higher is healthier.
     pub score: f64,
     /// Letter grade from [`letter_grade`] (A>=85, B>=70, C>=55, D>=40, F<40).
-    pub grade: &'static str,
+    #[serde(deserialize_with = "crate::static_str::deserialize")]
+    pub grade: crate::static_str::StaticStr,
     /// Per-component penalty breakdown.
     pub penalties: HealthScorePenalties,
 }
 
 /// Per-component penalty breakdown for the health score.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthScorePenalties {
     /// Points subtracted for unreachable files; absent when dead-code data
@@ -152,7 +153,7 @@ pub struct HealthScorePenalties {
 /// Like [`HealthScore`], the score starts at 100 and subtracts capped per-category
 /// penalties; the grade reuses the shared [`letter_grade`] thresholds verbatim
 /// (A>=85, B>=70, C>=55, D>=40, F<40), so the two axes are read on one scale.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StylingHealth {
     /// Styling formula version; see [`STYLING_HEALTH_FORMULA_VERSION`].
@@ -160,7 +161,8 @@ pub struct StylingHealth {
     /// Styling-health score in `[0, 100]`; higher is healthier.
     pub score: f64,
     /// Letter grade from the shared [`letter_grade`] thresholds.
-    pub grade: &'static str,
+    #[serde(deserialize_with = "crate::static_str::deserialize")]
+    pub grade: crate::static_str::StaticStr,
     /// Per-category penalty breakdown.
     pub penalties: StylingHealthPenalties,
     /// How much to trust the grade. `Low` in either of two cases, `High`
@@ -192,7 +194,7 @@ pub struct StylingHealth {
 /// analyzed surface or it is not), not three distinct evidence tiers, so a
 /// never-emitted `Medium` would be dead surface. Serializes lowercase (`"high"` /
 /// `"low"`), matching the sibling confidence enums' vocabulary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum StylingHealthConfidence {
@@ -213,7 +215,7 @@ pub enum StylingHealthConfidence {
 /// evaluated and clean"; the whole struct is only ever built when CSS analytics
 /// were produced, so there is no "missing pipeline" ambiguity to model with
 /// `Option` here (the parent `StylingHealth` is itself `Option` on the report).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StylingHealthPenalties {
     /// Copy-paste declaration blocks (`duplicate_declaration_blocks`), scaled by
@@ -348,7 +350,7 @@ pub fn summarize_coverage_source_consistency(
 /// counted in `react_hook_count` but NOT here, so the breakdown can sum to LESS
 /// than `react_hook_count`. `react_hook_count` remains the headline total; this
 /// is an additive refinement.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReactHookProfile {
     /// `useState` call count attributed to this component.
@@ -389,7 +391,7 @@ impl ReactHookProfile {
 }
 
 /// Inner complexity-violation payload.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComplexityViolation {
     /// File path relative to the project root.
@@ -538,7 +540,7 @@ pub struct HealthEffectiveThresholds {
 }
 
 /// Threshold values configured by a single override entry.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
     clippy::struct_field_names,
@@ -569,7 +571,7 @@ pub enum ThresholdSource {
 }
 
 /// Lifecycle state for a configured threshold override.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ThresholdOverrideStatus {
@@ -594,7 +596,9 @@ pub enum ThresholdOverrideStatus {
 /// because the complexity ceilings and the CRAP ceiling are evaluated
 /// independently: raising `maxCyclomatic` says nothing about whether the unit
 /// still breaches `maxCrap`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ThresholdOverrideDimension {
@@ -606,7 +610,7 @@ pub enum ThresholdOverrideDimension {
 }
 
 /// Current complexity metrics for a matched threshold override entry.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ThresholdOverrideMetrics {
     /// Current cyclomatic complexity of the matched function.
@@ -625,7 +629,7 @@ pub struct ThresholdOverrideMetrics {
 
 /// Report entry describing whether a threshold override is active, stale, or
 /// no longer matching any analyzed file or function.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ThresholdOverrideState {
     /// Lifecycle state of the override.
@@ -696,7 +700,7 @@ impl ThresholdOverrideState {
 
 /// Component-level aggregate attached to a template complexity finding,
 /// pairing the template's scores with the worst class-side function.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComponentRollup {
     /// Component name.
@@ -861,7 +865,7 @@ pub fn compute_finding_severity(
 }
 
 /// A function exceeding the very-high-risk size threshold (>60 LOC).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct LargeFunctionEntry {
     /// File path relative to the project root.
@@ -876,7 +880,7 @@ pub struct LargeFunctionEntry {
 }
 
 /// Summary statistics for the health report.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthSummary {
     /// Files included in the health analysis.
@@ -971,7 +975,7 @@ impl Default for HealthSummary {
 }
 
 /// Per-file health score combining complexity, coupling, and dead code metrics.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FileHealthScore {
     /// File path relative to the project root.
@@ -1019,7 +1023,7 @@ pub struct FileHealthScore {
 }
 
 /// A hotspot: a file that is both complex and frequently changing.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotEntry {
     /// File path relative to the project root.
@@ -1045,13 +1049,13 @@ pub struct HotspotEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<OwnershipMetrics>,
     /// True for files matched by test-path patterns; omitted when false.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub is_test_path: bool,
 }
 
 /// One contributor row in ownership metrics.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContributorEntry {
     /// Contributor identifier, encoded per `format`.
@@ -1067,7 +1071,7 @@ pub struct ContributorEntry {
 }
 
 /// Encoding applied to a [`ContributorEntry::identifier`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ContributorIdentifierFormat {
@@ -1082,7 +1086,7 @@ pub enum ContributorIdentifierFormat {
 }
 
 /// Ownership lifecycle state of a file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum OwnershipState {
@@ -1098,7 +1102,7 @@ pub enum OwnershipState {
 
 /// Ownership metrics for a hotspot file, derived from git history and
 /// CODEOWNERS declarations.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct OwnershipMetrics {
     /// Minimum contributors covering half the file's commits.
@@ -1144,7 +1148,7 @@ pub struct OwnershipMetrics {
 /// Churn recency weighting and ownership staleness are measured against one
 /// instant. `head_commit` and `environment` resolve to the same value on every
 /// run over the same commit; `wall_clock` does not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ClockSource {
@@ -1163,7 +1167,7 @@ pub enum ClockSource {
 /// same number. The human report says so in a warning that `--quiet` removes,
 /// which left the JSON consumer, who cannot see stderr at all, with no way to
 /// find out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ClockProvenance {
     /// Which of the three sources supplied the epoch.
@@ -1176,7 +1180,7 @@ pub struct ClockProvenance {
 }
 
 /// Scope metadata for the hotspot analysis.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotSummary {
     /// Start of the churn window, as passed to `git log --since`.

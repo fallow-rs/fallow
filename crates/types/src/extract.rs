@@ -1226,7 +1226,7 @@ pub struct FunctionComplexity {
 ///
 /// Not persisted in the extraction cache: `fallow health` computes these
 /// on demand from the CSS source, so there is no `bitcode` derive.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssRuleMetric {
     /// 1-based line of the rule's first selector.
@@ -1295,7 +1295,7 @@ pub struct CssCustomPropertyDefinition {
 /// Stylesheet-level structural CSS analytics, computed from the parsed CSS
 /// syntax tree. Feeds `fallow health` penalty weights and located findings,
 /// never a standalone CSS score.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssAnalytics {
     /// Total declarations across every style rule (normal plus `!important`).
@@ -1379,7 +1379,17 @@ pub struct CssAnalytics {
 }
 
 /// Which complexity metric a [`ComplexityContribution`] adds to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ComplexityMetric {
@@ -1394,7 +1404,17 @@ pub enum ComplexityMetric {
 /// Mirrors `SonarSource` cognitive-complexity vocabulary where it overlaps.
 /// `Case` means a `case` label carrying a test; a bare `default` adds nothing
 /// to cyclomatic complexity and so produces no contribution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -1463,7 +1483,7 @@ pub enum ComplexityContributionKind {
 /// cognitive increments `weight == 1 + nesting`. Consumers that render inline
 /// (the VS Code editor breakdown) group contributions by `line` and sum the
 /// weights, deferring the per-kind list to a hover.
-#[derive(Debug, Clone, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ComplexityContribution {
     /// 1-based line number where the construct begins.

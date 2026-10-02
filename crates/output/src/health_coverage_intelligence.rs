@@ -6,7 +6,7 @@ use fallow_types::serde_path;
 /// Coverage-intelligence JSON contract version. Scoped to the
 /// `coverage_intelligence` block and independent of the top-level fallow
 /// JSON `schema_version`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum CoverageIntelligenceSchemaVersion {
     /// First release of the coverage-intelligence block contract.
@@ -178,7 +178,18 @@ impl fmt::Display for CoverageIntelligenceConfidence {
 }
 
 /// Confidence tier for the cross-surface evidence match.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageIntelligenceMatchConfidence {
@@ -210,7 +221,7 @@ impl fmt::Display for CoverageIntelligenceMatchConfidence {
 }
 
 /// Machine-actionable next step for a coverage-intelligence finding.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceAction {
     /// Action identifier, normalized to `type` in JSON output.
@@ -223,7 +234,7 @@ pub struct CoverageIntelligenceAction {
 }
 
 /// Compact evidence values that led to a recommendation.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceEvidence {
     /// Test coverage percentage (0-100), when coverage data exists.
@@ -246,7 +257,7 @@ pub struct CoverageIntelligenceEvidence {
     pub test_coverage: Option<String>,
     /// True when the unit is inside the current change scope; omitted when
     /// false.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub changed: bool,
     /// Ownership-drift state label, when ownership analysis ran.
@@ -257,7 +268,7 @@ pub struct CoverageIntelligenceEvidence {
 }
 
 /// One combined coverage-intelligence finding.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceFinding {
     /// Stable finding ID of the form `fallow:coverage-intel:<hash>`.
@@ -289,7 +300,7 @@ pub struct CoverageIntelligenceFinding {
 }
 
 /// Aggregate metadata for coverage-intelligence output.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceSummary {
     /// Total combined findings.
@@ -307,7 +318,7 @@ pub struct CoverageIntelligenceSummary {
 }
 
 /// Combined coverage, runtime, complexity, and change-scope verdicts.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageIntelligenceReport {
     /// Coverage-intelligence block contract version.

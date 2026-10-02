@@ -1,5 +1,5 @@
 /// Structural CSS analytics surfaced by `fallow health --css`.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssAnalyticsReport {
     /// Stylesheets with at least one structurally notable rule, in scan order.
@@ -142,7 +142,7 @@ pub struct CssAnalyticsReport {
 /// with a per-notation distinct-value count. Emitted only above a floor, since
 /// mixing notations for one axis is a "no single source of truth" smell.
 /// Advisory: the action is "standardize on one notation", not a single search.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssNotationConsistency {
     /// The value axis these notations describe, e.g. `"Colors"` or
@@ -157,7 +157,7 @@ pub struct CssNotationConsistency {
 }
 
 /// One notation bucket and the count of distinct values authored in it.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssNotationCount {
     /// The notation family, e.g. `"hex"`, `"rgb"`, `"hsl"`, `"modern"`, `"px"`,
@@ -170,7 +170,7 @@ pub struct CssNotationCount {
 /// An unused CSS at-rule entity (an `@property` registration with no `var()`
 /// reference, or an `@layer` declaration never populated), located by its first
 /// definition. A cleanup candidate, never a gated finding.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedAtRule {
     /// Which kind of at-rule entity is unused.
@@ -185,7 +185,7 @@ pub struct UnusedAtRule {
 }
 
 /// Discriminant for [`UnusedAtRule::kind`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
@@ -199,7 +199,7 @@ pub enum UnusedAtRuleKind {
 
 /// A distinct Tailwind arbitrary-value utility token used in markup, with its
 /// total use count and first location (a design-token-bypass candidate).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TailwindArbitraryValue {
     /// The `prefix-[value]` token (e.g. `w-[13px]`). Variant prefixes are
@@ -218,7 +218,7 @@ pub struct TailwindArbitraryValue {
 }
 
 /// A located raw CSS declaration value on a scale-sensitive styling axis.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RawStyleValue {
     /// Value axis, e.g. `color`, `font-size`, `line-height`, `radius`, or `shadow`.
@@ -243,7 +243,7 @@ pub struct RawStyleValue {
 /// applied to CSS). Only blocks of 4+ declarations appearing in 2+ rules are
 /// reported, so the signal stays a strong copy-paste indicator rather than
 /// flagging legitimately-repeated small blocks.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssDuplicateBlock {
     /// Declarations in the shared block.
@@ -261,7 +261,7 @@ pub struct CssDuplicateBlock {
 }
 
 /// One occurrence of a duplicate declaration block.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssBlockOccurrence {
     /// Project-root-relative, forward-slash path to the stylesheet.
@@ -271,7 +271,7 @@ pub struct CssBlockOccurrence {
 }
 
 /// A duplicated CVA / shadcn variant class block.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CvaDuplicateVariantBlock {
     /// Normalized class block shared by several variant values.
@@ -286,7 +286,7 @@ pub struct CvaDuplicateVariantBlock {
 }
 
 /// A CVA / shadcn variant class value that can reuse an existing styling token.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CvaVariantTokenDrift {
     /// Tailwind arbitrary-value utility inside the variant class string.
@@ -308,7 +308,7 @@ pub struct CvaVariantTokenDrift {
 
 /// A `@keyframes` defined in a stylesheet but referenced by no animation in any
 /// stylesheet (cleanup candidate).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnreferencedKeyframes {
     /// The `@keyframes` name.
@@ -324,7 +324,7 @@ pub struct UnreferencedKeyframes {
 /// An `@font-face` family declared in a stylesheet but referenced by no
 /// `font-family` anywhere in the project: a dead web-font payload. A cleanup
 /// candidate (the family could be applied from inline styles or JavaScript).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedFontFace {
     /// The declared font family name (quotes stripped).
@@ -342,7 +342,7 @@ pub struct UnusedFontFace {
 /// candidate, never a gated finding: the token could be consumed by a Tailwind
 /// plugin, a published design-system surface, or a non-CSS-aware build step the
 /// scan cannot see (those cases are gated out before this is emitted).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnusedThemeToken {
     /// The full custom property as authored, including the `--` prefix
@@ -363,7 +363,7 @@ pub struct UnusedThemeToken {
 /// A Tailwind v4 `@theme` token that appears to duplicate an existing token by
 /// value. Emitted conservatively for comparable token namespaces, with the
 /// nearest existing token named so an agent has a concrete reuse target.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NearDuplicateThemeToken {
     /// The full custom property as authored, including the `--` prefix.
@@ -381,7 +381,7 @@ pub struct NearDuplicateThemeToken {
 }
 
 /// A styling token candidate that can replace or explain a finding.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NearestStylingToken {
     /// Token name, e.g. `--color-brand`.
@@ -399,7 +399,7 @@ pub struct NearestStylingToken {
 
 /// Where one Tailwind or CSS-in-JS design token is consumed, and through which
 /// surface. One entry in a [`TokenConsumers::consumers`] sample.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TokenConsumerLocation {
     /// Project-root-relative, forward-slash path to the consuming file.
@@ -417,7 +417,7 @@ pub struct TokenConsumerLocation {
 /// theme-group call, or a PandaCSS token-path call). The kind is the disjoint origin signal that
 /// distinguishes a Tailwind token entry from a CSS-in-JS token entry in the
 /// shared `token_consumers` list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ConsumerKind {
@@ -471,7 +471,7 @@ pub enum ConsumerKind {
 /// this module). `consumer_count` is always a STATIC lower bound (a computed class
 /// name like `bg-${color}`, or a CSS-in-JS access through an unresolved alias
 /// import, is not counted).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TokenConsumers {
     /// The token identity. For a Tailwind `@theme` token this is the full custom
@@ -515,7 +515,7 @@ pub const TOKEN_CONSUMER_SAMPLE_CAP: usize = 20;
 /// is referenced by no in-project markup (the CSS analogue of an unused export).
 /// A heavily-gated candidate, never a gated finding: the class may be applied
 /// from an HTML email, server template, CMS, or Markdown the parser never sees.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnreferencedCssClass {
     /// The class name (no dot).
@@ -533,7 +533,7 @@ pub struct UnreferencedCssClass {
 /// name that is defined in no stylesheet anywhere in the project (the
 /// "used-but-undefined" direction). Usually a typo or a removed animation;
 /// occasionally a `@keyframes` defined in CSS-in-JS the CSS parser never sees.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UndefinedKeyframes {
     /// The referenced `@keyframes` name that resolves to no definition.
@@ -552,7 +552,7 @@ pub struct UndefinedKeyframes {
 /// defined (a likely typo or stale rename). The CSS analogue of an unresolved
 /// import. A candidate, never a gated finding: the token could be defined in
 /// CSS-in-JS or an external stylesheet the parser never sees.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UnresolvedClassReference {
     /// The static class token referenced in markup (no dot).
@@ -571,7 +571,7 @@ pub struct UnresolvedClassReference {
 
 /// A Vue SFC's `<style scoped>` classes that appear nowhere else in the
 /// component (cleanup candidates).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ScopedUnusedClasses {
     /// Project-root-relative, forward-slash path to the SFC.
@@ -592,7 +592,7 @@ pub struct ScopedUnusedClasses {
 /// SARIF / MCP all resolve via the shared `issue_meta` contract through
 /// `IssueKind::parse(code)`. One `Vec<StylingFinding>` carries every styling
 /// family; the `code` discriminates.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct StylingFinding {
     /// The kebab IssueKind code, e.g. `css-token-drift`.
@@ -643,7 +643,7 @@ pub enum StylingFindingSeverity {
 }
 
 /// Confidence hint for a [`StylingFinding`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum StylingFindingConfidence {
@@ -654,7 +654,7 @@ pub enum StylingFindingConfidence {
 }
 
 /// Agent handling hint for a [`StylingFinding`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum StylingAgentDisposition {
@@ -672,7 +672,7 @@ pub enum StylingAgentDisposition {
 /// agent a machine-readable next step, mirroring the `actions` array carried by
 /// every other health finding, plus an optional runnable probe to confirm the
 /// candidate is genuinely unused before deleting it.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssCandidateAction {
     /// Action type identifier (`verify-unused`).
@@ -692,7 +692,7 @@ pub struct CssCandidateAction {
 }
 
 /// Discriminant for [`CssCandidateAction::kind`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum CssCandidateActionType {
@@ -996,7 +996,7 @@ fn safe_token_search(name: &str) -> Option<String> {
 }
 
 /// Per-stylesheet CSS analytics.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssFileAnalytics {
     /// Project-root-relative, forward-slash path.
@@ -1008,7 +1008,7 @@ pub struct CssFileAnalytics {
 /// Project-wide CSS analytics aggregates across every analyzed stylesheet
 /// (including stylesheets with no notable rule, which are not listed
 /// individually in `files`).
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssAnalyticsSummary {
     /// Stylesheets analyzed: standard `.css` files, Vue/Svelte SFC `<style>`

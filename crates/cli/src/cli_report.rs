@@ -3,8 +3,8 @@
 //! flow: `fallow --format json -o results.json`, then one `report` call per
 //! rendered surface).
 //!
-//! Supports GitHub-native text, CodeClimate, SARIF, and GitHub/GitLab PR
-//! feedback formats. Dispatch is on the envelope's `kind` field, so any envelope
+//! Supports GitHub-native text, CodeClimate, SARIF, markdown, and GitHub/GitLab
+//! PR feedback formats. Dispatch is on the envelope's `kind` field, so any envelope
 //! produced by `--format json`
 //! (dead-code, dupes, health, audit, security, or the bare combined run)
 //! renders byte-identically to the direct `--format` run. The `fallow fix`
@@ -43,7 +43,7 @@ pub fn run_report(
     }
     let Some(target) = report_target(output) else {
         return crate::emit_known_failure(
-            "fallow report supports --format github-annotations, github-summary, codeclimate, sarif, pr-comment-github, pr-comment-gitlab, review-github, or review-gitlab only",
+            "fallow report supports --format github-annotations, github-summary, codeclimate, sarif, markdown, pr-comment-github, pr-comment-gitlab, review-github, or review-gitlab only",
             2,
             output,
             telemetry::FailureReason::UnsupportedFormat,
@@ -76,12 +76,7 @@ pub fn run_report(
         Ok(resolver) => resolver,
         Err(code) => return code,
     };
-    if !quiet
-        && !matches!(
-            target,
-            ReportTarget::GithubAnnotations | ReportTarget::GithubSummary
-        )
-    {
+    if !quiet && target.renders_severity() {
         crate::report::sarif::note_saved_severity_fallback(
             kind,
             &saved.envelope,
@@ -99,6 +94,9 @@ pub fn run_report(
             github_annotations::print_annotations(kind, &saved.envelope, root)
         }
         ReportTarget::GithubSummary => github_summary::print_summary(kind, &saved.envelope, root),
+        ReportTarget::Markdown => {
+            render_saved_markdown(kind, &saved.envelope, root, resolver.as_ref(), output)
+        }
         ReportTarget::CodeClimate => {
             crate::report::codeclimate::print_envelope_codeclimate_with_config(
                 kind,
@@ -131,6 +129,23 @@ pub fn run_report(
     }
 }
 
+/// Print the markdown document of a saved envelope, or exit 2 with the reason
+/// when the envelope has no saved markdown document.
+fn render_saved_markdown(
+    kind: EnvelopeKind,
+    envelope: &serde_json::Value,
+    root: &Path,
+    resolver: Option<&crate::report::OwnershipResolver>,
+    output: OutputFormat,
+) -> ExitCode {
+    match crate::report::print_saved_markdown(kind, envelope, root, resolver) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            crate::emit_known_failure(&error, 2, output, telemetry::FailureReason::Validation)
+        }
+    }
+}
+
 /// The saved-render target of a `--format`, or `None` when `report` does not
 /// support that format.
 const fn report_target(output: OutputFormat) -> Option<ReportTarget> {
@@ -139,6 +154,7 @@ const fn report_target(output: OutputFormat) -> Option<ReportTarget> {
         OutputFormat::GithubSummary => Some(ReportTarget::GithubSummary),
         OutputFormat::CodeClimate => Some(ReportTarget::CodeClimate),
         OutputFormat::Sarif => Some(ReportTarget::Sarif),
+        OutputFormat::Markdown => Some(ReportTarget::Markdown),
         OutputFormat::PrCommentGithub => Some(ReportTarget::PrComment(Provider::Github)),
         OutputFormat::PrCommentGitlab => Some(ReportTarget::PrComment(Provider::Gitlab)),
         OutputFormat::ReviewGithub => Some(ReportTarget::Review(Provider::Github)),
@@ -148,6 +164,14 @@ const fn report_target(output: OutputFormat) -> Option<ReportTarget> {
 }
 
 fn validate_report_target(target: ReportTarget, kind: EnvelopeKind) -> Result<(), String> {
+    if matches!(target, ReportTarget::Markdown)
+        && matches!(
+            kind,
+            EnvelopeKind::Audit | EnvelopeKind::Security | EnvelopeKind::Fix
+        )
+    {
+        return Err(crate::report::saved_markdown_unsupported(kind));
+    }
     if matches!(target, ReportTarget::CodeClimate) && kind == EnvelopeKind::Security {
         return Err(
             "fallow security supports --format human, json, sarif, github-annotations, or github-summary only."
@@ -611,6 +635,7 @@ const fn report_target_label(target: ReportTarget) -> &'static str {
         ReportTarget::GithubSummary => "github-summary",
         ReportTarget::CodeClimate => "codeclimate",
         ReportTarget::Sarif => "sarif",
+        ReportTarget::Markdown => "markdown",
     }
 }
 
@@ -813,8 +838,20 @@ enum ReportTarget {
     GithubSummary,
     CodeClimate,
     Sarif,
+    Markdown,
     PrComment(Provider),
     Review(Provider),
+}
+
+impl ReportTarget {
+    /// Whether the target prints a finding level that can come from the
+    /// config, so a saved finding without its own level needs a stderr note.
+    const fn renders_severity(self) -> bool {
+        !matches!(
+            self,
+            Self::GithubAnnotations | Self::GithubSummary | Self::Markdown
+        )
+    }
 }
 
 fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value, ExitCode> {

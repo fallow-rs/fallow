@@ -46,7 +46,7 @@ pub enum HealthSection {
 }
 
 /// Result of complexity analysis for reporting.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthReport {
     /// Functions and synthetic template entries exceeding complexity

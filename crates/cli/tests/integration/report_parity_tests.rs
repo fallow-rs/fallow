@@ -86,8 +86,10 @@ fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extr
     let saved_path = saved_dir.path().join("results.json");
     std::fs::write(&saved_path, &json.stdout).expect("write saved report");
 
-    let formats: &[&str] = if command.is_some() {
-        &[
+    let formats: &[&str] = match command {
+        // The live audit markdown is the human report with markdown sections,
+        // so a saved audit envelope does not render markdown.
+        Some("audit") => &[
             "codeclimate",
             "sarif",
             "pr-comment-github",
@@ -96,16 +98,27 @@ fn assert_saved_report_parity_with_args(root: &Path, command: Option<&str>, extr
             "review-gitlab",
             "github-summary",
             "github-annotations",
-        ]
-    } else {
+        ],
+        Some(_) => &[
+            "codeclimate",
+            "sarif",
+            "pr-comment-github",
+            "pr-comment-gitlab",
+            "review-github",
+            "review-gitlab",
+            "github-summary",
+            "github-annotations",
+            "markdown",
+        ],
         // Combined comments use their richer multi-gate presentation while
         // the saved generic renderer preserves the same typed findings.
-        &[
+        None => &[
             "codeclimate",
             "sarif",
             "github-summary",
             "github-annotations",
-        ]
+            "markdown",
+        ],
     };
     for format in formats {
         let direct = run(root, &analysis_args(command, root, format, extra));
@@ -758,6 +771,7 @@ fn saved_security_report_preserves_native_sarif_and_rejects_codeclimate() {
         "pr-comment-gitlab",
         "review-github",
         "review-gitlab",
+        "markdown",
     ] {
         let saved_ci = run(
             &root,
@@ -1140,4 +1154,93 @@ fn combined_review_summary_body_matches_the_saved_render() {
         );
         assert_eq!(direct_body, body(&saved), "{format}");
     }
+}
+
+/// Copy the complexity fixture into a temporary project with a CODEOWNERS
+/// file, so `--group-by owner` has owners to read.
+fn owned_complexity_project() -> tempfile::TempDir {
+    let fixture = workspace_fixture("tests/fixtures/complexity-project");
+    let project = tempfile::tempdir().expect("owned complexity project");
+    for entry in [
+        "package.json",
+        "src/index.ts",
+        "src/simple.ts",
+        "src/complex.ts",
+    ] {
+        let target = project.path().join(entry);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).expect("create fixture directory");
+        }
+        std::fs::copy(fixture.join(entry), target).expect("copy fixture file");
+    }
+    std::fs::write(
+        project.path().join("CODEOWNERS"),
+        "src/complex.ts @team-core\nsrc/simple.ts @team-web\n",
+    )
+    .expect("write owners");
+    project
+}
+
+/// The live markdown of an owner-grouped health run with a score adds the
+/// score heading and the per-owner table. The saved render must print the
+/// same document.
+#[test]
+fn saved_owner_grouped_health_markdown_matches_direct_rendering() {
+    let project = owned_complexity_project();
+    assert_saved_report_parity_with_args(
+        project.path(),
+        Some("health"),
+        &["--group-by", "owner", "--score"],
+    );
+}
+
+/// The optional health sections (file scores, coverage gaps, refactoring
+/// targets) all come back from the saved envelope.
+#[test]
+fn saved_health_markdown_keeps_every_requested_section() {
+    let root = workspace_fixture("tests/fixtures/complexity-project");
+    assert_saved_report_parity_with_args(
+        &root,
+        Some("health"),
+        &["--score", "--file-scores", "--coverage-gaps", "--targets"],
+    );
+}
+
+/// The live audit markdown is the human report with markdown sections. A saved
+/// audit envelope cannot reproduce it, so `report` refuses the format with
+/// exit 2 rather than print a different document.
+#[test]
+fn saved_audit_markdown_is_refused() {
+    let root = workspace_fixture("tests/fixtures/complexity-project");
+    let json = run(&root, &analysis_args(Some("audit"), &root, "json", &[]));
+    assert!(
+        matches!(json.status.code(), Some(0 | 1)),
+        "audit JSON failed: {}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let saved_dir = tempfile::tempdir().expect("saved audit tempdir");
+    let saved_path = saved_dir.path().join("audit.json");
+    std::fs::write(&saved_path, &json.stdout).expect("write saved audit report");
+
+    let saved = run(
+        &root,
+        &[
+            "report".to_string(),
+            "--from".to_string(),
+            saved_path.display().to_string(),
+            "--root".to_string(),
+            root.display().to_string(),
+            "--quiet".to_string(),
+            "--format".to_string(),
+            "markdown".to_string(),
+        ],
+    );
+    assert_eq!(saved.status.code(), Some(2));
+    assert!(saved.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&saved.stderr)
+            .contains("saved audit envelopes do not support --format markdown"),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
 }

@@ -76,6 +76,7 @@ mod sarif;
 mod saved_health;
 mod security;
 mod similar_code;
+mod static_str;
 mod suppressions;
 mod trace_envelopes;
 mod type_aware_envelopes;
