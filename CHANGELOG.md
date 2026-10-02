@@ -527,6 +527,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   patterns add to the patterns of the default `vitest.config.ts` and do not
   replace them.
 
+- **An electron-vite config now sets the main and preload entries.** Before,
+  every file under `src/main` and `src/preload` was an entry point. Thus
+  fallow did not report an unused export in these files. Now, when
+  `electron.vite.config.*` has a `main` or `preload` section, fallow uses
+  the entries that electron-vite builds. These are the
+  `build.rollupOptions.input` and `build.lib.entry` values of the section.
+  When the section declares no entry, fallow uses the electron-vite default
+  `src/<section>/index` or `src/<section>/<section>` file. When fallow cannot
+  read the section, it keeps all files of that directory as entries. A
+  project without an electron-vite config keeps the old entries.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
