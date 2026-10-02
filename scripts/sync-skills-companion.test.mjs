@@ -350,3 +350,21 @@ test("--pin without a value exits 2", () => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /--pin needs a value/u);
 });
+
+test(
+  "refuses an unexpected source-lock shape before it writes any file",
+  withFixture((fixture) => {
+    const lockPath = join(fixture.skills, "source-lock.json");
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    lock.previous = { commit: lock.commit };
+    writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+    commitAll(fixture.skills, "chore: keep the previous pin");
+    git(fixture.skills, "push", "-q", "origin", "main");
+    changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    const before = companionState(fixture.skills);
+    const { code, output } = sync(fixture);
+    assert.equal(code, 1, output);
+    assert.match(output, /expected 1 "commit" value/u);
+    assert.deepEqual(companionState(fixture.skills), before);
+  }),
+);

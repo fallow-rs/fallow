@@ -55,9 +55,11 @@ const VERSION_FILES = [
 ];
 
 /**
- * The checks of the companion, in the order of its validate workflow. Each
- * one runs in the companion checkout with `FALLOW_SOURCE_DIR` set to a
- * checkout of the pin. The first failure stops the sync before the commit.
+ * The checks of the companion validate workflow that run locally without
+ * network access. The workflow runs more steps, for example the plugin
+ * validation, and its order differs. Each check runs in the companion
+ * checkout with `FALLOW_SOURCE_DIR` set to a checkout of the pin. The first
+ * failure stops the sync before the commit.
  */
 export const COMPANION_CHECKS = [
   ["node", "scripts/check-source-contract.mjs"],
@@ -240,16 +242,24 @@ const readVersion = (companion) => {
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
-/** Replace one JSON string value in place, so the file keeps its format. */
-const replaceValue = (file, key, oldValue, newValue, expected) => {
-  const content = readFileSync(file, "utf8");
-  const pattern = new RegExp(`("${key}"\\s*:\\s*)"${escapeRegExp(oldValue)}"`, "gu");
-  const count = content.match(pattern)?.length ?? 0;
+const valuePattern = (key, value) =>
+  new RegExp(`("${key}"\\s*:\\s*)"${escapeRegExp(value)}"`, "gu");
+
+/** Refuse unless `file` holds `expected` copies of the `key` value `value`. */
+const expectValueCount = (file, key, value, expected) => {
+  const count = readFileSync(file, "utf8").match(valuePattern(key, value))?.length ?? 0;
   if (count !== expected) {
-    throw new Error(
-      `expected ${expected.toString()} "${key}" value(s) in ${file}, found ${count.toString()}`,
+    throw new Refusal(
+      `expected ${expected.toString()} "${key}" value(s) "${value}" in ${file}, found ${count.toString()}`,
     );
   }
+};
+
+/** Replace one JSON string value in place, so the file keeps its format. */
+const replaceValue = (file, key, oldValue, newValue, expected) => {
+  expectValueCount(file, key, oldValue, expected);
+  const content = readFileSync(file, "utf8");
+  const pattern = valuePattern(key, oldValue);
   const updated = content.replace(pattern, `$1"${newValue}"`);
   JSON.parse(updated);
   writeFileSync(file, updated);
@@ -279,9 +289,9 @@ const runChecks = (companion, source, oldVersion, env, log) => {
     });
     if (result.status !== 0) {
       throw new Refusal(
-        `the companion check failed: ${line}. The sync changes stay in ${companion}. ` +
-          `Fix the cause, or discard them with: git -C ${companion} checkout -- . ` +
-          `&& git -C ${companion} clean -fd -- fallow`,
+        `the companion check failed: ${line}. The sync changes stay staged in ${companion}. ` +
+          `Fix the cause, or discard them with: git -C ${companion} reset --quiet ` +
+          `&& git -C ${companion} checkout -- . && git -C ${companion} clean -fd -- fallow`,
       );
     }
   }
@@ -322,6 +332,13 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
       return 0;
     }
 
+    // Check every value to replace before the first write, so a refusal
+    // leaves the companion clean.
+    for (const { path, count } of VERSION_FILES) {
+      expectValueCount(join(companion, path), "version", version.old, count);
+    }
+    expectValueCount(lockFile, "commit", oldPin, 1);
+
     for (const { canonical, published } of pairs) {
       runVendor(canonical, published);
     }
@@ -329,16 +346,18 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
       replaceValue(join(companion, path), "version", version.old, version.next, count);
     }
     replaceValue(lockFile, "commit", oldPin, pin, 1);
-    if (!skipChecks) {
-      runChecks(companion, source, version.old, env, log);
-    }
 
+    // Stage before the checks: the private-data guard of the companion reads
+    // `git ls-files`, so it does not see a new file that is still untracked.
     const paths = [
       ...pairs.map(({ published }) => relative(companion, published)),
       ...VERSION_FILES.map(({ path }) => path),
       SOURCE_LOCK,
     ];
     git(companion, "add", "-A", "--", ...paths);
+    if (!skipChecks) {
+      runChecks(companion, source, version.old, env, log);
+    }
     git(companion, "commit", "-S", "--quiet", "-m", message);
     log(`${PREFIX}: committed ${git(companion, "rev-parse", "--short", "HEAD")} in ${companion}.`);
     log("Push it with:");
