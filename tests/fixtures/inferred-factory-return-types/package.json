@@ -1,0 +1,6 @@
+{
+  "name": "inferred-factory-return-types",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts"
+}

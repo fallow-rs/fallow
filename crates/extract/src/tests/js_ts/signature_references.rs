@@ -148,3 +148,58 @@ export const made = make(local);
 
     assert!(types_for_export(source, "made").is_empty());
 }
+
+#[test]
+fn signature_references_include_inferred_factory_return_shapes() {
+    let source = r"
+type Answers = Record<string, number>;
+type Snapshot = { size: number };
+type Settings = { mode: string };
+type Scratch = { note: string };
+export function makeCache() {
+    function get(): Answers | undefined {
+        return undefined;
+    }
+    return { get };
+}
+export const makeReader = () => ({
+    read: (): Snapshot => ({ size: 1 }),
+});
+export function makeSettings() {
+    return { mode: 'fast' } as Settings;
+}
+export function makeCounter() {
+    const scratch: Scratch = { note: 'local' };
+    const count = () => scratch.note.length;
+    return { count };
+}
+";
+
+    assert_eq!(
+        signature_pairs(source),
+        vec![
+            ("makeCache".to_string(), "Answers".to_string()),
+            ("makeReader".to_string(), "Snapshot".to_string()),
+            ("makeSettings".to_string(), "Settings".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn signature_references_skip_body_when_return_type_is_explicit() {
+    let source = r"
+type Result = { ok: boolean };
+type Hidden = { value: number };
+export function run(): Result {
+    function inner(): Hidden {
+        return { value: 1 };
+    }
+    return { ok: inner().value > 0 };
+}
+";
+
+    assert_eq!(
+        signature_pairs(source),
+        vec![("run".to_string(), "Result".to_string())]
+    );
+}

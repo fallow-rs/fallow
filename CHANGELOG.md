@@ -339,6 +339,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matched directory as used. It reads a glob, a glob array, an object with
   an `include` value, and both branches of a conditional value.
 
+- **A type in the inferred return of an exported factory is not an unused
+  type.** Before, fallow read only explicit signatures. A factory without a
+  return type that returns a local function, for example
+  `function get(): Answers` in `return { get }`, did not count `Answers`.
+  Thus fallow reported the exported type as unused. Now fallow reads the
+  returned values of a function or arrow without a return type: inline
+  functions, `as` assertions, and local functions that a return statement
+  names. A type that only annotates a local value that the factory does not
+  return stays reported. With `private-type-leaks` on, a private type in
+  such a return now also gives a finding. This change invalidates the
+  extraction cache.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

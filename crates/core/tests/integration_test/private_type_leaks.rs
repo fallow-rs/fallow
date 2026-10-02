@@ -191,3 +191,27 @@ fn wrapper_call_and_type_assertion_initializers_back_exported_types() {
         "a non-exported type argument of an exported wrapper call should be a private type leak: {leaks:?}"
     );
 }
+
+#[test]
+fn inferred_factory_return_types_are_not_unused_type_exports() {
+    let root = fixture_path("inferred-factory-return-types");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_types: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+
+    for backing in ["Answers", "Snapshot", "Settings"] {
+        assert!(
+            !unused_types.contains(&backing),
+            "{backing} is part of the inferred return of a used factory: {unused_types:?}"
+        );
+    }
+    assert!(
+        unused_types.contains(&"Scratch"),
+        "Scratch only annotates a local value that the factory does not return: {unused_types:?}"
+    );
+}

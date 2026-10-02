@@ -261,6 +261,8 @@ impl ModuleInfoExtractor {
         }
         if let Some(return_type) = function.return_type.as_deref() {
             collector.visit_ts_type_annotation(return_type);
+        } else if let Some(body) = function.body.as_deref() {
+            collect_inferred_return_refs(body, &mut collector.refs);
         }
         Self::remove_type_parameter_refs(&mut collector.refs, function.type_parameters.as_deref());
         collector.refs
@@ -283,6 +285,14 @@ impl ModuleInfoExtractor {
         }
         if let Some(return_type) = arrow.return_type.as_deref() {
             collector.visit_ts_type_annotation(return_type);
+        } else if let Some(expression) = arrow.get_expression() {
+            collect_returned_expression_refs(
+                expression,
+                &FxHashMap::default(),
+                &mut collector.refs,
+            );
+        } else if let Some(body) = arrow.get_function_body() {
+            collect_inferred_return_refs(body, &mut collector.refs);
         }
         Self::remove_type_parameter_refs(&mut collector.refs, arrow.type_parameters.as_deref());
         collector.refs
@@ -544,4 +554,145 @@ impl ModuleInfoExtractor {
             }
         }
     }
+}
+
+/// A function-valued binding declared directly in a function body.
+#[derive(Clone, Copy)]
+enum LocalCallable<'b, 'a> {
+    Function(&'b Function<'a>),
+    Arrow(&'b ArrowFunctionExpression<'a>),
+}
+
+/// Collect type references that reach the inferred return type of a function
+/// without a return annotation. Only the returned values count: inline
+/// functions, `as` assertions, and local functions that a return statement
+/// names. Type annotations on other body values stay private, so a type that
+/// only annotates a local value keeps its unused finding.
+fn collect_inferred_return_refs(body: &FunctionBody<'_>, refs: &mut Vec<(String, Span)>) {
+    let locals = collect_local_callables(body);
+    let mut collector = ReturnedValueCollector {
+        locals: &locals,
+        refs,
+    };
+    collector.visit_function_body(body);
+}
+
+fn collect_local_callables<'b, 'a>(
+    body: &'b FunctionBody<'a>,
+) -> FxHashMap<&'b str, LocalCallable<'b, 'a>> {
+    let mut locals = FxHashMap::default();
+    for statement in &body.statements {
+        match statement {
+            Statement::FunctionDeclaration(function) => {
+                if let Some(id) = function.id.as_ref() {
+                    locals.insert(id.name.as_str(), LocalCallable::Function(function));
+                }
+            }
+            Statement::VariableDeclaration(declaration) => {
+                for declarator in &declaration.declarations {
+                    let (BindingPattern::BindingIdentifier(id), Some(init)) =
+                        (&declarator.id, &declarator.init)
+                    else {
+                        continue;
+                    };
+                    let callable = match init.without_parentheses() {
+                        Expression::ArrowFunctionExpression(arrow) => LocalCallable::Arrow(arrow),
+                        Expression::FunctionExpression(function) => {
+                            LocalCallable::Function(function)
+                        }
+                        _ => continue,
+                    };
+                    locals.insert(id.name.as_str(), callable);
+                }
+            }
+            _ => {}
+        }
+    }
+    locals
+}
+
+fn collect_returned_expression_refs(
+    expression: &Expression<'_>,
+    locals: &FxHashMap<&str, LocalCallable<'_, '_>>,
+    refs: &mut Vec<(String, Span)>,
+) {
+    match expression {
+        Expression::ParenthesizedExpression(inner) => {
+            collect_returned_expression_refs(&inner.expression, locals, refs);
+        }
+        Expression::TSSatisfiesExpression(inner) => {
+            collect_returned_expression_refs(&inner.expression, locals, refs);
+        }
+        Expression::TSNonNullExpression(inner) => {
+            collect_returned_expression_refs(&inner.expression, locals, refs);
+        }
+        Expression::TSAsExpression(assertion) => {
+            let mut collector = SignatureTypeCollector::default();
+            collector.visit_ts_type(&assertion.type_annotation);
+            refs.extend(collector.refs);
+        }
+        Expression::ArrowFunctionExpression(arrow) => {
+            refs.extend(ModuleInfoExtractor::collect_arrow_signature_refs(arrow));
+        }
+        Expression::FunctionExpression(function) => {
+            refs.extend(ModuleInfoExtractor::collect_function_signature_refs(
+                function,
+            ));
+        }
+        Expression::Identifier(identifier) => match locals.get(identifier.name.as_str()) {
+            Some(LocalCallable::Function(function)) => {
+                refs.extend(ModuleInfoExtractor::collect_function_signature_refs(
+                    function,
+                ));
+            }
+            Some(LocalCallable::Arrow(arrow)) => {
+                refs.extend(ModuleInfoExtractor::collect_arrow_signature_refs(arrow));
+            }
+            None => {}
+        },
+        Expression::ObjectExpression(object) => {
+            for property in &object.properties {
+                if let ObjectPropertyKind::ObjectProperty(property) = property {
+                    collect_returned_expression_refs(&property.value, locals, refs);
+                }
+            }
+        }
+        Expression::ArrayExpression(array) => {
+            for element in &array.elements {
+                if let Some(element) = element.as_expression() {
+                    collect_returned_expression_refs(element, locals, refs);
+                }
+            }
+        }
+        Expression::ConditionalExpression(conditional) => {
+            collect_returned_expression_refs(&conditional.consequent, locals, refs);
+            collect_returned_expression_refs(&conditional.alternate, locals, refs);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_returned_expression_refs(&logical.left, locals, refs);
+            collect_returned_expression_refs(&logical.right, locals, refs);
+        }
+        _ => {}
+    }
+}
+
+/// Visit the return statements of one function body. Nested functions and
+/// classes own their return statements, so the walk does not enter them.
+struct ReturnedValueCollector<'r, 'b, 'a> {
+    locals: &'r FxHashMap<&'b str, LocalCallable<'b, 'a>>,
+    refs: &'r mut Vec<(String, Span)>,
+}
+
+impl<'a> Visit<'a> for ReturnedValueCollector<'_, '_, '_> {
+    fn visit_return_statement(&mut self, statement: &ReturnStatement<'a>) {
+        if let Some(argument) = &statement.argument {
+            collect_returned_expression_refs(argument, self.locals, self.refs);
+        }
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _arrow: &ArrowFunctionExpression<'a>) {}
+
+    fn visit_class(&mut self, _class: &Class<'a>) {}
 }
