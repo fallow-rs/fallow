@@ -378,6 +378,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugin credits each method only on a class that implements the matching
   interface. Other methods on these classes still report.
 
+- **Markup inside an inline `<script>` body is no longer an HTML asset
+  reference.** Before, fallow read `<script src>` and `<link href>` tags in
+  the text of an inline script, for example in a JS string or a comment that
+  builds markup. This gave unresolved imports such as
+  `./themes/${name}.css`, and it made a file reachable that the page does
+  not load. Now fallow skips the body of each inline script and keeps the
+  `src` of the script tag. Fallow also skips a `src` or `href` value that
+  contains `${`, as it already does for `{{` and `###`. This covers JS
+  interpolation and JSP or EL expressions in server templates. The extraction
+  cache version changes, so the first run after the upgrade parses all
+  files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
