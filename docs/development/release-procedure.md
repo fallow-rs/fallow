@@ -136,8 +136,8 @@ invariants in this file.
    lockfile with `cd crates/napi && rm -rf node_modules && npm ci`.
 
    The comparative performance numbers are the one artifact a version bump
-   cannot regenerate: `benchmarks/bench-ci.sh` runs only fallow, and
-   `benchmarks/compare.mjs` is the only script that also runs knip. Refresh
+   cannot regenerate: `benchmarks/compare.mjs` is the only script that runs
+   both fallow and knip. Refresh
    them deliberately, not every release:
 
    - Re-run `node benchmarks/compare.mjs` on the same class of hardware named

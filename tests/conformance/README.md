@@ -158,6 +158,3 @@ the unadjudicated count settles.
 }
 ```
 
-## CI
-
-The conformance suite runs daily via `.github/workflows/conformance.yml` and can be triggered manually. Results are posted to the GitHub Actions step summary with per-project and per-issue-type breakdowns. It never fails the CI pipeline -- it is purely informational.

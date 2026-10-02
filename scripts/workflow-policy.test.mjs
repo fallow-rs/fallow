@@ -225,42 +225,6 @@ test("CI caches are scoped to the analyzed root", () => {
   );
 });
 
-test("binary-size workflow isolates incompatible release builds", () => {
-  const workflow = readWorkflow(".github/workflows/bloat.yml");
-  const globalEnv = indentedBlock(workflow, "env", 0);
-  const cliJob = indentedBlock(workflow, "cli-bloat", 2);
-  const shippedJob = indentedBlock(workflow, "shipped-binaries", 2);
-  const aggregateJob = indentedBlock(workflow, "bloat", 2);
-
-  assert.match(cliJob, /cargo bloat --release -p fallow-cli/);
-  assert.match(cliJob, /CARGO_PROFILE_RELEASE_STRIP: "none"/);
-  assert.match(cliJob, /CARGO_PROFILE_RELEASE_DEBUG: "2"/);
-  assert.doesNotMatch(cliJob, /fallow-lsp|fallow-mcp|fallow-multicall/);
-  assert.doesNotMatch(globalEnv, /CARGO_PROFILE_RELEASE_(STRIP|DEBUG)/);
-  assert.match(shippedJob, /cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall/);
-  assert.doesNotMatch(shippedJob, /cargo bloat/);
-  assert.match(aggregateJob, /needs:\n\s+- cli-bloat\n\s+- shipped-binaries/);
-  assert.match(aggregateJob, /if: \$\{\{ always\(\) && /);
-  for (const job of [cliJob, shippedJob, aggregateJob]) {
-    assert.match(job, /contains\(github\.event\.pull_request\.labels\.\*\.name, 'ci:perf'\)/);
-  }
-  assert.match(aggregateJob, /needs\.cli-bloat\.result/);
-  assert.match(aggregateJob, /needs\.shipped-binaries\.result/);
-  assert.match(aggregateJob, /exit 1/);
-  assert.match(aggregateJob, /needs\.cli-bloat\.outputs\.bytes/);
-  for (const output of ["lsp_bytes", "mcp_bytes", "multicall_bytes"]) {
-    assert.match(aggregateJob, new RegExp(`needs\\.shipped-binaries\\.outputs\\.${output}`));
-  }
-
-  for (const job of [cliJob, shippedJob]) {
-    const timeout = Number(job.match(/timeout-minutes: (\d+)/)?.[1]);
-    assert.ok(
-      timeout <= 20,
-      `binary build job must fit the 20 minute runner budget, got ${timeout}`,
-    );
-  }
-});
-
 // A predicate that names Windows or excludes Unix selects code that only
 // compiles and runs on Windows. `any(unix, windows)` means "any supported host"
 // and is not Windows-specific, so an `any(...)` group must not also name unix.

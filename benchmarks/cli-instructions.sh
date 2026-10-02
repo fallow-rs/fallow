@@ -16,14 +16,11 @@
 #             fill the warm caches. Fails when a benchmark command does not
 #             exit 0, because the exec harness rejects a non-zero exit.
 #   config    Print the CodSpeed config (codspeed.yml) for the benchmarks.
-#   counters  Print the --performance work counters of each dead-code run as
-#             a JSON array of {name, unit, value} entries.
 #   commands  Print one benchmark per line: name, then the command.
 #
 # Usage:
 #   benchmarks/cli-instructions.sh prepare  --fallow-bin target/release/fallow
 #   benchmarks/cli-instructions.sh config   --fallow-bin target/release/fallow > codspeed.yml
-#   benchmarks/cli-instructions.sh counters --fallow-bin target/release/fallow > counters.json
 #
 # Options:
 #   --fallow-bin PATH   The fallow binary (required).
@@ -35,8 +32,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # name, GitHub repository, pinned commit. Public projects only. The commits
-# are the release tags that benchmarks/bench-ci.sh also uses. Change a commit
-# only on purpose, because every value of that project moves with it.
+# are release tags. Change a commit only on purpose, because every value of
+# that project moves with it.
 PROJECTS=(
     "preact   preactjs/preact  055cc5b8c62326fbb0fcaccb9816504e82f121b8"
     "zod      colinhacks/zod   e30870369d5b8f31ff4d0130d4439fd997deb523"
@@ -55,7 +52,7 @@ WORK_DIR="${REPO_ROOT}/target/cli-instructions"
 
 subcommand="${1:-}"
 if [[ -z "${subcommand}" ]]; then
-    echo "Usage: $0 prepare|config|counters|commands --fallow-bin PATH [--work-dir DIR]" >&2
+    echo "Usage: $0 prepare|config|commands --fallow-bin PATH [--work-dir DIR]" >&2
     exit 2
 fi
 shift
@@ -188,43 +185,9 @@ cmd_commands() {
     for_each_benchmark print_command
 }
 
-COUNTERS_TMP=""
-
-collect_counters() {
-    local name="$1" project_dir="$2" command="$3" state="$4"
-    if [[ "${command}" != "dead-code" ]]; then
-        return 0
-    fi
-    benchmark_args "${project_dir}" "${command}" "${state}"
-    "${BENCH_ARGS[@]}" --performance > /dev/null 2> "${COUNTERS_TMP}/stderr.txt"
-    python3 - "${name}" "${COUNTERS_TMP}/stderr.txt" >> "${COUNTERS_TMP}/entries.jsonl" <<'PY'
-import json, sys
-name, path = sys.argv[1], sys.argv[2]
-text = open(path, encoding="utf-8").read()
-start = text.find("{")
-if start < 0:
-    sys.exit(f"no --performance JSON for {name}")
-report, _ = json.JSONDecoder().raw_decode(text, start)
-for key, value in report["counters"].items():
-    print(json.dumps({"name": f"{name}: {key}", "unit": "count", "value": value}))
-PY
-}
-
-cmd_counters() {
-    COUNTERS_TMP="$(mktemp -d)"
-    trap 'rm -rf "${COUNTERS_TMP}"' EXIT
-    : > "${COUNTERS_TMP}/entries.jsonl"
-    for_each_benchmark collect_counters
-    python3 -c '
-import json, sys
-print(json.dumps([json.loads(line) for line in open(sys.argv[1], encoding="utf-8")], indent=2))
-' "${COUNTERS_TMP}/entries.jsonl"
-}
-
 case "${subcommand}" in
     prepare)  cmd_prepare ;;
     config)   cmd_config ;;
-    counters) cmd_counters ;;
     commands) cmd_commands ;;
     *) echo "Unknown subcommand: ${subcommand}" >&2; exit 2 ;;
 esac

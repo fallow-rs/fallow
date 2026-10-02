@@ -97,29 +97,6 @@ pinned number only when the work changed on purpose, and give the reason in the
 commit. Drift invariant I9 checks that the counters do not depend on the
 thread count.
 
-## Allocation guard
-
-`.github/workflows/allocs.yml` runs `crates/core/benches/allocations.rs`
-under dhat and records four counts: total bytes, total blocks, peak bytes and
-peak blocks. The fixture has multi-binding and type-only imports, barrel files
-with named, type and star re-exports, a namespace import, a global stylesheet
-with an `@import`, a CSS module with an unused class and one Vue single-file
-component. The bench asserts that these paths still produce their findings,
-so a fixture that stops reaching a path fails the run instead of showing lower
-counts.
-
-The workflow sets `RAYON_NUM_THREADS=1`. With one thread the counts differ
-between runs by less than 0.02%, so a change of 1% or more is a real change.
-With four threads the peak bytes differ by more than 1% between runs. The job
-writes the counts to the job summary. To find a regression, compare the counts
-of a pull request run with the counts of the latest main run.
-`scripts/check-benchmark-harness.py` rejects the workflow without the
-variable. Run the bench locally with the same variable:
-
-```bash
-RAYON_NUM_THREADS=1 cargo bench -p fallow-core --bench allocations
-```
-
 ## Whole-binary instruction counts
 
 The Criterion shards measure code paths in process. They do not see process
@@ -141,8 +118,7 @@ work. The action sets `cycle-estimation: false`, so each instruction has the
 same cost and the value follows the instruction count.
 
 The simulation does not count the child processes, for example `git` in
-`audit`, or the time in system calls. The same job records the `--performance`
-work counters of each `dead-code` run in the job summary.
+`audit`, or the time in system calls.
 
 Under callgrind with one thread, the instruction count of each benchmark
 differed by less than 0.1% between runs. A regression threshold of 2% is safe.

@@ -63,7 +63,6 @@ schema = ["fallow-types/schema"]
 [dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }
-dhat = { workspace = true }
 postcard = { workspace = true }
 tempfile = { workspace = true }
 
@@ -84,8 +83,4 @@ harness = false
 
 [[bench]]
 name = "scaling_analysis"
-harness = false
-
-[[bench]]
-name = "allocations"
 harness = false

@@ -73,18 +73,3 @@ jobs:
           # Charge each instruction the same cost, so the value follows the
           # instruction count and not the estimated cycles.
           cycle-estimation: 'false'
-
-      - name: Record the work counters
-        id: counters
-        run: |
-          benchmarks/cli-instructions.sh counters --fallow-bin target/release/fallow > cli-counters.json
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          entries = json.load(open("cli-counters.json", encoding="utf-8"))
-          print("## CLI work counters")
-          print("")
-          print("| Counter | Value |")
-          print("|---------|-------|")
-          for entry in entries:
-              print(f"| {entry['name']} | {entry['value']} |")
-          PY

@@ -251,16 +251,12 @@ On push to `main` only (each one also has `workflow_dispatch`):
 On push to `main`, and on a pull request only with the `ci:perf` label:
 
 - `Benchmarks` (CodSpeed).
-- `Binary Size`.
-- `Allocation Tracking`.
 
-Add the `ci:perf` label to a pull request that changes a hot path, the binary
-size, or the allocation profile. The label event starts the run. A pull request
+Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
 without the label starts these workflows, but every job skips and uses no
 runner.
 
-On a schedule only: `Conformance`, `Ecosystem (Full)`, `Real-World
-Benchmarks`, `Hawk`, and `Release Validation`.
+On a schedule only: `Ecosystem (Full)`, `Hawk`, and `Release Validation`.
 
 ### Prose-only main scheduling
 

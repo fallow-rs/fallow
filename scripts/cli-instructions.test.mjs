@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,39 +56,6 @@ test("config lists one benchmark per project, command and cache state", () => {
   }
 });
 
-test("counters reads the dead-code work counters from --performance", () => {
-  const work = mkdtempSync(join(tmpdir(), "fallow-cli-instructions-"));
-  const fake = join(work, "fake-fallow");
-  writeFileSync(
-    fake,
-    [
-      "#!/usr/bin/env bash",
-      'if [[ "$1" != "dead-code" ]]; then echo "unexpected $1" >&2; exit 3; fi',
-      "echo '{\"findings\": []}'",
-      "echo 'progress line' >&2",
-      // Print the counters only when the script asks for them.
-      'for arg in "$@"; do',
-      '  if [[ "$arg" == "--performance" ]]; then',
-      '    echo \'{"total_ms": 1.5, "counters": {"files_read": 7, "oxc_resolve_calls": 11}}\' >&2',
-      "  fi",
-      "done",
-    ].join("\n"),
-  );
-  chmodSync(fake, 0o755);
-
-  const result = run(["counters", "--fallow-bin", fake, "--work-dir", work]);
-  assert.equal(result.status, 0, result.stderr);
-
-  const entries = JSON.parse(result.stdout);
-  const expected = PROJECTS.flatMap((project) =>
-    STATES.flatMap((state) => [
-      { name: `cli ${project} dead-code (${state}): files_read`, unit: "count", value: 7 },
-      { name: `cli ${project} dead-code (${state}): oxc_resolve_calls`, unit: "count", value: 11 },
-    ]),
-  );
-  assert.deepEqual(entries, expected);
-});
-
 // The CPU simulation rejects a measured process that starts a child process.
 // `benchmark_dead_code_run_starts_no_git_process` in
 // crates/cli/tests/integration/check_tests.rs proves that dead-code starts
@@ -99,22 +66,5 @@ test("the benchmark runs turn off the git-backed next steps", () => {
     "utf8",
   );
   assert.match(workflow, /^ {2}FALLOW_SUGGESTIONS: 'off'$/m);
-
-  const work = mkdtempSync(join(tmpdir(), "fallow-cli-instructions-"));
-  const fake = join(work, "fake-fallow");
-  const log = join(work, "env.log");
-  writeFileSync(
-    fake,
-    ["#!/usr/bin/env bash", `echo "\${FALLOW_SUGGESTIONS:-unset}" >> '${log}'`, "echo '{}'"].join(
-      "\n",
-    ),
-  );
-  chmodSync(fake, 0o755);
-  const result = spawnSync("bash", [SCRIPT, "counters", "--fallow-bin", fake, "--work-dir", work], {
-    encoding: "utf8",
-    env: { ...process.env, FALLOW_SUGGESTIONS: "on" },
-  });
-  // The fake prints no counters, so the script fails after the first run.
-  assert.notEqual(result.status, 0);
-  assert.equal(readFileSync(log, "utf8").trim(), "off");
+  assert.match(readFileSync(SCRIPT, "utf8"), /^export FALLOW_SUGGESTIONS=off$/m);
 });
