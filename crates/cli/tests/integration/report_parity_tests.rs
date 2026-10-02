@@ -509,8 +509,9 @@ fn saved_dead_code_comment_preserves_direct_decision_sidecar() {
     assert_eq!(saved_sidecar["gates"][0]["id"], "dead-code");
 }
 
-#[test]
-fn saved_audit_reports_preserve_all_native_sections() {
+/// A committed copy of the complexity fixture with one uncommitted duplicate,
+/// so `audit` has a git base in a shallow CI checkout too.
+fn audit_project() -> tempfile::TempDir {
     let fixture = workspace_fixture("tests/fixtures/complexity-project");
     let project = tempfile::tempdir().expect("audit project");
     for entry in [
@@ -534,6 +535,12 @@ fn saved_audit_reports_preserve_all_native_sections() {
         project.path().join("src/complex-copy.ts"),
     )
     .expect("create changed duplicate");
+    project
+}
+
+#[test]
+fn saved_audit_reports_preserve_all_native_sections() {
+    let project = audit_project();
 
     assert_saved_report_parity(project.path(), Some("audit"));
 }
@@ -1246,7 +1253,8 @@ fn saved_baselined_health_markdown_reads_sections_and_remaining_count() {
 /// exit 2 rather than print a different document.
 #[test]
 fn saved_audit_markdown_is_refused() {
-    let root = workspace_fixture("tests/fixtures/complexity-project");
+    let project = audit_project();
+    let root = project.path().to_path_buf();
     let json = run(&root, &analysis_args(Some("audit"), &root, "json", &[]));
     assert!(
         matches!(json.status.code(), Some(0 | 1)),
