@@ -17,14 +17,9 @@ rules:
   cache-poisoning:
     ignore:
       - release.yml
-  # benchmark-action/gh-release require tokens in with: block (not env-mappable)
+  # gh-release requires tokens in with: block (not env-mappable)
   secrets-outside-env:
     ignore:
-      - allocs.yml
-      - bench.yml
-      - bloat.yml
-      - conformance.yml
-      - coverage.yml
       - release.yml
   # Dependabot auto-merge uses pull_request_target intentionally — no code checkout,
   # only gh pr merge API call. Actor-gated to dependabot[bot].

@@ -109,8 +109,10 @@ so a fixture that stops reaching a path fails the run instead of showing lower
 counts.
 
 The workflow sets `RAYON_NUM_THREADS=1`. With one thread the counts differ
-between runs by less than 0.02%, so the alert threshold is 101%. With four
-threads the peak bytes differ by more than 1% between runs.
+between runs by less than 0.02%, so a change of 1% or more is a real change.
+With four threads the peak bytes differ by more than 1% between runs. The job
+writes the counts to the job summary. To find a regression, compare the counts
+of a pull request run with the counts of the latest main run.
 `scripts/check-benchmark-harness.py` rejects the workflow without the
 variable. Run the bench locally with the same variable:
 
@@ -140,8 +142,7 @@ same cost and the value follows the instruction count.
 
 The simulation does not count the child processes, for example `git` in
 `audit`, or the time in system calls. The same job records the `--performance`
-work counters of each `dead-code` run on the `cli-counters` chart, with an
-alert at 101%.
+work counters of each `dead-code` run in the job summary.
 
 Under callgrind with one thread, the instruction count of each benchmark
 differed by less than 0.1% between runs. A regression threshold of 2% is safe.

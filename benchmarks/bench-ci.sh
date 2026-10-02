@@ -4,13 +4,13 @@ set -euo pipefail
 # Real-world performance benchmark for CI.
 #
 # Clones 8 open-source projects, runs fallow on each (cold + warm cache),
-# and outputs timing results as benchmark-action compatible JSON.
+# and outputs timing results as a JSON array of {name, unit, value} entries.
 #
 # Usage:
 #   ./bench-ci.sh [--fallow-bin PATH] [--clone-dir DIR] [--runs N]
 #
 # Output:
-#   benchmark-action JSON to stdout
+#   JSON array to stdout
 #   Human-readable summary to stderr
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -339,7 +339,7 @@ for entry in [
 " >> "${BENCH_JSONL}"
 done
 
-# Combine JSONL into benchmark-action JSON array
+# Combine JSONL into one JSON array
 python3 -c "
 import json, sys
 data = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]

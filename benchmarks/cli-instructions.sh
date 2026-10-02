@@ -17,7 +17,7 @@
 #             exit 0, because the exec harness rejects a non-zero exit.
 #   config    Print the CodSpeed config (codspeed.yml) for the benchmarks.
 #   counters  Print the --performance work counters of each dead-code run as
-#             github-action-benchmark JSON (customSmallerIsBetter).
+#             a JSON array of {name, unit, value} entries.
 #   commands  Print one benchmark per line: name, then the command.
 #
 # Usage:

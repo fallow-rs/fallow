@@ -21,9 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
 
@@ -74,36 +76,8 @@ jobs:
               out.write(f\"unadjudicated={s['unadjudicated']}\n\")
           "
 
-          # Write custom JSON for benchmark-action tracking
-          # Per-project agreement rates + overall
-          python3 -c "
-          import json
-          with open('conformance-report.json') as f:
-              r = json.load(f)
-          data = [
-            {'name': 'Agreement Rate', 'unit': '%', 'value': float(r['summary']['agreement_pct'])},
-            {'name': 'Agreed Issues', 'unit': 'issues', 'value': int(r['summary']['agreed'])},
-            {'name': 'Fallow Total', 'unit': 'issues', 'value': int(r['summary']['fallow_total'])},
-            {'name': 'Knip Total', 'unit': 'issues', 'value': int(r['summary']['knip_total'])},
-          ]
-          for name, proj in sorted(r.get('projects', {}).items()):
-            data.append({'name': f'{name} Agreement', 'unit': '%', 'value': float(proj['agreement_pct'])})
-          print(json.dumps(data, indent=2))
-          " > conformance-bench.json
         # Never fail -- this is informational
         continue-on-error: true
-
-      - name: Store conformance metrics
-        if: always() && steps.conformance.outcome != 'skipped'
-        uses: ./.github/actions/store-benchmark
-        with:
-          name: Fallow Conformance
-          tool: customBiggerIsBetter
-          output-file-path: conformance-bench.json
-          data-dir: conformance
-          alert-threshold: '130%'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          continue-on-error: 'true'
 
       - name: Post step summary
         if: always()

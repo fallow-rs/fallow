@@ -46,7 +46,7 @@ env:
 
 jobs:
   allocations:
-    name: Allocation regression check
+    name: Allocation counts
     runs-on: ubuntu-latest
     # On a pull request, run only with the "ci:perf" label. Skip a "labeled"
     # event for another label, so it does not start a second run.
@@ -55,10 +55,11 @@ jobs:
       (contains(github.event.pull_request.labels.*.name, 'ci:perf') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ci:perf'))
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -67,13 +68,16 @@ jobs:
       - name: Run allocation benchmark
         run: cargo bench --bench allocations 2>&1 | tee alloc-output.txt
 
-      - name: Parse allocations
-        id: parse
+      - name: Report allocations
         run: |
           total_bytes=$(grep '^alloc_total_bytes:' alloc-output.txt | awk '{print $2}')
           total_blocks=$(grep '^alloc_total_blocks:' alloc-output.txt | awk '{print $2}')
           max_bytes=$(grep '^alloc_max_bytes:' alloc-output.txt | awk '{print $2}')
           max_blocks=$(grep '^alloc_max_blocks:' alloc-output.txt | awk '{print $2}')
+          if [ -z "$total_bytes" ] || [ -z "$total_blocks" ] || [ -z "$max_bytes" ] || [ -z "$max_blocks" ]; then
+            echo "::error::The allocation benchmark printed no alloc_* counters"
+            exit 1
+          fi
 
           {
             echo "## Allocation Stats"
@@ -85,31 +89,3 @@ jobs:
             echo "| Peak memory (bytes) | $max_bytes |"
             echo "| Peak allocations | $max_blocks |"
           } >> "$GITHUB_STEP_SUMMARY"
-
-          # Write custom JSON for benchmark-action tracking
-          python3 -c "
-          import json
-          data = [
-            {'name': 'Total Bytes Allocated', 'unit': 'bytes', 'value': int('${total_bytes:-0}')},
-            {'name': 'Total Allocations', 'unit': 'allocations', 'value': int('${total_blocks:-0}')},
-            {'name': 'Peak Memory', 'unit': 'bytes', 'value': int('${max_bytes:-0}')},
-            {'name': 'Peak Allocations', 'unit': 'allocations', 'value': int('${max_blocks:-0}')}
-          ]
-          print(json.dumps(data, indent=2))
-          " > alloc-bench.json
-
-      - name: Store allocation metrics
-        if: always() && steps.parse.outcome != 'skipped'
-        uses: ./.github/actions/store-benchmark
-        with:
-          # The series name changed with the realistic fixture, so the history
-          # does not compare the new counts with the old synthetic fixture.
-          name: Fallow Allocations (realistic fixture)
-          tool: customSmallerIsBetter
-          output-file-path: alloc-bench.json
-          data-dir: allocs
-          # The counts are deterministic with one thread (run-to-run spread
-          # below 0.02%), so 101% flags a real change of 1% or more.
-          alert-threshold: '101%'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          continue-on-error: ${{ github.event_name == 'pull_request' }}

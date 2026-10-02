@@ -958,10 +958,6 @@ test("coverage runs with read-only permissions on every push to main", () => {
   assert.match(coverageJob, /persist-credentials: false/);
   assert.match(coverageJob, /name: Enforce coverage floor/);
   assert.doesNotMatch(coverageJob, /coverage_policy/);
-  assert.match(
-    coverageJob,
-    /name: Upload coverage publication input\n\s+if: >-[\s\S]*github\.event_name == 'push'[\s\S]*github\.ref == 'refs\/heads\/main'[\s\S]*github\.event_name == 'workflow_dispatch'/,
-  );
   assert.match(coverageJob, /badge_color: \$\{\{ steps\.badge\.outputs\.color \}\}/);
   assert.doesNotMatch(coverageJob, /name: Store coverage metrics/);
   assert.doesNotMatch(coverageJob, /name: Update coverage badge/);
@@ -977,7 +973,7 @@ test("coverage publication is isolated to trusted events and write permissions",
   assert.match(publishJob, /github\.ref == 'refs\/heads\/main'/);
   assert.match(publishJob, /github\.event_name == 'workflow_dispatch'/);
   assert.match(publishJob, /BADGE_COLOR: \$\{\{ needs\.coverage\.outputs\.badge_color \}\}/);
-  assert.match(publishJob, /name: Store coverage metrics/);
+  assert.doesNotMatch(publishJob, /store-benchmark|gh-pages/);
   assert.match(publishJob, /name: Update coverage badge/);
   assert.doesNotMatch(publishJob, /\b(?:cargo|npm|pnpm)\b/);
 });

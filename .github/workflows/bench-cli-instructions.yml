@@ -45,8 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,19 +88,3 @@ jobs:
           for entry in entries:
               print(f"| {entry['name']} | {entry['value']} |")
           PY
-
-      - name: Store the work counters
-        if: always() && steps.counters.outcome == 'success'
-        uses: ./.github/actions/store-benchmark
-        with:
-          name: Fallow CLI Work Counters
-          tool: customSmallerIsBetter
-          output-file-path: cli-counters.json
-          data-dir: cli-counters
-          # The counters are exact, so any change of 1% or more is real work.
-          alert-threshold: '101%'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          continue-on-error: ${{ github.event_name == 'pull_request' }}
-          # A manual run on a branch only compares. The history on gh-pages
-          # holds main only.
-          push-ref: refs/heads/main

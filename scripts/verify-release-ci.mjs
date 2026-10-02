@@ -31,7 +31,6 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
   { name: "Coverage", file: "coverage.yml" },
   { name: "Ecosystem CI", file: "ecosystem.yml" },
   { name: "Cross-Architecture", file: "cross-arch.yml" },
-  { name: "Module Coupling", file: "coupling.yml" },
   { name: "Fuzz Smoke", file: "fuzz-smoke.yml" },
   { name: "Binary Size", file: "bloat.yml" },
   { name: "Allocation Tracking", file: "allocs.yml" },

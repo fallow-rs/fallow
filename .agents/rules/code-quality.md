@@ -42,5 +42,4 @@ CI runs `typos` (configured in `_typos.toml`). All code, comments, and test stri
 - `--document-private-items` rustdoc check
 - `cargo-shear` for unused dependency detection
 - `zizmor` for GitHub Actions security scanning
-- `cargo-bloat` for binary size tracking
-- `cargo-modules` for module coupling analysis (SIG Module Coupling property)
+- `cargo-bloat` for binary size reports

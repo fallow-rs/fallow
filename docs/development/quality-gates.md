@@ -245,7 +245,6 @@ On push to `main` only (each one also has `workflow_dispatch`):
 
 - `Coverage`, with the coverage floor.
 - `Cross-Architecture`.
-- `Module Coupling`.
 - `Fuzz Smoke`, which also runs every week.
 - `Scorecard`.
 

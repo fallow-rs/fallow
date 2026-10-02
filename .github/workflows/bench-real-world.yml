@@ -21,9 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -52,18 +54,6 @@ jobs:
             > bench-real-world.json \
             2> >(tee bench-real-world-stderr.txt >&2)
         continue-on-error: true
-
-      - name: Store benchmark result
-        if: always() && steps.bench.outcome != 'skipped'
-        uses: ./.github/actions/store-benchmark
-        with:
-          name: Fallow Real-World Benchmarks
-          tool: customSmallerIsBetter
-          output-file-path: bench-real-world.json
-          data-dir: bench-real-world
-          alert-threshold: '200%'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          continue-on-error: 'true'
 
       - name: Post step summary
         if: always()
