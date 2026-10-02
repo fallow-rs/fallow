@@ -3210,3 +3210,58 @@ fn unused_dev_dependencies(results: &fallow_core::results::AnalysisResults) -> V
         .map(|dep| dep.dep.package_name.clone())
         .collect()
 }
+
+#[test]
+fn wildcard_subpath_export_target_matches_nested_directories() {
+    let root = fixture_path("wildcard-subpath-export-nested");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = unused_file_paths(&results)
+        .into_iter()
+        .map(|path| relative_to_fixture(&root, &path))
+        .collect();
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            (
+                relative_to_fixture(&root, &export.export.path.to_string_lossy()),
+                export.export.export_name.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_files.contains(&"packages/ui/src/a/b/orphan.ts".to_string()),
+        "a `*` in an exports target matches files in nested directories: {unused_files:?}"
+    );
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(file, _)| file == "packages/lib/src/nested/deep.ts"),
+        "a nested file that matches `./src/*.ts` is a public entry point: {unused_exports:?}"
+    );
+    assert!(
+        unused_files.contains(&"packages/lib/src/nested/helper.js".to_string()),
+        "a file that does not end with the target suffix stays out of the entry set: {unused_files:?}"
+    );
+    assert_eq!(
+        unused_files,
+        vec!["packages/lib/src/nested/helper.js".to_string()],
+        "only the file outside the export target is unused: {unused_files:?}"
+    );
+    assert!(
+        unused_exports.is_empty(),
+        "every export is public through a wildcard subpath: {unused_exports:?}"
+    );
+}
+
+fn relative_to_fixture(root: &std::path::Path, path: &str) -> String {
+    let normalized_root = root.to_string_lossy().replace('\\', "/");
+    let normalized = path.replace('\\', "/");
+    match normalized.strip_prefix(&normalized_root) {
+        Some(rest) => rest.trim_start_matches('/').to_string(),
+        None => normalized,
+    }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "app",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lib": "*",
+    "ui": "*"
+  }
+}

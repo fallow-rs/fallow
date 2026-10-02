@@ -9,6 +9,7 @@ use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::plugins::config_parser::lexical_normalize;
 use crate::scripts::{IgnoredCommandEntries, ScriptCatalog, WorkspacePackages};
 
 const SKIPPED_ENTRY_WARNING_PREVIEW: usize = 5;
@@ -986,6 +987,7 @@ pub fn discover_root_entry_points(
             &mut nested_entries,
             &NestedPackageSearch {
                 canonical_root: &canonical_root,
+                files,
                 exports_subdirectories: &exports_dirs,
                 ignored: IgnoredCommandEntries::new(&config.ignore_command_entries),
                 workspaces,
@@ -1086,6 +1088,7 @@ struct PackageEntryBuckets<'a> {
 /// The inputs of the nested package search that every package shares.
 struct NestedPackageSearch<'a> {
     canonical_root: &'a Path,
+    files: &'a [DiscoveredFile],
     exports_subdirectories: &'a [String],
     ignored: IgnoredCommandEntries<'a>,
     workspaces: ScriptWorkspaces<'a>,
@@ -1139,7 +1142,7 @@ fn collect_nested_package_entries(
     let output_map = TsconfigOutputMap::from_project(pkg_dir);
     for entry_path in pkg.entry_points() {
         if entry_path.contains('*') {
-            expand_wildcard_entries(pkg_dir, &entry_path, search.canonical_root, entries.runtime);
+            expand_wildcard_entries(pkg_dir, &entry_path, search.files, entries.runtime);
         } else if let Some(ep) = resolve_entry_path_with_output_map(
             pkg_dir,
             &entry_path,
@@ -1162,34 +1165,59 @@ fn collect_nested_package_entries(
     }
 }
 
-/// Expand wildcard subpath exports to matching files on disk.
+/// Expand a wildcard subpath export target to the discovered files it matches.
 ///
-/// Handles patterns like `./src/themes/*.css` from package.json exports maps
-/// (`"./themes/*": { "import": "./src/themes/*.css" }`). Expands the `*` to
-/// match actual files in the target directory.
+/// Follows the Node subpath pattern rule: every `*` in the target stands for
+/// the same substring, and that substring can contain `/`. So the target
+/// `./src/*.ts` matches `src/top.ts` and also `src/nested/deep.ts`.
 fn expand_wildcard_entries(
     base: &Path,
     pattern: &str,
-    canonical_root: &Path,
+    files: &[DiscoveredFile],
     entries: &mut Vec<EntryPoint>,
 ) {
-    let full_pattern = base.join(pattern).to_string_lossy().to_string();
-    let Ok(matches) = glob::glob(&full_pattern) else {
-        return;
-    };
-    for path_result in matches {
-        let Ok(path) = path_result else {
+    let target = lexical_normalize(&base.join(pattern));
+    let literal_dir: PathBuf = target
+        .components()
+        .take_while(|component| !component.as_os_str().to_string_lossy().contains('*'))
+        .collect();
+    let target = target.to_string_lossy().replace('\\', "/");
+    let parts: Vec<&str> = target.split('*').collect();
+    for file in files {
+        if !file.path.starts_with(&literal_dir) {
             continue;
-        };
-        if let Ok(canonical) = dunce::canonicalize(&path)
-            && canonical.starts_with(canonical_root)
-        {
+        }
+        let path = file.path.to_string_lossy().replace('\\', "/");
+        if matches_subpath_pattern(&path, &parts) {
             entries.push(EntryPoint {
-                path,
+                path: file.path.clone(),
                 source: EntryPointSource::PackageJsonExports,
             });
         }
     }
+}
+
+/// Whether `path` matches a target split at its `*` characters, with one
+/// non-empty substring in place of every `*`.
+fn matches_subpath_pattern(path: &str, parts: &[&str]) -> bool {
+    let [prefix, .., suffix] = parts else {
+        return false;
+    };
+    if !path.starts_with(prefix) || !path.ends_with(suffix) {
+        return false;
+    }
+    let literal_len: usize = parts.iter().map(|part| part.len()).sum();
+    let stars = parts.len() - 1;
+    let Some(captured_len) = path.len().checked_sub(literal_len) else {
+        return false;
+    };
+    if captured_len == 0 || captured_len % stars != 0 {
+        return false;
+    }
+    let Some(capture) = path.get(prefix.len()..prefix.len() + captured_len / stars) else {
+        return false;
+    };
+    stars == 1 || parts.join(capture) == path
 }
 
 /// Discover the entry points of a workspace package.
@@ -1209,12 +1237,7 @@ pub fn discover_workspace_package_entry_points(
         let output_map = TsconfigOutputMap::from_project(ws_root);
         for entry_path in pkg.entry_points() {
             if entry_path.contains('*') {
-                expand_wildcard_entries(
-                    ws_root,
-                    &entry_path,
-                    &canonical_ws_root,
-                    &mut discovery.entries,
-                );
+                expand_wildcard_entries(ws_root, &entry_path, all_files, &mut discovery.entries);
             } else if let Some(ep) = resolve_entry_path_with_output_map(
                 ws_root,
                 &entry_path,
@@ -2562,6 +2585,46 @@ mod tests {
     mod wildcard_entry_tests {
         use super::*;
 
+        fn discovered_files_under(root: &Path) -> Vec<DiscoveredFile> {
+            let mut paths = Vec::new();
+            let mut pending = vec![root.to_path_buf()];
+            while let Some(dir) = pending.pop() {
+                for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        pending.push(path);
+                    } else {
+                        paths.push(path);
+                    }
+                }
+            }
+            paths.sort();
+            paths
+                .into_iter()
+                .enumerate()
+                .map(|(index, path)| DiscoveredFile {
+                    id: FileId(u32::try_from(index).unwrap()),
+                    path,
+                    size_bytes: 1,
+                })
+                .collect()
+        }
+
+        fn entry_names(entries: &[EntryPoint], root: &Path) -> Vec<String> {
+            let mut names: Vec<String> = entries
+                .iter()
+                .map(|ep| {
+                    ep.path
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            names.sort();
+            names
+        }
+
         #[test]
         fn expands_wildcard_css_entries() {
             let dir = tempfile::tempdir().expect("create temp dir");
@@ -2570,9 +2633,9 @@ mod tests {
             std::fs::write(themes.join("dark.css"), ":root { --bg: #000; }").unwrap();
             std::fs::write(themes.join("light.css"), ":root { --bg: #fff; }").unwrap();
 
-            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            let files = discovered_files_under(dir.path());
             let mut entries = Vec::new();
-            expand_wildcard_entries(dir.path(), "./src/themes/*.css", &canonical, &mut entries);
+            expand_wildcard_entries(dir.path(), "./src/themes/*.css", &files, &mut entries);
 
             assert_eq!(entries.len(), 2, "should expand wildcard to 2 CSS files");
             let paths: Vec<String> = entries
@@ -2593,9 +2656,9 @@ mod tests {
             let dir = tempfile::tempdir().expect("create temp dir");
             std::fs::create_dir_all(dir.path().join("src/themes")).unwrap();
 
-            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            let files = discovered_files_under(dir.path());
             let mut entries = Vec::new();
-            expand_wildcard_entries(dir.path(), "./src/themes/*.css", &canonical, &mut entries);
+            expand_wildcard_entries(dir.path(), "./src/themes/*.css", &files, &mut entries);
 
             assert!(
                 entries.is_empty(),
@@ -2611,9 +2674,9 @@ mod tests {
             std::fs::write(themes.join("dark.css"), ":root {}").unwrap();
             std::fs::write(themes.join("index.ts"), "export {};").unwrap();
 
-            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            let files = discovered_files_under(dir.path());
             let mut entries = Vec::new();
-            expand_wildcard_entries(dir.path(), "./src/themes/*.css", &canonical, &mut entries);
+            expand_wildcard_entries(dir.path(), "./src/themes/*.css", &files, &mut entries);
 
             assert_eq!(entries.len(), 1, "should only match CSS files");
             assert!(
@@ -2623,6 +2686,68 @@ mod tests {
                     .unwrap()
                     .to_string_lossy()
                     .ends_with(".css")
+            );
+        }
+
+        #[test]
+        fn wildcard_matches_files_in_nested_directories() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(src.join("nested/deeper")).unwrap();
+            std::fs::write(src.join("top.ts"), "export {};").unwrap();
+            std::fs::write(src.join("nested/deep.ts"), "export {};").unwrap();
+            std::fs::write(src.join("nested/deeper/leaf.ts"), "export {};").unwrap();
+            std::fs::write(src.join("nested/helper.js"), "export {};").unwrap();
+            std::fs::write(dir.path().join("outside.ts"), "export {};").unwrap();
+
+            let files = discovered_files_under(dir.path());
+            let mut entries = Vec::new();
+            expand_wildcard_entries(dir.path(), "./src/*.ts", &files, &mut entries);
+
+            assert_eq!(
+                entry_names(&entries, dir.path()),
+                vec![
+                    "src/nested/deep.ts",
+                    "src/nested/deeper/leaf.ts",
+                    "src/top.ts"
+                ],
+            );
+        }
+
+        #[test]
+        fn wildcard_without_suffix_matches_every_nested_file() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(src.join("a/b")).unwrap();
+            std::fs::write(src.join("top.ts"), "export {};").unwrap();
+            std::fs::write(src.join("a/b/orphan.tsx"), "export {};").unwrap();
+            std::fs::write(dir.path().join("index.ts"), "export {};").unwrap();
+
+            let files = discovered_files_under(dir.path());
+            let mut entries = Vec::new();
+            expand_wildcard_entries(dir.path(), "./src/*", &files, &mut entries);
+
+            assert_eq!(
+                entry_names(&entries, dir.path()),
+                vec!["src/a/b/orphan.tsx", "src/top.ts"],
+            );
+        }
+
+        #[test]
+        fn wildcard_with_several_stars_requires_one_substring() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::create_dir_all(dir.path().join("src/button")).unwrap();
+            std::fs::create_dir_all(dir.path().join("src/card")).unwrap();
+            std::fs::write(dir.path().join("src/button/button.ts"), "export {};").unwrap();
+            std::fs::write(dir.path().join("src/card/other.ts"), "export {};").unwrap();
+
+            let files = discovered_files_under(dir.path());
+            let mut entries = Vec::new();
+            expand_wildcard_entries(dir.path(), "./src/*/*.ts", &files, &mut entries);
+
+            assert_eq!(
+                entry_names(&entries, dir.path()),
+                vec!["src/button/button.ts"],
             );
         }
     }

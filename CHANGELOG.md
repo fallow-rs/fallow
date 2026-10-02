@@ -114,6 +114,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `*` in a package `exports` target now matches files in nested
+  directories.** Before, fallow expanded the `*` like a shell glob, so it
+  matched only one path segment. With `"./*": "./src/*.ts"`, fallow did not
+  use `src/nested/deep.ts` as an entry point. Thus it reported the exports
+  of that file as unused, and with `"./src/*": "./src/*"` it reported the
+  nested files as unused. Now fallow uses the Node rule: the `*` can match a
+  substring that contains `/`, and each `*` in the target matches the same
+  substring. A file that does not end with the text after the `*` stays out
+  of the entry set.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
