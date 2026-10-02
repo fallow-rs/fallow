@@ -131,6 +131,8 @@ mod nx_project_json;
 mod parse_degraded_diagnostic;
 #[path = "integration_test/redwoodsdk.rs"]
 mod redwoodsdk;
+#[path = "integration_test/relative_tsconfig_output_import.rs"]
+mod relative_tsconfig_output_import;
 #[path = "integration_test/rspress_theme.rs"]
 mod rspress_theme;
 #[path = "integration_test/rules_config.rs"]

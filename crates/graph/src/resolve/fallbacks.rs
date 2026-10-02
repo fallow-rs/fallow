@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 use serde_json::Value;
 
+use fallow_config::TsconfigOutputResolution;
 use fallow_types::discover::FileId;
 
 use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
@@ -604,6 +605,31 @@ pub(super) fn try_relative_package_root_source_fallback(
             .flatten()
             .map(ResolveResult::InternalModule)
     })
+}
+
+/// Resolve a relative import into a TypeScript output directory to its source.
+///
+/// A script or a test can import the emitted file (`../lib/types/a.js`) of a
+/// package whose tsconfig declares `rootDir` and `outDir`. The output is often
+/// not on disk, and `outDir` can have any name. The tsconfig files of the
+/// package that owns the target path map the output path to the source file.
+pub(super) fn try_relative_tsconfig_output_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !specifier.starts_with("./") && !specifier.starts_with("../") {
+        return None;
+    }
+    let target = normalize_path_lexically(&from_file.parent()?.join(specifier));
+    let manifest = nearest_package_manifest(ctx.package_manifests, &target)?;
+    let output_map = ctx.tsconfig_cache.output_map(&manifest.root);
+    let TsconfigOutputResolution::Resolved(source) =
+        output_map.resolve_source_for_output_path(&target, SOURCE_EXTS)
+    else {
+        return None;
+    };
+    lookup_internal_file_id(ctx, &source).map(ResolveResult::InternalModule)
 }
 
 pub(super) fn normalize_path_lexically(path: &Path) -> PathBuf {

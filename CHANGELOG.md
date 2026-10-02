@@ -224,6 +224,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the graph cache version changes to 66, so the first run after the upgrade
   rebuilds both caches.
 
+- **A relative import into a tsconfig `outDir` resolves to the source file.**
+  A script or a test can import the emitted file of a package, for example
+  `../lib/types/helper.js` when the tsconfig sets `rootDir` to `src` and
+  `outDir` to `lib/types`. Before, fallow did not use the tsconfig to map
+  such an import. Thus it reported the import as unresolved when the output
+  was not on disk. Now fallow reads the `tsconfig*.json` files at the root
+  of the package that owns the target path, and maps the output path to the
+  source file. The extension rules are the same as for package entry
+  points: `.js` maps to `.ts` or `.tsx`, and `.mjs` maps to `.mts`. An
+  output path without a source file stays unresolved.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

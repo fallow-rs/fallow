@@ -8,6 +8,7 @@ use oxc_resolver::Resolver;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
 
+use fallow_config::TsconfigOutputMap;
 use fallow_types::discover::FileId;
 
 /// Result of resolving an import specifier.
@@ -465,6 +466,7 @@ impl CanonicalizeCache {
 pub(super) struct TsconfigCache {
     json: DashMap<PathBuf, Option<Arc<Value>>, FxBuildHasher>,
     chains: DashMap<PathBuf, Arc<[PathBuf]>, FxBuildHasher>,
+    output_maps: DashMap<PathBuf, Arc<TsconfigOutputMap>, FxBuildHasher>,
 }
 
 impl TsconfigCache {
@@ -496,6 +498,18 @@ impl TsconfigCache {
     /// Store the computed tsconfig chain for a source file.
     pub fn store_chain(&self, from_file: &Path, chain: Arc<[PathBuf]>) {
         self.chains.insert(from_file.to_path_buf(), chain);
+    }
+
+    /// Return the output-to-source map of a package root, building it on
+    /// first miss. Each package root reads its tsconfig files once per run.
+    pub fn output_map(&self, package_root: &Path) -> Arc<TsconfigOutputMap> {
+        if let Some(map) = self.output_maps.get(package_root) {
+            return Arc::clone(&map);
+        }
+        let map = Arc::new(TsconfigOutputMap::from_project(package_root));
+        self.output_maps
+            .insert(package_root.to_path_buf(), Arc::clone(&map));
+        map
     }
 }
 
