@@ -1206,6 +1206,41 @@ fn saved_health_markdown_keeps_every_requested_section() {
     );
 }
 
+/// A baselined run carries `sections` and `summary.baseline_staleness.remaining_findings`.
+/// The saved render must read both and print the same document as the live run,
+/// for a score-only run and for a run that does not list complexity findings.
+#[test]
+fn saved_baselined_health_markdown_reads_sections_and_remaining_count() {
+    let project = owned_complexity_project();
+    let baseline_dir = tempfile::tempdir().expect("baseline tempdir");
+    let baseline = baseline_dir.path().join("health-baseline.json");
+    let baseline = baseline.display().to_string();
+    let root = project.path().display().to_string();
+    let saved = run(
+        project.path(),
+        &[
+            "health".to_string(),
+            "--root".to_string(),
+            root,
+            "--quiet".to_string(),
+            "--save-baseline".to_string(),
+            baseline.clone(),
+        ],
+    );
+    assert!(
+        matches!(saved.status.code(), Some(0 | 1)),
+        "save baseline failed: {}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    for extra in [["--score", "--baseline"], ["--file-scores", "--baseline"]] {
+        assert_saved_report_parity_with_args(
+            project.path(),
+            Some("health"),
+            &[extra[0], extra[1], &baseline],
+        );
+    }
+}
+
 /// The live audit markdown is the human report with markdown sections. A saved
 /// audit envelope cannot reproduce it, so `report` refuses the format with
 /// exit 2 rather than print a different document.
