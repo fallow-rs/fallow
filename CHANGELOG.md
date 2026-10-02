@@ -545,6 +545,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   electron-builder reads these files without `--config`. Now the Electron
   plugin keeps them. `electron-builder.mjs` is not a default name, so fallow
   still reports it when nothing references it.
+- **Starlight component overrides and custom CSS in the Astro config are
+  used.** Before, fallow did not read the options of the `@astrojs/starlight`
+  integration call in `integrations`. Thus it reported the files in
+  `components` and `customCss` as unused, and a package in `customCss` as an
+  unused dependency. Now a local path in these options is a used file, and a
+  package name is a used dependency.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

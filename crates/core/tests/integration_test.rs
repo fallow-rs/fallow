@@ -17,6 +17,8 @@ mod ag_ui_agent_hooks;
 mod angular_ng_package;
 #[path = "integration_test/angular_unrendered_component.rs"]
 mod angular_unrendered_component;
+#[path = "integration_test/astro_starlight_config.rs"]
+mod astro_starlight_config;
 #[path = "integration_test/astro_unrendered_component.rs"]
 mod astro_unrendered_component;
 #[path = "integration_test/astro_unused_component_prop.rs"]
