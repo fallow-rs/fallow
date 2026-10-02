@@ -29,6 +29,15 @@ fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     object.name == REQUIRE && member.property.name == "resolve"
 }
 
+/// Whether `expr` is `import.meta.resolve`. Code cannot rebind `import.meta`,
+/// so no shadow check applies.
+fn is_import_meta_resolve_callee(expr: &Expression<'_>) -> bool {
+    let Expression::StaticMemberExpression(member) = expr else {
+        return false;
+    };
+    matches!(member.object, Expression::ImportMeta(_)) && member.property.name == "resolve"
+}
+
 /// The value of a string literal or of a template literal without expressions.
 fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
     match argument {
@@ -188,7 +197,8 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn try_record_package_path_reference(&mut self, call: &CallExpression<'_>) {
-        if self.is_module_require_resolve(&call.callee)
+        if (self.is_module_require_resolve(&call.callee)
+            || is_import_meta_resolve_callee(&call.callee))
             && let Some(arg) = call.arguments.first()
         {
             let references = self.package_references_from_argument(arg);

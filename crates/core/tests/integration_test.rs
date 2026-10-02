@@ -87,6 +87,8 @@ mod hono_html_tagged_template;
 mod html_entry;
 #[path = "integration_test/import_load_kinds.rs"]
 mod import_load_kinds;
+#[path = "integration_test/import_meta_resolve_package.rs"]
+mod import_meta_resolve_package;
 #[path = "integration_test/issue_1032_tsconfig_sibling_src_paths.rs"]
 mod issue_1032_tsconfig_sibling_src_paths;
 #[path = "integration_test/issue_1304_effect_schema_same_name.rs"]

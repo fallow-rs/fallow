@@ -351,6 +351,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   such a return now also gives a finding. This change invalidates the
   extraction cache.
 
+- **`import.meta.resolve('pkg')` credits the package.** Before, fallow
+  reported a dependency as unused when its only reference was
+  `import.meta.resolve`, for example a package whose URL code gives to a
+  child process. Now `import.meta.resolve` credits a package with the same
+  limits as `require.resolve`: a bare package name or `<pkg>/package.json`
+  counts, and a deeper subpath does not. The extraction cache version
+  changes, so the first run after the upgrade parses all files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
