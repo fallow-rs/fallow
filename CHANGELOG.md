@@ -606,6 +606,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside double quotes and in a nested substitution. Text in single quotes,
   `$((...))` arithmetic and `${...}` expressions do not count.
 
+- **React Router apps without `entry.server` no longer report `isbot` as
+  unused.** When the app directory has no `entry.server` file, React Router
+  uses its built-in server entry. That entry imports `isbot`. Before, fallow
+  did not know about this import and reported `isbot` as an unused
+  dependency. Now the React Router plugin marks `isbot` as used when the app
+  directory has no `entry.server.{ts,tsx,js,jsx}` file. When the app has its
+  own `entry.server` file, the imports of that file decide which packages
+  are used.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

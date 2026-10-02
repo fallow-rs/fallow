@@ -1,0 +1,16 @@
+{
+  "name": "react-router-authored-entry-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "react-router dev"
+  },
+  "dependencies": {
+    "@react-router/node": "^7.0.0",
+    "isbot": "^5.0.0",
+    "react-router": "^7.0.0"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^7.0.0"
+  }
+}
