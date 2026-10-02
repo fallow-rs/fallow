@@ -265,7 +265,7 @@ const moveBackSteps = ({ remote, branch, oldTip, newTip, base, worktree }) =>
 // A push of the result makes the next run compare the pushed result with
 // itself, so the other problems must be fixed before the push.
 const OTHER_PROBLEMS_FIRST =
-  "Fix the other problems first. After a push of HEAD, the next run cannot find them, because it compares the pushed result with itself.";
+  "Fix the other problems first. After a push of the result, the next run cannot find them, because it compares the pushed result with itself.";
 
 const formatProblem = (label, lines) =>
   `${label}:\n${lines.map((line) => `    ${line}`).join("\n")}`;

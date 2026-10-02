@@ -422,7 +422,7 @@ test("the printed recovery steps for a moved entry lead to a passing run", (t) =
 });
 
 const OTHER_PROBLEMS_FIRST =
-  /Fix the other problems first\. After a push of HEAD, the next run cannot find them, because it compares the pushed result with itself\./u;
+  /Fix the other problems first\. After a push of the result, the next run cannot find them, because it compares the pushed result with itself\./u;
 
 // A moved entry is not the only problem, so a push of HEAD would hide the
 // other problem from the next run. The script must not print the push.

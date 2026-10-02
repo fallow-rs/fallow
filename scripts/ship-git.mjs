@@ -3,7 +3,7 @@
 // public documentation repository.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -139,7 +139,13 @@ const hookConfig = (top) => {
 const addWorktree = (top, commit, { branch, hooks }) => {
   const name = branch.replace(/[^\w.-]+/gu, "-");
   const path = realpathSync(mkdtempSync(join(tmpdir(), `ship-${name}-`)));
-  git(top, [...hooks, "worktree", "add", "--quiet", "--detach", path, commit]);
+  try {
+    git(top, [...hooks, "worktree", "add", "--quiet", "--detach", path, commit]);
+  } catch (error) {
+    // Without a worktree, the empty directory has no use and no report names it.
+    rmSync(path, { recursive: true, force: true });
+    throw error;
+  }
   return path;
 };
 
@@ -316,7 +322,13 @@ export const worktreeCommand = (path, args) => shellCommand(["git", "-C", path, 
  * must not go to the remote.
  */
 const keptWorktreeReport = ({ top, worktree, remote, branch, oldTip }, { push }) => {
-  const inRebase = rebaseInProgress(worktree);
+  let inRebase = false;
+  try {
+    inRebase = rebaseInProgress(worktree);
+  } catch {
+    // A broken worktree must not hide the original error or the kept path.
+    return `The temporary worktree ${worktree} is kept. Your checkout did not change.`;
+  }
   const lines = [
     `The temporary worktree ${worktree} holds the result. Your checkout did not change.`,
   ];
@@ -328,6 +340,7 @@ const keptWorktreeReport = ({ top, worktree, remote, branch, oldTip }, { push })
   }
   if (push) {
     lines.push(
+      "A push of a result that you changed by hand skips the checks of this script. Check the result first.",
       "Push the result from that worktree with a lease on the old branch tip:",
       `  ${worktreeCommand(worktree, leasePushArgs({ remote, branch, oldTip }))}`,
     );
