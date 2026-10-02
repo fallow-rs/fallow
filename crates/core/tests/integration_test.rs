@@ -25,6 +25,8 @@ mod barrel_exports;
 mod basic_analysis;
 #[path = "integration_test/bundler_entry_object_map.rs"]
 mod bundler_entry_object_map;
+#[path = "integration_test/bundler_nested_config_entry.rs"]
+mod bundler_nested_config_entry;
 #[path = "integration_test/caching.rs"]
 mod caching;
 #[path = "integration_test/css_in_js_styled.rs"]

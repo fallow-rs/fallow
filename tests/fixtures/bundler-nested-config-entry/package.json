@@ -1,0 +1,9 @@
+{
+  "name": "bundler-nested-config-entry",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "tsdown": "^0.15.0",
+    "tsup": "^8.0.0"
+  }
+}

@@ -302,6 +302,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--test-reporter spec` are not file arguments. When the script names a
   file, Node runs only that file, and fallow adds only that file.
 
+- **A `tsdown` or `tsup` config in a workspace package finds its `entry`
+  files.** These tools read each `entry` value relative to the directory of
+  the config file. Before, fallow read the values relative to the project
+  root when the tool was also a dependency of the root `package.json`. Thus
+  fallow reported the entry file of the package as unused. Now fallow
+  resolves each value from the config directory. A value with a leading `!`
+  now excludes its matches from the other `entry` values.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

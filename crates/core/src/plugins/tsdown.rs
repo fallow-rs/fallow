@@ -20,12 +20,12 @@ define_plugin! {
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
-    resolve_config(config_path, source, _root) {
+    resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
 
         let entries = config_parser::extract_config_string_or_array(source, config_path, &["entry"]);
-        result.extend_entry_patterns(entries);
+        result.extend_config_dir_entry_patterns(entries, config_path, root);
 
         result
     }
@@ -45,8 +45,11 @@ mod tests {
             };
         "#;
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert_eq!(result.entry_patterns, vec!["src/index.ts", "src/cli.ts"]);
     }
 
@@ -58,8 +61,11 @@ mod tests {
             };
         "#;
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert_eq!(result.entry_patterns, vec!["src/index.ts"]);
     }
 
@@ -73,8 +79,11 @@ mod tests {
             });
         "#;
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert!(
             result
                 .referenced_dependencies
@@ -92,8 +101,11 @@ mod tests {
     fn resolve_config_empty() {
         let source = r"export default {};";
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert!(result.entry_patterns.is_empty());
         assert!(result.referenced_dependencies.is_empty());
     }
@@ -106,8 +118,11 @@ mod tests {
             };
         "#;
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert!(result.entry_patterns.is_empty());
     }
 
@@ -120,8 +135,11 @@ mod tests {
             });
         "#;
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
         assert!(
             result
@@ -139,8 +157,11 @@ mod tests {
             });
         "#;
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert_eq!(result.entry_patterns, vec!["src/index.ts"]);
     }
 
@@ -153,8 +174,56 @@ mod tests {
             });
         "#;
         let plugin = TsdownPlugin;
-        let result =
-            plugin.resolve_config(Path::new("tsdown.config.ts"), source, Path::new("/project"));
+        let result = plugin.resolve_config(
+            Path::new("/project/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
         assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_nested_entry_resolves_from_config_directory() {
+        let source = r#"
+            export default {
+                entry: ["src/cli.ts", "./src/index.ts", "src/bin/*.ts", "!src/bin/skip.ts"]
+            };
+        "#;
+        let plugin = TsdownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/packages/lib/tsdown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec![
+                "packages/lib/src/cli.ts",
+                "packages/lib/src/index.ts",
+                "packages/lib/src/bin/*.ts",
+            ]
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .all(|rule| rule.exclude_globs == ["packages/lib/src/bin/skip.ts"])
+        );
+    }
+
+    #[test]
+    fn resolve_config_entry_resolves_from_workspace_root() {
+        let source = r#"
+            export default {
+                entry: ["src/cli.ts"]
+            };
+        "#;
+        let plugin = TsdownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/packages/lib/tsdown.config.ts"),
+            source,
+            Path::new("/project/packages/lib"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/cli.ts"]);
     }
 }

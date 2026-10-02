@@ -397,6 +397,33 @@ fn push_runtime_remote_sources(
 }
 
 impl PluginResult {
+    /// Register `entry` values that a bundler reads relative to the directory
+    /// of its config file. The project root run and the workspace run can read
+    /// the same config, so each value is anchored at the config directory. A
+    /// value with a leading `!` excludes its matches from every other value.
+    fn extend_config_dir_entry_patterns(
+        &mut self,
+        values: Vec<String>,
+        config_path: &Path,
+        root: &Path,
+    ) {
+        let (negated, positive): (Vec<String>, Vec<String>) =
+            values.into_iter().partition(|value| value.starts_with('!'));
+        let excluded: Vec<String> = negated
+            .iter()
+            .filter_map(|value| value.strip_prefix('!'))
+            .filter_map(|value| config_parser::normalize_config_path(value, config_path, root))
+            .collect();
+        self.entry_patterns.extend(
+            positive
+                .iter()
+                .filter_map(|value| config_parser::normalize_config_path(value, config_path, root))
+                .map(|pattern| {
+                    PathRule::new(pattern).with_excluded_globs(excluded.iter().cloned())
+                }),
+        );
+    }
+
     /// Register an entry pattern whose leading `../` segments are relative to
     /// the plugin root. The workspace prefix resolves them.
     fn push_parent_relative_entry_pattern(&mut self, pattern: String) {

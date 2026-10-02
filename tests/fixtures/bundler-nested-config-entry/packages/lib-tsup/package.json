@@ -1,0 +1,7 @@
+{
+  "name": "lib-tsup",
+  "private": true,
+  "devDependencies": {
+    "tsup": "^8.0.0"
+  }
+}
