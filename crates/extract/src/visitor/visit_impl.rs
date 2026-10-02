@@ -1749,6 +1749,26 @@ impl<'a> ModuleInfoExtractor {
         self.local_function_return_types.get(&callee_name).cloned()
     }
 
+    /// Record an import declaration that binds no name as a side-effect import
+    /// of `source`.
+    fn push_side_effect_import(
+        &mut self,
+        decl: &ImportDeclaration<'_>,
+        source: String,
+        is_type_only: bool,
+    ) {
+        self.imports.push(ImportInfo {
+            source,
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only,
+            is_type_only_star: false,
+            from_style: false,
+            span: decl.span,
+            source_span: decl.source.span,
+        });
+    }
+
     /// Record a named import specifier (`import { fork } from ...`), tracking the
     /// `child_process.fork` and `node:url` `fileURLToPath` provenance bindings.
     fn handle_import_specifier(
@@ -3261,36 +3281,39 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         let source_span = decl.source.span;
 
-        if let Some(specifiers) = &decl.specifiers {
-            for spec in specifiers {
-                match spec {
-                    ImportDeclarationSpecifier::ImportSpecifier(s) => {
-                        self.handle_import_specifier(s, &source, is_type_only, source_span);
-                    }
-                    ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
-                        self.handle_import_default_specifier(s, &source, is_type_only, source_span);
-                    }
-                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
-                        self.handle_import_namespace_specifier(
-                            s,
-                            &source,
-                            is_type_only,
-                            source_span,
-                        );
+        match &decl.specifiers {
+            // `import {} from 'x'` and `import type {} from 'x'` bind nothing
+            // but still name the module, so record them as side-effect
+            // imports. The type-only form keeps its type-only flag.
+            Some(specifiers) if specifiers.is_empty() => {
+                self.push_side_effect_import(decl, source, is_type_only);
+            }
+            Some(specifiers) => {
+                for spec in specifiers {
+                    match spec {
+                        ImportDeclarationSpecifier::ImportSpecifier(s) => {
+                            self.handle_import_specifier(s, &source, is_type_only, source_span);
+                        }
+                        ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
+                            self.handle_import_default_specifier(
+                                s,
+                                &source,
+                                is_type_only,
+                                source_span,
+                            );
+                        }
+                        ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
+                            self.handle_import_namespace_specifier(
+                                s,
+                                &source,
+                                is_type_only,
+                                source_span,
+                            );
+                        }
                     }
                 }
             }
-        } else {
-            self.imports.push(ImportInfo {
-                source,
-                imported_name: ImportedName::SideEffect,
-                local_name: String::new(),
-                is_type_only: false,
-                is_type_only_star: false,
-                from_style: false,
-                span: decl.span,
-                source_span,
-            });
+            None => self.push_side_effect_import(decl, source, false),
         }
     }
 

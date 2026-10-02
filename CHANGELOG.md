@@ -179,6 +179,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excludes file, so the findings are the same on each machine. A target
   that exists keeps the current behavior.
 
+- **An import with an empty specifier list credits its package.** Before,
+  fallow ignored `import {} from 'pkg'` and `import type {} from 'pkg'`,
+  because these imports bind no name. Thus it reported the package as an
+  unused dependency or devDependency. A relative form such as
+  `import type {} from './types'` did not keep the target file reachable.
+  Now fallow records the import as a side-effect import of the module. The
+  `import type {}` form counts as a type-only use of the package. The
+  extraction cache version changes, so the first run after the upgrade
+  rebuilds the cache.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

@@ -1363,3 +1363,40 @@ fn dev_dependency_of_a_private_sibling_is_not_credited() {
         "a dev-only declaration in the private sibling must not credit the consumer, got: {reported:?}"
     );
 }
+
+/// An import with an empty specifier list (`import {} from 'pkg'` or
+/// `import type {} from 'pkg'`) still names the package. It credits the
+/// package as a dependency, and a relative form keeps the target file
+/// reachable.
+#[test]
+fn empty_specifier_list_import_credits_package_and_file() {
+    let root = fixture_path("empty-specifier-import-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    let unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@x/settings"),
+        "`import {{}} from` should credit the dependency, found: {unused_dep_names:?}"
+    );
+    assert!(
+        !unused_dev_dep_names.contains(&"@x/settings"),
+        "`import type {{}} from` should credit the dev dependency, found: {unused_dev_dep_names:?}"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("packages/app/src/augment.ts")),
+        "`import type {{}} from './augment'` should keep the file reachable"
+    );
+}

@@ -43,6 +43,25 @@ fn extracts_side_effect_import() {
 }
 
 #[test]
+fn empty_specifier_list_import_is_side_effect() {
+    let info = parse_source("import {} from './setup';");
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].source, "./setup");
+    assert_eq!(info.imports[0].imported_name, ImportedName::SideEffect);
+    assert!(info.imports[0].local_name.is_empty());
+    assert!(!info.imports[0].is_type_only);
+}
+
+#[test]
+fn empty_specifier_list_type_import_is_type_only_side_effect() {
+    let info = parse_source("import type {} from '@scope/types';");
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].source, "@scope/types");
+    assert_eq!(info.imports[0].imported_name, ImportedName::SideEffect);
+    assert!(info.imports[0].is_type_only);
+}
+
+#[test]
 fn extracts_re_exports() {
     let info = parse_source("export { foo, bar as baz } from './module';");
     assert_eq!(info.re_exports.len(), 2);

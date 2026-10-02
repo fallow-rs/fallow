@@ -1,0 +1,5 @@
+{
+  "name": "empty-specifier-import-credit",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
