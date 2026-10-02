@@ -155,6 +155,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operand that fallow already binds to a class. When the two operands give
   two different classes, fallow binds no class.
 
+- **A method called on a `Map` value counts as used.** Before, fallow
+  reported a class method as unused when the only call went through
+  `map.get(key)?.method()`, `map.get(key)!.method()`, or a local that holds
+  `map.get(key)`. Now fallow reads the value type `V` of a binding that is
+  typed `Map<K, V>` or `ReadonlyMap<K, V>`, or that starts as
+  `new Map<K, V>()`. This works for variables, parameters and class fields.
+  A member access on the result of `.get(...)` then credits class `V`. A
+  `for...of` loop over `map.values()` also types the loop variable as `V`.
+  The extraction cache version changes, so the first run after the upgrade
+  rebuilds the cache.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

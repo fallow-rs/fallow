@@ -2,7 +2,7 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionBody, BinaryExpression, BindingPattern,
     CallExpression, Class, ClassElement, Expression, MethodDefinitionKind, ObjectPropertyKind,
     PropertyDefinition, PropertyKey, Statement, TSAccessibility, TSSignature, TSType,
-    TSTypeAnnotation, TSTypeName,
+    TSTypeAnnotation, TSTypeName, TSTypeParameterInstantiation,
 };
 use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
@@ -638,6 +638,67 @@ pub(super) fn array_element_type_from_type(ty: &TSType<'_>) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Extract the value type name of a map-shaped TS type: `Map<K, V>`,
+/// `ReadonlyMap<K, V>`, a parenthesized form, and a nullable union of those.
+/// Returns the value name only when it is a non-builtin identifier type
+/// reference, so `Map<string, number>` yields `None`.
+pub(super) fn map_value_type_from_type(ty: &TSType<'_>) -> Option<String> {
+    match ty {
+        TSType::TSTypeReference(type_ref) => {
+            let name = extract_type_name(&type_ref.type_name)?;
+            if name != "Map" && name != "ReadonlyMap" {
+                return None;
+            }
+            map_value_type_from_args(type_ref.type_arguments.as_deref())
+        }
+        TSType::TSParenthesizedType(paren) => map_value_type_from_type(&paren.type_annotation),
+        TSType::TSUnionType(union) => {
+            let mut found: Option<String> = None;
+            for branch in &union.types {
+                match branch {
+                    TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => {}
+                    other => {
+                        if found.is_some() {
+                            return None;
+                        }
+                        found = map_value_type_from_type(other);
+                        found.as_ref()?;
+                    }
+                }
+            }
+            found
+        }
+        _ => None,
+    }
+}
+
+/// The value type name of a `new Map<K, V>()` initializer, under the same
+/// non-builtin rule as `map_value_type_from_type`.
+pub(super) fn map_value_type_from_new(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => map_value_type_from_new(&paren.expression),
+        Expression::NewExpression(new_expr) => {
+            let Expression::Identifier(callee) = &new_expr.callee else {
+                return None;
+            };
+            if callee.name != "Map" {
+                return None;
+            }
+            map_value_type_from_args(new_expr.type_arguments.as_deref())
+        }
+        _ => None,
+    }
+}
+
+fn map_value_type_from_args(args: Option<&TSTypeParameterInstantiation<'_>>) -> Option<String> {
+    let args = args?;
+    if args.params.len() != 2 {
+        return None;
+    }
+    let value = extract_type_reference_name(&args.params[1])?;
+    (!is_builtin_constructor(&value)).then_some(value)
 }
 
 /// Infer the element class of an array-shaped binding from its optional type

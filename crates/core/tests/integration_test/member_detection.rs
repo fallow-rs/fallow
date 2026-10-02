@@ -1202,3 +1202,28 @@ fn nullish_fallback_and_nullable_ternary_inits_credit_class_members() {
         ]
     );
 }
+
+#[test]
+fn map_value_type_credits_class_members_read_through_get() {
+    let root = fixture_path("map-value-class-members");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+    unused.sort();
+
+    assert_eq!(
+        unused,
+        vec![
+            "Entry.unused".to_string(),
+            "Item.unused".to_string(),
+            "Session.unused".to_string(),
+            "Slot.unused".to_string(),
+        ],
+        "a member called on a Map value must credit the value class"
+    );
+}

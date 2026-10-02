@@ -36,8 +36,8 @@ use super::helpers::{
     extract_super_class_type_args, extract_type_annotation_name, extract_type_reference_name,
     has_angular_class_decorator, has_angular_plural_query_decorator,
     infer_array_binding_element_type, is_meta_url_arg, lit_custom_element_decorator,
-    lit_custom_element_tag, regex_pattern_to_suffix, return_type_element_name,
-    ts_import_type_qualifier_root,
+    lit_custom_element_tag, map_value_type_from_new, map_value_type_from_type,
+    regex_pattern_to_suffix, return_type_element_name, ts_import_type_qualifier_root,
 };
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
@@ -563,6 +563,10 @@ impl ModuleInfoExtractor {
                     .find_map(|scope| scope.get(receiver_name))
             })
             .cloned()
+            .or_else(|| {
+                let map_name = receiver_name.strip_suffix(".values()")?;
+                self.map_value_type_for(map_name)
+            })
     }
 
     fn record_array_binding_element_type(&mut self, binding: String, element: String) {
@@ -570,6 +574,69 @@ impl ModuleInfoExtractor {
             self.array_binding_element_types.insert(binding, element);
         } else if let Some(scope) = self.scoped_array_binding_element_types.last_mut() {
             scope.insert(binding, element);
+        }
+    }
+
+    fn record_map_binding_value_type(&mut self, binding: String, value: String) {
+        if self.is_module_scope() {
+            self.map_binding_value_types.insert(binding, value);
+        } else if let Some(scope) = self.scoped_map_binding_value_types.last_mut() {
+            scope.insert(binding, value);
+        }
+    }
+
+    /// The value class of a map-typed receiver name (already `this`-qualified).
+    fn map_value_type_for(&self, receiver_name: &str) -> Option<String> {
+        self.scoped_map_binding_value_types
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(receiver_name))
+            .or_else(|| self.map_binding_value_types.get(receiver_name))
+            .cloned()
+    }
+
+    /// The value class `V` of a `map.get(key)` expression when `map` is a
+    /// binding typed `Map<K, V>`. Looks through `( )`, `!` and `?.` so
+    /// `map.get(key)?.m()` and `map.get(key)!.m()` both resolve.
+    fn map_get_value_type(&self, expr: &Expression<'_>) -> Option<String> {
+        let call = match expr {
+            Expression::ParenthesizedExpression(paren) => {
+                return self.map_get_value_type(&paren.expression);
+            }
+            Expression::TSNonNullExpression(non_null) => {
+                return self.map_get_value_type(&non_null.expression);
+            }
+            Expression::CallExpression(call) => call.as_ref(),
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::CallExpression(call) => call.as_ref(),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let Expression::StaticMemberExpression(callee) = &call.callee else {
+            return None;
+        };
+        if callee.property.name != "get" || call.arguments.len() != 1 {
+            return None;
+        }
+        let receiver_name = static_member_object_name(&callee.object)?;
+        self.map_value_type_for(&self.qualify_this_scope(&receiver_name))
+    }
+
+    /// Record the value class of a binding typed `Map<K, V>` or initialized
+    /// with `new Map<K, V>()`. The annotation wins over the initializer.
+    fn record_map_binding_from_declaration(
+        &mut self,
+        binding: String,
+        type_annotation: Option<&TSTypeAnnotation<'_>>,
+        init: Option<&Expression<'_>>,
+    ) {
+        let value = match type_annotation {
+            Some(annotation) => map_value_type_from_type(&annotation.type_annotation),
+            None => init.and_then(map_value_type_from_new),
+        };
+        if let Some(value) = value.and_then(|value| self.resolve_class_type_param(&value)) {
+            self.record_map_binding_value_type(binding, value);
         }
     }
 
@@ -1869,6 +1936,8 @@ impl<'a> ModuleInfoExtractor {
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
+            self.scoped_map_binding_value_types
+                .push(FxHashMap::default());
             self.preseed_nested_declarations(statements);
         }
         self.preseed_direct_object_binding_targets(statements);
@@ -1888,6 +1957,7 @@ impl<'a> ModuleInfoExtractor {
         }
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types.pop();
+            self.scoped_map_binding_value_types.pop();
         }
     }
 
@@ -2310,6 +2380,16 @@ impl<'a> ModuleInfoExtractor {
                 id.name.as_str(),
                 declarator.type_annotation.as_deref(),
             );
+            self.record_map_binding_from_declaration(
+                id.name.to_string(),
+                declarator.type_annotation.as_deref(),
+                Some(init),
+            );
+            if declarator.type_annotation.is_none()
+                && let Some(value) = self.map_get_value_type(init)
+            {
+                self.insert_class_binding_target(id.name.to_string(), value);
+            }
         }
 
         // FP-1 (unused-load-data-key): `const X = data` passes the whole
@@ -2929,6 +3009,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 }
             }
 
+            self.record_map_binding_from_declaration(
+                this_key.clone(),
+                prop.type_annotation.as_deref(),
+                prop.value.as_ref(),
+            );
+
             if let Some(Expression::NewExpression(new_expr)) = &prop.value
                 && let Expression::Identifier(callee) = &new_expr.callee
                 && !super::helpers::is_builtin_constructor(callee.name.as_str())
@@ -2978,6 +3064,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 .push(FxHashSet::default());
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
+            self.scoped_map_binding_value_types
+                .push(FxHashMap::default());
             self.sanitizer_binding_stack.push(FxHashMap::default());
             self.literal_allowlist_binding_stack
                 .push(FxHashMap::default());
@@ -3000,6 +3088,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.nested_declaration_stack.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
+            self.scoped_map_binding_value_types.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
             self.risky_regex_binding_stack.pop();
@@ -3988,6 +4077,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             });
         }
         if let Some(type_name) = self.asserted_receiver_type_name(&expr.object) {
+            self.member_accesses.push(MemberAccess {
+                object: type_name,
+                member: expr.property.name.to_string(),
+            });
+        }
+        if let Some(type_name) = self.map_get_value_type(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: type_name,
                 member: expr.property.name.to_string(),

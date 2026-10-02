@@ -13142,3 +13142,57 @@ fn fallback_with_two_different_classes_does_not_bind() {
         info.member_accesses
     );
 }
+
+#[test]
+fn map_get_result_credits_the_map_value_class() {
+    let info = parse(
+        r"
+        import { Session, Entry, Slot } from './lib';
+        class Registry {
+          private sessions = new Map<string, Session>();
+          private entries: Map<string, Entry> = new Map();
+          run(id: string) {
+            this.sessions.get(id)?.open();
+            this.entries.get(id)!.close();
+          }
+        }
+        export function useSlot(slots: Map<string, Slot>) {
+          const slot = slots.get('key');
+          slot?.fill();
+        }
+        ",
+    );
+    assert!(has_member_access(&info, "Session", "open"));
+    assert!(has_member_access(&info, "Entry", "close"));
+    assert!(
+        has_member_access(&info, "Slot", "fill"),
+        "a local bound to map.get(...) must credit the value class, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn map_get_result_ignores_builtin_values_and_other_receivers() {
+    let info = parse(
+        r"
+        import { Session } from './lib';
+        export function first(counts: Map<string, number>, other: Session) {
+          counts.get('a')?.toFixed();
+          other.get('a')?.open();
+        }
+        export function second() {
+          sessions.get('a')?.close();
+        }
+        export function third(sessions: Map<string, Session>) {
+          sessions.get()?.reset();
+        }
+        ",
+    );
+    assert!(!has_member_access(&info, "number", "toFixed"));
+    assert!(!has_member_access(&info, "Session", "open"));
+    assert!(
+        !has_member_access(&info, "Session", "close"),
+        "a map parameter of one function must not type a sibling function's free name"
+    );
+    assert!(!has_member_access(&info, "Session", "reset"));
+}

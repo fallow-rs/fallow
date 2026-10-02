@@ -409,6 +409,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// and `for (const util of utils)` in the same lexical scope without leaking
     /// the binding to sibling functions.
     scoped_array_binding_element_types: Vec<FxHashMap<String, String>>,
+    /// Module-scope bindings typed `Map<K, V>` / `ReadonlyMap<K, V>` (or
+    /// initialized with `new Map<K, V>()`) of a non-builtin class `V`, keyed by
+    /// binding name -> value class name. Class fields use the class-scoped
+    /// `this@<id>.` key. A `<binding>.get(...)` result is then a receiver of `V`.
+    map_binding_value_types: FxHashMap<String, String>,
+    /// Block/function-scoped map value types, with the same scoping as
+    /// `scoped_array_binding_element_types`.
+    scoped_map_binding_value_types: Vec<FxHashMap<String, String>>,
     /// Top-level local function name -> declared return element class
     /// (`Promise<T>` / `T`, non-builtin). Populated by a `visit_program` pre-pass
     /// so `Promise.all(arr.map(cb))` can type its result from a map callback whose
