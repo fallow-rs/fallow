@@ -25,7 +25,7 @@ env:
 jobs:
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -307,7 +307,7 @@ jobs:
     name: Docker
     needs: changes
     if: needs.changes.outputs.docker == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -386,12 +386,12 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
-      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-latest' }}
+      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-26.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -410,7 +410,7 @@ jobs:
           HEAVY_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           if [ ! -f scripts/select-heavy-runner.mjs ]; then
-            echo 'runner=ubuntu-latest' >> "$GITHUB_OUTPUT"
+            echo 'runner=ubuntu-26.04' >> "$GITHUB_OUTPUT"
             echo 'Check uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
           else
             node scripts/select-heavy-runner.mjs
@@ -423,7 +423,7 @@ jobs:
     name: Check
     needs: [changes, heavy-runner]
     if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
-    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
     # A cold Rust cache can leave the NAPI release build finishing just after
     # the previous 20-minute limit on merged commits.
     timeout-minutes: 30
@@ -536,7 +536,7 @@ jobs:
     name: Drift harness
     needs: changes
     if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -676,7 +676,7 @@ jobs:
     name: Public skills contract
     needs: changes
     if: needs.changes.outputs.skills == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -704,7 +704,7 @@ jobs:
     name: Documentation
     needs: changes
     if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -718,7 +718,7 @@ jobs:
 
   typos:
     name: Typos
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -736,7 +736,7 @@ jobs:
 
   js-lint:
     name: JS Lint and Format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -803,7 +803,7 @@ jobs:
     name: npm Package
     needs: changes
     if: needs.changes.outputs.npm-package == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -927,7 +927,7 @@ jobs:
     name: Action with current binary
     needs: changes
     if: needs.changes.outputs.action-current == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -977,7 +977,7 @@ jobs:
     name: Fallow Self Analysis
     needs: changes
     if: needs.changes.outputs.self-analyze == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -1031,7 +1031,7 @@ jobs:
     name: VS Code Extension
     needs: changes
     if: needs.changes.outputs.vscode == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     permissions:
       contents: read
@@ -1073,7 +1073,7 @@ jobs:
     needs: changes
     # Same condition as vscode-target-host, the only consumer of the artifact.
     if: needs.changes.outputs.vscode-host == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -1116,7 +1116,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             target: linux-x64
             cli: target/debug/fallow
             lsp: target/debug/fallow-lsp
@@ -1206,7 +1206,7 @@ jobs:
     name: Zed Extension
     needs: changes
     if: needs.changes.outputs.zed == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -1227,7 +1227,7 @@ jobs:
     name: Test GitLab CI scripts
     needs: changes
     if: needs.changes.outputs.ci-scripts == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1241,7 +1241,7 @@ jobs:
     name: Security Audit
     needs: changes
     if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1262,7 +1262,7 @@ jobs:
     name: Cargo Deny
     needs: changes
     if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1274,7 +1274,7 @@ jobs:
     name: Unused Dependencies
     needs: changes
     if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1289,7 +1289,7 @@ jobs:
     name: Actions Security
     needs: changes
     if: needs.changes.outputs.actions == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1309,7 +1309,7 @@ jobs:
     name: MSRV (1.96)
     needs: changes
     if: needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -1342,12 +1342,12 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
-      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-latest' }}
+      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-26.04' }}
     steps:
       # The default branch owns allocation policy, including for internal PRs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1365,7 +1365,7 @@ jobs:
           MIRI_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           if [ ! -f scripts/select-miri-runner.mjs ]; then
-            echo 'runner=ubuntu-latest' >> "$GITHUB_OUTPUT"
+            echo 'runner=ubuntu-26.04' >> "$GITHUB_OUTPUT"
             echo 'Miri uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
           else
             node scripts/select-miri-runner.mjs
@@ -1384,7 +1384,7 @@ jobs:
     # The local pre-push hook checks formatting and Clippy, not Miri.
     if: always() && !cancelled() && (needs.changes.outputs.miri == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
     # Rerun-failed-jobs can retain the selector output from attempt one.
-    runs-on: ${{ github.run_attempt == 1 && needs['miri-runner'].result == 'success' && needs['miri-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ github.run_attempt == 1 && needs['miri-runner'].result == 'success' && needs['miri-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
     # 60, not 45: the fallow-extract step shares this budget with types+graph and
     # the React/JSX structural-extraction additions (larger ModuleInfo + per-file
     # JSX harvesting) grew the extract suite's interpreter runtime past the old
@@ -1434,7 +1434,7 @@ jobs:
 
   viz-frontend:
     name: Viz frontend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: needs.changes.outputs.viz == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     timeout-minutes: 10
@@ -1460,7 +1460,7 @@ jobs:
     name: CI
     if: always()
     needs: [changes, docker, check, drift, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
     steps:

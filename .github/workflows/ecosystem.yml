@@ -42,7 +42,7 @@ jobs:
   # projects do not each do a full LTO build and race for one cache key.
   build:
     name: Build fallow (release)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -69,7 +69,7 @@ jobs:
   ecosystem:
     name: Ecosystem (${{ matrix.project.name }})
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     strategy:

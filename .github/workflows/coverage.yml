@@ -26,7 +26,7 @@ env:
 jobs:
   changes:
     name: Detect coverage inputs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -49,7 +49,7 @@ jobs:
     name: Coverage
     needs: changes
     if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.main-full != 'false')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     outputs:
@@ -132,7 +132,7 @@ jobs:
       needs.coverage.result == 'success' &&
       ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     env:

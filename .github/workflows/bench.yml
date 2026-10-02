@@ -55,7 +55,7 @@ env:
 jobs:
   benchmark-harness:
     name: Benchmark harness
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # On a pull request, run only with the "ci:perf" label. Skip a "labeled"
     # event for another label, so it does not start a second run.
     if: >-
@@ -76,7 +76,7 @@ jobs:
   determine-matrix:
     name: Determine benchmark matrix
     needs: benchmark-harness
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     timeout-minutes: 5
@@ -103,7 +103,7 @@ jobs:
       - benchmark-harness
       - determine-matrix
     if: needs.determine-matrix.outputs.fast_matrix != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -144,7 +144,7 @@ jobs:
     name: CodSpeed full simulation (${{ matrix.label }})
     needs: benchmark-harness
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write

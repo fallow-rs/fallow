@@ -17,7 +17,7 @@ test("an allocated main run uses Blacksmith while an unconfigured run stays on G
   assert.equal(selectMiriRunner(eligible, now), "blacksmith-4vcpu-ubuntu-2404");
   assert.equal(
     selectMiriRunner({ ...eligible, BLACKSMITH_MIRI_ALLOCATION: "" }, now),
-    "ubuntu-latest",
+    "ubuntu-26.04",
   );
 });
 
@@ -43,7 +43,7 @@ test("only the original official main or internal PR attempt may consume a reser
   ]) {
     assert.equal(
       selectMiriRunner({ ...eligible, ...override }, now),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       JSON.stringify(override),
     );
   }
@@ -76,13 +76,13 @@ test("allocation parsing fails closed and cannot renew itself in a later month",
   ]) {
     assert.equal(
       selectMiriRunner({ ...eligible, BLACKSMITH_MIRI_ALLOCATION: allocation }, now),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       allocation,
     );
   }
-  assert.equal(selectMiriRunner(eligible, new Date("2026-10-01T00:00:00Z")), "ubuntu-latest");
-  assert.equal(selectMiriRunner(eligible, new Date("2026-08-31T23:59:59Z")), "ubuntu-latest");
-  assert.equal(selectMiriRunner(eligible, new Date("invalid")), "ubuntu-latest");
+  assert.equal(selectMiriRunner(eligible, new Date("2026-10-01T00:00:00Z")), "ubuntu-26.04");
+  assert.equal(selectMiriRunner(eligible, new Date("2026-08-31T23:59:59Z")), "ubuntu-26.04");
+  assert.equal(selectMiriRunner(eligible, new Date("invalid")), "ubuntu-26.04");
 });
 
 test("distinct concurrent CI run numbers consume only their disjoint reserved slots", () => {
@@ -101,7 +101,7 @@ test("distinct concurrent CI run numbers consume only their disjoint reserved sl
   for (const run of ["", "0", "-1", "100.5", "1e2", "0100", "100\n", "9007199254740992"]) {
     assert.equal(
       selectMiriRunner({ ...eligible, GITHUB_RUN_NUMBER: run }, now),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       run,
     );
   }
@@ -146,7 +146,7 @@ test("the Actions entrypoint writes its decision and a summary without disclosin
     assert.equal(result.status, 0, result.stderr);
     assert.equal(existsSync(output), true, "entrypoint must emit a runner decision");
     const emitted = readFileSync(output, "utf8");
-    assert.equal(emitted, "runner=ubuntu-latest\n");
+    assert.equal(emitted, "runner=ubuntu-26.04\n");
     assert.match(readFileSync(summary, "utf8"), /GitHub.*allocation/);
     assert.doesNotMatch(
       result.stdout + result.stderr + readFileSync(summary, "utf8"),
@@ -175,14 +175,14 @@ test("extended allocations reserve only remaining monthly budget", () => {
     "blacksmith-4vcpu-ubuntu-2404",
     "one slot exactly fills the remaining envelope",
   );
-  assert.equal(select({ slots: 2 }), "ubuntu-latest", "prior windows cannot be recycled");
+  assert.equal(select({ slots: 2 }), "ubuntu-26.04", "prior windows cannot be recycled");
   assert.equal(
     select({ slots: 53, budgetCredits: 8000, priorReservedCredits: 50 }),
     "blacksmith-4vcpu-ubuntu-2404",
   );
   assert.equal(
     select({ slots: 54, budgetCredits: 8000, priorReservedCredits: 50 }),
-    "ubuntu-latest",
+    "ubuntu-26.04",
   );
   assert.equal(
     select({ priorReservedCredits: 0, budgetCredits: 150 }),
@@ -208,13 +208,13 @@ test("extended allocations reserve only remaining monthly budget", () => {
     { priorReservedCredits: undefined },
     { runner: "blacksmith-32vcpu-ubuntu-2404" },
   ])
-    assert.equal(select(override), "ubuntu-latest", JSON.stringify(override));
+    assert.equal(select(override), "ubuntu-26.04", JSON.stringify(override));
   for (const date of [
     new Date("2026-08-31T23:59:59Z"),
     new Date("2026-10-01T00:00:00Z"),
     new Date("invalid"),
   ])
-    assert.equal(select({}, date), "ubuntu-latest");
+    assert.equal(select({}, date), "ubuntu-26.04");
 });
 
 test("a failed summary cannot publish a Blacksmith admission", async () => {
@@ -269,7 +269,7 @@ test("allocation intervals reject overflow while accepting an exact safe endpoin
   assert.equal(select(Number.MAX_SAFE_INTEGER - 1), "blacksmith-4vcpu-ubuntu-2404");
   assert.equal(
     select(Number.MAX_SAFE_INTEGER),
-    "ubuntu-latest",
+    "ubuntu-26.04",
     "overflow must fail even when the budget fits",
   );
 });

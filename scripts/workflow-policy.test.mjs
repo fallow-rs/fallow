@@ -341,10 +341,10 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     .replace(vscodeTargetHostJob, "");
 
   assert.doesNotMatch(workflowWithoutWindowsJobs, /windows-latest|windows-11-arm|macos-latest/);
-  assert.match(checkJob, /runs-on:.*\|\| \x27ubuntu-latest\x27/);
+  assert.match(checkJob, /runs-on:.*\|\| \x27ubuntu-26.04\x27/);
   assert.match(checkJob, /timeout-minutes: 30/);
   assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
-  assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-latest/);
+  assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-26.04/);
   assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);
   assert.match(windowsRustJob, /needs: changes/);
   assert.match(windowsRustJob, /if: needs\.changes\.outputs\.windows-rust == 'true'/);
@@ -424,7 +424,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.match(vscodeTargetHostJob, /FALLOW_BIN:/);
   assert.match(vscodeTargetHostJob, /FALLOW_LSP_BIN:/);
   assert.match(vscodeTargetHostJob, /name: Run exact target VSIX host smoke/);
-  assert.match(zedJob, /runs-on: ubuntu-latest/);
+  assert.match(zedJob, /runs-on: ubuntu-26.04/);
   assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
   assert.throws(() => indentedBlock(workflow, "windows-arm64", 2), /missing windows-arm64 block/);
   assert.throws(
@@ -1078,7 +1078,7 @@ const PGO_RUST_BINARY_PACKAGES = ["fallow-cli", "fallow-lsp", "fallow-mcp", "fal
 const PGO_LEGS = [
   {
     target: "x86_64-unknown-linux-gnu",
-    os: "ubuntu-latest",
+    os: "ubuntu-26.04",
     container: /container: rust:1\.97\.1-bullseye@sha256:[0-9a-f]{64}/u,
   },
   { target: "aarch64-apple-darwin", os: "macos-latest", container: null },
@@ -1290,7 +1290,7 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
   assert.match(compare, /-Cllvm-args=-pgo-warn-missing-function/u);
   assert.match(
     compare,
-    /- os: ubuntu-latest\n\s+target: x86_64-unknown-linux-gnu\n(?:\s+\w+: .*\n)*?\s+gate: true/u,
+    /- os: ubuntu-26.04\n\s+target: x86_64-unknown-linux-gnu\n(?:\s+\w+: .*\n)*?\s+gate: true/u,
   );
   assert.equal((compare.match(/gate: true/gu) ?? []).length, 1, "only Linux x64 gates wall time");
   assert.ok(compare.includes(PGO_CONFIG_FLAG), "the PGO build must use the release mechanism");
@@ -1319,20 +1319,20 @@ test("Miri falls back to GitHub when runner selection fails or a job is rerun", 
   for (const result of ["failure", "skipped", "cancelled"]) {
     context.needs["miri-runner"].result = result;
     assert.equal(runInNewContext(condition, context), true);
-    assert.equal(runInNewContext(runner, context), "ubuntu-latest", result);
+    assert.equal(runInNewContext(runner, context), "ubuntu-26.04", result);
   }
   context.needs["miri-runner"].result = "success";
   context.github.run_attempt = 2;
   assert.equal(
     runInNewContext(runner, context),
-    "ubuntu-latest",
+    "ubuntu-26.04",
     "rerun-failed-jobs may reuse old selector output",
   );
   context.github.run_attempt = 1;
   context.needs["miri-runner"].outputs = {};
-  assert.equal(runInNewContext(runner, context), "ubuntu-latest", "missing output falls back");
+  assert.equal(runInNewContext(runner, context), "ubuntu-26.04", "missing output falls back");
   context.needs["miri-runner"].outputs.runner = "unexpected-runner";
-  assert.equal(runInNewContext(runner, context), "ubuntu-latest", "unknown labels fail closed");
+  assert.equal(runInNewContext(runner, context), "ubuntu-26.04", "unknown labels fail closed");
   context.cancelled = () => true;
   assert.equal(runInNewContext(condition, context), false);
   context.cancelled = () => false;
@@ -1349,7 +1349,7 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
   const workflow = readWorkflow(".github/workflows/ci.yml");
   assert.match(workflow, /^  miri-runner:$/m, "CI must run the optional allocation selector");
   const selector = indentedBlock(workflow, "miri-runner", 2);
-  assert.match(selector, /runs-on: ubuntu-latest/);
+  assert.match(selector, /runs-on: ubuntu-26.04/);
   assert.match(selector, /permissions:\n      contents: read\n/);
   assert.doesNotMatch(selector, /secrets\.|id-token:|actions: write|pull-requests:/);
   assert.match(selector, /ref: refs\/heads\/main/);
@@ -1366,7 +1366,7 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
   assert.match(selector, /continue-on-error: true/);
   assert.match(
     selector,
-    /if \[ ! -f scripts\/select-miri-runner\.mjs \]; then[\s\S]*runner=ubuntu-latest[\s\S]*else[\s\S]*node scripts\/select-miri-runner\.mjs/,
+    /if \[ ! -f scripts\/select-miri-runner\.mjs \]; then[\s\S]*runner=ubuntu-26.04[\s\S]*else[\s\S]*node scripts\/select-miri-runner\.mjs/,
   );
   const miri = indentedBlock(workflow, "miri", 2);
   assert.doesNotMatch(miri, /continue-on-error/);
@@ -1417,7 +1417,7 @@ test("an unset Miri allocation skips selector startup without skipping Miri", as
   assert.equal(runInNewContext(miri.match(/^    if: (.+)$/m)[1], context), true);
   assert.equal(
     runInNewContext(miri.match(/^    runs-on: \$\{\{ (.+) \}\}$/m)[1], context),
-    "ubuntu-latest",
+    "ubuntu-26.04",
   );
 });
 
@@ -1562,7 +1562,7 @@ test("failed selector steps discard partial Blacksmith output despite continue-o
       runInNewContext(output, {
         steps: { runner: { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } } },
       }),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       outcome,
     );
   }
@@ -1619,7 +1619,7 @@ test("heavy jobs admit a reserved runner and retain GitHub fallback after select
       cancelled: () => false,
     };
     const evaluateRunner = () =>
-      runner === "ubuntu-latest" ? runner : runInNewContext(runner, context);
+      runner === "ubuntu-26.04" ? runner : runInNewContext(runner, context);
     assert.equal(
       evaluateRunner(),
       "blacksmith-4vcpu-ubuntu-2404",
@@ -1630,15 +1630,15 @@ test("heavy jobs admit a reserved runner and retain GitHub fallback after select
     for (const result of ["failure", "skipped", "cancelled"]) {
       context.needs["heavy-runner"].result = result;
       assert.equal(runInNewContext(condition, context), true);
-      assert.equal(evaluateRunner(), "ubuntu-latest");
+      assert.equal(evaluateRunner(), "ubuntu-26.04");
     }
     context.needs["heavy-runner"].result = "success";
     context.github.run_attempt = 2;
-    assert.equal(evaluateRunner(), "ubuntu-latest", "retained outputs cannot admit reruns");
+    assert.equal(evaluateRunner(), "ubuntu-26.04", "retained outputs cannot admit reruns");
     context.github.run_attempt = 1;
     for (const outputs of [{}, { runner: "blacksmith-8vcpu-ubuntu-2404" }]) {
       context.needs["heavy-runner"].outputs = outputs;
-      assert.equal(evaluateRunner(), "ubuntu-latest");
+      assert.equal(evaluateRunner(), "ubuntu-26.04");
     }
     context.cancelled = () => true;
     assert.equal(runInNewContext(condition, context), false);
@@ -1704,7 +1704,7 @@ test("heavy selectors skip startup when unset and publish only successful truste
       context.github.ref = "refs/heads/topic";
       assert.equal(runInNewContext(condition, context), false);
     }
-    assert.match(selector, /runs-on: ubuntu-latest/);
+    assert.match(selector, /runs-on: ubuntu-26.04/);
     assert.match(selector, /permissions:\n      contents: read\n/);
     assert.match(selector, /ref: refs\/heads\/main\n          persist-credentials: false/);
     assert.match(selector, /node-version: '22'/);
@@ -1721,7 +1721,7 @@ test("heavy selectors skip startup when unset and publish only successful truste
         runInNewContext(output, {
           steps: { runner: { outcome, outputs: { runner: "blacksmith-4vcpu-ubuntu-2404" } } },
         }),
-        outcome === "success" ? "blacksmith-4vcpu-ubuntu-2404" : "ubuntu-latest",
+        outcome === "success" ? "blacksmith-4vcpu-ubuntu-2404" : "ubuntu-26.04",
       );
     }
   }
@@ -1801,7 +1801,7 @@ test("heavy admission reserves the actual job timeouts including overhead", asyn
         { ...environment, BLACKSMITH_HEAVY_ALLOCATION: JSON.stringify(reservation) },
         new Date("2026-09-15T00:00:00Z"),
       ),
-      "ubuntu-latest",
+      "ubuntu-26.04",
     );
   }
 });

@@ -36,10 +36,10 @@ const select = (record = allocation, environment = {}, date = now) =>
 
 test("Check admits only reserved runs after accounting for the complete Miri window", () => {
   assert.equal(select(), "blacksmith-4vcpu-ubuntu-2404");
-  assert.equal(select(allocation, { GITHUB_RUN_NUMBER: "99" }), "ubuntu-latest");
-  assert.equal(select(allocation, { GITHUB_RUN_NUMBER: "101" }), "ubuntu-latest");
-  assert.equal(select({ ...allocation, priorReservedCredits: 2099 }), "ubuntu-latest");
-  assert.equal(select({ ...allocation, budgetCredits: 2189 }), "ubuntu-latest");
+  assert.equal(select(allocation, { GITHUB_RUN_NUMBER: "99" }), "ubuntu-26.04");
+  assert.equal(select(allocation, { GITHUB_RUN_NUMBER: "101" }), "ubuntu-26.04");
+  assert.equal(select({ ...allocation, priorReservedCredits: 2099 }), "ubuntu-26.04");
+  assert.equal(select({ ...allocation, budgetCredits: 2189 }), "ubuntu-26.04");
   assert.equal(select({ ...allocation, budgetCredits: 2190 }), "blacksmith-4vcpu-ubuntu-2404");
 });
 
@@ -66,12 +66,12 @@ test("every window is validated before any admission, including nonmatching wind
   ]) {
     assert.equal(
       select({ ...allocation, allocations: [window] }),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       JSON.stringify(window),
     );
     assert.equal(
       select({ ...allocation, allocations: [valid, window] }),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       "a later invalid record must reject the complete allocation",
     );
   }
@@ -81,12 +81,12 @@ test("every window is validated before any admission, including nonmatching wind
       budgetCredits: 3000,
       allocations: [valid, { ...valid, workflow: ["release-validation.yml"], job: "drift-full" }],
     }),
-    "ubuntu-latest",
+    "ubuntu-26.04",
     "a coerced later identity must reject the entire record",
   );
   assert.equal(
     select({ ...allocation, allocations: [valid, valid] }),
-    "ubuntu-latest",
+    "ubuntu-26.04",
     "duplicate windows are not reusable credits",
   );
 });
@@ -120,11 +120,11 @@ test("workflow run-number namespaces share the whole budget and keep separate wi
     };
     assert.equal(
       select(record, environment),
-      admitted ? "blacksmith-4vcpu-ubuntu-2404" : "ubuntu-latest",
+      admitted ? "blacksmith-4vcpu-ubuntu-2404" : "ubuntu-26.04",
     );
     assert.equal(
       select({ ...record, budgetCredits: 509 }, environment),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       "even an unmatched window consumes its full reservation",
     );
   }
@@ -160,11 +160,11 @@ test("strict shared schema rejects unsafe, partial and extra fields", () => {
       { extra: true },
     ].map((override) => ({ ...allocation, ...override })),
   ])
-    assert.equal(select(record), "ubuntu-latest", JSON.stringify(record));
+    assert.equal(select(record), "ubuntu-26.04", JSON.stringify(record));
   for (const raw of ["", "{", "null"]) {
     assert.equal(
       selectHeavyRunner({ ...eligible, BLACKSMITH_HEAVY_ALLOCATION: raw }, now),
-      "ubuntu-latest",
+      "ubuntu-26.04",
     );
   }
   const largest = { ...allocation, budgetCredits: 8000, priorReservedCredits: 7910 };
@@ -185,7 +185,7 @@ test("strict shared schema rejects unsafe, partial and extra fields", () => {
     "blacksmith-4vcpu-ubuntu-2404",
   );
   for (const run of ["", "0", "100.0", "1e2", "0100", "-100", " 100", "9007199254740992"]) {
-    assert.equal(select(allocation, { GITHUB_RUN_NUMBER: run }), "ubuntu-latest", run);
+    assert.equal(select(allocation, { GITHUB_RUN_NUMBER: run }), "ubuntu-26.04", run);
   }
 });
 
@@ -214,11 +214,11 @@ test("Miri accounting validates full reservations, legacy records and UTC expiry
   ])
     assert.equal(
       select(allocation, { BLACKSMITH_MIRI_ALLOCATION: JSON.stringify({ ...miri, ...override }) }),
-      "ubuntu-latest",
+      "ubuntu-26.04",
       JSON.stringify(override),
     );
   for (const raw of ["{", "null", "[]", "{}", JSON.stringify({ ...legacy, slots: 17 })]) {
-    assert.equal(select(allocation, { BLACKSMITH_MIRI_ALLOCATION: raw }), "ubuntu-latest", raw);
+    assert.equal(select(allocation, { BLACKSMITH_MIRI_ALLOCATION: raw }), "ubuntu-26.04", raw);
   }
   const noPrior = { ...allocation, priorReservedCredits: 0, budgetCredits: 90 };
   for (const raw of ["", undefined, JSON.stringify({ ...miri, month: "2026-08" })]) {
@@ -232,7 +232,7 @@ test("Miri accounting validates full reservations, legacy records and UTC expiry
     new Date("2026-10-01T00:00:00Z"),
     new Date("invalid"),
   ]) {
-    assert.equal(select(allocation, {}, date), "ubuntu-latest");
+    assert.equal(select(allocation, {}, date), "ubuntu-26.04");
   }
   assert.equal(
     select(allocation, {}, new Date("2026-09-30T23:59:59Z")),
@@ -270,7 +270,7 @@ test("untrusted contexts and all reruns fall back even with a reserved window", 
     { GITHUB_WORKFLOW_REF: "fallow-rs/fallow/.github/workflows/ci.yml@refs/heads/topic" },
     { HEAVY_JOB: "drift-full" },
   ])
-    assert.equal(select(allocation, environment), "ubuntu-latest", JSON.stringify(environment));
+    assert.equal(select(allocation, environment), "ubuntu-26.04", JSON.stringify(environment));
   const drift = {
     ...allocation,
     allocations: [
@@ -296,7 +296,7 @@ test("untrusted contexts and all reruns fall back even with a reserved window", 
     },
     { ...direct, GITHUB_RUN_ATTEMPT: "2" },
   ])
-    assert.equal(select(drift, environment), "ubuntu-latest");
+    assert.equal(select(drift, environment), "ubuntu-26.04");
 });
 
 test("the executable publishes real routing output only after a successful summary", async () => {
@@ -333,7 +333,7 @@ test("the executable publishes real routing output only after a successful summa
     assert.match(readFileSync(valid.summary, "utf8"), /ci.yml\/check.*90 credits/);
     const invalid = run("invalid", "{");
     assert.equal(invalid.result.status, 0, invalid.result.stderr);
-    assert.equal(invalid.output, "runner=ubuntu-latest\n");
+    assert.equal(invalid.output, "runner=ubuntu-26.04\n");
     const failed = run("failed", raw, directory);
     assert.notEqual(failed.result.status, 0);
     assert.equal(failed.output, "", "failed selection cannot publish a partial admission");

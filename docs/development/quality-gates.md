@@ -319,7 +319,7 @@ before and after a CI change.
 
 ### Optional bounded Blacksmith Miri trial
 
-Miri uses `ubuntu-latest` by default. A maintainer can opt in to a small trial
+Miri uses `ubuntu-26.04` by default. A maintainer can opt in to a small trial
 with the repository variable `BLACKSMITH_MIRI_ALLOCATION` on `fallow-rs/fallow`:
 
 ```json

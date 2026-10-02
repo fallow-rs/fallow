@@ -123,7 +123,7 @@ jobs:
 
   vscode-package-targets:
     name: Package VS Code target artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -162,7 +162,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             target: linux-x64
             cli: target/debug/fallow
             lsp: target/debug/fallow-lsp
@@ -287,12 +287,12 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
-      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-latest' }}
+      runner: ${{ steps.runner.outcome == 'success' && steps.runner.outputs.runner || 'ubuntu-26.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -310,7 +310,7 @@ jobs:
           HEAVY_JOB: drift-full
         run: |
           if [ ! -f scripts/select-heavy-runner.mjs ]; then
-            echo 'runner=ubuntu-latest' >> "$GITHUB_OUTPUT"
+            echo 'runner=ubuntu-26.04' >> "$GITHUB_OUTPUT"
             echo 'Drift uses GitHub: the trusted allocation helper is not available yet.' >> "$GITHUB_STEP_SUMMARY"
           else
             node scripts/select-heavy-runner.mjs
@@ -323,7 +323,7 @@ jobs:
     name: Drift harness (full run)
     needs: heavy-runner
     if: always() && !cancelled()
-    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -349,7 +349,7 @@ jobs:
 
   check-codegen:
     name: Check codegen drift
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:

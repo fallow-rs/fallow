@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const GITHUB_RUNNER = "ubuntu-latest";
+const GITHUB_RUNNER = "ubuntu-26.04";
 const BLACKSMITH_RUNNER = "blacksmith-4vcpu-ubuntu-2404";
 const REPOSITORY = "fallow-rs/fallow";
 // Reserve the 60-minute job timeout at 2 credits/minute plus 30 for overhead.

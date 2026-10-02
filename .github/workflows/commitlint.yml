@@ -22,7 +22,7 @@ concurrency:
 jobs:
   commitlint:
     name: Commit messages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
