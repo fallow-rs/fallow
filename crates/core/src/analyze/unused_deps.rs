@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_config::{IgnoreDependencyMatcher, PackageJson, ResolvedConfig};
 
 use crate::discover::FileId;
+use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{
@@ -1464,9 +1465,10 @@ fn workspace_dependency_map(
     ws_dep_map
 }
 
-fn import_spans_by_file(
-    resolved_modules: &[ResolvedModule],
-) -> FxHashMap<FileId, Vec<(&str, &str, u32)>> {
+fn import_spans_by_file<'a>(
+    resolved_modules: &'a [ResolvedModule],
+    modules: &'a [ModuleInfo],
+) -> FxHashMap<FileId, Vec<(&'a str, &'a str, u32)>> {
     let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     for rm in resolved_modules {
         for edge in rm.all_resolved_source_edges() {
@@ -1477,6 +1479,17 @@ fn import_spans_by_file(
                     edge.span().start,
                 ));
             }
+        }
+    }
+    // A direct `require.resolve('pkg')` call names the package at a known
+    // location, so it is an unlisted-dependency site like an import. The
+    // package name stands in for the specifier.
+    for module in modules {
+        for (package_name, span_start) in &module.package_resolve_sites {
+            import_spans_by_file
+                .entry(module.file_id)
+                .or_default()
+                .push((package_name.as_str(), package_name.as_str(), *span_start));
         }
     }
     import_spans_by_file
@@ -1490,6 +1503,7 @@ pub struct UnlistedDependencyInput<'a> {
     pub workspaces: &'a [fallow_config::WorkspaceInfo],
     pub plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     pub resolved_modules: &'a [ResolvedModule],
+    pub modules: &'a [ModuleInfo],
     pub line_offsets_by_file: &'a LineOffsetsMap<'a>,
 }
 
@@ -1603,7 +1617,7 @@ fn build_unlisted_dependency_context_parts<'a>(
     let ws_dep_map = workspace_dependency_map(input.workspaces, input.config);
 
     let plugin_parts = build_unlisted_dependency_plugin_parts(input.plugin_result);
-    let import_spans_by_file = import_spans_by_file(input.resolved_modules);
+    let import_spans_by_file = import_spans_by_file(input.resolved_modules, input.modules);
 
     let ignore_deps = &input.config.ignore_dependencies;
 

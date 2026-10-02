@@ -38,6 +38,11 @@ pub struct ModuleInfo {
     /// literals and template quasis. The analysis maps each name to the
     /// package that declares the binary.
     pub bin_path_references: Box<[String]>,
+    /// Package names from direct `require.resolve('pkg')` calls, each with the
+    /// byte offset of its call. A name from a resolver function, a loop
+    /// binding or a static table has no site, because it is a heuristic
+    /// credit. The unlisted-dependency check reports a site like an import.
+    pub package_resolve_sites: Box<[(String, u32)]>,
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Arc<[MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
@@ -404,6 +409,7 @@ impl ModuleInfo {
             package_path_references: Box::default(),
             type_package_references: Box::default(),
             bin_path_references: Box::default(),
+            package_resolve_sites: Box::default(),
             member_accesses: Arc::default(),
             semantic_facts: Arc::default(),
             whole_object_uses: Arc::default(),
@@ -3723,7 +3729,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1384);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1400);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -4246,6 +4252,7 @@ mod tests {
             package_path_references: vec!["react".to_string()].into(),
             type_package_references: vec!["react".to_string()].into(),
             bin_path_references: vec!["vite".to_string()].into(),
+            package_resolve_sites: vec![("react".to_string(), 0)].into(),
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
@@ -4404,6 +4411,7 @@ mod tests {
         assert_eq!(module.iconify_icon_names.len(), 1);
         assert_eq!(module.directives.len(), 1);
         assert_eq!(module.security_sinks_skipped, 1);
+        assert_eq!(module.package_resolve_sites.len(), 1);
         assert_released!(module.dynamic_imports);
         assert_released!(module.require_calls);
         assert_released!(module.package_path_references);

@@ -234,6 +234,7 @@ impl ModuleInfoExtractor {
         {
             let references = self.package_references_from_argument(arg);
             self.push_package_path_references(references);
+            self.try_record_package_resolve_site(call);
         }
 
         if let Expression::Identifier(callee) = &call.callee
@@ -246,6 +247,29 @@ impl ModuleInfoExtractor {
             let references = self.package_references_from_argument(arg);
             self.push_package_path_references(references);
         }
+    }
+
+    /// Record the site of a direct `require.resolve('pkg')` call.
+    ///
+    /// The argument is a string literal or a template literal without
+    /// expressions, so the call names the package at a known location. A call
+    /// with a second argument (the `paths` option) resolves from other
+    /// directories and gets no site. Names from resolver functions, loop
+    /// bindings and static tables also get no site: they only credit the
+    /// dependency.
+    fn try_record_package_resolve_site(&mut self, call: &CallExpression<'_>) {
+        if call.arguments.len() != 1 {
+            return;
+        }
+        let Some(package_name) = call
+            .arguments
+            .first()
+            .and_then(static_string_argument)
+            .and_then(package_from_resolution_specifier)
+        else {
+            return;
+        };
+        self.package_resolve_sites.push((package_name, call.span));
     }
 
     /// Record `require.resolve('./file')` as a reference to a project file.

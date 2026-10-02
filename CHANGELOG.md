@@ -400,6 +400,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependency credits nothing and reports nothing. The extraction cache
   version changes, so the first run after the upgrade parses all files again.
 
+- **A `require.resolve('pkg')` call reports an unlisted package.** Before,
+  fallow used the call only to credit a listed dependency. When the package
+  was not in `package.json`, fallow reported nothing, or it did not show the
+  file of the call. Now a call with one string argument, such as
+  `require.resolve('pkg/package.json')`, is an unlisted-dependency site, the
+  same as an import of the package. This includes `require` from
+  `createRequire(import.meta.url)` and a call in a `try` block. A package
+  name from a resolver function, a loop over a static table, or a call with
+  a `paths` option still only credits the dependency, because fallow cannot
+  be sure of the name. The parse cache version changed, so the first run
+  after the upgrade parses all files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

@@ -349,6 +349,10 @@ pub(crate) struct ModuleInfoExtractor {
     package_path_references: Vec<String>,
     type_package_references: Vec<String>,
     bin_path_references: Vec<String>,
+    /// Direct `require.resolve('pkg')` calls: the package name and the call
+    /// span. Kept as a span until the spans are final, so a component-file
+    /// remap moves them.
+    package_resolve_sites: Vec<(String, Span)>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
     pending_computed_enum_key_uses: Vec<PendingComputedEnumKeyUse>,
@@ -1566,6 +1570,9 @@ impl ModuleInfoExtractor {
         }
         for require_call in &mut self.require_calls {
             require_call.span = remap(require_call.span);
+        }
+        for (_, span) in &mut self.package_resolve_sites {
+            *span = remap(*span);
         }
     }
 
@@ -2978,10 +2985,6 @@ impl ModuleInfoExtractor {
         content_hash: u64,
         parsed: ParsedSuppressions,
     ) -> ModuleInfo {
-        let ParsedSuppressions {
-            suppressions,
-            unknown_kinds,
-        } = parsed;
         self.finalize_cjs_provenance();
         self.finalize_import_load_kinds();
         let namespace_object_aliases = self.finalize_resolution_phase();
@@ -3001,6 +3004,7 @@ impl ModuleInfoExtractor {
             package_path_references: self.package_path_references.into_boxed_slice(),
             type_package_references: self.type_package_references.into_boxed_slice(),
             bin_path_references: self.bin_path_references.into_boxed_slice(),
+            package_resolve_sites: finish_package_resolve_sites(self.package_resolve_sites),
             member_accesses: self.member_accesses.into(),
             semantic_facts: self.semantic_facts.into(),
             whole_object_uses: self.whole_object_uses.into(),
@@ -3010,8 +3014,8 @@ impl ModuleInfoExtractor {
             // Set by the parse layer, which owns the parser diagnostics.
             parse_error_count: 0,
             parse_panicked: false,
-            suppressions,
-            unknown_suppression_kinds: unknown_kinds,
+            suppressions: parsed.suppressions,
+            unknown_suppression_kinds: parsed.unknown_kinds,
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -3132,6 +3136,11 @@ impl ModuleInfoExtractor {
         let mut bin_path_references = std::mem::take(&mut info.bin_path_references).into_vec();
         bin_path_references.append(&mut self.bin_path_references);
         info.bin_path_references = bin_path_references.into_boxed_slice();
+        let mut package_resolve_sites = std::mem::take(&mut info.package_resolve_sites).into_vec();
+        package_resolve_sites.extend(finish_package_resolve_sites(std::mem::take(
+            &mut self.package_resolve_sites,
+        )));
+        info.package_resolve_sites = package_resolve_sites.into_boxed_slice();
         let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
         member_accesses.append(&mut self.member_accesses);
         info.member_accesses = member_accesses.into();
@@ -3214,6 +3223,14 @@ impl ModuleInfoExtractor {
             .append(&mut self.svelte_dispatched_events);
         info.has_dynamic_dispatch |= self.has_dynamic_dispatch;
     }
+}
+
+/// Keep the start offset of each final resolve-call span.
+fn finish_package_resolve_sites(sites: Vec<(String, Span)>) -> Box<[(String, u32)]> {
+    sites
+        .into_iter()
+        .map(|(package_name, span)| (package_name, span.start))
+        .collect()
 }
 
 /// The statically named keys of a destructuring pattern, or `None` when the pattern

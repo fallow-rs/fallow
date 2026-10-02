@@ -124,3 +124,58 @@ fn a_local_meta_binding_is_not_import_meta() {
          export const a = meta.resolve('local-pkg');\n";
     assert!(package_references(source).is_empty());
 }
+
+fn package_resolve_sites(source: &str) -> Vec<(String, u32)> {
+    parse_source(source).package_resolve_sites.to_vec()
+}
+
+#[test]
+fn only_a_literal_resolve_call_gets_a_site() {
+    let source = "function packageRoot(name) {\n\
+           return require.resolve(`${name}/package.json`);\n\
+         }\n\
+         packageRoot('helper-pkg');\n\
+         const PACKAGES = ['table-pkg'];\n\
+         for (const name of PACKAGES) require.resolve(`${name}/package.json`);\n\
+         require.resolve('searched-pkg', { paths: [dir] });\n\
+         require.resolve('./local.js');\n\
+         require.resolve('direct-pkg/package.json');\n\
+         require.resolve(`template-pkg`);\n";
+    let mut credited = package_references(source);
+    credited.sort();
+    assert_eq!(
+        credited,
+        [
+            "direct-pkg",
+            "helper-pkg",
+            "searched-pkg",
+            "table-pkg",
+            "template-pkg"
+        ],
+        "every package name credits the dependency"
+    );
+    let direct_start = u32::try_from(source.find("require.resolve('direct-pkg").unwrap()).unwrap();
+    let template_start =
+        u32::try_from(source.find("require.resolve(`template-pkg").unwrap()).unwrap();
+    assert_eq!(
+        package_resolve_sites(source),
+        [
+            ("direct-pkg".to_string(), direct_start),
+            ("template-pkg".to_string(), template_start),
+        ],
+        "only a direct call with one static argument has a source site"
+    );
+}
+
+#[test]
+fn a_shadowed_require_resolve_gets_no_site() {
+    let source = "function load(require) {\n\
+           return require.resolve('shadowed-pkg');\n\
+         }\n";
+    assert!(package_resolve_sites(source).is_empty());
+    assert_eq!(
+        package_resolve_sites("require.resolve('module-pkg');\n"),
+        [("module-pkg".to_string(), 0)],
+        "the module require still gets a site"
+    );
+}

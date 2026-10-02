@@ -52,6 +52,7 @@ pub(super) fn find_unlisted_dependencies(
         workspaces,
         plugin_result,
         resolved_modules,
+        modules: &[],
         line_offsets_by_file,
     })
 }

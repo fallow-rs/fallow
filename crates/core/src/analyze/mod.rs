@@ -2006,6 +2006,7 @@ fn run_member_and_dependency_detectors(
                 plugin_result: input.plugin_result,
                 workspaces: input.workspaces,
                 resolved_modules: input.resolved_modules,
+                modules: input.modules,
                 line_offsets_by_file: input.line_offsets_by_file,
             })
         },
@@ -2654,6 +2655,7 @@ struct DependencyDetectorInput<'a> {
     plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     workspaces: &'a [fallow_config::WorkspaceInfo],
     resolved_modules: &'a [ResolvedModule],
+    modules: &'a [ModuleInfo],
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
 }
 
@@ -2684,6 +2686,7 @@ fn populate_unlisted_dependency_findings(
             workspaces: input.workspaces,
             plugin_result: input.plugin_result,
             resolved_modules: input.resolved_modules,
+            modules: input.modules,
             line_offsets_by_file: input.line_offsets_by_file,
         })
         .into_iter()
