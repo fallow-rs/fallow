@@ -297,12 +297,14 @@ impl ProcessTree {
     )]
     pub fn has_exited_without_reaping(&self) -> io::Result<bool> {
         let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        let process_id = libc::id_t::try_from(self.process_group_id)
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         // SAFETY: `info` points to writable storage for a siginfo_t. WNOWAIT
         // observes the dedicated child without releasing its PID or PGID.
         let result = unsafe {
             libc::waitid(
                 libc::P_PID,
-                self.process_group_id as libc::id_t,
+                process_id,
                 info.as_mut_ptr(),
                 libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
             )
@@ -311,9 +313,11 @@ impl ProcessTree {
             return Err(io::Error::last_os_error());
         }
 
-        // SAFETY: waitid initialized the siginfo_t on success. A zero si_pid
-        // means WNOHANG observed no state change yet.
-        let exited = unsafe { info.assume_init().si_pid() } != 0;
+        // SAFETY: waitid initialized the siginfo_t on success.
+        let info = unsafe { info.assume_init() };
+        // SAFETY: si_pid reads initialized memory: waitid sets it on a state
+        // change, and the zeroed buffer keeps it 0 when WNOHANG finds none.
+        let exited = unsafe { info.si_pid() } != 0;
         // Only the apple EPERM branch of `terminate` reads this cache.
         #[cfg(target_vendor = "apple")]
         if exited {

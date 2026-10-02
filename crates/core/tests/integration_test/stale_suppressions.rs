@@ -561,7 +561,7 @@ fn analyze_with_suppression_using(
     let mut lines: Vec<&str> = source.lines().collect();
     let comment = format!("// {directive} {token}");
     lines.insert(line as usize - 1, &comment);
-    std::fs::write(&path, lines.join("\n") + "\n").expect("write suppressed file");
+    std::fs::write(&path, format!("{}\n", lines.join("\n"))).expect("write suppressed file");
 
     let after = fallow_core::analyze(&config(root)).expect("analysis should succeed");
     let moved = (path.clone(), line + 1);

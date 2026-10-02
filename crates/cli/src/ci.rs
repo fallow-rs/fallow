@@ -3857,6 +3857,10 @@ mod tests {
                 200
             }
 
+            #[expect(
+                clippy::unwrap_in_result,
+                reason = "test helper: a panic fails the test"
+            )]
             fn read_json<T: serde::de::DeserializeOwned>(&mut self) -> Result<T, ureq::Error> {
                 // Serialize to string and back to produce the generic T
                 let s = serde_json::to_string(&self.body).unwrap();

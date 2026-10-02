@@ -689,12 +689,12 @@ fn scan_astro_props_statement(
 ) {
     // The `Props` interface / type alias may be bare or `export`-wrapped.
     if let Some(decl) = props_interface_declaration(stmt) {
-        if !decl.extends.is_empty() {
+        if decl.extends.is_empty() {
+            collect_ts_signature_props(&decl.body.body, &mut scan.prop_names);
+        } else {
             // `interface Props extends ImportedBase`: the inherited names require
             // cross-file resolution. Abstain.
             harvest.has_unharvestable_props = true;
-        } else {
-            collect_ts_signature_props(&decl.body.body, &mut scan.prop_names);
         }
         return;
     }

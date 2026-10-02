@@ -218,8 +218,8 @@ fn stage_package_dependency_edit(
     pkg_value: &serde_json::Value,
 ) {
     match serde_json::to_string_pretty(pkg_value) {
-        Ok(new_json) => {
-            let pkg_content = new_json + "\n";
+        Ok(mut pkg_content) => {
+            pkg_content.push('\n');
             input.plan.stage_existing(
                 pkg_path.to_path_buf(),
                 original_content.as_bytes(),

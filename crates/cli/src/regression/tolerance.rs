@@ -82,6 +82,10 @@ impl Tolerance {
 
     /// Check whether the delta exceeds this tolerance.
     #[expect(
+        clippy::cast_sign_loss,
+        reason = "parse rejects negative percentages; a NaN percentage saturates to zero allowed issues"
+    )]
+    #[expect(
         clippy::cast_possible_truncation,
         reason = "percentage of a count is bounded by the count itself"
     )]

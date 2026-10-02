@@ -171,6 +171,24 @@ significant_drop_in_scrutinee = "warn" # Catch temporaries dropped later than ex
 suspicious_operation_groupings = "warn" # Catch visually ambiguous arithmetic/bitwise grouping
 unused_peekable = "warn"               # Catch Peekable iterators that never peek
 
+# Restriction lints with few or no hits; they keep new code from regressing.
+mem_forget = "warn"                     # Leaks destructors; use ManuallyDrop
+lossy_float_literal = "warn"            # Literal that f32/f64 cannot represent
+mixed_read_write_in_expression = "warn" # Unspecified evaluation order
+try_err = "warn"                        # Err(x)? hides the return type
+fn_to_numeric_cast_any = "warn"         # Function pointer cast to an integer
+float_cmp_const = "warn"                # Exact compare against a float constant
+string_lit_chars_any = "warn"           # Use matches! on a char instead
+format_push_string = "warn"             # Use write! instead of a temporary String
+mutex_atomic = "warn"                   # Use an atomic for a single primitive
+suspicious_xor_used_as_pow = "warn"     # 2 ^ 8 is XOR, not a power
+empty_enum_variants_with_brackets = "warn" # Use `Variant` not `Variant {}`
+multiple_unsafe_ops_per_block = "warn"  # One SAFETY comment per unsafe operation
+unwrap_in_result = "warn"               # Return the error instead of panicking
+string_add = "warn"                     # Use push_str or format!
+redundant_type_annotations = "warn"     # Annotation repeats the initializer type
+deref_by_slicing = "warn"               # Use &* or as_slice() instead of [..]
+
 # Process-spawn ban (method list lives in .clippy.toml). Allowed workspace-wide
 # so CLI and MCP can spawn worktrees, sidecars, and subprocesses off the core
 # analysis path. Core, extract, graph, and engine re-deny it at their crate
@@ -181,19 +199,14 @@ disallowed_methods = "allow"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
-missing_panics_doc = "allow"
 cast_possible_truncation = "allow"
-cast_sign_loss = "allow"
 cast_precision_loss = "allow"
-cast_possible_wrap = "allow"
 too_many_lines = "warn"                 # SIG unit size, threshold in .clippy.toml
 items_after_statements = "allow"
 single_match_else = "allow"
-if_not_else = "allow"
 redundant_closure_for_method_calls = "allow"
 similar_names = "allow"
 wildcard_imports = "allow"
-unnested_or_patterns = "allow"
 doc_markdown = "allow"                  # False positives on technical terms
 too_long_first_doc_paragraph = "allow"  # Too strict for module-level docs
 struct_excessive_bools = "allow"        # CLI filter structs need many bools
@@ -204,6 +217,7 @@ option_if_let_else = "allow"            # Too many false positives in match-heav
 missing_const_for_fn = "allow"          # Not a const library
 fallible_impl_from = "allow"            # From impls that can fail are intentional
 use_self = "allow"                      # Too noisy with generics
+unused_async_trait_impl = "allow"       # Trait signatures (tower-lsp, rmcp) require async fn without .await
 
 # Allow cargo lints that are unavoidable
 multiple_crate_versions = "allow"       # Transitive dependency version conflicts

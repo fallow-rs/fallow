@@ -350,13 +350,11 @@ fn many_small_files_with_some_duplicates() {
     let shared_hashes: Vec<u64> = (1..=20).collect();
     let mut data: DetectInput = Vec::with_capacity(50);
 
-    for i in 0..50 {
+    for i in 0..50_u64 {
         let hashes = if i < 10 {
             shared_hashes.clone()
         } else {
-            ((i * 1000 + 1)..=(i * 1000 + 20))
-                .map(|v| v as u64)
-                .collect()
+            ((i * 1000 + 1)..=(i * 1000 + 20)).collect()
         };
 
         data.push((

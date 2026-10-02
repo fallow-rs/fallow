@@ -205,21 +205,25 @@ fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::
         Some(Command::Security { .. }) => telemetry::AnalysisMode::Security,
         Some(Command::SimilarCode { .. }) => telemetry::AnalysisMode::SimilarCode,
         Some(Command::Fix { .. }) => telemetry::AnalysisMode::Fix,
-        Some(Command::Health {
-            runtime_coverage: Some(_),
-            ..
-        })
-        | Some(Command::Audit {
-            runtime_coverage: Some(_),
-            ..
-        })
-        | Some(Command::Coverage { .. }) => telemetry::AnalysisMode::ProductionCoverage,
-        Some(Command::Health {
-            coverage: Some(_), ..
-        })
-        | Some(Command::Audit {
-            coverage: Some(_), ..
-        }) => telemetry::AnalysisMode::RuntimeCoverage,
+        Some(
+            Command::Health {
+                runtime_coverage: Some(_),
+                ..
+            }
+            | Command::Audit {
+                runtime_coverage: Some(_),
+                ..
+            }
+            | Command::Coverage { .. },
+        ) => telemetry::AnalysisMode::ProductionCoverage,
+        Some(
+            Command::Health {
+                coverage: Some(_), ..
+            }
+            | Command::Audit {
+                coverage: Some(_), ..
+            },
+        ) => telemetry::AnalysisMode::RuntimeCoverage,
         None
         | Some(
             Command::Check { .. }

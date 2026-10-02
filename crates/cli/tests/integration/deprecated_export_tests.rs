@@ -23,6 +23,10 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+#[expect(
+    clippy::unwrap_in_result,
+    reason = "test helper: a panic fails the test"
+)]
 fn finding<'a>(json: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
     json["deprecated_exports_in_use"]
         .as_array()

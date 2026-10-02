@@ -71,7 +71,7 @@ impl DenoJson {
     #[must_use]
     fn workspace_patterns(&self) -> Vec<String> {
         match &self.workspace {
-            Some(DenoWorkspace::Members(members)) | Some(DenoWorkspace::Detailed { members }) => {
+            Some(DenoWorkspace::Members(members) | DenoWorkspace::Detailed { members }) => {
                 members.clone()
             }
             None => Vec::new(),

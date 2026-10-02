@@ -1391,6 +1391,10 @@ mod tests {
     }
 
     impl ChildJsonTransport for StubTransport {
+        #[expect(
+            clippy::unwrap_in_result,
+            reason = "test helper: a panic fails the test"
+        )]
         fn run(&self, args: &[String]) -> Result<ChildProcessOutput, String> {
             self.calls.lock().unwrap().push(args.to_vec());
             let is_required = args.ends_with(&trace_file_args("src/api.ts"));

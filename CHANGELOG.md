@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow report --from <file> --format markdown` renders a saved run as
+  markdown.** Before, `report` refused the markdown format. Now a saved
+  `dead-code`, `dupes`, `health` or bare combined envelope renders the same
+  markdown document as the live `--format markdown` run with the same flags,
+  byte for byte. This includes `--group-by` on `dead-code` and `health`, and
+  the score, file scores, coverage gaps, hotspots and targets of `health`.
+  You can analyze once and write both the job summary and a markdown report
+  from one JSON file. A saved `audit`, `security` or `fix` envelope exits 2
+  with a reason, because these commands print no markdown document that a
+  saved envelope can reproduce. A combined envelope with type-aware evidence
+  also exits 2. The combined envelope does not record `--group-by`, so the
+  saved markdown of a grouped combined run has an ungrouped dead-code
+  section and no `## Health by <mode>` section.
+
 - **`fallow agent install` now blocks Codex commits and pushes with a
   native hook.** Before, Codex got only a block of text in `AGENTS.md`, and
   nothing stopped a `git commit` when the audit failed. Now the install

@@ -532,6 +532,44 @@ function is new. An envelope without the member keeps the earlier note: the
 count includes the functions that the baseline accepts. `dead-code` and
 `dupes` do not set the member.
 
+## Saved markdown render
+
+`fallow report --from <file> --format markdown` prints the same bytes as the
+live `--format markdown` run that wrote the file. The live markdown has no
+elapsed time, so no field is masked. `report::markdown::print_saved_markdown`
+reads the typed sections back from the envelope and calls the section printers
+of the live run in the same order:
+
+- `dead-code`: the findings, the type-aware evidence and the config patterns
+  that matched nothing. A grouped envelope is flattened, sorted into the order
+  of the analysis, and grouped again with the saved `grouped_by` mode.
+- `dupes`: the duplication report. The live markdown of a grouped run is not
+  grouped, so the saved render is not grouped.
+- `health`: the full `HealthReport`, then the `## Health by <mode>` section
+  from the envelope, then the type-aware evidence.
+- the bare combined run: the `check`, `dupes` and `health` sections in that
+  order.
+
+The full health report reads back because the health output types in
+`crates/output` and the action types in `crates/types` derive `Deserialize`.
+A field that a live run fills from a string constant uses the
+`static_str::StaticStr` alias and a `deserialize_with` function. serde borrows
+a field spelled `&'static str` from the input, and the alias stops that borrow.
+
+Three cases are refused with exit 2 and a reason on stderr:
+
+- `audit`: the live audit markdown is the human report with markdown sections.
+- `security` and `fix`: these commands print no markdown document.
+- a combined envelope with type-aware evidence: the envelope keeps the evidence
+  of the dead-code section only, but the live markdown also prints the evidence
+  of the health section.
+
+The combined envelope does not record `--group-by`, so the saved render of a
+grouped combined run prints the dead-code section without groups and has no
+`## Health by <mode>` section. The
+`report_parity_tests` integration tests compare the two renders for each
+supported kind.
+
 ## Compact health populations
 
 Compact health output keeps the existing `vital-signs:` payload unchanged and

@@ -2602,14 +2602,14 @@ impl HealthBaselineData {
     }
 
     pub(crate) fn finding_entry_count(&self) -> usize {
-        if !self.finding_counts.is_empty() {
+        if self.finding_counts.is_empty() {
+            self.findings.len()
+        } else {
             self.finding_counts
                 .values()
                 .flat_map(BTreeMap::values)
                 .map(|entry| entry.count)
                 .sum()
-        } else {
-            self.findings.len()
         }
     }
 
@@ -2649,7 +2649,18 @@ impl HealthBaselineData {
         mode: HealthBaselineMode,
     ) -> HealthBaselineOverlap {
         let baseline_counts = self.counts_for(mode);
-        if !baseline_counts.is_empty() {
+        if baseline_counts.is_empty() {
+            let baseline_keys: FxHashSet<&str> = self.findings.iter().map(String::as_str).collect();
+            HealthBaselineOverlap {
+                matched_entries: findings
+                    .iter()
+                    .filter(|finding| {
+                        baseline_keys.contains(health_finding_key(finding, root).as_str())
+                    })
+                    .count(),
+                moved_entries: 0,
+            }
+        } else {
             let current_counts = health_finding_counts(findings, root, mode);
             let direct = health_overlap_entry_count(&current_counts, baseline_counts);
             let remapped = (mode == HealthBaselineMode::Identity)
@@ -2669,17 +2680,6 @@ impl HealthBaselineData {
                     matched_entries: direct,
                     moved_entries: 0,
                 },
-            }
-        } else {
-            let baseline_keys: FxHashSet<&str> = self.findings.iter().map(String::as_str).collect();
-            HealthBaselineOverlap {
-                matched_entries: findings
-                    .iter()
-                    .filter(|finding| {
-                        baseline_keys.contains(health_finding_key(finding, root).as_str())
-                    })
-                    .count(),
-                moved_entries: 0,
             }
         }
     }

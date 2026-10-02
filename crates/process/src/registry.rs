@@ -141,17 +141,15 @@ pub fn kill_pid(pid: u32) {
 pub fn kill_pid(pid: u32) {
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE};
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
-    // SAFETY: OpenProcess returns null on failure (which we check),
-    // TerminateProcess with exit code 1 is a no-op if the handle is
-    // null. CloseHandle on a valid handle is well-defined.
-    unsafe {
-        let handle: HANDLE = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-        if handle.is_null() {
-            return;
-        }
-        let _ = TerminateProcess(handle, 1);
-        let _ = CloseHandle(handle);
+    // SAFETY: OpenProcess takes plain values and returns null on failure.
+    let handle: HANDLE = unsafe { OpenProcess(PROCESS_TERMINATE, FALSE, pid) };
+    if handle.is_null() {
+        return;
     }
+    // SAFETY: `handle` is a valid process handle opened with PROCESS_TERMINATE.
+    let _ = unsafe { TerminateProcess(handle, 1) };
+    // SAFETY: `handle` is valid and this is its only close.
+    let _ = unsafe { CloseHandle(handle) };
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -182,16 +180,16 @@ pub fn pid_is_alive(pid: u32) -> bool {
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
     };
-    // SAFETY: identical safety contract as kill_pid.
-    unsafe {
-        let handle: HANDLE = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if handle.is_null() {
-            return false;
-        }
-        let result = WaitForSingleObject(handle, 0);
-        let _ = CloseHandle(handle);
-        result != WAIT_OBJECT_0
+    // SAFETY: OpenProcess takes plain values and returns null on failure.
+    let handle: HANDLE = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
+    if handle.is_null() {
+        return false;
     }
+    // SAFETY: `handle` is a valid process handle; a zero timeout only polls.
+    let result = unsafe { WaitForSingleObject(handle, 0) };
+    // SAFETY: `handle` is valid and this is its only close.
+    let _ = unsafe { CloseHandle(handle) };
+    result != WAIT_OBJECT_0
 }
 
 #[cfg(not(any(unix, windows)))]

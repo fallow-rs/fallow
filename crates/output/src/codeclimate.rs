@@ -186,6 +186,11 @@ pub fn build_codeclimate_issue(input: CodeClimateIssueInput<'_>) -> CodeClimateI
 ///
 /// Infallible: `CodeClimateIssue` contains only strings, integers, arrays, and
 /// enums serialized as fixed strings.
+///
+/// # Panics
+///
+/// Does not panic in practice: every `CodeClimateIssue` field serializes
+/// infallibly.
 #[must_use]
 #[expect(
     clippy::expect_used,

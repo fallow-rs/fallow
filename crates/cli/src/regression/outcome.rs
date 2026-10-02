@@ -14,7 +14,7 @@ pub enum RegressionOutcome {
         current_total: usize,
         tolerance: Tolerance,
         /// Per-type deltas for human output.
-        type_deltas: Vec<(&'static str, isize)>,
+        type_deltas: Vec<(&'static str, i64)>,
     },
     /// Regression check was skipped (e.g., --changed-since active).
     Skipped { reason: &'static str },
@@ -35,7 +35,7 @@ pub fn print_regression_outcome(outcome: &RegressionOutcome) {
             baseline_total,
             current_total,
         } => {
-            let delta = *current_total as isize - *baseline_total as isize;
+            let delta = crate::count_delta::signed_delta(*current_total, *baseline_total);
             let sign = if delta >= 0 { "+" } else { "" };
             eprintln!(
                 "Regression check passed: {current_total} issues (baseline: {baseline_total}, \
@@ -48,7 +48,7 @@ pub fn print_regression_outcome(outcome: &RegressionOutcome) {
             tolerance,
             type_deltas,
         } => {
-            let delta = *current_total as isize - *baseline_total as isize;
+            let delta = crate::count_delta::signed_delta(*current_total, *baseline_total);
             let tol_str = match tolerance {
                 Tolerance::Percentage(pct) => format!("{pct}%"),
                 Tolerance::Absolute(abs) => format!("{abs}"),

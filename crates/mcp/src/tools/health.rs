@@ -394,7 +394,7 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
 
 fn complexity_sort_from_param(value: Option<&str>) -> Result<ComplexitySort, String> {
     match value {
-        None | Some("") | Some("cyclomatic") => Ok(ComplexitySort::Cyclomatic),
+        None | Some("" | "cyclomatic") => Ok(ComplexitySort::Cyclomatic),
         Some("cognitive") => Ok(ComplexitySort::Cognitive),
         Some("lines") => Ok(ComplexitySort::Lines),
         Some("severity") => Ok(ComplexitySort::Severity),

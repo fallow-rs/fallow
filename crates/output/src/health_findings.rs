@@ -41,7 +41,7 @@ pub struct HealthActionContext {
 }
 
 /// Wire envelope for a single complexity finding.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthFinding {
     /// Inner complexity-violation payload.
@@ -423,7 +423,7 @@ fn build_crap_coverage_action(
 /// pipeline (the typed action builder operates on the inner
 /// [`HotspotEntry`]) or via [`HotspotFinding::from`] for fixture and
 /// test code.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotFinding {
     /// Inner hotspot payload. Flattened on the wire.
@@ -644,7 +644,7 @@ fn suggest_codeowners_pattern(path: &str) -> String {
 /// Construct via [`RefactoringTargetFinding::with_actions`] in the
 /// typical health pipeline or via [`RefactoringTargetFinding::from`] for
 /// fixture and test code.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTargetFinding {
     /// Inner refactoring target payload. Flattened on the wire.

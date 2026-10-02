@@ -13,7 +13,7 @@
 ///   become dead annotations once the baseline regenerates.
 /// - `config-disabled`: `health.suggestInlineSuppression` is `false`.
 /// - `unspecified`: the caller did not record a reason.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthActionsMeta {
     /// Always `true` when the breadcrumb is emitted. Absent from the wire when

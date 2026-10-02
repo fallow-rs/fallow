@@ -359,7 +359,10 @@ mod tests {
             "indexed {} lines, cap is {MAX_ADDED_LINES}",
             index.added_line_count()
         );
-        assert_eq!(index.net_lines(), (MAX_ADDED_LINES + 100) as i64);
+        assert_eq!(
+            Some(index.net_lines()),
+            i64::try_from(MAX_ADDED_LINES + 100).ok()
+        );
         assert_eq!(index.hunk_count(), 1);
     }
 

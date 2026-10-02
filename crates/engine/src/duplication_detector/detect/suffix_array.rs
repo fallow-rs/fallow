@@ -11,6 +11,10 @@
 /// sentinels) is remapped to a dense `0..=k` range and a virtual smallest
 /// terminator is appended; the terminator's position is dropped from the
 /// returned array.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "ranks and shifted symbols are non-negative by construction"
+)]
 pub(super) fn build_suffix_array(text: &[i64]) -> Vec<usize> {
     let n = text.len();
     if n == 0 {
@@ -267,6 +271,10 @@ fn lms_substrings_equal(s: &[usize], is_s: &[bool], lhs: usize, rhs: usize) -> b
 /// Build a suffix array using the O(N log N) prefix-doubling algorithm with
 /// radix sort. Retained as a reference implementation for differential tests
 /// against [`build_suffix_array`].
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "ranks and shifted symbols are non-negative by construction"
+)]
 #[cfg(test)]
 #[expect(
     clippy::cast_possible_truncation,
@@ -593,7 +601,7 @@ mod tests {
         for _ in 0..4000 {
             let n = 1 + rng.below(40) as usize;
             let alphabet = 1 + rng.below(3); // values 0..alphabet
-            let text: Vec<i64> = std::iter::repeat_with(|| rng.below(alphabet) as i64)
+            let text: Vec<i64> = std::iter::repeat_with(|| rng.below(alphabet).cast_signed())
                 .take(n)
                 .collect();
             let expected = naive_suffix_array(&text);
@@ -614,7 +622,7 @@ mod tests {
             for f in 0..file_count {
                 let len = rng.below(12) as usize;
                 for _ in 0..len {
-                    text.push(rng.below(5) as i64);
+                    text.push(rng.below(5).cast_signed());
                 }
                 if f + 1 < file_count {
                     text.push(sentinel);
@@ -635,7 +643,7 @@ mod tests {
     fn sais_matches_doubling_on_large_repetitive_input() {
         // A larger input with long repeats, exercising deeper recursion.
         let mut rng = XorShift(0xDEAD_BEEF_CAFE_F00D);
-        let block: Vec<i64> = std::iter::repeat_with(|| rng.below(8) as i64)
+        let block: Vec<i64> = std::iter::repeat_with(|| rng.below(8).cast_signed())
             .take(50)
             .collect();
         let mut text: Vec<i64> = Vec::new();

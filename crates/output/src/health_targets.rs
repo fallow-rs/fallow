@@ -4,7 +4,7 @@
 ///
 /// Derived from the project's metric distribution (percentile-based with floors).
 /// Exposed in JSON output so consumers can interpret scores in context.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
     clippy::struct_field_names,
@@ -73,11 +73,12 @@ impl RecommendationCategory {
 }
 
 /// A contributing factor that triggered or strengthened a recommendation.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ContributingFactor {
     /// Metric name (matches JSON field names: `"fan_in"`, `"dead_code_ratio"`, etc.).
-    pub metric: &'static str,
+    #[serde(deserialize_with = "crate::static_str::deserialize")]
+    pub metric: crate::static_str::StaticStr,
     /// Raw metric value for programmatic use.
     pub value: f64,
     /// Threshold that was exceeded.
@@ -173,7 +174,7 @@ impl Confidence {
 ///
 /// Provides enough detail for an AI agent to act on a recommendation
 /// without a second tool call.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TargetEvidence {
     /// Names of unused exports (populated for `RemoveDeadCode` targets).
@@ -194,7 +195,7 @@ pub struct TargetEvidence {
 }
 
 /// A direct importer referenced in target evidence.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DirectCallerEvidence {
     /// File that directly imports the target.
@@ -206,7 +207,7 @@ pub struct DirectCallerEvidence {
 }
 
 /// Symbol details for a direct importer.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DirectCallerSymbolEvidence {
     /// Imported binding name.
@@ -218,7 +219,7 @@ pub struct DirectCallerSymbolEvidence {
 }
 
 /// A duplicate-code sibling referenced in target evidence.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneSiblingEvidence {
     /// File containing the sibling clone instance.
@@ -233,7 +234,7 @@ pub struct CloneSiblingEvidence {
 }
 
 /// A function referenced in target evidence.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EvidenceFunction {
     /// Function name.
@@ -246,7 +247,7 @@ pub struct EvidenceFunction {
 
 /// One prioritized refactoring recommendation in the health report's
 /// `refactoring_targets` section.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTarget {
     /// Absolute file path (stripped to relative in output).

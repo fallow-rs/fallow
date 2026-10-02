@@ -1796,7 +1796,7 @@ fn debug_enabled() -> bool {
 /// True when env var `name` holds a truthy value (`1`, `true`, `yes`, `on`).
 /// Shared with the update check and the cache notice opt-out gate.
 pub fn env_truthy(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
+    std::env::var(name).is_ok_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "1" | "true" | "yes" | "on"
@@ -3292,7 +3292,7 @@ mod tests {
         assert_eq!(kept.first().copied(), Some(6), "oldest of the tail dropped");
         assert_eq!(
             kept.last().copied(),
-            Some((total - 1) as i64),
+            i64::try_from(total - 1).ok(),
             "newest kept"
         );
     }
@@ -3328,11 +3328,11 @@ mod tests {
         );
         assert_eq!(
             kept.first().copied(),
-            Some((total - SPOOL_MAX_EVENTS) as i64)
+            i64::try_from(total - SPOOL_MAX_EVENTS).ok()
         );
         assert_eq!(
             kept.last().copied(),
-            Some((total - 1) as i64),
+            i64::try_from(total - 1).ok(),
             "newest kept"
         );
     }

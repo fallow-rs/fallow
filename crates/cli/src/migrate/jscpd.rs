@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn migrate_jscpd_non_object_root_warns() {
-        let jscpd: serde_json::Value = serde_json::json!("not an object");
+        let jscpd = serde_json::json!("not an object");
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_jscpd(&jscpd, &mut config, &mut warnings);
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn migrate_jscpd_null_root() {
-        let jscpd: serde_json::Value = serde_json::json!(null);
+        let jscpd = serde_json::json!(null);
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_jscpd(&jscpd, &mut config, &mut warnings);
@@ -888,7 +888,7 @@ mod tests {
 
     #[test]
     fn migrate_jscpd_array_root() {
-        let jscpd: serde_json::Value = serde_json::json!([1, 2, 3]);
+        let jscpd = serde_json::json!([1, 2, 3]);
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_jscpd(&jscpd, &mut config, &mut warnings);

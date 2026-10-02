@@ -6,7 +6,7 @@ use fallow_types::serde_path;
 /// Runtime coverage JSON contract version. This is scoped to the
 /// `runtime_coverage` block and is independent of the top-level fallow
 /// JSON `schema_version`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum RuntimeCoverageSchemaVersion {
     /// First release of the runtime coverage block contract.
@@ -24,7 +24,7 @@ pub enum RuntimeCoverageSchemaVersion {
 /// touched-hot-path is event-tied to the current diff and reviewers need
 /// it to be the top-line signal. In standalone analysis (no change
 /// scope), `cold-code-detected` remains primary.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageReportVerdict {
@@ -47,7 +47,7 @@ pub enum RuntimeCoverageReportVerdict {
 /// agents can reason about them independently of the headline. Order is
 /// stable: severity-descending so the first entry mirrors a sensible
 /// non-PR-context verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCoverageSignal {
@@ -153,7 +153,7 @@ impl fmt::Display for RuntimeCoverageVerdict {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 /// Confidence level for a runtime coverage finding.
@@ -193,7 +193,7 @@ impl fmt::Display for RuntimeCoverageConfidence {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 /// License or trial watermark applied to runtime coverage output.
@@ -225,7 +225,7 @@ impl fmt::Display for RuntimeCoverageWatermark {
 }
 
 /// Runtime coverage source used to produce the summary.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageDataSource {
@@ -254,7 +254,7 @@ impl fmt::Display for RuntimeCoverageDataSource {
 }
 
 /// Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageSummary {
     /// Runtime evidence source used for this report. Local mode reads a
@@ -295,7 +295,7 @@ pub struct RuntimeCoverageSummary {
 
 /// Quality-of-capture signals emitted by the sidecar so the CLI can explain
 /// short-window captures honestly instead of letting users blame the tool.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageCaptureQuality {
     /// Total observation window in seconds. Finer-grained than period_days
@@ -313,7 +313,7 @@ pub struct RuntimeCoverageCaptureQuality {
 }
 
 /// Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageEvidence {
     /// `used` when the function is reachable in the module graph, `unused`
@@ -345,7 +345,7 @@ pub struct RuntimeCoverageEvidence {
     pub deployments_observed: u32,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 /// Suggested follow-up action for a runtime coverage finding.
 pub struct RuntimeCoverageAction {
@@ -363,7 +363,7 @@ pub struct RuntimeCoverageAction {
 }
 
 /// Non-fatal diagnostic emitted while merging runtime coverage.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageMessage {
     /// Stable machine-readable warning code.
@@ -378,7 +378,7 @@ pub struct RuntimeCoverageMessage {
 /// F4: these make the EXISTING Fallow-owned discriminators legible; they are not
 /// a new or external signal and gate nothing. Pairs with `evidence.static_status`
 /// (the static half of the discriminator set).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageDiscriminators {
     /// Three-state runtime tracking: `called` (invocations > 0), `never_called`
@@ -406,7 +406,7 @@ pub struct RuntimeCoverageDiscriminators {
 }
 
 /// One per-function runtime-coverage finding in `runtime_coverage.findings`.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageFinding {
     /// Per-finding suppression key of the form `fallow:prod:<hash>` (first 8 hex
@@ -466,7 +466,7 @@ pub struct RuntimeCoverageFinding {
 }
 
 /// One hot function in `runtime_coverage.hot_paths`, ranked by invocations.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageHotPath {
     /// Stable content-hash ID of the form `fallow:hot:<hash>`.
@@ -511,7 +511,7 @@ pub struct RuntimeCoverageHotPath {
 /// Speed-work inputs for one hot function: how often it runs and how much
 /// work each call does. `importance` ranks the risk of a change; this block
 /// ranks where speed work gives the largest gain.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageOptimizationTarget {
     /// `invocations` multiplied by the per-call cost that `cost_basis` names.
@@ -540,7 +540,7 @@ pub struct RuntimeCoverageOptimizationTarget {
 
 /// The per-call cost that `optimization_target.cost_score` multiplies with
 /// `invocations`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeCoverageCostBasis {
@@ -562,7 +562,7 @@ impl RuntimeCoverageCostBasis {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 /// Blast-radius risk band. The current thresholds are high at >=20 static
@@ -597,7 +597,7 @@ impl fmt::Display for RuntimeCoverageRiskBand {
 
 /// One blast-radius entry in `runtime_coverage.blast_radius`: how far a
 /// change to the function would ripple.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageBlastRadiusEntry {
     /// Stable content-hash ID of the form `fallow:blast:<hash>`.
@@ -629,7 +629,7 @@ pub struct RuntimeCoverageBlastRadiusEntry {
 
 /// One production-importance entry in `runtime_coverage.importance`, scoring
 /// how much a function matters in production.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageImportanceEntry {
     /// Stable content-hash ID of the form `fallow:importance:<hash>`.
@@ -661,7 +661,7 @@ pub struct RuntimeCoverageImportanceEntry {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 /// Runtime coverage findings merged into the health report or emitted by
 /// `fallow coverage analyze`. Present in health output when --runtime-coverage
@@ -783,7 +783,7 @@ impl RuntimeCoverageReport {
 /// the cloud runtime-context `provenance` block so the local-capture and cloud
 /// surfaces present one portable shape. F4: provenance is context only; it never
 /// gates a verdict or confidence.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageProvenance {
     /// `local` for a local capture, `cloud` for the cloud read path.

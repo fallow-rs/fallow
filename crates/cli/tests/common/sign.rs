@@ -57,7 +57,8 @@ pub fn mint_runtime_coverage_jwt() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock before UNIX epoch")
-        .as_secs() as i64;
+        .as_secs()
+        .cast_signed();
     let exp = now + 30 * 24 * 60 * 60;
 
     let header = json!({ "alg": "EdDSA", "typ": "JWT" });
@@ -81,7 +82,8 @@ pub fn mint_expired_runtime_coverage_jwt() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock before UNIX epoch")
-        .as_secs() as i64;
+        .as_secs()
+        .cast_signed();
     let iat = now - 180 * 24 * 60 * 60;
     let exp = now - 120 * 24 * 60 * 60;
 

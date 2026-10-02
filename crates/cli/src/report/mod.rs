@@ -46,6 +46,7 @@ pub use fallow_output::strip_root_prefix;
 pub use grouping::OwnershipResolver;
 pub(crate) use human::dupes::MAX_CLONE_GROUPS;
 pub(crate) use human::health::{render_health_score, render_health_trend};
+pub(crate) use markdown::{print_saved_markdown, saved_markdown_unsupported};
 pub(crate) use status::{
     HumanStatus, line as human_status_line, semantic_status, type_aware_meta_status,
 };

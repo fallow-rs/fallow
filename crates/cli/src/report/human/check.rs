@@ -5756,14 +5756,14 @@ mod tests {
     fn grouped_items_from_same_file_share_one_file_header() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
-        for i in 0..3 {
+        for i in 0..3_u32 {
             results
                 .unused_exports
                 .push(UnusedExportFinding::with_actions(UnusedExport {
                     path: root.join("src/utils.ts"),
                     export_name: format!("fn{i}"),
                     is_type_only: false,
-                    line: (i + 1) as u32,
+                    line: i + 1,
                     col: 0,
                     span_start: 0,
                     is_re_export: false,

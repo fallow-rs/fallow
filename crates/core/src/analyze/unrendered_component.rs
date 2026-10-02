@@ -104,7 +104,7 @@ fn is_sfc_extension(path: &Path) -> bool {
     // project is credited/tracked but never flagged.
     matches!(
         path.extension().and_then(|ext| ext.to_str()),
-        Some("vue") | Some("svelte") | Some("astro")
+        Some("vue" | "svelte" | "astro")
     )
 }
 

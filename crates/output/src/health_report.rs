@@ -15,7 +15,9 @@ use fallow_types::output_dead_code::PropDrillingChainFinding;
 /// the report carries its result, also when that result is empty. The value
 /// set is OPEN: a later release can add a section, so a consumer must accept
 /// a token that it does not know.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum HealthSection {
@@ -46,7 +48,7 @@ pub enum HealthSection {
 }
 
 /// Result of complexity analysis for reporting.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthReport {
     /// Functions and synthetic template entries exceeding complexity
@@ -63,7 +65,11 @@ pub struct HealthReport {
     /// in this array. The value set is OPEN (see [`HealthSection`]). Absent
     /// in an envelope from a fallow version before this member, and on a
     /// report that no health run built.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_open_sections"
+    )]
     pub sections: Option<Vec<HealthSection>>,
     /// Configured threshold override states. Entries are emitted for active
     /// exceptions, stale exceptions, and full-run no-match cleanup hints.
@@ -196,5 +202,47 @@ mod tests {
         let report = HealthReport::default();
         let json = serde_json::to_string(&report).expect("health report should serialize");
         assert!(!json.contains("health_score"));
+    }
+}
+
+/// Read `sections` from a saved envelope. The value set is open, so a token
+/// from a later fallow version is skipped instead of failing the whole read.
+fn deserialize_open_sections<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<HealthSection>>, D::Error> {
+    let tokens: Option<Vec<serde_json::Value>> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(tokens.map(|tokens| {
+        tokens
+            .into_iter()
+            .filter_map(|token| serde_json::from_value(token).ok())
+            .collect()
+    }))
+}
+
+#[cfg(test)]
+mod open_sections_tests {
+    use super::*;
+
+    #[derive(serde::Deserialize)]
+    struct Envelope {
+        #[serde(default, deserialize_with = "deserialize_open_sections")]
+        sections: Option<Vec<HealthSection>>,
+    }
+
+    #[test]
+    fn an_unknown_section_token_is_skipped() {
+        let envelope: Envelope =
+            serde_json::from_str(r#"{"sections":["complexity","later-section","hotspots"]}"#)
+                .expect("an unknown token must not fail the read");
+        assert_eq!(
+            envelope.sections,
+            Some(vec![HealthSection::Complexity, HealthSection::Hotspots])
+        );
+    }
+
+    #[test]
+    fn an_absent_member_stays_absent() {
+        let envelope: Envelope = serde_json::from_str("{}").expect("valid envelope");
+        assert_eq!(envelope.sections, None);
     }
 }

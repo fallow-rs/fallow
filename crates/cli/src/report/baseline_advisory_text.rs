@@ -152,7 +152,7 @@ fn subject(analysis: Option<&str>) -> String {
 fn capitalize(value: &str) -> String {
     let mut chars = value.chars();
     match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
     }
 }

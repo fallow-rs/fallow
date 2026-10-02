@@ -140,18 +140,18 @@ fn resolve_command_output(cli: &Cli, selected: OutputFormat) -> OutputFormat {
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::RulePackSchema
-            | Command::Ci { .. },
-        )
-        | Some(Command::RulePack {
-            subcommand: RulePackCli::Schema,
-        })
-        | Some(Command::Config { path: false })
-        | Some(Command::Coverage {
-            subcommand:
-                CoverageCli::Setup { json: true, .. }
-                | CoverageCli::ReviewPacket { .. }
-                | CoverageCli::DeploymentChanges { .. },
-        }) => OutputFormat::Json,
+            | Command::Ci { .. }
+            | Command::RulePack {
+                subcommand: RulePackCli::Schema,
+            }
+            | Command::Config { path: false }
+            | Command::Coverage {
+                subcommand:
+                    CoverageCli::Setup { json: true, .. }
+                    | CoverageCli::ReviewPacket { .. }
+                    | CoverageCli::DeploymentChanges { .. },
+            },
+        ) => OutputFormat::Json,
         _ => selected,
     }
 }
@@ -165,41 +165,41 @@ fn command_payload_is_json(cli: &Cli, selected: OutputFormat) -> bool {
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::RulePackSchema
-            | Command::Ci { .. },
-        )
-        | Some(Command::RulePack {
-            subcommand: RulePackCli::Schema,
-        }) => true,
+            | Command::Ci { .. }
+            | Command::RulePack {
+                subcommand: RulePackCli::Schema,
+            },
+        ) => true,
         Some(Command::Config { path }) => !path,
         Some(Command::Coverage {
             subcommand: CoverageCli::Setup { json, .. },
         }) => *json,
-        Some(Command::Coverage {
-            subcommand:
-                CoverageCli::UploadInventory { .. }
-                | CoverageCli::UploadSourceMaps { .. }
-                | CoverageCli::UploadStaticFindings { .. },
-        })
-        | Some(Command::Impact {
-            subcommand:
-                Some(
-                    ImpactCli::Enable
-                    | ImpactCli::Disable
-                    | ImpactCli::Default { .. }
-                    | ImpactCli::Reset { .. }
-                    | ImpactCli::Statusline,
-                ),
-            ..
-        })
-        | Some(
-            Command::Init { .. }
+        Some(
+            Command::Coverage {
+                subcommand:
+                    CoverageCli::UploadInventory { .. }
+                    | CoverageCli::UploadSourceMaps { .. }
+                    | CoverageCli::UploadStaticFindings { .. },
+            }
+            | Command::Impact {
+                subcommand:
+                    Some(
+                        ImpactCli::Enable
+                        | ImpactCli::Disable
+                        | ImpactCli::Default { .. }
+                        | ImpactCli::Reset { .. }
+                        | ImpactCli::Statusline,
+                    ),
+                ..
+            }
+            | Command::Init { .. }
             | Command::CiTemplate { .. }
             | Command::Migrate { .. }
-            | Command::SetupHooks { .. },
-        )
-        | Some(Command::Hooks {
-            subcommand: HooksCli::Install { .. } | HooksCli::Uninstall { .. },
-        }) => false,
+            | Command::SetupHooks { .. }
+            | Command::Hooks {
+                subcommand: HooksCli::Install { .. } | HooksCli::Uninstall { .. },
+            },
+        ) => false,
         _ => matches!(selected, OutputFormat::Json),
     }
 }

@@ -195,7 +195,7 @@ pub(super) fn css_report_scan_target<'a>(
     let kind = match extension {
         Some("css") => CssScanKind::Css,
         Some("scss" | "sass" | "less") => CssScanKind::Preprocessor,
-        Some("vue") | Some("svelte") => CssScanKind::Sfc,
+        Some("vue" | "svelte") => CssScanKind::Sfc,
         Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts") => CssScanKind::CssInJs,
         _ => return None,
     };

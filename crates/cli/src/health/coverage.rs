@@ -2718,7 +2718,7 @@ mod tests {
         let prepared = prepare_coverage_sources(&coverage)
             .unwrap_or_else(|err| panic!("failed to collect coverage sources: {err}"));
         assert!(matches!(
-            &prepared.sources[..],
+            &*prepared.sources,
             [CoverageSource::Istanbul { path }] if path.ends_with("prod-coverage.json")
         ));
 
@@ -2740,7 +2740,7 @@ mod tests {
         let prepared = prepare_coverage_sources(&coverage)
             .unwrap_or_else(|err| panic!("failed to collect coverage sources: {err}"));
         assert!(matches!(
-            &prepared.sources[..],
+            &*prepared.sources,
             [CoverageSource::V8 { path }] if path.ends_with("coverage-final.json")
         ));
 
@@ -2816,7 +2816,7 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to collect coverage sources: {err}"));
 
         assert!(matches!(
-            &prepared.sources[..],
+            &*prepared.sources,
             [CoverageSource::V8Dir { path }] if path == &root.to_string_lossy()
         ));
 

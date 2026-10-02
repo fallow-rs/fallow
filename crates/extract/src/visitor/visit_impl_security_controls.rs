@@ -38,14 +38,7 @@ fn is_validation_control(callee_path: &str, leaf: &str) -> bool {
         "parse" | "safeparse" | "validate" | "validateasync" | "assert" | "check" | "is"
     ) && matches!(
         control_object(callee_path),
-        Some("z")
-            | Some("zod")
-            | Some("joi")
-            | Some("yup")
-            | Some("valibot")
-            | Some("v")
-            | Some("superstruct")
-            | Some("schema")
+        Some("z" | "zod" | "joi" | "yup" | "valibot" | "v" | "superstruct" | "schema")
     )) || matches!(leaf, "validatesync" | "parseasync" | "safeparseasync")
 }
 
