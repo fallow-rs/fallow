@@ -597,6 +597,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fallow reads `root` and adds the same entries under that directory. It
   resolves `root` against the config directory, and it reads the path
   helpers `resolve`, `join` and `fileURLToPath(new URL(...))`.
+- **A file that a command substitution runs is an entry point.** Before,
+  fallow did not read the commands inside `$(...)` or backticks in
+  package.json scripts and CI steps. Thus a script such as
+  `STAMP="$(node scripts/stamp.ts)"` or a GitHub Actions step
+  ``run: KEY=`node scripts/key.ts` `` left the file reported as unused. Now
+  fallow parses the body of each substitution as a command of its own, also
+  inside double quotes and in a nested substitution. Text in single quotes,
+  `$((...))` arithmetic and `${...}` expressions do not count.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

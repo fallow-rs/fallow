@@ -1,6 +1,6 @@
 use crate::scripts::{
     DeclaredScriptCall, IgnoredCommandEntries, MAX_SCRIPT_EXPANSIONS, MAX_SCRIPT_INDIRECTION_DEPTH,
-    ScriptCatalog,
+    MAX_SUBSTITUTION_DEPTH, ScriptCatalog,
 };
 
 /// Extract file path references from a package.json script value.
@@ -23,11 +23,27 @@ use crate::scripts::{
 /// (`npm run lint -- src/a.ts`) resolves to the script body with the
 /// forwarded arguments appended, as the package manager runs it. The rules
 /// above then apply to that command.
+///
+/// The body of a `$(...)` or backtick command substitution is scanned as a
+/// script of its own, because the shell runs it.
 pub fn extract_script_file_refs(script: &str, context: CommandRefContext<'_>) -> Vec<String> {
     let mut refs = Vec::new();
     let mut expansions = 0;
-    collect_script_file_refs(script, context, 0, &mut expansions, &mut refs);
+    collect_script_file_refs(
+        script,
+        context,
+        Depth::default(),
+        &mut expansions,
+        &mut refs,
+    );
     refs
+}
+
+/// How deep the scan is in script calls and in command substitutions.
+#[derive(Debug, Clone, Copy, Default)]
+struct Depth {
+    scripts: usize,
+    substitutions: usize,
 }
 
 /// The inputs that decide which file arguments of a command become file
@@ -54,12 +70,25 @@ impl CommandRefContext<'static> {
 fn collect_script_file_refs(
     script: &str,
     context: CommandRefContext<'_>,
-    depth: usize,
+    depth: Depth,
     expansions: &mut usize,
     refs: &mut Vec<String>,
 ) {
     const RUNNERS: &[&str] = &["node", "bun", "ts-node", "tsx", "babel-node"];
 
+    if depth.substitutions < MAX_SUBSTITUTION_DEPTH {
+        let inner = Depth {
+            substitutions: depth.substitutions + 1,
+            ..depth
+        };
+        for body in crate::scripts::command_substitutions(script) {
+            collect_script_file_refs(body, context, inner, expansions, refs);
+        }
+    }
+    let called = Depth {
+        scripts: depth.scripts + 1,
+        ..depth
+    };
     for segment in script.split(&['&', '|', ';'][..]) {
         let segment = segment.trim();
         if segment.is_empty() {
@@ -73,15 +102,18 @@ fn collect_script_file_refs(
         match crate::scripts::declared_script_call(&tokens, context.scripts) {
             Some(DeclaredScriptCall::NoFileRefs) => continue,
             Some(DeclaredScriptCall::Command(command)) => {
-                if depth < MAX_SCRIPT_INDIRECTION_DEPTH && *expansions < MAX_SCRIPT_EXPANSIONS {
+                if depth.scripts < MAX_SCRIPT_INDIRECTION_DEPTH
+                    && *expansions < MAX_SCRIPT_EXPANSIONS
+                {
                     *expansions += 1;
-                    collect_script_file_refs(&command, context, depth + 1, expansions, refs);
+                    collect_script_file_refs(&command, context, called, expansions, refs);
                 }
                 continue;
             }
             Some(DeclaredScriptCall::InPackages(commands)) => {
                 for command in &commands {
-                    if depth >= MAX_SCRIPT_INDIRECTION_DEPTH || *expansions >= MAX_SCRIPT_EXPANSIONS
+                    if depth.scripts >= MAX_SCRIPT_INDIRECTION_DEPTH
+                        || *expansions >= MAX_SCRIPT_EXPANSIONS
                     {
                         break;
                     }
@@ -94,7 +126,7 @@ fn collect_script_file_refs(
                             ignored: context.ignored,
                             scripts: &scripts,
                         },
-                        depth + 1,
+                        called,
                         expansions,
                         &mut package_refs,
                     );
@@ -547,6 +579,19 @@ mod tests {
     fn script_semicolon_separator() {
         let refs = refs("node scripts/a.js; node scripts/b.ts");
         assert_eq!(refs, vec!["scripts/a.js", "scripts/b.ts"]);
+    }
+
+    #[test]
+    fn script_command_substitution_bodies() {
+        assert_eq!(
+            refs(r#"STAMP="$(node scripts/a.ts)" LABEL=`tsx scripts/b.ts`"#),
+            vec!["scripts/a.ts", "scripts/b.ts"]
+        );
+        assert_eq!(
+            refs(r#"X="$(echo "$(node scripts/inner.ts)")""#),
+            vec!["scripts/inner.ts"]
+        );
+        assert!(refs("echo '$(node scripts/none.ts)'").is_empty());
     }
 
     #[test]

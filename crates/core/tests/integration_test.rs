@@ -511,6 +511,8 @@ mod issue_956_playwright_pnpm_exec;
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]
 mod script_multiplexers;
+#[path = "integration_test/shell_command_substitution.rs"]
+mod shell_command_substitution;
 #[path = "integration_test/visibility_tags.rs"]
 mod visibility_tags;
 #[path = "integration_test/vue_options_api_prop_emit.rs"]

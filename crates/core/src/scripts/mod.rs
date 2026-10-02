@@ -32,6 +32,7 @@ pub use resolve::{
     DependencyBinaries, build_bin_to_package_map, resolve_binary_to_package,
     resolve_known_dependency_binary,
 };
+pub use shell::command_substitutions;
 pub use workspace_selection::WorkspacePackages;
 use workspace_selection::{PackageSelector, WorkspacePackage, relative_dir};
 
@@ -697,6 +698,10 @@ pub const MAX_SCRIPT_INDIRECTION_DEPTH: usize = 8;
 /// scripts call each other with arguments.
 pub const MAX_SCRIPT_EXPANSIONS: usize = 64;
 
+/// Maximum nesting of `$(...)` and backtick command substitutions that is
+/// parsed. Guards the recursion against pathological input.
+pub const MAX_SUBSTITUTION_DEPTH: usize = 8;
+
 /// A script body in the catalog, plus whether its file arguments are relative
 /// to the root the analysis resolves paths against.
 #[derive(Debug, Clone)]
@@ -941,6 +946,9 @@ struct ScriptExpansion {
     expansions: usize,
     /// `false` once a body from another workspace package has been entered.
     local_paths: bool,
+    /// Command substitutions on the current path, bounded by
+    /// [`MAX_SUBSTITUTION_DEPTH`].
+    substitution_depth: usize,
 }
 
 impl ScriptExpansion {
@@ -949,6 +957,7 @@ impl ScriptExpansion {
             active: Vec::new(),
             expansions: 0,
             local_paths: true,
+            substitution_depth: 0,
         }
     }
 }
@@ -1667,6 +1676,14 @@ fn parse_script_internal(
                 }
             }
         }
+    }
+    if state.substitution_depth >= MAX_SUBSTITUTION_DEPTH {
+        return;
+    }
+    for body in shell::command_substitutions(script) {
+        state.substitution_depth += 1;
+        parse_script_internal(body, advance_package_manager, catalog, state, commands);
+        state.substitution_depth -= 1;
     }
 }
 
@@ -3552,6 +3569,32 @@ mod tests {
     }
 
     #[test]
+    fn command_substitution_bodies_are_parsed_as_commands() {
+        let cmds = parse_script(r#"STAMP="$(node scripts/stamp.ts)" LABEL=`tsx scripts/label.ts`"#);
+        let files: Vec<&str> = cmds
+            .iter()
+            .flat_map(|cmd| cmd.file_args.iter().map(String::as_str))
+            .collect();
+        assert_eq!(files, vec!["scripts/stamp.ts", "scripts/label.ts"]);
+    }
+
+    #[test]
+    fn nested_command_substitution_is_parsed() {
+        let cmds = parse_script(r#"X="$(echo "$(node scripts/inner.ts)")""#);
+        assert!(
+            cmds.iter()
+                .any(|cmd| cmd.binary == "node" && cmd.file_args == ["scripts/inner.ts"]),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn single_quoted_command_substitution_is_not_parsed() {
+        let cmds = parse_script("echo '$(node scripts/none.ts)'");
+        assert!(cmds.iter().all(|cmd| cmd.binary != "node"), "{cmds:?}");
+    }
+
+    #[test]
     fn node_runner_file_args() {
         let cmds = parse_script("node scripts/build.js");
         assert_eq!(cmds.len(), 1);
@@ -5189,11 +5232,24 @@ mod tests {
 
     #[test]
     fn varlock_does_not_guess_through_unbalanced_or_dynamic_words() {
-        for command in [
-            r#"varlock run -p "./env -- is-ci ignored -- publint"#,
-            "varlock run -p './env -- is-ci ignored -- publint",
-            "varlock run -p $(echo -- is-ci) -- publint",
-            "varlock run -p `echo -- is-ci` -- publint",
+        // The body of a command substitution is a command of its own.
+        for (command, binaries) in [
+            (
+                r#"varlock run -p "./env -- is-ci ignored -- publint"#,
+                vec!["varlock"],
+            ),
+            (
+                "varlock run -p './env -- is-ci ignored -- publint",
+                vec!["varlock"],
+            ),
+            (
+                "varlock run -p $(echo -- is-ci) -- publint",
+                vec!["varlock", "echo"],
+            ),
+            (
+                "varlock run -p `echo -- is-ci` -- publint",
+                vec!["varlock", "echo"],
+            ),
         ] {
             let commands = parse_script(command);
             assert_eq!(
@@ -5201,7 +5257,7 @@ mod tests {
                     .iter()
                     .map(|command| command.binary.as_str())
                     .collect::<Vec<_>>(),
-                vec!["varlock"],
+                binaries,
                 "{command}"
             );
         }
@@ -5209,10 +5265,11 @@ mod tests {
 
     #[test]
     fn varlock_keeps_known_child_before_dynamic_arguments() {
-        for command in [
-            "varlock run -- vite --host=$(hostname)",
-            "varlock run -- vite $(pwd)",
-            "varlock run -- vite `pwd`",
+        // The body of a command substitution is a command of its own.
+        for (command, substituted) in [
+            ("varlock run -- vite --host=$(hostname)", "hostname"),
+            ("varlock run -- vite $(pwd)", "pwd"),
+            ("varlock run -- vite `pwd`", "pwd"),
         ] {
             let commands = parse_script(command);
             assert_eq!(
@@ -5220,7 +5277,7 @@ mod tests {
                     .iter()
                     .map(|command| command.binary.as_str())
                     .collect::<Vec<_>>(),
-                vec!["varlock", "vite"],
+                vec!["varlock", "vite", substituted],
                 "{command}"
             );
         }

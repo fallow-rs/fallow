@@ -160,6 +160,116 @@ pub fn split_shell_operators(script: &str) -> Vec<&str> {
     segments
 }
 
+/// Return the bodies of the outermost `$(...)` and backtick command
+/// substitutions in `script`.
+///
+/// The shell runs these bodies as commands, also inside double quotes. Text in
+/// single quotes does not run, so it is skipped. `$((...))` arithmetic and
+/// `${...}` parameter expressions are skipped too. A substitution inside a body
+/// is not returned: parse the body again to get it. An unclosed substitution
+/// gives no body.
+pub fn command_substitutions(script: &str) -> Vec<&str> {
+    let bytes = script.as_bytes();
+    let mut bodies = Vec::new();
+    let mut in_double_quote = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'\'' if !in_double_quote => {
+                let Some(end) = find_byte(bytes, i + 1, b'\'') else {
+                    break;
+                };
+                i = end + 1;
+            }
+            b'"' => {
+                in_double_quote = !in_double_quote;
+                i += 1;
+            }
+            b'`' => {
+                let Some(end) = backtick_end(bytes, i + 1) else {
+                    break;
+                };
+                bodies.push(&script[i + 1..end]);
+                i = end + 1;
+            }
+            b'$' if bytes.get(i + 1) == Some(&b'{') => {
+                let Some(end) = closing_delimiter(bytes, i + 2, b'{', b'}') else {
+                    break;
+                };
+                i = end + 1;
+            }
+            b'$' if bytes.get(i + 1) == Some(&b'(') => {
+                let start = i + 2;
+                let Some(end) = closing_delimiter(bytes, start, b'(', b')') else {
+                    break;
+                };
+                if bytes.get(start) != Some(&b'(') {
+                    bodies.push(&script[start..end]);
+                }
+                i = end + 1;
+            }
+            _ => i += 1,
+        }
+    }
+    bodies
+}
+
+fn find_byte(bytes: &[u8], from: usize, needle: u8) -> Option<usize> {
+    bytes
+        .get(from..)?
+        .iter()
+        .position(|&b| b == needle)
+        .map(|offset| from + offset)
+}
+
+/// Index of the backtick that closes a backtick substitution whose body
+/// starts at `from`. A backslash escapes the next byte.
+fn backtick_end(bytes: &[u8], from: usize) -> Option<usize> {
+    let mut i = from;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'`' => return Some(i),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Index of the `close` byte that matches an `open` byte before `from`.
+///
+/// Quotes in the body start a new quoting context, as in the shell, so a
+/// delimiter inside quotes does not count.
+fn closing_delimiter(bytes: &[u8], from: usize, open: u8, close: u8) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut in_double_quote = false;
+    let mut i = from;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' {
+            i += 2;
+            continue;
+        }
+        if b == b'"' {
+            in_double_quote = !in_double_quote;
+        } else if !in_double_quote {
+            if b == b'\'' {
+                i = find_byte(bytes, i + 1, b'\'')?;
+            } else if b == open {
+                depth += 1;
+            } else if b == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Return the byte length of a shell operator at position `i`, or `None`.
 ///
 /// Checks two-char operators (`&&`, `||`) before single-char ones (`&`, `|`, `;`)
@@ -465,6 +575,66 @@ mod tests {
     #[test]
     fn operator_len_pipe_at_end_of_slice() {
         assert_eq!(shell_operator_len(b"|", 0), Some(1));
+    }
+
+    #[test]
+    fn substitutions_read_dollar_paren_and_backtick_bodies() {
+        assert_eq!(
+            command_substitutions("a=$(node one.ts) b=`node two.ts`"),
+            vec!["node one.ts", "node two.ts"]
+        );
+    }
+
+    #[test]
+    fn substitutions_read_bodies_inside_double_quotes() {
+        assert_eq!(
+            command_substitutions(r#"x="$(node one.ts arg)""#),
+            vec!["node one.ts arg"]
+        );
+        assert_eq!(
+            command_substitutions(r#"x="`node two.ts`""#),
+            vec!["node two.ts"]
+        );
+    }
+
+    #[test]
+    fn substitutions_return_the_outer_body_of_a_nested_substitution() {
+        let outer = command_substitutions(r#"x="$(echo "$(node inner.ts)" | tr a b)""#);
+        assert_eq!(outer, vec![r#"echo "$(node inner.ts)" | tr a b"#]);
+        assert_eq!(command_substitutions(outer[0]), vec!["node inner.ts"]);
+    }
+
+    #[test]
+    fn substitutions_match_parens_in_quotes_and_subshells() {
+        assert_eq!(
+            command_substitutions("x=$(echo ')' \")\" && (cd a; node b.ts))"),
+            vec!["echo ')' \")\" && (cd a; node b.ts)"]
+        );
+    }
+
+    #[test]
+    fn substitutions_skip_single_quoted_text() {
+        assert!(command_substitutions("echo '$(node none.ts) `node none.ts`'").is_empty());
+        assert_eq!(
+            command_substitutions(r#"echo "it's $(node one.ts)""#),
+            vec!["node one.ts"]
+        );
+    }
+
+    #[test]
+    fn substitutions_skip_arithmetic_and_parameter_expressions() {
+        assert!(command_substitutions("echo $((1 + (2 * 3))) ${HOME} ${x:-)}").is_empty());
+        assert_eq!(
+            command_substitutions("echo $((1 + 2)) $(node one.ts)"),
+            vec!["node one.ts"]
+        );
+    }
+
+    #[test]
+    fn substitutions_skip_escaped_and_unclosed_forms() {
+        assert!(command_substitutions("echo \\$(node none.ts) \\`x`").is_empty());
+        assert!(command_substitutions("x=$(node none.ts").is_empty());
+        assert!(command_substitutions("x=`node none.ts").is_empty());
     }
 
     #[test]
