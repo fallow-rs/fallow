@@ -54,6 +54,13 @@ impl SetupHooksOptions<'_> {
         if !self.user {
             return Ok(self.root.to_path_buf());
         }
+        // A unit test that falls back to `$HOME` writes into the real home
+        // directory of the developer.
+        #[cfg(test)]
+        assert!(
+            self.home.is_some(),
+            "user scope in a unit test: pass an explicit home"
+        );
         self.home
             .map(Path::to_path_buf)
             .or_else(home_dir)
@@ -1624,6 +1631,18 @@ mod tests {
             gitignore_claude: false,
             uninstall: false,
         }
+    }
+
+    /// A unit test that resolves the user scope from `$HOME` writes to the
+    /// real `~/.claude` or `~/.codex` of the developer. Each test must pass an
+    /// explicit `home`.
+    #[test]
+    #[should_panic(expected = "pass an explicit home")]
+    fn user_scope_without_home_is_refused_in_tests() {
+        let tmp = tempdir().unwrap();
+        let mut o = opts(tmp.path());
+        o.user = true;
+        let _ = o.scope_base();
     }
 
     #[test]
