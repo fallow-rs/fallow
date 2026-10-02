@@ -36,7 +36,13 @@ export const createShipRepo = (prefix) => {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !GIT_LOCATION_VARIABLES.has(name)),
   );
-  Object.assign(env, { GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: "1" });
+  // `TMPDIR` puts the temporary worktrees of the scripts in `root`, so the
+  // cleanup removes them too.
+  Object.assign(env, {
+    GIT_CONFIG_GLOBAL: globalConfig,
+    GIT_CONFIG_NOSYSTEM: "1",
+    TMPDIR: root,
+  });
 
   const origin = join(root, "origin.git");
   const work = join(root, "work");

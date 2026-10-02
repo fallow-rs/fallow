@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runCliMain } from "./cli-main.mjs";
-import { finishRebase, git, rebaseBranch, run, shipMain } from "./ship-git.mjs";
+import { checkRebase, git, run, shipBranch, shipMain } from "./ship-git.mjs";
 
 const MANIFEST = "public-content-manifest.json";
 const GENERATOR = "scripts/public-content.mjs";
@@ -22,8 +22,12 @@ Run from a checkout of fallow-rs/docs. Rebase a pull request branch on the
 base branch. Regenerate ${MANIFEST} for each commit that conflicts on it.
 Stop on any other conflict.
 
-The checkout must have no untracked files. The manifest generator reads the
-directory, so an untracked page would get into the manifest.
+The rebase, the checks and the push run in a temporary worktree with a
+detached HEAD, so your checkout and every local branch stay as they are.
+The manifest generator reads the directory. The fresh worktree has no
+untracked or ignored files, so a draft page of your checkout does not get
+into the manifest. The generator and the tests use only Node built-ins,
+so the worktree needs no npm install.
 
 Options:
   --pr <number>     Read the head branch of this pull request with gh.
@@ -34,8 +38,12 @@ Options:
                     when all checks pass.
   -h, --help        Show this help.
 
-The rebase runs on a detached HEAD, so no local branch changes. Git rerere
-is off for the rebase. After the rebase, the script checks that the result
+Git rerere is off for the rebase. The pre-push hook of your checkout runs
+on the push. When the checks pass, the script removes the worktree. After
+a stop or a failed check, the script keeps the worktree and prints its
+path and the next commands.
+
+After the rebase, the script checks that the result
 is the same as a merge of the branch into the base outside ${MANIFEST}.
 A rebase drops the changes of a merge commit. A path where the merge
 itself conflicts fails the check only when the branch has merge commits.
@@ -83,27 +91,26 @@ const runCheck =
   };
 
 /**
- * Rebase the documentation branch and run the checks of that repository.
- * Print the report to `log` and return the exit code.
+ * Rebase the documentation branch in a temporary worktree and run the
+ * checks of that repository. Print the report to `log` and return the exit
+ * code.
  */
 const shipDocsRebase = (cwd, options, log = console.log) => {
   if (!existsSync(join(cwd, GENERATOR))) {
     throw new Error(`${cwd} has no ${GENERATOR}. Run this script in a fallow-rs/docs checkout.`);
   }
-  // The generator writes the manifest from the files in the directory, so an
-  // untracked page would get into the manifest of the pushed commits.
-  const rebased = rebaseBranch(cwd, log, options, {
-    resolveConflicts: regenerateManifest(cwd),
-    refuseUntracked: true,
-  });
-  if (rebased === null) {
-    return 1;
-  }
-  // The generator check covers the manifest, so the tree check leaves it out.
-  return finishRebase(cwd, log, options, rebased, {
-    ignored: [MANIFEST],
-    checks: () => CHECKS.flatMap(runCheck(cwd)),
-    passed: [`Checks passed: ${CHECKS.map(({ label }) => label).join(", ")}.`],
+  // The generator writes the manifest from the files in the directory. The
+  // fresh worktree holds only the files of the branch, so no untracked page
+  // gets into the manifest of the pushed commits.
+  return shipBranch(cwd, log, options, {
+    resolveConflicts: regenerateManifest,
+    // The generator check covers the manifest, so the tree check leaves it out.
+    check: (worktree, rebased) =>
+      checkRebase(worktree, log, options, rebased, {
+        ignored: [MANIFEST],
+        checks: () => CHECKS.flatMap(runCheck(worktree)),
+        passed: [`Checks passed: ${CHECKS.map(({ label }) => label).join(", ")}.`],
+      }),
   });
 };
 

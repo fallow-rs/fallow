@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -52,7 +52,42 @@ const forkRepo = (t, { base, onMain, onBranch }) => {
 
 const shipRebase = (repo, ...args) => repo.runNode(SCRIPT, ["--branch", "feat", ...args]);
 
-const fileAtHead = (repo, path) => repo.git("show", `HEAD:${path}`);
+const fileAt = (repo, commit, path) => repo.git("show", `${commit}:${path}`);
+
+/** The full hash of the rebase result that the script printed. */
+const newTipOf = (result) => {
+  const match = result.output.match(/new tip ([0-9a-f]{40})\./u);
+  assert.notEqual(match, null, result.output);
+  return match[1];
+};
+
+/** The path of the temporary worktree that the script kept. */
+const keptWorktreeOf = (result) => {
+  const match = result.output.match(/The temporary worktree (\S+) holds/u);
+  assert.notEqual(match, null, result.output);
+  return match[1];
+};
+
+/** The paths of all worktrees of the fixture repository. */
+const worktreePaths = (repo) =>
+  repo
+    .git("worktree", "list", "--porcelain")
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.slice("worktree ".length));
+
+const rebaseInProgressIn = (repo, dir) =>
+  ["rebase-merge", "rebase-apply"].some((name) =>
+    existsSync(resolve(dir, repo.git("-C", dir, "rev-parse", "--git-path", name))),
+  );
+
+/** The branch, the HEAD commit, the status and the rebase state of the clone. */
+const callerState = (repo) => ({
+  branch: repo.git("branch", "--show-current"),
+  head: repo.git("rev-parse", "HEAD"),
+  status: repo.git("status", "--porcelain=v1", "--untracked-files=all"),
+  rebase: rebaseInProgressIn(repo, repo.work),
+});
 
 test("a CHANGELOG conflict keeps the entries of both sides", (t) => {
   const repo = forkRepo(t, {
@@ -68,15 +103,16 @@ test("a CHANGELOG conflict keeps the entries of both sides", (t) => {
   const result = shipRebase(repo);
 
   assert.equal(result.status, 0, result.output);
+  const tip = newTipOf(result);
   assert.equal(
-    fileAtHead(repo, "CHANGELOG.md"),
+    fileAt(repo, tip, "CHANGELOG.md"),
     changelog("- Main entry.", "- Branch entry.").trimEnd(),
   );
   assert.match(result.output, /Resolved conflicts at 1 stops of the rebase\./u);
   assert.match(result.output, /CHANGELOG check: the rebase kept the lines of the branch/u);
   assert.match(result.output, /the new entries of the branch are in the first release section/u);
   assert.match(result.output, /src\/lib\.rs: GRAPH_CACHE_VERSION 1 -> 2/u);
-  assert.equal(repo.git("rev-parse", "HEAD^"), repo.git("rev-parse", "origin/main"));
+  assert.equal(repo.git("rev-parse", `${tip}^`), repo.git("rev-parse", "origin/main"));
 });
 
 test("a conflict outside CHANGELOG.md stops the rebase", (t) => {
@@ -90,8 +126,9 @@ test("a conflict outside CHANGELOG.md stops the rebase", (t) => {
 
   assert.equal(result.status, 1, result.output);
   assert.match(result.output, /STOP: feat: Conflicts outside CHANGELOG\.md: src\/value\.txt/u);
-  assert.match(readFileSync(join(repo.work, "src/value.txt"), "utf8"), /^<{7} /mu);
-  assert.equal(existsSync(join(repo.work, ".git", "rebase-merge")), true);
+  const kept = keptWorktreeOf(result);
+  assert.match(readFileSync(join(kept, "src/value.txt"), "utf8"), /^<{7} /mu);
+  assert.equal(rebaseInProgressIn(repo, kept), true);
 });
 
 test("the CHANGELOG check finds a superseded entry that a keep-both resolution kept", (t) => {
@@ -112,7 +149,7 @@ test("the CHANGELOG check finds a superseded entry that a keep-both resolution k
     /Lines that the rebase added and the branch did not add:\n\s+- Draft entry\./u,
   );
   assert.doesNotMatch(result.output, /Pushed/u);
-  assert.notEqual(repo.git("rev-parse", "origin/feat"), repo.git("rev-parse", "HEAD"));
+  assert.notEqual(repo.git("rev-parse", "origin/feat"), newTipOf(result));
 });
 
 test("the CHANGELOG check finds a subsection that the resolution added two times", (t) => {
@@ -205,7 +242,7 @@ test("the tree check finds a change that the branch made in a merge commit", (t)
     /Paths where the rebase result differs from a merge of the branch into origin\/main:\n\s+src\/b\.txt/u,
   );
   assert.match(result.output, /The branch has 1 merge commits\./u);
-  assert.equal(fileAtHead(repo, "src/b.txt"), "b");
+  assert.equal(fileAt(repo, newTipOf(result), "src/b.txt"), "b");
   assert.doesNotMatch(result.output, /Pushed/u);
 });
 
@@ -229,7 +266,7 @@ test("the tree check passes a path where only the merge conflicts", (t) => {
   const result = shipRebase(repo);
 
   assert.equal(result.status, 0, result.output);
-  assert.equal(fileAtHead(repo, "src/value.txt"), "3");
+  assert.equal(fileAt(repo, newTipOf(result), "src/value.txt"), "3");
   assert.match(
     result.output,
     /the merge conflicts at these paths, so the check does not compare them\. The branch has no merge commits:\n\s+src\/value\.txt\n/u,
@@ -260,7 +297,7 @@ test("a branch with a clean merge commit passes the tree check", (t) => {
 
   assert.equal(result.status, 0, result.output);
   assert.equal(
-    fileAtHead(repo, "CHANGELOG.md"),
+    fileAt(repo, newTipOf(result), "CHANGELOG.md"),
     changelog("- Main entry.", "- Branch entry.").trimEnd(),
   );
 });
@@ -309,7 +346,7 @@ const release = (text) => text.replace("## [Unreleased]\n\n", "## [Unreleased]\n
 const MOVED =
   /Entries of the branch that moved out of the first release section:\n\s+- Branch entry\./u;
 const MOVE_BY_HAND =
-  /HEAD holds the rebased branch\. To fix it:\n\s+1\. Move these entries to the first release section of CHANGELOG\.md and commit the change\./u;
+  /The temporary worktree \S+ holds the rebased branch\. To fix it, work in that worktree:\n\s+1\. Move these entries to the first release section of CHANGELOG\.md and commit the change\./u;
 
 test("the script stops when a clean rebase moves a branch entry into a release", (t) => {
   const repo = forkRepo(t, {
@@ -330,7 +367,10 @@ test("the script stops when a clean rebase moves a branch entry into a release",
   assert.match(result.output, /Resolved conflicts at 0 stops of the rebase\./u);
   assert.match(result.output, MOVED);
   assert.match(result.output, MOVE_BY_HAND);
-  assert.equal(repo.git("log", "-1", "--format=%s"), "feat: branch change");
+  assert.equal(
+    repo.git("-C", keptWorktreeOf(result), "log", "-1", "--format=%s"),
+    "feat: branch change",
+  );
   repo.git("fetch", "--quiet", "origin");
   assert.equal(repo.git("rev-parse", "origin/feat"), oldTip);
 });
@@ -350,28 +390,35 @@ test("the printed recovery steps for a moved entry lead to a passing run", (t) =
   const failed = shipRebase(repo, "--push");
 
   assert.equal(failed.status, 1, failed.output);
-  const rebasedTip = repo.git("rev-parse", "HEAD");
-  assert.match(failed.output, new RegExp(`git diff ${rebasedTip} HEAD`, "u"));
-  const push = failed.output.match(/^\s*git (push \S+ \S+ \S+)$/mu);
+  const rebasedTip = newTipOf(failed);
+  const kept = keptWorktreeOf(failed);
+  assert.equal(repo.git("-C", kept, "rev-parse", "HEAD"), rebasedTip);
+  assert.match(failed.output, new RegExp(`git -C ${kept} diff ${rebasedTip} HEAD`, "u"));
+  const push = failed.output.match(/^\s*git -C (\S+) (push \S+ \S+ \S+)$/mu);
   assert.notEqual(push, null, failed.output);
+  assert.equal(push[1], kept);
   assert.equal(
-    push[1],
+    push[2],
     `push --force-with-lease=refs/heads/feat:${oldTip} origin HEAD:refs/heads/feat`,
   );
-  const fixed = fileAtHead(repo, "CHANGELOG.md")
+  const fixed = fileAt(repo, rebasedTip, "CHANGELOG.md")
     .replace("- Branch entry.\n", "")
     .replace("## [Unreleased]\n\n", "## [Unreleased]\n\n### Added\n\n- Branch entry.\n\n");
-  repo.commit("docs: move the branch entry to the unreleased section", {
-    "CHANGELOG.md": `${fixed}\n`,
-  });
-  repo.git(...push[1].split(" "));
+  writeFileSync(join(kept, "CHANGELOG.md"), `${fixed}\n`);
+  repo.git("-C", kept, "commit", "--quiet", "-am", "docs: move the branch entry back");
+  const fixedTip = repo.git("-C", kept, "rev-parse", "HEAD");
+  repo.git("-C", kept, ...push[2].split(" "));
+  const remove = failed.output.match(/^\s*git -C (\S+) (worktree remove --force \S+)$/mu);
+  assert.notEqual(remove, null, failed.output);
+  repo.git("-C", remove[1], ...remove[2].split(" "));
 
   const rerun = shipRebase(repo, "--push");
 
   assert.equal(rerun.status, 0, rerun.output);
   assert.match(rerun.output, /The branch is already on origin\/main\. Nothing to push\./u);
   repo.git("fetch", "--quiet", "origin");
-  assert.equal(repo.git("rev-parse", "origin/feat"), repo.git("rev-parse", "HEAD"));
+  assert.equal(repo.git("rev-parse", "origin/feat"), fixedTip);
+  assert.deepEqual(worktreePaths(repo), [repo.work]);
 });
 
 const OTHER_PROBLEMS_FIRST =
@@ -384,7 +431,7 @@ const assertNoRecoverySteps = (result) => {
   assert.match(result.output, MOVED);
   assert.match(result.output, OTHER_PROBLEMS_FIRST);
   assert.doesNotMatch(result.output, MOVE_BY_HAND);
-  assert.doesNotMatch(result.output, /git push/u);
+  assert.doesNotMatch(result.output, /push --force-with-lease/u);
   assert.doesNotMatch(result.output, /Run the script again/u);
 };
 
@@ -558,7 +605,7 @@ test("the rebase ignores a recorded rerere resolution", (t) => {
 
   assert.equal(result.status, 1, result.output);
   assert.match(result.output, /Conflicts outside CHANGELOG\.md: src\/lib\.rs/u);
-  assert.match(readFileSync(join(repo.work, "src/lib.rs"), "utf8"), /^<{7} /mu);
+  assert.match(readFileSync(join(keptWorktreeOf(result), "src/lib.rs"), "utf8"), /^<{7} /mu);
 });
 
 test("--push updates the branch with a lease on the old tip", (t) => {
@@ -577,7 +624,7 @@ test("--push updates the branch with a lease on the old tip", (t) => {
     /Pushing feat\. The pre-push hook of the checkout runs first\.\nPushed feat with a lease/u,
   );
   repo.git("fetch", "--quiet", "origin");
-  assert.equal(repo.git("rev-parse", "origin/feat"), repo.git("rev-parse", "HEAD"));
+  assert.equal(repo.git("rev-parse", "origin/feat"), newTipOf(result));
 });
 
 test("--push fails when the remote branch moved after the fetch", (t) => {
@@ -588,8 +635,8 @@ test("--push fails when the remote branch moved after the fetch", (t) => {
       r.commit("feat: branch change", { "CHANGELOG.md": changelog("- Branch entry.") }),
   });
   // Someone else pushes to `feat` between the fetch and the push of the
-  // script. The script switches to the fetched tip after the fetch, so a
-  // post-checkout hook that runs one time moves the remote branch.
+  // script. The script adds a worktree at the fetched tip after the fetch,
+  // so a post-checkout hook that runs one time moves the remote branch.
   repo.git("switch", "--quiet", "--detach", "origin/feat");
   const other = repo.commit("feat: other change", { "src/other.txt": "other\n" });
   repo.git("push", "--quiet", "origin", "HEAD:refs/heads/other");
@@ -615,20 +662,115 @@ test("--push fails when the remote branch moved after the fetch", (t) => {
   assert.equal(result.status, 2, result.output);
   assert.match(result.output, /stale info/u);
   assert.equal(repo.git("--git-dir", origin, "rev-parse", "refs/heads/feat"), other);
+  const kept = keptWorktreeOf(result);
+  assert.equal(repo.git("-C", kept, "rev-parse", "HEAD"), newTipOf(result));
+  assert.match(result.output, new RegExp(`git -C ${kept} push --force-with-lease=`, "u"));
 });
 
-test("the script refuses a work tree with tracked changes", (t) => {
-  const repo = forkRepo(t, {
+// A branch that conflicts only in CHANGELOG.md.
+const changelogConflictRepo = (t) =>
+  forkRepo(t, {
     base: { "CHANGELOG.md": changelog() },
-    onMain: () => {},
-    onBranch: (r) => r.commit("feat: branch change", { "CHANGELOG.md": changelog("- Entry.") }),
+    onMain: (r) => r.commit("feat: main change", { "CHANGELOG.md": changelog("- Main entry.") }),
+    onBranch: (r) =>
+      r.commit("feat: branch change", { "CHANGELOG.md": changelog("- Branch entry.") }),
   });
-  repo.write("CHANGELOG.md", "local edit\n");
+
+test("a passing run keeps the caller checkout and removes its worktree", (t) => {
+  const repo = changelogConflictRepo(t);
+  const before = callerState(repo);
 
   const result = shipRebase(repo);
 
-  assert.equal(result.status, 2, result.output);
-  assert.match(result.output, /tracked changes/u);
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(callerState(repo), before);
+  assert.equal(before.branch, "main");
+  assert.deepEqual(worktreePaths(repo), [repo.work]);
+  assert.doesNotMatch(result.output, /HEAD is detached/u);
+});
+
+test("a conflict stop keeps the caller checkout and leaves the rebase in a kept worktree", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/value.txt": "base\n" },
+    onMain: (r) => r.commit("fix: main value", { "src/value.txt": "main\n" }),
+    onBranch: (r) => r.commit("fix: branch value", { "src/value.txt": "branch\n" }),
+  });
+  const before = callerState(repo);
+
+  const result = shipRebase(repo);
+
+  assert.equal(result.status, 1, result.output);
+  assert.deepEqual(callerState(repo), before);
+  const kept = keptWorktreeOf(result);
+  assert.deepEqual(worktreePaths(repo), [repo.work, kept]);
+  assert.equal(rebaseInProgressIn(repo, kept), true);
+  assert.match(result.output, new RegExp(`git -C ${kept} rebase --continue`, "u"));
+  assert.match(result.output, new RegExp(`git -C ${kept} push --force-with-lease=`, "u"));
+  assert.match(result.output, new RegExp(`git -C ${kept} rebase --abort`, "u"));
+  assert.match(result.output, new RegExp(`worktree remove --force ${kept}`, "u"));
+});
+
+test("a failed check keeps the caller checkout and the rebased HEAD in a kept worktree", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", {
+        "src/lib.rs": cacheSource(2),
+        "src/other.txt": "other\n",
+      }),
+  });
+  const before = callerState(repo);
+
+  const result = shipRebase(repo, "--push");
+
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.output, /Version changes that the rebase lost/u);
+  assert.deepEqual(callerState(repo), before);
+  const kept = keptWorktreeOf(result);
+  assert.equal(repo.git("-C", kept, "rev-parse", "HEAD"), newTipOf(result));
+  assert.equal(repo.git("-C", kept, "rev-parse", "HEAD^"), repo.git("rev-parse", "origin/main"));
+  assert.equal(rebaseInProgressIn(repo, kept), false);
+  assert.match(result.output, new RegExp(`worktree remove --force ${kept}`, "u"));
+});
+
+test("the run does not touch an unrelated branch with uncommitted changes", (t) => {
+  const repo = changelogConflictRepo(t);
+  repo.git("switch", "--quiet", "-c", "unrelated");
+  repo.commit("chore: unrelated work", { "src/notes.txt": "notes\n" });
+  repo.write("src/notes.txt", "edited notes\n");
+  repo.write("CHANGELOG.md", "staged edit\n");
+  repo.git("add", "CHANGELOG.md");
+  repo.write("src/draft.txt", "untracked\n");
+  const before = callerState(repo);
+
+  const result = shipRebase(repo, "--push");
+
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(callerState(repo), before);
+  assert.equal(readFileSync(join(repo.work, "src/notes.txt"), "utf8"), "edited notes\n");
+  assert.equal(repo.git("diff", "--cached", "--name-only"), "CHANGELOG.md");
+  repo.git("fetch", "--quiet", "origin");
+  assert.equal(repo.git("rev-parse", "origin/feat"), newTipOf(result));
+  assert.deepEqual(worktreePaths(repo), [repo.work]);
+});
+
+test("--push runs the pre-push hook of a relative core.hooksPath", (t) => {
+  const repo = changelogConflictRepo(t);
+  const log = join(repo.root, "pre-push.log");
+  mkdirSync(join(repo.work, "hooks"));
+  mkdirSync(join(repo.work, "target"));
+  writeFileSync(
+    join(repo.work, "hooks", "pre-push"),
+    `#!/bin/sh\nprintf '%s\\n' "$CARGO_TARGET_DIR" > "${log}"\n`,
+  );
+  chmodSync(join(repo.work, "hooks", "pre-push"), 0o755);
+  repo.git("config", "core.hooksPath", "hooks");
+
+  const result = shipRebase(repo, "--push");
+
+  assert.equal(result.status, 0, result.output);
+  assert.equal(readFileSync(log, "utf8"), `${join(repo.work, "target")}\n`);
 });
 
 test("the rebase is linear when rebase.rebaseMerges is set", (t) => {
@@ -638,7 +780,7 @@ test("the rebase is linear when rebase.rebaseMerges is set", (t) => {
   const result = shipRebase(repo);
 
   assert.equal(result.status, 0, result.output);
-  assert.equal(repo.git("rev-list", "--merges", "origin/main..HEAD"), "");
+  assert.equal(repo.git("rev-list", "--merges", `origin/main..${newTipOf(result)}`), "");
 });
 
 test("the rebase moves no local branch when rebase.updateRefs is set", (t) => {
@@ -677,7 +819,7 @@ test("the script ignores an inherited GIT_DIR and GIT_WORK_TREE", (t) => {
   });
 
   assert.equal(result.status, 0, result.output);
-  assert.equal(repo.git("rev-parse", "HEAD^"), repo.git("rev-parse", "origin/main"));
+  assert.equal(repo.git("rev-parse", `${newTipOf(result)}^`), repo.git("rev-parse", "origin/main"));
   assert.equal(other.git("log", "--format=%s"), "chore: other");
 });
 
@@ -707,7 +849,7 @@ test("the script refuses a pull request from a fork", (t) => {
   assert.equal(repo.git("branch", "--show-current"), "main");
 });
 
-test("the script refuses a checkout with a stopped rebase", (t) => {
+test("a stopped rebase in the caller checkout stays as it is", (t) => {
   const repo = forkRepo(t, {
     base: { "CHANGELOG.md": changelog() },
     onMain: (r) => r.commit("fix: main change", { "src/a.txt": "a\n" }),
@@ -716,11 +858,13 @@ test("the script refuses a checkout with a stopped rebase", (t) => {
   // A failed `--exec` step stops the rebase with a clean work tree.
   repo.git("switch", "--quiet", "--detach", "origin/feat");
   assert.throws(() => repo.git("rebase", "--exec", "false", "origin/main"));
+  const before = callerState(repo);
 
   const result = shipRebase(repo);
 
-  assert.equal(result.status, 2, result.output);
-  assert.match(result.output, /A rebase is in progress/u);
+  assert.equal(result.status, 0, result.output);
+  assert.deepEqual(callerState(repo), before);
+  assert.equal(before.rebase, true);
 });
 
 test("the version report names the file of a deleted constant", (t) => {

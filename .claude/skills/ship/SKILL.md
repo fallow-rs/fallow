@@ -51,22 +51,23 @@ Use these scripts for each pull request, one at a time:
    - Each entry that the branch adds to the first release section is still
      in that section. A release on `main` puts a version heading under
      `## [Unreleased]`, and an entry of the branch can land under it.
-     Then the check fails and lists the entries. HEAD holds the rebased
-     branch. A fix on the old branch does not help, because the next run
-     rebases it again and moves the entries again. After a push of HEAD,
-     the next run compares the pushed result with itself, so it cannot
-     find a problem of the first rebase or of the manual fix. When other
-     checks also fail, the script prints no push command: fix the other
-     problems first. When the moved entries are the only problem, the
-     script prints these steps. Do them on HEAD:
+     Then the check fails and lists the entries. The kept temporary
+     worktree holds the rebased branch. A fix on the old branch does not
+     help, because the next run rebases it again and moves the entries
+     again. After a push of the result, the next run compares the pushed
+     result with itself, so it cannot find a problem of the first rebase
+     or of the manual fix. When other checks also fail, the script prints
+     no push command: fix the other problems first. When the moved entries
+     are the only problem, the script prints these steps. Do them in the
+     kept worktree:
      1. Move the entries to the first release section of `CHANGELOG.md`
-        and commit the change.
-     2. Make sure that the printed `git diff <rebased tip> HEAD` command
-        shows only the moved entries. This is the only check of the
-        manual fix.
-     3. Push HEAD with the lease command that the script prints, for
-        example
-        `git push --force-with-lease=refs/heads/<branch>:<old tip> origin HEAD:refs/heads/<branch>`.
+        and commit the change. Make sure that the printed
+        `git -C <worktree> diff <rebased tip> HEAD` command shows only the
+        moved entries. This is the only check of the manual fix.
+     2. Push with the lease command that the script prints, for example
+        `git -C <worktree> push --force-with-lease=refs/heads/<branch>:<old tip> origin HEAD:refs/heads/<branch>`.
+     3. Remove the worktree with the printed
+        `git -C <checkout> worktree remove --force <worktree>` command.
      4. Run the script again. It confirms that the branch is on `main`.
         It cannot check the first rebase again.
    - The rebase adds no second `###` subsection with the same name to the
@@ -92,13 +93,26 @@ Use these scripts for each pull request, one at a time:
 
 For a companion pull request in fallow-rs/docs, run
 `node <fallow>/scripts/ship-docs-rebase.mjs --pr <number> --push` in a
-docs checkout with no untracked files. The manifest generator reads the
-directory, so the script refuses untracked files. The script regenerates
-`public-content-manifest.json` for each commit that conflicts on it. It
-runs the same merge comparison outside that file. Then add
-`--repo fallow-rs/docs` to the wait command.
+docs checkout. The script regenerates `public-content-manifest.json` for
+each commit that conflicts on it. The manifest generator reads the
+directory. The rebase runs in a fresh worktree, so untracked files of the
+checkout do not get into the manifest. The script runs the same merge
+comparison outside that file. Then add `--repo fallow-rs/docs` to the
+wait command.
 
-The rebase scripts work on a detached HEAD. If a script stops on a
-conflict, the rebase stays in progress: resolve it by hand, or run
-`git rebase --abort`. If a check fails, the script does not push. Each
-script prints its options and exit codes with `--help`.
+The rebase scripts do not change the checkout where they run. They add a
+temporary worktree with a detached HEAD, and the rebase, the checks and
+the push run there. The checkout can be on any branch and can have
+changes. The pre-push hook of the checkout runs on the push. When the
+checks pass, the script removes the worktree. After a stop, a failed
+check or a failed push, the script keeps the worktree and prints its
+path and the next commands:
+
+- After a conflict, the rebase stays in progress in the worktree.
+  Resolve it there and run `git -C <worktree> rebase --continue`, or run
+  `git -C <worktree> rebase --abort`.
+- If a check fails, the script does not push.
+- To discard the worktree, run the printed
+  `git -C <checkout> worktree remove --force <worktree>` command.
+
+Each script prints its options and exit codes with `--help`.

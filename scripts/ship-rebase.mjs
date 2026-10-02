@@ -12,12 +12,12 @@ import { fileURLToPath } from "node:url";
 
 import { runCliMain } from "./cli-main.mjs";
 import {
-  finishRebase,
+  checkRebase,
   git,
   leasePushArgs,
-  rebaseBranch,
-  shellCommand,
+  shipBranch,
   shipMain,
+  worktreeCommand,
 } from "./ship-git.mjs";
 
 const CHANGELOG = "CHANGELOG.md";
@@ -36,8 +36,15 @@ Options:
                     when all checks pass.
   -h, --help        Show this help.
 
-The rebase runs on a detached HEAD, so no local branch changes. Git rerere
-is off for the rebase. After the rebase, the script runs these checks:
+The rebase, the checks and the push run in a temporary worktree with a
+detached HEAD, so your checkout and every local branch stay as they are.
+Your checkout can have changes, and it can be on any branch. Git rerere
+is off for the rebase. The pre-push hook of your checkout runs on the push.
+When the checks pass, the script removes the worktree. After a stop or a
+failed check, the script keeps the worktree and prints its path and the
+next commands.
+
+After the rebase, the script runs these checks:
   - Outside CHANGELOG.md, the result is the same as a merge of the branch
     into the base. A rebase drops the changes of a merge commit. A path
     where the merge itself conflicts fails the check only when the branch
@@ -48,8 +55,8 @@ is off for the rebase. After the rebase, the script runs these checks:
     into the released version. A fix on the old branch does not help,
     because the rebase moves the entry again. When the moved entries are
     the only problem, the check prints the steps that fix the rebased
-    branch on HEAD: move the entry back, commit, check the printed
-    git diff, push HEAD with the printed lease command, and run the
+    branch in the kept worktree: move the entry back, commit, check the
+    printed git diff, push with the printed lease command, and run the
     script again. After the push, the next run compares the pushed
     result with itself. It cannot check the first rebase or the manual
     fix again, so the git diff is the only check of the fix. When other
@@ -241,20 +248,22 @@ export const movedEntries = ({ added, oldTipText, baseText, newTipText }) => {
  * result with itself. That run cannot find a problem of the first rebase or
  * of the manual fix, so step 2 is the only check of the fix.
  */
-const moveBackSteps = ({ remote, branch, oldTip, newTip, base }) =>
+const moveBackSteps = ({ remote, branch, oldTip, newTip, base, worktree }) =>
   [
-    "HEAD holds the rebased branch. To fix it:",
+    `The temporary worktree ${worktree} holds the rebased branch. To fix it, work in that worktree:`,
     "  1. Move these entries to the first release section of CHANGELOG.md and commit the change.",
-    `  2. Make sure that \`${shellCommand(["git", "diff", newTip, "HEAD"])}\` shows only the moved entries.`,
+    "     Make sure that this command shows only the moved entries:",
+    `       ${worktreeCommand(worktree, ["diff", newTip, "HEAD"])}`,
     "     The next run cannot check the manual fix, so this step is its only check.",
-    "  3. Push HEAD with a lease on the old branch tip:",
-    `       ${shellCommand(["git", ...leasePushArgs({ remote, branch, oldTip })])}`,
+    "  2. Push the worktree HEAD with a lease on the old branch tip:",
+    `       ${worktreeCommand(worktree, leasePushArgs({ remote, branch, oldTip }))}`,
+    "  3. Remove the worktree with the command below.",
     `  4. Run the script again. It confirms that the branch is on ${base}.`,
     "     It cannot check the first rebase again.",
   ].join("\n  ");
 
-// A push of HEAD makes the next run compare the pushed result with itself,
-// so the other problems must be fixed before the push.
+// A push of the result makes the next run compare the pushed result with
+// itself, so the other problems must be fixed before the push.
 const OTHER_PROBLEMS_FIRST =
   "Fix the other problems first. After a push of HEAD, the next run cannot find them, because it compares the pushed result with itself.";
 
@@ -393,20 +402,14 @@ const logVersions = (log, base, changes) =>
   );
 
 /**
- * Rebase the branch and run the checks. Print the report to `log` and
- * return the exit code.
+ * Run the checks of the rebase result in the temporary worktree `cwd`.
+ * Print the report to `log` and return the exit code.
  */
-const shipRebase = (cwd, options, log = console.log) => {
-  const rebased = rebaseBranch(cwd, log, options, {
-    resolveConflicts: resolveChangelogOnly(cwd),
-  });
-  if (rebased === null) {
-    return 1;
-  }
+const checkResult = (cwd, log, options, rebased) => {
   const { oldBase, oldTip, baseTip, newTip } = rebased;
   const versionsAfter = versionChanges(cwd, baseTip, newTip);
   logVersions(log, options.base, versionsAfter);
-  return finishRebase(cwd, log, options, rebased, {
+  return checkRebase(cwd, log, options, rebased, {
     ignored: [CHANGELOG],
     checks: (tips, treeProblems) => {
       const changelog = checkChangelog(cwd, tips);
@@ -427,6 +430,16 @@ const shipRebase = (cwd, options, log = console.log) => {
     ],
   });
 };
+
+/**
+ * Rebase the branch in a temporary worktree and run the checks. Print the
+ * report to `log` and return the exit code.
+ */
+const shipRebase = (cwd, options, log = console.log) =>
+  shipBranch(cwd, log, options, {
+    resolveConflicts: resolveChangelogOnly,
+    check: (worktree, rebased) => checkResult(worktree, log, options, rebased),
+  });
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runCliMain(shipMain(USAGE, shipRebase));
