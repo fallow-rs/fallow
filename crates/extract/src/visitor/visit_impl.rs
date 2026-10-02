@@ -170,6 +170,14 @@ impl ModuleInfoExtractor {
         // factories are excluded from the STRICT (cross-module) map; the same-file
         // (loose) maps below are unaffected. See #1441 (Part A).
         let strict_eligible = !input.is_async && !input.is_generator;
+        // An `async` factory hands back a promise of the class. It is exported
+        // through its own strict map and binds only an awaited call result.
+        let returns_promise = input.is_async && !input.is_generator;
+        if returns_promise {
+            self.promise_factory_functions.insert(name.to_string());
+        } else if input.is_generator {
+            self.generator_factory_functions.insert(name.to_string());
+        }
         if let Some(class_name) = function_body_returns_new_class(body) {
             // An all-paths-unanimous, non-falling-through proof additionally
             // qualifies this factory for cross-module export (see
@@ -179,6 +187,11 @@ impl ModuleInfoExtractor {
                 && let Some(unanimous_class) = function_body_returns_new_class_unanimous(body)
             {
                 self.strict_factory_return_functions
+                    .insert(name.to_string(), unanimous_class);
+            } else if returns_promise
+                && let Some(unanimous_class) = function_body_returns_new_class_unanimous(body)
+            {
+                self.strict_async_factory_return_functions
                     .insert(name.to_string(), unanimous_class);
             }
             self.factory_return_functions
@@ -223,6 +236,16 @@ impl ModuleInfoExtractor {
                 .insert(name.to_string(), class_name.clone());
             self.factory_return_functions
                 .insert(name.to_string(), class_name);
+        } else if returns_promise
+            && let Some(return_type) = input.return_type
+            && let Some(class_name) = return_type_element_name(&return_type.type_annotation)
+        {
+            // `async function load(): Promise<Gauge>`: the same compiler-checked
+            // contract as the sync arm above, for the awaited value.
+            self.strict_async_factory_return_functions
+                .insert(name.to_string(), class_name.clone());
+            self.factory_return_functions
+                .insert(name.to_string(), class_name);
         }
 
         // Object-literal return (`return { orders: factory.ordersPage }`): capture
@@ -242,8 +265,8 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Capture `const local = callee(...)` (bare-identifier callee) as a factory
-    /// return candidate. `resolve_factory_return_candidates` keeps only those
+    /// Capture `const local = callee(...)` or `const local = await callee(...)`
+    /// (bare-identifier callee) as a factory return candidate. `resolve_factory_return_candidates` keeps only those
     /// whose callee is a known same-file `new Class()` factory or an imported
     /// callee (cross-module). See issue #1441.
     ///
@@ -255,7 +278,11 @@ impl ModuleInfoExtractor {
         declarator: &VariableDeclarator<'_>,
         init: &Expression<'_>,
     ) {
-        let Some(callee_name) = Self::bare_call_callee_name(init) else {
+        let (call, awaited) = match init {
+            Expression::AwaitExpression(await_expr) => (&await_expr.argument, true),
+            _ => (init, false),
+        };
+        let Some(callee_name) = Self::bare_call_callee_name(call) else {
             return;
         };
 
@@ -271,13 +298,14 @@ impl ModuleInfoExtractor {
                     .push(super::FactoryReturnCandidate {
                         local_name: id.name.to_string(),
                         callee_name,
+                        awaited,
                     });
             }
             // `const { a, b } = useApi()`. The instance is never named, so queue one
             // direct factory-result access per statically named key. Dropping this
             // shape is what reported every member of a destructured factory result
             // as unused.
-            BindingPattern::ObjectPattern(pattern) => {
+            BindingPattern::ObjectPattern(pattern) if !awaited => {
                 let Some(keys) = super::destructured_factory_keys(pattern) else {
                     // A rest element or computed key can read any property.
                     self.factory_whole_object_candidates.push(callee_name);

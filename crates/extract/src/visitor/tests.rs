@@ -382,6 +382,60 @@ fn factory_return_arrow_bodies_credit_member_on_class() {
 }
 
 #[test]
+fn awaited_same_file_async_factory_credits_member_on_class() {
+    // `await makeWidget()` gives the `Widget` that the async factory resolves to,
+    // at the top level and inside an async function.
+    for source in [
+        "class Widget { used() {} }\nasync function makeWidget() { return new Widget() }\nconst w = await makeWidget()\nw.used()",
+        "class Widget { used() {} }\nconst makeWidget = async () => new Widget()\nasync function run() { const w = await makeWidget(); w.used() }",
+        "class Widget { used() {} }\nasync function makeWidget(): Promise<Widget> { return {} as Widget }\nconst w = await makeWidget()\nw.used()",
+    ] {
+        let info = parse(source);
+        assert!(
+            has_member_access(&info, "Widget", "used"),
+            "an awaited async factory should credit the member on the class: {source:?}"
+        );
+    }
+}
+
+#[test]
+fn unawaited_same_file_async_factory_does_not_credit_member_on_class() {
+    // Without `await`, the local holds a promise and not a `Widget`. The awaited
+    // form of the same source is the positive control.
+    let unawaited = parse(
+        "class Widget { used() {} }\nasync function makeWidget() { return new Widget() }\nconst p = makeWidget()\np.used()",
+    );
+    assert!(
+        !has_member_access(&unawaited, "Widget", "used"),
+        "a promise from an async factory must not credit the class: {:?}",
+        unawaited.member_accesses
+    );
+    let awaited = parse(
+        "class Widget { used() {} }\nasync function makeWidget() { return new Widget() }\nconst p = await makeWidget()\np.used()",
+    );
+    assert!(has_member_access(&awaited, "Widget", "used"));
+}
+
+#[test]
+fn awaited_imported_factory_emits_awaited_fact() {
+    // `const api = await useApi()` with an imported callee emits the factory-fn
+    // fact with the awaited flag, so the analyze layer can match an async export.
+    let info = parse(
+        "import { useApi } from './api'\nconst api = await useApi()\napi.Plan()\nconst sync = useApi()\nsync.Other()",
+    );
+    let flag = |member: &str| {
+        info.semantic_facts.iter().find_map(|fact| match fact {
+            SemanticFact::FactoryFnMemberAccess(access) if access.member == member => {
+                Some(access.awaited)
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(flag("Plan"), Some(true), "{:?}", info.semantic_facts);
+    assert_eq!(flag("Other"), Some(false), "{:?}", info.semantic_facts);
+}
+
+#[test]
 fn non_factory_function_does_not_credit_member_on_class() {
     // `useApi` does not return `new Class()`, so no binding is recorded and
     // `api.Plan` is not credited on `RESTApi` (it stays a flaggable member).
@@ -491,17 +545,31 @@ fn exported_factory_returns_records_return_type_annotation_arrow() {
     );
 }
 
+fn exported_factory_return_entries(info: &crate::ModuleInfo) -> Vec<(&str, &str, bool)> {
+    info.exported_factory_returns
+        .iter()
+        .map(|fr| {
+            (
+                fr.export_name.as_str(),
+                fr.class_local_name.as_str(),
+                fr.is_async,
+            )
+        })
+        .collect()
+}
+
 #[test]
-fn exported_factory_returns_return_type_abstains_on_async() {
+fn exported_factory_returns_return_type_marks_async() {
     // Even with a return-type annotation, an async factory returns a Promise, not
-    // the class instance, so the annotation must NOT record a strict entry.
+    // the class instance. The entry carries `is_async`, so only an awaited call
+    // result credits the class, never a plain `const x = make()`.
     let info = parse(
         "class Ctrl { m() {} }\nexport async function make(): Promise<Ctrl> { return {} as Ctrl }",
     );
-    assert!(
-        info.exported_factory_returns.is_empty(),
-        "async return-type factory must abstain: {:?}",
-        info.exported_factory_returns
+    assert_eq!(
+        exported_factory_return_entries(&info),
+        [("make", "Ctrl", true)],
+        "async return-type factory must be recorded as async only"
     );
 }
 
@@ -533,15 +601,16 @@ fn exported_factory_returns_abstains_on_conflicting_returns() {
 }
 
 #[test]
-fn exported_factory_returns_abstains_on_async_factory() {
-    // `async function make()` returns Promise<RESTApi>, not RESTApi. Must abstain.
+fn exported_factory_returns_marks_async_factory() {
+    // `async function make()` returns Promise<RESTApi>, not RESTApi. The entry
+    // carries `is_async`, so only an awaited call result credits the class.
     let info = parse(
         "class RESTApi { Plan() {} }\nexport async function make(): Promise<RESTApi> { return new RESTApi() }",
     );
-    assert!(
-        info.exported_factory_returns.is_empty(),
-        "an async factory must not be exported cross-module: {:?}",
-        info.exported_factory_returns
+    assert_eq!(
+        exported_factory_return_entries(&info),
+        [("make", "RESTApi", true)],
+        "an async factory must be exported as async only"
     );
 }
 

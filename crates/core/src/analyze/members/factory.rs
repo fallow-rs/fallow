@@ -97,9 +97,9 @@ pub(super) fn propagate_factory_fn_accesses(
             let Some(seed_keys) = local_to_export_keys.get(access.callee_name.as_str()) else {
                 continue;
             };
-            let classes = seed_keys
-                .iter()
-                .flat_map(|seed_key| factory_return_classes_for_callee(graph, indexes, seed_key));
+            let classes = seed_keys.iter().flat_map(|seed_key| {
+                factory_return_classes_for_callee(graph, indexes, seed_key, access.awaited)
+            });
             for class_origin in classes {
                 accessed_members
                     .entry(class_origin)
@@ -348,10 +348,14 @@ fn factory_return_class_origins(
 /// The classes a callee's proven exported factory returns, resolved across modules.
 /// Empty for any callee that is not an internal exported factory with a strict,
 /// value-proven return: each link of the chain is an over-credit gate.
+///
+/// An `async` factory returns a promise of the class, so it credits the class only
+/// when the consumer awaited the call. A sync factory credits for both call kinds.
 fn factory_return_classes_for_callee(
     graph: &ModuleGraph,
     indexes: &MemberPassIndexes<'_>,
     seed_key: &ExportKey,
+    awaited: bool,
 ) -> Vec<ExportKey> {
     let mut origins = Vec::new();
     for factory_origin in
@@ -370,6 +374,9 @@ fn factory_return_classes_for_callee(
         else {
             continue;
         };
+        if factory_return.is_async && !awaited {
+            continue;
+        }
         origins.extend(factory_return_class_origins(
             graph,
             indexes,
@@ -399,9 +406,9 @@ pub(super) fn propagate_factory_fn_whole_object_uses(
             let Some(seed_keys) = local_to_export_keys.get(fact.callee_name.as_str()) else {
                 continue;
             };
-            let classes = seed_keys
-                .iter()
-                .flat_map(|seed_key| factory_return_classes_for_callee(graph, indexes, seed_key));
+            let classes = seed_keys.iter().flat_map(|seed_key| {
+                factory_return_classes_for_callee(graph, indexes, seed_key, false)
+            });
             whole_object_used_exports.extend(classes);
         }
     }

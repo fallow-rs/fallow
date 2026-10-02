@@ -133,6 +133,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   access, so renamed (`{ service: local }`) and nested keys also bind to
   their class. The extraction cache version changes, so the first run after
   the upgrade parses all files again.
+- **An awaited result of an async class factory credits the class
+  members.** Before, `const widget = await makeWidget()` did not bind
+  `widget` to the class that `makeWidget` returns. Thus fallow reported
+  each member that the code reads on `widget` as an unused class member.
+  Now an `async` factory that returns `new Widget()` on all paths, or that
+  has a `Promise<Widget>` return type, binds the awaited result to
+  `Widget`. This applies at the top level and in an async function, in the
+  same file and across modules. A call without `await` gives a promise, so
+  it does not credit the class. The extraction cache version changes, so
+  the first run after the upgrade parses all files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

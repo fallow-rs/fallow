@@ -1997,6 +1997,10 @@ pub struct FactoryReturnExport {
     pub export_name: String,
     /// The returned class's local name within the factory module.
     pub class_local_name: String,
+    /// The factory returns a promise of the class (an `async` function, or a
+    /// `Promise<Class>` return type). Only an awaited call result is the class.
+    #[serde(default)]
+    pub is_async: bool,
 }
 
 /// One resolved property of an object-literal factory return: a dotted property
@@ -2929,6 +2933,8 @@ pub struct FactoryFnMemberAccessFact {
     pub callee_name: String,
     /// Member accessed on the returned instance-like object.
     pub member: String,
+    /// The local holds the awaited call result (`const x = await factory()`).
+    pub awaited: bool,
 }
 
 /// A factory-returned value consumed opaquely, so every member of the class it
@@ -4278,6 +4284,7 @@ mod tests {
             exported_factory_returns: std::sync::Arc::from([FactoryReturnExport {
                 export_name: "useApi".to_string(),
                 class_local_name: "RESTApi".to_string(),
+                is_async: false,
             }]),
             exported_factory_return_object_shapes: std::sync::Arc::from([
                 FactoryReturnObjectShapeExport {

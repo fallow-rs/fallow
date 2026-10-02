@@ -142,6 +142,8 @@ pub(crate) struct FactoryCallCandidate {
 pub(crate) struct FactoryReturnCandidate {
     local_name: String,
     callee_name: String,
+    /// `const local = await callee()`: the local holds the awaited result.
+    awaited: bool,
 }
 
 /// An unresolved object-literal property value captured while visiting a factory
@@ -547,6 +549,16 @@ pub(crate) struct ModuleInfoExtractor {
     /// `ModuleInfo.exported_factory_returns`, bounding the cross-module
     /// over-credit blast radius. See issue #1441 (Part A).
     strict_factory_return_functions: FxHashMap<String, String>,
+    /// The `async` counterpart of `strict_factory_return_functions`: factories
+    /// proven to resolve to one class. Exported with `is_async`, so only an
+    /// awaited cross-module call result credits the class.
+    strict_async_factory_return_functions: FxHashMap<String, String>,
+    /// Module-scope `async` (non-generator) functions. Their plain call result is
+    /// a promise, so only an awaited result binds the class they resolve to.
+    promise_factory_functions: FxHashSet<String>,
+    /// Module-scope generator functions. Awaiting the call gives the iterator,
+    /// so an awaited result never binds a class.
+    generator_factory_functions: FxHashSet<String>,
     /// Factory functions returning an object literal, captured at visit time and
     /// resolved at finalize (`resolve_factory_return_object_shapes`). See #1858.
     factory_return_object_candidates: Vec<FactoryReturnObjectCandidate>,
@@ -1421,14 +1433,30 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    fn record_factory_fn_member_fact(&mut self, callee_name: String, member: String) {
+    fn record_factory_fn_member_fact(
+        &mut self,
+        callee_name: String,
+        member: String,
+        awaited: bool,
+    ) {
         self.semantic_facts
             .push(SemanticFact::FactoryFnMemberAccess(
                 FactoryFnMemberAccessFact {
                     callee_name,
                     member,
+                    awaited,
                 },
             ));
+    }
+
+    /// Whether a call of the same-file function `callee` gives the value that the
+    /// function returns: a sync call, or an awaited call of an `async` function.
+    fn call_result_is_returned_value(&self, callee: &str, awaited: bool) -> bool {
+        if awaited {
+            !self.generator_factory_functions.contains(callee)
+        } else {
+            !self.promise_factory_functions.contains(callee)
+        }
     }
 
     fn record_typed_property_member_fact(
@@ -2084,13 +2112,17 @@ impl ModuleInfoExtractor {
             return;
         }
         let candidates = std::mem::take(&mut self.factory_return_candidates);
-        let mut deferred_factory_facts: Vec<(String, String)> = Vec::new();
+        let mut deferred_factory_facts: Vec<(String, String, bool)> = Vec::new();
         let mut deferred_object_property_facts: Vec<(String, String, String)> = Vec::new();
         let mut deferred_member_accesses: Vec<MemberAccess> = Vec::new();
         for candidate in candidates {
             // Same-file factory returning `new Class()`: bind the local to the
             // class so `resolve_bound_member_accesses` credits `x.member` directly.
             if let Some(class_name) = self.factory_return_functions.get(&candidate.callee_name) {
+                // A plain call of an `async` factory gives a promise, not the class.
+                if !self.call_result_is_returned_value(&candidate.callee_name, candidate.awaited) {
+                    continue;
+                }
                 let class_name = class_name.clone();
                 self.binding_target_names
                     .entry(candidate.local_name)
@@ -2140,8 +2172,11 @@ impl ModuleInfoExtractor {
             let object_prefix = format!("{}.", candidate.local_name);
             for access in &self.member_accesses {
                 if access.object == candidate.local_name {
-                    deferred_factory_facts
-                        .push((candidate.callee_name.clone(), access.member.clone()));
+                    deferred_factory_facts.push((
+                        candidate.callee_name.clone(),
+                        access.member.clone(),
+                        candidate.awaited,
+                    ));
                 } else if let Some(property_path) = access.object.strip_prefix(&object_prefix) {
                     // `const ui = importedObjectFactory(); ui.orders.member`: emit a
                     // fact the analyze layer joins against the factory's exported
@@ -2155,8 +2190,8 @@ impl ModuleInfoExtractor {
             }
         }
         self.member_accesses.extend(deferred_member_accesses);
-        for (callee_name, member) in deferred_factory_facts {
-            self.record_factory_fn_member_fact(callee_name, member);
+        for (callee_name, member, awaited) in deferred_factory_facts {
+            self.record_factory_fn_member_fact(callee_name, member, awaited);
         }
         for (callee_name, property_path, member) in deferred_object_property_facts {
             self.semantic_facts
@@ -2200,6 +2235,9 @@ impl ModuleInfoExtractor {
         let mut deferred_facts = Vec::new();
         for (callee_name, member) in inline_accesses {
             if let Some(class_name) = self.factory_return_functions.get(&callee_name) {
+                if !self.call_result_is_returned_value(&callee_name, false) {
+                    continue;
+                }
                 let object = class_name.clone();
                 self.member_accesses.push(MemberAccess { object, member });
                 continue;
@@ -2209,7 +2247,7 @@ impl ModuleInfoExtractor {
             }
         }
         for (callee_name, member) in deferred_facts {
-            self.record_factory_fn_member_fact(callee_name, member);
+            self.record_factory_fn_member_fact(callee_name, member, false);
         }
     }
 
@@ -2226,6 +2264,9 @@ impl ModuleInfoExtractor {
         for callee_name in callees {
             // Same-file factory: the class is known, mark it used wholesale.
             if let Some(class_name) = self.factory_return_functions.get(&callee_name) {
+                if !self.call_result_is_returned_value(&callee_name, false) {
+                    continue;
+                }
                 let class_name = class_name.clone();
                 self.whole_object_uses.push(class_name);
                 continue;
@@ -2253,7 +2294,9 @@ impl ModuleInfoExtractor {
     /// `resolve_factory_return_aliases` has populated the strict map. See issue
     /// #1441 (Part A).
     fn collect_exported_factory_returns(&self) -> Vec<fallow_types::extract::FactoryReturnExport> {
-        if self.strict_factory_return_functions.is_empty() {
+        if self.strict_factory_return_functions.is_empty()
+            && self.strict_async_factory_return_functions.is_empty()
+        {
             return Vec::new();
         }
         let mut out = Vec::new();
@@ -2270,6 +2313,15 @@ impl ModuleInfoExtractor {
                 out.push(fallow_types::extract::FactoryReturnExport {
                     export_name: export.name.to_string(),
                     class_local_name: class_local_name.clone(),
+                    is_async: false,
+                });
+            } else if let Some(class_local_name) =
+                self.strict_async_factory_return_functions.get(local_name)
+            {
+                out.push(fallow_types::extract::FactoryReturnExport {
+                    export_name: export.name.to_string(),
+                    class_local_name: class_local_name.clone(),
+                    is_async: true,
                 });
             }
         }
