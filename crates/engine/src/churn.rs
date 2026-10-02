@@ -832,12 +832,13 @@ fn path_from_cache_bytes(path: &[u8]) -> Option<PathBuf> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
 
-    let chunks = path.chunks_exact(2);
-    if !chunks.remainder().is_empty() {
+    let (chunks, remainder) = path.as_chunks::<2>();
+    if !remainder.is_empty() {
         return None;
     }
     let wide: Vec<u16> = chunks
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .iter()
+        .map(|&pair| u16::from_le_bytes(pair))
         .collect();
     Some(PathBuf::from(OsString::from_wide(&wide)))
 }
