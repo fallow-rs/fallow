@@ -334,6 +334,7 @@ pub(crate) struct ModuleInfoExtractor {
     import_load_kind_marks: Vec<(Span, ImportLoadKind)>,
     require_calls: Vec<RequireCallInfo>,
     package_path_references: Vec<String>,
+    type_package_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
     pending_computed_enum_key_uses: Vec<PendingComputedEnumKeyUse>,
@@ -478,6 +479,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// file-level export recording is suppressed while non-zero (issue #2349).
     /// Transient visitor state; never persisted.
     ambient_module_depth: u32,
+    /// Whether the walked program has top-level import or export syntax.
+    /// TypeScript reads `declare module 'pkg'` as an augmentation only in a
+    /// module file. Transient visitor state; never persisted.
+    is_module_file: bool,
     /// Depth of namespace bodies declared without the `export` keyword
     /// (`namespace Foo {}`, `declare namespace Foo {}`, legacy `module Foo {}`,
     /// dotted `namespace A.B.C {}`, and namespaces nested in those or in
@@ -2970,6 +2975,7 @@ impl ModuleInfoExtractor {
             dynamic_import_patterns: self.dynamic_import_patterns,
             require_calls: self.require_calls,
             package_path_references: self.package_path_references.into_boxed_slice(),
+            type_package_references: self.type_package_references.into_boxed_slice(),
             member_accesses: self.member_accesses.into(),
             semantic_facts: self.semantic_facts.into(),
             whole_object_uses: self.whole_object_uses.into(),
@@ -3094,6 +3100,10 @@ impl ModuleInfoExtractor {
             std::mem::take(&mut info.package_path_references).into_vec();
         package_path_references.append(&mut self.package_path_references);
         info.package_path_references = package_path_references.into_boxed_slice();
+        let mut type_package_references =
+            std::mem::take(&mut info.type_package_references).into_vec();
+        type_package_references.append(&mut self.type_package_references);
+        info.type_package_references = type_package_references.into_boxed_slice();
         let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
         member_accesses.append(&mut self.member_accesses);
         info.member_accesses = member_accesses.into();

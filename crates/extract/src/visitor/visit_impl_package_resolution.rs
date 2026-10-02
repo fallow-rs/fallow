@@ -42,6 +42,20 @@ fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
     }
 }
 
+/// Whether the program has top-level import or export syntax, the rule that
+/// TypeScript uses to treat a file as a module and not as a script.
+/// `export as namespace` alone does not make a module file.
+pub(super) fn program_has_module_syntax(program: &Program<'_>) -> bool {
+    program.body.iter().any(|statement| match statement {
+        Statement::TSNamespaceExportDeclaration(_) => false,
+        Statement::TSImportEqualsDeclaration(decl) => matches!(
+            decl.module_reference,
+            TSModuleReference::ExternalModuleReference(_)
+        ),
+        _ => statement.is_module_declaration(),
+    })
+}
+
 fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
     if !is_package_resolution_specifier(specifier) {
         return None;
@@ -224,6 +238,28 @@ impl ModuleInfoExtractor {
             is_speculative: true,
         });
         self.mark_import_load_kind(call.span, ImportLoadKind::PathReference);
+    }
+
+    /// Record the package that a module augmentation names.
+    ///
+    /// TypeScript treats `declare module 'pkg' { ... }` as an augmentation
+    /// only in a module file, and there `pkg` must resolve. So the declaration
+    /// is a type-only use of the package. In a script file the same syntax
+    /// declares an ambient module, which uses nothing. A wildcard pattern such
+    /// as `'*.svg'` and a relative path name no package.
+    pub(super) fn record_module_augmentation(&mut self, decl: &TSExternalModuleDeclaration<'_>) {
+        if !self.is_module_file || self.ambient_module_depth > 0 || decl.body.is_none() {
+            return;
+        }
+        let specifier = decl.id.value.as_str();
+        if specifier.contains('*') || !is_package_resolution_specifier(specifier) {
+            return;
+        }
+        if let Some(package_name) = package_name_from_specifier(specifier)
+            && !self.type_package_references.contains(&package_name)
+        {
+            self.type_package_references.push(package_name);
+        }
     }
 
     fn push_package_path_references(&mut self, references: Vec<String>) {

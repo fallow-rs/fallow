@@ -11,6 +11,7 @@ mod jsx_assets;
 mod jsx_retry;
 mod load_data;
 mod member_access;
+mod module_augmentation;
 mod react_structural;
 mod require_resolve;
 mod security_sources;

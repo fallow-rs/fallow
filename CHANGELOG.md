@@ -189,6 +189,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extraction cache version changes, so the first run after the upgrade
   rebuilds the cache.
 
+- **A module augmentation now credits the package that it names.** A
+  top-level `declare module 'pkg' { ... }` in a file with an import or an
+  export augments `pkg`, and TypeScript requires `pkg` to resolve. Before,
+  fallow did not count this declaration as a use, so it reported `pkg` as
+  an unused dependency or devDependency. Now the declaration credits `pkg`
+  as a type-only use. The same syntax in a file without an import or an
+  export declares an ambient module, so it credits nothing. A wildcard
+  name such as `'*.svg'` and a relative path also credit nothing. An
+  augmentation never reports an unlisted dependency. The extraction cache
+  version changes because the cached extraction output changes.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

@@ -54,7 +54,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1376);
+assert_cached_type_size!(CachedModule, 1392);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -117,6 +117,9 @@ pub struct CachedModule {
     pub require_calls: Vec<CachedRequireCall>,
     /// Package names statically referenced through package path resolution.
     pub package_path_references: Box<[String]>,
+    /// Package names that a module augmentation (`declare module 'pkg'` in a
+    /// module file) names. They credit the package as a type-only use.
+    pub type_package_references: Box<[String]>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<crate::MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.

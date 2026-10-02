@@ -139,6 +139,12 @@ fn credit_package_path_references(graph: &mut graph::ModuleGraph, modules: &[ext
         for package_name in &module.package_path_references {
             record_graph_package_usage(graph, package_name, module.file_id, false);
         }
+        // A module augmentation credits the package as a type-only use. The
+        // unlisted-dependency check reports a package only at a resolved
+        // import site, so an undeclared augmented package stays unreported.
+        for package_name in &module.type_package_references {
+            record_graph_package_usage(graph, package_name, module.file_id, true);
+        }
     }
 }
 

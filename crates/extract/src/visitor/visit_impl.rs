@@ -2966,6 +2966,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 .push(directive.directive.as_str().to_string());
         }
         self.is_server_action_module = visit_server_actions::is_server_action_module(program);
+        self.is_module_file = program_has_module_syntax(program);
         self.record_program_namespace_import_locals(program);
         self.record_program_function_type_aliases(program);
         self.record_program_prologue(program);
@@ -3530,6 +3531,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // `declare module 'pkg'`) marks a module augmentation or ambient
         // module declaration. Track the depth so export visitors skip
         // file-level recording inside the body (issue #2349).
+        self.record_module_augmentation(decl);
         self.ambient_module_depth += 1;
         let body_statements = decl.body.as_ref().map(|block| &block.body);
         self.with_module_body_binding_scope(body_statements, None, |visitor| {

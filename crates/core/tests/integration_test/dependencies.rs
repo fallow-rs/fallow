@@ -1400,3 +1400,40 @@ fn empty_specifier_list_import_credits_package_and_file() {
         "`import type {{}} from './augment'` should keep the file reachable"
     );
 }
+
+/// A top-level `declare module 'pkg' { ... }` in a module file augments the
+/// package, and TypeScript requires `pkg` to resolve. It credits the package
+/// as a type-only use. A `declare module` in a script file declares an
+/// ambient shim and credits nothing. Neither form reports an unlisted
+/// dependency.
+#[test]
+fn module_augmentation_credits_package() {
+    let root = fixture_path("module-augmentation-package-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dev_dep_names.contains(&"@x/slots"),
+        "the augmentation in a module file should credit the package, found: {unused_dev_dep_names:?}"
+    );
+    assert!(
+        unused_dev_dep_names.contains(&"ambient-lib"),
+        "the ambient declaration in a script file must not credit the package, found: {unused_dev_dep_names:?}"
+    );
+
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert_eq!(
+        unlisted,
+        vec!["missing-lib"],
+        "only the real import may report an unlisted dependency"
+    );
+}

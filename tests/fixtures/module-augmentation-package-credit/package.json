@@ -1,0 +1,5 @@
+{
+  "name": "module-augmentation-package-credit",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
