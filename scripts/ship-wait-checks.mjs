@@ -51,6 +51,10 @@ const GIT_NOT_ANCESTOR_EXIT = 1;
 const SHORT_SHA_LENGTH = 12;
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
+// Path filters decide which workflows a push to main starts, so one push can
+// start fewer runs than --min-checks. When the runs of a commit stay complete
+// and unchanged this long, no further run comes, and the wait ends.
+const COMMIT_SETTLE_MS = 10 * MINUTE;
 
 const USAGE = `Usage: node scripts/ship-wait-checks.mjs (--pr <number> | --commit <sha>) [options]
 
@@ -78,6 +82,9 @@ Options:
 With --pr, the wait stops when the pull request conflicts with its base
 branch, because GitHub then starts no pull_request workflows.
 
+With --commit, path filters can start fewer runs than --min-checks. When the
+runs stay complete and unchanged for ${COMMIT_SETTLE_MS / MINUTE} minutes, the wait ends below the count.
+
 With --follow-main, the script runs "git fetch ${FOLLOW_REMOTE} ${FOLLOW_BRANCH}" in the
 working directory, so it does not work with --repo. The wait moves to a
 newer commit at most ${MAX_FOLLOW_HOPS} times. It stops with exit code 0 when all
@@ -103,19 +110,29 @@ const bucketSummary = (checks) => {
     .join(" ");
 };
 
+const checkSignature = (checks) =>
+  checks
+    .map(({ name, bucket }) => `${name}:${bucket}`)
+    .toSorted()
+    .join("\n");
+
 /**
  * Read the checks until at least `minChecks` exist and none is pending.
  *
  * `readChecks()` returns `{ ok: true, checks }` or `{ ok: false, error }`.
  * `readMergeable()`, when given, returns `{ ok: true, mergeable }` or
  * `{ ok: false, error }`. It runs only while the checks are incomplete.
- * Returns `{ status, checks }` where `status` is `pass`, `fail`, `conflict`,
- * `timeout` or `error`. The loop stops after `MAX_READ_ERRORS` read errors of
+ * With `settleMs`, checks that stay complete and unchanged for that time end
+ * the wait below `minChecks` with the status `settled`. Without it, too few
+ * checks wait until the timeout.
+ * Returns `{ status, checks }` where `status` is `pass`, `settled`, `fail`,
+ * `conflict`, `timeout` or `error`. The loop stops after `MAX_READ_ERRORS` read errors of
  * the checks in a row. A failed read of the mergeable state only warns.
  */
 export const waitForChecks = async ({
   readChecks,
   readMergeable = null,
+  settleMs = null,
   minChecks,
   intervalMs,
   timeoutMs,
@@ -126,15 +143,27 @@ export const waitForChecks = async ({
   const deadline = now() + timeoutMs;
   let checks = [];
   let readErrors = 0;
+  let signature = "";
+  let changedAt = now();
   for (;;) {
     const read = readChecks();
     if (read.ok) {
       readErrors = 0;
       checks = read.checks;
+      const nextSignature = checkSignature(checks);
+      if (nextSignature !== signature) {
+        signature = nextSignature;
+        changedAt = now();
+      }
       const pending = checks.some(({ bucket }) => bucket === "pending");
+      const failed = checks.some(({ bucket }) => FAILED_BUCKETS.has(bucket));
       if (checks.length >= minChecks && !pending) {
-        const failed = checks.some(({ bucket }) => FAILED_BUCKETS.has(bucket));
         return { status: failed ? "fail" : "pass", checks };
+      }
+      const settled =
+        settleMs !== null && checks.length > 0 && !pending && now() - changedAt >= settleMs;
+      if (settled) {
+        return { status: failed ? "fail" : "settled", checks };
       }
     } else {
       readErrors += 1;
@@ -444,6 +473,7 @@ const parseOptions = (argv) => {
 
 const EXIT_CODES = {
   pass: 0,
+  settled: 0,
   fail: 1,
   hops: 1,
   timeout: 2,
@@ -459,12 +489,13 @@ const EXIT_CODES = {
  */
 export const reportChecks = (
   { status, checks, origin = "", head = "", error = "", maxHops = MAX_FOLLOW_HOPS },
-  { label, minChecks, commit = null, followMain: following = false },
+  { label, minChecks, settleMs = COMMIT_SETTLE_MS, commit = null, followMain: following = false },
   log = console.log,
 ) => {
   const summary = checks.length === 0 ? "no checks" : bucketSummary(checks);
   const headline = {
     pass: `${label}: all checks passed (${summary}).`,
+    settled: `${label}: all ${checks.length} runs passed, fewer than --min-checks ${minChecks}, and no run started or changed for ${settleMs / MINUTE} minutes (${summary}).`,
     fail: `${label}: checks failed (${summary}).`,
     timeout: `${label}: timed out with ${checks.length} of at least ${minChecks} checks (${summary}).`,
     error: `${label}: stopped after ${MAX_READ_ERRORS} failed reads of the checks.`,
@@ -502,6 +533,7 @@ const main = async () => {
       waitCommit: (sha, timeoutMs) =>
         waitForChecks({
           ...options,
+          settleMs: COMMIT_SETTLE_MS,
           timeoutMs,
           readChecks: ghRunsReader({ commit: sha, repo: options.repo }),
         }),
@@ -513,7 +545,8 @@ const main = async () => {
   const isPr = options.commit === null;
   const readChecks = isPr ? ghChecksReader(options) : ghRunsReader(options);
   const readMergeable = isPr ? ghMergeableReader(options) : null;
-  const result = await waitForChecks({ ...options, readChecks, readMergeable });
+  const settleMs = isPr ? null : COMMIT_SETTLE_MS;
+  const result = await waitForChecks({ ...options, readChecks, readMergeable, settleMs });
   return reportChecks(result, options);
 };
 

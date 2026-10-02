@@ -34,10 +34,14 @@ const scripted = (reads) => {
   };
 };
 
-const wait = (script, { minChecks = 1, timeoutMs = 10 * INTERVAL_MS, readMergeable } = {}) =>
+const wait = (
+  script,
+  { minChecks = 1, timeoutMs = 10 * INTERVAL_MS, readMergeable, settleMs = null } = {},
+) =>
   waitForChecks({
     ...script,
     readMergeable,
+    settleMs,
     minChecks,
     intervalMs: INTERVAL_MS,
     timeoutMs,
@@ -110,6 +114,61 @@ test("the wait times out while too few checks exist", async () => {
   assert.equal(result.status, "timeout");
   assert.equal(code, 2);
   assert.deepEqual(lines, ["PR 7: timed out with 1 of at least 3 checks (pass=1)."]);
+});
+
+test("commit runs that stay complete for the settle window end the wait below the count", async () => {
+  const script = scripted([{ ok: true, checks: [check("CI", "pass"), check("Lint", "pass")] }]);
+
+  const result = await wait(script, {
+    minChecks: 3,
+    timeoutMs: 20 * INTERVAL_MS,
+    settleMs: 3 * INTERVAL_MS,
+  });
+  const lines = [];
+  const code = reportChecks(
+    result,
+    { label: "Commit abc", minChecks: 3, settleMs: 3 * INTERVAL_MS },
+    (line) => lines.push(line),
+  );
+
+  assert.equal(result.status, "settled");
+  assert.equal(script.reads(), 4);
+  assert.equal(code, 0);
+  assert.match(lines[0], /^Commit abc: all 2 runs passed, fewer than --min-checks 3/u);
+});
+
+test("a new or changed run starts the settle window again", async () => {
+  const script = scripted([
+    { ok: true, checks: [check("CI", "pass")] },
+    { ok: true, checks: [check("CI", "pass")] },
+    { ok: true, checks: [check("CI", "pass"), check("Bench", "pass")] },
+  ]);
+
+  const result = await wait(script, { minChecks: 3, settleMs: 2 * INTERVAL_MS });
+
+  assert.equal(result.status, "settled");
+  assert.equal(script.reads(), 5);
+  assert.equal(result.checks.length, 2);
+});
+
+test("a failed run that settles below the count still fails", async () => {
+  const script = scripted([{ ok: true, checks: [check("CI", "fail")] }]);
+
+  const result = await wait(script, { minChecks: 3, settleMs: 2 * INTERVAL_MS });
+
+  assert.equal(result.status, "fail");
+});
+
+test("a pending run never settles", async () => {
+  const script = scripted([{ ok: true, checks: [check("CI", "pending")] }]);
+
+  const result = await wait(script, {
+    minChecks: 3,
+    timeoutMs: 6 * INTERVAL_MS,
+    settleMs: 2 * INTERVAL_MS,
+  });
+
+  assert.equal(result.status, "timeout");
 });
 
 test("a pull request that conflicts with its base stops the wait with exit code 3", async () => {
