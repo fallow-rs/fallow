@@ -1,0 +1,5 @@
+{
+  "name": "signature-backing-unused-backer",
+  "private": true,
+  "main": "src/index.ts"
+}

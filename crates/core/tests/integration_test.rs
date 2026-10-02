@@ -155,6 +155,8 @@ mod rules_config;
 mod safe_analysis;
 #[path = "integration_test/sfc_parsing.rs"]
 mod sfc_parsing;
+#[path = "integration_test/signature_backing_unused_backer.rs"]
+mod signature_backing_unused_backer;
 #[path = "integration_test/size_limit_plugin.rs"]
 mod size_limit_plugin;
 #[path = "integration_test/skipped_file_reachability_caveat.rs"]

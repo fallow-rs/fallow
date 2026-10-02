@@ -484,6 +484,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values of options such as `--names` and `--prefix-colors`. The
   `run-s` and `run-p` arguments stay script names.
 
+- **An exported type that backs only unused exports is now reported.**
+  Fallow hides an unused exported type when the signature of another export
+  in the same file uses it. Before, fallow also hid the type when that other
+  export was unused. For example, `export function summarize(): Summary`
+  with no import of `summarize` gave a finding for `summarize` and none for
+  `Summary`. Now fallow hides the type only when at least one export that
+  uses it is live. A type that is hidden counts as live for the types in
+  its own signature. A type that only its own signature uses, such as a
+  recursive tree node, is now also reported.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

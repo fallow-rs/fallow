@@ -634,8 +634,14 @@ fn build_unused_export(
 
 /// Remove exported type findings when the type is only exported to support
 /// another public signature in the same module.
+///
+/// A backing export counts as live when it is not in `unused_values` or
+/// `unused_types`. A type stays hidden only while at least one of its backing
+/// exports is live. A hidden type counts as live for the types that it backs,
+/// so the check repeats until no more types become hidden.
 pub fn suppress_signature_backing_types(
     unused_types: &mut Vec<UnusedExport>,
+    unused_values: &[UnusedExport],
     graph: &ModuleGraph,
     modules: &[fallow_types::extract::ModuleInfo],
 ) {
@@ -648,20 +654,54 @@ pub fn suppress_signature_backing_types(
         .iter()
         .map(|module| (module.file_id, module.path.as_path()))
         .collect();
-    let backing_types: FxHashSet<(&std::path::Path, &str)> = modules
+    let mut backers_by_type: FxHashMap<(&std::path::Path, &str), Vec<&str>> = FxHashMap::default();
+    for (module, path) in modules
         .iter()
         .filter_map(|module| path_by_id.get(&module.file_id).map(|path| (module, *path)))
-        .flat_map(|(module, path)| {
-            module
-                .public_signature_type_references
-                .iter()
-                .map(move |reference| (path, reference.type_name.as_str()))
-        })
-        .collect();
+    {
+        for reference in &module.public_signature_type_references {
+            backers_by_type
+                .entry((path, reference.type_name.as_str()))
+                .or_default()
+                .push(reference.export_name.as_str());
+        }
+    }
 
-    unused_types.retain(|unused| {
-        !backing_types.contains(&(unused.path.as_path(), unused.export_name.as_str()))
-    });
+    let mut dead: FxHashSet<(&std::path::Path, &str)> = unused_values
+        .iter()
+        .chain(unused_types.iter())
+        .map(|unused| (unused.path.as_path(), unused.export_name.as_str()))
+        .collect();
+    let keys: Vec<(&std::path::Path, &str)> = unused_types
+        .iter()
+        .map(|unused| (unused.path.as_path(), unused.export_name.as_str()))
+        .collect();
+    let mut hidden = vec![false; keys.len()];
+    loop {
+        let newly_hidden: Vec<usize> = keys
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !hidden[*index])
+            .filter(|(_, key)| {
+                backers_by_type.get(*key).is_some_and(|backers| {
+                    backers
+                        .iter()
+                        .any(|backer| !dead.contains(&(key.0, *backer)))
+                })
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if newly_hidden.is_empty() {
+            break;
+        }
+        for index in newly_hidden {
+            dead.remove(&keys[index]);
+            hidden[index] = true;
+        }
+    }
+
+    let mut hidden = hidden.into_iter();
+    unused_types.retain(|_| !hidden.next().unwrap_or(false));
 }
 
 /// File-name suffixes that idiomatically declare local helper types
@@ -1695,7 +1735,7 @@ mod tests {
             finding("/project/a.ts", "Unbacked"),
         ];
 
-        suppress_signature_backing_types(&mut findings, &graph, &[known, unknown]);
+        suppress_signature_backing_types(&mut findings, &[], &graph, &[known, unknown]);
 
         let retained: Vec<_> = findings
             .iter()
@@ -1708,6 +1748,64 @@ mod tests {
                 (std::path::Path::new("/project/a.ts"), "Unbacked"),
             ]
         );
+    }
+
+    #[test]
+    fn signature_backing_types_need_a_live_backer() {
+        use fallow_types::extract::{ModuleInfo, PublicSignatureTypeReference};
+
+        let graph = build_graph(&[("/project/a.ts", false)]);
+        let reference = |export_name: &str, type_name: &str| PublicSignatureTypeReference {
+            export_name: export_name.to_owned(),
+            type_name: type_name.to_owned(),
+            span: Span::new(0, 1),
+            from_satisfies: false,
+        };
+        let mut module = ModuleInfo::empty(FileId(0));
+        module.public_signature_type_references = vec![
+            // Backed only by an unused value export.
+            reference("summarize", "Summary"),
+            // Backed by one used and one unused value export.
+            reference("usedReader", "Entry"),
+            reference("unusedReader", "Entry"),
+            // `Outer` is backed by a used export, `Inner` only by `Outer`.
+            reference("build", "Outer"),
+            reference("Outer", "Inner"),
+            // `Leaf` is backed only by `Branch`, which is itself unused.
+            reference("summarize", "Branch"),
+            reference("Branch", "Leaf"),
+            // Backed only by itself.
+            reference("TreeNode", "TreeNode"),
+        ];
+        let finding = |name: &str, is_type_only: bool| UnusedExport {
+            path: PathBuf::from("/project/a.ts"),
+            export_name: name.to_owned(),
+            is_type_only,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
+        };
+        let unused_values = vec![finding("summarize", false), finding("unusedReader", false)];
+        let mut findings = vec![
+            finding("Summary", true),
+            finding("Entry", true),
+            finding("Outer", true),
+            finding("Inner", true),
+            finding("Branch", true),
+            finding("Leaf", true),
+            finding("TreeNode", true),
+        ];
+
+        suppress_signature_backing_types(&mut findings, &unused_values, &graph, &[module]);
+
+        let retained: Vec<_> = findings
+            .iter()
+            .map(|finding| finding.export_name.as_str())
+            .collect();
+        assert_eq!(retained, vec!["Summary", "Branch", "Leaf", "TreeNode"]);
     }
 
     fn make_export(name: &str, span_start: u32, span_end: u32) -> ExportSymbol {
