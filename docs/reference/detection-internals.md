@@ -780,7 +780,11 @@ ignores suppress findings without fabricating resolution edges. Raw-specifier
 unresolved-import ignores are not filesystem globs. A relative import whose
 target is missing and ignored by a repository ignore file is build output, not
 an unresolved import; this check reads no global git excludes file and applies
-only inside a git repository. Static test coverage is
+only inside a git repository. The resolver records the missing paths that a
+project package `exports` entry names for an unresolved bare specifier
+(`ResolvedModule::missing_export_targets`, kept in the graph cache), and the
+same check applies when each of those paths is ignored. No edge points at a
+missing path. Static test coverage is
 reference reachability, not runtime line coverage; complexity suppression
 controls findings while aggregate metrics continue to describe the source.
 Security and feature-flag analysis retain their own opt-in contracts and cannot

@@ -1,9 +1,11 @@
-//! Gitignore rules for the missing targets of relative imports.
+//! Gitignore rules for the missing targets of unresolved imports.
 //!
 //! A relative import of a build output (`../dist/out.js`) or of generated code
-//! (`./generated/client`) does not resolve before the build runs. When the
-//! repository ignores the target path, the import is not a defect of the
-//! source, so the unresolved-import check does not report it.
+//! (`./generated/client`) does not resolve before the build runs. The same
+//! applies to a package subpath (`store/enums`) whose `exports` entry names
+//! generated code. When the repository ignores the target path, the import is
+//! not a defect of the source, so the unresolved-import check does not report
+//! it.
 
 use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
@@ -19,13 +21,13 @@ use crate::plugins::config_parser::lexical_normalize;
 /// discovery.
 const DIR_IGNORE_FILES: [&str; 2] = [".gitignore", ".ignore"];
 
-/// Matches the missing target of a relative import against the ignore files
-/// of the git repository that holds the project root.
+/// Matches the missing target of an unresolved import against the ignore
+/// files of the git repository that holds the project root.
 ///
 /// The machine global excludes file is not read, because a rule there would
 /// change the findings from one machine to another. The repository root and
 /// each matcher are found on the first query that needs them, so a project
-/// without relative unresolved imports reads no ignore file.
+/// without such unresolved imports reads no ignore file.
 pub(super) struct GitignoredTargets<'a> {
     root: &'a Path,
     repo_root: OnceCell<Option<PathBuf>>,
@@ -55,7 +57,20 @@ impl<'a> GitignoredTargets<'a> {
         let Some(importer_dir) = importer.parent() else {
             return false;
         };
-        let target = lexical_normalize(&importer_dir.join(spec));
+        self.ignores_missing_path(&lexical_normalize(&importer_dir.join(spec)))
+    }
+
+    /// Return `true` when `paths` is not empty and each path is a missing
+    /// path that an ignore rule of the repository ignores. The resolver
+    /// records these paths for a bare specifier whose package `exports` entry
+    /// names only missing paths.
+    pub(super) fn ignores_missing_paths(&mut self, paths: &[PathBuf]) -> bool {
+        !paths.is_empty() && paths.iter().all(|path| self.ignores_missing_path(path))
+    }
+
+    /// Return `true` when `target` does not exist and an ignore rule of the
+    /// repository ignores it or one of its parent directories.
+    fn ignores_missing_path(&mut self, target: &Path) -> bool {
         if target.exists() {
             return false;
         }
@@ -77,7 +92,7 @@ impl<'a> GitignoredTargets<'a> {
             }
             match self
                 .dir_matcher(dir)
-                .matched_path_or_any_parents(&target, false)
+                .matched_path_or_any_parents(target, false)
             {
                 Match::Ignore(_) => return true,
                 Match::Whitelist(_) => return false,
@@ -85,7 +100,7 @@ impl<'a> GitignoredTargets<'a> {
             }
         }
         self.exclude_matcher(&repo_root)
-            .matched_path_or_any_parents(&target, false)
+            .matched_path_or_any_parents(target, false)
             .is_ignore()
     }
 

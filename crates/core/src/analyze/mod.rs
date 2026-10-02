@@ -3103,6 +3103,7 @@ mod tests {
                     exported_factory_returns: std::sync::Arc::default(),
                     exported_factory_return_object_shapes: std::sync::Arc::default(),
                     type_member_types: std::sync::Arc::default(),
+                    missing_export_targets: vec![],
                 })
                 .collect();
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -3190,6 +3191,7 @@ mod tests {
                 exported_factory_returns: std::sync::Arc::default(),
                 exported_factory_return_object_shapes: std::sync::Arc::default(),
                 type_member_types: std::sync::Arc::default(),
+                missing_export_targets: vec![],
             }];
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
             graph.modules[0].exports = vec![ExportSymbol {
@@ -3289,6 +3291,7 @@ mod tests {
                     exported_factory_returns: std::sync::Arc::default(),
                     exported_factory_return_object_shapes: std::sync::Arc::default(),
                     type_member_types: std::sync::Arc::default(),
+                    missing_export_targets: vec![],
                 })
                 .collect::<Vec<_>>();
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);

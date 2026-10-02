@@ -1882,6 +1882,14 @@ pub fn find_unresolved_imports(
             if gitignored.ignores_missing_target(&module.path, spec) {
                 continue;
             }
+            if module
+                .missing_export_targets
+                .iter()
+                .find(|target| target.specifier == *spec)
+                .is_some_and(|target| gitignored.ignores_missing_paths(&target.paths))
+            {
+                continue;
+            }
             let (line, col, specifier_col) =
                 unresolved_import_location(&edge, module.file_id, line_offsets_by_file);
             reported_specs.insert(spec.clone());

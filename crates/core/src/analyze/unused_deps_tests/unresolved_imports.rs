@@ -50,6 +50,7 @@ fn unresolved_import_detected() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -98,6 +99,7 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let mut config = test_config(PathBuf::from("/project"));
@@ -159,6 +161,7 @@ fn ignore_unresolved_imports_matches_leading_dot_slash_specifiers() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     // Resolve through the real config pipeline so the leading "./" strip
@@ -237,6 +240,7 @@ fn multi_binding_re_export_reports_one_unresolved_finding_per_specifier() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -497,6 +501,7 @@ fn unresolved_dynamic_import_detected_with_real_location() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -573,6 +578,7 @@ fn unresolved_platform_builtins_not_reported() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -633,6 +639,7 @@ fn unresolved_virtual_module_not_reported() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -689,6 +696,7 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -752,6 +760,7 @@ fn unresolved_tanstack_start_virtual_imports_not_reported() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -839,6 +848,7 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -923,6 +933,7 @@ fn unresolved_import_suppressed_by_generated_type_import_prefix() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -985,6 +996,7 @@ fn generated_type_import_prefix_is_plugin_gated() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1039,6 +1051,7 @@ fn unresolved_import_suppressed_by_inline_comment() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1102,6 +1115,7 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1167,6 +1181,7 @@ fn unresolved_import_file_level_suppression() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1245,6 +1260,7 @@ fn resolved_import_not_reported_as_unresolved() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1324,6 +1340,7 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -1374,6 +1391,7 @@ fn module_with_unresolved(path: PathBuf, specifiers: &[&str]) -> ResolvedModule 
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }
 }
 

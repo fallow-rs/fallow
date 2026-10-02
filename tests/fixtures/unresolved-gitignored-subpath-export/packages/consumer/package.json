@@ -1,0 +1,7 @@
+{
+  "name": "consumer",
+  "type": "module",
+  "dependencies": {
+    "store": "workspace:*"
+  }
+}

@@ -48,6 +48,7 @@ fn graph_with_import_from(
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     (graph, resolved_modules)
@@ -284,6 +285,7 @@ fn dev_dep_not_flagged_when_importing_file_is_unreachable() {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         }];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         (graph, resolved_modules)

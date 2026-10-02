@@ -427,6 +427,7 @@ fn empty_resolved_module(
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }
 }
 
@@ -953,6 +954,7 @@ fn create_re_export_input() -> ReExportInput {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     });
 
     for b in 0..barrel_count {
@@ -1036,6 +1038,7 @@ fn create_re_export_input() -> ReExportInput {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         });
     }
 
@@ -1100,6 +1103,7 @@ fn create_re_export_input() -> ReExportInput {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         });
     }
 

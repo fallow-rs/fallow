@@ -1639,6 +1639,7 @@ mod tests {
                 exported_factory_returns: std::sync::Arc::default(),
                 exported_factory_return_object_shapes: std::sync::Arc::default(),
                 type_member_types: std::sync::Arc::default(),
+                missing_export_targets: vec![],
             })
             .collect();
 
@@ -2518,6 +2519,7 @@ mod tests {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         }
     }
 

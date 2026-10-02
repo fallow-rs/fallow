@@ -158,6 +158,7 @@ fn builtin_modules_not_reported_as_unlisted() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -223,6 +224,7 @@ fn virtual_modules_not_reported_as_unlisted() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -482,6 +484,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -515,6 +518,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         },
     ];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -584,6 +588,7 @@ fn dynamic_import_unlisted_dep_has_import_site() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -1094,6 +1099,7 @@ fn workspace_import_case(
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

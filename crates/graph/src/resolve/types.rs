@@ -295,6 +295,21 @@ pub struct ResolvedModule {
     /// and type-literal aliases. See `fallow_types::extract::TypeMemberTypeEntry`
     /// and issue #1785.
     pub type_member_types: Arc<[fallow_types::extract::TypeMemberTypeEntry]>,
+    /// Unresolved bare specifiers whose package `exports` entry names only
+    /// paths that do not exist, in specifier order. The resolver records the
+    /// paths so that the unresolved-import check can test them against the
+    /// ignore rules of the repository. No edge points at these paths.
+    pub missing_export_targets: Vec<MissingExportTarget>,
+}
+
+/// The missing paths that the `exports` map of a project package names for
+/// one unresolved bare specifier.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MissingExportTarget {
+    /// The import specifier, for example `store/enums`.
+    pub specifier: String,
+    /// The absolute paths that the matched `exports` entry names.
+    pub paths: Vec<PathBuf>,
 }
 
 impl Default for ResolvedModule {
@@ -319,6 +334,7 @@ impl Default for ResolvedModule {
             exported_factory_returns: Arc::default(),
             exported_factory_return_object_shapes: Arc::default(),
             type_member_types: Arc::default(),
+            missing_export_targets: vec![],
         }
     }
 }

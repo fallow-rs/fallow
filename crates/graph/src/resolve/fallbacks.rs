@@ -787,16 +787,22 @@ fn resolve_package_map_target(
     target: &str,
     source_subpath: Option<&Path>,
 ) -> Option<FileId> {
-    let target = target.strip_prefix("./")?;
-    if target.starts_with("../") || target.starts_with('/') {
-        return None;
-    }
-    let target_path = manifest.root.join(target);
+    let target_path = package_map_target_path(manifest, target)?;
 
     lookup_internal_file_id(ctx, &target_path)
         .or_else(|| try_source_fallback(&target_path, ctx.raw_path_to_id))
         .or_else(|| try_source_fallback(&target_path, ctx.path_to_id))
         .or_else(|| source_subpath.and_then(|subpath| try_source_subpath(ctx, manifest, subpath)))
+}
+
+/// Join a package map target (`./src/index.ts`) to the package root. A target
+/// that leaves the package root is not a package path.
+fn package_map_target_path(manifest: &PackageManifestInfo, target: &str) -> Option<PathBuf> {
+    let target = target.strip_prefix("./")?;
+    if target.starts_with("../") || target.starts_with('/') {
+        return None;
+    }
+    Some(manifest.root.join(target))
 }
 
 fn resolve_package_map_targets(
@@ -1089,12 +1095,7 @@ fn try_manifest_workspace_resolution(
     };
 
     if let Some(exports) = manifest.package_json.exports.as_ref() {
-        let export_key = if subpath.is_empty() {
-            ".".to_string()
-        } else {
-            format!("./{subpath}")
-        };
-        return match package_map_target(exports, &export_key, ctx.condition_names) {
+        return match package_map_target(exports, &export_key(subpath), ctx.condition_names) {
             PackageMapTarget::Targets(targets) => {
                 match resolve_package_map_targets(ctx, manifest, &targets, Some(source_subpath)) {
                     Some(file_id) => ManifestWorkspaceResolution::Resolved(
@@ -1120,6 +1121,51 @@ fn try_manifest_workspace_resolution(
     }
 
     ManifestWorkspaceResolution::Continue
+}
+
+/// The `exports` key that a package subpath matches: `.` for the package
+/// root, else `./<subpath>`.
+fn export_key(subpath: &str) -> String {
+    if subpath.is_empty() {
+        ".".to_string()
+    } else {
+        format!("./{subpath}")
+    }
+}
+
+/// Return the paths that the `exports` map of a project package names for a
+/// bare `specifier`, when no named path exists on disk.
+///
+/// Generated code (`./src/generated/enums.ts`) does not exist before the
+/// generator runs, so such an import does not resolve. The unresolved-import
+/// check uses these paths to find out if the repository ignores the target.
+/// The result is `None` when the specifier does not name a project package,
+/// when the package has no `exports` map, when no `exports` key matches the
+/// subpath, when a target leaves the package root, or when a target exists.
+pub(super) fn missing_package_export_paths(
+    ctx: &ResolveContext<'_>,
+    specifier: &str,
+) -> Option<Vec<PathBuf>> {
+    if !is_bare_specifier(specifier) {
+        return None;
+    }
+    let pkg_name = extract_package_name(specifier);
+    let manifest = find_package_manifest(ctx.package_manifests, &pkg_name)?;
+    let exports = manifest.package_json.exports.as_ref()?;
+    let subpath = specifier
+        .strip_prefix(pkg_name.as_str())
+        .and_then(|s| s.strip_prefix('/'))
+        .unwrap_or("");
+    let PackageMapTarget::Targets(targets) =
+        package_map_target(exports, &export_key(subpath), ctx.condition_names)
+    else {
+        return None;
+    };
+    let paths = targets
+        .iter()
+        .map(|target| package_map_target_path(manifest, target))
+        .collect::<Option<Vec<_>>>()?;
+    (!paths.is_empty() && paths.iter().all(|path| !path.exists())).then_some(paths)
 }
 
 /// Resolve the stripped subpath as a relative import from inside the package

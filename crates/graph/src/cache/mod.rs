@@ -15,8 +15,8 @@ use fallow_types::extract::{ImportInfo, ReExportInfo};
 use oxc_span::Span;
 
 use crate::resolve::{
-    ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
-    ResolvedReplacedModuleTarget,
+    MissingExportTarget, ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject,
+    ResolvedReExport, ResolvedReplacedModuleTarget,
 };
 
 mod store;
@@ -40,7 +40,7 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// Never reuse a version number that a published build wrote, even from a
 /// development commit. Git history and the CHANGELOG record the reason for
 /// each bump.
-pub const GRAPH_CACHE_VERSION: u32 = 65;
+pub const GRAPH_CACHE_VERSION: u32 = 66;
 
 /// Cached form of a resolved target.
 ///
@@ -326,6 +326,8 @@ pub struct CachedResolvedModule {
     re_exports: Vec<CachedResolvedReExport>,
     /// Dynamic import pattern targets, aligned with current extracted patterns.
     resolved_dynamic_pattern_targets: Vec<Vec<StableFileKey>>,
+    /// Missing `exports` paths of unresolved bare specifiers.
+    missing_export_targets: Vec<MissingExportTarget>,
 }
 
 impl CachedResolvedModule {
@@ -360,6 +362,7 @@ impl CachedResolvedModule {
                         .collect::<Option<Vec<_>>>()
                 })
                 .collect::<Option<Vec<_>>>()?,
+            missing_export_targets: module.missing_export_targets.clone(),
         })
     }
 }
@@ -557,6 +560,7 @@ fn restore_cached_resolved_module(
             &module.exported_factory_return_object_shapes,
         ),
         type_member_types: Arc::clone(&module.type_member_types),
+        missing_export_targets: entry.missing_export_targets.clone(),
     })
 }
 

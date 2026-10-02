@@ -200,6 +200,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   augmentation never reports an unlisted dependency. The extraction cache
   version changes because the cached extraction output changes.
 
+- **A package subpath that maps to a missing gitignored path is not
+  unresolved.** A workspace package can export generated code, for example
+  `"exports": { "./enums": "./src/generated/enums.ts" }`. The generated
+  file does not exist before the generator runs. Before, fallow reported
+  each import of `store/enums` as unresolved. Now fallow does not report a
+  bare import of a project package when the matched `exports` entry names
+  only missing paths and an ignore rule of the repository ignores each of
+  them. The same ignore rules apply as for a relative import. A subpath
+  without an `exports` key, and a missing target that no rule ignores, stay
+  unresolved. The dependency findings for the package do not change.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

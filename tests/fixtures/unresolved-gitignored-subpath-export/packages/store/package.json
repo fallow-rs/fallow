@@ -1,0 +1,9 @@
+{
+  "name": "store",
+  "type": "module",
+  "exports": {
+    "./enums": "./src/generated/enums.ts",
+    "./schema": "./src/schema.ts",
+    ".": "./src/index.ts"
+  }
+}
