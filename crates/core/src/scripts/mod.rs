@@ -309,6 +309,8 @@ fn directory_module_glob(dir: &str) -> Option<String> {
 
 /// Script multiplexer commands whose positional arguments are script names, not binaries.
 /// `concurrently "npm:dev"` and `run-p server worker` reference other package.json scripts.
+/// `concurrently` also takes full commands (`concurrently "tsx watch src/api.ts"`),
+/// see [`concurrently_inline_commands`].
 const SCRIPT_MULTIPLEXERS: &[&str] = &[
     "concurrently",
     "npm-run-all",
@@ -318,6 +320,86 @@ const SCRIPT_MULTIPLEXERS: &[&str] = &[
     "run-s2",
     "run-p2",
 ];
+
+/// The multiplexer that runs a positional argument as a shell command,
+/// unless the argument is a package-manager shortcut such as `npm:dev`.
+const CONCURRENTLY: &str = "concurrently";
+
+/// `concurrently` argument prefixes that name a package.json script.
+const CONCURRENTLY_SCRIPT_SHORTCUTS: &[&str] =
+    &["npm:", "pnpm:", "yarn:", "bun:", "node:", "deno:"];
+
+/// `concurrently` options whose value is the next token.
+const CONCURRENTLY_VALUE_FLAGS: &[&str] = &[
+    "-m",
+    "--max-processes",
+    "-n",
+    "--names",
+    "--name-separator",
+    "-s",
+    "--success",
+    "--hide",
+    "-p",
+    "--prefix",
+    "-c",
+    "--prefix-colors",
+    "-l",
+    "--prefix-length",
+    "-t",
+    "--timestamp-format",
+    "--kill-signal",
+    "--ks",
+    "--kill-timeout",
+    "--restart-tries",
+    "--restart-after",
+    "--default-input-target",
+];
+
+/// The `concurrently` option whose value is a command that runs after the others.
+const CONCURRENTLY_TEARDOWN_FLAG: &str = "--teardown";
+
+/// The `concurrently` options that make the arguments after `--` placeholder
+/// values instead of commands.
+const CONCURRENTLY_PASSTHROUGH_FLAGS: &[&str] = &["-P", "--passthrough-arguments"];
+
+/// Return the shell commands that `concurrently` runs, from the arguments
+/// after the binary. A package-manager shortcut such as `npm:dev` is a script
+/// name and not a command, and an option value is not a command, except the
+/// value of `--teardown`.
+fn concurrently_inline_commands<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let passthrough = args
+        .iter()
+        .any(|arg| CONCURRENTLY_PASSTHROUGH_FLAGS.contains(arg));
+    let mut commands = Vec::new();
+    let mut options_done = false;
+    let mut iter = args.iter().copied();
+    while let Some(arg) = iter.next() {
+        if !options_done && arg == "--" {
+            if passthrough {
+                break;
+            }
+            options_done = true;
+            continue;
+        }
+        if !options_done && arg.starts_with('-') {
+            if arg == CONCURRENTLY_TEARDOWN_FLAG {
+                commands.extend(iter.next());
+            } else if let Some(value) = arg.strip_prefix("--teardown=") {
+                commands.push(value);
+            } else if CONCURRENTLY_VALUE_FLAGS.contains(&arg) {
+                iter.next();
+            }
+            continue;
+        }
+        let is_script_shortcut = CONCURRENTLY_SCRIPT_SHORTCUTS
+            .iter()
+            .any(|prefix| arg.starts_with(prefix));
+        if !is_script_shortcut && !arg.trim().is_empty() {
+            commands.push(arg);
+        }
+    }
+    commands
+}
 
 /// pnpm commands and shorthands whose next token is not a dependency binary.
 const PNPM_BUILTIN_COMMANDS: &[&str] = &[
@@ -1408,6 +1490,11 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
                     names.insert(name.to_string());
                 }
             }
+            if binary == CONCURRENTLY {
+                for inline in concurrently_inline_commands(&tokens[idx + 1..]) {
+                    names.extend(referenced_package_scripts(inline, catalog));
+                }
+            }
             continue;
         }
         if let Some(invocation) = declared_script_invocation(&tokens, idx, catalog)
@@ -1440,6 +1527,12 @@ pub fn referenced_workspace_scripts(
         let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
             continue;
         };
+        if tokens[idx] == CONCURRENTLY {
+            for inline in concurrently_inline_commands(&tokens[idx + 1..]) {
+                references.extend(referenced_workspace_scripts(inline, catalog));
+            }
+            continue;
+        }
         let Some(invocation) = declared_script_invocation(&tokens, idx, catalog) else {
             continue;
         };
@@ -1522,6 +1615,22 @@ fn parse_script_internal(
                                 rebase_all(std::slice::from_ref(&dir), &cmd.config_args);
                             cmd.file_args = rebase_all(std::slice::from_ref(&dir), &cmd.file_args);
                         }
+                    }
+                }
+                SegmentOutcome::InlineCommand { command, location } => {
+                    let start = commands.len();
+                    parse_script_internal(
+                        &command,
+                        advance_package_manager,
+                        catalog,
+                        state,
+                        commands,
+                    );
+                    for cmd in &mut commands[start..] {
+                        cmd.config_args =
+                            location.resolve_all(std::mem::take(&mut cmd.config_args), catalog);
+                        cmd.file_args =
+                            location.resolve_all(std::mem::take(&mut cmd.file_args), catalog);
                     }
                 }
                 SegmentOutcome::ScriptCall {
@@ -2344,6 +2453,13 @@ enum SegmentOutcome {
         /// Where the package manager runs the script.
         location: RunLocation,
     },
+    /// A full command that a multiplexer receives as one argument
+    /// (`concurrently "tsx watch src/api.ts"`), parsed like a script body.
+    InlineCommand {
+        command: String,
+        /// Where the multiplexer runs the command.
+        location: RunLocation,
+    },
 }
 
 /// Return the first token of the child command for a known command wrapper.
@@ -2418,6 +2534,11 @@ fn parse_command_segment(
     let binary = tokens[idx].to_string();
 
     if SCRIPT_MULTIPLEXERS.contains(&binary.as_str()) {
+        let inline_commands = if binary == CONCURRENTLY {
+            concurrently_inline_commands(&tokens[idx + 1..])
+        } else {
+            Vec::new()
+        };
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
             file_args_command: binary.clone(),
             binary,
@@ -2425,6 +2546,14 @@ fn parse_command_segment(
             file_args: Vec::new(),
             flag_packages: Vec::new(),
         }));
+        outcomes.extend(
+            inline_commands
+                .into_iter()
+                .map(|command| SegmentOutcome::InlineCommand {
+                    command: command.to_string(),
+                    location: location.clone(),
+                }),
+        );
         return outcomes;
     }
 
@@ -4838,6 +4967,78 @@ mod tests {
                 "{command} calls no script of a workspace package"
             );
         }
+    }
+
+    #[test]
+    fn concurrently_parses_quoted_inline_commands() {
+        let cmds = parse_script(
+            r#"concurrently -n api,web -c red,blue --kill-others-on-fail "tsx watch src/api.ts" "vite" npm:worker"#,
+        );
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["concurrently", "tsx", "vite"]);
+        assert_eq!(cmds[1].file_args, vec!["src/api.ts".to_string()]);
+    }
+
+    #[test]
+    fn concurrently_teardown_value_is_a_command() {
+        let cmds =
+            parse_script(r#"concurrently --teardown "node scripts/stop.js" "node src/a.js""#);
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["concurrently", "node", "node"]);
+        assert_eq!(cmds[1].file_args, vec!["scripts/stop.js".to_string()]);
+        assert_eq!(cmds[2].file_args, vec!["src/a.js".to_string()]);
+    }
+
+    #[test]
+    fn concurrently_passthrough_arguments_are_not_commands() {
+        let cmds = parse_script(r#"concurrently -P "node src/a.js {1}" -- extra.js"#);
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["concurrently", "node"]);
+    }
+
+    #[test]
+    fn run_p_positionals_stay_script_names() {
+        let cmds = parse_script(r#"run-p "tsx src/api.ts" serve"#);
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["run-p"]);
+    }
+
+    #[test]
+    fn referenced_scripts_include_concurrently_inline_calls() {
+        let scripts = HashMap::from([
+            (
+                "start".to_string(),
+                r#"concurrently "npm run serve" "node src/a.js""#.to_string(),
+            ),
+            ("serve".to_string(), "node src/server.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+
+        let referenced = referenced_package_scripts(&scripts["start"], &catalog);
+
+        assert_eq!(referenced, FxHashSet::from_iter(["serve".to_string()]));
+    }
+
+    #[test]
+    fn referenced_workspace_scripts_include_concurrently_inline_calls() {
+        let mut packages = WorkspacePackages::default();
+        let dev = std::collections::HashMap::from([(
+            "dev".to_string(),
+            "tsx watch src/server.ts".to_string(),
+        )]);
+        packages.add("@scope/api", "packages/api", Some(&dev));
+        packages.add("@scope/web", "packages/web", Some(&dev));
+        let catalog = ScriptCatalog::default().with_workspaces(std::sync::Arc::new(packages), "");
+        let command =
+            r#"concurrently -n api,web "npm run dev -w @scope/api" "pnpm --filter @scope/web dev""#;
+
+        assert_eq!(
+            referenced_workspace_scripts(command, &catalog),
+            vec![
+                ("packages/api".to_string(), "dev".to_string()),
+                ("packages/web".to_string(), "dev".to_string()),
+            ]
+        );
     }
 
     #[test]

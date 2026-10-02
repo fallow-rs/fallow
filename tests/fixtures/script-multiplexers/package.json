@@ -3,6 +3,7 @@
   "main": "src/index.ts",
   "devDependencies": {
     "concurrently": "^8.0.0",
+    "http-server": "^14.0.0",
     "npm-run-all": "^4.0.0",
     "tsx": "^4.0.0"
   },
@@ -12,6 +13,7 @@
     "worker": "tsx src/worker.ts",
     "build": "run-s clean compile",
     "clean": "rm -rf dist",
-    "compile": "tsc"
+    "compile": "tsc",
+    "start": "concurrently -n api,docs -c blue,green \"tsx watch src/api.ts\" \"http-server public\""
   }
 }

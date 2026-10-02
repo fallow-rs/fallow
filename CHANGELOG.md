@@ -473,6 +473,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not read a helper with more parameters, a default value, a
   conditional body, or an import binding.
 
+- **Quoted commands that `concurrently` runs count as used.** Before,
+  fallow read every argument of `concurrently` as a script name. Thus in
+  `concurrently -n api,web "tsx watch src/api.ts" "vite"`, fallow did not
+  see `tsx`, `vite` or `src/api.ts`, and it could report the file as
+  unused. Now fallow parses each quoted command as a full script command.
+  It credits the binary, the file arguments and the package scripts that
+  the command calls. The value of `--teardown` is also a command. A
+  shortcut such as `npm:dev` stays a script name, and fallow skips the
+  values of options such as `--names` and `--prefix-colors`. The
+  `run-s` and `run-p` arguments stay script names.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
