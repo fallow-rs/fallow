@@ -1483,6 +1483,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
         }],
         package_path_references: Box::default(),
         type_package_references: Box::default(),
+        bin_path_references: Box::default(),
         member_accesses: vec![
             MemberAccess {
                 object: "Status".to_string(),

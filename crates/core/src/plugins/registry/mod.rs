@@ -309,6 +309,10 @@ pub struct AggregatedPluginResult {
     pub tooling_dependencies: Vec<String>,
     /// Package names discovered as used in package.json scripts (binary invocations).
     pub script_used_packages: FxHashSet<String>,
+    /// The binary names that the declared dependencies provide. Script
+    /// analysis fills it for the root result; workspace results keep the
+    /// default.
+    pub dependency_binaries: crate::scripts::DependencyBinaries,
     /// Import prefixes for virtual modules provided by active frameworks.
     /// Imports matching these prefixes should not be flagged as unlisted dependencies.
     pub virtual_module_prefixes: Vec<String>,
@@ -448,6 +452,7 @@ impl AggregatedPluginResult {
             setup_files,
             tooling_dependencies,
             script_used_packages,
+            dependency_binaries: _,
             virtual_module_prefixes,
             virtual_package_suffixes,
             generated_import_patterns,

@@ -148,6 +148,25 @@ fn credit_package_path_references(graph: &mut graph::ModuleGraph, modules: &[ext
     }
 }
 
+/// Credit the package behind each `node_modules/.bin/<name>` path in source.
+///
+/// The persisted graph cache does not hold these credits: the bin map comes
+/// from `node_modules`, which the cache manifest does not track. Each run
+/// applies them to a built or a loaded graph.
+fn credit_bin_path_references(
+    graph: &mut graph::ModuleGraph,
+    modules: &[extract::ModuleInfo],
+    binaries: &scripts::DependencyBinaries,
+) {
+    for module in modules {
+        for binary in &module.bin_path_references {
+            if let Some(package_name) = binaries.package_for(binary) {
+                record_graph_package_usage(graph, &package_name, module.file_id, false);
+            }
+        }
+    }
+}
+
 /// Result of the full analysis pipeline, including optional performance timings.
 #[doc(hidden)]
 pub struct AnalysisOutput {
@@ -1208,9 +1227,15 @@ fn try_load_analysis_graph_cache(
     if store.manifest.matches_inputs(&current) {
         let project = restore_cached_resolved_project(input, modules, &store.resolved_project)?;
         tracing::debug!("Graph cache hit: skipping import resolution and graph build");
+        let mut graph = store.graph;
+        credit_bin_path_references(
+            &mut graph,
+            modules,
+            &input.plugin_result.dependency_binaries,
+        );
 
         return Ok(GraphCacheHit {
-            graph: store.graph,
+            graph,
             project,
             elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
         });
@@ -1308,7 +1333,7 @@ fn build_analysis_graph_timed(
 ) -> TimedGraph {
     let t = Instant::now();
     input.progress.set_stage("building module graph...");
-    let graph = build_analysis_graph(&BuildAnalysisGraphInput {
+    let mut graph = build_analysis_graph(&BuildAnalysisGraphInput {
         config: input.config,
         plugin_result: input.plugin_result,
         project,
@@ -1317,6 +1342,11 @@ fn build_analysis_graph_timed(
         modules,
         workspaces: input.workspaces,
     });
+    credit_bin_path_references(
+        &mut graph,
+        modules,
+        &input.plugin_result.dependency_binaries,
+    );
     TimedGraph {
         graph,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
@@ -2124,6 +2154,8 @@ fn analyze_all_scripts(
     analyze_root_scripts(config, root_pkg, &deps, plugin_result);
     analyze_workspace_scripts(config, workspace_pkgs, &deps, plugin_result);
     analyze_ci_scripts(config, &bin_map, &all_dep_set, &all_scripts, plugin_result);
+    plugin_result.dependency_binaries =
+        scripts::DependencyBinaries::new(config.root.clone(), bin_map, all_dep_set);
 
     plugin_result
         .entry_point_roles

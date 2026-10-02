@@ -348,6 +348,7 @@ pub(crate) struct ModuleInfoExtractor {
     require_calls: Vec<RequireCallInfo>,
     package_path_references: Vec<String>,
     type_package_references: Vec<String>,
+    bin_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
     pending_computed_enum_key_uses: Vec<PendingComputedEnumKeyUse>,
@@ -2999,6 +3000,7 @@ impl ModuleInfoExtractor {
             require_calls: self.require_calls,
             package_path_references: self.package_path_references.into_boxed_slice(),
             type_package_references: self.type_package_references.into_boxed_slice(),
+            bin_path_references: self.bin_path_references.into_boxed_slice(),
             member_accesses: self.member_accesses.into(),
             semantic_facts: self.semantic_facts.into(),
             whole_object_uses: self.whole_object_uses.into(),
@@ -3127,6 +3129,9 @@ impl ModuleInfoExtractor {
             std::mem::take(&mut info.type_package_references).into_vec();
         type_package_references.append(&mut self.type_package_references);
         info.type_package_references = type_package_references.into_boxed_slice();
+        let mut bin_path_references = std::mem::take(&mut info.bin_path_references).into_vec();
+        bin_path_references.append(&mut self.bin_path_references);
+        info.bin_path_references = bin_path_references.into_boxed_slice();
         let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
         member_accesses.append(&mut self.member_accesses);
         info.member_accesses = member_accesses.into();

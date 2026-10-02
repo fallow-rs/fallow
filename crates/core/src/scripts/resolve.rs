@@ -1,6 +1,6 @@
 //! Binary name → npm package name resolution.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -117,6 +117,38 @@ pub fn resolve_known_dependency_binary(
     declared_packages
         .contains(binary)
         .then(|| binary.to_string())
+}
+
+/// The binary names that the declared dependencies of a project provide.
+///
+/// Script analysis builds the bin map once. Source analysis uses the same map
+/// to resolve a `node_modules/.bin/<name>` path in code.
+#[derive(Debug, Clone, Default)]
+pub struct DependencyBinaries {
+    root: PathBuf,
+    bin_map: FxHashMap<String, String>,
+    declared_packages: FxHashSet<String>,
+}
+
+impl DependencyBinaries {
+    #[must_use]
+    pub const fn new(
+        root: PathBuf,
+        bin_map: FxHashMap<String, String>,
+        declared_packages: FxHashSet<String>,
+    ) -> Self {
+        Self {
+            root,
+            bin_map,
+            declared_packages,
+        }
+    }
+
+    /// The declared dependency that provides `binary`, if one does.
+    #[must_use]
+    pub fn package_for(&self, binary: &str) -> Option<String> {
+        resolve_known_dependency_binary(binary, &self.root, &self.bin_map, &self.declared_packages)
+    }
 }
 
 /// Extract a package name from a `node_modules/.bin` symlink target path.

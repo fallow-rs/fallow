@@ -492,6 +492,7 @@ pub fn cached_to_module_opts(
         require_calls: cached_require_calls_to_module(&cached.require_calls),
         package_path_references: cached.package_path_references.clone(),
         type_package_references: cached.type_package_references.clone(),
+        bin_path_references: cached.bin_path_references.clone(),
         member_accesses: cached.member_accesses.clone().into(),
         semantic_facts: cached_opt_to_arc(cached.semantic_facts.as_deref()),
         whole_object_uses: Arc::from(&*cached.whole_object_uses),
@@ -607,6 +608,7 @@ pub fn module_to_cached(
         require_calls: module_require_calls_to_cached(&module.require_calls),
         package_path_references: module.package_path_references.clone(),
         type_package_references: module.type_package_references.clone(),
+        bin_path_references: module.bin_path_references.clone(),
         member_accesses: module.member_accesses.to_vec(),
         semantic_facts: (!module.semantic_facts.is_empty())
             .then(|| Box::from(&*module.semantic_facts)),

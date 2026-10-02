@@ -390,6 +390,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cache version changes, so the first run after the upgrade parses all
   files again.
 
+- **A `node_modules/.bin/<name>` path in source credits the package.** Before,
+  fallow reported a dependency as unused when code only used its binary
+  through a path, for example `resolve('node_modules/.bin/tool')` as the
+  command of a child process. Now fallow reads the binary name from each
+  `node_modules/.bin/<name>` path in a string or a template literal. It maps
+  the name to a declared dependency with the same bin map that the script
+  analysis uses, and credits that package. A name that maps to no declared
+  dependency credits nothing and reports nothing. The extraction cache
+  version changes, so the first run after the upgrade parses all files again.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it

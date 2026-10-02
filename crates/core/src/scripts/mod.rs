@@ -29,7 +29,8 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub use resolve::{
-    build_bin_to_package_map, resolve_binary_to_package, resolve_known_dependency_binary,
+    DependencyBinaries, build_bin_to_package_map, resolve_binary_to_package,
+    resolve_known_dependency_binary,
 };
 pub use workspace_selection::WorkspacePackages;
 use workspace_selection::{PackageSelector, WorkspacePackage, relative_dir};

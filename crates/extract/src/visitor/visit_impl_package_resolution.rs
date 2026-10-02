@@ -154,6 +154,37 @@ fn collect_static_object_string_property_values(
     }
 }
 
+/// The path segment that leads to the installed binaries of a package manager.
+const NODE_MODULES_BIN: &str = "node_modules/.bin/";
+
+/// The binary names in each `node_modules/.bin/<name>` path segment of `text`.
+///
+/// The segment must start the text or follow a character that cannot be part
+/// of a directory name, such as `/`, a space or a quote. The name ends at the
+/// first character that a binary name does not use, such as `/`, a space or a
+/// quote. A segment without a name gives nothing.
+fn bin_names_in_text(text: &str) -> impl Iterator<Item = &str> {
+    text.match_indices(NODE_MODULES_BIN)
+        .filter(|(start, _)| {
+            text[..*start]
+                .chars()
+                .next_back()
+                .is_none_or(|prev| !is_bin_name_char(prev))
+        })
+        .filter_map(|(start, _)| {
+            let rest = &text[start + NODE_MODULES_BIN.len()..];
+            let end = rest
+                .find(|ch: char| !is_bin_name_char(ch))
+                .unwrap_or(rest.len());
+            let name = &rest[..end];
+            (!name.is_empty()).then_some(name)
+        })
+}
+
+fn is_bin_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '+' | '@')
+}
+
 impl ModuleInfoExtractor {
     /// Whether `callee` is `require.resolve` on the `require` of the module.
     ///
@@ -269,6 +300,20 @@ impl ModuleInfoExtractor {
             && !self.type_package_references.contains(&package_name)
         {
             self.type_package_references.push(package_name);
+        }
+    }
+
+    /// Record the binary name of each `node_modules/.bin/<name>` path in the
+    /// text of a string literal or a template quasi.
+    ///
+    /// Code hands such a path to a consumer that static analysis cannot
+    /// follow, such as a child process. The analysis maps the name to the
+    /// package that declares the binary and credits that package.
+    pub(super) fn record_bin_path_references(&mut self, text: &str) {
+        for name in bin_names_in_text(text) {
+            if !self.bin_path_references.iter().any(|known| known == name) {
+                self.bin_path_references.push(name.to_string());
+            }
         }
     }
 

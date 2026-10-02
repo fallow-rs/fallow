@@ -1,3 +1,4 @@
+mod bin_path_references;
 mod callee_uses;
 mod cjs;
 mod classes;

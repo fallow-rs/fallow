@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 322;
+pub(super) const CACHE_VERSION: u32 = 323;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -54,7 +54,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1392);
+assert_cached_type_size!(CachedModule, 1408);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
@@ -120,6 +120,10 @@ pub struct CachedModule {
     /// Package names that a module augmentation (`declare module 'pkg'` in a
     /// module file) names. They credit the package as a type-only use.
     pub type_package_references: Box<[String]>,
+    /// Binary names found in `node_modules/.bin/<name>` paths in string
+    /// literals and template quasis. The analysis maps each name to the
+    /// package that declares the binary.
+    pub bin_path_references: Box<[String]>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<crate::MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.

@@ -1,0 +1,11 @@
+{
+  "name": "node-modules-bin-path",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "dependencies": {
+    "cli-tool": "1.0.0",
+    "@scope/runner": "1.0.0",
+    "idle-dep": "1.0.0"
+  }
+}

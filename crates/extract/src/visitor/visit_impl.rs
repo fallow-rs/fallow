@@ -3905,7 +3905,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
     }
 
+    fn visit_string_literal(&mut self, lit: &StringLiteral<'a>) {
+        self.record_bin_path_references(lit.value.as_str());
+        walk::walk_string_literal(self, lit);
+    }
+
     fn visit_template_literal(&mut self, tpl: &TemplateLiteral<'a>) {
+        for quasi in &tpl.quasis {
+            self.record_bin_path_references(quasi.value.raw.as_str());
+        }
         let suppress = self.in_tagged_template_quasi;
         self.in_tagged_template_quasi = false;
         if !suppress {

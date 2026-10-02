@@ -34,6 +34,10 @@ pub struct ModuleInfo {
     /// Package names that a module augmentation (`declare module 'pkg'` in a
     /// module file) names. They credit the package as a type-only use.
     pub type_package_references: Box<[String]>,
+    /// Binary names found in `node_modules/.bin/<name>` paths in string
+    /// literals and template quasis. The analysis maps each name to the
+    /// package that declares the binary.
+    pub bin_path_references: Box<[String]>,
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Arc<[MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
@@ -399,6 +403,7 @@ impl ModuleInfo {
             require_calls: Vec::new(),
             package_path_references: Box::default(),
             type_package_references: Box::default(),
+            bin_path_references: Box::default(),
             member_accesses: Arc::default(),
             semantic_facts: Arc::default(),
             whole_object_uses: Arc::default(),
@@ -515,6 +520,7 @@ impl ModuleInfo {
         Self::release_vec(&mut self.require_calls);
         Self::release_boxed_slice(&mut self.package_path_references);
         Self::release_boxed_slice(&mut self.type_package_references);
+        Self::release_boxed_slice(&mut self.bin_path_references);
         Self::release_arc_slice(&mut self.whole_object_uses);
         Self::release_vec(&mut self.unused_import_bindings);
         Self::release_vec(&mut self.type_referenced_import_bindings);
@@ -3717,7 +3723,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1368);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1384);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -4239,6 +4245,7 @@ mod tests {
             }],
             package_path_references: vec!["react".to_string()].into(),
             type_package_references: vec!["react".to_string()].into(),
+            bin_path_references: vec!["vite".to_string()].into(),
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
@@ -4401,6 +4408,7 @@ mod tests {
         assert_released!(module.require_calls);
         assert_released!(module.package_path_references);
         assert_released!(module.type_package_references);
+        assert_released!(module.bin_path_references);
         assert_released!(module.whole_object_uses);
         assert_released!(module.unused_import_bindings);
         assert_released!(module.type_referenced_import_bindings);
