@@ -1,0 +1,13 @@
+{
+  "name": "expo-router-app-config-plugins",
+  "private": true,
+  "dependencies": {
+    "expo": "*",
+    "expo-router": "*"
+  },
+  "devDependencies": {
+    "@sample/expo-plugin-pdf": "*",
+    "sample-expo-plugin-camera": "*",
+    "unused-control": "*"
+  }
+}

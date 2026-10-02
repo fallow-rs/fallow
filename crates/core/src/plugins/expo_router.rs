@@ -49,6 +49,8 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(&import));
         }
 
+        super::expo::add_config_plugins(&mut result, source, config_path, root);
+
         let route_root = extract_route_root(source, config_path, root)
             .unwrap_or_else(|| default_route_root(root).to_string());
         add_route_root_patterns(&mut result, &route_root);

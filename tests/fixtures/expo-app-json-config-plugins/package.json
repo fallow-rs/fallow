@@ -1,0 +1,12 @@
+{
+  "name": "expo-app-json-config-plugins",
+  "private": true,
+  "dependencies": {
+    "expo": "*"
+  },
+  "devDependencies": {
+    "@sample/expo-plugin-pdf": "*",
+    "sample-expo-plugin-camera": "*",
+    "unused-control": "*"
+  }
+}

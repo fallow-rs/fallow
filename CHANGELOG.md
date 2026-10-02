@@ -412,6 +412,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be sure of the name. The parse cache version changed, so the first run
   after the upgrade parses all files again.
 
+- **Expo config plugins in the app config are credited.** Before, fallow
+  did not read the `plugins` list in `app.json` or `app.config.*`. Thus it
+  reported a config plugin package as an unused dependency, because Expo
+  loads it by name and the source never imports it. Now fallow credits each
+  package in `plugins` and `expo.plugins`, as a string or as the first item
+  of a `[name, options]` tuple. A relative entry, such as
+  `./plugins/with-setting.js`, now keeps that local plugin file reachable.
+  This works with and without `expo-router`.
+
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
   `setupFilesAfterEnv`, `globalSetup` and `globalTeardown`. Thus it
