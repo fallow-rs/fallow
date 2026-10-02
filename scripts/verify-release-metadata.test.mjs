@@ -150,6 +150,45 @@ test("the changelog gate refuses a duplicated section", () => {
   );
 });
 
+test("the changelog gate refuses a heading that a merge left twice in the section", () => {
+  const body = [
+    "### Added",
+    "",
+    "- **One.**",
+    "",
+    "### Fixed",
+    "",
+    "- **Two.**",
+    "",
+    "### Added",
+    "",
+    "- **Three.**",
+    "",
+  ].join("\n");
+
+  // The 3.21.0 heading is on line 6, so its first "### Added" is on line 8.
+  assert.throws(
+    () => assertChangelogRelease(changelog({ body }), "v3.21.0"),
+    /the 3\.21\.0 section repeats "### Added" on lines 8 and 16, so merge each/u,
+  );
+
+  const twice = `${body}### Fixed\n\n- **Four.**\n\n### Added\n\n- **Five.**\n`;
+  assert.throws(
+    () => assertChangelogRelease(changelog({ body: twice }), "v3.21.0"),
+    /repeats "### Added" on lines 8, 16 and 23; "### Fixed" on lines 12 and 19/u,
+  );
+});
+
+test("the heading check ignores code samples, Unreleased and older sections", () => {
+  const fenced = ["### Added", "", "```md", "### Added", "```", ""].join("\n");
+  assert.doesNotThrow(() => assertChangelogRelease(changelog({ body: fenced }), "v3.21.0"));
+
+  const repeated = "### Fixed\n\n- **A.**\n\n### Fixed\n\n- **B.**\n";
+  assert.doesNotThrow(() => assertChangelogRelease(changelog({ unreleased: repeated }), "v3.21.0"));
+  const olderRepeat = changelog().replace("- **Something earlier.**", `- **X.**\n\n${repeated}`);
+  assert.doesNotThrow(() => assertChangelogRelease(olderRepeat, "v3.21.0"));
+});
+
 test("the changelog gate requires a real release date", () => {
   for (const [heading, expected] of [
     ["## [3.21.0]", /found none/u],

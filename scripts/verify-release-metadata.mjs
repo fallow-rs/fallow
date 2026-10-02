@@ -108,6 +108,35 @@ export const changelogSections = (changelog) => {
   }));
 };
 
+const SUBHEADING = /^### (?<name>.+?)\s*$/u;
+
+/**
+ * The `###` headings that occur more than once in a section, each with the
+ * 1-based changelog line numbers of every occurrence. A clean merge of two
+ * branches that both add a `### Fixed` leaves two of them, and the release
+ * notes then inherit the split. Fenced blocks are skipped, as in
+ * `changelogSections`.
+ */
+export const repeatedSubheadings = (section) => {
+  const occurrences = new Map();
+  let fenced = false;
+
+  section.body.split(/\r?\n/u).forEach((line, index) => {
+    if (CODE_FENCE.test(line)) {
+      fenced = !fenced;
+      return;
+    }
+    const name = fenced ? undefined : line.match(SUBHEADING)?.groups.name;
+    if (name !== undefined) {
+      occurrences.set(name, [...(occurrences.get(name) ?? []), section.line + 1 + index]);
+    }
+  });
+
+  return Array.from(occurrences, ([name, lines]) => ({ name, lines })).filter(
+    (heading) => heading.lines.length > 1,
+  );
+};
+
 const hasContent = (body) => body.split(/\r?\n/u).some((line) => line.trim() !== "");
 
 /**
@@ -171,6 +200,17 @@ export const assertChangelogRelease = (changelog, tag) => {
     !section.body.includes(EM_DASH),
     `CHANGELOG.md: the ${version} section contains an em-dash, which the release notes inherit`,
   );
+
+  const repeated = repeatedSubheadings(section);
+  if (repeated.length > 0) {
+    const where = repeated.map(
+      ({ name, lines }) =>
+        `"### ${name}" on lines ${lines.slice(0, -1).join(", ")} and ${lines.at(-1)}`,
+    );
+    assert.fail(
+      `CHANGELOG.md: the ${version} section repeats ${where.join("; ")}, so merge each into one heading`,
+    );
+  }
 
   const previous = previousReleasedVersion(sections, version);
   const expected = `${COMPARE_URL_PREFIX}v${previous}...v${version}`;

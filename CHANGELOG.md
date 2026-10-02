@@ -81,6 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one owner, the owner with the most instances. `fallow health --group-by`
   measures the duplicated lines of each group. `fallow health --workspace`
   does not change: it counts only the clones inside the workspace.
+- **The release gate refuses a section with a repeated `###` heading.**
+  A clean merge can leave two `### Fixed` headings in one version section.
+  `scripts/verify-release-metadata.mjs` now fails at dispatch when the
+  section of the new version has a `###` heading more than once. The error
+  names each heading and its line numbers. The gate does not check
+  `[Unreleased]` or sections that shipped before.
 
 ### Fixed
 
