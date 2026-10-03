@@ -3,15 +3,14 @@ use crate::graph::ModuleGraph;
 use crate::results::UnusedFile;
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use super::predicates::{
-    is_barrel_with_reachable_sources, is_config_file, is_declaration_file, is_html_file,
-};
+use super::predicates::{is_barrel_with_reachable_sources, is_config_file, is_html_file};
 
 /// Find files that are not reachable from any entry point.
 ///
-/// TypeScript declaration files (`.d.ts`) are excluded because they are consumed
-/// by the TypeScript compiler via `tsconfig.json` includes, not via explicit
-/// import statements. Flagging them as unused is a false positive.
+/// TypeScript declaration files (`.d.ts`, `.d.mts`, `.d.cts`) are entry points
+/// unless they are orphan module declaration files (see
+/// `discover::find_orphan_module_declaration_files`), so only an orphan that
+/// nothing reachable imports is reported here.
 ///
 /// Configuration files (e.g., `babel.config.js`, `.eslintrc.js`, `knip.config.ts`)
 /// are also excluded because they are consumed by tools, not via imports.
@@ -31,7 +30,6 @@ pub fn find_unused_files(
         .modules
         .iter()
         .filter(|m| !m.is_reachable() && !m.is_entry_point())
-        .filter(|m| !is_declaration_file(&m.path))
         .filter(|m| !is_config_file(&m.path))
         .filter(|m| !is_html_file(&m.path))
         .filter(|m| !is_barrel_with_reachable_sources(m, graph))

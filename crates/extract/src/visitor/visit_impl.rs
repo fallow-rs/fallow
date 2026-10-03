@@ -3000,6 +3000,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         self.is_server_action_module = visit_server_actions::is_server_action_module(program);
         self.is_module_file = program_has_module_syntax(program);
+        self.has_global_declarations =
+            program_has_global_declarations(program, self.is_module_file);
+        self.triple_slash_reference_paths = triple_slash_reference_paths(program);
         self.record_program_namespace_import_locals(program);
         self.record_program_spy_api_locals(program);
         self.record_program_function_type_aliases(program);

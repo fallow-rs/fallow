@@ -1,9 +1,3 @@
-/// Check if a path is a TypeScript declaration file (`.d.ts`, `.d.mts`, `.d.cts`).
-pub(in crate::analyze) fn is_declaration_file(path: &std::path::Path) -> bool {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts")
-}
-
 /// Whether the path is a React/Preact JSX module (`.jsx` / `.tsx`). `.js` / `.ts`
 /// files re-parsed through the JSX retry path also carry React IR, but React
 /// detectors scope to the canonical JSX extensions to keep the surface tight.
@@ -185,29 +179,6 @@ pub(in crate::analyze) fn is_barrel_with_reachable_sources(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn declaration_file_dts() {
-        assert!(is_declaration_file(std::path::Path::new("styled.d.ts")));
-        assert!(is_declaration_file(std::path::Path::new(
-            "src/types/styled.d.ts"
-        )));
-        assert!(is_declaration_file(std::path::Path::new("env.d.ts")));
-    }
-
-    #[test]
-    fn declaration_file_dmts_dcts() {
-        assert!(is_declaration_file(std::path::Path::new("module.d.mts")));
-        assert!(is_declaration_file(std::path::Path::new("module.d.cts")));
-    }
-
-    #[test]
-    fn not_declaration_file() {
-        assert!(!is_declaration_file(std::path::Path::new("index.ts")));
-        assert!(!is_declaration_file(std::path::Path::new("component.tsx")));
-        assert!(!is_declaration_file(std::path::Path::new("utils.js")));
-        assert!(!is_declaration_file(std::path::Path::new("styles.d.css")));
-    }
 
     #[test]
     fn test_or_spec_file_matches_test_and_spec() {
@@ -444,32 +415,6 @@ mod tests {
         assert!(!is_config_file(std::path::Path::new(
             "jest.config/index.ts"
         )));
-    }
-
-    /// Declaration files in deeply nested paths.
-    #[test]
-    fn declaration_file_nested_paths() {
-        assert!(is_declaration_file(std::path::Path::new(
-            "packages/ui/src/types/global.d.ts"
-        )));
-        assert!(is_declaration_file(std::path::Path::new(
-            "node_modules/@types/react/index.d.ts"
-        )));
-    }
-
-    /// Files ending with `.d.` but not valid declaration extensions.
-    #[test]
-    fn not_declaration_file_invalid_d_extensions() {
-        assert!(!is_declaration_file(std::path::Path::new("file.d.js")));
-        assert!(!is_declaration_file(std::path::Path::new("file.d.jsx")));
-        assert!(!is_declaration_file(std::path::Path::new("file.d.css")));
-        assert!(!is_declaration_file(std::path::Path::new("file.d.json")));
-    }
-
-    /// Files with `.d.ts` in the middle of the name (not at the end).
-    #[test]
-    fn not_declaration_file_d_ts_in_middle() {
-        assert!(!is_declaration_file(std::path::Path::new("my.d.ts.backup")));
     }
 
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};

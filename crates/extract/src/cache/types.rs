@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 326;
+pub(super) const CACHE_VERSION: u32 = 327;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -54,7 +54,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1424);
+assert_cached_type_size!(CachedModule, 1440);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
@@ -256,6 +256,10 @@ pub struct CachedModule {
     /// All-action `"use server"` module flag. Round-trips so the security
     /// `client-server-leak` BFS sees the action boundary on warm-cache loads.
     pub is_server_action_module: bool,
+    /// Global-scope declaration flag. Mirrors `ModuleInfo.has_global_declarations`.
+    pub has_global_declarations: bool,
+    /// `/// <reference path>` values. Mirrors `ModuleInfo.triple_slash_reference_paths`.
+    pub triple_slash_reference_paths: Box<[String]>,
     /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared props.
     /// Round-trips so the `unused-component-prop` detector sees them on
     /// warm-cache loads.

@@ -735,6 +735,10 @@ pub(crate) struct ModuleInfoExtractor {
     has_dynamic_provide: bool,
     /// All-action `"use server"` module flag, set in `visit_program`.
     is_server_action_module: bool,
+    /// Global-scope declaration flag, set in `visit_program`.
+    has_global_declarations: bool,
+    /// `/// <reference path>` values, set in `visit_program`.
+    triple_slash_reference_paths: Vec<String>,
     /// Module-scope `const NAME = "literal"` names: a DI key bound to a string
     /// literal has STRING identity (a provider supplying the literal, often
     /// inside a package, matches it), so its `di_key_sites` are dropped at
@@ -3053,6 +3057,8 @@ impl ModuleInfoExtractor {
             di_key_sites: self.di_key_sites,
             has_dynamic_provide: self.has_dynamic_provide,
             is_server_action_module: self.is_server_action_module,
+            has_global_declarations: self.has_global_declarations,
+            triple_slash_reference_paths: self.triple_slash_reference_paths.into_boxed_slice(),
             // Populated in `release_resolution_payload`; empty at construction.
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),

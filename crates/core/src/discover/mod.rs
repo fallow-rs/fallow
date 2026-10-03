@@ -1,5 +1,6 @@
 mod entry_points;
 mod infrastructure;
+mod orphan_declarations;
 mod parse_scripts;
 mod walk;
 
@@ -20,6 +21,7 @@ pub(crate) use entry_points::{
 };
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub(crate) use infrastructure::discover_infrastructure_entry_points;
+pub(crate) use orphan_declarations::find_orphan_module_declaration_files;
 pub(crate) use parse_scripts::CommandRefContext;
 pub use walk::{
     DiscoveredSources, HiddenDirMatch, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS,

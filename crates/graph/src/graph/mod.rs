@@ -122,10 +122,12 @@ impl<'graph> EffectiveExportOrigin<'graph> {
 
 /// True when the path's final component looks like a TypeScript declaration
 /// file (`.d.ts`, `.d.mts`, `.d.cts`). Used to seed declaration files as
-/// overall entry points so ambient `typeof import()` references stay alive.
+/// overall entry points so ambient `typeof import()` references stay alive;
+/// see [`ModuleGraph::build_with_declaration_seeding`] for the exception.
 ///
-/// Keep in sync with the analysis-layer declaration-file predicate. The graph
-/// crate cannot depend on the detector backend, so the predicate is duplicated.
+/// The analysis layer reuses this predicate. Keep it in sync with the
+/// discovery walk's declaration-file predicate, which exempts declaration
+/// files from the file-size skip.
 #[must_use]
 pub fn is_declaration_file_path(path: &Path) -> bool {
     path.file_name()
@@ -133,6 +135,17 @@ pub fn is_declaration_file_path(path: &Path) -> bool {
         .is_some_and(|name| {
             name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts")
         })
+}
+
+/// The entry points of a graph build, split by reachability role.
+#[derive(Debug, Clone, Copy)]
+pub struct ReachabilityRoots<'a> {
+    /// Every entry point, of any role.
+    pub all: &'a [EntryPoint],
+    /// Runtime/application entry points.
+    pub runtime: &'a [EntryPoint],
+    /// Test entry points.
+    pub test: &'a [EntryPoint],
 }
 
 /// The core module dependency graph.
@@ -705,6 +718,41 @@ impl ModuleGraph {
         test_entry_points: &[EntryPoint],
         files: &[DiscoveredFile],
     ) -> Self {
+        Self::build_with_declaration_seeding(
+            resolved_modules,
+            replaced_module_targets,
+            &ReachabilityRoots {
+                all: entry_points,
+                runtime: runtime_entry_points,
+                test: test_entry_points,
+            },
+            files,
+            &FxHashSet::default(),
+        )
+    }
+
+    /// Build the module graph like
+    /// [`Self::build_with_reachability_roots_and_replacements`], except that
+    /// the declaration files in `unseeded_declaration_files` are not seeded as
+    /// entry points.
+    ///
+    /// Every other declaration file is seeded so ambient declarations and
+    /// their `typeof import()` references stay alive. The caller names the
+    /// orphan module declaration files: a module declaration file that nothing
+    /// points to adds nothing to the global scope, so it must be reachable
+    /// through an import to stay used.
+    pub fn build_with_declaration_seeding(
+        resolved_modules: &[ResolvedModule],
+        replaced_module_targets: &[ResolvedReplacedModuleTarget],
+        roots: &ReachabilityRoots<'_>,
+        files: &[DiscoveredFile],
+        unseeded_declaration_files: &FxHashSet<FileId>,
+    ) -> Self {
+        let ReachabilityRoots {
+            all: entry_points,
+            runtime: runtime_entry_points,
+            test: test_entry_points,
+        } = *roots;
         let _span = tracing::info_span!("build_graph").entered();
 
         let module_count = files.len();
@@ -728,7 +776,9 @@ impl ModuleGraph {
         let test_entry_point_ids = Self::resolve_entry_point_ids(test_entry_points, &path_to_id);
 
         for file in files {
-            if is_declaration_file_path(&file.path) {
+            if is_declaration_file_path(&file.path)
+                && !unseeded_declaration_files.contains(&file.id)
+            {
                 entry_point_ids.insert(file.id);
             }
         }
@@ -1562,6 +1612,82 @@ mod tests {
         ];
 
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    fn declaration_seeding_graph(unseeded: &FxHashSet<FileId>) -> ModuleGraph {
+        let paths = [
+            "/project/types/ambient.d.ts",
+            "/project/types/orphan.d.ts",
+            "/project/types/helper.ts",
+        ];
+        let files: Vec<DiscoveredFile> = paths
+            .iter()
+            .zip(0u32..)
+            .map(|(path, id)| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(path),
+                size_bytes: 10,
+            })
+            .collect();
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./helper".to_string(),
+                        imported_name: ImportedName::Named("Helper".to_string()),
+                        local_name: "Helper".to_string(),
+                        is_type_only: true,
+                        is_type_only_star: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(2)),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                ..Default::default()
+            },
+        ];
+        ModuleGraph::build_with_declaration_seeding(
+            &resolved_modules,
+            &[],
+            &ReachabilityRoots {
+                all: &[],
+                runtime: &[],
+                test: &[],
+            },
+            &files,
+            unseeded,
+        )
+    }
+
+    #[test]
+    fn every_declaration_file_is_seeded_by_default() {
+        let graph = declaration_seeding_graph(&FxHashSet::default());
+        assert!(graph.modules[0].is_entry_point());
+        assert!(graph.modules[1].is_entry_point());
+        assert!(graph.modules[2].is_reachable());
+    }
+
+    #[test]
+    fn unseeded_declaration_file_no_longer_keeps_its_imports_reachable() {
+        let unseeded: FxHashSet<FileId> = std::iter::once(FileId(1)).collect();
+        let graph = declaration_seeding_graph(&unseeded);
+        assert!(graph.modules[0].is_entry_point());
+        assert!(!graph.modules[1].is_entry_point());
+        assert!(!graph.modules[1].is_reachable());
+        assert!(!graph.modules[2].is_reachable());
     }
 
     #[test]

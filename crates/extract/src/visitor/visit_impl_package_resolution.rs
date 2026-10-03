@@ -65,6 +65,63 @@ pub(super) fn program_has_module_syntax(program: &Program<'_>) -> bool {
     })
 }
 
+/// Whether TypeScript reads the program as adding to the global scope: a
+/// script file (no top-level import or export, see
+/// [`program_has_module_syntax`]), or a module file with a top-level
+/// `declare global` block or string-named `declare module` block (an ambient
+/// module declaration or a module augmentation).
+pub(super) fn program_has_global_declarations(program: &Program<'_>, is_module_file: bool) -> bool {
+    !is_module_file
+        || program.body.iter().any(|statement| {
+            matches!(
+                statement,
+                Statement::TSGlobalDeclaration(_) | Statement::TSExternalModuleDeclaration(_)
+            )
+        })
+}
+
+/// The `path` values of every `/// <reference path="..." />` directive in the
+/// program, in source order. `types`, `lib` and `no-default-lib` directives
+/// name packages or compiler settings, not files, and are skipped.
+pub(super) fn triple_slash_reference_paths(program: &Program<'_>) -> Vec<String> {
+    program
+        .comments
+        .iter()
+        .filter(|comment| comment.is_line())
+        .filter_map(|comment| {
+            reference_directive_path(comment.content_span().source_text(program.source_text))
+        })
+        .collect()
+}
+
+/// Parse the content of a line comment (the text after `//`) as a
+/// `/ <reference path="..." />` directive and return its `path` value.
+fn reference_directive_path(content: &str) -> Option<String> {
+    let rest = content.strip_prefix('/')?.trim_start();
+    let attributes = rest.strip_prefix("<reference")?;
+    if !attributes.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut search = attributes;
+    while let Some(index) = search.find("path") {
+        let preceded_by_space = search[..index]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace);
+        let after = &search[index + "path".len()..];
+        if preceded_by_space && let Some(value) = after.trim_start().strip_prefix('=') {
+            let value = value.trim_start();
+            let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+            let value = &value[quote.len_utf8()..];
+            let end = value.find(quote)?;
+            let path = value[..end].trim();
+            return (!path.is_empty()).then(|| path.to_string());
+        }
+        search = after;
+    }
+    None
+}
+
 fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
     if !is_package_resolution_specifier(specifier) {
         return None;
