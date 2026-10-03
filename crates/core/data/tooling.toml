@@ -23,6 +23,11 @@
 #
 # `notes` (on prefix) and `ecosystem` (on exact) are optional, for human
 # context and grouping in the diff. They do not affect matching.
+#
+# The `@types/` prefix does not credit a type package in `devDependencies` on
+# its own. A `@types/X` package is credited there when the project declares X,
+# imports X or names X in a tsconfig `types` entry, or when it is listed under
+# [[ambient_types]] below.
 
 # ── Prefixes: package families where every member is tooling ──────────────
 
@@ -395,3 +400,46 @@ ecosystem = "build"
 [[exact]]
 name = "electron-vite"
 ecosystem = "build"
+
+# ── Ambient global type packages ──────────────────────────────────────────
+#
+# These packages declare globals (`process`, `describe`, `Bun`, `chrome`), so
+# a project uses them without importing anything. They are always credited.
+# Keep the list short: a type package that a project imports or whose target
+# it declares needs no entry.
+
+[[ambient_types]]
+name = "@types/node"
+
+[[ambient_types]]
+name = "@types/bun"
+
+[[ambient_types]]
+name = "bun-types"
+
+[[ambient_types]]
+name = "@types/deno"
+
+[[ambient_types]]
+name = "@types/jest"
+
+[[ambient_types]]
+name = "@types/mocha"
+
+[[ambient_types]]
+name = "@types/jasmine"
+
+[[ambient_types]]
+name = "@types/qunit"
+
+[[ambient_types]]
+name = "@types/web"
+
+[[ambient_types]]
+name = "@types/webpack-env"
+
+[[ambient_types]]
+name = "@types/chrome"
+
+[[ambient_types]]
+name = "@types/firefox-webext-browser"

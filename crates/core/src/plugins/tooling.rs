@@ -43,6 +43,14 @@ struct ToolingCatalogue {
     prefix: Vec<PrefixEntry>,
     #[serde(default)]
     exact: Vec<ExactEntry>,
+    #[serde(default)]
+    ambient_types: Vec<AmbientTypesEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct AmbientTypesEntry {
+    /// Exact name of a type package that declares globals.
+    name: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -73,10 +81,12 @@ struct ExactEntry {
     ecosystem: Option<String>,
 }
 
-/// Parsed catalogue: ordered prefix patterns + an exact-match set.
+/// Parsed catalogue: ordered prefix patterns, an exact-match set, and the
+/// ambient global type packages.
 struct Catalogue {
     prefixes: Vec<String>,
     exact: FxHashSet<String>,
+    ambient_types: FxHashSet<String>,
 }
 
 /// Parse and cache the embedded catalogue once. Panics with a clear message if
@@ -96,6 +106,7 @@ fn catalogue() -> &'static Catalogue {
         Catalogue {
             prefixes: parsed.prefix.into_iter().map(|p| p.pattern).collect(),
             exact: parsed.exact.into_iter().map(|e| e.name).collect(),
+            ambient_types: parsed.ambient_types.into_iter().map(|e| e.name).collect(),
         }
     })
 }
@@ -115,9 +126,57 @@ pub fn is_known_tooling_dependency(name: &str) -> bool {
         || catalogue.exact.contains(name)
 }
 
+/// Whether a package declares ambient globals (`@types/node`, `@types/jest`,
+/// `bun-types`), so a project uses it without importing anything.
+#[must_use]
+pub fn is_ambient_types_package(name: &str) -> bool {
+    catalogue().ambient_types.contains(name)
+}
+
+/// The package that a `@types/` package types, by the DefinitelyTyped naming
+/// convention: `@types/node` types `node`, `@types/scope__pkg` types
+/// `@scope/pkg`. `None` for a name outside the `@types/` scope.
+#[must_use]
+pub fn types_package_target(name: &str) -> Option<String> {
+    let tail = name.strip_prefix("@types/")?;
+    if tail.is_empty() {
+        return None;
+    }
+    Some(match tail.split_once("__") {
+        Some((scope, package)) if !scope.is_empty() && !package.is_empty() => {
+            format!("@{scope}/{package}")
+        }
+        _ => tail.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ambient_types_cover_global_packages_only() {
+        assert!(is_ambient_types_package("@types/node"));
+        assert!(is_ambient_types_package("@types/jest"));
+        assert!(is_ambient_types_package("bun-types"));
+        assert!(!is_ambient_types_package("@types/react"));
+        assert!(!is_ambient_types_package("node"));
+    }
+
+    #[test]
+    fn types_package_target_follows_the_naming_convention() {
+        assert_eq!(
+            types_package_target("@types/node"),
+            Some("node".to_string())
+        );
+        assert_eq!(
+            types_package_target("@types/scope__pkg"),
+            Some("@scope/pkg".to_string())
+        );
+        assert_eq!(types_package_target("@types/"), None);
+        assert_eq!(types_package_target("node"), None);
+        assert_eq!(types_package_target("bun-types"), None);
+    }
 
     #[test]
     fn types_prefix_matches_scoped() {

@@ -520,6 +520,15 @@ fn describe_tooling_credit(credit: &fallow_types::trace::ToolingCredit) -> Strin
         ("plugin-reference", _, Some(reference)) => format!(
             "Credited as tooling of the {plugin} plugin: a package.json script, CI config or git hook runs {reference}."
         ),
+        ("ambient-types", _, _) => "Credited as a type package that declares globals.".to_string(),
+        ("types-target", _, Some(target)) => {
+            format!(
+                "Credited as the type package of {target}, which the project declares or imports."
+            )
+        }
+        ("types-config", _, _) => {
+            "Credited because a config file, such as a tsconfig types entry, names it.".to_string()
+        }
         (reason, _, _) => format!("Credited as tooling ({reason})."),
     }
 }
@@ -1034,6 +1043,28 @@ mod tests {
         }));
         let rendered = plain(&build_dependency_trace_human_lines(&config_trace));
         assert!(rendered.contains("found its config in .toolrc.json."));
+
+        let mut types_trace = DependencyTrace {
+            package_name: "@types/lib".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: false,
+            import_count: 0,
+            peer_of: Vec::new(),
+            sources: Vec::new(),
+            tooling_credit: None,
+        };
+        types_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
+            reason: "types-target".to_string(),
+            plugin: None,
+            config: None,
+            reference: Some("lib".to_string()),
+        }));
+        let rendered = plain(&build_dependency_trace_human_lines(&types_trace));
+        assert!(rendered.contains(
+            "Credited as the type package of lib, which the project declares or imports."
+        ));
     }
 
     #[test]

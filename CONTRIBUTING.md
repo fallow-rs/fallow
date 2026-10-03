@@ -212,6 +212,7 @@ ecosystem = "core"
 ```
 
 - Use `[[prefix]]` when every package under a scope or name family is tooling (matched with `name.starts_with(pattern)`); use `[[exact]]` for a single package name. `notes` / `ecosystem` are optional, for human context only.
+- A `@types/X` package is not credited by the `@types/` prefix alone. In `devDependencies` it is credited when the project declares `X`, imports `X` or names `X` in a tsconfig `types` entry. A type package that declares globals and is never imported (`@types/node`, `@types/jest`, `bun-types`) goes under `[[ambient_types]]` with its exact `name`; keep that list short.
 - Do **not** add framework-plugin packages (`vite-plugin-*`, `prettier-plugin-*`, `eslint-plugin-*`, `@rollup/plugin-*`, or scoped forms like `@ianvs/prettier-plugin-sort-imports`). Those must be credited by the relevant plugin's config parser when they actually appear in the config file; listing them here would hide a declared-but-unused plugin. The catalogue's parse tests reject such entries.
 - Run `cargo test -p fallow-core plugins::tooling` to validate the catalogue (it checks the TOML parses, has no empty/whitespace prefixes, no duplicates, and no framework-plugin entries). The file is embedded into the binary via `include_str!`, so a passing test means a working release.
 

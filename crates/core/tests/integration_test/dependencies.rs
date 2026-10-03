@@ -1652,3 +1652,30 @@ fn plugin_tooling_dev_dependency_needs_config_or_reference() {
         "only the tooling devDependencies without a config file or a reference should be reported"
     );
 }
+
+/// A `@types/X` devDependency is credited only when the project declares X,
+/// imports X or names X in a tsconfig `types` entry, or when X is an ambient
+/// global type package such as `node` or `jest`.
+#[test]
+fn types_dev_dependency_needs_target_or_ambient_globals() {
+    let root = fixture_path("types-package-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    // Credited: @types/react (react is declared), @types/scope__pkg
+    // (@scope/pkg is declared), @types/geojson (a type-only import of
+    // geojson), @types/ws (a tsconfig `types` entry), and the ambient globals
+    // @types/node, @types/jest and bun-types.
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["@types/better-sqlite3", "@types/uuid"],
+        "only the type packages without a target, a tsconfig entry or ambient globals should be reported"
+    );
+}

@@ -144,6 +144,12 @@ impl DependencyBinaries {
         }
     }
 
+    /// Every dependency name the root and workspace manifests declare.
+    #[must_use]
+    pub const fn declared_packages(&self) -> &FxHashSet<String> {
+        &self.declared_packages
+    }
+
     /// The declared dependency that provides `binary`, if one does.
     #[must_use]
     pub fn package_for(&self, binary: &str) -> Option<String> {

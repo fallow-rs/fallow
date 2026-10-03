@@ -12,11 +12,16 @@ use crate::common::{fixture_path, parse_json, run_fallow, run_fallow_in_root};
 use serde_json::{Value, json};
 
 const FIXTURE: &str = "plugin-tooling-credit";
+const TYPES_FIXTURE: &str = "types-package-credit";
 
 fn trace(package: &str) -> Value {
+    trace_in(FIXTURE, package)
+}
+
+fn trace_in(fixture: &str, package: &str) -> Value {
     parse_json(&run_fallow(
         "dead-code",
-        FIXTURE,
+        fixture,
         &[
             "--trace-dependency",
             package,
@@ -65,11 +70,44 @@ fn a_hook_invocation_traces_as_a_script_reference() {
     assert!(syncpack.get("tooling_credit").is_none(), "{syncpack:#}");
 }
 
-/// Every declared devDependency traces as unused exactly when the report
-/// flags it.
 #[test]
-fn the_trace_agrees_with_the_report_for_every_dev_dependency() {
-    let root = fixture_path(FIXTURE);
+fn type_package_credits_name_their_evidence() {
+    let node = trace_in(TYPES_FIXTURE, "@types/node");
+    assert_eq!(node["is_used"], true, "{node:#}");
+    assert_eq!(
+        node["tooling_credit"],
+        json!({ "reason": "ambient-types" }),
+        "{node:#}"
+    );
+
+    let react = trace_in(TYPES_FIXTURE, "@types/react");
+    assert_eq!(
+        react["tooling_credit"],
+        json!({ "reason": "types-target", "reference": "react" }),
+        "{react:#}"
+    );
+
+    let geojson = trace_in(TYPES_FIXTURE, "@types/geojson");
+    assert_eq!(
+        geojson["tooling_credit"],
+        json!({ "reason": "types-target", "reference": "geojson" }),
+        "{geojson:#}"
+    );
+
+    let ws = trace_in(TYPES_FIXTURE, "@types/ws");
+    assert_eq!(
+        ws["tooling_credit"],
+        json!({ "reason": "types-config" }),
+        "{ws:#}"
+    );
+
+    let uuid = trace_in(TYPES_FIXTURE, "@types/uuid");
+    assert_eq!(uuid["is_used"], false, "{uuid:#}");
+    assert!(uuid.get("tooling_credit").is_none(), "{uuid:#}");
+}
+
+fn assert_trace_agrees_with_report(fixture: &str) {
+    let root = fixture_path(fixture);
     let report = parse_json(&run_fallow_in_root(
         "dead-code",
         &root,
@@ -90,11 +128,19 @@ fn the_trace_agrees_with_the_report_for_every_dev_dependency() {
         .expect("devDependencies object");
     assert!(!reported.is_empty(), "the fixture must report something");
     for name in declared.keys() {
-        let traced = trace(name);
+        let traced = trace_in(fixture, name);
         assert_eq!(
             traced["is_used"].as_bool(),
             Some(!reported.contains(&name.as_str())),
-            "trace and report disagree on {name}: reported {reported:?}, trace {traced:#}"
+            "trace and report disagree on {name} in {fixture}: reported {reported:?}, trace {traced:#}"
         );
     }
+}
+
+/// Every declared devDependency traces as unused exactly when the report
+/// flags it.
+#[test]
+fn the_trace_agrees_with_the_report_for_every_dev_dependency() {
+    assert_trace_agrees_with_report(FIXTURE);
+    assert_trace_agrees_with_report(TYPES_FIXTURE);
 }

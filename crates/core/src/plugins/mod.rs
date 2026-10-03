@@ -389,6 +389,51 @@ pub fn push_tooling_trace_credits(
             provenance.push_tooling_credit(dependency.clone(), credit.clone());
         }
     }
+    push_types_trace_credits(provenance, plugin_result);
+}
+
+/// Record why the unused devDependency check credits each type package in
+/// `devDependencies`: ambient globals, a declared target package, or a
+/// tsconfig `types` entry. A target that the code imports is credited by the trace
+/// itself, which reads the module graph.
+fn push_types_trace_credits(
+    provenance: &mut fallow_types::trace::TraceProvenance,
+    plugin_result: &AggregatedPluginResult,
+) {
+    let declared = plugin_result.dependency_binaries.declared_packages();
+    let mut names: Vec<&String> = plugin_result.dev_dependency_names.iter().collect();
+    names.sort_unstable();
+    for name in names {
+        let credit = if is_ambient_types_package(name) {
+            fallow_types::trace::ToolingCredit {
+                reason: "ambient-types".to_owned(),
+                plugin: None,
+                config: None,
+                reference: None,
+            }
+        } else if let Some(target) = types_package_target(name) {
+            if declared.contains(&target) {
+                fallow_types::trace::ToolingCredit {
+                    reason: "types-target".to_owned(),
+                    plugin: None,
+                    config: None,
+                    reference: Some(target),
+                }
+            } else if plugin_result.referenced_dependencies.contains(name) {
+                fallow_types::trace::ToolingCredit {
+                    reason: "types-config".to_owned(),
+                    plugin: None,
+                    config: None,
+                    reference: None,
+                }
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+        provenance.push_tooling_credit(name.clone(), credit);
+    }
 }
 
 /// Add a trace source for each remote that a literal runtime call names.
@@ -1733,7 +1778,8 @@ pub(crate) use module_federation::runtime_remotes;
 pub use registry::{
     AggregatedPluginResult, PluginRegistry, PluginToolingDependencies, PluginToolingEvidence,
 };
-pub(crate) use tooling::is_known_tooling_dependency;
+pub use tooling::types_package_target;
+pub(crate) use tooling::{is_ambient_types_package, is_known_tooling_dependency};
 
 fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {
     let imports = config_parser::extract_imports(source, config_path);
