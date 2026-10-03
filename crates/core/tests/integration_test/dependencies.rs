@@ -576,6 +576,52 @@ fn ancestor_declaration_is_credited_when_it_satisfies_a_descendant_import() {
     );
 }
 
+/// Each import credits the nearest manifest that installs the package. A root
+/// declaration stays used only for an importer outside every workspace or an
+/// importer whose workspace chain does not install the package.
+#[test]
+fn root_declaration_is_credited_only_through_the_nearest_manifest() {
+    let root = fixture_path("root-dependency-nearest-manifest-credit");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let names_at = |deps: Vec<&fallow_types::results::UnusedDependency>, manifest: &str| {
+        let path = root.join(manifest);
+        let mut names: Vec<String> = deps
+            .into_iter()
+            .filter(|dep| dep.path == path)
+            .map(|dep| dep.package_name.clone())
+            .collect();
+        names.sort();
+        names
+    };
+    let prod: Vec<_> = results.unused_dependencies.iter().map(|d| &d.dep).collect();
+    let dev: Vec<_> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| &d.dep)
+        .collect();
+
+    assert_eq!(
+        names_at(prod.clone(), "package.json"),
+        vec!["shared-runtime".to_string(), "tool-lib".to_string()],
+        "a root declaration that every importer reaches through a nearer manifest is unused"
+    );
+    assert!(
+        names_at(dev.clone(), "package.json").is_empty(),
+        "a peer-only workspace declaration installs nothing, so the root devDependency stays used"
+    );
+    assert_eq!(
+        names_at(prod.clone(), "packages/tool/package.json"),
+        vec!["shared-runtime".to_string()],
+        "a workspace declaration that nothing in the workspace imports is still reported"
+    );
+    assert!(
+        names_at(prod.clone(), "packages/app/package.json").is_empty(),
+        "the workspace that imports shared-runtime keeps its declaration"
+    );
+}
+
 #[test]
 fn package_less_tsconfig_reference_credits_nearest_package_workspace() {
     let project = tempfile::tempdir().expect("create temp dir");

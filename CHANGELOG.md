@@ -804,6 +804,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check, counts as a use of that declaration. A production import of a
   publishable nested workspace stays unlisted and does not count.
 
+- **A root dependency is used only when an import needs the root
+  declaration.** Before, any import of a package anywhere in the project
+  kept the root declaration of that package alive, also when the importing
+  workspace declared the package itself. Now each import counts for the
+  nearest manifest that installs the package: the owning workspace, then its
+  ancestor workspaces, then the root. A root declaration counts as used when
+  a file outside every workspace imports the package, or when no workspace
+  in the importer's chain installs it. A `peerDependencies` entry installs
+  nothing, so it does not take the use away from the root. The peer, script,
+  plugin and config credits of the root manifest do not change. This can
+  report new unused root dependencies.
+
 ### Changed
 
 - **`fallow health --group-by --top N` applies the limit to each group.**
