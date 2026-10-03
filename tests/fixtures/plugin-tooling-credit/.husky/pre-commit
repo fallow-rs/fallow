@@ -1,0 +1,1 @@
+npx markdownlint-cli2 "**/*.md"

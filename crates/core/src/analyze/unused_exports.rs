@@ -2985,6 +2985,7 @@ mod tests {
             discovered_always_used: vec![],
             setup_files: vec![],
             tooling_dependencies: vec![],
+            plugin_tooling: vec![],
             script_used_packages: FxHashSet::default(),
             dependency_binaries: crate::scripts::DependencyBinaries::default(),
             virtual_module_prefixes: vec![],

@@ -27,8 +27,13 @@ const ENABLERS: &[&str] = &["supabase"];
 /// from these entries rather than being entries themselves.
 const ENTRY_PATTERNS: &[&str] = &["supabase/functions/*/index.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"];
 
-/// The Supabase CLI is invoked from scripts, not imported, so credit it as a
-/// tooling dependency so it never reports as unused.
+/// The Supabase CLI config. It is the plugin's own config file, so an existing
+/// one credits the CLI as a tooling dependency.
+const ALWAYS_USED: &[&str] = &["supabase/config.toml"];
+
+/// The Supabase CLI is invoked from scripts, not imported. It is credited as a
+/// tooling dependency when the project has a CLI config or a script, CI or
+/// hook reference to it.
 const TOOLING_DEPENDENCIES: &[&str] = &["supabase"];
 
 /// Built-in plugin for Supabase Edge Function projects.
@@ -55,6 +60,10 @@ impl Plugin for SupabasePlugin {
 
     fn entry_patterns(&self) -> &'static [&'static str] {
         ENTRY_PATTERNS
+    }
+
+    fn always_used(&self) -> &'static [&'static str] {
+        ALWAYS_USED
     }
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {

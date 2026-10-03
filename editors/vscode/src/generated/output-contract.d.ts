@@ -11531,7 +11531,8 @@ imported_by: string[]
  */
 type_only_imported_by: string[]
 /**
- * Whether the dependency is invoked from package.json scripts or CI configs.
+ * Whether the dependency is invoked from package.json scripts, CI configs
+ * or git hooks.
  */
 used_in_scripts: boolean
 /**
@@ -11557,6 +11558,39 @@ peer_of?: string[]
  * Federation config declares the name (issue #2796).
  */
 sources?: TraceSource[]
+/**
+ * Why the unused devDependency check credits the dependency as tooling
+ * when no file imports it and no script, CI workflow or git hook runs it.
+ * When present, `is_used` is `true`. Absent otherwise.
+ */
+tooling_credit?: (ToolingCredit | null)
+}
+/**
+ * Why the unused devDependency check counts a dependency as used tooling
+ * although no source file imports it.
+ */
+export interface ToolingCredit {
+/**
+ * The evidence: `plugin-config` when the plugin that declares the
+ * dependency found its own config file, `plugin-reference` when a
+ * package.json script, a CI workflow or a git hook runs one of that
+ * plugin's packages. The set is open.
+ */
+reason: string
+/**
+ * The plugin that declares the dependency as tooling.
+ */
+plugin?: (string | null)
+/**
+ * The config file the plugin found, relative to the project root, for
+ * `plugin-config`. `package.json` when the config is a package.json key.
+ */
+config?: (string | null)
+/**
+ * The package that a script, CI workflow or git hook runs, for
+ * `plugin-reference`.
+ */
+reference?: (string | null)
 }
 /**
  * Result of tracing a clone: all groups containing the code at a source

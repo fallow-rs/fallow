@@ -722,11 +722,16 @@ impl<'a> AnalysisSession<'a> {
         );
         trace_pipeline_profile(&profile);
 
-        let trace_provenance = plugins::federation_trace_provenance(
+        let mut trace_provenance = plugins::federation_trace_provenance(
             &self.config.root,
             self.files(),
             &plugin_result.federation_sources,
             &core.modules,
+        );
+        plugins::push_tooling_trace_credits(
+            &mut trace_provenance,
+            &self.config.root,
+            &plugin_result,
         );
         let mut output = assemble_full_output(
             core,
@@ -864,12 +869,18 @@ impl DeadCodeBackendPrelude<'_> {
         &self,
         modules: &[extract::ModuleInfo],
     ) -> fallow_types::trace::TraceProvenance {
-        plugins::federation_trace_provenance(
+        let mut provenance = plugins::federation_trace_provenance(
             &self.config.root,
             self.discovery.files(),
             &self.plugin_result.federation_sources,
             modules,
-        )
+        );
+        plugins::push_tooling_trace_credits(
+            &mut provenance,
+            &self.config.root,
+            &self.plugin_result,
+        );
+        provenance
     }
 
     /// The plugin stage's result, after the workspace merge and the
@@ -2194,6 +2205,17 @@ fn analyze_all_scripts(
     analyze_root_scripts(config, root_pkg, &deps, plugin_result);
     analyze_workspace_scripts(config, workspace_pkgs, &deps, plugin_result);
     analyze_ci_scripts(config, &bin_map, &all_dep_set, &all_scripts, plugin_result);
+    analyze_hook_scripts(
+        config,
+        workspaces,
+        &scripts::hooks::HookContext {
+            bin_map: &bin_map,
+            declared_packages: &all_dep_set,
+            scripts: &all_scripts,
+            ignored: scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
+        },
+        plugin_result,
+    );
     plugin_result.dependency_binaries =
         scripts::DependencyBinaries::new(config.root.clone(), bin_map, all_dep_set);
 
@@ -2437,6 +2459,33 @@ fn analyze_ci_scripts(
                 .entry_patterns
                 .push((plugins::PathRule::new(pat), "scripts".to_string()));
         }
+    }
+}
+
+/// Analyze git hook and staged-file commands for binary invocations and merge
+/// the invoked packages into the script-used set.
+///
+/// Hooks run on a developer machine, never in production, so production mode
+/// skips them, like the non-production package.json scripts.
+fn analyze_hook_scripts(
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    context: &scripts::hooks::HookContext<'_>,
+    plugin_result: &mut plugins::AggregatedPluginResult,
+) {
+    if config.production {
+        return;
+    }
+    let roots = std::iter::once(config.root.as_path()).chain(
+        workspaces
+            .iter()
+            .map(|ws| ws.root.as_path())
+            .filter(|root| *root != config.root.as_path()),
+    );
+    for root in roots {
+        plugin_result
+            .script_used_packages
+            .extend(scripts::hooks::analyze_hook_files(root, context));
     }
 }
 

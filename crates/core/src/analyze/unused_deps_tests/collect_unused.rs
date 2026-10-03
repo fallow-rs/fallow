@@ -8,6 +8,7 @@ fn collect_unused_empty_deps_returns_empty() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -16,6 +17,7 @@ fn collect_unused_empty_deps_returns_empty() {
         check_implicit: true,
         check_known_tooling: false,
         check_plugin_tooling: true,
+        plugin_tooling_needs_evidence: false,
     };
     let result = collect_unused_for_category(UnusedCategoryInput {
         dep_names: vec![],
@@ -36,6 +38,7 @@ fn collect_unused_all_used_returns_empty() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -44,6 +47,7 @@ fn collect_unused_all_used_returns_empty() {
         check_implicit: false,
         check_known_tooling: false,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     };
     let deps = vec!["react".to_string(), "lodash".to_string()];
     let result = collect_unused_for_category(UnusedCategoryInput {
@@ -65,6 +69,7 @@ fn collect_unused_some_unused_are_flagged() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -73,6 +78,7 @@ fn collect_unused_some_unused_are_flagged() {
         check_implicit: false,
         check_known_tooling: false,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     };
     let deps = vec![
         "react".to_string(),
@@ -105,6 +111,7 @@ fn collect_unused_implicit_filter_skips_react_dom() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -113,6 +120,7 @@ fn collect_unused_implicit_filter_skips_react_dom() {
         check_implicit: true,
         check_known_tooling: false,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     };
     let deps = vec!["react-dom".to_string(), "lodash".to_string()];
     let result = collect_unused_for_category(UnusedCategoryInput {
@@ -135,6 +143,7 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -143,6 +152,7 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
         check_implicit: false,
         check_known_tooling: false,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     };
     let deps = vec!["react-dom".to_string()];
     let result = collect_unused_for_category(UnusedCategoryInput {
@@ -165,6 +175,7 @@ fn collect_unused_known_tooling_filter_skips_jest() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -173,6 +184,7 @@ fn collect_unused_known_tooling_filter_skips_jest() {
         check_implicit: false,
         check_known_tooling: true,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     };
     let deps = vec!["jest".to_string(), "my-lib".to_string()];
     let result = collect_unused_for_category(UnusedCategoryInput {
@@ -201,6 +213,7 @@ fn collect_unused_plugin_tooling_filter() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -209,6 +222,7 @@ fn collect_unused_plugin_tooling_filter() {
         check_implicit: false,
         check_known_tooling: false,
         check_plugin_tooling: true,
+        plugin_tooling_needs_evidence: false,
     };
     let deps = vec!["my-runtime".to_string(), "other".to_string()];
     let result = collect_unused_for_category(UnusedCategoryInput {
@@ -237,6 +251,7 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
         plugin_referenced: &pr,
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
+        credited_plugin_tooling: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -245,6 +260,7 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
         check_implicit: true,
         check_known_tooling: false,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     };
     let deps = vec!["my-runtime".to_string()];
     let result = collect_unused_for_category(UnusedCategoryInput {

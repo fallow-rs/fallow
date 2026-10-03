@@ -966,6 +966,7 @@ pub fn trace_dependency(
         import_count,
         peer_of,
         sources: Vec::new(),
+        tooling_credit: None,
     }
 }
 

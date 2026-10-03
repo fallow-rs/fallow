@@ -359,6 +359,38 @@ pub fn federation_trace_provenance(
     provenance
 }
 
+/// Record why the unused devDependency check credits each plugin tooling
+/// dependency, so `--trace-dependency` explains the credit instead of calling
+/// the dependency unused.
+pub fn push_tooling_trace_credits(
+    provenance: &mut fallow_types::trace::TraceProvenance,
+    root: &Path,
+    plugin_result: &AggregatedPluginResult,
+) {
+    for entry in &plugin_result.plugin_tooling {
+        let Some(evidence) = entry.evidence(&plugin_result.script_used_packages) else {
+            continue;
+        };
+        let credit = match evidence {
+            PluginToolingEvidence::OwnConfig(config) => fallow_types::trace::ToolingCredit {
+                reason: "plugin-config".to_owned(),
+                plugin: Some(entry.plugin.clone()),
+                config: Some(config.strip_prefix(root).unwrap_or(config).to_path_buf()),
+                reference: None,
+            },
+            PluginToolingEvidence::Reference(name) => fallow_types::trace::ToolingCredit {
+                reason: "plugin-reference".to_owned(),
+                plugin: Some(entry.plugin.clone()),
+                config: None,
+                reference: Some(name.to_owned()),
+            },
+        };
+        for dependency in &entry.dependencies {
+            provenance.push_tooling_credit(dependency.clone(), credit.clone());
+        }
+    }
+}
+
 /// Add a trace source for each remote that a literal runtime call names.
 fn push_runtime_remote_sources(
     provenance: &mut fallow_types::trace::TraceProvenance,
@@ -1698,7 +1730,9 @@ pub mod registry;
 mod tooling;
 
 pub(crate) use module_federation::runtime_remotes;
-pub use registry::{AggregatedPluginResult, PluginRegistry};
+pub use registry::{
+    AggregatedPluginResult, PluginRegistry, PluginToolingDependencies, PluginToolingEvidence,
+};
 pub(crate) use tooling::is_known_tooling_dependency;
 
 fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {

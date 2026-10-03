@@ -13,6 +13,7 @@ pub mod ci;
 #[cfg(test)]
 mod command_forms_tests;
 mod flag_credits;
+pub mod hooks;
 mod node_test;
 mod resolve;
 mod shell;

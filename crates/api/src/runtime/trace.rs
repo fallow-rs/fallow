@@ -241,6 +241,11 @@ pub fn run_trace_dependency(
         output.sources = artifacts
             .trace_provenance
             .dependency_sources(&options.package_name);
+        output.apply_tooling_credit(
+            artifacts
+                .trace_provenance
+                .tooling_credit(&options.package_name),
+        );
         Ok(TraceDependencyProgrammaticOutput { output })
     })
 }

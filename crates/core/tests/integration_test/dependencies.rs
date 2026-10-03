@@ -1623,3 +1623,32 @@ fn module_augmentation_credits_package() {
         "only the real import may report an unlisted dependency"
     );
 }
+
+/// A plugin credits its own tooling devDependencies only with evidence that
+/// the project runs the tool: a config file of its own, its config in
+/// package.json, or a script, CI workflow or git hook that invokes it. A
+/// declared package alone activates the plugin and is no evidence.
+#[test]
+fn plugin_tooling_dev_dependency_needs_config_or_reference() {
+    let root = fixture_path("plugin-tooling-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    // Credited, each by a different kind of evidence:
+    // c8 (`.c8rc.json`), lefthook (`lefthook.yml`), simple-git-hooks (its
+    // package.json key), mocha (a script), ts-mocha (the mocha plugin, whose
+    // tool a script runs), syncpack (a simple-git-hooks command), size-limit
+    // (a lefthook command) and markdownlint-cli2 (a husky hook).
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["commitizen", "cz-conventional-changelog", "karma", "nyc"],
+        "only the tooling devDependencies without a config file or a reference should be reported"
+    );
+}

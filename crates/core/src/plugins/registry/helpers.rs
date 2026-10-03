@@ -562,7 +562,7 @@ fn scan_dir_for_pattern(dir: &Path, file_pattern: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-fn expand_brace_pattern(pattern: &str) -> Vec<String> {
+pub(super) fn expand_brace_pattern(pattern: &str) -> Vec<String> {
     let Some(open) = pattern.find('{') else {
         return vec![pattern.to_string()];
     };
