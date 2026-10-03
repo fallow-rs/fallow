@@ -300,10 +300,17 @@ pub struct DependencyTrace {
     pub type_only_imported_by: Vec<PathBuf>,
     /// Whether the dependency is invoked from package.json scripts or CI configs.
     pub used_in_scripts: bool,
-    /// Whether the dependency is used at all.
+    /// Whether the dependency is used at all: imported, invoked from scripts,
+    /// or listed as a peer by a used package (`peer_of`).
     pub is_used: bool,
     /// Total import count.
     pub import_count: usize,
+    /// Used packages that list this dependency in their installed
+    /// `peerDependencies`, required or optional, sorted by name. The
+    /// unused-dependency check credits such a peer, because the package that
+    /// lists it loads it at runtime. Absent when no used package lists it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peer_of: Vec<String>,
     /// The configs that declare this name as a Module Federation remote alias
     /// under `remotes`, one per config. A remote alias is provided by a
     /// remote container at runtime, not by an npm package. Absent when no

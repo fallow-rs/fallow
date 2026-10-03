@@ -313,29 +313,48 @@ fn recursive_peer_dependencies_of_used_package_not_flagged() {
 }
 
 #[test]
-fn optional_peer_dependency_of_used_package_is_still_flagged_when_unused() {
+fn optional_peer_dependency_of_used_package_not_flagged() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let root = tmp.path();
-    std::fs::create_dir_all(root.join("node_modules/plugin-a")).expect("create plugin-a dir");
-    std::fs::write(
-        root.join("node_modules/plugin-a/package.json"),
-        r#"{
-  "name": "plugin-a",
-  "peerDependencies": {"optional-peer": "^1.0.0"},
-  "peerDependenciesMeta": {"optional-peer": {"optional": true}}
-}"#,
-    )
-    .expect("write plugin-a package");
+    for (name, peer) in [
+        ("plugin-a", "optional-peer"),
+        ("unused-plugin", "peer-of-unused"),
+    ] {
+        std::fs::create_dir_all(root.join("node_modules").join(name)).expect("create package dir");
+        std::fs::write(
+            root.join("node_modules").join(name).join("package.json"),
+            format!(
+                r#"{{
+  "name": "{name}",
+  "peerDependencies": {{"{peer}": "^1.0.0"}},
+  "peerDependenciesMeta": {{"{peer}": {{"optional": true}}}}
+}}"#
+            ),
+        )
+        .expect("write package");
+    }
 
     let (graph, _) = build_graph_with_npm_imports(&[("plugin-a", false)]);
-    let pkg = make_pkg(&["plugin-a", "optional-peer"], &[], &[]);
+    let pkg = make_pkg(
+        &[
+            "plugin-a",
+            "optional-peer",
+            "unused-plugin",
+            "peer-of-unused",
+        ],
+        &[],
+        &[],
+    );
     let config = test_config(root.to_path_buf());
 
     let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
+    let mut unused_names: Vec<&str> = unused.iter().map(|dep| dep.package_name.as_str()).collect();
+    unused_names.sort_unstable();
 
-    assert!(
-        unused.iter().any(|d| d.package_name == "optional-peer"),
-        "optional peer dependencies are not required by the used package and should still be reported: {unused:?}"
+    assert_eq!(
+        unused_names,
+        vec!["peer-of-unused", "unused-plugin"],
+        "an optional peer of a used package is credited; one of an unused package is not"
     );
 }
 

@@ -282,7 +282,7 @@ impl FallowMcp {
         run_impact_closure(&self.binary, params.0).await
     }
 
-    /// Trace where a dependency is used. Returns which files import the package, which imports are type-only, whether the package is referenced from package.json scripts or CI configs (`used_in_scripts`), and whether the dependency is used at all (`is_used` accounts for both imports and script usage, matching the unused-deps detector). Useful before removing a dependency or moving it between dependencies and devDependencies.
+    /// Trace where a dependency is used. Returns which files import the package, which imports are type-only, whether the package is referenced from package.json scripts or CI configs (`used_in_scripts`), and whether the dependency is used at all (`is_used` accounts for imports, script usage, and the used packages that list it as a peer (`peer_of`), matching the unused-deps detector). Useful before removing a dependency or moving it between dependencies and devDependencies.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn trace_dependency(
         &self,

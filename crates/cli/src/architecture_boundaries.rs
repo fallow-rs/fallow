@@ -1669,6 +1669,9 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         // The built-in module list has one source, in fallow-core, so the
         // entry weight report and the dependency detectors agree on it.
         "fallow_core::analyze::is_builtin_module",
+        // Peer-dependency credit has one implementation, in fallow-core, so
+        // `--trace-dependency` and the unused-dependency check agree on it.
+        "fallow_core::analyze::peer_dependency_hosts",
     ];
 
     for line in core_backend.lines() {

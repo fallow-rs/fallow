@@ -11535,13 +11535,21 @@ type_only_imported_by: string[]
  */
 used_in_scripts: boolean
 /**
- * Whether the dependency is used at all.
+ * Whether the dependency is used at all: imported, invoked from scripts,
+ * or listed as a peer by a used package (`peer_of`).
  */
 is_used: boolean
 /**
  * Total import count.
  */
 import_count: number
+/**
+ * Used packages that list this dependency in their installed
+ * `peerDependencies`, required or optional, sorted by name. The
+ * unused-dependency check credits such a peer, because the package that
+ * lists it loads it at runtime. Absent when no used package lists it.
+ */
+peer_of?: string[]
 /**
  * The configs that declare this name as a Module Federation remote alias
  * under `remotes`, one per config. A remote alias is provided by a

@@ -952,13 +952,19 @@ pub fn trace_dependency(
 
     let import_count = imported_by.len();
     let used_in_scripts = script_used_packages.contains(package_name);
+    let peer_of = crate::core_backend::peer_dependency_hosts(
+        root,
+        graph.package_usage.keys().map(String::as_str),
+        package_name,
+    );
     DependencyTrace {
         package_name: package_name.to_string(),
         imported_by,
         type_only_imported_by,
         used_in_scripts,
-        is_used: import_count > 0 || used_in_scripts,
+        is_used: import_count > 0 || used_in_scripts || !peer_of.is_empty(),
         import_count,
+        peer_of,
         sources: Vec::new(),
     }
 }

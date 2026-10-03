@@ -791,6 +791,28 @@ fn peer_dependency_of_parent_installed_package_is_not_unused() {
 }
 
 #[test]
+fn optional_peer_of_used_dependency_is_not_unused() {
+    let root = fixture_path("optional-peer-of-used-dependency");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dep_names.sort_unstable();
+
+    // `host` is imported and declares `opt-peer` as an optional peer, so the
+    // listed `opt-peer` turns on a host feature. `unused-host` is not imported,
+    // so its optional peer `peer-of-unused` gets no credit.
+    assert_eq!(
+        unused_dep_names,
+        vec!["peer-of-unused", "unused-host"],
+        "only the optional peer of a used host is credited"
+    );
+}
+
+#[test]
 fn subpath_imports_resolve_correctly() {
     let root = fixture_path("subpath-imports");
     let config = create_config(root);

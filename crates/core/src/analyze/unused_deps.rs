@@ -96,12 +96,20 @@ impl PeerDependencyResolver {
         }
     }
 
+    /// Every package that a seed package lists in `peerDependencies`, directly
+    /// or through another credited peer, mapped to the packages that list it.
+    ///
+    /// Optional peers (`peerDependenciesMeta.<name>.optional`) count too: a
+    /// project lists an optional peer of a package it uses to turn on a feature
+    /// of that package, which loads the peer at runtime where the import graph
+    /// does not see it. Only used packages seed the closure, so the peers of an
+    /// unused package get no credit.
     fn peer_dependency_closure<'b>(
         &mut self,
         package_root: &Path,
         seeds: impl IntoIterator<Item = &'b str>,
-    ) -> FxHashSet<String> {
-        let mut peer_used = FxHashSet::default();
+    ) -> FxHashMap<String, Vec<String>> {
+        let mut hosts_by_peer: FxHashMap<String, Vec<String>> = FxHashMap::default();
         let mut expanded = FxHashSet::default();
         let mut queue: Vec<String> = seeds.into_iter().map(str::to_string).collect();
 
@@ -111,13 +119,15 @@ impl PeerDependencyResolver {
             }
 
             for peer in self.peer_dependencies_for(package_root, &package_name) {
-                if peer_used.insert(peer.clone()) {
+                let hosts = hosts_by_peer.entry(peer.clone()).or_default();
+                if hosts.is_empty() {
                     queue.push(peer);
                 }
+                hosts.push(package_name.clone());
             }
         }
 
-        peer_used
+        hosts_by_peer
     }
 
     fn peer_dependencies_for(&mut self, package_root: &Path, package_name: &str) -> Vec<String> {
@@ -129,12 +139,34 @@ impl PeerDependencyResolver {
         let peer_dependencies: Vec<String> =
             find_installed_package_json(package_root, package_name)
                 .and_then(|path| PackageJson::load(&path).ok())
-                .map(|pkg| pkg.required_peer_dependency_names())
+                .map(|pkg| pkg.peer_dependency_names())
                 .unwrap_or_default();
 
         self.cache.insert(key, peer_dependencies.clone());
         peer_dependencies
     }
+}
+
+/// The packages that give `package_name` peer-dependency credit in the
+/// unused-dependency check: each one is used, or credited itself, and lists
+/// `package_name` in its installed `peerDependencies`, required or optional.
+///
+/// `used_packages` are the package names the import graph records. The
+/// installed manifests are looked up from `package_root` and its ancestors, as
+/// the unused-dependency check does for the root `package.json`. The result is
+/// sorted and empty when no used package lists `package_name` as a peer.
+pub fn peer_dependency_hosts<'a>(
+    package_root: &Path,
+    used_packages: impl IntoIterator<Item = &'a str>,
+    package_name: &str,
+) -> Vec<String> {
+    let mut hosts = PeerDependencyResolver::new()
+        .peer_dependency_closure(package_root, used_packages)
+        .remove(package_name)
+        .unwrap_or_default();
+    hosts.sort_unstable();
+    hosts.dedup();
+    hosts
 }
 
 fn find_installed_package_json(package_root: &Path, package_name: &str) -> Option<PathBuf> {
@@ -894,7 +926,7 @@ struct DependencyUsageIndices<'a> {
     workspace_used_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     ancestor_credited_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
-    root_peer_used: FxHashSet<String>,
+    root_peer_used: FxHashMap<String, Vec<String>>,
 }
 
 /// Compute the package-usage indices used to decide whether a dependency is used.
@@ -943,7 +975,7 @@ fn collect_root_unused_dependencies(
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let is_used_globally = |dep: &str| {
         usage.root_credited_packages.contains(dep)
-            || usage.root_peer_used.contains(dep)
+            || usage.root_peer_used.contains_key(dep)
             || linked_workspaces.contains(dep)
     };
 
@@ -1091,7 +1123,7 @@ fn read_workspace_package(
 
 struct WorkspaceDependencyUsage<'a> {
     ws_root: &'a Path,
-    ws_peer_used: FxHashSet<String>,
+    ws_peer_used: FxHashMap<String, Vec<String>>,
     /// Packages this workspace inherits from the private siblings it bundles,
     /// absent when the workspace bundles no private sibling.
     bundled_used: Option<&'a FxHashSet<&'a str>>,
@@ -1105,7 +1137,7 @@ struct WorkspaceDependencyUsage<'a> {
 impl WorkspaceDependencyUsage<'_> {
     fn is_used_in_workspace(&self, dep: &str) -> bool {
         self.root_flagged.contains(dep)
-            || self.ws_peer_used.contains(dep)
+            || self.ws_peer_used.contains_key(dep)
             || self
                 .bundled_used
                 .is_some_and(|bundled| bundled.contains(dep))

@@ -68,6 +68,7 @@ mod output_file_tests;
 mod package_baselines_tests;
 mod package_cycle_tests;
 mod parse_error_gate_tests;
+mod peer_dependency_credit_tests;
 mod plugin_diagnostic_tests;
 mod production_workspace_tests;
 mod reconcile_review_tests;

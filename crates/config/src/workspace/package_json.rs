@@ -241,25 +241,13 @@ impl PackageJson {
             .unwrap_or_default()
     }
 
-    /// Get required peer dependency names only.
+    /// Get every peer dependency name, required or optional.
     #[must_use]
-    pub fn required_peer_dependency_names(&self) -> Vec<String> {
+    pub fn peer_dependency_names(&self) -> Vec<String> {
         self.peer_dependencies
             .as_ref()
-            .map(|deps| {
-                deps.keys()
-                    .filter(|dep| !self.peer_dependency_is_optional(dep))
-                    .cloned()
-                    .collect()
-            })
+            .map(|deps| deps.keys().cloned().collect())
             .unwrap_or_default()
-    }
-
-    fn peer_dependency_is_optional(&self, dep: &str) -> bool {
-        self.peer_dependencies_meta
-            .as_ref()
-            .and_then(|meta| meta.get(dep))
-            .is_some_and(|meta| meta.optional)
     }
 
     /// Extract entry points from package.json fields.
@@ -827,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn package_json_required_peer_dependency_names_excludes_optional_peers() {
+    fn package_json_peer_dependency_names_include_optional_peers() {
         let pkg: PackageJson = serde_json::from_str(
             r#"{
             "peerDependencies": {"react": "^18", "typescript": "^5"},
@@ -835,7 +823,9 @@ mod tests {
         }"#,
         )
         .unwrap();
-        assert_eq!(pkg.required_peer_dependency_names(), vec!["react"]);
+        let mut names = pkg.peer_dependency_names();
+        names.sort_unstable();
+        assert_eq!(names, vec!["react", "typescript"]);
     }
 
     #[test]
