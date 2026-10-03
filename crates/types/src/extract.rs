@@ -222,6 +222,18 @@ pub struct ModuleInfo {
     /// module, including a `"use server"` file with a non-action value
     /// export. Captured only by JS/TS extraction.
     pub is_server_action_module: bool,
+    /// `true` when TypeScript reads this file as adding to the global scope:
+    /// a script file (no top-level import or export), or a module file with a
+    /// top-level `declare global` block or string-named `declare module`
+    /// block. Read only for declaration files (`.d.ts`, `.d.mts`, `.d.cts`):
+    /// a declaration file without global declarations is seeded as an entry
+    /// point only when something points to it. Captured only by JS/TS
+    /// extraction; `false` for every other module.
+    pub has_global_declarations: bool,
+    /// Raw `path` values of `/// <reference path="..." />` directives in this
+    /// file, in source order. A declaration file named by one stays an entry
+    /// point. Captured only by JS/TS extraction.
+    pub triple_slash_reference_paths: Box<[String]>,
     /// Local names of import bindings that ARE referenced somewhere in this file
     /// (script value/type position OR template/markup). The complement of
     /// `unused_import_bindings` among `imports`. Derived by
@@ -452,6 +464,8 @@ impl ModuleInfo {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             is_server_action_module: false,
+            has_global_declarations: false,
+            triple_slash_reference_paths: Box::default(),
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             has_props_attrs_fallthrough: false,
@@ -3729,7 +3743,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1400);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1416);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -4358,6 +4372,8 @@ mod tests {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             is_server_action_module: false,
+            has_global_declarations: false,
+            triple_slash_reference_paths: Box::default(),
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             has_props_attrs_fallthrough: false,

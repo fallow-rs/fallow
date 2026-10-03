@@ -114,6 +114,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An orphan module declaration file is now reported as an unused file.**
+  Before, fallow made every `.d.ts`, `.d.mts` and `.d.cts` file an entry
+  point and never reported one, so a stale declaration file and every module
+  that only it imported stayed used. Now a declaration file that is a module
+  (it has a top-level import or export and no `declare global` or
+  `declare module` block) is an entry point only when something points to
+  it: a sibling with the same stem (`foo.js` or `foo.ts` next to
+  `foo.d.ts`, `styles.css` next to `styles.css.d.ts`), a package.json `types`,
+  `typings`, `typesVersions` or `exports` `types` condition, a
+  `/// <reference path>` directive, or a tsconfig or jsconfig in its
+  directory chain whose `files`, `include` (everything below the config
+  when it sets neither) without an `exclude` match, or `typeRoots` covers
+  it. Otherwise fallow reports the file, and its imports no longer keep
+  other modules reachable. A reachable import still makes the file used.
+  Script-style declaration files and files with a `declare global` or
+  `declare module` block stay entry points. To keep such a file, add it to
+  `ignorePatterns` or add a `// fallow-ignore-file unused-file` comment.
+  The extraction cache version changes, so the first run after the upgrade
+  parses all files again.
+
 - **A `*` in a package `exports` target now matches files in nested
   directories.** Before, fallow expanded the `*` like a shell glob, so it
   matched only one path segment. With `"./*": "./src/*.ts"`, fallow did not

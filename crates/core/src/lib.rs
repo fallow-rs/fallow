@@ -1216,12 +1216,14 @@ fn try_load_analysis_graph_cache(
 
     let t = Instant::now();
     input.progress.set_stage("loading module graph cache...");
+    let unseeded_declaration_files = orphan_module_declaration_files(input, modules);
     let current = build_graph_cache_manifest(
         input.config,
         input.plugin_result,
         &entry_points.entry_points,
         input.files,
         modules,
+        &unseeded_declaration_files,
     );
     let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir).map_err(Some)?;
     if store.manifest.matches_inputs(&current) {
@@ -1333,6 +1335,7 @@ fn build_analysis_graph_timed(
 ) -> TimedGraph {
     let t = Instant::now();
     input.progress.set_stage("building module graph...");
+    let unseeded_declaration_files = orphan_module_declaration_files(input, modules);
     let mut graph = build_analysis_graph(&BuildAnalysisGraphInput {
         config: input.config,
         plugin_result: input.plugin_result,
@@ -1341,6 +1344,7 @@ fn build_analysis_graph_timed(
         files: input.files,
         modules,
         workspaces: input.workspaces,
+        unseeded_declaration_files: &unseeded_declaration_files,
     });
     credit_bin_path_references(
         &mut graph,
@@ -1351,6 +1355,15 @@ fn build_analysis_graph_timed(
         graph,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
     }
+}
+
+/// The orphan module declaration files of this run, which the graph does not
+/// seed as entry points. See [`discover::find_orphan_module_declaration_files`].
+fn orphan_module_declaration_files(
+    input: &AnalysisCoreSharedInput<'_>,
+    modules: &[extract::ModuleInfo],
+) -> FxHashSet<discover::FileId> {
+    discover::find_orphan_module_declaration_files(&input.config.root, input.files, modules)
 }
 
 fn release_resolution_payloads(modules: &mut [extract::ModuleInfo]) {
@@ -1775,6 +1788,7 @@ struct BuildAnalysisGraphInput<'a> {
     files: &'a [discover::DiscoveredFile],
     modules: &'a [extract::ModuleInfo],
     workspaces: &'a [fallow_config::WorkspaceInfo],
+    unseeded_declaration_files: &'a FxHashSet<discover::FileId>,
 }
 
 /// Build the analysis graph and persist it for the next identical run.
@@ -1793,16 +1807,20 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
             input.entry_points,
             input.files,
             input.modules,
+            input.unseeded_declaration_files,
         )
     });
 
-    let mut graph = graph::ModuleGraph::build_with_reachability_roots_and_replacements(
+    let mut graph = graph::ModuleGraph::build_with_declaration_seeding(
         &input.project.modules,
         &input.project.replaced_module_targets,
-        &input.entry_points.all,
-        &input.entry_points.runtime,
-        &input.entry_points.test,
+        &graph::ReachabilityRoots {
+            all: &input.entry_points.all,
+            runtime: &input.entry_points.runtime,
+            test: &input.entry_points.test,
+        },
         input.files,
+        input.unseeded_declaration_files,
     );
     credit_package_path_references(&mut graph, input.modules);
     credit_workspace_package_usage(&mut graph, &input.project.modules, input.workspaces);
@@ -1838,10 +1856,16 @@ fn build_graph_cache_manifest(
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
     modules: &[extract::ModuleInfo],
+    unseeded_declaration_files: &FxHashSet<discover::FileId>,
 ) -> graph_cache::GraphCacheManifest {
     let mode = graph_cache::GraphCacheMode::new(
         resolver_options_hash(config),
-        entry_points_hash(entry_points, &config.root),
+        entry_points_hash(
+            entry_points,
+            files,
+            unseeded_declaration_files,
+            &config.root,
+        ),
         plugin_config_hash(plugin_result, &config.root),
     );
     // The parse stage already hashed every file it read, so keying the manifest
@@ -1898,9 +1922,13 @@ fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
 }
 
 /// Hash the entry-point set (sorted root-relative paths per role) so any change
-/// in reachability roots misses the cache.
+/// in reachability roots misses the cache. The declaration files the graph
+/// does not seed are reachability roots too: they depend on package.json,
+/// tsconfig and sibling files the manifest does not track.
 fn entry_points_hash(
     entry_points: &discover::CategorizedEntryPoints,
+    files: &[discover::DiscoveredFile],
+    unseeded_declaration_files: &FxHashSet<discover::FileId>,
     root: &std::path::Path,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -1915,6 +1943,16 @@ fn entry_points_hash(
         for key in keys {
             key.hash(&mut hasher);
         }
+    }
+    let mut unseeded: Vec<String> = files
+        .iter()
+        .filter(|file| unseeded_declaration_files.contains(&file.id))
+        .map(|file| root_relative_key(root, &file.path))
+        .collect();
+    unseeded.sort_unstable();
+    unseeded.len().hash(&mut hasher);
+    for key in unseeded {
+        key.hash(&mut hasher);
     }
     hasher.finish()
 }

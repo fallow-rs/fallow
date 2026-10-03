@@ -371,6 +371,8 @@ mod issue_2940_ignore_pattern_negation;
 mod issue_2952_package_imports_workspace_dep;
 #[path = "integration_test/issue_2954_lint_targets_not_entries.rs"]
 mod issue_2954_lint_targets_not_entries;
+#[path = "integration_test/orphan_module_declaration_files.rs"]
+mod orphan_module_declaration_files;
 #[path = "integration_test/workspace_hoisted_package_imports.rs"]
 mod workspace_hoisted_package_imports;
 

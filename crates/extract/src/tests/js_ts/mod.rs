@@ -3,6 +3,7 @@ mod callee_uses;
 mod cjs;
 mod classes;
 mod complexity;
+mod declaration_scope;
 mod dynamic_imports;
 mod exports;
 mod html_tagged_template;

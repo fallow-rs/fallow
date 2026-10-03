@@ -1,0 +1,18 @@
+{
+  "name": "orphan-module-declaration-files",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "types/public.d.ts",
+  "typesVersions": {
+    "*": {
+      "versioned/*": ["types/versioned/*"]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./types/exported.d.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}
