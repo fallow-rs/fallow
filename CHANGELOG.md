@@ -82,6 +82,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A command-line tool from the tooling catalogue needs a reference to
+  count as used.** Before, a catalogue entry such as `oxlint`, `tsx`,
+  `npm-run-all` or `lint-staged` in `devDependencies` was credited by name,
+  so a tool that nothing runs never reported as unused, while
+  `--trace-dependency` called it unused. Now a catalogue entry marked as a
+  command-line tool is credited when a package.json script, a CI workflow
+  or a git hook runs it, when its own config file exists (a plugin config,
+  a catalogue `config` pattern such as `.jscpd.json`, or a package.json key
+  named after the tool), or when a plugin credits it. Catalogue entries
+  that are libraries rather than commands, such as `sass` or `jsdom`, keep
+  the credit by name, and `--trace-dependency` now reports that credit as
+  `known-tooling`, or `known-tooling-config` with the config file. Use
+  `ignoreDependencies` for a tool that the project runs in a way fallow
+  does not see, such as an editor integration.
 - **A `@types/X` devDependency needs a target or ambient globals to count
   as used.** Before, every `@types/` package in `devDependencies` was
   credited by name, so `@types/better-sqlite3` stayed silent in a project

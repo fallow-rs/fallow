@@ -11576,9 +11576,11 @@ export interface ToolingCredit {
  * package.json script, a CI workflow or a git hook runs one of that
  * plugin's packages, `ambient-types` for a type package that declares
  * globals, `types-target` when the project declares or imports the
- * package that a `@types/` package types, and `types-config` when a
- * config file, such as a tsconfig `types` entry, names the type package.
- * The set is open.
+ * package that a `@types/` package types, `types-config` when a config
+ * file, such as a tsconfig `types` entry, names the type package,
+ * `known-tooling` for a library from the tooling catalogue, and
+ * `known-tooling-config` when a command-line tool from the catalogue has
+ * its own config file. The set is open.
  */
 reason: string
 /**
@@ -11586,8 +11588,9 @@ reason: string
  */
 plugin?: (string | null)
 /**
- * The config file the plugin found, relative to the project root, for
- * `plugin-config`. `package.json` when the config is a package.json key.
+ * The config file found, relative to the project root, for
+ * `plugin-config` and `known-tooling-config`. A `package.json` path when
+ * the config is a package.json key.
  */
 config?: (string | null)
 /**

@@ -29535,7 +29535,7 @@
       "properties": {
         "reason": {
           "type": "string",
-          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, and `types-config` when a\nconfig file, such as a tsconfig `types` entry, names the type package.\nThe set is open."
+          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, `types-config` when a config\nfile, such as a tsconfig `types` entry, names the type package,\n`known-tooling` for a library from the tooling catalogue, and\n`known-tooling-config` when a command-line tool from the catalogue has\nits own config file. The set is open."
         },
         "plugin": {
           "type": [
@@ -29549,7 +29549,7 @@
             "string",
             "null"
           ],
-          "description": "The config file the plugin found, relative to the project root, for\n`plugin-config`. `package.json` when the config is a package.json key."
+          "description": "The config file found, relative to the project root, for\n`plugin-config` and `known-tooling-config`. A `package.json` path when\nthe config is a package.json key."
         },
         "reference": {
           "type": [

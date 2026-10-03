@@ -10,6 +10,7 @@ fn collect_unused_empty_deps_returns_empty() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };
@@ -41,6 +42,7 @@ fn collect_unused_all_used_returns_empty() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };
@@ -73,6 +75,7 @@ fn collect_unused_some_unused_are_flagged() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };
@@ -116,6 +119,7 @@ fn collect_unused_implicit_filter_skips_react_dom() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };
@@ -149,6 +153,7 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };
@@ -174,7 +179,7 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
 }
 
 #[test]
-fn collect_unused_known_tooling_filter_skips_jest() {
+fn collect_unused_known_tooling_filter_credits_library_and_needs_cli_reference() {
     let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
@@ -182,6 +187,7 @@ fn collect_unused_known_tooling_filter_skips_jest() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };
@@ -192,18 +198,40 @@ fn collect_unused_known_tooling_filter_skips_jest() {
         check_plugin_tooling: false,
         plugin_tooling_needs_evidence: false,
     };
-    let deps = vec!["jest".to_string(), "my-lib".to_string()];
+    // `jsdom` is a catalogue library, credited by name. `jest` is a catalogue
+    // command-line tool, credited only by a reference or its own config.
+    let deps = vec![
+        "jsdom".to_string(),
+        "jest".to_string(),
+        "my-lib".to_string(),
+    ];
+    let result = collect_unused_for_category(UnusedCategoryInput {
+        dep_names: deps.clone(),
+        category: &category,
+        shared: &shared,
+        is_used: &|_| false,
+        used_in_workspaces: &|_| Vec::new(),
+        pkg_path: Path::new("/project/package.json"),
+        pkg_content: None,
+    });
+    let names: Vec<&str> = result.iter().map(|d| d.package_name.as_str()).collect();
+    assert_eq!(names, vec!["jest", "my-lib"]);
+
     let result = collect_unused_for_category(UnusedCategoryInput {
         dep_names: deps,
         category: &category,
         shared: &shared,
         is_used: &|_| false,
         used_in_workspaces: &|_| Vec::new(),
-        pkg_path: Path::new("/pkg.json"),
-        pkg_content: None,
+        pkg_path: Path::new("/project/package.json"),
+        pkg_content: Some(r#"{ "jest": { "testEnvironment": "node" } }"#),
     });
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].package_name, "my-lib");
+    let names: Vec<&str> = result.iter().map(|d| d.package_name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["my-lib"],
+        "a package.json key named after the tool is its own config"
+    );
 }
 
 #[test]
@@ -221,6 +249,7 @@ fn collect_unused_plugin_tooling_filter() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };
@@ -260,6 +289,7 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
         declared_packages: &pt,
+        project_root: Path::new("/project"),
         script_used: &su,
         ignore_deps: &id,
     };

@@ -731,6 +731,7 @@ impl<'a> AnalysisSession<'a> {
         plugins::push_tooling_trace_credits(
             &mut trace_provenance,
             &self.config.root,
+            self.workspaces(),
             &plugin_result,
         );
         let mut output = assemble_full_output(
@@ -878,6 +879,7 @@ impl DeadCodeBackendPrelude<'_> {
         plugins::push_tooling_trace_credits(
             &mut provenance,
             &self.config.root,
+            self.discovery.workspaces(),
             &self.plugin_result,
         );
         provenance

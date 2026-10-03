@@ -1,0 +1,1 @@
+npx cross-env CI=1 node scripts/check.js
