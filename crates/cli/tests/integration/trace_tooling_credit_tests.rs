@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 const FIXTURE: &str = "plugin-tooling-credit";
 const TYPES_FIXTURE: &str = "types-package-credit";
+const CATALOGUE_FIXTURE: &str = "catalogue-cli-credit";
 
 fn trace(package: &str) -> Value {
     trace_in(FIXTURE, package)
@@ -106,6 +107,31 @@ fn type_package_credits_name_their_evidence() {
     assert!(uuid.get("tooling_credit").is_none(), "{uuid:#}");
 }
 
+#[test]
+fn catalogue_credits_name_their_evidence() {
+    let sass = trace_in(CATALOGUE_FIXTURE, "sass");
+    assert_eq!(sass["is_used"], true, "{sass:#}");
+    assert_eq!(
+        sass["tooling_credit"],
+        json!({ "reason": "known-tooling" }),
+        "{sass:#}"
+    );
+
+    let jscpd = trace_in(CATALOGUE_FIXTURE, "jscpd");
+    assert_eq!(
+        jscpd["tooling_credit"],
+        json!({ "reason": "known-tooling-config", "config": ".jscpd.json" }),
+        "{jscpd:#}"
+    );
+
+    let lint_staged = trace_in(CATALOGUE_FIXTURE, "lint-staged");
+    assert_eq!(lint_staged["is_used"], true, "{lint_staged:#}");
+
+    let tsx = trace_in(CATALOGUE_FIXTURE, "tsx");
+    assert_eq!(tsx["is_used"], false, "{tsx:#}");
+    assert!(tsx.get("tooling_credit").is_none(), "{tsx:#}");
+}
+
 fn assert_trace_agrees_with_report(fixture: &str) {
     let root = fixture_path(fixture);
     let report = parse_json(&run_fallow_in_root(
@@ -143,4 +169,5 @@ fn assert_trace_agrees_with_report(fixture: &str) {
 fn the_trace_agrees_with_the_report_for_every_dev_dependency() {
     assert_trace_agrees_with_report(FIXTURE);
     assert_trace_agrees_with_report(TYPES_FIXTURE);
+    assert_trace_agrees_with_report(CATALOGUE_FIXTURE);
 }

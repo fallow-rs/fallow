@@ -146,6 +146,15 @@ fn has_glob_syntax(pattern: &str) -> bool {
     pattern.contains(['*', '?', '['])
 }
 
+/// The first existing file under one of `roots` that one of the root-anchored
+/// `patterns` names.
+pub fn find_config_file<'a>(
+    patterns: impl Iterator<Item = &'a str>,
+    roots: &[&Path],
+) -> Option<PathBuf> {
+    find_own_file(patterns, roots, &[])
+}
+
 /// The first existing file under one of `roots` that one of `patterns` names.
 ///
 /// A root-anchored pattern is probed on the filesystem and stops at the first

@@ -1679,3 +1679,31 @@ fn types_dev_dependency_needs_target_or_ambient_globals() {
         "only the type packages without a target, a tsconfig entry or ambient globals should be reported"
     );
 }
+
+/// A command-line tool from the tooling catalogue is credited only when a
+/// package.json script, a CI workflow or a git hook runs it, or when its own
+/// config file exists. A catalogue entry that is not a command-line tool,
+/// such as `sass`, keeps its credit.
+#[test]
+fn catalogue_cli_dev_dependency_needs_reference_or_config() {
+    let root = fixture_path("catalogue-cli-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    // Credited: concurrently (a script), rimraf (a CI workflow), cross-env (a
+    // husky hook), prettier (a lint-staged command and `.prettierrc`),
+    // lint-staged (its package.json key), jscpd (`.jscpd.json`), madge
+    // (`.madgerc`) and sass (not a command-line tool).
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["npm-run-all", "oxlint", "tsx"],
+        "only the command-line tools without a reference or a config file should be reported"
+    );
+}

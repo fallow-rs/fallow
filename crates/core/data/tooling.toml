@@ -1,9 +1,10 @@
 # Community-maintainable catalogue of known dev tooling packages.
 #
-# Packages listed here are never reported as unused devDependencies, because
-# they are used via the CLI or config files rather than imported in application
-# source. This complements the per-plugin `tooling_dependencies()` lists with
-# tooling that is not tied to any single framework plugin.
+# Packages listed here are tooling: they are used via the CLI or config files
+# rather than imported in application source. See `cli` and [[ambient_types]]
+# below for the entries that need a reference to count as used. This
+# complements the per-plugin `tooling_dependencies()` lists with tooling that
+# is not tied to any single framework plugin.
 #
 # This file is the single source of truth: it is embedded into the binary via
 # `include_str!` and parsed once at startup (see `crates/core/src/plugins/tooling.rs`).
@@ -24,6 +25,13 @@
 # `notes` (on prefix) and `ecosystem` (on exact) are optional, for human
 # context and grouping in the diff. They do not affect matching.
 #
+# `cli = true` marks a command-line tool. A command-line tool in
+# `devDependencies` is credited only when a package.json script, a CI workflow
+# or a git hook runs it, when its own config file exists, or when a plugin
+# credits it. `config` lists the config file patterns of a tool that no
+# plugin covers, relative to the package root or the project root. An entry
+# without `cli` is credited by name.
+#
 # The `@types/` prefix does not credit a type package in `devDependencies` on
 # its own. A `@types/X` package is credited there when the project declares X,
 # imports X or names X in a tsconfig `types` entry, or when it is listed under
@@ -37,9 +45,11 @@ notes = "TypeScript type definitions"
 
 [[prefix]]
 pattern = "husky"
+cli = true
 
 [[prefix]]
 pattern = "lint-staged"
+cli = true
 
 [[prefix]]
 pattern = "commitlint"
@@ -80,6 +90,7 @@ pattern = "@secretlint/"
 
 [[prefix]]
 pattern = "oxlint"
+cli = true
 
 [[prefix]]
 pattern = "@semantic-release/"
@@ -120,42 +131,52 @@ ecosystem = "core"
 [[exact]]
 name = "prettier"
 ecosystem = "formatting"
+cli = true
 
 [[exact]]
 name = "turbo"
 ecosystem = "monorepo"
+cli = true
 
 [[exact]]
 name = "concurrently"
 ecosystem = "scripts"
+cli = true
 
 [[exact]]
 name = "cross-env"
 ecosystem = "scripts"
+cli = true
 
 [[exact]]
 name = "rimraf"
 ecosystem = "scripts"
+cli = true
 
 [[exact]]
 name = "npm-run-all"
 ecosystem = "scripts"
+cli = true
 
 [[exact]]
 name = "npm-run-all2"
 ecosystem = "scripts"
+cli = true
 
 [[exact]]
 name = "nodemon"
 ecosystem = "scripts"
+cli = true
 
 [[exact]]
 name = "ts-node"
 ecosystem = "runtime"
+cli = true
 
 [[exact]]
 name = "tsx"
 ecosystem = "runtime"
+cli = true
 
 [[exact]]
 name = "knip"
@@ -164,18 +185,23 @@ ecosystem = "analysis"
 [[exact]]
 name = "fallow"
 ecosystem = "analysis"
+cli = true
+config = [".fallowrc.json", ".fallowrc.jsonc", "fallow.toml", ".fallow.toml"]
 
 [[exact]]
 name = "jest"
 ecosystem = "testing"
+cli = true
 
 [[exact]]
 name = "vitest"
 ecosystem = "testing"
+cli = true
 
 [[exact]]
 name = "tap"
 ecosystem = "testing"
+cli = true
 
 [[exact]]
 name = "happy-dom"
@@ -188,6 +214,7 @@ ecosystem = "testing"
 [[exact]]
 name = "vite"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "sass"
@@ -200,26 +227,33 @@ ecosystem = "styling"
 [[exact]]
 name = "webpack"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "webpack-cli"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "webpack-dev-server"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "esbuild"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "rollup"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "swc"
 ecosystem = "transpiler"
+cli = true
+config = [".swcrc"]
 
 [[exact]]
 name = "@swc/core"
@@ -244,14 +278,18 @@ ecosystem = "build"
 [[exact]]
 name = "release-it"
 ecosystem = "release"
+cli = true
 
 [[exact]]
 name = "lerna"
 ecosystem = "monorepo"
+cli = true
+config = ["lerna.json"]
 
 [[exact]]
 name = "dotenv-cli"
 ecosystem = "scripts"
+cli = true
 
 [[exact]]
 name = "dotenv-flow"
@@ -260,42 +298,56 @@ ecosystem = "scripts"
 [[exact]]
 name = "oxfmt"
 ecosystem = "formatting"
+cli = true
 
 [[exact]]
 name = "jscpd"
 ecosystem = "analysis"
+cli = true
+config = [".jscpd.json"]
 
 [[exact]]
 name = "npm-check-updates"
 ecosystem = "deps"
+cli = true
+config = [".ncurc.{json,yml,yaml,js,cjs,mjs}"]
 
 [[exact]]
 name = "markdownlint-cli"
 ecosystem = "linting"
+cli = true
 
 [[exact]]
 name = "npm-package-json-lint"
 ecosystem = "linting"
+cli = true
+config = [".npmpackagejsonlintrc.json", "npmpackagejsonlint.config.js"]
 
 [[exact]]
 name = "synp"
 ecosystem = "deps"
+cli = true
 
 [[exact]]
 name = "flow-bin"
 ecosystem = "types"
+cli = true
+config = [".flowconfig"]
 
 [[exact]]
 name = "i18next-parser"
 ecosystem = "i18n"
+cli = true
 
 [[exact]]
 name = "i18next-conv"
 ecosystem = "i18n"
+cli = true
 
 [[exact]]
 name = "webpack-bundle-analyzer"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "@vitejs/plugin-vue"
@@ -308,30 +360,39 @@ ecosystem = "bundler"
 [[exact]]
 name = "next-sitemap"
 ecosystem = "build"
+cli = true
+config = ["next-sitemap.config.{js,cjs,mjs}"]
 
 [[exact]]
 name = "tsup"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "unbuild"
 ecosystem = "bundler"
+cli = true
+config = ["build.config.{ts,js,mjs,cjs}"]
 
 [[exact]]
 name = "typedoc"
 ecosystem = "docs"
+cli = true
 
 [[exact]]
 name = "nx"
 ecosystem = "monorepo"
+cli = true
 
 [[exact]]
 name = "@manypkg/cli"
 ecosystem = "monorepo"
+cli = true
 
 [[exact]]
 name = "vue-tsc"
 ecosystem = "types"
+cli = true
 
 [[exact]]
 name = "@vue/tsconfig"
@@ -348,6 +409,7 @@ ecosystem = "config"
 [[exact]]
 name = "@typescript/native-preview"
 ecosystem = "core"
+cli = true
 
 [[exact]]
 name = "tw-animate-css"
@@ -364,6 +426,7 @@ ecosystem = "bundler"
 [[exact]]
 name = "rolldown"
 ecosystem = "bundler"
+cli = true
 
 [[exact]]
 name = "rolldown-vite"
@@ -376,6 +439,7 @@ ecosystem = "transpiler"
 [[exact]]
 name = "playwright"
 ecosystem = "testing"
+cli = true
 
 [[exact]]
 name = "puppeteer"
@@ -384,10 +448,14 @@ ecosystem = "testing"
 [[exact]]
 name = "madge"
 ecosystem = "analysis"
+cli = true
+config = [".madgerc"]
 
 [[exact]]
 name = "patch-package"
 ecosystem = "deps"
+cli = true
+config = ["patches/*.patch"]
 
 [[exact]]
 name = "electron"
@@ -396,10 +464,12 @@ ecosystem = "build"
 [[exact]]
 name = "electron-builder"
 ecosystem = "build"
+cli = true
 
 [[exact]]
 name = "electron-vite"
 ecosystem = "build"
+cli = true
 
 # ── Ambient global type packages ──────────────────────────────────────────
 #

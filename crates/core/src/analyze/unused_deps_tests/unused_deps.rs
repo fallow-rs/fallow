@@ -22,21 +22,30 @@ fn unused_dep_flagged_when_never_imported() {
 }
 
 #[test]
-fn known_tooling_dev_deps_not_flagged_as_unused() {
+fn known_tooling_dev_deps_credit_libraries_and_referenced_cli_tools() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
-    let pkg = make_pkg(&[], &["jest", "vitest"], &[]);
+    let pkg = make_pkg(&[], &["jsdom", "sass", "jest", "vitest"], &[]);
     let config = test_config(PathBuf::from("/project"));
 
     let (unused, unused_dev, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
-
     assert!(unused.is_empty());
-    assert!(
-        !unused_dev.iter().any(|d| d.package_name == "jest"),
-        "jest is a known tooling dep and should be filtered"
+    let mut names: Vec<&str> = unused_dev.iter().map(|d| d.package_name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec!["jest", "vitest"],
+        "catalogue libraries keep their credit, command-line tools need a reference"
     );
+
+    let mut plugin_result = AggregatedPluginResult::default();
+    plugin_result
+        .script_used_packages
+        .extend(["jest".to_string(), "vitest".to_string()]);
+    let (_, unused_dev, _) =
+        find_unused_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
     assert!(
-        !unused_dev.iter().any(|d| d.package_name == "vitest"),
-        "vitest is a known tooling dep and should be filtered"
+        unused_dev.is_empty(),
+        "a script reference credits the command-line tools, found: {unused_dev:?}"
     );
 }
 

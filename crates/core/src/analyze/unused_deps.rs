@@ -91,6 +91,9 @@ pub struct SharedDepSets<'a> {
     /// Every dependency name the project declares, in any manifest and any
     /// section. A declared `X` credits a `@types/X` devDependency.
     pub declared_packages: &'a FxHashSet<&'a str>,
+    /// The project root, where a command-line tool's own config file may
+    /// live for any package.
+    pub project_root: &'a Path,
     pub script_used: &'a FxHashSet<&'a str>,
     pub ignore_deps: &'a IgnoreDependencyMatcher,
 }
@@ -619,8 +622,10 @@ fn shared_dep_sets<'a>(
     plugin_tooling: &'a PluginToolingSets<'a>,
     script_used: &'a FxHashSet<&'a str>,
     ignore_deps: &'a IgnoreDependencyMatcher,
+    project_root: &'a Path,
 ) -> SharedDepSets<'a> {
     SharedDepSets {
+        project_root,
         plugin_referenced,
         package_plugin_referenced,
         plugin_tooling: &plugin_tooling.declared,
@@ -669,7 +674,13 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
         .filter(|dep| !input.category.check_implicit || !is_implicit_dependency(dep))
         .filter(|dep| {
             !input.category.check_known_tooling
-                || !is_credited_known_tooling(dep, input.shared, input.is_used)
+                || !is_credited_known_tooling(
+                    dep,
+                    input.shared,
+                    input.is_used,
+                    input.pkg_path,
+                    input.pkg_content,
+                )
         })
         .filter(|dep| {
             let tooling = if input.category.plugin_tooling_needs_evidence {
@@ -707,12 +718,16 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
 /// An ambient global type package (`@types/node`, `bun-types`) is always
 /// credited. Any other `@types/X` package is credited only when the project
 /// declares `X` or uses `X` where `is_used` looks. A tsconfig `types` entry
-/// credits it through the plugin-referenced set. Every other name falls back
-/// to the tooling catalogue.
+/// credits it through the plugin-referenced set. A command-line tool from the
+/// catalogue is credited here only when its own config file exists; a
+/// script, CI workflow or git hook reference credits it through the
+/// script-used set. Every other name falls back to the tooling catalogue.
 fn is_credited_known_tooling(
     dep: &str,
     shared: &SharedDepSets<'_>,
     is_used: &dyn Fn(&str) -> bool,
+    pkg_path: &Path,
+    pkg_content: Option<&str>,
 ) -> bool {
     if crate::plugins::is_ambient_types_package(dep) {
         return true;
@@ -720,7 +735,38 @@ fn is_credited_known_tooling(
     if let Some(target) = crate::plugins::types_package_target(dep) {
         return shared.declared_packages.contains(target.as_str()) || is_used(&target);
     }
+    if let Some(config) = crate::plugins::cli_tooling_config_patterns(dep) {
+        return cli_tool_has_own_config(dep, config, shared.project_root, pkg_path, pkg_content);
+    }
     crate::plugins::is_known_tooling_dependency(dep)
+}
+
+/// Whether a command-line tool has a config file of its own next to the
+/// declaring package.json or at the project root, or its config under a
+/// package.json key named after it.
+fn cli_tool_has_own_config(
+    dep: &str,
+    config: &[String],
+    project_root: &Path,
+    pkg_path: &Path,
+    pkg_content: Option<&str>,
+) -> bool {
+    if pkg_content
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok())
+        .is_some_and(|manifest| manifest.get(dep).is_some())
+    {
+        return true;
+    }
+    if config.is_empty() {
+        return false;
+    }
+    let package_root = pkg_path.parent().unwrap_or(project_root);
+    let roots: &[&Path] = if package_root == project_root {
+        &[project_root]
+    } else {
+        &[package_root, project_root]
+    };
+    crate::plugins::registry::find_config_file(config.iter().map(String::as_str), roots).is_some()
 }
 
 /// Build a reverse index from package name to workspace roots that import it.
@@ -950,7 +996,7 @@ struct UnusedDependencyScan<'a> {
 }
 
 impl<'a> UnusedDependencyScan<'a> {
-    fn root_shared(&'a self, config: &ResolvedConfig) -> SharedDepSets<'a> {
+    fn root_shared(&'a self, config: &'a ResolvedConfig) -> SharedDepSets<'a> {
         shared_dep_sets(
             &self.plugin_referenced,
             self.package_referenced
@@ -959,6 +1005,7 @@ impl<'a> UnusedDependencyScan<'a> {
             &self.plugin_tooling,
             &self.script_used,
             self.ignore_deps,
+            &config.root,
         )
     }
 
@@ -1203,6 +1250,7 @@ fn collect_workspace_unused_dependencies<'a>(
         inputs.plugin_tooling,
         inputs.script_used,
         inputs.ignore_deps,
+        &inputs.config.root,
     );
 
     let ws_root = ws.root.as_path();

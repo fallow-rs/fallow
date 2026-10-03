@@ -17,6 +17,8 @@ pub(crate) mod builtin;
 mod helpers;
 mod tooling_evidence;
 
+pub(crate) use tooling_evidence::find_config_file;
+
 /// Names of every built-in framework plugin, in registry order.
 ///
 /// Derived live from the plugin registry so capability introspection

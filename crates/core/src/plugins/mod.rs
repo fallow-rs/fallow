@@ -365,6 +365,7 @@ pub fn federation_trace_provenance(
 pub fn push_tooling_trace_credits(
     provenance: &mut fallow_types::trace::TraceProvenance,
     root: &Path,
+    workspaces: &[fallow_config::WorkspaceInfo],
     plugin_result: &AggregatedPluginResult,
 ) {
     for entry in &plugin_result.plugin_tooling {
@@ -390,6 +391,70 @@ pub fn push_tooling_trace_credits(
         }
     }
     push_types_trace_credits(provenance, plugin_result);
+    push_catalogue_trace_credits(provenance, root, workspaces, plugin_result);
+}
+
+/// Record why the unused devDependency check credits each catalogue entry in
+/// `devDependencies` that the trace would otherwise call unused: a library
+/// entry by name, a command-line tool by its own config file or its
+/// package.json key.
+fn push_catalogue_trace_credits(
+    provenance: &mut fallow_types::trace::TraceProvenance,
+    root: &Path,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    plugin_result: &AggregatedPluginResult,
+) {
+    let mut package_roots: Vec<&Path> = vec![root];
+    package_roots.extend(
+        workspaces
+            .iter()
+            .map(|ws| ws.root.as_path())
+            .filter(|ws_root| *ws_root != root),
+    );
+    let manifests: Vec<(PathBuf, serde_json::Value)> = package_roots
+        .iter()
+        .filter_map(|package_root| {
+            let path = package_root.join("package.json");
+            let content = std::fs::read_to_string(&path).ok()?;
+            serde_json::from_str(&content)
+                .ok()
+                .map(|value| (path, value))
+        })
+        .collect();
+    let mut names: Vec<&String> = plugin_result.dev_dependency_names.iter().collect();
+    names.sort_unstable();
+    for name in names {
+        if is_ambient_types_package(name) || types_package_target(name).is_some() {
+            continue;
+        }
+        let credit = match cli_tooling_config_patterns(name) {
+            None if is_known_tooling_dependency(name) => fallow_types::trace::ToolingCredit {
+                reason: "known-tooling".to_owned(),
+                plugin: None,
+                config: None,
+                reference: None,
+            },
+            None => continue,
+            Some(patterns) => {
+                let manifest_key = manifests
+                    .iter()
+                    .find(|(_, manifest)| manifest.get(name.as_str()).is_some())
+                    .map(|(path, _)| path.clone());
+                let Some(config) = manifest_key.or_else(|| {
+                    registry::find_config_file(patterns.iter().map(String::as_str), &package_roots)
+                }) else {
+                    continue;
+                };
+                fallow_types::trace::ToolingCredit {
+                    reason: "known-tooling-config".to_owned(),
+                    plugin: None,
+                    config: Some(config.strip_prefix(root).unwrap_or(&config).to_path_buf()),
+                    reference: None,
+                }
+            }
+        };
+        provenance.push_tooling_credit(name.clone(), credit);
+    }
 }
 
 /// Record why the unused devDependency check credits each type package in
@@ -1779,7 +1844,9 @@ pub use registry::{
     AggregatedPluginResult, PluginRegistry, PluginToolingDependencies, PluginToolingEvidence,
 };
 pub use tooling::types_package_target;
-pub(crate) use tooling::{is_ambient_types_package, is_known_tooling_dependency};
+pub(crate) use tooling::{
+    cli_tooling_config_patterns, is_ambient_types_package, is_known_tooling_dependency,
+};
 
 fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {
     let imports = config_parser::extract_imports(source, config_path);
