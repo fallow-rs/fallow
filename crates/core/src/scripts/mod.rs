@@ -206,6 +206,61 @@ fn file_target_tool(binary: &str) -> Option<&'static FileTargetTool> {
         .find(|tool| tool.names.contains(&name))
 }
 
+/// Return `true` when a script bundles with every package left external:
+/// `bun build --packages=external` or `esbuild --packages=external`, also with
+/// the value as a separate argument.
+///
+/// Such a build does not inline the source of a workspace sibling, so the
+/// sibling's own packages are not resolved from the bundling workspace.
+#[must_use]
+pub fn script_externalizes_packages(script: &str) -> bool {
+    shell::split_shell_operators(script)
+        .into_iter()
+        .any(|segment| {
+            let words = shell::split_words(segment);
+            let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
+            command_externalizes_packages(&tokens)
+        })
+}
+
+fn command_externalizes_packages(tokens: &[&str]) -> bool {
+    let Some(idx) = shell::skip_initial_wrappers(tokens, 0) else {
+        return false;
+    };
+    let args_start = if let Some(build_idx) = bun_build_subcommand(tokens, idx) {
+        build_idx + 1
+    } else {
+        let Some(binary_idx) = shell::advance_past_package_manager(tokens, idx) else {
+            return false;
+        };
+        if tool_name(tokens[binary_idx]) != "esbuild" {
+            return false;
+        }
+        binary_idx + 1
+    };
+    let args = tokens.get(args_start..).unwrap_or_default();
+    args.iter().enumerate().any(|(i, arg)| {
+        *arg == "--packages=external"
+            || (*arg == "--packages" && args.get(i + 1) == Some(&"external"))
+    })
+}
+
+/// The index of `build` in `bun [runtime flags] build`, or `None` when the
+/// command at `idx` is not a `bun build` call.
+fn bun_build_subcommand(tokens: &[&str], idx: usize) -> Option<usize> {
+    if tokens.get(idx) != Some(&"bun") {
+        return None;
+    }
+    let mut next = idx + 1;
+    while tokens
+        .get(next)
+        .is_some_and(|token| shell::BUN_RUNTIME_FLAGS.contains(token))
+    {
+        next += 1;
+    }
+    (tokens.get(next) == Some(&"build")).then_some(next)
+}
+
 /// Return `true` when `binary` only reads its file arguments (a formatter,
 /// linter, or checker), so those arguments must not become entry points.
 #[must_use]
@@ -2875,6 +2930,34 @@ fn is_builtin_command(cmd: &str) -> bool {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn script_externalizes_packages_reads_bun_build_and_esbuild() {
+        for script in [
+            "bun build ./src/index.ts --outdir dist --packages=external",
+            "bun build ./src/index.ts --packages external --target node",
+            "tsc --noEmit && bun build src/cli.ts --packages=external",
+            "NODE_ENV=production esbuild src/index.ts --bundle --packages=external",
+            "npx esbuild src/index.ts --bundle --packages external",
+            "bunx esbuild src/index.ts --bundle \"--packages=external\"",
+        ] {
+            assert!(script_externalizes_packages(script), "{script}");
+        }
+    }
+
+    #[test]
+    fn script_externalizes_packages_ignores_other_commands() {
+        for script in [
+            "bun build ./src/index.ts --outdir dist",
+            "bun build ./src/index.ts --external react",
+            "esbuild src/index.ts --bundle --external:react",
+            "bun run build --packages=external",
+            "node scripts/build.mjs --packages=external",
+            "echo bun build --packages=external",
+        ] {
+            assert!(!script_externalizes_packages(script), "{script}");
+        }
+    }
 
     /// Analyze every script value without dependency context.
     fn analyze_scripts(

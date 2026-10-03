@@ -526,6 +526,7 @@ fn manifest<'a>(
         shipped: declared.clone(),
         installed: declared.clone(),
         declared,
+        externalizes_packages: false,
     }
 }
 

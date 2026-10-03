@@ -1,6 +1,7 @@
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
+mod bundle_externalization;
 mod deprecated_exports;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
