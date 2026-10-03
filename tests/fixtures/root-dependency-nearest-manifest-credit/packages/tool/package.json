@@ -1,0 +1,9 @@
+{
+  "name": "tool",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "shared-runtime": "1.0.0",
+    "tool-lib": "1.0.0"
+  }
+}

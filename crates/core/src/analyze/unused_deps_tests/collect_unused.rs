@@ -524,6 +524,7 @@ fn manifest<'a>(
         name: root.to_string(),
         is_private,
         shipped: declared.clone(),
+        installed: declared.clone(),
         declared,
     }
 }
@@ -610,4 +611,45 @@ fn own_declaration_is_not_attributed_to_an_ancestor() {
         ),
         None,
     );
+}
+
+fn chain_installs(
+    file: &str,
+    package_name: &str,
+    manifests: &[super::super::WorkspaceManifest<'_>],
+) -> bool {
+    let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
+    graph.modules[0].path = PathBuf::from(file);
+    let roots: Vec<&Path> = manifests.iter().map(|manifest| manifest.root).collect();
+    let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
+    super::super::workspace_chain_installs(manifests, &ownership, package_name, FileId(0))
+}
+
+#[test]
+fn workspace_chain_installs_through_owner_or_ancestor() {
+    let manifests = [
+        manifest("/project/apps/tool", &["tool-lib"], false),
+        manifest("/project/apps/tool/packages/cli", &["cli-lib"], false),
+    ];
+    let file = "/project/apps/tool/packages/cli/src/index.ts";
+
+    assert!(chain_installs(file, "cli-lib", &manifests));
+    assert!(chain_installs(file, "tool-lib", &manifests));
+    assert!(!chain_installs(file, "root-lib", &manifests));
+    assert!(
+        !chain_installs("/project/src/index.ts", "tool-lib", &manifests),
+        "a file outside every workspace is attributed to the root"
+    );
+}
+
+#[test]
+fn peer_only_declaration_does_not_install() {
+    let mut app = manifest("/project/packages/app", &["react"], false);
+    app.installed.clear();
+
+    assert!(!chain_installs(
+        "/project/packages/app/src/index.ts",
+        "react",
+        &[app]
+    ));
 }

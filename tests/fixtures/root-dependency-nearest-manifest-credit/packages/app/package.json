@@ -1,0 +1,11 @@
+{
+  "name": "app",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "shared-runtime": "1.0.0"
+  },
+  "peerDependencies": {
+    "peer-lib": "1.0.0"
+  }
+}

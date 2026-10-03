@@ -239,6 +239,11 @@ struct WorkspaceManifest<'a> {
     /// private siblings: a sibling's source reaches this workspace whether it is
     /// pulled in for the shipped build or only for the local one.
     declared: FxHashSet<String>,
+    /// Names the package manager installs for this workspace: `dependencies`,
+    /// `devDependencies` and `optionalDependencies`. A `peerDependencies`
+    /// entry alone installs nothing, so a consumer or an ancestor manifest
+    /// still has to provide the package.
+    installed: FxHashSet<String>,
     /// Names declared in a category that travels with the package:
     /// `dependencies`, `optionalDependencies`, and `peerDependencies`.
     /// `devDependencies` are build-time needs of this workspace alone and are
@@ -279,6 +284,12 @@ fn read_workspace_manifests<'a>(
                 name: pkg.name.clone().unwrap_or_else(|| workspace.name.clone()),
                 is_private: pkg.private == Some(true),
                 declared: pkg.all_dependency_names().into_iter().collect(),
+                installed: pkg
+                    .production_dependency_names()
+                    .into_iter()
+                    .chain(pkg.dev_dependency_names())
+                    .chain(pkg.optional_dependency_names())
+                    .collect(),
                 shipped: shipped_dependency_names(&pkg),
             })
         })
@@ -461,6 +472,49 @@ fn ancestor_satisfying_import<'m, 'a>(
         .iter()
         .filter_map(|ancestor| manifests.get(*ancestor))
         .find(|ancestor| ancestor.declared.contains(package_name))
+}
+
+/// Packages whose import in at least one file is attributed to the root
+/// manifest.
+///
+/// Each import is attributed to the nearest manifest that installs the
+/// package: the owning workspace, then its ancestor workspaces, then the root.
+/// A root declaration is therefore used only when some importer lies outside
+/// every workspace, or when no workspace in the importer's chain installs the
+/// package. An importer whose own workspace or an ancestor workspace declares
+/// the package does not keep the root declaration alive.
+fn collect_root_credited_packages<'a>(
+    graph: &'a ModuleGraph,
+    manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+) -> FxHashSet<&'a str> {
+    graph
+        .package_usage
+        .iter()
+        .filter(|(package_name, file_ids)| {
+            file_ids
+                .iter()
+                .any(|id| !workspace_chain_installs(manifests, ownership, package_name, *id))
+        })
+        .map(|(package_name, _)| package_name.as_str())
+        .collect()
+}
+
+/// Return `true` when the workspace that owns file `id`, or one of its
+/// ancestor workspaces, installs `package_name`.
+fn workspace_chain_installs(
+    manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+    package_name: &str,
+    id: FileId,
+) -> bool {
+    let Some(index) = ownership.workspace_index_for_file(id) else {
+        return false;
+    };
+    std::iter::once(index)
+        .chain(ownership.ancestors_of(index).iter().copied())
+        .filter_map(|workspace| manifests.get(workspace))
+        .any(|manifest| manifest.installed.contains(package_name))
 }
 
 fn shared_dep_sets<'a>(
@@ -673,8 +727,12 @@ pub fn find_unused_dependencies(
     );
     let (mut unused_deps, mut unused_dev_deps, mut unused_optional_deps) =
         collect_root_unused_dependencies(pkg, config, &shared, &scan.usage, &linked_workspaces);
-    let root_flagged =
-        root_flagged_dependencies(&unused_deps, &unused_dev_deps, &unused_optional_deps);
+    let root_flagged = root_flagged_dependencies(
+        &unused_deps,
+        &unused_dev_deps,
+        &unused_optional_deps,
+        &scan.usage.used_packages,
+    );
 
     let inputs = scan.workspace_inputs(config, &root_flagged);
     append_workspace_unused_dependencies(
@@ -775,6 +833,9 @@ type UnusedDependencyTriple = (
 /// Package-usage indices shared by the root and per-workspace unused-dependency passes.
 struct DependencyUsageIndices<'a> {
     used_packages: FxHashSet<&'a str>,
+    /// Packages with at least one import attributed to the root manifest, see
+    /// [`collect_root_credited_packages`].
+    root_credited_packages: FxHashSet<&'a str>,
     package_workspace_usage: FxHashMap<String, Vec<PathBuf>>,
     workspace_used_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: FxHashMap<&'a Path, FxHashSet<&'a str>>,
@@ -800,7 +861,9 @@ fn collect_dependency_usage_indices<'a>(
         collect_bundled_workspace_usage(&manifests, &workspace_used_packages);
     let ancestor_credited_packages =
         collect_ancestor_credited_packages(graph, config, &manifests, &ownership);
+    let root_credited_packages = collect_root_credited_packages(graph, &manifests, &ownership);
     DependencyUsageIndices {
+        root_credited_packages,
         package_workspace_usage: collect_package_workspace_usage(
             graph,
             &workspace_roots,
@@ -824,7 +887,7 @@ fn collect_root_unused_dependencies(
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let is_used_globally = |dep: &str| {
-        usage.used_packages.contains(dep)
+        usage.root_credited_packages.contains(dep)
             || usage.root_peer_used.contains(dep)
             || linked_workspaces.contains(dep)
     };
@@ -838,15 +901,22 @@ fn collect_root_unused_dependencies(
     )
 }
 
+/// Root findings for packages that nothing in the project imports.
+///
+/// A workspace does not repeat such a finding for its own declaration. A root
+/// finding for a package that a workspace imports through a nearer manifest is
+/// left out, so the workspace declarations of that package are still checked.
 fn root_flagged_dependencies(
     unused_deps: &[UnusedDependency],
     unused_dev_deps: &[UnusedDependency],
     unused_optional_deps: &[UnusedDependency],
+    used_packages: &FxHashSet<&str>,
 ) -> FxHashSet<String> {
     unused_deps
         .iter()
         .chain(unused_dev_deps)
         .chain(unused_optional_deps)
+        .filter(|d| !used_packages.contains(d.package_name.as_str()))
         .map(|d| d.package_name.clone())
         .collect()
 }
