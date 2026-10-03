@@ -9,6 +9,7 @@ fn collect_unused_empty_deps_returns_empty() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -39,6 +40,7 @@ fn collect_unused_all_used_returns_empty() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -70,6 +72,7 @@ fn collect_unused_some_unused_are_flagged() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -112,6 +115,7 @@ fn collect_unused_implicit_filter_skips_react_dom() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -144,6 +148,7 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -176,6 +181,7 @@ fn collect_unused_known_tooling_filter_skips_jest() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -214,6 +220,7 @@ fn collect_unused_plugin_tooling_filter() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };
@@ -252,6 +259,7 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
         package_plugin_referenced: &pr,
         plugin_tooling: &pt,
         credited_plugin_tooling: &pt,
+        declared_packages: &pt,
         script_used: &su,
         ignore_deps: &id,
     };

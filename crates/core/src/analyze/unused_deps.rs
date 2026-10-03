@@ -88,6 +88,9 @@ pub struct SharedDepSets<'a> {
     pub plugin_tooling: &'a FxHashSet<&'a str>,
     /// The plugin tooling dependencies whose plugin found evidence of use.
     pub credited_plugin_tooling: &'a FxHashSet<&'a str>,
+    /// Every dependency name the project declares, in any manifest and any
+    /// section. A declared `X` credits a `@types/X` devDependency.
+    pub declared_packages: &'a FxHashSet<&'a str>,
     pub script_used: &'a FxHashSet<&'a str>,
     pub ignore_deps: &'a IgnoreDependencyMatcher,
 }
@@ -622,6 +625,7 @@ fn shared_dep_sets<'a>(
         package_plugin_referenced,
         plugin_tooling: &plugin_tooling.declared,
         credited_plugin_tooling: &plugin_tooling.credited,
+        declared_packages: &plugin_tooling.declared_packages,
         script_used,
         ignore_deps,
     }
@@ -629,10 +633,14 @@ fn shared_dep_sets<'a>(
 
 /// The tooling dependencies of the active plugins: every declared one, and
 /// the subset whose plugin found evidence that the project uses it.
+///
+/// It also carries every declared dependency name, which the `@types/X`
+/// credit reads.
 #[derive(Default)]
 struct PluginToolingSets<'a> {
     declared: FxHashSet<&'a str>,
     credited: FxHashSet<&'a str>,
+    declared_packages: FxHashSet<&'a str>,
 }
 
 /// Collect unused dependencies for a single category (prod, dev, or optional).
@@ -660,7 +668,8 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
         .filter(|dep| !input.shared.script_used.contains(dep.as_str()))
         .filter(|dep| !input.category.check_implicit || !is_implicit_dependency(dep))
         .filter(|dep| {
-            !input.category.check_known_tooling || !crate::plugins::is_known_tooling_dependency(dep)
+            !input.category.check_known_tooling
+                || !is_credited_known_tooling(dep, input.shared, input.is_used)
         })
         .filter(|dep| {
             let tooling = if input.category.plugin_tooling_needs_evidence {
@@ -691,6 +700,27 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
             }
         })
         .collect()
+}
+
+/// Whether the unused devDependency check credits `dep` as known tooling.
+///
+/// An ambient global type package (`@types/node`, `bun-types`) is always
+/// credited. Any other `@types/X` package is credited only when the project
+/// declares `X` or uses `X` where `is_used` looks. A tsconfig `types` entry
+/// credits it through the plugin-referenced set. Every other name falls back
+/// to the tooling catalogue.
+fn is_credited_known_tooling(
+    dep: &str,
+    shared: &SharedDepSets<'_>,
+    is_used: &dyn Fn(&str) -> bool,
+) -> bool {
+    if crate::plugins::is_ambient_types_package(dep) {
+        return true;
+    }
+    if let Some(target) = crate::plugins::types_package_target(dep) {
+        return shared.declared_packages.contains(target.as_str()) || is_used(&target);
+    }
+    crate::plugins::is_known_tooling_dependency(dep)
 }
 
 /// Build a reverse index from package name to workspace roots that import it.
@@ -820,12 +850,23 @@ fn plugin_tooling_set(
 /// A plugin's tooling dependencies are credited for devDependencies only when
 /// the plugin found its own config file, or when a package.json script, a CI
 /// workflow or a git hook invokes one of its reference packages.
-fn plugin_tooling_sets(
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-) -> PluginToolingSets<'_> {
+fn plugin_tooling_sets<'a>(
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
+    root_declared: &'a [String],
+) -> PluginToolingSets<'a> {
     let Some(plugin_result) = plugin_result else {
-        return PluginToolingSets::default();
+        return PluginToolingSets {
+            declared_packages: root_declared.iter().map(String::as_str).collect(),
+            ..PluginToolingSets::default()
+        };
     };
+    let declared_packages = plugin_result
+        .dependency_binaries
+        .declared_packages()
+        .iter()
+        .map(String::as_str)
+        .chain(root_declared.iter().map(String::as_str))
+        .collect();
     let credited = plugin_result
         .plugin_tooling
         .iter()
@@ -839,6 +880,7 @@ fn plugin_tooling_sets(
     PluginToolingSets {
         declared: plugin_tooling_set(Some(plugin_result)),
         credited,
+        declared_packages,
     }
 }
 
@@ -866,7 +908,9 @@ pub fn find_unused_dependencies(
     Vec<UnusedDependency>,
     Vec<UnusedDependency>,
 ) {
-    let scan = build_unused_dependency_scan(graph, config, plugin_result, workspaces);
+    let root_declared = pkg.all_dependency_names();
+    let scan =
+        build_unused_dependency_scan(graph, config, plugin_result, workspaces, &root_declared);
     let shared = scan.root_shared(config);
 
     let linked_workspaces = fallow_config::link_only_workspace_dependencies(
@@ -945,10 +989,11 @@ fn build_unused_dependency_scan<'a>(
     config: &'a ResolvedConfig,
     plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     workspaces: &'a [fallow_config::WorkspaceInfo],
+    root_declared: &'a [String],
 ) -> UnusedDependencyScan<'a> {
     UnusedDependencyScan {
         plugin_referenced: plugin_referenced_set(plugin_result),
-        plugin_tooling: plugin_tooling_sets(plugin_result),
+        plugin_tooling: plugin_tooling_sets(plugin_result, root_declared),
         script_used: script_used_set(plugin_result),
         package_referenced: plugin_result
             .map(package_referenced_dependencies_by_path)

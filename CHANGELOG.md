@@ -82,6 +82,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A `@types/X` devDependency needs a target or ambient globals to count
+  as used.** Before, every `@types/` package in `devDependencies` was
+  credited by name, so `@types/better-sqlite3` stayed silent in a project
+  with no `better-sqlite3` dependency, import or tsconfig entry. Now a
+  `@types/X` package is credited when the project declares `X`, imports
+  `X` (a type-only import counts) or names `X` in a tsconfig `types`
+  entry. A short list of type packages that declare globals is always
+  credited: `@types/node`, `@types/bun`, `bun-types`, `@types/deno`,
+  `@types/jest`, `@types/mocha`, `@types/jasmine`, `@types/qunit`,
+  `@types/web`, `@types/webpack-env`, `@types/chrome` and
+  `@types/firefox-webext-browser`. `--trace-dependency` names the credit
+  with the `ambient-types`, `types-target` and `types-config` reasons.
+  Production dependencies keep the plain credit. A `/// <reference
+  types="X" />` directive is not read yet; use `ignoreDependencies` for a
+  type package that only such a directive or another global use needs.
 - **A plugin credits its own tooling devDependencies only with evidence
   that the project uses the tool.** Before, an active plugin credited every
   package it declares as tooling, and a declared package is enough to

@@ -370,6 +370,11 @@ pub struct AggregatedPluginResult {
     /// analysis fills it for the root result; workspace results keep the
     /// default.
     pub dependency_binaries: crate::scripts::DependencyBinaries,
+    /// The names that the root and workspace manifests declare in
+    /// `devDependencies`. Script analysis fills it for the root result, so
+    /// the trace credits a dependency only where the unused devDependency
+    /// check would.
+    pub dev_dependency_names: FxHashSet<String>,
     /// Import prefixes for virtual modules provided by active frameworks.
     /// Imports matching these prefixes should not be flagged as unlisted dependencies.
     pub virtual_module_prefixes: Vec<String>,
@@ -511,6 +516,7 @@ impl AggregatedPluginResult {
             plugin_tooling,
             script_used_packages,
             dependency_binaries: _,
+            dev_dependency_names,
             virtual_module_prefixes,
             virtual_package_suffixes,
             generated_import_patterns,
@@ -547,6 +553,7 @@ impl AggregatedPluginResult {
         self.setup_files.extend(setup_files);
         self.tooling_dependencies.extend(tooling_dependencies);
         self.plugin_tooling.extend(plugin_tooling);
+        self.dev_dependency_names.extend(dev_dependency_names);
         self.script_used_packages.extend(script_used_packages);
         extend_unique(&mut self.virtual_module_prefixes, virtual_module_prefixes);
         extend_unique(&mut self.virtual_package_suffixes, virtual_package_suffixes);

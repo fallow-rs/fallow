@@ -262,7 +262,11 @@ pub struct ToolingCredit {
     /// The evidence: `plugin-config` when the plugin that declares the
     /// dependency found its own config file, `plugin-reference` when a
     /// package.json script, a CI workflow or a git hook runs one of that
-    /// plugin's packages. The set is open.
+    /// plugin's packages, `ambient-types` for a type package that declares
+    /// globals, `types-target` when the project declares or imports the
+    /// package that a `@types/` package types, and `types-config` when a
+    /// config file, such as a tsconfig `types` entry, names the type package.
+    /// The set is open.
     pub reason: String,
     /// The plugin that declares the dependency as tooling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -276,7 +280,8 @@ pub struct ToolingCredit {
     )]
     pub config: Option<PathBuf>,
     /// The package that a script, CI workflow or git hook runs, for
-    /// `plugin-reference`.
+    /// `plugin-reference`, or the package that a `@types/` package types,
+    /// for `types-target`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
 }

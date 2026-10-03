@@ -1,0 +1,21 @@
+{
+  "name": "types-package-credit",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@scope/pkg": "^1.0.0",
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.0.0",
+    "@types/geojson": "^7946.0.0",
+    "@types/jest": "^29.0.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/scope__pkg": "^1.0.0",
+    "@types/uuid": "^9.0.0",
+    "@types/ws": "^8.0.0",
+    "bun-types": "^1.0.0"
+  }
+}

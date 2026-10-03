@@ -29535,7 +29535,7 @@
       "properties": {
         "reason": {
           "type": "string",
-          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages. The set is open."
+          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, and `types-config` when a\nconfig file, such as a tsconfig `types` entry, names the type package.\nThe set is open."
         },
         "plugin": {
           "type": [
@@ -29556,7 +29556,7 @@
             "string",
             "null"
           ],
-          "description": "The package that a script, CI workflow or git hook runs, for\n`plugin-reference`."
+          "description": "The package that a script, CI workflow or git hook runs, for\n`plugin-reference`, or the package that a `@types/` package types,\nfor `types-target`."
         }
       },
       "required": [
