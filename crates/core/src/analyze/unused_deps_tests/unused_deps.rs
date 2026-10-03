@@ -393,6 +393,32 @@ fn scoped_package_subpath_import_recognized_as_used() {
     );
 }
 
+/// A devDependency that the same manifest lists in `peerDependencies` installs
+/// the package's own peer for local build and test, so it is not unused. A
+/// devDependency with no peer entry stays reported.
+#[test]
+fn dev_dep_listed_as_own_peer_not_flagged() {
+    let (graph, _) = build_graph_with_npm_imports(&[]);
+    let pkg: PackageJson = serde_json::from_str(
+        r#"{
+  "name": "test-project",
+  "peerDependencies": {"react": "^18.0.0"},
+  "peerDependenciesMeta": {"react": {"optional": true}},
+  "devDependencies": {"react": "^18.3.1", "left-pad": "^1.0.0"}
+}"#,
+    )
+    .expect("pkg should deserialize");
+    let config = test_config(PathBuf::from("/project"));
+
+    let (_, unused_dev, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
+    let unused_dev_names: Vec<&str> = unused_dev
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+
+    assert_eq!(unused_dev_names, vec!["left-pad"]);
+}
+
 #[test]
 fn optional_dep_in_peer_deps_also_counts() {
     let (graph, _) = build_graph_with_npm_imports(&[("sharp", false)]);

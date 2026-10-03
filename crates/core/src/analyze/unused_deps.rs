@@ -745,6 +745,19 @@ const fn optional_category() -> DepCategoryConfig {
     }
 }
 
+/// Names a manifest lists in `peerDependencies`, required or optional.
+///
+/// A devDependency with one of these names is the package's own peer,
+/// installed for local build and test. Its consumer supplies it at runtime, so
+/// it is neither an unused devDependency nor a devDependency in production.
+fn own_peer_dependency_names(pkg: &PackageJson) -> FxHashSet<&str> {
+    pkg.peer_dependencies
+        .as_ref()
+        .into_iter()
+        .flat_map(|deps| deps.keys().map(String::as_str))
+        .collect()
+}
+
 fn package_referenced_dependencies_by_path(
     plugin_result: &crate::plugins::AggregatedPluginResult,
 ) -> FxHashMap<PathBuf, FxHashSet<&str>> {
@@ -1017,21 +1030,32 @@ fn collect_root_unused_categories(
     root_pkg_content: Option<&str>,
 ) -> UnusedDependencyTriple {
     let no_workspace_context = |_dep: &str| Vec::new();
-    let category = |dep_names: Vec<String>, category: &DepCategoryConfig| {
-        collect_unused_for_category(UnusedCategoryInput {
-            dep_names,
-            category,
-            shared,
-            is_used: is_used_globally,
-            used_in_workspaces: &no_workspace_context,
-            pkg_path: root_pkg_path,
-            pkg_content: root_pkg_content,
-        })
-    };
+    let category =
+        |dep_names: Vec<String>, category: &DepCategoryConfig, is_used: &dyn Fn(&str) -> bool| {
+            collect_unused_for_category(UnusedCategoryInput {
+                dep_names,
+                category,
+                shared,
+                is_used,
+                used_in_workspaces: &no_workspace_context,
+                pkg_path: root_pkg_path,
+                pkg_content: root_pkg_content,
+            })
+        };
+    let own_peers = own_peer_dependency_names(pkg);
+    let is_dev_used = |dep: &str| own_peers.contains(dep) || is_used_globally(dep);
 
-    let unused_deps = category(pkg.production_dependency_names(), &prod_category());
-    let unused_dev_deps = category(pkg.dev_dependency_names(), &dev_category());
-    let unused_optional_deps = category(pkg.optional_dependency_names(), &optional_category());
+    let unused_deps = category(
+        pkg.production_dependency_names(),
+        &prod_category(),
+        is_used_globally,
+    );
+    let unused_dev_deps = category(pkg.dev_dependency_names(), &dev_category(), &is_dev_used);
+    let unused_optional_deps = category(
+        pkg.optional_dependency_names(),
+        &optional_category(),
+        is_used_globally,
+    );
     (unused_deps, unused_dev_deps, unused_optional_deps)
 }
 
@@ -1188,6 +1212,8 @@ fn collect_workspace_unused_categories(
 ) {
     let is_used_in_workspace = |dep: &str| usage.is_used_in_workspace(dep);
     let used_in_workspaces = |dep: &str| usage.used_in_other_workspaces(dep);
+    let own_peers = own_peer_dependency_names(ws_pkg);
+    let is_dev_used = |dep: &str| own_peers.contains(dep) || is_used_in_workspace(dep);
 
     let prod = collect_unused_for_category(UnusedCategoryInput {
         dep_names: ws_pkg.production_dependency_names(),
@@ -1202,7 +1228,7 @@ fn collect_workspace_unused_categories(
         dep_names: ws_pkg.dev_dependency_names(),
         category: &dev_category(),
         shared: ws_shared,
-        is_used: &is_used_in_workspace,
+        is_used: &is_dev_used,
         used_in_workspaces: &used_in_workspaces,
         pkg_path: ws_pkg_path,
         pkg_content: Some(ws_pkg_content),
@@ -1515,12 +1541,7 @@ pub fn find_dev_dependencies_in_production(
         .iter()
         .chain(optional_names.iter())
         .map(String::as_str)
-        .chain(
-            pkg.peer_dependencies
-                .as_ref()
-                .into_iter()
-                .flat_map(|deps| deps.keys().map(String::as_str)),
-        )
+        .chain(own_peer_dependency_names(pkg))
         .collect();
 
     let plugin_tooling = plugin_tooling_set(plugin_result);

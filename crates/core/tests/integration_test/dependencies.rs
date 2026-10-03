@@ -813,6 +813,40 @@ fn optional_peer_of_used_dependency_is_not_unused() {
 }
 
 #[test]
+fn dev_dependency_listed_as_own_peer_is_not_unused() {
+    let root = fixture_path("dev-dependency-listed-as-own-peer");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused_dev: Vec<(String, &str)> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| {
+            let manifest = d
+                .dep
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&d.dep.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (manifest, d.dep.package_name.as_str())
+        })
+        .collect();
+    unused_dev.sort_unstable();
+
+    // `react` (root, optional peer) and `react-dom` (workspace, required peer)
+    // are dev copies of the package's own peer. `left-pad` and `is-odd` have no
+    // peer entry and stay reported.
+    assert_eq!(
+        unused_dev,
+        vec![
+            ("package.json".to_string(), "left-pad"),
+            ("packages/lib/package.json".to_string(), "is-odd"),
+        ],
+        "a devDependency listed as the same manifest's peer is credited"
+    );
+}
+
+#[test]
 fn subpath_imports_resolve_correctly() {
     let root = fixture_path("subpath-imports");
     let config = create_config(root);
