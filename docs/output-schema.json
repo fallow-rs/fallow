@@ -24314,7 +24314,7 @@
         },
         "used_in_scripts": {
           "type": "boolean",
-          "description": "Whether the dependency is invoked from package.json scripts or CI configs."
+          "description": "Whether the dependency is invoked from package.json scripts, CI configs\nor git hooks."
         },
         "is_used": {
           "type": "boolean",
@@ -24337,6 +24337,17 @@
             "$ref": "#/definitions/TraceSource"
           },
           "description": "The configs that declare this name as a Module Federation remote alias\nunder `remotes`, one per config. A remote alias is provided by a\nremote container at runtime, not by an npm package. Absent when no\nFederation config declares the name (issue #2796)."
+        },
+        "tooling_credit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolingCredit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the unused devDependency check credits the dependency as tooling\nwhen no file imports it and no script, CI workflow or git hook runs it.\nWhen present, `is_used` is `true`. Absent otherwise."
         }
       },
       "required": [
@@ -29518,6 +29529,40 @@
         }
       ],
       "description": "One health section that a run produced.\n\nA section is in [`HealthReport::sections`] when the run computed it and\nthe report carries its result, also when that result is empty. The value\nset is OPEN: a later release can add a section, so a consumer must accept\na token that it does not know."
+    },
+    "ToolingCredit": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages. The set is open."
+        },
+        "plugin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The plugin that declares the dependency as tooling."
+        },
+        "config": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The config file the plugin found, relative to the project root, for\n`plugin-config`. `package.json` when the config is a package.json key."
+        },
+        "reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The package that a script, CI workflow or git hook runs, for\n`plugin-reference`."
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "description": "Why the unused devDependency check counts a dependency as used tooling\nalthough no source file imports it."
     }
   }
 }

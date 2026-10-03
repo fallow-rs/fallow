@@ -74,6 +74,11 @@ pub struct DepCategoryConfig {
     pub check_known_tooling: bool,
     /// Whether to check `plugin_tooling` set (prod + dev = true, optional = false).
     pub check_plugin_tooling: bool,
+    /// Whether a plugin tooling dependency needs evidence that the project
+    /// uses the plugin (dev = true): the plugin found its own config file, or
+    /// a script, CI workflow or git hook invokes its tool. When true, the
+    /// check reads `credited_plugin_tooling` instead of `plugin_tooling`.
+    pub plugin_tooling_needs_evidence: bool,
 }
 
 /// Shared sets used by `collect_unused_for_category` to filter dependencies.
@@ -81,6 +86,8 @@ pub struct SharedDepSets<'a> {
     pub plugin_referenced: &'a FxHashSet<&'a str>,
     pub package_plugin_referenced: &'a FxHashSet<&'a str>,
     pub plugin_tooling: &'a FxHashSet<&'a str>,
+    /// The plugin tooling dependencies whose plugin found evidence of use.
+    pub credited_plugin_tooling: &'a FxHashSet<&'a str>,
     pub script_used: &'a FxHashSet<&'a str>,
     pub ignore_deps: &'a IgnoreDependencyMatcher,
 }
@@ -606,17 +613,26 @@ fn workspace_chain_installs(
 fn shared_dep_sets<'a>(
     plugin_referenced: &'a FxHashSet<&'a str>,
     package_plugin_referenced: &'a FxHashSet<&'a str>,
-    plugin_tooling: &'a FxHashSet<&'a str>,
+    plugin_tooling: &'a PluginToolingSets<'a>,
     script_used: &'a FxHashSet<&'a str>,
     ignore_deps: &'a IgnoreDependencyMatcher,
 ) -> SharedDepSets<'a> {
     SharedDepSets {
         plugin_referenced,
         package_plugin_referenced,
-        plugin_tooling,
+        plugin_tooling: &plugin_tooling.declared,
+        credited_plugin_tooling: &plugin_tooling.credited,
         script_used,
         ignore_deps,
     }
+}
+
+/// The tooling dependencies of the active plugins: every declared one, and
+/// the subset whose plugin found evidence that the project uses it.
+#[derive(Default)]
+struct PluginToolingSets<'a> {
+    declared: FxHashSet<&'a str>,
+    credited: FxHashSet<&'a str>,
 }
 
 /// Collect unused dependencies for a single category (prod, dev, or optional).
@@ -647,8 +663,12 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
             !input.category.check_known_tooling || !crate::plugins::is_known_tooling_dependency(dep)
         })
         .filter(|dep| {
-            !input.category.check_plugin_tooling
-                || !input.shared.plugin_tooling.contains(dep.as_str())
+            let tooling = if input.category.plugin_tooling_needs_evidence {
+                input.shared.credited_plugin_tooling
+            } else {
+                input.shared.plugin_tooling
+            };
+            !input.category.check_plugin_tooling || !tooling.contains(dep.as_str())
         })
         .filter(|dep| !input.shared.plugin_referenced.contains(dep.as_str()))
         .filter(|dep| {
@@ -724,6 +744,7 @@ const fn prod_category() -> DepCategoryConfig {
         check_implicit: true,
         check_known_tooling: false,
         check_plugin_tooling: true,
+        plugin_tooling_needs_evidence: false,
     }
 }
 
@@ -733,6 +754,7 @@ const fn dev_category() -> DepCategoryConfig {
         check_implicit: false,
         check_known_tooling: true,
         check_plugin_tooling: true,
+        plugin_tooling_needs_evidence: true,
     }
 }
 
@@ -742,6 +764,7 @@ const fn optional_category() -> DepCategoryConfig {
         check_implicit: true,
         check_known_tooling: false,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     }
 }
 
@@ -790,6 +813,33 @@ fn plugin_tooling_set(
     plugin_result
         .map(|pr| pr.tooling_dependencies.iter().map(String::as_str).collect())
         .unwrap_or_default()
+}
+
+/// The plugin tooling sets for the unused-dependency check.
+///
+/// A plugin's tooling dependencies are credited for devDependencies only when
+/// the plugin found its own config file, or when a package.json script, a CI
+/// workflow or a git hook invokes one of its reference packages.
+fn plugin_tooling_sets(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> PluginToolingSets<'_> {
+    let Some(plugin_result) = plugin_result else {
+        return PluginToolingSets::default();
+    };
+    let credited = plugin_result
+        .plugin_tooling
+        .iter()
+        .filter(|entry| {
+            entry
+                .evidence(&plugin_result.script_used_packages)
+                .is_some()
+        })
+        .flat_map(|entry| entry.dependencies.iter().map(String::as_str))
+        .collect();
+    PluginToolingSets {
+        declared: plugin_tooling_set(Some(plugin_result)),
+        credited,
+    }
 }
 
 fn script_used_set(
@@ -847,7 +897,7 @@ pub fn find_unused_dependencies(
 
 struct UnusedDependencyScan<'a> {
     plugin_referenced: FxHashSet<&'a str>,
-    plugin_tooling: FxHashSet<&'a str>,
+    plugin_tooling: PluginToolingSets<'a>,
     script_used: FxHashSet<&'a str>,
     package_referenced: FxHashMap<PathBuf, FxHashSet<&'a str>>,
     empty_package_referenced: FxHashSet<&'a str>,
@@ -898,7 +948,7 @@ fn build_unused_dependency_scan<'a>(
 ) -> UnusedDependencyScan<'a> {
     UnusedDependencyScan {
         plugin_referenced: plugin_referenced_set(plugin_result),
-        plugin_tooling: plugin_tooling_set(plugin_result),
+        plugin_tooling: plugin_tooling_sets(plugin_result),
         script_used: script_used_set(plugin_result),
         package_referenced: plugin_result
             .map(package_referenced_dependencies_by_path)
@@ -1076,7 +1126,7 @@ struct WorkspaceUnusedDependencyInputs<'a> {
     package_referenced: &'a FxHashMap<PathBuf, FxHashSet<&'a str>>,
     empty_package_referenced: &'a FxHashSet<&'a str>,
     plugin_referenced: &'a FxHashSet<&'a str>,
-    plugin_tooling: &'a FxHashSet<&'a str>,
+    plugin_tooling: &'a PluginToolingSets<'a>,
     script_used: &'a FxHashSet<&'a str>,
     ignore_deps: &'a IgnoreDependencyMatcher,
     workspace_used_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,

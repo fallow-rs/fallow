@@ -92,5 +92,6 @@ mod telemetry_tests;
 mod trace_error_tests;
 mod trace_federation_tests;
 mod trace_path_tests;
+mod trace_tooling_credit_tests;
 mod type_aware_degradation_tests;
 mod unresolved_gitignored_target_tests;

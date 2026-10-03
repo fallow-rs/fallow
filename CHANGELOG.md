@@ -82,6 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A plugin credits its own tooling devDependencies only with evidence
+  that the project uses the tool.** Before, an active plugin credited every
+  package it declares as tooling, and a declared package is enough to
+  activate the plugin. So `karma` or `commitizen` in `devDependencies` with
+  no config file and no script never reported as unused. Now the credit
+  needs a config file of the plugin (`.c8rc.json`, `lefthook.yml`), its
+  config key in package.json, or a package.json script, CI workflow or git
+  hook that runs one of the plugin's packages. Git hooks are read for the
+  first time: commands in `.husky/` hook scripts, lefthook configs, and
+  simple-git-hooks and lint-staged configs (package.json key or own file)
+  now credit the packages they run. `--trace-dependency` names the credit
+  in a new `tooling_credit` field (`plugin-config` with the config file, or
+  `plugin-reference` with the package that a command runs) and reports such
+  a dependency as used, so the trace agrees with the report. Production
+  dependencies keep the plain credit. Use `ignoreDependencies` to keep a
+  tooling package that the project runs in a way fallow does not see.
 - **The Claude Code gate audits the install root from a subdirectory.**
   Before, the handler ran the gate script from the session directory. A
   session in a package directory then audited only that package and could

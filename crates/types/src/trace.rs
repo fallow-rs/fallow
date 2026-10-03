@@ -188,6 +188,9 @@ pub struct TraceProvenance {
     files: Vec<(PathBuf, TraceSource)>,
     /// Dependency name and the config that names it.
     dependencies: Vec<(String, TraceSource)>,
+    /// Dependency name and why the unused devDependency check credits it as
+    /// tooling.
+    tooling_credits: Vec<(String, ToolingCredit)>,
 }
 
 impl TraceProvenance {
@@ -232,6 +235,50 @@ impl TraceProvenance {
             .map(|(_, source)| source.clone())
             .collect()
     }
+
+    /// Record why the dependency `name` is credited as tooling. The first
+    /// credit recorded for a name wins.
+    pub fn push_tooling_credit(&mut self, name: String, credit: ToolingCredit) {
+        if !self.tooling_credits.iter().any(|(known, _)| *known == name) {
+            self.tooling_credits.push((name, credit));
+        }
+    }
+
+    /// Why the dependency `name` is credited as tooling, if it is.
+    #[must_use]
+    pub fn tooling_credit(&self, name: &str) -> Option<ToolingCredit> {
+        self.tooling_credits
+            .iter()
+            .find(|(known, _)| known == name)
+            .map(|(_, credit)| credit.clone())
+    }
+}
+
+/// Why the unused devDependency check counts a dependency as used tooling
+/// although no source file imports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ToolingCredit {
+    /// The evidence: `plugin-config` when the plugin that declares the
+    /// dependency found its own config file, `plugin-reference` when a
+    /// package.json script, a CI workflow or a git hook runs one of that
+    /// plugin's packages. The set is open.
+    pub reason: String,
+    /// The plugin that declares the dependency as tooling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// The config file the plugin found, relative to the project root, for
+    /// `plugin-config`. `package.json` when the config is a package.json key.
+    #[serde(
+        serialize_with = "serde_path::serialize_option",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub config: Option<PathBuf>,
+    /// The package that a script, CI workflow or git hook runs, for
+    /// `plugin-reference`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
 }
 
 /// A config that names a traced file or a traced dependency, and the key that
@@ -298,7 +345,8 @@ pub struct DependencyTrace {
     /// Files that import this dependency with type-only imports.
     #[serde(serialize_with = "serde_path::serialize_vec")]
     pub type_only_imported_by: Vec<PathBuf>,
-    /// Whether the dependency is invoked from package.json scripts or CI configs.
+    /// Whether the dependency is invoked from package.json scripts, CI configs
+    /// or git hooks.
     pub used_in_scripts: bool,
     /// Whether the dependency is used at all: imported, invoked from scripts,
     /// or listed as a peer by a used package (`peer_of`).
@@ -317,6 +365,27 @@ pub struct DependencyTrace {
     /// Federation config declares the name (issue #2796).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<TraceSource>,
+    /// Why the unused devDependency check credits the dependency as tooling
+    /// when no file imports it and no script, CI workflow or git hook runs it.
+    /// When present, `is_used` is `true`. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tooling_credit: Option<ToolingCredit>,
+}
+
+impl DependencyTrace {
+    /// Attach the tooling credit of an otherwise unused dependency and count
+    /// the dependency as used, so the trace agrees with the unused-dependency
+    /// report. A dependency that an import or a script already uses keeps no
+    /// credit, because the credit does not decide its status.
+    pub fn apply_tooling_credit(&mut self, credit: Option<ToolingCredit>) {
+        if self.is_used {
+            return;
+        }
+        if let Some(credit) = credit {
+            self.is_used = true;
+            self.tooling_credit = Some(credit);
+        }
+    }
 }
 
 /// Sub-phase attribution inside the entry-point discovery stage.

@@ -1,0 +1,4 @@
+pre-push:
+  commands:
+    size:
+      run: npx size-limit

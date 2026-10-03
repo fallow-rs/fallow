@@ -659,21 +659,68 @@ fn all_deps_used_produces_no_unused() {
 }
 
 #[test]
-fn plugin_tooling_dev_deps_not_flagged() {
+fn plugin_tooling_dev_deps_need_evidence() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
-    let pkg = make_pkg(&[], &["my-dev-tool"], &[]);
+    let pkg = make_pkg(&[], &["my-dev-tool", "my-dev-tool-addon"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let unused_dev_names = |plugin_result: &AggregatedPluginResult| -> Vec<String> {
+        let (_, unused_dev, _) =
+            find_unused_dependencies(&graph, &pkg, &config, Some(plugin_result), &[]);
+        let mut names: Vec<String> = unused_dev.into_iter().map(|d| d.package_name).collect();
+        names.sort();
+        names
+    };
+    let tooling = |has_own_config: bool| {
+        let own_config = has_own_config.then(|| PathBuf::from("/project/.my-dev-toolrc"));
+        let mut plugin_result = AggregatedPluginResult::default();
+        plugin_result
+            .tooling_dependencies
+            .extend(["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()]);
+        plugin_result
+            .plugin_tooling
+            .push(crate::plugins::PluginToolingDependencies {
+                plugin: "my-dev-tool".to_string(),
+                dependencies: vec!["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()],
+                references: vec!["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()],
+                own_config,
+            });
+        plugin_result
+    };
+
+    assert_eq!(
+        unused_dev_names(&tooling(false)),
+        vec!["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()],
+        "an active plugin without a config file or a reference credits nothing"
+    );
+    assert!(
+        unused_dev_names(&tooling(true)).is_empty(),
+        "a plugin that found its own config file credits its tooling dev deps"
+    );
+    let mut referenced = tooling(false);
+    referenced
+        .script_used_packages
+        .insert("my-dev-tool".to_string());
+    assert!(
+        unused_dev_names(&referenced).is_empty(),
+        "a script reference to the tool credits every tooling dev dep of its plugin"
+    );
+}
+
+#[test]
+fn plugin_tooling_prod_deps_keep_declared_credit() {
+    let (graph, _) = build_graph_with_npm_imports(&[]);
+    let pkg = make_pkg(&["my-runtime-tool"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
     let mut plugin_result = AggregatedPluginResult::default();
     plugin_result
         .tooling_dependencies
-        .push("my-dev-tool".to_string());
+        .push("my-runtime-tool".to_string());
 
-    let (_, unused_dev, _) =
-        find_unused_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
+    let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
 
     assert!(
-        !unused_dev.iter().any(|d| d.package_name == "my-dev-tool"),
-        "plugin tooling dev deps should not be flagged as unused"
+        unused.is_empty(),
+        "the evidence rule covers devDependencies only, found: {unused:?}"
     );
 }

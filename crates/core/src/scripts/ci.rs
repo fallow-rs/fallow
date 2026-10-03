@@ -123,7 +123,7 @@ fn extract_ci_signals(content: &str, context: &CiContext<'_>, analysis: &mut CiA
 /// - Block scalar run blocks: `  run: |` or `  run: >` followed by indented lines
 /// - Plain multi-line scalars: `  run: command` whose continuation lines are
 ///   indented past the `run` key column and fold into the same command
-fn extract_ci_commands(content: &str) -> Vec<String> {
+pub(super) fn extract_ci_commands(content: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut multiline_run = MultilineRunState::default();
 

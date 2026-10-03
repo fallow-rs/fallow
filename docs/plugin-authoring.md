@@ -213,7 +213,7 @@ Files that should always be considered used when this plugin is active, even if 
 
 ### `toolingDependencies`
 
-Packages used through CLI commands or config files, without source imports. Fallow does not flag them as unused dev dependencies.
+Packages used through CLI commands or config files, without source imports. Fallow does not flag them as unused dev dependencies when the project shows that it uses the tool: a file that matches the plugin's `configPatterns` or `alwaysUsed`, a top-level package.json key named after the plugin, or a package.json script, CI workflow or git hook that runs one of these packages or one of the `enablers`. An active plugin alone is not enough, because a declared package activates it.
 
 ```jsonc
 {
