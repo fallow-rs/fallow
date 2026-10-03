@@ -198,6 +198,16 @@ pub fn is_builtin_module(name: &str) -> bool {
     fallow_core::analyze::is_builtin_module(name)
 }
 
+/// The used packages that list `package_name` as a peer dependency, required
+/// or optional, via the shared unused-dependency implementation.
+pub fn peer_dependency_hosts<'a>(
+    root: &Path,
+    used_packages: impl IntoIterator<Item = &'a str>,
+    package_name: &str,
+) -> Vec<String> {
+    fallow_core::analyze::peer_dependency_hosts(root, used_packages, package_name)
+}
+
 /// Discover the root and workspace package entry points via the shared core
 /// implementation.
 ///

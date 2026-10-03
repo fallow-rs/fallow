@@ -134,6 +134,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The extraction cache version changes, so the first run after the upgrade
   parses all files again.
 
+- **An optional peer of a used dependency is no longer reported as an
+  unused dependency.** A project lists an optional peer
+  (`peerDependenciesMeta.<name>.optional`) of a package it uses to turn on a
+  feature of that package, which then loads the peer at runtime where the
+  import graph does not see it. Before, fallow credited only the required
+  peers of a used package, so it reported such an optional peer as unused.
+  Now fallow credits required and optional peers alike. Only a used package
+  gives this credit, so the peers of an unused package stay reported.
+  `--trace-dependency` now reports a credited peer as used and names the
+  used packages that list it in a new `peer_of` field (JSON) and a
+  `Peer dependency of:` section (human). Before, the trace printed `UNUSED`
+  even for a required peer that the unused-dependency check credited.
+
 - **A `*` in a package `exports` target now matches files in nested
   directories.** Before, fallow expanded the `*` like a shell glob, so it
   matched only one path segment. With `"./*": "./src/*.ts"`, fallow did not

@@ -24318,11 +24318,18 @@
         },
         "is_used": {
           "type": "boolean",
-          "description": "Whether the dependency is used at all."
+          "description": "Whether the dependency is used at all: imported, invoked from scripts,\nor listed as a peer by a used package (`peer_of`)."
         },
         "import_count": {
           "type": "integer",
           "description": "Total import count."
+        },
+        "peer_of": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Used packages that list this dependency in their installed\n`peerDependencies`, required or optional, sorted by name. The\nunused-dependency check credits such a peer, because the package that\nlists it loads it at runtime. Absent when no used package lists it."
         },
         "sources": {
           "type": "array",

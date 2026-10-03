@@ -491,6 +491,17 @@ fn build_dependency_trace_human_lines(trace: &DependencyTrace) -> Vec<String> {
             "Referenced from package.json scripts or CI configs.".dimmed()
         ));
     }
+    if !trace.peer_of.is_empty() {
+        lines.push(String::new());
+        lines.push("  Peer dependency of:".to_string());
+        for host in &trace.peer_of {
+            lines.push(format!("    {} {host}", "->".dimmed()));
+        }
+        lines.push(format!(
+            "  {}",
+            "A used package lists this name as a peer and loads it at runtime.".dimmed()
+        ));
+    }
     lines.push(String::new());
     lines
 }
@@ -921,6 +932,7 @@ mod tests {
             used_in_scripts: true,
             is_used: true,
             import_count: 1,
+            peer_of: Vec::new(),
             sources: Vec::new(),
         };
 
@@ -934,6 +946,27 @@ mod tests {
     }
 
     #[test]
+    fn a_peer_credited_trace_names_the_packages_that_list_it() {
+        let trace = DependencyTrace {
+            package_name: "opt-peer".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: true,
+            import_count: 0,
+            peer_of: vec!["host".to_string()],
+            sources: Vec::new(),
+        };
+
+        let rendered = plain(&build_dependency_trace_human_lines(&trace));
+
+        assert!(rendered.contains("USED opt-peer (0 import(s))"));
+        assert!(rendered.contains("Peer dependency of:"));
+        assert!(rendered.contains("-> host"));
+        assert!(!rendered.contains("Imported by:"));
+    }
+
+    #[test]
     fn a_federation_remote_trace_names_its_config() {
         let trace = DependencyTrace {
             package_name: "checkout".to_string(),
@@ -942,6 +975,7 @@ mod tests {
             used_in_scripts: false,
             is_used: true,
             import_count: 1,
+            peer_of: Vec::new(),
             sources: vec![TraceSource {
                 kind: "module-federation".to_string(),
                 plugin: "webpack".to_string(),
