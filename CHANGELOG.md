@@ -795,6 +795,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   get the ancestor's dependency. A sibling workspace's manifest still does not
   count.
 
+- **An ancestor workspace's dependency counts as used when a nested
+  workspace uses it.** Before, fallow credited an import only to the deepest
+  workspace that owns the file. When a nested workspace's build script used a
+  package that only the ancestor workspace declared, fallow reported the
+  ancestor's declaration as an unused dependency. Now an import that the
+  ancestor's declaration satisfies, by the rule of the unlisted dependency
+  check, counts as a use of that declaration. A production import of a
+  publishable nested workspace stays unlisted and does not count.
+
 ### Changed
 
 - **`fallow health --group-by --top N` applies the limit to each group.**

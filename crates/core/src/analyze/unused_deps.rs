@@ -405,6 +405,64 @@ fn collect_workspace_used_packages<'a>(
     by_ws
 }
 
+/// Reverse index: workspace root -> packages that a descendant workspace's files
+/// import through that workspace's declaration.
+///
+/// A file whose own workspace does not declare a package may use the first
+/// ancestor workspace that does, under the rule of
+/// [`accepts_ancestor_declaration`] that the unlisted-dependency check applies.
+/// The import then counts as a use of that ancestor's declaration, so the two
+/// results agree. The root manifest is credited project-wide elsewhere.
+fn collect_ancestor_credited_packages<'a>(
+    graph: &'a ModuleGraph,
+    config: &ResolvedConfig,
+    manifests: &[WorkspaceManifest<'a>],
+    ownership: &WorkspaceOwnershipIndex,
+) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
+    let mut credited: FxHashMap<&Path, FxHashSet<&str>> = FxHashMap::default();
+    for (package_name, file_ids) in &graph.package_usage {
+        for id in file_ids {
+            if let Some(ancestor) =
+                ancestor_satisfying_import(graph, config, manifests, ownership, package_name, *id)
+            {
+                credited
+                    .entry(ancestor.root)
+                    .or_default()
+                    .insert(package_name.as_str());
+            }
+        }
+    }
+    credited
+}
+
+/// The ancestor workspace whose declaration satisfies an import of
+/// `package_name` in file `id`, or `None` when the owning workspace declares
+/// the package itself, the file may not use an ancestor declaration, or no
+/// ancestor workspace declares it.
+fn ancestor_satisfying_import<'m, 'a>(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    manifests: &'m [WorkspaceManifest<'a>],
+    ownership: &WorkspaceOwnershipIndex,
+    package_name: &str,
+    id: FileId,
+) -> Option<&'m WorkspaceManifest<'a>> {
+    let index = ownership.workspace_index_for_file(id)?;
+    let owner = manifests.get(index)?;
+    if owner.declared.contains(package_name) {
+        return None;
+    }
+    let module = graph.modules.get(id.0 as usize)?;
+    if !accepts_ancestor_declaration(owner.is_private, module, config) {
+        return None;
+    }
+    ownership
+        .ancestors_of(index)
+        .iter()
+        .filter_map(|ancestor| manifests.get(*ancestor))
+        .find(|ancestor| ancestor.declared.contains(package_name))
+}
+
 fn shared_dep_sets<'a>(
     plugin_referenced: &'a FxHashSet<&'a str>,
     package_plugin_referenced: &'a FxHashSet<&'a str>,
@@ -668,6 +726,7 @@ impl<'a> UnusedDependencyScan<'a> {
             ignore_deps: self.ignore_deps,
             workspace_used_packages: &self.usage.workspace_used_packages,
             bundled_workspace_usage: &self.usage.bundled_workspace_usage,
+            ancestor_credited_packages: &self.usage.ancestor_credited_packages,
             package_workspace_usage: &self.usage.package_workspace_usage,
             root_flagged,
         }
@@ -719,6 +778,7 @@ struct DependencyUsageIndices<'a> {
     package_workspace_usage: FxHashMap<String, Vec<PathBuf>>,
     workspace_used_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    ancestor_credited_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     root_peer_used: FxHashSet<String>,
 }
 
@@ -738,6 +798,8 @@ fn collect_dependency_usage_indices<'a>(
         collect_workspace_used_packages(graph, &workspace_roots, &ownership);
     let bundled_workspace_usage =
         collect_bundled_workspace_usage(&manifests, &workspace_used_packages);
+    let ancestor_credited_packages =
+        collect_ancestor_credited_packages(graph, config, &manifests, &ownership);
     DependencyUsageIndices {
         package_workspace_usage: collect_package_workspace_usage(
             graph,
@@ -746,6 +808,7 @@ fn collect_dependency_usage_indices<'a>(
         ),
         workspace_used_packages,
         bundled_workspace_usage,
+        ancestor_credited_packages,
         used_packages,
         root_peer_used,
     }
@@ -837,6 +900,7 @@ struct WorkspaceUnusedDependencyInputs<'a> {
     ignore_deps: &'a IgnoreDependencyMatcher,
     workspace_used_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    ancestor_credited_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     root_flagged: &'a FxHashSet<String>,
 }
@@ -866,16 +930,21 @@ fn collect_workspace_unused_dependencies<'a>(
     );
 
     let ws_root = ws.root.as_path();
+    let ancestor_credited = inputs.ancestor_credited_packages.get(&ws_root);
     let ws_used_packages: FxHashSet<&str> = inputs
         .workspace_used_packages
         .get(&ws_root)
-        .cloned()
-        .unwrap_or_default();
+        .into_iter()
+        .chain(ancestor_credited)
+        .flatten()
+        .copied()
+        .collect();
     let usage = workspace_dependency_usage(
         ws_root,
         &ws_used_packages,
         inputs.package_workspace_usage,
         inputs.bundled_workspace_usage.get(&ws_root),
+        ancestor_credited,
         inputs.root_flagged,
     );
 
@@ -901,6 +970,9 @@ struct WorkspaceDependencyUsage<'a> {
     /// Packages this workspace inherits from the private siblings it bundles,
     /// absent when the workspace bundles no private sibling.
     bundled_used: Option<&'a FxHashSet<&'a str>>,
+    /// Packages that descendant workspace files import through this
+    /// workspace's declaration, absent when there are none.
+    ancestor_credited: Option<&'a FxHashSet<&'a str>>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     root_flagged: &'a FxHashSet<String>,
 }
@@ -912,6 +984,9 @@ impl WorkspaceDependencyUsage<'_> {
             || self
                 .bundled_used
                 .is_some_and(|bundled| bundled.contains(dep))
+            || self
+                .ancestor_credited
+                .is_some_and(|credited| credited.contains(dep))
             || self
                 .package_workspace_usage
                 .get(dep)
@@ -928,6 +1003,7 @@ fn workspace_dependency_usage<'a>(
     ws_used_packages: &FxHashSet<&str>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     bundled_used: Option<&'a FxHashSet<&'a str>>,
+    ancestor_credited: Option<&'a FxHashSet<&'a str>>,
     root_flagged: &'a FxHashSet<String>,
 ) -> WorkspaceDependencyUsage<'a> {
     let ws_peer_used = PeerDependencyResolver::new()
@@ -936,6 +1012,7 @@ fn workspace_dependency_usage<'a>(
         ws_root,
         ws_peer_used,
         bundled_used,
+        ancestor_credited,
         package_workspace_usage,
         root_flagged,
     }

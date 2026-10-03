@@ -512,3 +512,102 @@ fn import_location_prefers_package_import_over_builtin() {
         find_unprovided_import_location(&spans, &line_offsets, &[], "src/a.ts", FileId(0), "test");
     assert_eq!(location, Some((1, 50)));
 }
+
+fn manifest<'a>(
+    root: &'a str,
+    declared: &[&str],
+    is_private: bool,
+) -> super::super::WorkspaceManifest<'a> {
+    let declared: FxHashSet<String> = declared.iter().map(|dep| (*dep).to_string()).collect();
+    super::super::WorkspaceManifest {
+        root: Path::new(root),
+        name: root.to_string(),
+        is_private,
+        shipped: declared.clone(),
+        declared,
+    }
+}
+
+/// The graph helper makes its one file a runtime entry point, so the file is
+/// production code unless its path matches a test pattern.
+fn ancestor_root_for(
+    file: &str,
+    package_name: &str,
+    manifests: &[super::super::WorkspaceManifest<'_>],
+) -> Option<PathBuf> {
+    let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
+    graph.modules[0].path = PathBuf::from(file);
+    let roots: Vec<&Path> = manifests.iter().map(|manifest| manifest.root).collect();
+    let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
+    let config = test_config(PathBuf::from("/project"));
+    super::super::ancestor_satisfying_import(
+        &graph,
+        &config,
+        manifests,
+        &ownership,
+        package_name,
+        FileId(0),
+    )
+    .map(|ancestor| ancestor.root.to_path_buf())
+}
+
+#[test]
+fn ancestor_declaration_satisfies_non_production_descendant_import() {
+    let manifests = [
+        manifest("/project/apps/tool", &["build-kit"], false),
+        manifest("/project/apps/tool/packages/cli", &[], false),
+    ];
+
+    assert_eq!(
+        ancestor_root_for(
+            "/project/apps/tool/packages/cli/src/build.test.ts",
+            "build-kit",
+            &manifests
+        ),
+        Some(PathBuf::from("/project/apps/tool")),
+        "a test file of the nested workspace uses the ancestor declaration"
+    );
+    assert_eq!(
+        ancestor_root_for(
+            "/project/apps/tool/packages/cli/src/index.ts",
+            "build-kit",
+            &manifests
+        ),
+        None,
+        "a production file of a publishable nested workspace does not"
+    );
+}
+
+#[test]
+fn ancestor_declaration_satisfies_private_descendant_import() {
+    let manifests = [
+        manifest("/project/apps/tool", &["build-kit"], false),
+        manifest("/project/apps/tool/packages/cli", &[], true),
+    ];
+
+    assert_eq!(
+        ancestor_root_for(
+            "/project/apps/tool/packages/cli/src/index.ts",
+            "build-kit",
+            &manifests
+        ),
+        Some(PathBuf::from("/project/apps/tool")),
+    );
+}
+
+#[test]
+fn own_declaration_is_not_attributed_to_an_ancestor() {
+    let manifests = [
+        manifest("/project/apps/tool", &["build-kit"], false),
+        manifest("/project/apps/tool/packages/cli", &["build-kit"], true),
+    ];
+
+    assert_eq!(
+        ancestor_root_for(
+            "/project/apps/tool/packages/cli/src/index.ts",
+            "build-kit",
+            &manifests
+        ),
+        None,
+    );
+}
