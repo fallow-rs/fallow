@@ -551,6 +551,31 @@ fn ancestor_manifest_satisfies_private_and_non_production_imports() {
     );
 }
 
+/// An import that an ancestor workspace's declaration satisfies counts as a use
+/// of that declaration. An import that the strict check still reports as
+/// unlisted does not.
+#[test]
+fn ancestor_declaration_is_credited_when_it_satisfies_a_descendant_import() {
+    let root = fixture_path("workspace-ancestor-manifest-dependencies");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let reported = unused_dependency_names_for(&results, "packages/tool/package.json");
+    assert!(
+        !reported.iter().any(|name| name == "build-kit"),
+        "the nested build script uses the tool declaration of build-kit, got: {reported:?}"
+    );
+    assert!(
+        reported.iter().any(|name| name == "cli-runtime-lib"),
+        "a production import of the publishable nested workspace does not use the tool declaration, got: {reported:?}"
+    );
+    assert_eq!(
+        unlisted_sites_for(&results, "cli-runtime-lib"),
+        vec![root.join("packages/tool/packages/cli/src/index.ts")],
+        "the production import stays unlisted in the nested workspace"
+    );
+}
+
 #[test]
 fn package_less_tsconfig_reference_credits_nearest_package_workspace() {
     let project = tempfile::tempdir().expect("create temp dir");
