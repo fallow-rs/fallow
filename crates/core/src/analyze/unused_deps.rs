@@ -15,6 +15,7 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use super::bundle_externalization::source_sets_packages_external;
 use super::gitignored_targets::GitignoredTargets;
 use super::package_json_utils::{find_dep_line_in_json, read_pkg_json_content};
 use super::predicates::{
@@ -249,6 +250,9 @@ struct WorkspaceManifest<'a> {
     /// `devDependencies` are build-time needs of this workspace alone and are
     /// never inlined into a consumer, so they are deliberately excluded.
     shipped: FxHashSet<String>,
+    /// A package script bundles with every package external
+    /// (`bun build --packages=external`, `esbuild --packages=external`).
+    externalizes_packages: bool,
 }
 
 /// Names a workspace carries into anything that inlines its source.
@@ -291,6 +295,11 @@ fn read_workspace_manifests<'a>(
                     .chain(pkg.optional_dependency_names())
                     .collect(),
                 shipped: shipped_dependency_names(&pkg),
+                externalizes_packages: pkg.scripts.as_ref().is_some_and(|scripts| {
+                    scripts
+                        .values()
+                        .any(|script| crate::scripts::script_externalizes_packages(script))
+                }),
             })
         })
         .collect()
@@ -313,9 +322,13 @@ fn dependency_owning_workspace_roots<'a>(manifests: &[WorkspaceManifest<'a>]) ->
 /// package brings its own dependency tree and needs no hoisting. Crediting a
 /// published sibling's packages would suppress a genuine finding. Workspace
 /// graphs can be cyclic, so each walk carries a visited set.
+///
+/// A consumer in `externalizing` leaves every package out of its bundle, so it
+/// does not inline a sibling and gets no credit.
 fn collect_bundled_workspace_usage<'a>(
     manifests: &[WorkspaceManifest<'a>],
     workspace_used_packages: &FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    externalizing: &FxHashSet<usize>,
 ) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
     let private_by_name: FxHashMap<&str, usize> = manifests
         .iter()
@@ -331,6 +344,7 @@ fn collect_bundled_workspace_usage<'a>(
     manifests
         .par_iter()
         .enumerate()
+        .filter(|(index, _)| !externalizing.contains(index))
         .map(|(index, consumer)| {
             let bundled = bundled_packages_for(
                 index,
@@ -388,6 +402,46 @@ fn bundled_packages_for<'a>(
     }
 
     bundled
+}
+
+/// Indices of the workspaces whose build leaves every package external.
+///
+/// The signal is explicit: a package script that runs
+/// `bun build --packages=external` or `esbuild --packages=external`, or a file
+/// of the workspace that imports `esbuild` and sets `packages: 'external'`.
+/// Without it, a private sibling is assumed to be bundled.
+fn collect_externalizing_workspaces(
+    graph: &ModuleGraph,
+    manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+) -> FxHashSet<usize> {
+    let mut externalizing: FxHashSet<usize> = manifests
+        .iter()
+        .enumerate()
+        .filter(|(_, manifest)| manifest.externalizes_packages)
+        .map(|(index, _)| index)
+        .collect();
+    let Some(file_ids) = graph.package_usage.get("esbuild") else {
+        return externalizing;
+    };
+    let mut checked: FxHashSet<FileId> = FxHashSet::default();
+    for id in file_ids {
+        let Some(index) = ownership.workspace_index_for_file(*id) else {
+            continue;
+        };
+        if externalizing.contains(&index) || !checked.insert(*id) {
+            continue;
+        }
+        let Some(module) = graph.modules.get(id.0 as usize) else {
+            continue;
+        };
+        if std::fs::read_to_string(&module.path)
+            .is_ok_and(|source| source_sets_packages_external(&source, &module.path))
+        {
+            externalizing.insert(index);
+        }
+    }
+    externalizing
 }
 
 /// Reverse index: workspace root -> packages with ANY file under that root using
@@ -857,8 +911,9 @@ fn collect_dependency_usage_indices<'a>(
     let ownership = WorkspaceOwnershipIndex::new(graph, &workspace_roots);
     let workspace_used_packages =
         collect_workspace_used_packages(graph, &workspace_roots, &ownership);
+    let externalizing = collect_externalizing_workspaces(graph, &manifests, &ownership);
     let bundled_workspace_usage =
-        collect_bundled_workspace_usage(&manifests, &workspace_used_packages);
+        collect_bundled_workspace_usage(&manifests, &workspace_used_packages, &externalizing);
     let ancestor_credited_packages =
         collect_ancestor_credited_packages(graph, config, &manifests, &ownership);
     let root_credited_packages = collect_root_credited_packages(graph, &manifests, &ownership);

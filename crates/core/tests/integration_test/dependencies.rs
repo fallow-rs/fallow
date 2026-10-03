@@ -1267,6 +1267,28 @@ fn private_sibling_bundled_dependency_is_credited_to_the_consumer() {
     );
 }
 
+/// A consumer whose build leaves every package external does not inline the
+/// private sibling, so the sibling's packages do not need the consumer's
+/// declaration. The signal is esbuild `packages: 'external'` in a build file
+/// or `bun build --packages=external` in a package script.
+#[test]
+fn externalizing_consumer_gets_no_bundled_credit() {
+    for fixture in [
+        "private-workspace-externalized-esbuild",
+        "private-workspace-externalized-bun-build",
+    ] {
+        let config = create_config(fixture_path(fixture));
+        let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+        let reported = unused_dependency_names_for(&results, "packages/consumer/package.json");
+        assert_eq!(
+            reported,
+            vec!["lodash-es".to_string()],
+            "{fixture}: the externalized sibling's lodash-es is not credited to the consumer"
+        );
+    }
+}
+
 /// A published sibling is installed from the registry with its own dependency
 /// tree, so the consumer never needs the sibling's packages hoisted. Crediting
 /// them there would hide a real finding.

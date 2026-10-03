@@ -816,6 +816,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugin and config credits of the root manifest do not change. This can
   report new unused root dependencies.
 
+- **A workspace that bundles with every package external gets no credit
+  for its private siblings' packages.** A private sibling workspace is
+  inlined into the bundle of the workspace that depends on it, so fallow
+  credits the sibling's packages to that workspace. Before, this credit also
+  applied when the build kept every package external, so the sibling was not
+  inlined. Now the credit is removed when the depending workspace gives an
+  explicit signal: a file that imports `esbuild` and sets
+  `packages: 'external'`, or a package script that runs
+  `bun build --packages=external` or `esbuild --packages=external`. Without
+  such a signal the credit stays. This can report new unused workspace
+  dependencies.
+
 ### Changed
 
 - **`fallow health --group-by --top N` applies the limit to each group.**

@@ -1,0 +1,5 @@
+{
+  "name": "private-workspace-externalized-bun-build",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
