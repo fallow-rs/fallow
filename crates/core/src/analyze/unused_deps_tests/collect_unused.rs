@@ -260,113 +260,174 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
     assert_eq!(result[0].package_name, "my-runtime");
 }
 
+fn ws_deps(root: &str, deps: &[&str], is_private: bool) -> super::super::WorkspaceDependencies {
+    super::super::WorkspaceDependencies {
+        root: PathBuf::from(root),
+        deps: deps.iter().map(|dep| (*dep).to_string()).collect(),
+        is_private,
+    }
+}
+
+/// `file_is_production` stands in for the module classification: a
+/// production file of a publishable workspace keeps the strict check.
+fn is_package_listed_for_file_as(
+    file_path: &Path,
+    package_name: &str,
+    root_deps: &FxHashSet<String>,
+    ws_dep_map: &[super::super::WorkspaceDependencies],
+    file_is_production: bool,
+) -> bool {
+    let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
+    graph.modules[0].path = file_path.to_path_buf();
+    let roots: Vec<&Path> = ws_dep_map.iter().map(|ws| ws.root.as_path()).collect();
+    let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
+    super::super::manifest_chain_declares(
+        package_name,
+        FileId(0),
+        ws_dep_map,
+        &ownership,
+        root_deps,
+        |owner_is_private| owner_is_private || !file_is_production,
+    )
+}
+
 fn is_package_listed_for_file(
     file_path: &Path,
     package_name: &str,
     root_deps: &FxHashSet<String>,
-    ws_dep_map: &[(PathBuf, FxHashSet<String>)],
+    ws_dep_map: &[super::super::WorkspaceDependencies],
 ) -> bool {
-    let (mut graph, _) = build_graph_with_npm_imports(&[(package_name, false)]);
-    graph.modules[0].path = file_path.to_path_buf();
-    let roots: Vec<&Path> = ws_dep_map.iter().map(|(root, _)| root.as_path()).collect();
-    let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
-    super::super::owning_workspace_deps_for_file_id(FileId(0), ws_dep_map, &ownership)
-        .unwrap_or(root_deps)
-        .contains(package_name)
+    is_package_listed_for_file_as(file_path, package_name, root_deps, ws_dep_map, true)
+}
+
+fn names(list: &[&str]) -> FxHashSet<String> {
+    list.iter().map(|name| (*name).to_string()).collect()
 }
 
 #[test]
 fn listed_in_root_deps() {
-    let mut root_deps = FxHashSet::default();
-    root_deps.insert("react".to_string());
-    let ws_dep_map: Vec<(PathBuf, FxHashSet<String>)> = vec![];
     assert!(is_package_listed_for_file(
         Path::new("/project/src/index.ts"),
         "react",
-        &root_deps,
+        &names(&["react"]),
+        &[],
+    ));
+}
+
+#[test]
+fn production_file_of_publishable_workspace_does_not_inherit_root_deps() {
+    let ws_dep_map = vec![ws_deps("/project/packages/app", &[], false)];
+
+    assert!(!is_package_listed_for_file(
+        Path::new("/project/packages/app/src/index.ts"),
+        "react",
+        &names(&["react"]),
         &ws_dep_map,
     ));
 }
 
 #[test]
-fn workspace_file_does_not_inherit_root_deps() {
-    let mut root_deps = FxHashSet::default();
-    root_deps.insert("react".to_string());
-    let ws_dep_map = vec![(PathBuf::from("/project/packages/app"), FxHashSet::default())];
+fn private_workspace_file_inherits_root_deps() {
+    let ws_dep_map = vec![ws_deps("/project/packages/app", &[], true)];
 
-    assert!(!is_package_listed_for_file(
+    assert!(is_package_listed_for_file(
         Path::new("/project/packages/app/src/index.ts"),
         "react",
-        &root_deps,
+        &names(&["react"]),
         &ws_dep_map,
+    ));
+}
+
+#[test]
+fn non_production_file_inherits_nearest_ancestor_declaration() {
+    let ws_dep_map = vec![
+        ws_deps("/project/packages/app", &["react"], false),
+        ws_deps("/project/packages/app/plugins/widget", &[], false),
+    ];
+    let file = Path::new("/project/packages/app/plugins/widget/scripts/build.mjs");
+
+    assert!(is_package_listed_for_file_as(
+        file,
+        "react",
+        &FxHashSet::default(),
+        &ws_dep_map,
+        false,
+    ));
+    assert!(is_package_listed_for_file_as(
+        file,
+        "vue",
+        &names(&["vue"]),
+        &ws_dep_map,
+        false,
+    ));
+    assert!(!is_package_listed_for_file_as(
+        file,
+        "axios",
+        &names(&["vue"]),
+        &ws_dep_map,
+        false,
+    ));
+    assert!(!is_package_listed_for_file_as(
+        file,
+        "react",
+        &FxHashSet::default(),
+        &ws_dep_map,
+        true,
     ));
 }
 
 #[test]
 fn listed_in_workspace_deps() {
-    let root_deps = FxHashSet::default();
-    let mut ws_deps = FxHashSet::default();
-    ws_deps.insert("lodash".to_string());
-    let ws_dep_map = vec![(PathBuf::from("/project/packages/app"), ws_deps)];
+    let ws_dep_map = vec![ws_deps("/project/packages/app", &["lodash"], false)];
     assert!(is_package_listed_for_file(
         Path::new("/project/packages/app/src/index.ts"),
         "lodash",
-        &root_deps,
+        &FxHashSet::default(),
         &ws_dep_map,
     ));
 }
 
 #[test]
 fn not_listed_anywhere() {
-    let root_deps = FxHashSet::default();
-    let ws_dep_map: Vec<(PathBuf, FxHashSet<String>)> = vec![];
     assert!(!is_package_listed_for_file(
         Path::new("/project/src/index.ts"),
         "axios",
-        &root_deps,
-        &ws_dep_map,
+        &FxHashSet::default(),
+        &[],
     ));
 }
 
 #[test]
 fn listed_in_different_workspace_not_matching() {
-    let root_deps = FxHashSet::default();
-    let mut ws_deps = FxHashSet::default();
-    ws_deps.insert("lodash".to_string());
-    let ws_dep_map = vec![(PathBuf::from("/project/packages/lib"), ws_deps)];
+    let ws_dep_map = vec![
+        ws_deps("/project/packages/app", &[], true),
+        ws_deps("/project/packages/lib", &["lodash"], false),
+    ];
     assert!(!is_package_listed_for_file(
         Path::new("/project/packages/app/src/index.ts"),
         "lodash",
-        &root_deps,
+        &FxHashSet::default(),
         &ws_dep_map,
     ));
 }
 
 #[test]
 fn nested_workspace_uses_most_specific_manifest() {
-    let root_deps = FxHashSet::default();
-    let mut parent_deps = FxHashSet::default();
-    parent_deps.insert("react".to_string());
-    let mut child_deps = FxHashSet::default();
-    child_deps.insert("vue".to_string());
     let ws_dep_map = vec![
-        (PathBuf::from("/project/packages/app"), parent_deps),
-        (
-            PathBuf::from("/project/packages/app/plugins/widget"),
-            child_deps,
-        ),
+        ws_deps("/project/packages/app", &["react"], false),
+        ws_deps("/project/packages/app/plugins/widget", &["vue"], false),
     ];
 
     assert!(is_package_listed_for_file(
         Path::new("/project/packages/app/plugins/widget/src/index.ts"),
         "vue",
-        &root_deps,
+        &FxHashSet::default(),
         &ws_dep_map,
     ));
     assert!(!is_package_listed_for_file(
         Path::new("/project/packages/app/plugins/widget/src/index.ts"),
         "react",
-        &root_deps,
+        &FxHashSet::default(),
         &ws_dep_map,
     ));
 }
@@ -388,6 +449,8 @@ fn workspace_ownership_uses_most_specific_ancestor() {
         let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
         assert_eq!(ownership.workspace_index_for_file(FileId(0)), expected);
         assert_eq!(ownership.workspace_index_for_file(FileId(1)), None);
+        assert_eq!(ownership.ancestors_of(0), &[] as &[usize]);
+        assert_eq!(ownership.ancestors_of(1), &[0]);
     }
 }
 

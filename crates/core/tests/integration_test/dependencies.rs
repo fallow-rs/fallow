@@ -514,6 +514,43 @@ fn nested_workspace_dependency_usage_belongs_to_deepest_workspace() {
     );
 }
 
+fn unlisted_sites_for(
+    results: &fallow_types::results::AnalysisResults,
+    package_name: &str,
+) -> Vec<std::path::PathBuf> {
+    results
+        .unlisted_dependencies
+        .iter()
+        .filter(|dep| dep.dep.package_name == package_name)
+        .flat_map(|dep| dep.dep.imported_from.iter().map(|site| site.path.clone()))
+        .collect()
+}
+
+/// A workspace file may use a package that only an ancestor manifest declares
+/// when the workspace is private or the file is not production code. A
+/// production file of a publishable workspace keeps the strict check, because
+/// consumers of the published package do not get the ancestor's dependency.
+#[test]
+fn ancestor_manifest_satisfies_private_and_non_production_imports() {
+    let root = fixture_path("workspace-ancestor-manifest-dependencies");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        unlisted_sites_for(&results, "root-runtime-lib"),
+        vec![root.join("packages/public-lib/src/index.ts")],
+        "only the production file of the publishable workspace stays unlisted"
+    );
+    assert!(
+        unlisted_sites_for(&results, "root-test-helper").is_empty(),
+        "a test file may use the root devDependency"
+    );
+    assert!(
+        unlisted_sites_for(&results, "build-kit").is_empty(),
+        "a build script of a nested workspace may use the ancestor workspace's dependency"
+    );
+}
+
 #[test]
 fn package_less_tsconfig_reference_credits_nearest_package_workspace() {
     let project = tempfile::tempdir().expect("create temp dir");

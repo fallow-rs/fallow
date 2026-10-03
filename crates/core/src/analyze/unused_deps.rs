@@ -161,6 +161,9 @@ fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
 /// scanning every workspace for every package-usage entry or import site.
 struct WorkspaceOwnershipIndex {
     workspace_by_file: Vec<Option<usize>>,
+    /// For each workspace, the workspaces whose roots contain its root,
+    /// nearest first. The root manifest is not a workspace and is not listed.
+    ancestors_by_workspace: Vec<Vec<usize>>,
 }
 
 impl WorkspaceOwnershipIndex {
@@ -182,8 +185,26 @@ impl WorkspaceOwnershipIndex {
                     .find_map(|ancestor| by_root.get(ancestor).copied())
             })
             .collect();
+        let ancestors_by_workspace = workspace_roots
+            .iter()
+            .map(|root| {
+                root.ancestors()
+                    .skip(1)
+                    .filter_map(|ancestor| by_root.get(ancestor).copied())
+                    .collect()
+            })
+            .collect();
 
-        Self { workspace_by_file }
+        Self {
+            workspace_by_file,
+            ancestors_by_workspace,
+        }
+    }
+
+    fn ancestors_of(&self, workspace_index: usize) -> &[usize] {
+        self.ancestors_by_workspace
+            .get(workspace_index)
+            .map_or(&[], Vec::as_slice)
     }
 
     fn workspace_index_for_file(&self, file_id: FileId) -> Option<usize> {
@@ -1040,6 +1061,40 @@ fn production_exclude_globset() -> Option<&'static globset::GlobSet> {
     .as_ref()
 }
 
+/// Return `true` when `module` is production code: reachable from a runtime
+/// entry point, not a test or story file, and not a config file.
+///
+/// Repo tooling the test globs do not cover (`scripts/`, `benchmarks/`,
+/// playgrounds, anything reachable only through a config-file support entry)
+/// is not runtime reachable, so it is not production code either.
+fn is_production_module(module: &crate::graph::ModuleNode, config: &ResolvedConfig) -> bool {
+    if !module.is_runtime_reachable() || is_config_file(&module.path) {
+        return false;
+    }
+    let relative = module
+        .path
+        .strip_prefix(&config.root)
+        .unwrap_or(&module.path);
+    !production_exclude_globset().is_some_and(|test_globs| test_globs.is_match(relative))
+}
+
+/// Return `true` when a workspace file may use a package that only an
+/// ancestor manifest declares (an ancestor workspace or the root).
+///
+/// A private workspace is never published, so it always runs inside the
+/// monorepo where the ancestor's install is present. A file that is not
+/// production code (a test, config or build script) also runs only inside the
+/// monorepo. A production file of a publishable workspace must declare its
+/// packages itself, because consumers of the published package do not get the
+/// ancestor's dependency.
+fn accepts_ancestor_declaration(
+    owner_is_private: bool,
+    module: &crate::graph::ModuleNode,
+    config: &ResolvedConfig,
+) -> bool {
+    owner_is_private || !is_production_module(module, config)
+}
+
 /// Return `true` when every file importing `dep` is a test/story or config file
 /// and the dependency is not exclusively type-only imported.
 fn dependency_is_test_only(
@@ -1139,12 +1194,12 @@ pub fn find_test_only_dependencies(
 /// tooling the test globs do not cover (`scripts/`, `benchmarks/`, `.github/`,
 /// playgrounds, and anything reachable only through a config-file support
 /// entry such as a rollup config chain) is not part of the shipped artifact,
-/// so a devDependency imported only there must not be promoted.
+/// so a devDependency imported only there must not be promoted. The rule lives
+/// in [`is_production_module`].
 fn dependency_has_prod_value_import(
     dep: &str,
     graph: &ModuleGraph,
     config: &ResolvedConfig,
-    test_globs: &globset::GlobSet,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> bool {
     let Some(file_ids) = graph.package_usage.get(dep) else {
@@ -1172,18 +1227,10 @@ fn dependency_has_prod_value_import(
             return false;
         }
         graph.modules.get(id.0 as usize).is_some_and(|module| {
-            if !module.is_runtime_reachable() {
-                return false;
-            }
-            let relative = module
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&module.path);
-            !(test_globs.is_match(relative)
-                || is_config_file(&module.path)
-                || workspaces
+            is_production_module(module, config)
+                && !workspaces
                     .iter()
-                    .any(|ws| module.path.starts_with(&ws.root)))
+                    .any(|ws| module.path.starts_with(&ws.root))
         })
     })
 }
@@ -1216,9 +1263,9 @@ pub fn find_dev_dependencies_in_production(
     workspaces: &[fallow_config::WorkspaceInfo],
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> Vec<DevDependencyInProduction> {
-    let Some(test_globs) = production_exclude_globset() else {
+    if production_exclude_globset().is_none() {
         return Vec::new();
-    };
+    }
 
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
@@ -1269,7 +1316,7 @@ pub fn find_dev_dependencies_in_production(
             continue;
         }
 
-        if dependency_has_prod_value_import(&dep, graph, config, test_globs, workspaces) {
+        if dependency_has_prod_value_import(&dep, graph, config, workspaces) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -1297,16 +1344,6 @@ fn types_package_name(package_name: &str) -> String {
         || format!("@types/{package_name}"),
         |scoped| format!("@types/{}", scoped.replacen('/', "__", 1)),
     )
-}
-
-fn owning_workspace_deps_for_file_id<'a>(
-    file_id: FileId,
-    ws_dep_map: &'a [(PathBuf, FxHashSet<String>)],
-    ownership: &WorkspaceOwnershipIndex,
-) -> Option<&'a FxHashSet<String>> {
-    ownership
-        .workspace_index_for_file(file_id)
-        .and_then(|index| ws_dep_map.get(index).map(|(_, deps)| deps))
 }
 
 fn relative_module_path(module_path: &Path, root: &Path) -> String {
@@ -1432,10 +1469,20 @@ fn package_imports_are_all_npm_scheme(
     saw_package
 }
 
+/// The names one workspace manifest makes resolvable for its own files.
+struct WorkspaceDependencies {
+    root: PathBuf,
+    /// Every declared dependency name, the workspace's own name, and for a
+    /// Deno member the ambient names of the other Deno members.
+    deps: FxHashSet<String>,
+    /// `"private": true` in the manifest.
+    is_private: bool,
+}
+
 fn workspace_dependency_map(
     workspaces: &[fallow_config::WorkspaceInfo],
     config: &ResolvedConfig,
-) -> Vec<(PathBuf, FxHashSet<String>)> {
+) -> Vec<WorkspaceDependencies> {
     let ambient_workspace_names: FxHashSet<String> = workspaces
         .iter()
         .filter(|ws| fallow_config::dir_has_deno_json(&ws.root))
@@ -1460,7 +1507,11 @@ fn workspace_dependency_map(
         if fallow_config::dir_has_deno_json(&ws.root) {
             ws_deps.extend(ambient_workspace_names.iter().cloned());
         }
-        ws_dep_map.push((ws.root.clone(), ws_deps));
+        ws_dep_map.push(WorkspaceDependencies {
+            root: ws.root.clone(),
+            deps: ws_deps,
+            is_private: ws_pkg.private == Some(true),
+        });
     }
     ws_dep_map
 }
@@ -1513,7 +1564,7 @@ pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<Unl
     let workspace_roots: Vec<&Path> = parts
         .ws_dep_map
         .iter()
-        .map(|(root, _)| root.as_path())
+        .map(|ws| ws.root.as_path())
         .collect();
     let workspace_ownership = WorkspaceOwnershipIndex::new(input.graph, &workspace_roots);
     let ctx = UnlistedDependencyContext {
@@ -1537,7 +1588,7 @@ pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<Unl
 
 struct UnlistedDependencyContextParts<'a> {
     all_deps: FxHashSet<String>,
-    ws_dep_map: Vec<(PathBuf, FxHashSet<String>)>,
+    ws_dep_map: Vec<WorkspaceDependencies>,
     virtual_prefixes: Vec<&'a str>,
     virtual_suffixes: Vec<&'a str>,
     plugin_tooling: FxHashSet<&'a str>,
@@ -1663,7 +1714,7 @@ struct UnlistedDependencyContext<'a> {
     graph: &'a ModuleGraph,
     config: &'a ResolvedConfig,
     all_deps: &'a FxHashSet<String>,
-    ws_dep_map: &'a [(std::path::PathBuf, FxHashSet<String>)],
+    ws_dep_map: &'a [WorkspaceDependencies],
     virtual_prefixes: &'a [&'a str],
     virtual_suffixes: &'a [&'a str],
     plugin_tooling: &'a FxHashSet<&'a str>,
@@ -1716,9 +1767,7 @@ fn collect_unlisted_import_site(
     if package_imports_are_all_npm_scheme(ctx.import_spans_by_file, id, package_name) {
         return None;
     }
-    let deps = owning_workspace_deps_for_file_id(id, ctx.ws_dep_map, ctx.workspace_ownership)
-        .unwrap_or(ctx.all_deps);
-    if deps.contains(package_name) || deps.contains(&types_package_name(package_name)) {
+    if import_is_declared(package_name, id, module, ctx) {
         return None;
     }
     let relative_path = relative_module_path(&module.path, &ctx.config.root);
@@ -1735,6 +1784,64 @@ fn collect_unlisted_import_site(
         line,
         col,
     })
+}
+
+/// Return `true` when a manifest that the importing file may use declares
+/// `package_name` or its `@types` package.
+///
+/// A file outside every workspace uses the root manifest. A workspace file
+/// uses its own manifest first. When that manifest does not declare the
+/// package, the walk goes up through the ancestor workspaces to the root
+/// manifest, but only when [`accepts_ancestor_declaration`] allows it. Sibling
+/// workspaces are never consulted.
+fn import_is_declared(
+    package_name: &str,
+    id: FileId,
+    module: &crate::graph::ModuleNode,
+    ctx: &UnlistedDependencyContext<'_>,
+) -> bool {
+    manifest_chain_declares(
+        package_name,
+        id,
+        ctx.ws_dep_map,
+        ctx.workspace_ownership,
+        ctx.all_deps,
+        |owner_is_private| accepts_ancestor_declaration(owner_is_private, module, ctx.config),
+    )
+}
+
+/// The manifest walk behind [`import_is_declared`]. `accepts_ancestor`
+/// receives whether the owning workspace is private and decides whether the
+/// walk may continue past the owning workspace's own manifest.
+fn manifest_chain_declares(
+    package_name: &str,
+    id: FileId,
+    ws_dep_map: &[WorkspaceDependencies],
+    ownership: &WorkspaceOwnershipIndex,
+    root_deps: &FxHashSet<String>,
+    accepts_ancestor: impl FnOnce(bool) -> bool,
+) -> bool {
+    let types_name = types_package_name(package_name);
+    let declares =
+        |deps: &FxHashSet<String>| deps.contains(package_name) || deps.contains(&types_name);
+    let Some((index, owner)) = ownership
+        .workspace_index_for_file(id)
+        .and_then(|index| ws_dep_map.get(index).map(|owner| (index, owner)))
+    else {
+        return declares(root_deps);
+    };
+    if declares(&owner.deps) {
+        return true;
+    }
+    if !accepts_ancestor(owner.is_private) {
+        return false;
+    }
+    ownership
+        .ancestors_of(index)
+        .iter()
+        .filter_map(|ancestor| ws_dep_map.get(*ancestor))
+        .any(|ancestor| declares(&ancestor.deps))
+        || declares(root_deps)
 }
 
 /// Plumbing for the per-spec skip checks in `find_unresolved_imports`.

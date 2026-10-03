@@ -782,6 +782,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a function is new. `fallow report --from` on an envelope from an
   older fallow keeps the earlier text.
 
+- **A workspace file can use a package that an ancestor manifest declares.**
+  Before, fallow checked a workspace file only against the `package.json` of
+  its own workspace. A package that only the root manifest or an ancestor
+  workspace declared was reported as an unlisted dependency, while a root
+  declaration counted as used. Now fallow walks from the owning workspace
+  through its ancestor workspaces to the root manifest and accepts the first
+  declaration it finds, when the workspace is private or when the file is not
+  production code (a test, config or build script, by the same rule that the
+  dev dependency checks use). A production file of a publishable workspace
+  keeps the strict check, because consumers of the published package do not
+  get the ancestor's dependency. A sibling workspace's manifest still does not
+  count.
+
 ### Changed
 
 - **`fallow health --group-by --top N` applies the limit to each group.**

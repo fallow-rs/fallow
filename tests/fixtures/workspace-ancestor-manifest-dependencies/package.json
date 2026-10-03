@@ -1,0 +1,11 @@
+{
+  "name": "workspace-ancestor-manifest-dependencies",
+  "private": true,
+  "workspaces": ["packages/*", "packages/tool/packages/*"],
+  "dependencies": {
+    "root-runtime-lib": "1.0.0"
+  },
+  "devDependencies": {
+    "root-test-helper": "1.0.0"
+  }
+}
