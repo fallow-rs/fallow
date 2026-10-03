@@ -147,6 +147,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Peer dependency of:` section (human). Before, the trace printed `UNUSED`
   even for a required peer that the unused-dependency check credited.
 
+- **A devDependency that the same `package.json` lists in
+  `peerDependencies` is no longer reported as unused.** A package that
+  declares a peer often lists the same package in `devDependencies`, so the
+  peer is installed for its own build and tests. The consumer supplies the
+  peer at runtime, so the source of the package often does not import it.
+  Before, fallow reported that dev copy as an unused devDependency. Now
+  fallow credits it, for a required or an optional peer, in the root and in
+  each workspace `package.json`. This is the rule that the
+  `dev-dependency-in-production` check already applies to a dev and peer
+  pair. A devDependency with no peer entry stays reported.
+
 - **A `*` in a package `exports` target now matches files in nested
   directories.** Before, fallow expanded the `*` like a shell glob, so it
   matched only one path segment. With `"./*": "./src/*.ts"`, fallow did not

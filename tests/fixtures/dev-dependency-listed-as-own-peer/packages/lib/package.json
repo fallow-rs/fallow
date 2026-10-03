@@ -1,0 +1,11 @@
+{
+  "name": "lib",
+  "main": "src/index.ts",
+  "peerDependencies": {
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "react-dom": "^18.3.1",
+    "is-odd": "3.0.1"
+  }
+}
