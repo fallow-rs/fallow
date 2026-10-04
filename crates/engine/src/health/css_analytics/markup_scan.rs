@@ -4,6 +4,7 @@ use super::*;
 /// the orchestrator stays a thin assembler.
 pub(super) struct MarkupCssCandidates {
     pub(super) tailwind_arbitrary_values: Vec<fallow_output::TailwindArbitraryValue>,
+    pub(super) tailwind_occurrences: Vec<TailwindOccurrence>,
     pub(super) cva_duplicate_variant_blocks: Vec<fallow_output::CvaDuplicateVariantBlock>,
     pub(super) cva_variant_token_drifts: Vec<fallow_output::CvaVariantTokenDrift>,
     pub(super) unresolved_class_references: Vec<fallow_output::UnresolvedClassReference>,
@@ -15,6 +16,7 @@ pub(super) struct MarkupCssCandidates {
 
 struct MarkupTokenCandidates {
     tailwind_arbitrary_values: Vec<fallow_output::TailwindArbitraryValue>,
+    tailwind_occurrences: Vec<TailwindOccurrence>,
     cva_duplicate_variant_blocks: Vec<fallow_output::CvaDuplicateVariantBlock>,
     cva_variant_token_drifts: Vec<fallow_output::CvaVariantTokenDrift>,
 }
@@ -58,6 +60,7 @@ pub(super) fn scan_markup_css_candidates(
 
     MarkupCssCandidates {
         tailwind_arbitrary_values: markup.tailwind_arbitrary_values,
+        tailwind_occurrences: markup.tailwind_occurrences,
         cva_duplicate_variant_blocks: markup.cva_duplicate_variant_blocks,
         cva_variant_token_drifts: markup.cva_variant_token_drifts,
         unresolved_class_references: references.unresolved_class_references,
@@ -70,12 +73,10 @@ pub(super) fn scan_markup_css_candidates(
 
 fn scan_markup_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> MarkupTokenCandidates {
     let ctx = markup_scan_ctx(input);
+    let tailwind = scan_markup_tailwind_arbitrary_values(input.files, ctx, input.summary);
     MarkupTokenCandidates {
-        tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
-            input.files,
-            ctx,
-            input.summary,
-        ),
+        tailwind_arbitrary_values: tailwind.analytics,
+        tailwind_occurrences: tailwind.occurrences,
         cva_duplicate_variant_blocks: scan_cva_duplicate_variant_blocks(input.files, ctx),
         cva_variant_token_drifts: scan_cva_variant_token_drifts(
             input.files,

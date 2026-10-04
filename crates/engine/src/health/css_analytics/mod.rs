@@ -14,7 +14,11 @@ mod cva;
 mod markup_scan;
 mod near_duplicates;
 mod preprocessor;
+mod tailwind_occurrences;
 mod theme_tokens;
+
+use tailwind_occurrences::TailwindScan;
+pub(super) use tailwind_occurrences::{TailwindOccurrence, surviving_representatives};
 mod token_consumers;
 
 use classes::*;
@@ -708,14 +712,18 @@ fn scan_markup_tailwind_arbitrary_values(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
     summary: &mut fallow_output::CssAnalyticsSummary,
-) -> Vec<fallow_output::TailwindArbitraryValue> {
+) -> TailwindScan {
     let HealthScanCtx { config, .. } = ctx;
 
     use fallow_output::TailwindArbitraryValue;
 
     if !project_uses_tailwind(&config.root) {
-        return Vec::new();
+        return TailwindScan {
+            analytics: Vec::new(),
+            occurrences: Vec::new(),
+        };
     }
+    let mut occurrences = Vec::new();
     // token -> (total count, first path, first line). First-seen wins for the
     // location; files are path-sorted, so the first occurrence is deterministic.
     let mut agg: rustc_hash::FxHashMap<String, (u32, String, u32)> =
@@ -727,6 +735,11 @@ fn scan_markup_tailwind_arbitrary_values(
         };
         for arb in crate::css::scan_tailwind_arbitrary_values(&source) {
             total_uses = total_uses.saturating_add(1);
+            occurrences.push(TailwindOccurrence {
+                value: arb.value.clone(),
+                path: rel.clone(),
+                line: arb.line,
+            });
             let entry = agg
                 .entry(arb.value)
                 .or_insert_with(|| (0, rel.clone(), arb.line));
@@ -749,7 +762,10 @@ fn scan_markup_tailwind_arbitrary_values(
         })
         .collect();
     out.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.value.cmp(&b.value)));
-    out
+    TailwindScan {
+        analytics: out,
+        occurrences,
+    }
 }
 
 fn record_css_analytics_summary(
@@ -865,6 +881,7 @@ struct CssTokenMetrics {
 pub(super) struct CssAnalyticsComputation {
     pub(super) report: fallow_output::CssAnalyticsReport,
     pub(super) scoring_inputs: super::styling_score::StylingScoringInputs,
+    pub(super) tailwind_occurrences: Vec<TailwindOccurrence>,
 }
 
 /// Walk every in-scope stylesheet / SFC, accumulating structural metrics, the
@@ -1103,7 +1120,7 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     );
     let scoring_inputs = css_report_scoring_inputs(walk_ref);
     let output = walk.into_output(summary, raw_style_values);
-    let report = assemble_css_report(CssReportAssemblyInput {
+    let (report, tailwind_occurrences) = assemble_css_report(CssReportAssemblyInput {
         output,
         metrics,
         candidates,
@@ -1114,6 +1131,7 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     Some(CssAnalyticsComputation {
         report,
         scoring_inputs,
+        tailwind_occurrences,
     })
 }
 
@@ -1236,7 +1254,7 @@ struct CssReportAssemblyInput<'a> {
 
 fn assemble_css_report(
     input: CssReportAssemblyInput<'_>,
-) -> Option<fallow_output::CssAnalyticsReport> {
+) -> Option<(fallow_output::CssAnalyticsReport, Vec<TailwindOccurrence>)> {
     use fallow_output::CssAnalyticsReport;
 
     let CssReportAssemblyInput {
@@ -1266,27 +1284,30 @@ fn assemble_css_report(
     scoped_unused.sort_by(|a, b| a.path.cmp(&b.path));
     sort_raw_style_values(&mut output.raw_style_values);
     output.summary.raw_style_values = saturate_len(output.raw_style_values.len());
-    Some(CssAnalyticsReport {
-        files: output.file_reports,
-        summary: output.summary,
-        scoped_unused,
-        unreferenced_keyframes: metrics.unreferenced_keyframes,
-        undefined_keyframes: metrics.undefined_keyframes,
-        duplicate_declaration_blocks: metrics.duplicate_declaration_blocks,
-        cva_duplicate_variant_blocks: candidates.cva_duplicate_variant_blocks,
-        cva_variant_token_drifts: candidates.cva_variant_token_drifts,
-        tailwind_arbitrary_values: candidates.tailwind_arbitrary_values,
-        raw_style_values: output.raw_style_values,
-        unused_at_rules: metrics.unused_at_rules,
-        unresolved_class_references: candidates.unresolved_class_references,
-        unreferenced_css_classes: candidates.unreferenced_css_classes,
-        unused_font_faces: metrics.unused_font_faces,
-        unused_theme_tokens: candidates.unused_theme_tokens,
-        near_duplicate_theme_tokens: candidates.near_duplicate_theme_tokens,
-        near_duplicate_css_in_js_tokens: candidates.near_duplicate_css_in_js_tokens,
-        token_consumers,
-        font_size_unit_mix: metrics.font_size_unit_mix,
-    })
+    Some((
+        CssAnalyticsReport {
+            files: output.file_reports,
+            summary: output.summary,
+            scoped_unused,
+            unreferenced_keyframes: metrics.unreferenced_keyframes,
+            undefined_keyframes: metrics.undefined_keyframes,
+            duplicate_declaration_blocks: metrics.duplicate_declaration_blocks,
+            cva_duplicate_variant_blocks: candidates.cva_duplicate_variant_blocks,
+            cva_variant_token_drifts: candidates.cva_variant_token_drifts,
+            tailwind_arbitrary_values: candidates.tailwind_arbitrary_values,
+            raw_style_values: output.raw_style_values,
+            unused_at_rules: metrics.unused_at_rules,
+            unresolved_class_references: candidates.unresolved_class_references,
+            unreferenced_css_classes: candidates.unreferenced_css_classes,
+            unused_font_faces: metrics.unused_font_faces,
+            unused_theme_tokens: candidates.unused_theme_tokens,
+            near_duplicate_theme_tokens: candidates.near_duplicate_theme_tokens,
+            near_duplicate_css_in_js_tokens: candidates.near_duplicate_css_in_js_tokens,
+            token_consumers,
+            font_size_unit_mix: metrics.font_size_unit_mix,
+        },
+        candidates.tailwind_occurrences,
+    ))
 }
 
 fn css_report_is_empty(
@@ -1298,6 +1319,7 @@ fn css_report_is_empty(
     output.summary.files_analyzed == 0
         && output.scoped_unused.is_empty()
         && candidates.tailwind_arbitrary_values.is_empty()
+        && candidates.tailwind_occurrences.is_empty()
         && candidates.cva_duplicate_variant_blocks.is_empty()
         && candidates.cva_variant_token_drifts.is_empty()
         && candidates.unresolved_class_references.is_empty()
@@ -1384,6 +1406,9 @@ fn retain_markup_candidates_changed_scope(
 ) {
     candidates
         .tailwind_arbitrary_values
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .tailwind_occurrences
         .retain(|item| in_scope(&item.path));
     candidates
         .cva_duplicate_variant_blocks

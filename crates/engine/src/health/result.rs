@@ -167,18 +167,18 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
                 &computation.scoring_inputs,
             )
         });
-        input.report.css_analytics = computation.map(|computation| computation.report);
         // Graduation (chunk 2): map the descriptive css candidates into first-class
         // styling findings, honoring inline suppression at production time. Styling
         // stays in its own domain (HealthReport), not the dead-code AnalysisResults.
         input.report.styling_findings = build_styling_findings(
-            input.report.css_analytics.as_ref(),
+            computation.as_ref(),
             input.modules,
             input.files,
             input.config,
             input.opts.css_deep,
             input.dead_code_results,
         );
+        input.report.css_analytics = computation.map(|computation| computation.report);
     }
 }
 
@@ -189,20 +189,21 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
 /// arbitrary values = hardcoded-instead-of-token). Default severity `warn` is
 /// applied downstream; the finding is verdict-neutral by default.
 fn build_styling_findings(
-    css: Option<&fallow_output::CssAnalyticsReport>,
+    computation: Option<&super::css_analytics::CssAnalyticsComputation>,
     modules: &[fallow_types::extract::ModuleInfo],
     files: &[DiscoveredFile],
     config: &ResolvedConfig,
     include_cross_file_reachability: bool,
     dead_code_results: Option<&fallow_types::results::AnalysisResults>,
 ) -> Vec<fallow_output::StylingFinding> {
-    let Some(css) = css else {
+    let Some(computation) = computation else {
         return Vec::new();
     };
 
     let suppressions = StylingSuppressionIndex::new(modules, files, &config.root);
     let ctx = StylingFindingContext {
-        css,
+        css: &computation.report,
+        tailwind_occurrences: &computation.tailwind_occurrences,
         config,
         include_cross_file_reachability,
         suppressions: &suppressions,
@@ -254,6 +255,7 @@ impl<'a> StylingSuppressionIndex<'a> {
 
 struct StylingFindingContext<'a, 's> {
     css: &'a fallow_output::CssAnalyticsReport,
+    tailwind_occurrences: &'a [super::css_analytics::TailwindOccurrence],
     config: &'a ResolvedConfig,
     include_cross_file_reachability: bool,
     suppressions: &'s StylingSuppressionIndex<'a>,
@@ -289,14 +291,15 @@ fn append_tailwind_arbitrary_value_findings(
     findings: &mut Vec<fallow_output::StylingFinding>,
     ctx: &StylingFindingContext<'_, '_>,
 ) {
-    for candidate in &ctx.css.tailwind_arbitrary_values {
-        if ctx.is_suppressed(
-            &candidate.path,
-            candidate.line,
-            fallow_types::suppress::IssueKind::CssTokenDrift,
-        ) {
-            continue;
-        }
+    for candidate in
+        super::css_analytics::surviving_representatives(ctx.tailwind_occurrences, |site| {
+            !ctx.is_suppressed(
+                &site.path,
+                site.line,
+                fallow_types::suppress::IssueKind::CssTokenDrift,
+            )
+        })
+    {
         findings.push(fallow_output::StylingFinding {
             code: "css-token-drift".to_string(),
             sub_kind: "tailwind-arbitrary-value".to_string(),
@@ -312,7 +315,7 @@ fn append_tailwind_arbitrary_value_findings(
                 "Replace the one-off Tailwind arbitrary value with an existing scale token, or confirm it is intentional."
                     .to_string(),
             ),
-            actions: candidate.actions.clone(),
+            actions: vec![fallow_output::CssCandidateAction::replace_arbitrary_value(&candidate.value)],
         });
     }
 }

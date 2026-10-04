@@ -32,6 +32,7 @@ mod complexity_gate_tests;
 mod config_pattern_parity_tests;
 mod coverage_analyze_tests;
 mod coverage_cloud_reads_tests;
+mod css_token_drift_suppression_tests;
 mod deprecated_export_tests;
 mod doctor_tests;
 mod dupes_tests;
