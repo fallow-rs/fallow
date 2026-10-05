@@ -1,0 +1,10 @@
+{
+  "name": "shell-command-substitution",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "stamp": "STAMP=\"$(node scripts/stamp.ts)\"",
+    "label": "LABEL=`node scripts/label.ts`"
+  }
+}

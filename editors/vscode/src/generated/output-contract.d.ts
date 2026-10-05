@@ -11531,11 +11531,13 @@ imported_by: string[]
  */
 type_only_imported_by: string[]
 /**
- * Whether the dependency is invoked from package.json scripts or CI configs.
+ * Whether the dependency is invoked from package.json scripts, CI configs
+ * or git hooks.
  */
 used_in_scripts: boolean
 /**
- * Whether the dependency is used at all.
+ * Whether the dependency is used at all: imported, invoked from scripts,
+ * or listed as a peer by a used package (`peer_of`).
  */
 is_used: boolean
 /**
@@ -11543,12 +11545,60 @@ is_used: boolean
  */
 import_count: number
 /**
+ * Used packages that list this dependency in their installed
+ * `peerDependencies`, required or optional, sorted by name. The
+ * unused-dependency check credits such a peer, because the package that
+ * lists it loads it at runtime. Absent when no used package lists it.
+ */
+peer_of?: string[]
+/**
  * The configs that declare this name as a Module Federation remote alias
  * under `remotes`, one per config. A remote alias is provided by a
  * remote container at runtime, not by an npm package. Absent when no
  * Federation config declares the name (issue #2796).
  */
 sources?: TraceSource[]
+/**
+ * Why the unused devDependency check credits the dependency as tooling
+ * when no file imports it and no script, CI workflow or git hook runs it.
+ * When present, `is_used` is `true`. Absent otherwise.
+ */
+tooling_credit?: (ToolingCredit | null)
+}
+/**
+ * Why the unused devDependency check counts a dependency as used tooling
+ * although no source file imports it.
+ */
+export interface ToolingCredit {
+/**
+ * The evidence: `plugin-config` when the plugin that declares the
+ * dependency found its own config file, `plugin-reference` when a
+ * package.json script, a CI workflow or a git hook runs one of that
+ * plugin's packages, `ambient-types` for a type package that declares
+ * globals, `types-target` when the project declares or imports the
+ * package that a `@types/` package types, `types-config` when a config
+ * file, such as a tsconfig `types` entry, names the type package,
+ * `known-tooling` for a library from the tooling catalogue, and
+ * `known-tooling-config` when a command-line tool from the catalogue has
+ * its own config file. The set is open.
+ */
+reason: string
+/**
+ * The plugin that declares the dependency as tooling.
+ */
+plugin?: (string | null)
+/**
+ * The config file found, relative to the project root, for
+ * `plugin-config` and `known-tooling-config`. A `package.json` path when
+ * the config is a package.json key.
+ */
+config?: (string | null)
+/**
+ * The package that a script, CI workflow or git hook runs, for
+ * `plugin-reference`, or the package that a `@types/` package types,
+ * for `types-target`.
+ */
+reference?: (string | null)
 }
 /**
  * Result of tracing a clone: all groups containing the code at a source

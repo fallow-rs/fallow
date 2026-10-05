@@ -139,6 +139,41 @@ pub(crate) fn extract_config_shallow_strings_or_object_property(
     .unwrap_or_default()
 }
 
+/// Extract top-level string values of `key` from each object element of the
+/// `array_key` array, including object entries that hold `object_property`.
+///
+/// Useful for configs like:
+/// - `overrides: [{ files: ["*.ts"], jsPlugins: ["pkg", { specifier: "pkg2" }] }]`
+#[must_use]
+pub(crate) fn extract_config_array_objects_shallow_strings_or_object_property(
+    source: &str,
+    path: &Path,
+    array_key: &str,
+    key: &str,
+    object_property: &str,
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let prop = find_property(obj, array_key)?;
+        let Expression::ArrayExpression(arr) = &prop.value else {
+            return None;
+        };
+        let values = arr
+            .elements
+            .iter()
+            .filter_map(|element| match element.as_expression() {
+                Some(Expression::ObjectExpression(element_obj)) => find_property(element_obj, key),
+                _ => None,
+            })
+            .flat_map(|inner| {
+                collect_shallow_string_or_object_property_values(&inner.value, object_property)
+            })
+            .collect();
+        Some(values)
+    })
+    .unwrap_or_default()
+}
+
 /// Extract shallow strings from an array property inside a nested object path.
 #[must_use]
 pub(crate) fn extract_config_nested_shallow_strings(
@@ -287,7 +322,38 @@ pub(crate) fn extract_config_string_or_array(
 ) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
-        get_nested_string_or_array(obj, prop_path)
+        get_nested_string_or_array(obj, prop_path, PathScope::Program(program))
+    })
+    .unwrap_or_default()
+}
+
+/// Extract a string, array, or object-map value from each config of a
+/// default-exported config array, or from the single config object.
+///
+/// Supports `export default [...]` and `export default defineConfig([...])`.
+/// The function reads `prop_path` from each object element of the array. When
+/// the default export is not an array, it reads the config object.
+#[must_use]
+pub(crate) fn extract_config_array_or_object_string_or_array(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let Some(arr) = find_default_export_array(program) else {
+            let obj = find_config_object(program)?;
+            return get_nested_string_or_array(obj, prop_path, PathScope::Program(program));
+        };
+        let values = arr
+            .elements
+            .iter()
+            .filter_map(|element| element.as_expression().and_then(object_expression))
+            .filter_map(|element_obj| {
+                get_nested_string_or_array(element_obj, prop_path, PathScope::Program(program))
+            })
+            .flatten()
+            .collect();
+        Some(values)
     })
     .unwrap_or_default()
 }
@@ -323,7 +389,8 @@ pub(crate) fn extract_config_array_nested_string_or_array(
         let mut results = Vec::new();
         for element in &arr.elements {
             if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
-                && let Some(values) = get_nested_string_or_array(element_obj, inner_path)
+                && let Some(values) =
+                    get_nested_string_or_array(element_obj, inner_path, PathScope::Program(program))
             {
                 results.extend(values);
             }
@@ -362,7 +429,12 @@ pub(crate) fn extract_config_array_object_fields(
                 Some(Expression::ObjectExpression(element_obj)) => Some(
                     keys.iter()
                         .map(|key| {
-                            get_nested_string_or_array(element_obj, &[key]).unwrap_or_default()
+                            get_nested_string_or_array(
+                                element_obj,
+                                &[key],
+                                PathScope::Program(program),
+                            )
+                            .unwrap_or_default()
                         })
                         .collect(),
                 ),
@@ -383,7 +455,7 @@ pub(crate) fn extract_config_object_nested_string_or_array(
     inner_path: &[&str],
 ) -> Vec<String> {
     extract_config_object_nested(source, path, object_path, |value_obj| {
-        get_nested_string_or_array(value_obj, inner_path)
+        get_nested_string_or_array(value_obj, inner_path, PathScope::Bare)
     })
 }
 
@@ -1819,28 +1891,60 @@ fn is_command_token_char(ch: char) -> bool {
     !ch.is_whitespace() && !matches!(ch, '&' | '|' | ';' | '"' | '\'')
 }
 
+/// The identifiers that a path expression can resolve.
+#[derive(Clone, Copy)]
+enum PathScope<'p> {
+    /// No identifier resolves.
+    Bare,
+    /// A call to a module-level path helper of this program resolves.
+    Program(&'p Program<'p>),
+    /// Inside a helper body, the parameter `name` holds the literal `value`.
+    Param { name: &'p str, value: &'p str },
+}
+
 /// Convert an expression to a path-like string if it's statically recoverable.
 pub(crate) fn expression_to_path_string(expr: &Expression) -> Option<String> {
+    path_string_in(expr, PathScope::Bare)
+}
+
+fn path_string_in(expr: &Expression, scope: PathScope<'_>) -> Option<String> {
     match expr {
-        Expression::ParenthesizedExpression(paren) => expression_to_path_string(&paren.expression),
-        Expression::TSAsExpression(ts_as) => expression_to_path_string(&ts_as.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => expression_to_path_string(&ts_sat.expression),
+        Expression::ParenthesizedExpression(paren) => path_string_in(&paren.expression, scope),
+        Expression::TSAsExpression(ts_as) => path_string_in(&ts_as.expression, scope),
+        Expression::TSSatisfiesExpression(ts_sat) => path_string_in(&ts_sat.expression, scope),
         Expression::StaticMemberExpression(member) if member.property.name == "pathname" => {
-            expression_to_path_string(&member.object)
+            path_string_in(&member.object, scope)
         }
-        Expression::CallExpression(call) => call_expression_to_path_string(call),
-        Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr),
+        Expression::CallExpression(call) => call_expression_to_path_string(call, scope),
+        Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr, scope),
+        _ => scoped_string(expr, scope),
+    }
+}
+
+/// A string literal, or the helper parameter that stands for one.
+fn scoped_string(expr: &Expression, scope: PathScope<'_>) -> Option<String> {
+    match (expr, scope) {
+        (Expression::Identifier(id), PathScope::Param { name, value }) if id.name == name => {
+            Some(value.to_string())
+        }
         _ => expression_to_string(expr),
     }
 }
 
-fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
+fn call_expression_to_path_string(call: &CallExpression, scope: PathScope<'_>) -> Option<String> {
+    if let PathScope::Program(program) = scope
+        && let Expression::Identifier(id) = &call.callee
+        && let Some(path) = local_helper_call_path(program, &id.name, call)
+    {
+        return Some(path);
+    }
+
     if matches!(&call.callee, Expression::Identifier(id) if id.name == "fileURLToPath") {
         return call
             .arguments
             .first()
             .and_then(Argument::as_expression)
-            .and_then(expression_to_path_string);
+            .and_then(|arg| path_string_in(arg, scope));
     }
 
     let callee_name = match &call.callee {
@@ -1864,10 +1968,95 @@ fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
             return None;
         }
 
-        segments.push(expression_to_string(expr)?);
+        segments.push(scoped_string(expr, scope)?);
     }
 
     (!segments.is_empty()).then(|| join_path_segments(&segments))
+}
+
+/// Evaluate a call to a module-level path helper with one literal argument.
+///
+/// Configs often declare a small helper such as
+/// `const p = (rel) => fileURLToPath(new URL(rel, import.meta.url))` and call
+/// it as `p("./src/main.ts")`. The helper body is evaluated with its parameter
+/// bound to the literal argument. The body can not call another helper.
+fn local_helper_call_path(program: &Program, name: &str, call: &CallExpression) -> Option<String> {
+    let [argument] = call.arguments.as_slice() else {
+        return None;
+    };
+    let value = expression_to_string(argument.as_expression()?)?;
+    let (param, body) = find_local_path_helper(program, name)?;
+    path_string_in(
+        body,
+        PathScope::Param {
+            name: param,
+            value: &value,
+        },
+    )
+}
+
+/// Find a module-level function `name` with one simple parameter and a body
+/// that only returns one expression. Return the parameter name and that
+/// expression.
+fn find_local_path_helper<'a>(
+    program: &'a Program<'a>,
+    name: &str,
+) -> Option<(&'a str, &'a Expression<'a>)> {
+    let declared = program.body.iter().find_map(|stmt| {
+        let func = match stmt {
+            Statement::FunctionDeclaration(func) => func,
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::FunctionDeclaration(func) => func,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        func.id
+            .as_ref()
+            .is_some_and(|id| id.name == name)
+            .then_some(&**func)
+    });
+    if let Some(func) = declared {
+        return function_helper_body(func);
+    }
+    match find_variable_init_expression(program, name)?.without_parentheses() {
+        Expression::ArrowFunctionExpression(arrow) => {
+            let param = single_simple_param(&arrow.params)?;
+            let body = match &arrow.body {
+                ArrowFunctionBody::FunctionBody(body) => single_returned_expression(body)?,
+                body => body.as_expression()?,
+            };
+            Some((param, body))
+        }
+        Expression::FunctionExpression(func) => function_helper_body(func),
+        _ => None,
+    }
+}
+
+fn function_helper_body<'a>(func: &'a Function<'a>) -> Option<(&'a str, &'a Expression<'a>)> {
+    let param = single_simple_param(&func.params)?;
+    let body = single_returned_expression(func.body.as_ref()?)?;
+    Some((param, body))
+}
+
+fn single_simple_param<'a>(params: &'a FormalParameters<'a>) -> Option<&'a str> {
+    let [param] = params.items.as_slice() else {
+        return None;
+    };
+    if params.rest.is_some() || param.initializer.is_some() {
+        return None;
+    }
+    match &param.pattern {
+        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str()),
+        _ => None,
+    }
+}
+
+fn single_returned_expression<'a>(body: &'a FunctionBody<'a>) -> Option<&'a Expression<'a>> {
+    match body.statements.as_slice() {
+        [Statement::ReturnStatement(ret)] => ret.argument.as_ref(),
+        _ => None,
+    }
 }
 
 /// True when an expression is a "current directory" anchor: the `__dirname`
@@ -1889,7 +2078,7 @@ fn is_import_meta_expression(expr: &Expression) -> bool {
     matches!(expr, Expression::ImportMeta(_))
 }
 
-fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
+fn new_expression_to_path_string(new_expr: &NewExpression, scope: PathScope<'_>) -> Option<String> {
     if !matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "URL") {
         return None;
     }
@@ -1898,7 +2087,7 @@ fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
         .arguments
         .first()
         .and_then(Argument::as_expression)
-        .and_then(expression_to_string)?;
+        .and_then(|arg| scoped_string(arg, scope))?;
 
     let base = new_expr
         .arguments
@@ -1941,7 +2130,8 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
                     return None;
                 };
                 let find = property_key_to_string(&prop.key)?;
-                let (replacement, is_bare) = alias_replacement_kinded(&prop.value)?;
+                let (replacement, is_bare) =
+                    alias_replacement_kinded(&prop.value, PathScope::Bare)?;
                 Some((find, replacement, is_bare))
             })
             .collect(),
@@ -1955,7 +2145,7 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
                 let find = find_property(obj, "find")
                     .and_then(|prop| expression_to_string(&prop.value))?;
                 let (replacement, is_bare) = find_property(obj, "replacement")
-                    .and_then(|prop| alias_replacement_kinded(&prop.value))?;
+                    .and_then(|prop| alias_replacement_kinded(&prop.value, PathScope::Bare))?;
                 Some((find, replacement, is_bare))
             })
             .collect(),
@@ -1969,11 +2159,15 @@ fn expression_to_alias_pairs_kinded(expr: &Expression) -> Vec<(String, String, b
 /// (`path.resolve(...)`, `path.join(...)`, `fileURLToPath(...)`, `new URL(...)`)
 /// or a `./`-prefixed string is always a filesystem path. This is the
 /// filesystem-free discriminator the package-to-package gate relies on.
-fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
+fn alias_replacement_kinded(expr: &Expression, scope: PathScope<'_>) -> Option<(String, bool)> {
     match expr {
-        Expression::ParenthesizedExpression(paren) => alias_replacement_kinded(&paren.expression),
-        Expression::TSAsExpression(ts_as) => alias_replacement_kinded(&ts_as.expression),
-        Expression::TSSatisfiesExpression(ts_sat) => alias_replacement_kinded(&ts_sat.expression),
+        Expression::ParenthesizedExpression(paren) => {
+            alias_replacement_kinded(&paren.expression, scope)
+        }
+        Expression::TSAsExpression(ts_as) => alias_replacement_kinded(&ts_as.expression, scope),
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            alias_replacement_kinded(&ts_sat.expression, scope)
+        }
         Expression::StringLiteral(s) => {
             let value = s.value.to_string();
             let is_bare =
@@ -1987,8 +2181,8 @@ fn alias_replacement_kinded(expr: &Expression) -> Option<(String, bool)> {
             .elements
             .iter()
             .find_map(ArrayExpressionElement::as_expression)
-            .and_then(alias_replacement_kinded),
-        _ => expression_to_path_string(expr).map(|value| (value, false)),
+            .and_then(|element| alias_replacement_kinded(element, scope)),
+        _ => path_string_in(expr, scope).map(|value| (value, false)),
     }
 }
 
@@ -2067,7 +2261,8 @@ fn resolve_object_alias_pairs_kinded(
         match prop {
             ObjectPropertyKind::ObjectProperty(prop) => {
                 if let Some(find) = property_key_to_string(&prop.key)
-                    && let Some((replacement, is_bare)) = alias_replacement_kinded(&prop.value)
+                    && let Some((replacement, is_bare)) =
+                        alias_replacement_kinded(&prop.value, PathScope::Program(program))
                 {
                     pairs.push((find, replacement, is_bare));
                 }
@@ -2114,7 +2309,9 @@ fn resolve_array_alias_pairs_kinded(
                     && let Some(find) = find_property(obj, "find")
                         .and_then(|prop| expression_to_string(&prop.value))
                     && let Some((replacement, is_bare)) = find_property(obj, "replacement")
-                        .and_then(|prop| alias_replacement_kinded(&prop.value))
+                        .and_then(|prop| {
+                            alias_replacement_kinded(&prop.value, PathScope::Program(program))
+                        })
                 {
                     pairs.push((find, replacement, is_bare));
                 }
@@ -2567,17 +2764,21 @@ fn get_nested_expression<'a>(
 }
 
 /// Navigate a nested path and extract a string, string array, or object string/array values.
-fn get_nested_string_or_array(obj: &ObjectExpression, path: &[&str]) -> Option<Vec<String>> {
+fn get_nested_string_or_array(
+    obj: &ObjectExpression,
+    path: &[&str],
+    scope: PathScope<'_>,
+) -> Option<Vec<String>> {
     if path.is_empty() {
         return None;
     }
     if path.len() == 1 {
         let prop = find_property(obj, path[0])?;
-        return Some(expression_to_string_or_array(&prop.value));
+        return Some(string_or_array_in(&prop.value, scope));
     }
     let prop = find_property(obj, path[0])?;
     if let Expression::ObjectExpression(nested) = &prop.value {
-        get_nested_string_or_array(nested, &path[1..])
+        get_nested_string_or_array(nested, &path[1..], scope)
     } else {
         None
     }
@@ -2591,6 +2792,10 @@ fn get_nested_string_or_array(obj: &ObjectExpression, path: &[&str]) -> Option<V
 /// `{ "input": "src/x.scss", "bundleName": "x", "inject": false }`). Extracting
 /// `input` prevents object-form entries from being silently dropped. See #126.
 pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
+    string_or_array_in(expr, PathScope::Bare)
+}
+
+fn string_or_array_in(expr: &Expression, scope: PathScope<'_>) -> Vec<String> {
     match expr {
         Expression::StringLiteral(s) => vec![s.value.to_string()],
         Expression::TemplateLiteral(t) if t.expressions.is_empty() => t
@@ -2604,9 +2809,9 @@ pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
             .filter_map(|el| el.as_expression())
             .flat_map(|e| match e {
                 Expression::ObjectExpression(obj) => find_property(obj, "input")
-                    .map(|p| expression_to_string_or_array(&p.value))
+                    .map(|p| string_or_array_in(&p.value, scope))
                     .unwrap_or_default(),
-                _ => expression_to_path_string(e).into_iter().collect(),
+                _ => path_string_in(e, scope).into_iter().collect(),
             })
             .collect(),
         Expression::ObjectExpression(obj) => obj
@@ -2615,22 +2820,20 @@ pub(crate) fn expression_to_string_or_array(expr: &Expression) -> Vec<String> {
             .flat_map(|p| {
                 if let ObjectPropertyKind::ObjectProperty(p) = p {
                     match &p.value {
-                        Expression::ArrayExpression(_) => expression_to_string_or_array(&p.value),
+                        Expression::ArrayExpression(_) => string_or_array_in(&p.value, scope),
                         Expression::ObjectExpression(value_obj) => {
                             find_property(value_obj, "import")
-                                .map(|import_prop| {
-                                    expression_to_string_or_array(&import_prop.value)
-                                })
+                                .map(|import_prop| string_or_array_in(&import_prop.value, scope))
                                 .unwrap_or_default()
                         }
-                        _ => expression_to_path_string(&p.value).into_iter().collect(),
+                        _ => path_string_in(&p.value, scope).into_iter().collect(),
                     }
                 } else {
                     Vec::new()
                 }
             })
             .collect(),
-        _ => expression_to_path_string(expr).into_iter().collect(),
+        _ => path_string_in(expr, scope).into_iter().collect(),
     }
 }
 
@@ -2947,6 +3150,29 @@ mod tests {
             r#"export default { entry: { main: "./src/main.js", vendor: "./src/vendor.js" } };"#;
         let result = extract_config_string_or_array(source, &js_path(), &["entry"]);
         assert_eq!(result, vec!["./src/main.js", "./src/vendor.js"]);
+    }
+
+    #[test]
+    fn array_or_object_string_or_array_reads_each_array_element() {
+        let source = r#"
+            const shared = { format: ["esm"] };
+            export default defineConfig([
+                { entry: "./src/a.ts" },
+                ({ ...shared, entry: { b: "./src/b.ts" } }),
+                { entry: ["./src/c.ts"] } satisfies Options,
+                { format: ["cjs"] },
+                shared,
+            ] as Options[]);
+        "#;
+        let result = extract_config_array_or_object_string_or_array(source, &ts_path(), &["entry"]);
+        assert_eq!(result, vec!["./src/a.ts", "./src/b.ts", "./src/c.ts"]);
+    }
+
+    #[test]
+    fn array_or_object_string_or_array_falls_back_to_config_object() {
+        let source = r#"export default defineConfig({ entry: { main: "./src/main.ts" } });"#;
+        let result = extract_config_array_or_object_string_or_array(source, &ts_path(), &["entry"]);
+        assert_eq!(result, vec!["./src/main.ts"]);
     }
 
     #[test]

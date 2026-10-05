@@ -1,0 +1,7 @@
+{
+  "name": "@x/app",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@x/settings": "workspace:*"
+  }
+}

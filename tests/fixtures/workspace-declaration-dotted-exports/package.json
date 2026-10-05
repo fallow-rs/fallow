@@ -1,0 +1,7 @@
+{
+  "name": "workspace-declaration-dotted-exports",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ]
+}

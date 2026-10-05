@@ -744,6 +744,53 @@ pub(super) fn new_url_import_source(expr: &NewExpression<'_>) -> Option<String> 
     }
 }
 
+/// Callee names that take a filesystem path or a file URL and do not load a
+/// module: the `node:fs` sync, callback and promise APIs, plus
+/// `fileURLToPath` from `node:url`.
+const FILESYSTEM_PATH_CALLEES: &[&str] = &[
+    "accessSync",
+    "appendFileSync",
+    "copyFileSync",
+    "createReadStream",
+    "createWriteStream",
+    "existsSync",
+    "lstatSync",
+    "mkdirSync",
+    "readFileSync",
+    "readdirSync",
+    "realpathSync",
+    "rmSync",
+    "rmdirSync",
+    "statSync",
+    "unlinkSync",
+    "writeFileSync",
+    "access",
+    "appendFile",
+    "copyFile",
+    "lstat",
+    "mkdir",
+    "readFile",
+    "readdir",
+    "realpath",
+    "rm",
+    "rmdir",
+    "stat",
+    "unlink",
+    "writeFile",
+    "fileURLToPath",
+];
+
+/// Whether a call callee (`readFileSync(...)`, `fs.readFileSync(...)`,
+/// `fs.promises.readFile(...)`) names a filesystem path consumer.
+pub(super) fn is_filesystem_path_callee(callee: &Expression<'_>) -> bool {
+    let name = match callee {
+        Expression::Identifier(ident) => ident.name.as_str(),
+        Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+        _ => return false,
+    };
+    FILESYSTEM_PATH_CALLEES.contains(&name)
+}
+
 pub(super) fn is_child_process_source(source: &str) -> bool {
     matches!(source, "node:child_process" | "child_process")
 }

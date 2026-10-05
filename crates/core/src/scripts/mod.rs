@@ -13,6 +13,8 @@ pub mod ci;
 #[cfg(test)]
 mod command_forms_tests;
 mod flag_credits;
+pub mod hooks;
+mod node_test;
 mod resolve;
 mod shell;
 mod workspace_selection;
@@ -28,8 +30,10 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub use resolve::{
-    build_bin_to_package_map, resolve_binary_to_package, resolve_known_dependency_binary,
+    DependencyBinaries, build_bin_to_package_map, resolve_binary_to_package,
+    resolve_known_dependency_binary,
 };
+pub use shell::command_substitutions;
 pub use workspace_selection::WorkspacePackages;
 use workspace_selection::{PackageSelector, WorkspacePackage, relative_dir};
 
@@ -203,6 +207,61 @@ fn file_target_tool(binary: &str) -> Option<&'static FileTargetTool> {
         .find(|tool| tool.names.contains(&name))
 }
 
+/// Return `true` when a script bundles with every package left external:
+/// `bun build --packages=external` or `esbuild --packages=external`, also with
+/// the value as a separate argument.
+///
+/// Such a build does not inline the source of a workspace sibling, so the
+/// sibling's own packages are not resolved from the bundling workspace.
+#[must_use]
+pub fn script_externalizes_packages(script: &str) -> bool {
+    shell::split_shell_operators(script)
+        .into_iter()
+        .any(|segment| {
+            let words = shell::split_words(segment);
+            let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
+            command_externalizes_packages(&tokens)
+        })
+}
+
+fn command_externalizes_packages(tokens: &[&str]) -> bool {
+    let Some(idx) = shell::skip_initial_wrappers(tokens, 0) else {
+        return false;
+    };
+    let args_start = if let Some(build_idx) = bun_build_subcommand(tokens, idx) {
+        build_idx + 1
+    } else {
+        let Some(binary_idx) = shell::advance_past_package_manager(tokens, idx) else {
+            return false;
+        };
+        if tool_name(tokens[binary_idx]) != "esbuild" {
+            return false;
+        }
+        binary_idx + 1
+    };
+    let args = tokens.get(args_start..).unwrap_or_default();
+    args.iter().enumerate().any(|(i, arg)| {
+        *arg == "--packages=external"
+            || (*arg == "--packages" && args.get(i + 1) == Some(&"external"))
+    })
+}
+
+/// The index of `build` in `bun [runtime flags] build`, or `None` when the
+/// command at `idx` is not a `bun build` call.
+fn bun_build_subcommand(tokens: &[&str], idx: usize) -> Option<usize> {
+    if tokens.get(idx) != Some(&"bun") {
+        return None;
+    }
+    let mut next = idx + 1;
+    while tokens
+        .get(next)
+        .is_some_and(|token| shell::BUN_RUNTIME_FLAGS.contains(token))
+    {
+        next += 1;
+    }
+    (tokens.get(next) == Some(&"build")).then_some(next)
+}
+
 /// Return `true` when `binary` only reads its file arguments (a formatter,
 /// linter, or checker), so those arguments must not become entry points.
 #[must_use]
@@ -307,6 +366,8 @@ fn directory_module_glob(dir: &str) -> Option<String> {
 
 /// Script multiplexer commands whose positional arguments are script names, not binaries.
 /// `concurrently "npm:dev"` and `run-p server worker` reference other package.json scripts.
+/// `concurrently` also takes full commands (`concurrently "tsx watch src/api.ts"`),
+/// see [`concurrently_inline_commands`].
 const SCRIPT_MULTIPLEXERS: &[&str] = &[
     "concurrently",
     "npm-run-all",
@@ -316,6 +377,86 @@ const SCRIPT_MULTIPLEXERS: &[&str] = &[
     "run-s2",
     "run-p2",
 ];
+
+/// The multiplexer that runs a positional argument as a shell command,
+/// unless the argument is a package-manager shortcut such as `npm:dev`.
+const CONCURRENTLY: &str = "concurrently";
+
+/// `concurrently` argument prefixes that name a package.json script.
+const CONCURRENTLY_SCRIPT_SHORTCUTS: &[&str] =
+    &["npm:", "pnpm:", "yarn:", "bun:", "node:", "deno:"];
+
+/// `concurrently` options whose value is the next token.
+const CONCURRENTLY_VALUE_FLAGS: &[&str] = &[
+    "-m",
+    "--max-processes",
+    "-n",
+    "--names",
+    "--name-separator",
+    "-s",
+    "--success",
+    "--hide",
+    "-p",
+    "--prefix",
+    "-c",
+    "--prefix-colors",
+    "-l",
+    "--prefix-length",
+    "-t",
+    "--timestamp-format",
+    "--kill-signal",
+    "--ks",
+    "--kill-timeout",
+    "--restart-tries",
+    "--restart-after",
+    "--default-input-target",
+];
+
+/// The `concurrently` option whose value is a command that runs after the others.
+const CONCURRENTLY_TEARDOWN_FLAG: &str = "--teardown";
+
+/// The `concurrently` options that make the arguments after `--` placeholder
+/// values instead of commands.
+const CONCURRENTLY_PASSTHROUGH_FLAGS: &[&str] = &["-P", "--passthrough-arguments"];
+
+/// Return the shell commands that `concurrently` runs, from the arguments
+/// after the binary. A package-manager shortcut such as `npm:dev` is a script
+/// name and not a command, and an option value is not a command, except the
+/// value of `--teardown`.
+fn concurrently_inline_commands<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    let passthrough = args
+        .iter()
+        .any(|arg| CONCURRENTLY_PASSTHROUGH_FLAGS.contains(arg));
+    let mut commands = Vec::new();
+    let mut options_done = false;
+    let mut iter = args.iter().copied();
+    while let Some(arg) = iter.next() {
+        if !options_done && arg == "--" {
+            if passthrough {
+                break;
+            }
+            options_done = true;
+            continue;
+        }
+        if !options_done && arg.starts_with('-') {
+            if arg == CONCURRENTLY_TEARDOWN_FLAG {
+                commands.extend(iter.next());
+            } else if let Some(value) = arg.strip_prefix("--teardown=") {
+                commands.push(value);
+            } else if CONCURRENTLY_VALUE_FLAGS.contains(&arg) {
+                iter.next();
+            }
+            continue;
+        }
+        let is_script_shortcut = CONCURRENTLY_SCRIPT_SHORTCUTS
+            .iter()
+            .any(|prefix| arg.starts_with(prefix));
+        if !is_script_shortcut && !arg.trim().is_empty() {
+            commands.push(arg);
+        }
+    }
+    commands
+}
 
 /// pnpm commands and shorthands whose next token is not a dependency binary.
 const PNPM_BUILTIN_COMMANDS: &[&str] = &[
@@ -613,6 +754,10 @@ pub const MAX_SCRIPT_INDIRECTION_DEPTH: usize = 8;
 /// scripts call each other with arguments.
 pub const MAX_SCRIPT_EXPANSIONS: usize = 64;
 
+/// Maximum nesting of `$(...)` and backtick command substitutions that is
+/// parsed. Guards the recursion against pathological input.
+pub const MAX_SUBSTITUTION_DEPTH: usize = 8;
+
 /// A script body in the catalog, plus whether its file arguments are relative
 /// to the root the analysis resolves paths against.
 #[derive(Debug, Clone)]
@@ -857,6 +1002,9 @@ struct ScriptExpansion {
     expansions: usize,
     /// `false` once a body from another workspace package has been entered.
     local_paths: bool,
+    /// Command substitutions on the current path, bounded by
+    /// [`MAX_SUBSTITUTION_DEPTH`].
+    substitution_depth: usize,
 }
 
 impl ScriptExpansion {
@@ -865,6 +1013,7 @@ impl ScriptExpansion {
             active: Vec::new(),
             expansions: 0,
             local_paths: true,
+            substitution_depth: 0,
         }
     }
 }
@@ -1042,6 +1191,9 @@ pub struct ScriptAnalysis {
     pub used_packages: FxHashSet<String>,
     /// Config file paths extracted from `--config` / `-c` arguments.
     pub config_files: Vec<String>,
+    /// The same config file paths, each with the binary that received it.
+    /// A plugin reads a config file only when its own binary received it.
+    pub binary_config_files: Vec<BinaryConfigFile>,
     /// File paths extracted as positional arguments (entry point candidates).
     pub entry_files: Vec<String>,
 }
@@ -1054,12 +1206,22 @@ impl ScriptAnalysis {
     /// lists into patterns one by one.
     fn dedupe_paths(&mut self) {
         retain_first_seen(&mut self.config_files);
+        retain_first_seen(&mut self.binary_config_files);
         retain_first_seen(&mut self.entry_files);
     }
 }
 
-fn retain_first_seen(values: &mut Vec<String>) {
-    let mut seen: FxHashSet<String> = FxHashSet::default();
+/// A config file argument and the binary that received it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BinaryConfigFile {
+    /// The binary name (e.g., "vitest").
+    pub binary: String,
+    /// The config path as it appeared in the script, relative to the package.
+    pub path: String,
+}
+
+fn retain_first_seen<T: Clone + Eq + std::hash::Hash>(values: &mut Vec<T>) {
+    let mut seen: FxHashSet<T> = FxHashSet::default();
     values.retain(|value| seen.insert(value.clone()));
 }
 
@@ -1331,6 +1493,12 @@ fn accumulate_parsed_commands(
             .entry_files
             .extend_from_slice(cmd.entry_files(ignored));
         result.used_packages.extend(cmd.flag_packages);
+        result
+            .binary_config_files
+            .extend(cmd.config_args.iter().map(|path| BinaryConfigFile {
+                binary: cmd.binary.clone(),
+                path: path.clone(),
+            }));
         result.config_files.extend(cmd.config_args);
     }
 }
@@ -1358,6 +1526,7 @@ pub fn parse_script_with_catalog(script: &str, catalog: &ScriptCatalog) -> Vec<S
         script,
         &|tokens, idx, catalog| {
             script_invocation_target(tokens, idx, catalog)
+                .or_else(|| bun_file_runner_target(tokens, idx, catalog))
                 .or_else(|| {
                     package_manager_exec_binary(tokens, idx).map(|(binary_idx, location)| {
                         PackageManagerTarget::Binary(binary_idx, location)
@@ -1406,6 +1575,11 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
                     names.insert(name.to_string());
                 }
             }
+            if binary == CONCURRENTLY {
+                for inline in concurrently_inline_commands(&tokens[idx + 1..]) {
+                    names.extend(referenced_package_scripts(inline, catalog));
+                }
+            }
             continue;
         }
         if let Some(invocation) = declared_script_invocation(&tokens, idx, catalog)
@@ -1438,6 +1612,12 @@ pub fn referenced_workspace_scripts(
         let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
             continue;
         };
+        if tokens[idx] == CONCURRENTLY {
+            for inline in concurrently_inline_commands(&tokens[idx + 1..]) {
+                references.extend(referenced_workspace_scripts(inline, catalog));
+            }
+            continue;
+        }
         let Some(invocation) = declared_script_invocation(&tokens, idx, catalog) else {
             continue;
         };
@@ -1522,6 +1702,22 @@ fn parse_script_internal(
                         }
                     }
                 }
+                SegmentOutcome::InlineCommand { command, location } => {
+                    let start = commands.len();
+                    parse_script_internal(
+                        &command,
+                        advance_package_manager,
+                        catalog,
+                        state,
+                        commands,
+                    );
+                    for cmd in &mut commands[start..] {
+                        cmd.config_args =
+                            location.resolve_all(std::mem::take(&mut cmd.config_args), catalog);
+                        cmd.file_args =
+                            location.resolve_all(std::mem::take(&mut cmd.file_args), catalog);
+                    }
+                }
                 SegmentOutcome::ScriptCall {
                     name, extra_args, ..
                 } => {
@@ -1536,6 +1732,14 @@ fn parse_script_internal(
                 }
             }
         }
+    }
+    if state.substitution_depth >= MAX_SUBSTITUTION_DEPTH {
+        return;
+    }
+    for body in shell::command_substitutions(script) {
+        state.substitution_depth += 1;
+        parse_script_internal(body, advance_package_manager, catalog, state, commands);
+        state.substitution_depth -= 1;
     }
 }
 
@@ -1664,6 +1868,10 @@ fn advance_past_package_manager_with_context(
         return Some(target);
     }
 
+    if let Some(target) = bun_file_runner_target(tokens, idx, catalog) {
+        return Some(target);
+    }
+
     if let Some((binary_idx, location)) = package_manager_exec_binary(tokens, idx) {
         return Some(PackageManagerTarget::Binary(binary_idx, location));
     }
@@ -1683,6 +1891,36 @@ fn advance_past_package_manager_with_context(
 
     shell::advance_past_package_manager(tokens, idx)
         .map(|binary_idx| PackageManagerTarget::Binary(binary_idx, RunLocation::Here))
+}
+
+/// Recognize `bun <file>`, `bun run <file>`, and `bun --watch <file>`, where
+/// Bun runs a script file. Bun runs a declared script with that name first, so
+/// a declared name is not a file. The target is `bun` itself, which then takes
+/// the file as a node-runner argument.
+fn bun_file_runner_target(
+    tokens: &[&str],
+    idx: usize,
+    catalog: &ScriptCatalog,
+) -> Option<PackageManagerTarget> {
+    if tokens.get(idx) != Some(&"bun") {
+        return None;
+    }
+    let skip_runtime_flags = |mut i: usize| {
+        while tokens
+            .get(i)
+            .is_some_and(|token| shell::BUN_RUNTIME_FLAGS.contains(token))
+        {
+            i += 1;
+        }
+        i
+    };
+    let mut next = skip_runtime_flags(idx + 1);
+    if matches!(tokens.get(next), Some(&("run" | "run-script"))) {
+        next = skip_runtime_flags(next + 1);
+    }
+    let target = *tokens.get(next)?;
+    (looks_like_script_file(target) && !catalog.declares_script_at(target, &RunLocation::Here))
+        .then_some(PackageManagerTarget::Binary(idx, RunLocation::Here))
 }
 
 /// Recognize a package manager invocation of a package.json script.
@@ -2342,6 +2580,13 @@ enum SegmentOutcome {
         /// Where the package manager runs the script.
         location: RunLocation,
     },
+    /// A full command that a multiplexer receives as one argument
+    /// (`concurrently "tsx watch src/api.ts"`), parsed like a script body.
+    InlineCommand {
+        command: String,
+        /// Where the multiplexer runs the command.
+        location: RunLocation,
+    },
 }
 
 /// Return the first token of the child command for a known command wrapper.
@@ -2416,6 +2661,11 @@ fn parse_command_segment(
     let binary = tokens[idx].to_string();
 
     if SCRIPT_MULTIPLEXERS.contains(&binary.as_str()) {
+        let inline_commands = if binary == CONCURRENTLY {
+            concurrently_inline_commands(&tokens[idx + 1..])
+        } else {
+            Vec::new()
+        };
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
             file_args_command: binary.clone(),
             binary,
@@ -2423,6 +2673,14 @@ fn parse_command_segment(
             file_args: Vec::new(),
             flag_packages: Vec::new(),
         }));
+        outcomes.extend(
+            inline_commands
+                .into_iter()
+                .map(|command| SegmentOutcome::InlineCommand {
+                    command: command.to_string(),
+                    location: location.clone(),
+                }),
+        );
         return outcomes;
     }
 
@@ -2436,6 +2694,10 @@ fn parse_command_segment(
         file_args.clear();
         config_args.clear();
     }
+    file_args.extend(node_test::default_test_patterns(
+        &binary,
+        &tokens[idx + 1..],
+    ));
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
@@ -2487,6 +2749,10 @@ fn wrapped_command_args<'a>(
         file_args.clear();
         config_args.clear();
     }
+    file_args.extend(node_test::default_test_patterns(
+        child,
+        &tokens[child_idx + 1..],
+    ));
     (file_args, config_args, child)
 }
 
@@ -2597,6 +2863,23 @@ fn looks_like_file_path(token: &str) -> bool {
         && !token.contains("://")
 }
 
+/// Check if a token looks like a standalone script file reference (must have a
+/// script-like source extension and a path-like structure, not a bare command
+/// name).
+#[must_use]
+pub fn looks_like_script_file(token: &str) -> bool {
+    if !could_be_file_path(token) {
+        return false;
+    }
+    let extensions = [
+        ".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".gts", ".gjs",
+    ];
+    if !extensions.iter().any(|ext| token.ends_with(ext)) {
+        return false;
+    }
+    token.contains('/') || token.starts_with("./") || token.starts_with("../")
+}
+
 /// Check if a command is a shell built-in (not an npm package).
 fn is_builtin_command(cmd: &str) -> bool {
     matches!(
@@ -2648,6 +2931,34 @@ fn is_builtin_command(cmd: &str) -> bool {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn script_externalizes_packages_reads_bun_build_and_esbuild() {
+        for script in [
+            "bun build ./src/index.ts --outdir dist --packages=external",
+            "bun build ./src/index.ts --packages external --target node",
+            "tsc --noEmit && bun build src/cli.ts --packages=external",
+            "NODE_ENV=production esbuild src/index.ts --bundle --packages=external",
+            "npx esbuild src/index.ts --bundle --packages external",
+            "bunx esbuild src/index.ts --bundle \"--packages=external\"",
+        ] {
+            assert!(script_externalizes_packages(script), "{script}");
+        }
+    }
+
+    #[test]
+    fn script_externalizes_packages_ignores_other_commands() {
+        for script in [
+            "bun build ./src/index.ts --outdir dist",
+            "bun build ./src/index.ts --external react",
+            "esbuild src/index.ts --bundle --external:react",
+            "bun run build --packages=external",
+            "node scripts/build.mjs --packages=external",
+            "echo bun build --packages=external",
+        ] {
+            assert!(!script_externalizes_packages(script), "{script}");
+        }
+    }
 
     /// Analyze every script value without dependency context.
     fn analyze_scripts(
@@ -3342,6 +3653,32 @@ mod tests {
     }
 
     #[test]
+    fn command_substitution_bodies_are_parsed_as_commands() {
+        let cmds = parse_script(r#"STAMP="$(node scripts/stamp.ts)" LABEL=`tsx scripts/label.ts`"#);
+        let files: Vec<&str> = cmds
+            .iter()
+            .flat_map(|cmd| cmd.file_args.iter().map(String::as_str))
+            .collect();
+        assert_eq!(files, vec!["scripts/stamp.ts", "scripts/label.ts"]);
+    }
+
+    #[test]
+    fn nested_command_substitution_is_parsed() {
+        let cmds = parse_script(r#"X="$(echo "$(node scripts/inner.ts)")""#);
+        assert!(
+            cmds.iter()
+                .any(|cmd| cmd.binary == "node" && cmd.file_args == ["scripts/inner.ts"]),
+            "{cmds:?}"
+        );
+    }
+
+    #[test]
+    fn single_quoted_command_substitution_is_not_parsed() {
+        let cmds = parse_script("echo '$(node scripts/none.ts)'");
+        assert!(cmds.iter().all(|cmd| cmd.binary != "node"), "{cmds:?}");
+    }
+
+    #[test]
     fn node_runner_file_args() {
         let cmds = parse_script("node scripts/build.js");
         assert_eq!(cmds.len(), 1);
@@ -3491,6 +3828,36 @@ mod tests {
         .collect();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"), &FxHashMap::default());
         assert!(result.config_files.contains(&"webpack.prod.js".to_string()));
+    }
+
+    #[test]
+    fn analyze_keeps_binary_of_each_config_file() {
+        let scripts: HashMap<String, String> = [
+            ("snap", "npx vitest run --config vitest.snap.config.ts"),
+            ("e2e", "pnpm exec vitest -c=./vitest.e2e.config.ts"),
+            (
+                "build",
+                "cross-env NODE_ENV=production webpack --config webpack.prod.js",
+            ),
+        ]
+        .into_iter()
+        .map(|(name, body)| (name.to_string(), body.to_string()))
+        .collect();
+        let result = analyze_scripts(&scripts, Path::new("/nonexistent"), &FxHashMap::default());
+        let mut pairs: Vec<(&str, &str)> = result
+            .binary_config_files
+            .iter()
+            .map(|file| (file.binary.as_str(), file.path.as_str()))
+            .collect();
+        pairs.sort_unstable();
+        assert_eq!(
+            pairs,
+            vec![
+                ("vitest", "./vitest.e2e.config.ts"),
+                ("vitest", "vitest.snap.config.ts"),
+                ("webpack", "webpack.prod.js"),
+            ]
+        );
     }
 
     #[test]
@@ -4462,9 +4829,12 @@ mod tests {
     #[test]
     fn bun_treated_as_package_manager() {
         let cmds = parse_script("bun scripts/build.ts");
+        assert_eq!(cmds.len(), 1, "bare `bun <file>` runs the file");
+        assert_eq!(cmds[0].binary, "bun");
+        assert_eq!(cmds[0].file_args, vec!["scripts/build.ts"]);
         assert!(
-            cmds.is_empty(),
-            "bare `bun <arg>` should be treated as running a script (like yarn)"
+            parse_script("bun dev").is_empty(),
+            "bare `bun <name>` runs the script with that name"
         );
     }
 
@@ -4608,6 +4978,64 @@ mod tests {
                 .iter()
                 .any(|f| f.starts_with('\'') || f.ends_with('\'')),
             "file_args must not contain surrounding single quotes"
+        );
+    }
+
+    #[test]
+    fn bare_node_test_script_records_default_test_patterns() {
+        for script in [
+            "node --test",
+            "NODE_ENV=test node --test",
+            "node --experimental-strip-types --test",
+            "node --test --watch",
+            "node --test --import tsx --test-reporter spec",
+        ] {
+            let cmds = parse_script(script);
+            assert_eq!(cmds.len(), 1, "`{script}`");
+            assert_eq!(cmds[0].binary, "node", "`{script}`");
+            assert!(
+                cmds[0]
+                    .file_args
+                    .contains(&"**/*.test.{js,mjs,cjs,ts,mts,cts}".to_string()),
+                "`{script}` produced {:?}",
+                cmds[0].file_args
+            );
+            assert!(
+                !cmds[0]
+                    .file_args
+                    .iter()
+                    .any(|arg| arg == "tsx" || arg == "spec"),
+                "`{script}` recorded a flag value: {:?}",
+                cmds[0].file_args
+            );
+        }
+    }
+
+    #[test]
+    fn node_test_with_file_argument_records_only_that_file() {
+        let cmds = parse_script("node --test test/only.test.ts");
+        assert_eq!(cmds[0].file_args, vec!["test/only.test.ts"]);
+    }
+
+    #[test]
+    fn node_test_setup_import_keeps_default_test_patterns() {
+        let cmds = parse_script("node --import ./setup.ts --test");
+        assert!(cmds[0].file_args.contains(&"./setup.ts".to_string()));
+        assert!(
+            cmds[0]
+                .file_args
+                .contains(&"**/test/**/*.{js,mjs,cjs,ts,mts,cts}".to_string())
+        );
+    }
+
+    #[test]
+    fn ignored_node_command_drops_default_test_patterns() {
+        let ignored = vec!["node".to_string()];
+        let cmds = parse_script("node --test");
+        assert!(
+            cmds[0]
+                .entry_files(IgnoredCommandEntries::new(&ignored))
+                .is_empty()
         );
     }
 
@@ -4773,6 +5201,78 @@ mod tests {
     }
 
     #[test]
+    fn concurrently_parses_quoted_inline_commands() {
+        let cmds = parse_script(
+            r#"concurrently -n api,web -c red,blue --kill-others-on-fail "tsx watch src/api.ts" "vite" npm:worker"#,
+        );
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["concurrently", "tsx", "vite"]);
+        assert_eq!(cmds[1].file_args, vec!["src/api.ts".to_string()]);
+    }
+
+    #[test]
+    fn concurrently_teardown_value_is_a_command() {
+        let cmds =
+            parse_script(r#"concurrently --teardown "node scripts/stop.js" "node src/a.js""#);
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["concurrently", "node", "node"]);
+        assert_eq!(cmds[1].file_args, vec!["scripts/stop.js".to_string()]);
+        assert_eq!(cmds[2].file_args, vec!["src/a.js".to_string()]);
+    }
+
+    #[test]
+    fn concurrently_passthrough_arguments_are_not_commands() {
+        let cmds = parse_script(r#"concurrently -P "node src/a.js {1}" -- extra.js"#);
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["concurrently", "node"]);
+    }
+
+    #[test]
+    fn run_p_positionals_stay_script_names() {
+        let cmds = parse_script(r#"run-p "tsx src/api.ts" serve"#);
+        let binaries: Vec<&str> = cmds.iter().map(|cmd| cmd.binary.as_str()).collect();
+        assert_eq!(binaries, vec!["run-p"]);
+    }
+
+    #[test]
+    fn referenced_scripts_include_concurrently_inline_calls() {
+        let scripts = HashMap::from([
+            (
+                "start".to_string(),
+                r#"concurrently "npm run serve" "node src/a.js""#.to_string(),
+            ),
+            ("serve".to_string(), "node src/server.ts".to_string()),
+        ]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+
+        let referenced = referenced_package_scripts(&scripts["start"], &catalog);
+
+        assert_eq!(referenced, FxHashSet::from_iter(["serve".to_string()]));
+    }
+
+    #[test]
+    fn referenced_workspace_scripts_include_concurrently_inline_calls() {
+        let mut packages = WorkspacePackages::default();
+        let dev = std::collections::HashMap::from([(
+            "dev".to_string(),
+            "tsx watch src/server.ts".to_string(),
+        )]);
+        packages.add("@scope/api", "packages/api", Some(&dev));
+        packages.add("@scope/web", "packages/web", Some(&dev));
+        let catalog = ScriptCatalog::default().with_workspaces(std::sync::Arc::new(packages), "");
+        let command =
+            r#"concurrently -n api,web "npm run dev -w @scope/api" "pnpm --filter @scope/web dev""#;
+
+        assert_eq!(
+            referenced_workspace_scripts(command, &catalog),
+            vec![
+                ("packages/api".to_string(), "dev".to_string()),
+                ("packages/web".to_string(), "dev".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn varlock_preserves_quoted_argument_boundaries() {
         for command in [
             r#"varlock run -p "./env -- is-ci ignored" -- publint"#,
@@ -4816,11 +5316,24 @@ mod tests {
 
     #[test]
     fn varlock_does_not_guess_through_unbalanced_or_dynamic_words() {
-        for command in [
-            r#"varlock run -p "./env -- is-ci ignored -- publint"#,
-            "varlock run -p './env -- is-ci ignored -- publint",
-            "varlock run -p $(echo -- is-ci) -- publint",
-            "varlock run -p `echo -- is-ci` -- publint",
+        // The body of a command substitution is a command of its own.
+        for (command, binaries) in [
+            (
+                r#"varlock run -p "./env -- is-ci ignored -- publint"#,
+                vec!["varlock"],
+            ),
+            (
+                "varlock run -p './env -- is-ci ignored -- publint",
+                vec!["varlock"],
+            ),
+            (
+                "varlock run -p $(echo -- is-ci) -- publint",
+                vec!["varlock", "echo"],
+            ),
+            (
+                "varlock run -p `echo -- is-ci` -- publint",
+                vec!["varlock", "echo"],
+            ),
         ] {
             let commands = parse_script(command);
             assert_eq!(
@@ -4828,7 +5341,7 @@ mod tests {
                     .iter()
                     .map(|command| command.binary.as_str())
                     .collect::<Vec<_>>(),
-                vec!["varlock"],
+                binaries,
                 "{command}"
             );
         }
@@ -4836,10 +5349,11 @@ mod tests {
 
     #[test]
     fn varlock_keeps_known_child_before_dynamic_arguments() {
-        for command in [
-            "varlock run -- vite --host=$(hostname)",
-            "varlock run -- vite $(pwd)",
-            "varlock run -- vite `pwd`",
+        // The body of a command substitution is a command of its own.
+        for (command, substituted) in [
+            ("varlock run -- vite --host=$(hostname)", "hostname"),
+            ("varlock run -- vite $(pwd)", "pwd"),
+            ("varlock run -- vite `pwd`", "pwd"),
         ] {
             let commands = parse_script(command);
             assert_eq!(
@@ -4847,7 +5361,7 @@ mod tests {
                     .iter()
                     .map(|command| command.binary.as_str())
                     .collect::<Vec<_>>(),
-                vec!["varlock", "vite"],
+                vec!["varlock", "vite", substituted],
                 "{command}"
             );
         }

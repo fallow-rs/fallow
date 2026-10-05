@@ -46,6 +46,7 @@ fn test_only_dep_from_root_test_file() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -106,6 +107,7 @@ fn test_only_dep_from_root_config_file() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -168,6 +170,7 @@ fn test_only_dep_from_workspace_config_file() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -229,6 +232,7 @@ fn not_test_only_when_imported_from_app_config() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -303,6 +307,7 @@ fn not_test_only_when_also_imported_from_source() {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -336,6 +341,7 @@ fn not_test_only_when_also_imported_from_source() {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         },
     ];
 
@@ -397,6 +403,7 @@ fn test_only_dep_from_workspace_jest_config() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

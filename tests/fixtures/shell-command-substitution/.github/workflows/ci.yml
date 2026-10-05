@@ -1,0 +1,15 @@
+name: ci
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: DIGEST="$(node scripts/digest.ts input)"
+      - run: |
+          DIGEST="$(node scripts/digest.ts input)"
+          echo "$DIGEST"
+      - run: KEY=`node scripts/key.ts`
+      - run: OUTER="$(echo "$(node scripts/nested.ts)")"
+      - run: echo '$(node scripts/none.ts)'
+      - run: echo $((1 + 2)) ${HOME}

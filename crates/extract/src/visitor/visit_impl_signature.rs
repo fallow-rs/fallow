@@ -209,12 +209,32 @@ impl ModuleInfoExtractor {
         owner_name: &str,
         refs: Vec<(String, Span)>,
     ) {
+        self.push_local_signature_refs(owner_name, refs, false);
+    }
+
+    /// Record the types of a `satisfies` clause on a module-level binding.
+    /// These types are in use, but they do not form the type of the binding.
+    pub(super) fn record_local_satisfies_refs(
+        &mut self,
+        owner_name: &str,
+        refs: Vec<(String, Span)>,
+    ) {
+        self.push_local_signature_refs(owner_name, refs, true);
+    }
+
+    fn push_local_signature_refs(
+        &mut self,
+        owner_name: &str,
+        refs: Vec<(String, Span)>,
+        from_satisfies: bool,
+    ) {
         self.local_signature_type_references
             .extend(refs.into_iter().map(|(type_name, span)| {
                 super::super::LocalSignatureTypeReference {
                     owner_name: owner_name.to_string(),
                     type_name,
                     span,
+                    from_satisfies,
                 }
             }));
     }
@@ -231,6 +251,7 @@ impl ModuleInfoExtractor {
                         export_name: export_name.to_string(),
                         type_name,
                         span,
+                        from_satisfies: false,
                     }),
             );
     }
@@ -261,6 +282,8 @@ impl ModuleInfoExtractor {
         }
         if let Some(return_type) = function.return_type.as_deref() {
             collector.visit_ts_type_annotation(return_type);
+        } else if let Some(body) = function.body.as_deref() {
+            collect_inferred_return_refs(body, &mut collector.refs);
         }
         Self::remove_type_parameter_refs(&mut collector.refs, function.type_parameters.as_deref());
         collector.refs
@@ -283,6 +306,14 @@ impl ModuleInfoExtractor {
         }
         if let Some(return_type) = arrow.return_type.as_deref() {
             collector.visit_ts_type_annotation(return_type);
+        } else if let Some(expression) = arrow.get_expression() {
+            collect_returned_expression_refs(
+                expression,
+                &FxHashMap::default(),
+                &mut collector.refs,
+            );
+        } else if let Some(body) = arrow.get_function_body() {
+            collect_inferred_return_refs(body, &mut collector.refs);
         }
         Self::remove_type_parameter_refs(&mut collector.refs, arrow.type_parameters.as_deref());
         collector.refs
@@ -296,17 +327,116 @@ impl ModuleInfoExtractor {
             refs.extend(Self::collect_type_refs_from_annotation(annotation));
         }
         if let Some(init) = &declarator.init {
-            match init {
-                Expression::ArrowFunctionExpression(arrow) => {
+            Self::collect_initializer_signature_refs(
+                Self::strip_satisfies_clauses(init),
+                &mut refs,
+            );
+        }
+        refs
+    }
+
+    /// Collect the types that shape the inferred type of a variable
+    /// initializer. A type assertion sets the type directly. A call or `new`
+    /// wrapper takes its type from its type arguments and from the signature
+    /// of a function argument, for example `memo(function C(p: Props) {})`.
+    fn collect_initializer_signature_refs(init: &Expression<'_>, refs: &mut Vec<(String, Span)>) {
+        match init {
+            Expression::ParenthesizedExpression(parenthesized) => {
+                Self::collect_initializer_signature_refs(&parenthesized.expression, refs);
+            }
+            Expression::TSNonNullExpression(non_null) => {
+                Self::collect_initializer_signature_refs(&non_null.expression, refs);
+            }
+            Expression::TSAsExpression(assertion) => {
+                Self::collect_asserted_type_refs(&assertion.type_annotation, refs);
+            }
+            Expression::TSTypeAssertion(assertion) => {
+                Self::collect_asserted_type_refs(&assertion.type_annotation, refs);
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                refs.extend(Self::collect_arrow_signature_refs(arrow));
+            }
+            Expression::FunctionExpression(function) => {
+                refs.extend(Self::collect_function_signature_refs(function));
+            }
+            Expression::CallExpression(call) => {
+                Self::collect_wrapper_call_signature_refs(
+                    call.type_arguments.as_deref(),
+                    &call.arguments,
+                    refs,
+                );
+            }
+            Expression::NewExpression(new_expression) => {
+                Self::collect_wrapper_call_signature_refs(
+                    new_expression.type_arguments.as_deref(),
+                    &new_expression.arguments,
+                    refs,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_asserted_type_refs(ty: &TSType<'_>, refs: &mut Vec<(String, Span)>) {
+        let mut collector = SignatureTypeCollector::default();
+        collector.visit_ts_type(ty);
+        refs.extend(collector.refs);
+    }
+
+    fn collect_wrapper_call_signature_refs(
+        type_arguments: Option<&TSTypeParameterInstantiation<'_>>,
+        arguments: &[Argument<'_>],
+        refs: &mut Vec<(String, Span)>,
+    ) {
+        if let Some(type_arguments) = type_arguments {
+            let mut collector = SignatureTypeCollector::default();
+            collector.visit_ts_type_parameter_instantiation(type_arguments);
+            refs.extend(collector.refs);
+        }
+        for argument in arguments {
+            match argument {
+                Argument::ArrowFunctionExpression(arrow) => {
                     refs.extend(Self::collect_arrow_signature_refs(arrow));
                 }
-                Expression::FunctionExpression(function) => {
+                Argument::FunctionExpression(function) => {
                     refs.extend(Self::collect_function_signature_refs(function));
                 }
                 _ => {}
             }
         }
-        refs
+    }
+
+    /// Return the value under any `satisfies` clauses and parentheses. A
+    /// `satisfies` clause does not change the type of the value.
+    fn strip_satisfies_clauses<'b>(init: &'b Expression<'b>) -> &'b Expression<'b> {
+        match init.without_parentheses() {
+            Expression::TSSatisfiesExpression(satisfies) => {
+                Self::strip_satisfies_clauses(&satisfies.expression).without_parentheses()
+            }
+            _ => init,
+        }
+    }
+
+    /// Collect the types of the `satisfies` clauses on a variable initializer,
+    /// for example `Provider` in `["a"] as const satisfies readonly Provider[]`.
+    pub(super) fn collect_variable_satisfies_refs(
+        declarator: &VariableDeclarator<'_>,
+    ) -> Vec<(String, Span)> {
+        let mut collector = SignatureTypeCollector::default();
+        let mut current = declarator.init.as_ref();
+        while let Some(expression) = current {
+            current = match expression.without_parentheses() {
+                Expression::TSSatisfiesExpression(satisfies) => {
+                    collector.visit_ts_type(&satisfies.type_annotation);
+                    Some(&satisfies.expression)
+                }
+                Expression::TSAsExpression(assertion) => Some(&assertion.expression),
+                Expression::TSTypeAssertion(assertion) => Some(&assertion.expression),
+                Expression::TSNonNullExpression(non_null) => Some(&non_null.expression),
+                _ => None,
+            };
+        }
+        collector.refs
     }
 
     /// Collect signature type references from a class's heritage clauses: type
@@ -481,4 +611,145 @@ impl ModuleInfoExtractor {
             }
         }
     }
+}
+
+/// A function-valued binding declared directly in a function body.
+#[derive(Clone, Copy)]
+enum LocalCallable<'b, 'a> {
+    Function(&'b Function<'a>),
+    Arrow(&'b ArrowFunctionExpression<'a>),
+}
+
+/// Collect type references that reach the inferred return type of a function
+/// without a return annotation. Only the returned values count: inline
+/// functions, `as` assertions, and local functions that a return statement
+/// names. Type annotations on other body values stay private, so a type that
+/// only annotates a local value keeps its unused finding.
+fn collect_inferred_return_refs(body: &FunctionBody<'_>, refs: &mut Vec<(String, Span)>) {
+    let locals = collect_local_callables(body);
+    let mut collector = ReturnedValueCollector {
+        locals: &locals,
+        refs,
+    };
+    collector.visit_function_body(body);
+}
+
+fn collect_local_callables<'b, 'a>(
+    body: &'b FunctionBody<'a>,
+) -> FxHashMap<&'b str, LocalCallable<'b, 'a>> {
+    let mut locals = FxHashMap::default();
+    for statement in &body.statements {
+        match statement {
+            Statement::FunctionDeclaration(function) => {
+                if let Some(id) = function.id.as_ref() {
+                    locals.insert(id.name.as_str(), LocalCallable::Function(function));
+                }
+            }
+            Statement::VariableDeclaration(declaration) => {
+                for declarator in &declaration.declarations {
+                    let (BindingPattern::BindingIdentifier(id), Some(init)) =
+                        (&declarator.id, &declarator.init)
+                    else {
+                        continue;
+                    };
+                    let callable = match init.without_parentheses() {
+                        Expression::ArrowFunctionExpression(arrow) => LocalCallable::Arrow(arrow),
+                        Expression::FunctionExpression(function) => {
+                            LocalCallable::Function(function)
+                        }
+                        _ => continue,
+                    };
+                    locals.insert(id.name.as_str(), callable);
+                }
+            }
+            _ => {}
+        }
+    }
+    locals
+}
+
+fn collect_returned_expression_refs(
+    expression: &Expression<'_>,
+    locals: &FxHashMap<&str, LocalCallable<'_, '_>>,
+    refs: &mut Vec<(String, Span)>,
+) {
+    match expression {
+        Expression::ParenthesizedExpression(inner) => {
+            collect_returned_expression_refs(&inner.expression, locals, refs);
+        }
+        Expression::TSSatisfiesExpression(inner) => {
+            collect_returned_expression_refs(&inner.expression, locals, refs);
+        }
+        Expression::TSNonNullExpression(inner) => {
+            collect_returned_expression_refs(&inner.expression, locals, refs);
+        }
+        Expression::TSAsExpression(assertion) => {
+            let mut collector = SignatureTypeCollector::default();
+            collector.visit_ts_type(&assertion.type_annotation);
+            refs.extend(collector.refs);
+        }
+        Expression::ArrowFunctionExpression(arrow) => {
+            refs.extend(ModuleInfoExtractor::collect_arrow_signature_refs(arrow));
+        }
+        Expression::FunctionExpression(function) => {
+            refs.extend(ModuleInfoExtractor::collect_function_signature_refs(
+                function,
+            ));
+        }
+        Expression::Identifier(identifier) => match locals.get(identifier.name.as_str()) {
+            Some(LocalCallable::Function(function)) => {
+                refs.extend(ModuleInfoExtractor::collect_function_signature_refs(
+                    function,
+                ));
+            }
+            Some(LocalCallable::Arrow(arrow)) => {
+                refs.extend(ModuleInfoExtractor::collect_arrow_signature_refs(arrow));
+            }
+            None => {}
+        },
+        Expression::ObjectExpression(object) => {
+            for property in &object.properties {
+                if let ObjectPropertyKind::ObjectProperty(property) = property {
+                    collect_returned_expression_refs(&property.value, locals, refs);
+                }
+            }
+        }
+        Expression::ArrayExpression(array) => {
+            for element in &array.elements {
+                if let Some(element) = element.as_expression() {
+                    collect_returned_expression_refs(element, locals, refs);
+                }
+            }
+        }
+        Expression::ConditionalExpression(conditional) => {
+            collect_returned_expression_refs(&conditional.consequent, locals, refs);
+            collect_returned_expression_refs(&conditional.alternate, locals, refs);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_returned_expression_refs(&logical.left, locals, refs);
+            collect_returned_expression_refs(&logical.right, locals, refs);
+        }
+        _ => {}
+    }
+}
+
+/// Visit the return statements of one function body. Nested functions and
+/// classes own their return statements, so the walk does not enter them.
+struct ReturnedValueCollector<'r, 'b, 'a> {
+    locals: &'r FxHashMap<&'b str, LocalCallable<'b, 'a>>,
+    refs: &'r mut Vec<(String, Span)>,
+}
+
+impl<'a> Visit<'a> for ReturnedValueCollector<'_, '_, '_> {
+    fn visit_return_statement(&mut self, statement: &ReturnStatement<'a>) {
+        if let Some(argument) = &statement.argument {
+            collect_returned_expression_refs(argument, self.locals, self.refs);
+        }
+    }
+
+    fn visit_function(&mut self, _function: &Function<'a>, _flags: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _arrow: &ArrowFunctionExpression<'a>) {}
+
+    fn visit_class(&mut self, _class: &Class<'a>) {}
 }

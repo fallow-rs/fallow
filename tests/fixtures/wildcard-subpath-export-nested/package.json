@@ -1,0 +1,5 @@
+{
+  "name": "wildcard-subpath-export-nested",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

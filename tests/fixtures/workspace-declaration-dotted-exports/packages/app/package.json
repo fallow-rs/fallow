@@ -1,0 +1,8 @@
+{
+  "name": "@demo/app",
+  "private": true,
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@demo/lib": "workspace:*"
+  }
+}

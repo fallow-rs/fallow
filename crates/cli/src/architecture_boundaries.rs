@@ -1649,6 +1649,9 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::plugins::registry::builtin_config_patterns",
         "fallow_core::plugins::registry::builtin_plugin_names",
         "fallow_core::plugins::registry::is_external_plugin_active",
+        // The `@types/X` naming rule has one source, in fallow-core, so the
+        // dependency trace and the unused devDependency check agree on it.
+        "fallow_core::plugins::types_package_target",
         // The discovery walk has one implementation, in fallow-core, so its
         // config-candidate basenames stay derived from the plugin registry.
         "fallow_core::discover::DiscoveredSources",
@@ -1669,6 +1672,9 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         // The built-in module list has one source, in fallow-core, so the
         // entry weight report and the dependency detectors agree on it.
         "fallow_core::analyze::is_builtin_module",
+        // Peer-dependency credit has one implementation, in fallow-core, so
+        // `--trace-dependency` and the unused-dependency check agree on it.
+        "fallow_core::analyze::peer_dependency_hosts",
     ];
 
     for line in core_backend.lines() {

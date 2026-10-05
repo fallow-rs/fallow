@@ -9,7 +9,7 @@
 //! at startup. There is no regeneration step. To add a tool, edit one entry in
 //! the TOML and open a PR. See `CONTRIBUTING.md`.
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Embedded catalogue source. Because it is `include_str!`-embedded at compile
 /// time, a green `catalogue_parses` test guarantees the released binary parses.
@@ -43,6 +43,14 @@ struct ToolingCatalogue {
     prefix: Vec<PrefixEntry>,
     #[serde(default)]
     exact: Vec<ExactEntry>,
+    #[serde(default)]
+    ambient_types: Vec<AmbientTypesEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct AmbientTypesEntry {
+    /// Exact name of a type package that declares globals.
+    name: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -58,6 +66,12 @@ struct PrefixEntry {
     )]
     #[serde(default)]
     notes: Option<String>,
+    /// Whether every package of the family is a command-line tool.
+    #[serde(default)]
+    cli: bool,
+    /// Config file patterns of a command-line tool that no plugin covers.
+    #[serde(default)]
+    config: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -71,12 +85,23 @@ struct ExactEntry {
     )]
     #[serde(default)]
     ecosystem: Option<String>,
+    /// Whether the package is a command-line tool.
+    #[serde(default)]
+    cli: bool,
+    /// Config file patterns of a command-line tool that no plugin covers.
+    #[serde(default)]
+    config: Vec<String>,
 }
 
-/// Parsed catalogue: ordered prefix patterns + an exact-match set.
+/// Parsed catalogue: ordered prefix patterns, an exact-match set, the
+/// command-line tools with their config patterns, and the ambient global type
+/// packages.
 struct Catalogue {
     prefixes: Vec<String>,
     exact: FxHashSet<String>,
+    cli_exact: FxHashMap<String, Vec<String>>,
+    cli_prefixes: Vec<(String, Vec<String>)>,
+    ambient_types: FxHashSet<String>,
 }
 
 /// Parse and cache the embedded catalogue once. Panics with a clear message if
@@ -93,9 +118,24 @@ fn catalogue() -> &'static Catalogue {
             "embedded crates/core/data/tooling.toml must parse; run \
              `cargo test -p fallow-core catalogue_parses` to see the error",
         );
+        let cli_exact = parsed
+            .exact
+            .iter()
+            .filter(|e| e.cli)
+            .map(|e| (e.name.clone(), e.config.clone()))
+            .collect();
+        let cli_prefixes = parsed
+            .prefix
+            .iter()
+            .filter(|p| p.cli)
+            .map(|p| (p.pattern.clone(), p.config.clone()))
+            .collect();
         Catalogue {
             prefixes: parsed.prefix.into_iter().map(|p| p.pattern).collect(),
             exact: parsed.exact.into_iter().map(|e| e.name).collect(),
+            cli_exact,
+            cli_prefixes,
+            ambient_types: parsed.ambient_types.into_iter().map(|e| e.name).collect(),
         }
     })
 }
@@ -115,9 +155,121 @@ pub fn is_known_tooling_dependency(name: &str) -> bool {
         || catalogue.exact.contains(name)
 }
 
+/// The config file patterns of a command-line tool in the catalogue, or
+/// `None` when the catalogue does not mark `name` as a command-line tool.
+///
+/// The unused devDependency check credits a command-line tool only when a
+/// script, a CI workflow or a git hook runs it, when one of these config files
+/// exists, or when a plugin credits it. An empty slice means the tool has no
+/// config file of its own that no plugin covers.
+#[must_use]
+pub fn cli_tooling_config_patterns(name: &str) -> Option<&'static [String]> {
+    let catalogue = catalogue();
+    if let Some(config) = catalogue.cli_exact.get(name) {
+        return Some(config);
+    }
+    if catalogue.exact.contains(name) {
+        return None;
+    }
+    catalogue
+        .cli_prefixes
+        .iter()
+        .find(|(pattern, _)| name.starts_with(pattern.as_str()))
+        .map(|(_, config)| config.as_slice())
+}
+
+/// Whether a package declares ambient globals (`@types/node`, `@types/jest`,
+/// `bun-types`), so a project uses it without importing anything.
+#[must_use]
+pub fn is_ambient_types_package(name: &str) -> bool {
+    catalogue().ambient_types.contains(name)
+}
+
+/// The package that a `@types/` package types, by the DefinitelyTyped naming
+/// convention: `@types/node` types `node`, `@types/scope__pkg` types
+/// `@scope/pkg`. `None` for a name outside the `@types/` scope.
+#[must_use]
+pub fn types_package_target(name: &str) -> Option<String> {
+    let tail = name.strip_prefix("@types/")?;
+    if tail.is_empty() {
+        return None;
+    }
+    Some(match tail.split_once("__") {
+        Some((scope, package)) if !scope.is_empty() && !package.is_empty() => {
+            format!("@{scope}/{package}")
+        }
+        _ => tail.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_entries_carry_their_config_patterns() {
+        assert_eq!(cli_tooling_config_patterns("tsx"), Some(&[][..]));
+        assert_eq!(
+            cli_tooling_config_patterns("jscpd").map(<[String]>::to_vec),
+            Some(vec![".jscpd.json".to_string()])
+        );
+        assert_eq!(
+            cli_tooling_config_patterns("oxlint-tsgolint"),
+            Some(&[][..])
+        );
+        assert_eq!(cli_tooling_config_patterns("sass"), None);
+        assert_eq!(cli_tooling_config_patterns("@types/node"), None);
+        assert_eq!(cli_tooling_config_patterns("left-pad"), None);
+    }
+
+    #[test]
+    fn cli_config_patterns_are_root_anchored() {
+        let parsed: ToolingCatalogue = toml::from_str(CATALOGUE_TOML).unwrap();
+        let patterns = parsed
+            .exact
+            .iter()
+            .flat_map(|e| e.config.iter().map(move |c| (e.cli, c)))
+            .chain(
+                parsed
+                    .prefix
+                    .iter()
+                    .flat_map(|p| p.config.iter().map(move |c| (p.cli, c))),
+            );
+        for (cli, pattern) in patterns {
+            assert!(
+                cli,
+                "config pattern {pattern} needs `cli = true` on its entry"
+            );
+            assert!(
+                !pattern.starts_with("**") && !pattern.starts_with('/'),
+                "config pattern {pattern} must be relative to the package root"
+            );
+        }
+    }
+
+    #[test]
+    fn ambient_types_cover_global_packages_only() {
+        assert!(is_ambient_types_package("@types/node"));
+        assert!(is_ambient_types_package("@types/jest"));
+        assert!(is_ambient_types_package("bun-types"));
+        assert!(!is_ambient_types_package("@types/react"));
+        assert!(!is_ambient_types_package("node"));
+    }
+
+    #[test]
+    fn types_package_target_follows_the_naming_convention() {
+        assert_eq!(
+            types_package_target("@types/node"),
+            Some("node".to_string())
+        );
+        assert_eq!(
+            types_package_target("@types/scope__pkg"),
+            Some("@scope/pkg".to_string())
+        );
+        assert_eq!(types_package_target("@types/"), None);
+        assert_eq!(types_package_target("node"), None);
+        assert_eq!(types_package_target("bun-types"), None);
+    }
 
     #[test]
     fn types_prefix_matches_scoped() {

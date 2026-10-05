@@ -21,6 +21,31 @@ fn destructured_class_members_credit_reads_and_opaque_patterns() {
 }
 
 #[test]
+fn destructured_fields_of_typed_parameters_credit_their_classes() {
+    let config = create_config(fixture_path("typed-destructured-class-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(
+        unused,
+        [
+            ("Client", "unused"),
+            ("Service", "unused"),
+            ("Store", "unused")
+        ]
+    );
+}
+
+#[test]
 fn type_guard_subject_member_access_credits_only_its_predicate_class() {
     let project = tempfile::tempdir().expect("create project");
     let source_dir = project.path().join("src");
@@ -1149,5 +1174,56 @@ fn ignore_decorators_applies_to_declaring_class_only() {
     assert!(
         admin_findings.is_empty(),
         "AdminPage has no own members; no findings should be attributed to it, found: {admin_findings:?}"
+    );
+}
+
+#[test]
+fn nullish_fallback_and_nullable_ternary_inits_credit_class_members() {
+    let config = create_config(fixture_path("fallback-init-class-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(
+        unused,
+        [
+            ("Cache", "unused"),
+            ("Link", "unused"),
+            ("Pool", "unused"),
+            ("Queue", "unused"),
+        ]
+    );
+}
+
+#[test]
+fn map_value_type_credits_class_members_read_through_get() {
+    let root = fixture_path("map-value-class-members");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+    unused.sort();
+
+    assert_eq!(
+        unused,
+        vec![
+            "Entry.unused".to_string(),
+            "Item.unused".to_string(),
+            "Session.unused".to_string(),
+            "Slot.unused".to_string(),
+        ],
+        "a member called on a Map value must credit the value class"
     );
 }

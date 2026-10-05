@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_config::{IgnoreDependencyMatcher, PackageJson, ResolvedConfig};
 
 use crate::discover::FileId;
+use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{
@@ -14,6 +15,8 @@ use crate::results::{
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
+use super::bundle_externalization::source_sets_packages_external;
+use super::gitignored_targets::GitignoredTargets;
 use super::package_json_utils::{find_dep_line_in_json, read_pkg_json_content};
 use super::predicates::{
     is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias, is_virtual_module,
@@ -71,6 +74,11 @@ pub struct DepCategoryConfig {
     pub check_known_tooling: bool,
     /// Whether to check `plugin_tooling` set (prod + dev = true, optional = false).
     pub check_plugin_tooling: bool,
+    /// Whether a plugin tooling dependency needs evidence that the project
+    /// uses the plugin (dev = true): the plugin found its own config file, or
+    /// a script, CI workflow or git hook invokes its tool. When true, the
+    /// check reads `credited_plugin_tooling` instead of `plugin_tooling`.
+    pub plugin_tooling_needs_evidence: bool,
 }
 
 /// Shared sets used by `collect_unused_for_category` to filter dependencies.
@@ -78,6 +86,14 @@ pub struct SharedDepSets<'a> {
     pub plugin_referenced: &'a FxHashSet<&'a str>,
     pub package_plugin_referenced: &'a FxHashSet<&'a str>,
     pub plugin_tooling: &'a FxHashSet<&'a str>,
+    /// The plugin tooling dependencies whose plugin found evidence of use.
+    pub credited_plugin_tooling: &'a FxHashSet<&'a str>,
+    /// Every dependency name the project declares, in any manifest and any
+    /// section. A declared `X` credits a `@types/X` devDependency.
+    pub declared_packages: &'a FxHashSet<&'a str>,
+    /// The project root, where a command-line tool's own config file may
+    /// live for any package.
+    pub project_root: &'a Path,
     pub script_used: &'a FxHashSet<&'a str>,
     pub ignore_deps: &'a IgnoreDependencyMatcher,
 }
@@ -93,12 +109,20 @@ impl PeerDependencyResolver {
         }
     }
 
+    /// Every package that a seed package lists in `peerDependencies`, directly
+    /// or through another credited peer, mapped to the packages that list it.
+    ///
+    /// Optional peers (`peerDependenciesMeta.<name>.optional`) count too: a
+    /// project lists an optional peer of a package it uses to turn on a feature
+    /// of that package, which loads the peer at runtime where the import graph
+    /// does not see it. Only used packages seed the closure, so the peers of an
+    /// unused package get no credit.
     fn peer_dependency_closure<'b>(
         &mut self,
         package_root: &Path,
         seeds: impl IntoIterator<Item = &'b str>,
-    ) -> FxHashSet<String> {
-        let mut peer_used = FxHashSet::default();
+    ) -> FxHashMap<String, Vec<String>> {
+        let mut hosts_by_peer: FxHashMap<String, Vec<String>> = FxHashMap::default();
         let mut expanded = FxHashSet::default();
         let mut queue: Vec<String> = seeds.into_iter().map(str::to_string).collect();
 
@@ -108,13 +132,15 @@ impl PeerDependencyResolver {
             }
 
             for peer in self.peer_dependencies_for(package_root, &package_name) {
-                if peer_used.insert(peer.clone()) {
+                let hosts = hosts_by_peer.entry(peer.clone()).or_default();
+                if hosts.is_empty() {
                     queue.push(peer);
                 }
+                hosts.push(package_name.clone());
             }
         }
 
-        peer_used
+        hosts_by_peer
     }
 
     fn peer_dependencies_for(&mut self, package_root: &Path, package_name: &str) -> Vec<String> {
@@ -126,12 +152,34 @@ impl PeerDependencyResolver {
         let peer_dependencies: Vec<String> =
             find_installed_package_json(package_root, package_name)
                 .and_then(|path| PackageJson::load(&path).ok())
-                .map(|pkg| pkg.required_peer_dependency_names())
+                .map(|pkg| pkg.peer_dependency_names())
                 .unwrap_or_default();
 
         self.cache.insert(key, peer_dependencies.clone());
         peer_dependencies
     }
+}
+
+/// The packages that give `package_name` peer-dependency credit in the
+/// unused-dependency check: each one is used, or credited itself, and lists
+/// `package_name` in its installed `peerDependencies`, required or optional.
+///
+/// `used_packages` are the package names the import graph records. The
+/// installed manifests are looked up from `package_root` and its ancestors, as
+/// the unused-dependency check does for the root `package.json`. The result is
+/// sorted and empty when no used package lists `package_name` as a peer.
+pub fn peer_dependency_hosts<'a>(
+    package_root: &Path,
+    used_packages: impl IntoIterator<Item = &'a str>,
+    package_name: &str,
+) -> Vec<String> {
+    let mut hosts = PeerDependencyResolver::new()
+        .peer_dependency_closure(package_root, used_packages)
+        .remove(package_name)
+        .unwrap_or_default();
+    hosts.sort_unstable();
+    hosts.dedup();
+    hosts
 }
 
 fn find_installed_package_json(package_root: &Path, package_name: &str) -> Option<PathBuf> {
@@ -159,6 +207,9 @@ fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
 /// scanning every workspace for every package-usage entry or import site.
 struct WorkspaceOwnershipIndex {
     workspace_by_file: Vec<Option<usize>>,
+    /// For each workspace, the workspaces whose roots contain its root,
+    /// nearest first. The root manifest is not a workspace and is not listed.
+    ancestors_by_workspace: Vec<Vec<usize>>,
 }
 
 impl WorkspaceOwnershipIndex {
@@ -180,8 +231,26 @@ impl WorkspaceOwnershipIndex {
                     .find_map(|ancestor| by_root.get(ancestor).copied())
             })
             .collect();
+        let ancestors_by_workspace = workspace_roots
+            .iter()
+            .map(|root| {
+                root.ancestors()
+                    .skip(1)
+                    .filter_map(|ancestor| by_root.get(ancestor).copied())
+                    .collect()
+            })
+            .collect();
 
-        Self { workspace_by_file }
+        Self {
+            workspace_by_file,
+            ancestors_by_workspace,
+        }
+    }
+
+    fn ancestors_of(&self, workspace_index: usize) -> &[usize] {
+        self.ancestors_by_workspace
+            .get(workspace_index)
+            .map_or(&[], Vec::as_slice)
     }
 
     fn workspace_index_for_file(&self, file_id: FileId) -> Option<usize> {
@@ -216,11 +285,19 @@ struct WorkspaceManifest<'a> {
     /// private siblings: a sibling's source reaches this workspace whether it is
     /// pulled in for the shipped build or only for the local one.
     declared: FxHashSet<String>,
+    /// Names the package manager installs for this workspace: `dependencies`,
+    /// `devDependencies` and `optionalDependencies`. A `peerDependencies`
+    /// entry alone installs nothing, so a consumer or an ancestor manifest
+    /// still has to provide the package.
+    installed: FxHashSet<String>,
     /// Names declared in a category that travels with the package:
     /// `dependencies`, `optionalDependencies`, and `peerDependencies`.
     /// `devDependencies` are build-time needs of this workspace alone and are
     /// never inlined into a consumer, so they are deliberately excluded.
     shipped: FxHashSet<String>,
+    /// A package script bundles with every package external
+    /// (`bun build --packages=external`, `esbuild --packages=external`).
+    externalizes_packages: bool,
 }
 
 /// Names a workspace carries into anything that inlines its source.
@@ -256,7 +333,18 @@ fn read_workspace_manifests<'a>(
                 name: pkg.name.clone().unwrap_or_else(|| workspace.name.clone()),
                 is_private: pkg.private == Some(true),
                 declared: pkg.all_dependency_names().into_iter().collect(),
+                installed: pkg
+                    .production_dependency_names()
+                    .into_iter()
+                    .chain(pkg.dev_dependency_names())
+                    .chain(pkg.optional_dependency_names())
+                    .collect(),
                 shipped: shipped_dependency_names(&pkg),
+                externalizes_packages: pkg.scripts.as_ref().is_some_and(|scripts| {
+                    scripts
+                        .values()
+                        .any(|script| crate::scripts::script_externalizes_packages(script))
+                }),
             })
         })
         .collect()
@@ -279,9 +367,13 @@ fn dependency_owning_workspace_roots<'a>(manifests: &[WorkspaceManifest<'a>]) ->
 /// package brings its own dependency tree and needs no hoisting. Crediting a
 /// published sibling's packages would suppress a genuine finding. Workspace
 /// graphs can be cyclic, so each walk carries a visited set.
+///
+/// A consumer in `externalizing` leaves every package out of its bundle, so it
+/// does not inline a sibling and gets no credit.
 fn collect_bundled_workspace_usage<'a>(
     manifests: &[WorkspaceManifest<'a>],
     workspace_used_packages: &FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    externalizing: &FxHashSet<usize>,
 ) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
     let private_by_name: FxHashMap<&str, usize> = manifests
         .iter()
@@ -297,6 +389,7 @@ fn collect_bundled_workspace_usage<'a>(
     manifests
         .par_iter()
         .enumerate()
+        .filter(|(index, _)| !externalizing.contains(index))
         .map(|(index, consumer)| {
             let bundled = bundled_packages_for(
                 index,
@@ -356,6 +449,46 @@ fn bundled_packages_for<'a>(
     bundled
 }
 
+/// Indices of the workspaces whose build leaves every package external.
+///
+/// The signal is explicit: a package script that runs
+/// `bun build --packages=external` or `esbuild --packages=external`, or a file
+/// of the workspace that imports `esbuild` and sets `packages: 'external'`.
+/// Without it, a private sibling is assumed to be bundled.
+fn collect_externalizing_workspaces(
+    graph: &ModuleGraph,
+    manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+) -> FxHashSet<usize> {
+    let mut externalizing: FxHashSet<usize> = manifests
+        .iter()
+        .enumerate()
+        .filter(|(_, manifest)| manifest.externalizes_packages)
+        .map(|(index, _)| index)
+        .collect();
+    let Some(file_ids) = graph.package_usage.get("esbuild") else {
+        return externalizing;
+    };
+    let mut checked: FxHashSet<FileId> = FxHashSet::default();
+    for id in file_ids {
+        let Some(index) = ownership.workspace_index_for_file(*id) else {
+            continue;
+        };
+        if externalizing.contains(&index) || !checked.insert(*id) {
+            continue;
+        }
+        let Some(module) = graph.modules.get(id.0 as usize) else {
+            continue;
+        };
+        if std::fs::read_to_string(&module.path)
+            .is_ok_and(|source| source_sets_packages_external(&source, &module.path))
+        {
+            externalizing.insert(index);
+        }
+    }
+    externalizing
+}
+
 /// Reverse index: workspace root -> packages with ANY file under that root using
 /// them. Each module's deepest matching workspace root is pre-computed once in parallel so the
 /// package_usage walk costs O(packages * avg_files_per_package) instead of
@@ -382,20 +515,137 @@ fn collect_workspace_used_packages<'a>(
     by_ws
 }
 
+/// Reverse index: workspace root -> packages that a descendant workspace's files
+/// import through that workspace's declaration.
+///
+/// A file whose own workspace does not declare a package may use the first
+/// ancestor workspace that does, under the rule of
+/// [`accepts_ancestor_declaration`] that the unlisted-dependency check applies.
+/// The import then counts as a use of that ancestor's declaration, so the two
+/// results agree. The root manifest is credited project-wide elsewhere.
+fn collect_ancestor_credited_packages<'a>(
+    graph: &'a ModuleGraph,
+    config: &ResolvedConfig,
+    manifests: &[WorkspaceManifest<'a>],
+    ownership: &WorkspaceOwnershipIndex,
+) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
+    let mut credited: FxHashMap<&Path, FxHashSet<&str>> = FxHashMap::default();
+    for (package_name, file_ids) in &graph.package_usage {
+        for id in file_ids {
+            if let Some(ancestor) =
+                ancestor_satisfying_import(graph, config, manifests, ownership, package_name, *id)
+            {
+                credited
+                    .entry(ancestor.root)
+                    .or_default()
+                    .insert(package_name.as_str());
+            }
+        }
+    }
+    credited
+}
+
+/// The ancestor workspace whose declaration satisfies an import of
+/// `package_name` in file `id`, or `None` when the owning workspace declares
+/// the package itself, the file may not use an ancestor declaration, or no
+/// ancestor workspace declares it.
+fn ancestor_satisfying_import<'m, 'a>(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    manifests: &'m [WorkspaceManifest<'a>],
+    ownership: &WorkspaceOwnershipIndex,
+    package_name: &str,
+    id: FileId,
+) -> Option<&'m WorkspaceManifest<'a>> {
+    let index = ownership.workspace_index_for_file(id)?;
+    let owner = manifests.get(index)?;
+    if owner.declared.contains(package_name) {
+        return None;
+    }
+    let module = graph.modules.get(id.0 as usize)?;
+    if !accepts_ancestor_declaration(owner.is_private, module, config) {
+        return None;
+    }
+    ownership
+        .ancestors_of(index)
+        .iter()
+        .filter_map(|ancestor| manifests.get(*ancestor))
+        .find(|ancestor| ancestor.declared.contains(package_name))
+}
+
+/// Packages whose import in at least one file is attributed to the root
+/// manifest.
+///
+/// Each import is attributed to the nearest manifest that installs the
+/// package: the owning workspace, then its ancestor workspaces, then the root.
+/// A root declaration is therefore used only when some importer lies outside
+/// every workspace, or when no workspace in the importer's chain installs the
+/// package. An importer whose own workspace or an ancestor workspace declares
+/// the package does not keep the root declaration alive.
+fn collect_root_credited_packages<'a>(
+    graph: &'a ModuleGraph,
+    manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+) -> FxHashSet<&'a str> {
+    graph
+        .package_usage
+        .iter()
+        .filter(|(package_name, file_ids)| {
+            file_ids
+                .iter()
+                .any(|id| !workspace_chain_installs(manifests, ownership, package_name, *id))
+        })
+        .map(|(package_name, _)| package_name.as_str())
+        .collect()
+}
+
+/// Return `true` when the workspace that owns file `id`, or one of its
+/// ancestor workspaces, installs `package_name`.
+fn workspace_chain_installs(
+    manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+    package_name: &str,
+    id: FileId,
+) -> bool {
+    let Some(index) = ownership.workspace_index_for_file(id) else {
+        return false;
+    };
+    std::iter::once(index)
+        .chain(ownership.ancestors_of(index).iter().copied())
+        .filter_map(|workspace| manifests.get(workspace))
+        .any(|manifest| manifest.installed.contains(package_name))
+}
+
 fn shared_dep_sets<'a>(
     plugin_referenced: &'a FxHashSet<&'a str>,
     package_plugin_referenced: &'a FxHashSet<&'a str>,
-    plugin_tooling: &'a FxHashSet<&'a str>,
+    plugin_tooling: &'a PluginToolingSets<'a>,
     script_used: &'a FxHashSet<&'a str>,
     ignore_deps: &'a IgnoreDependencyMatcher,
+    project_root: &'a Path,
 ) -> SharedDepSets<'a> {
     SharedDepSets {
+        project_root,
         plugin_referenced,
         package_plugin_referenced,
-        plugin_tooling,
+        plugin_tooling: &plugin_tooling.declared,
+        credited_plugin_tooling: &plugin_tooling.credited,
+        declared_packages: &plugin_tooling.declared_packages,
         script_used,
         ignore_deps,
     }
+}
+
+/// The tooling dependencies of the active plugins: every declared one, and
+/// the subset whose plugin found evidence that the project uses it.
+///
+/// It also carries every declared dependency name, which the `@types/X`
+/// credit reads.
+#[derive(Default)]
+struct PluginToolingSets<'a> {
+    declared: FxHashSet<&'a str>,
+    credited: FxHashSet<&'a str>,
+    declared_packages: FxHashSet<&'a str>,
 }
 
 /// Collect unused dependencies for a single category (prod, dev, or optional).
@@ -423,11 +673,22 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
         .filter(|dep| !input.shared.script_used.contains(dep.as_str()))
         .filter(|dep| !input.category.check_implicit || !is_implicit_dependency(dep))
         .filter(|dep| {
-            !input.category.check_known_tooling || !crate::plugins::is_known_tooling_dependency(dep)
+            !input.category.check_known_tooling
+                || !is_credited_known_tooling(
+                    dep,
+                    input.shared,
+                    input.is_used,
+                    input.pkg_path,
+                    input.pkg_content,
+                )
         })
         .filter(|dep| {
-            !input.category.check_plugin_tooling
-                || !input.shared.plugin_tooling.contains(dep.as_str())
+            let tooling = if input.category.plugin_tooling_needs_evidence {
+                input.shared.credited_plugin_tooling
+            } else {
+                input.shared.plugin_tooling
+            };
+            !input.category.check_plugin_tooling || !tooling.contains(dep.as_str())
         })
         .filter(|dep| !input.shared.plugin_referenced.contains(dep.as_str()))
         .filter(|dep| {
@@ -450,6 +711,62 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
             }
         })
         .collect()
+}
+
+/// Whether the unused devDependency check credits `dep` as known tooling.
+///
+/// An ambient global type package (`@types/node`, `bun-types`) is always
+/// credited. Any other `@types/X` package is credited only when the project
+/// declares `X` or uses `X` where `is_used` looks. A tsconfig `types` entry
+/// credits it through the plugin-referenced set. A command-line tool from the
+/// catalogue is credited here only when its own config file exists; a
+/// script, CI workflow or git hook reference credits it through the
+/// script-used set. Every other name falls back to the tooling catalogue.
+fn is_credited_known_tooling(
+    dep: &str,
+    shared: &SharedDepSets<'_>,
+    is_used: &dyn Fn(&str) -> bool,
+    pkg_path: &Path,
+    pkg_content: Option<&str>,
+) -> bool {
+    if crate::plugins::is_ambient_types_package(dep) {
+        return true;
+    }
+    if let Some(target) = crate::plugins::types_package_target(dep) {
+        return shared.declared_packages.contains(target.as_str()) || is_used(&target);
+    }
+    if let Some(config) = crate::plugins::cli_tooling_config_patterns(dep) {
+        return cli_tool_has_own_config(dep, config, shared.project_root, pkg_path, pkg_content);
+    }
+    crate::plugins::is_known_tooling_dependency(dep)
+}
+
+/// Whether a command-line tool has a config file of its own next to the
+/// declaring package.json or at the project root, or its config under a
+/// package.json key named after it.
+fn cli_tool_has_own_config(
+    dep: &str,
+    config: &[String],
+    project_root: &Path,
+    pkg_path: &Path,
+    pkg_content: Option<&str>,
+) -> bool {
+    if pkg_content
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok())
+        .is_some_and(|manifest| manifest.get(dep).is_some())
+    {
+        return true;
+    }
+    if config.is_empty() {
+        return false;
+    }
+    let package_root = pkg_path.parent().unwrap_or(project_root);
+    let roots: &[&Path] = if package_root == project_root {
+        &[project_root]
+    } else {
+        &[package_root, project_root]
+    };
+    crate::plugins::registry::find_config_file(config.iter().map(String::as_str), roots).is_some()
 }
 
 /// Build a reverse index from package name to workspace roots that import it.
@@ -503,6 +820,7 @@ const fn prod_category() -> DepCategoryConfig {
         check_implicit: true,
         check_known_tooling: false,
         check_plugin_tooling: true,
+        plugin_tooling_needs_evidence: false,
     }
 }
 
@@ -512,6 +830,7 @@ const fn dev_category() -> DepCategoryConfig {
         check_implicit: false,
         check_known_tooling: true,
         check_plugin_tooling: true,
+        plugin_tooling_needs_evidence: true,
     }
 }
 
@@ -521,7 +840,21 @@ const fn optional_category() -> DepCategoryConfig {
         check_implicit: true,
         check_known_tooling: false,
         check_plugin_tooling: false,
+        plugin_tooling_needs_evidence: false,
     }
+}
+
+/// Names a manifest lists in `peerDependencies`, required or optional.
+///
+/// A devDependency with one of these names is the package's own peer,
+/// installed for local build and test. Its consumer supplies it at runtime, so
+/// it is neither an unused devDependency nor a devDependency in production.
+fn own_peer_dependency_names(pkg: &PackageJson) -> FxHashSet<&str> {
+    pkg.peer_dependencies
+        .as_ref()
+        .into_iter()
+        .flat_map(|deps| deps.keys().map(String::as_str))
+        .collect()
 }
 
 fn package_referenced_dependencies_by_path(
@@ -558,6 +891,45 @@ fn plugin_tooling_set(
         .unwrap_or_default()
 }
 
+/// The plugin tooling sets for the unused-dependency check.
+///
+/// A plugin's tooling dependencies are credited for devDependencies only when
+/// the plugin found its own config file, or when a package.json script, a CI
+/// workflow or a git hook invokes one of its reference packages.
+fn plugin_tooling_sets<'a>(
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
+    root_declared: &'a [String],
+) -> PluginToolingSets<'a> {
+    let Some(plugin_result) = plugin_result else {
+        return PluginToolingSets {
+            declared_packages: root_declared.iter().map(String::as_str).collect(),
+            ..PluginToolingSets::default()
+        };
+    };
+    let declared_packages = plugin_result
+        .dependency_binaries
+        .declared_packages()
+        .iter()
+        .map(String::as_str)
+        .chain(root_declared.iter().map(String::as_str))
+        .collect();
+    let credited = plugin_result
+        .plugin_tooling
+        .iter()
+        .filter(|entry| {
+            entry
+                .evidence(&plugin_result.script_used_packages)
+                .is_some()
+        })
+        .flat_map(|entry| entry.dependencies.iter().map(String::as_str))
+        .collect();
+    PluginToolingSets {
+        declared: plugin_tooling_set(Some(plugin_result)),
+        credited,
+        declared_packages,
+    }
+}
+
 fn script_used_set(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> FxHashSet<&str> {
@@ -582,7 +954,9 @@ pub fn find_unused_dependencies(
     Vec<UnusedDependency>,
     Vec<UnusedDependency>,
 ) {
-    let scan = build_unused_dependency_scan(graph, config, plugin_result, workspaces);
+    let root_declared = pkg.all_dependency_names();
+    let scan =
+        build_unused_dependency_scan(graph, config, plugin_result, workspaces, &root_declared);
     let shared = scan.root_shared(config);
 
     let linked_workspaces = fallow_config::link_only_workspace_dependencies(
@@ -592,8 +966,12 @@ pub fn find_unused_dependencies(
     );
     let (mut unused_deps, mut unused_dev_deps, mut unused_optional_deps) =
         collect_root_unused_dependencies(pkg, config, &shared, &scan.usage, &linked_workspaces);
-    let root_flagged =
-        root_flagged_dependencies(&unused_deps, &unused_dev_deps, &unused_optional_deps);
+    let root_flagged = root_flagged_dependencies(
+        &unused_deps,
+        &unused_dev_deps,
+        &unused_optional_deps,
+        &scan.usage.used_packages,
+    );
 
     let inputs = scan.workspace_inputs(config, &root_flagged);
     append_workspace_unused_dependencies(
@@ -609,7 +987,7 @@ pub fn find_unused_dependencies(
 
 struct UnusedDependencyScan<'a> {
     plugin_referenced: FxHashSet<&'a str>,
-    plugin_tooling: FxHashSet<&'a str>,
+    plugin_tooling: PluginToolingSets<'a>,
     script_used: FxHashSet<&'a str>,
     package_referenced: FxHashMap<PathBuf, FxHashSet<&'a str>>,
     empty_package_referenced: FxHashSet<&'a str>,
@@ -618,7 +996,7 @@ struct UnusedDependencyScan<'a> {
 }
 
 impl<'a> UnusedDependencyScan<'a> {
-    fn root_shared(&'a self, config: &ResolvedConfig) -> SharedDepSets<'a> {
+    fn root_shared(&'a self, config: &'a ResolvedConfig) -> SharedDepSets<'a> {
         shared_dep_sets(
             &self.plugin_referenced,
             self.package_referenced
@@ -627,6 +1005,7 @@ impl<'a> UnusedDependencyScan<'a> {
             &self.plugin_tooling,
             &self.script_used,
             self.ignore_deps,
+            &config.root,
         )
     }
 
@@ -645,6 +1024,7 @@ impl<'a> UnusedDependencyScan<'a> {
             ignore_deps: self.ignore_deps,
             workspace_used_packages: &self.usage.workspace_used_packages,
             bundled_workspace_usage: &self.usage.bundled_workspace_usage,
+            ancestor_credited_packages: &self.usage.ancestor_credited_packages,
             package_workspace_usage: &self.usage.package_workspace_usage,
             root_flagged,
         }
@@ -656,10 +1036,11 @@ fn build_unused_dependency_scan<'a>(
     config: &'a ResolvedConfig,
     plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     workspaces: &'a [fallow_config::WorkspaceInfo],
+    root_declared: &'a [String],
 ) -> UnusedDependencyScan<'a> {
     UnusedDependencyScan {
         plugin_referenced: plugin_referenced_set(plugin_result),
-        plugin_tooling: plugin_tooling_set(plugin_result),
+        plugin_tooling: plugin_tooling_sets(plugin_result, root_declared),
         script_used: script_used_set(plugin_result),
         package_referenced: plugin_result
             .map(package_referenced_dependencies_by_path)
@@ -693,10 +1074,14 @@ type UnusedDependencyTriple = (
 /// Package-usage indices shared by the root and per-workspace unused-dependency passes.
 struct DependencyUsageIndices<'a> {
     used_packages: FxHashSet<&'a str>,
+    /// Packages with at least one import attributed to the root manifest, see
+    /// [`collect_root_credited_packages`].
+    root_credited_packages: FxHashSet<&'a str>,
     package_workspace_usage: FxHashMap<String, Vec<PathBuf>>,
     workspace_used_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: FxHashMap<&'a Path, FxHashSet<&'a str>>,
-    root_peer_used: FxHashSet<String>,
+    ancestor_credited_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    root_peer_used: FxHashMap<String, Vec<String>>,
 }
 
 /// Compute the package-usage indices used to decide whether a dependency is used.
@@ -713,9 +1098,14 @@ fn collect_dependency_usage_indices<'a>(
     let ownership = WorkspaceOwnershipIndex::new(graph, &workspace_roots);
     let workspace_used_packages =
         collect_workspace_used_packages(graph, &workspace_roots, &ownership);
+    let externalizing = collect_externalizing_workspaces(graph, &manifests, &ownership);
     let bundled_workspace_usage =
-        collect_bundled_workspace_usage(&manifests, &workspace_used_packages);
+        collect_bundled_workspace_usage(&manifests, &workspace_used_packages, &externalizing);
+    let ancestor_credited_packages =
+        collect_ancestor_credited_packages(graph, config, &manifests, &ownership);
+    let root_credited_packages = collect_root_credited_packages(graph, &manifests, &ownership);
     DependencyUsageIndices {
+        root_credited_packages,
         package_workspace_usage: collect_package_workspace_usage(
             graph,
             &workspace_roots,
@@ -723,6 +1113,7 @@ fn collect_dependency_usage_indices<'a>(
         ),
         workspace_used_packages,
         bundled_workspace_usage,
+        ancestor_credited_packages,
         used_packages,
         root_peer_used,
     }
@@ -738,8 +1129,8 @@ fn collect_root_unused_dependencies(
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let is_used_globally = |dep: &str| {
-        usage.used_packages.contains(dep)
-            || usage.root_peer_used.contains(dep)
+        usage.root_credited_packages.contains(dep)
+            || usage.root_peer_used.contains_key(dep)
             || linked_workspaces.contains(dep)
     };
 
@@ -752,15 +1143,22 @@ fn collect_root_unused_dependencies(
     )
 }
 
+/// Root findings for packages that nothing in the project imports.
+///
+/// A workspace does not repeat such a finding for its own declaration. A root
+/// finding for a package that a workspace imports through a nearer manifest is
+/// left out, so the workspace declarations of that package are still checked.
 fn root_flagged_dependencies(
     unused_deps: &[UnusedDependency],
     unused_dev_deps: &[UnusedDependency],
     unused_optional_deps: &[UnusedDependency],
+    used_packages: &FxHashSet<&str>,
 ) -> FxHashSet<String> {
     unused_deps
         .iter()
         .chain(unused_dev_deps)
         .chain(unused_optional_deps)
+        .filter(|d| !used_packages.contains(d.package_name.as_str()))
         .map(|d| d.package_name.clone())
         .collect()
 }
@@ -774,21 +1172,32 @@ fn collect_root_unused_categories(
     root_pkg_content: Option<&str>,
 ) -> UnusedDependencyTriple {
     let no_workspace_context = |_dep: &str| Vec::new();
-    let category = |dep_names: Vec<String>, category: &DepCategoryConfig| {
-        collect_unused_for_category(UnusedCategoryInput {
-            dep_names,
-            category,
-            shared,
-            is_used: is_used_globally,
-            used_in_workspaces: &no_workspace_context,
-            pkg_path: root_pkg_path,
-            pkg_content: root_pkg_content,
-        })
-    };
+    let category =
+        |dep_names: Vec<String>, category: &DepCategoryConfig, is_used: &dyn Fn(&str) -> bool| {
+            collect_unused_for_category(UnusedCategoryInput {
+                dep_names,
+                category,
+                shared,
+                is_used,
+                used_in_workspaces: &no_workspace_context,
+                pkg_path: root_pkg_path,
+                pkg_content: root_pkg_content,
+            })
+        };
+    let own_peers = own_peer_dependency_names(pkg);
+    let is_dev_used = |dep: &str| own_peers.contains(dep) || is_used_globally(dep);
 
-    let unused_deps = category(pkg.production_dependency_names(), &prod_category());
-    let unused_dev_deps = category(pkg.dev_dependency_names(), &dev_category());
-    let unused_optional_deps = category(pkg.optional_dependency_names(), &optional_category());
+    let unused_deps = category(
+        pkg.production_dependency_names(),
+        &prod_category(),
+        is_used_globally,
+    );
+    let unused_dev_deps = category(pkg.dev_dependency_names(), &dev_category(), &is_dev_used);
+    let unused_optional_deps = category(
+        pkg.optional_dependency_names(),
+        &optional_category(),
+        is_used_globally,
+    );
     (unused_deps, unused_dev_deps, unused_optional_deps)
 }
 
@@ -809,11 +1218,12 @@ struct WorkspaceUnusedDependencyInputs<'a> {
     package_referenced: &'a FxHashMap<PathBuf, FxHashSet<&'a str>>,
     empty_package_referenced: &'a FxHashSet<&'a str>,
     plugin_referenced: &'a FxHashSet<&'a str>,
-    plugin_tooling: &'a FxHashSet<&'a str>,
+    plugin_tooling: &'a PluginToolingSets<'a>,
     script_used: &'a FxHashSet<&'a str>,
     ignore_deps: &'a IgnoreDependencyMatcher,
     workspace_used_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
+    ancestor_credited_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     root_flagged: &'a FxHashSet<String>,
 }
@@ -840,19 +1250,25 @@ fn collect_workspace_unused_dependencies<'a>(
         inputs.plugin_tooling,
         inputs.script_used,
         inputs.ignore_deps,
+        &inputs.config.root,
     );
 
     let ws_root = ws.root.as_path();
+    let ancestor_credited = inputs.ancestor_credited_packages.get(&ws_root);
     let ws_used_packages: FxHashSet<&str> = inputs
         .workspace_used_packages
         .get(&ws_root)
-        .cloned()
-        .unwrap_or_default();
+        .into_iter()
+        .chain(ancestor_credited)
+        .flatten()
+        .copied()
+        .collect();
     let usage = workspace_dependency_usage(
         ws_root,
         &ws_used_packages,
         inputs.package_workspace_usage,
         inputs.bundled_workspace_usage.get(&ws_root),
+        ancestor_credited,
         inputs.root_flagged,
     );
 
@@ -874,10 +1290,13 @@ fn read_workspace_package(
 
 struct WorkspaceDependencyUsage<'a> {
     ws_root: &'a Path,
-    ws_peer_used: FxHashSet<String>,
+    ws_peer_used: FxHashMap<String, Vec<String>>,
     /// Packages this workspace inherits from the private siblings it bundles,
     /// absent when the workspace bundles no private sibling.
     bundled_used: Option<&'a FxHashSet<&'a str>>,
+    /// Packages that descendant workspace files import through this
+    /// workspace's declaration, absent when there are none.
+    ancestor_credited: Option<&'a FxHashSet<&'a str>>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     root_flagged: &'a FxHashSet<String>,
 }
@@ -885,10 +1304,13 @@ struct WorkspaceDependencyUsage<'a> {
 impl WorkspaceDependencyUsage<'_> {
     fn is_used_in_workspace(&self, dep: &str) -> bool {
         self.root_flagged.contains(dep)
-            || self.ws_peer_used.contains(dep)
+            || self.ws_peer_used.contains_key(dep)
             || self
                 .bundled_used
                 .is_some_and(|bundled| bundled.contains(dep))
+            || self
+                .ancestor_credited
+                .is_some_and(|credited| credited.contains(dep))
             || self
                 .package_workspace_usage
                 .get(dep)
@@ -905,6 +1327,7 @@ fn workspace_dependency_usage<'a>(
     ws_used_packages: &FxHashSet<&str>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
     bundled_used: Option<&'a FxHashSet<&'a str>>,
+    ancestor_credited: Option<&'a FxHashSet<&'a str>>,
     root_flagged: &'a FxHashSet<String>,
 ) -> WorkspaceDependencyUsage<'a> {
     let ws_peer_used = PeerDependencyResolver::new()
@@ -913,6 +1336,7 @@ fn workspace_dependency_usage<'a>(
         ws_root,
         ws_peer_used,
         bundled_used,
+        ancestor_credited,
         package_workspace_usage,
         root_flagged,
     }
@@ -931,6 +1355,8 @@ fn collect_workspace_unused_categories(
 ) {
     let is_used_in_workspace = |dep: &str| usage.is_used_in_workspace(dep);
     let used_in_workspaces = |dep: &str| usage.used_in_other_workspaces(dep);
+    let own_peers = own_peer_dependency_names(ws_pkg);
+    let is_dev_used = |dep: &str| own_peers.contains(dep) || is_used_in_workspace(dep);
 
     let prod = collect_unused_for_category(UnusedCategoryInput {
         dep_names: ws_pkg.production_dependency_names(),
@@ -945,7 +1371,7 @@ fn collect_workspace_unused_categories(
         dep_names: ws_pkg.dev_dependency_names(),
         category: &dev_category(),
         shared: ws_shared,
-        is_used: &is_used_in_workspace,
+        is_used: &is_dev_used,
         used_in_workspaces: &used_in_workspaces,
         pkg_path: ws_pkg_path,
         pkg_content: Some(ws_pkg_content),
@@ -1036,6 +1462,40 @@ fn production_exclude_globset() -> Option<&'static globset::GlobSet> {
         builder.build().ok()
     })
     .as_ref()
+}
+
+/// Return `true` when `module` is production code: reachable from a runtime
+/// entry point, not a test or story file, and not a config file.
+///
+/// Repo tooling the test globs do not cover (`scripts/`, `benchmarks/`,
+/// playgrounds, anything reachable only through a config-file support entry)
+/// is not runtime reachable, so it is not production code either.
+fn is_production_module(module: &crate::graph::ModuleNode, config: &ResolvedConfig) -> bool {
+    if !module.is_runtime_reachable() || is_config_file(&module.path) {
+        return false;
+    }
+    let relative = module
+        .path
+        .strip_prefix(&config.root)
+        .unwrap_or(&module.path);
+    !production_exclude_globset().is_some_and(|test_globs| test_globs.is_match(relative))
+}
+
+/// Return `true` when a workspace file may use a package that only an
+/// ancestor manifest declares (an ancestor workspace or the root).
+///
+/// A private workspace is never published, so it always runs inside the
+/// monorepo where the ancestor's install is present. A file that is not
+/// production code (a test, config or build script) also runs only inside the
+/// monorepo. A production file of a publishable workspace must declare its
+/// packages itself, because consumers of the published package do not get the
+/// ancestor's dependency.
+fn accepts_ancestor_declaration(
+    owner_is_private: bool,
+    module: &crate::graph::ModuleNode,
+    config: &ResolvedConfig,
+) -> bool {
+    owner_is_private || !is_production_module(module, config)
 }
 
 /// Return `true` when every file importing `dep` is a test/story or config file
@@ -1137,12 +1597,12 @@ pub fn find_test_only_dependencies(
 /// tooling the test globs do not cover (`scripts/`, `benchmarks/`, `.github/`,
 /// playgrounds, and anything reachable only through a config-file support
 /// entry such as a rollup config chain) is not part of the shipped artifact,
-/// so a devDependency imported only there must not be promoted.
+/// so a devDependency imported only there must not be promoted. The rule lives
+/// in [`is_production_module`].
 fn dependency_has_prod_value_import(
     dep: &str,
     graph: &ModuleGraph,
     config: &ResolvedConfig,
-    test_globs: &globset::GlobSet,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> bool {
     let Some(file_ids) = graph.package_usage.get(dep) else {
@@ -1170,18 +1630,10 @@ fn dependency_has_prod_value_import(
             return false;
         }
         graph.modules.get(id.0 as usize).is_some_and(|module| {
-            if !module.is_runtime_reachable() {
-                return false;
-            }
-            let relative = module
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&module.path);
-            !(test_globs.is_match(relative)
-                || is_config_file(&module.path)
-                || workspaces
+            is_production_module(module, config)
+                && !workspaces
                     .iter()
-                    .any(|ws| module.path.starts_with(&ws.root)))
+                    .any(|ws| module.path.starts_with(&ws.root))
         })
     })
 }
@@ -1214,9 +1666,9 @@ pub fn find_dev_dependencies_in_production(
     workspaces: &[fallow_config::WorkspaceInfo],
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> Vec<DevDependencyInProduction> {
-    let Some(test_globs) = production_exclude_globset() else {
+    if production_exclude_globset().is_none() {
         return Vec::new();
-    };
+    }
 
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
@@ -1232,12 +1684,7 @@ pub fn find_dev_dependencies_in_production(
         .iter()
         .chain(optional_names.iter())
         .map(String::as_str)
-        .chain(
-            pkg.peer_dependencies
-                .as_ref()
-                .into_iter()
-                .flat_map(|deps| deps.keys().map(String::as_str)),
-        )
+        .chain(own_peer_dependency_names(pkg))
         .collect();
 
     let plugin_tooling = plugin_tooling_set(plugin_result);
@@ -1267,7 +1714,7 @@ pub fn find_dev_dependencies_in_production(
             continue;
         }
 
-        if dependency_has_prod_value_import(&dep, graph, config, test_globs, workspaces) {
+        if dependency_has_prod_value_import(&dep, graph, config, workspaces) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -1295,16 +1742,6 @@ fn types_package_name(package_name: &str) -> String {
         || format!("@types/{package_name}"),
         |scoped| format!("@types/{}", scoped.replacen('/', "__", 1)),
     )
-}
-
-fn owning_workspace_deps_for_file_id<'a>(
-    file_id: FileId,
-    ws_dep_map: &'a [(PathBuf, FxHashSet<String>)],
-    ownership: &WorkspaceOwnershipIndex,
-) -> Option<&'a FxHashSet<String>> {
-    ownership
-        .workspace_index_for_file(file_id)
-        .and_then(|index| ws_dep_map.get(index).map(|(_, deps)| deps))
 }
 
 fn relative_module_path(module_path: &Path, root: &Path) -> String {
@@ -1430,10 +1867,20 @@ fn package_imports_are_all_npm_scheme(
     saw_package
 }
 
+/// The names one workspace manifest makes resolvable for its own files.
+struct WorkspaceDependencies {
+    root: PathBuf,
+    /// Every declared dependency name, the workspace's own name, and for a
+    /// Deno member the ambient names of the other Deno members.
+    deps: FxHashSet<String>,
+    /// `"private": true` in the manifest.
+    is_private: bool,
+}
+
 fn workspace_dependency_map(
     workspaces: &[fallow_config::WorkspaceInfo],
     config: &ResolvedConfig,
-) -> Vec<(PathBuf, FxHashSet<String>)> {
+) -> Vec<WorkspaceDependencies> {
     let ambient_workspace_names: FxHashSet<String> = workspaces
         .iter()
         .filter(|ws| fallow_config::dir_has_deno_json(&ws.root))
@@ -1458,14 +1905,19 @@ fn workspace_dependency_map(
         if fallow_config::dir_has_deno_json(&ws.root) {
             ws_deps.extend(ambient_workspace_names.iter().cloned());
         }
-        ws_dep_map.push((ws.root.clone(), ws_deps));
+        ws_dep_map.push(WorkspaceDependencies {
+            root: ws.root.clone(),
+            deps: ws_deps,
+            is_private: ws_pkg.private == Some(true),
+        });
     }
     ws_dep_map
 }
 
-fn import_spans_by_file(
-    resolved_modules: &[ResolvedModule],
-) -> FxHashMap<FileId, Vec<(&str, &str, u32)>> {
+fn import_spans_by_file<'a>(
+    resolved_modules: &'a [ResolvedModule],
+    modules: &'a [ModuleInfo],
+) -> FxHashMap<FileId, Vec<(&'a str, &'a str, u32)>> {
     let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     for rm in resolved_modules {
         for edge in rm.all_resolved_source_edges() {
@@ -1476,6 +1928,17 @@ fn import_spans_by_file(
                     edge.span().start,
                 ));
             }
+        }
+    }
+    // A direct `require.resolve('pkg')` call names the package at a known
+    // location, so it is an unlisted-dependency site like an import. The
+    // package name stands in for the specifier.
+    for module in modules {
+        for (package_name, span_start) in &module.package_resolve_sites {
+            import_spans_by_file
+                .entry(module.file_id)
+                .or_default()
+                .push((package_name.as_str(), package_name.as_str(), *span_start));
         }
     }
     import_spans_by_file
@@ -1489,6 +1952,7 @@ pub struct UnlistedDependencyInput<'a> {
     pub workspaces: &'a [fallow_config::WorkspaceInfo],
     pub plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     pub resolved_modules: &'a [ResolvedModule],
+    pub modules: &'a [ModuleInfo],
     pub line_offsets_by_file: &'a LineOffsetsMap<'a>,
 }
 
@@ -1498,7 +1962,7 @@ pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<Unl
     let workspace_roots: Vec<&Path> = parts
         .ws_dep_map
         .iter()
-        .map(|(root, _)| root.as_path())
+        .map(|ws| ws.root.as_path())
         .collect();
     let workspace_ownership = WorkspaceOwnershipIndex::new(input.graph, &workspace_roots);
     let ctx = UnlistedDependencyContext {
@@ -1522,7 +1986,7 @@ pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<Unl
 
 struct UnlistedDependencyContextParts<'a> {
     all_deps: FxHashSet<String>,
-    ws_dep_map: Vec<(PathBuf, FxHashSet<String>)>,
+    ws_dep_map: Vec<WorkspaceDependencies>,
     virtual_prefixes: Vec<&'a str>,
     virtual_suffixes: Vec<&'a str>,
     plugin_tooling: FxHashSet<&'a str>,
@@ -1602,7 +2066,7 @@ fn build_unlisted_dependency_context_parts<'a>(
     let ws_dep_map = workspace_dependency_map(input.workspaces, input.config);
 
     let plugin_parts = build_unlisted_dependency_plugin_parts(input.plugin_result);
-    let import_spans_by_file = import_spans_by_file(input.resolved_modules);
+    let import_spans_by_file = import_spans_by_file(input.resolved_modules, input.modules);
 
     let ignore_deps = &input.config.ignore_dependencies;
 
@@ -1648,7 +2112,7 @@ struct UnlistedDependencyContext<'a> {
     graph: &'a ModuleGraph,
     config: &'a ResolvedConfig,
     all_deps: &'a FxHashSet<String>,
-    ws_dep_map: &'a [(std::path::PathBuf, FxHashSet<String>)],
+    ws_dep_map: &'a [WorkspaceDependencies],
     virtual_prefixes: &'a [&'a str],
     virtual_suffixes: &'a [&'a str],
     plugin_tooling: &'a FxHashSet<&'a str>,
@@ -1701,9 +2165,7 @@ fn collect_unlisted_import_site(
     if package_imports_are_all_npm_scheme(ctx.import_spans_by_file, id, package_name) {
         return None;
     }
-    let deps = owning_workspace_deps_for_file_id(id, ctx.ws_dep_map, ctx.workspace_ownership)
-        .unwrap_or(ctx.all_deps);
-    if deps.contains(package_name) || deps.contains(&types_package_name(package_name)) {
+    if import_is_declared(package_name, id, module, ctx) {
         return None;
     }
     let relative_path = relative_module_path(&module.path, &ctx.config.root);
@@ -1720,6 +2182,64 @@ fn collect_unlisted_import_site(
         line,
         col,
     })
+}
+
+/// Return `true` when a manifest that the importing file may use declares
+/// `package_name` or its `@types` package.
+///
+/// A file outside every workspace uses the root manifest. A workspace file
+/// uses its own manifest first. When that manifest does not declare the
+/// package, the walk goes up through the ancestor workspaces to the root
+/// manifest, but only when [`accepts_ancestor_declaration`] allows it. Sibling
+/// workspaces are never consulted.
+fn import_is_declared(
+    package_name: &str,
+    id: FileId,
+    module: &crate::graph::ModuleNode,
+    ctx: &UnlistedDependencyContext<'_>,
+) -> bool {
+    manifest_chain_declares(
+        package_name,
+        id,
+        ctx.ws_dep_map,
+        ctx.workspace_ownership,
+        ctx.all_deps,
+        |owner_is_private| accepts_ancestor_declaration(owner_is_private, module, ctx.config),
+    )
+}
+
+/// The manifest walk behind [`import_is_declared`]. `accepts_ancestor`
+/// receives whether the owning workspace is private and decides whether the
+/// walk may continue past the owning workspace's own manifest.
+fn manifest_chain_declares(
+    package_name: &str,
+    id: FileId,
+    ws_dep_map: &[WorkspaceDependencies],
+    ownership: &WorkspaceOwnershipIndex,
+    root_deps: &FxHashSet<String>,
+    accepts_ancestor: impl FnOnce(bool) -> bool,
+) -> bool {
+    let types_name = types_package_name(package_name);
+    let declares =
+        |deps: &FxHashSet<String>| deps.contains(package_name) || deps.contains(&types_name);
+    let Some((index, owner)) = ownership
+        .workspace_index_for_file(id)
+        .and_then(|index| ws_dep_map.get(index).map(|owner| (index, owner)))
+    else {
+        return declares(root_deps);
+    };
+    if declares(&owner.deps) {
+        return true;
+    }
+    if !accepts_ancestor(owner.is_private) {
+        return false;
+    }
+    ownership
+        .ancestors_of(index)
+        .iter()
+        .filter_map(|ancestor| ws_dep_map.get(*ancestor))
+        .any(|ancestor| declares(&ancestor.deps))
+        || declares(root_deps)
 }
 
 /// Plumbing for the per-spec skip checks in `find_unresolved_imports`.
@@ -1857,6 +2377,7 @@ pub fn find_unresolved_imports(
         generated_patterns,
         generated_type_prefixes,
     };
+    let mut gitignored = GitignoredTargets::new(&config.root);
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
@@ -1875,6 +2396,17 @@ pub fn find_unresolved_imports(
                 continue;
             }
             if unresolved_spec_is_silenced(spec, edge.is_type_only(), &filters) {
+                continue;
+            }
+            if gitignored.ignores_missing_target(&module.path, spec) {
+                continue;
+            }
+            if module
+                .missing_export_targets
+                .iter()
+                .find(|target| target.specifier == *spec)
+                .is_some_and(|target| gitignored.ignores_missing_paths(&target.paths))
+            {
                 continue;
             }
             let (line, col, specifier_col) =

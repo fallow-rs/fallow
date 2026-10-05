@@ -36,12 +36,13 @@ use super::helpers::{
     extract_super_class_type_args, extract_type_annotation_name, extract_type_reference_name,
     has_angular_class_decorator, has_angular_plural_query_decorator,
     infer_array_binding_element_type, is_meta_url_arg, lit_custom_element_decorator,
-    lit_custom_element_tag, regex_pattern_to_suffix, return_type_element_name,
-    ts_import_type_qualifier_root,
+    lit_custom_element_tag, map_value_type_from_new, map_value_type_from_type,
+    regex_pattern_to_suffix, return_type_element_name, ts_import_type_qualifier_root,
 };
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
     SideEffectRegistrationTarget, collect_static_import_specifiers, extract_import_expression,
+    extract_promise_all_elements, ssr_load_module_call, ssr_load_module_source,
     try_extract_arrow_wrapped_import, try_extract_import_then_callback,
     try_extract_property_callback_import, try_extract_require,
 };
@@ -82,6 +83,8 @@ mod visit_security_sinks;
 mod visit_server_actions;
 #[path = "visit_impl_signature.rs"]
 mod visit_signature;
+#[path = "visit_impl_spy_calls.rs"]
+mod visit_spy_calls;
 #[path = "visit_impl_structural.rs"]
 mod visit_structural;
 #[path = "visit_impl_svelte_events.rs"]
@@ -103,6 +106,7 @@ use visit_package_resolution::*;
 use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
+pub(super) use visit_spy_calls::SpyApi;
 
 /// Array iteration methods whose callback's FIRST parameter is an element of the
 /// receiver array (so it can be typed to the receiver's element class). `reduce`
@@ -170,6 +174,14 @@ impl ModuleInfoExtractor {
         // factories are excluded from the STRICT (cross-module) map; the same-file
         // (loose) maps below are unaffected. See #1441 (Part A).
         let strict_eligible = !input.is_async && !input.is_generator;
+        // An `async` factory hands back a promise of the class. It is exported
+        // through its own strict map and binds only an awaited call result.
+        let returns_promise = input.is_async && !input.is_generator;
+        if returns_promise {
+            self.promise_factory_functions.insert(name.to_string());
+        } else if input.is_generator {
+            self.generator_factory_functions.insert(name.to_string());
+        }
         if let Some(class_name) = function_body_returns_new_class(body) {
             // An all-paths-unanimous, non-falling-through proof additionally
             // qualifies this factory for cross-module export (see
@@ -179,6 +191,11 @@ impl ModuleInfoExtractor {
                 && let Some(unanimous_class) = function_body_returns_new_class_unanimous(body)
             {
                 self.strict_factory_return_functions
+                    .insert(name.to_string(), unanimous_class);
+            } else if returns_promise
+                && let Some(unanimous_class) = function_body_returns_new_class_unanimous(body)
+            {
+                self.strict_async_factory_return_functions
                     .insert(name.to_string(), unanimous_class);
             }
             self.factory_return_functions
@@ -223,6 +240,16 @@ impl ModuleInfoExtractor {
                 .insert(name.to_string(), class_name.clone());
             self.factory_return_functions
                 .insert(name.to_string(), class_name);
+        } else if returns_promise
+            && let Some(return_type) = input.return_type
+            && let Some(class_name) = return_type_element_name(&return_type.type_annotation)
+        {
+            // `async function load(): Promise<Gauge>`: the same compiler-checked
+            // contract as the sync arm above, for the awaited value.
+            self.strict_async_factory_return_functions
+                .insert(name.to_string(), class_name.clone());
+            self.factory_return_functions
+                .insert(name.to_string(), class_name);
         }
 
         // Object-literal return (`return { orders: factory.ordersPage }`): capture
@@ -242,8 +269,8 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Capture `const local = callee(...)` (bare-identifier callee) as a factory
-    /// return candidate. `resolve_factory_return_candidates` keeps only those
+    /// Capture `const local = callee(...)` or `const local = await callee(...)`
+    /// (bare-identifier callee) as a factory return candidate. `resolve_factory_return_candidates` keeps only those
     /// whose callee is a known same-file `new Class()` factory or an imported
     /// callee (cross-module). See issue #1441.
     ///
@@ -255,7 +282,11 @@ impl ModuleInfoExtractor {
         declarator: &VariableDeclarator<'_>,
         init: &Expression<'_>,
     ) {
-        let Some(callee_name) = Self::bare_call_callee_name(init) else {
+        let (call, awaited) = match init {
+            Expression::AwaitExpression(await_expr) => (&await_expr.argument, true),
+            _ => (init, false),
+        };
+        let Some(callee_name) = Self::bare_call_callee_name(self.class_carrying_init(call)) else {
             return;
         };
 
@@ -271,13 +302,14 @@ impl ModuleInfoExtractor {
                     .push(super::FactoryReturnCandidate {
                         local_name: id.name.to_string(),
                         callee_name,
+                        awaited,
                     });
             }
             // `const { a, b } = useApi()`. The instance is never named, so queue one
             // direct factory-result access per statically named key. Dropping this
             // shape is what reported every member of a destructured factory result
             // as unused.
-            BindingPattern::ObjectPattern(pattern) => {
+            BindingPattern::ObjectPattern(pattern) if !awaited => {
                 let Some(keys) = super::destructured_factory_keys(pattern) else {
                     // A rest element or computed key can read any property.
                     self.factory_whole_object_candidates.push(callee_name);
@@ -535,6 +567,10 @@ impl ModuleInfoExtractor {
                     .find_map(|scope| scope.get(receiver_name))
             })
             .cloned()
+            .or_else(|| {
+                let map_name = receiver_name.strip_suffix(".values()")?;
+                self.map_value_type_for(map_name)
+            })
     }
 
     fn record_array_binding_element_type(&mut self, binding: String, element: String) {
@@ -542,6 +578,69 @@ impl ModuleInfoExtractor {
             self.array_binding_element_types.insert(binding, element);
         } else if let Some(scope) = self.scoped_array_binding_element_types.last_mut() {
             scope.insert(binding, element);
+        }
+    }
+
+    fn record_map_binding_value_type(&mut self, binding: String, value: String) {
+        if self.is_module_scope() {
+            self.map_binding_value_types.insert(binding, value);
+        } else if let Some(scope) = self.scoped_map_binding_value_types.last_mut() {
+            scope.insert(binding, value);
+        }
+    }
+
+    /// The value class of a map-typed receiver name (already `this`-qualified).
+    fn map_value_type_for(&self, receiver_name: &str) -> Option<String> {
+        self.scoped_map_binding_value_types
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(receiver_name))
+            .or_else(|| self.map_binding_value_types.get(receiver_name))
+            .cloned()
+    }
+
+    /// The value class `V` of a `map.get(key)` expression when `map` is a
+    /// binding typed `Map<K, V>`. Looks through `( )`, `!` and `?.` so
+    /// `map.get(key)?.m()` and `map.get(key)!.m()` both resolve.
+    fn map_get_value_type(&self, expr: &Expression<'_>) -> Option<String> {
+        let call = match expr {
+            Expression::ParenthesizedExpression(paren) => {
+                return self.map_get_value_type(&paren.expression);
+            }
+            Expression::TSNonNullExpression(non_null) => {
+                return self.map_get_value_type(&non_null.expression);
+            }
+            Expression::CallExpression(call) => call.as_ref(),
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::CallExpression(call) => call.as_ref(),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let Expression::StaticMemberExpression(callee) = &call.callee else {
+            return None;
+        };
+        if callee.property.name != "get" || call.arguments.len() != 1 {
+            return None;
+        }
+        let receiver_name = static_member_object_name(&callee.object)?;
+        self.map_value_type_for(&self.qualify_this_scope(&receiver_name))
+    }
+
+    /// Record the value class of a binding typed `Map<K, V>` or initialized
+    /// with `new Map<K, V>()`. The annotation wins over the initializer.
+    fn record_map_binding_from_declaration(
+        &mut self,
+        binding: String,
+        type_annotation: Option<&TSTypeAnnotation<'_>>,
+        init: Option<&Expression<'_>>,
+    ) {
+        let value = match type_annotation {
+            Some(annotation) => map_value_type_from_type(&annotation.type_annotation),
+            None => init.and_then(map_value_type_from_new),
+        };
+        if let Some(value) = value.and_then(|value| self.resolve_class_type_param(&value)) {
+            self.record_map_binding_value_type(binding, value);
         }
     }
 
@@ -1319,8 +1418,10 @@ impl ModuleInfoExtractor {
     fn record_variable_declarator_metadata(&mut self, declarator: &VariableDeclarator<'_>) {
         if self.is_module_scope() {
             let refs = Self::collect_variable_signature_refs(declarator);
+            let satisfies_refs = Self::collect_variable_satisfies_refs(declarator);
             for id in declarator.id.get_binding_identifiers() {
                 self.record_local_signature_refs(&id.name, refs.clone());
+                self.record_local_satisfies_refs(&id.name, satisfies_refs.clone());
             }
         }
 
@@ -1654,6 +1755,26 @@ impl<'a> ModuleInfoExtractor {
         self.local_function_return_types.get(&callee_name).cloned()
     }
 
+    /// Record an import declaration that binds no name as a side-effect import
+    /// of `source`.
+    fn push_side_effect_import(
+        &mut self,
+        decl: &ImportDeclaration<'_>,
+        source: String,
+        is_type_only: bool,
+    ) {
+        self.imports.push(ImportInfo {
+            source,
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only,
+            is_type_only_star: false,
+            from_style: false,
+            span: decl.span,
+            source_span: decl.source.span,
+        });
+    }
+
     /// Record a named import specifier (`import { fork } from ...`), tracking the
     /// `child_process.fork` and `node:url` `fileURLToPath` provenance bindings.
     fn handle_import_specifier(
@@ -1841,6 +1962,8 @@ impl<'a> ModuleInfoExtractor {
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
+            self.scoped_map_binding_value_types
+                .push(FxHashMap::default());
             self.preseed_nested_declarations(statements);
         }
         self.preseed_direct_object_binding_targets(statements);
@@ -1860,6 +1983,7 @@ impl<'a> ModuleInfoExtractor {
         }
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types.pop();
+            self.scoped_map_binding_value_types.pop();
         }
     }
 
@@ -2001,6 +2125,11 @@ impl<'a> ModuleInfoExtractor {
             }
         }
 
+        // `a ?? new A()`, `f ? new A() : null` and similar inits hold the
+        // class instance in one operand. Bind through that operand.
+        let original_init = init;
+        let init = self.class_carrying_init(init);
+
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Some(source) = static_member_object_name(unwrap_static_expr(init))
         {
@@ -2010,18 +2139,36 @@ impl<'a> ModuleInfoExtractor {
             }
         }
 
+        // `const { service } = input` is the destructure form of
+        // `const service = input.service`. Resolve each destructured path the
+        // same way, so a typed source path (for example a parameter typed by
+        // an inline type literal) binds the local to its class.
+        if let BindingPattern::ObjectPattern(pattern) = &declarator.id
+            && let Some(source) = static_member_object_name(unwrap_static_expr(init))
+        {
+            let source = self.qualify_this_scope(&source);
+            for (local, path) in extract_object_pattern_bindings(pattern) {
+                if let Some(BindingTarget::Class(type_name)) =
+                    self.resolve_bound_object_name(&format!("{source}.{path}"))
+                {
+                    self.insert_class_binding_target(local, type_name);
+                }
+            }
+        }
+
+        // `f ? (value as T) : null` binds `T`. A plain `value as T` init
+        // stays out: only an unwrapped nullable operand reads the assertion.
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
-            && let Some(type_name) = self.nullable_asserted_type_name(init)
+            && !std::ptr::eq(init, original_init)
+            && let Some(type_name) = self.asserted_receiver_type_name(init)
         {
             self.insert_class_binding_target(id.name.to_string(), type_name);
         }
 
-        if let Expression::NewExpression(new_expr) = init
-            && let Expression::Identifier(callee) = &new_expr.callee
-            && let BindingPattern::BindingIdentifier(id) = &declarator.id
-            && !super::helpers::is_builtin_constructor(callee.name.as_str())
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(class_name) = constructed_class_name(init)
         {
-            self.insert_class_binding_target(id.name.to_string(), callee.name.to_string());
+            self.insert_class_binding_target(id.name.to_string(), class_name.to_string());
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -2080,23 +2227,55 @@ impl<'a> ModuleInfoExtractor {
         extract_type_reference_name(type_annotation)
     }
 
-    fn nullable_asserted_type_name(&self, expr: &Expression<'_>) -> Option<String> {
-        let Expression::ConditionalExpression(conditional) = unwrap_static_expr(expr) else {
-            return None;
-        };
-        if matches!(
-            unwrap_static_expr(&conditional.alternate),
-            Expression::NullLiteral(_)
-        ) {
-            return self.asserted_receiver_type_name(&conditional.consequent);
+    /// The operand of a declarator init that holds the class instance.
+    ///
+    /// - `f ? X : null` (or `undefined`, or `void 0`) gives `X`.
+    /// - `a ?? new A()` and `a || new A()` give `new A()` when `a` has no
+    ///   bound class, or when `a` is bound to the same class `A`.
+    /// - `a ?? fallback` gives `a` when `a` has a bound class and the
+    ///   fallback constructs no class.
+    ///
+    /// Any other init, and a fallback whose two operands give two different
+    /// classes, comes back unchanged. The binding arms then match nothing.
+    fn class_carrying_init<'e, 'b>(&self, init: &'b Expression<'e>) -> &'b Expression<'e> {
+        match unwrap_static_expr(init) {
+            Expression::ConditionalExpression(conditional) => {
+                if is_nullish_value(&conditional.alternate) {
+                    self.class_carrying_init(&conditional.consequent)
+                } else if is_nullish_value(&conditional.consequent) {
+                    self.class_carrying_init(&conditional.alternate)
+                } else {
+                    init
+                }
+            }
+            Expression::LogicalExpression(logical)
+                if matches!(
+                    logical.operator,
+                    LogicalOperator::Coalesce | LogicalOperator::Or
+                ) =>
+            {
+                let right = unwrap_static_expr(&logical.right);
+                let right_class = constructed_class_name(right);
+                let left_class = self.bound_class_name(&logical.left);
+                match (left_class, right_class) {
+                    (Some(left), Some(right_name)) if left == right_name => right,
+                    (None, Some(_)) => right,
+                    (Some(_), None) => &logical.left,
+                    _ => init,
+                }
+            }
+            _ => init,
         }
-        if matches!(
-            unwrap_static_expr(&conditional.consequent),
-            Expression::NullLiteral(_)
-        ) {
-            return self.asserted_receiver_type_name(&conditional.alternate);
+    }
+
+    /// The class bound to an identifier or static member receiver, if any.
+    fn bound_class_name(&self, expr: &Expression<'_>) -> Option<String> {
+        let source = static_member_object_name(unwrap_static_expr(expr))?;
+        let source = self.qualify_this_scope(&source);
+        match self.resolve_bound_object_name(&source) {
+            Some(BindingTarget::Class(class_name)) => Some(class_name),
+            _ => None,
         }
-        None
     }
 
     fn record_route_loader_data_declarator(
@@ -2227,6 +2406,16 @@ impl<'a> ModuleInfoExtractor {
                 id.name.as_str(),
                 declarator.type_annotation.as_deref(),
             );
+            self.record_map_binding_from_declaration(
+                id.name.to_string(),
+                declarator.type_annotation.as_deref(),
+                Some(init),
+            );
+            if declarator.type_annotation.is_none()
+                && let Some(value) = self.map_get_value_type(init)
+            {
+                self.insert_class_binding_target(id.name.to_string(), value);
+            }
         }
 
         // FP-1 (unused-load-data-key): `const X = data` passes the whole
@@ -2297,6 +2486,33 @@ impl<'a> ModuleInfoExtractor {
             return;
         }
 
+        self.record_dynamic_import_declarator(declarator, init);
+    }
+
+    /// Record the dynamic-import edges of a declarator init: a
+    /// `Promise.all([import(...)])` array destructure, a call of a local
+    /// loader function, or a direct `import(...)`.
+    fn record_dynamic_import_declarator(
+        &mut self,
+        declarator: &VariableDeclarator<'a>,
+        init: &Expression<'a>,
+    ) {
+        if let BindingPattern::ArrayPattern(pattern) = &declarator.id
+            && let Some(elements) = extract_promise_all_elements(init)
+        {
+            self.handle_promise_all_dynamic_imports(pattern, elements);
+            return;
+        }
+
+        if self.record_loader_call_declaration(declarator, init) {
+            return;
+        }
+
+        if let Some((span, source)) = ssr_load_module_call(init) {
+            self.handle_dynamic_import_declaration(&declarator.id, span, &[source]);
+            return;
+        }
+
         let Some(import_expr) = extract_import_expression(init) else {
             return;
         };
@@ -2305,7 +2521,7 @@ impl<'a> ModuleInfoExtractor {
         if sources.is_empty() {
             return;
         }
-        self.handle_dynamic_import_declaration(declarator, import_expr, &sources);
+        self.handle_dynamic_import_declaration(&declarator.id, import_expr.span, &sources);
     }
 
     /// Record a CommonJS named export (`module.exports.X = ...` /
@@ -2783,13 +2999,20 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 .push(directive.directive.as_str().to_string());
         }
         self.is_server_action_module = visit_server_actions::is_server_action_module(program);
+        self.is_module_file = program_has_module_syntax(program);
+        self.has_global_declarations =
+            program_has_global_declarations(program, self.is_module_file);
+        self.triple_slash_reference_paths = triple_slash_reference_paths(program);
         self.record_program_namespace_import_locals(program);
+        self.record_program_spy_api_locals(program);
         self.record_program_function_type_aliases(program);
         self.record_program_prologue(program);
         self.record_program_sanitizer_functions(program);
         self.record_local_function_return_types(program);
         self.preseed_direct_object_binding_targets(&program.body);
+        self.record_program_local_import_loaders(program);
         walk::walk_program(self, program);
+        self.finish_local_import_loaders();
     }
 
     fn visit_formal_parameter(&mut self, param: &FormalParameter<'a>) {
@@ -2846,6 +3069,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 }
             }
 
+            self.record_map_binding_from_declaration(
+                this_key.clone(),
+                prop.type_annotation.as_deref(),
+                prop.value.as_ref(),
+            );
+
             if let Some(Expression::NewExpression(new_expr)) = &prop.value
                 && let Expression::Identifier(callee) = &new_expr.callee
                 && !super::helpers::is_builtin_constructor(callee.name.as_str())
@@ -2895,6 +3124,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 .push(FxHashSet::default());
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
+            self.scoped_map_binding_value_types
+                .push(FxHashMap::default());
             self.sanitizer_binding_stack.push(FxHashMap::default());
             self.literal_allowlist_binding_stack
                 .push(FxHashMap::default());
@@ -2917,6 +3148,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.nested_declaration_stack.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
+            self.scoped_map_binding_value_types.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
             self.risky_regex_binding_stack.pop();
@@ -3089,36 +3321,39 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         let source_span = decl.source.span;
 
-        if let Some(specifiers) = &decl.specifiers {
-            for spec in specifiers {
-                match spec {
-                    ImportDeclarationSpecifier::ImportSpecifier(s) => {
-                        self.handle_import_specifier(s, &source, is_type_only, source_span);
-                    }
-                    ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
-                        self.handle_import_default_specifier(s, &source, is_type_only, source_span);
-                    }
-                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
-                        self.handle_import_namespace_specifier(
-                            s,
-                            &source,
-                            is_type_only,
-                            source_span,
-                        );
+        match &decl.specifiers {
+            // `import {} from 'x'` and `import type {} from 'x'` bind nothing
+            // but still name the module, so record them as side-effect
+            // imports. The type-only form keeps its type-only flag.
+            Some(specifiers) if specifiers.is_empty() => {
+                self.push_side_effect_import(decl, source, is_type_only);
+            }
+            Some(specifiers) => {
+                for spec in specifiers {
+                    match spec {
+                        ImportDeclarationSpecifier::ImportSpecifier(s) => {
+                            self.handle_import_specifier(s, &source, is_type_only, source_span);
+                        }
+                        ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
+                            self.handle_import_default_specifier(
+                                s,
+                                &source,
+                                is_type_only,
+                                source_span,
+                            );
+                        }
+                        ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
+                            self.handle_import_namespace_specifier(
+                                s,
+                                &source,
+                                is_type_only,
+                                source_span,
+                            );
+                        }
                     }
                 }
             }
-        } else {
-            self.imports.push(ImportInfo {
-                source,
-                imported_name: ImportedName::SideEffect,
-                local_name: String::new(),
-                is_type_only: false,
-                is_type_only_star: false,
-                from_style: false,
-                span: decl.span,
-                source_span,
-            });
+            None => self.push_side_effect_import(decl, source, false),
         }
     }
 
@@ -3335,6 +3570,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // `declare module 'pkg'`) marks a module augmentation or ambient
         // module declaration. Track the depth so export visitors skip
         // file-level recording inside the body (issue #2349).
+        self.record_module_augmentation(decl);
         self.ambient_module_depth += 1;
         let body_statements = decl.body.as_ref().map(|block| &block.body);
         self.with_module_body_binding_scope(body_statements, None, |visitor| {
@@ -3551,6 +3787,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.record_string_coercion_to_string(arg_expr);
         }
         self.clear_literal_allowlist_on_mutating_member_call(expr);
+        self.record_filesystem_path_new_url_arguments(expr);
         self.record_og_image_template_call(expr);
         self.record_framework_callback_param_sources(expr);
         self.react_record_hook_call(expr);
@@ -3601,10 +3838,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.try_record_relative_require_resolve(expr);
         self.record_bare_require_call(expr);
         self.record_whole_object_call_use(expr);
+        self.record_namespace_spy_call(expr);
         self.record_import_meta_glob_patterns(expr);
         self.record_require_context_pattern(expr);
         self.record_import_callback_dynamic_imports(expr);
         self.record_arrow_wrapped_dynamic_import(expr);
+        self.record_ssr_load_module(expr);
 
         self.try_record_fluent_chain_access(expr);
         self.record_pinia_map_helpers(expr);
@@ -3681,7 +3920,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
     }
 
+    fn visit_string_literal(&mut self, lit: &StringLiteral<'a>) {
+        self.record_bin_path_references(lit.value.as_str());
+        walk::walk_string_literal(self, lit);
+    }
+
     fn visit_template_literal(&mut self, tpl: &TemplateLiteral<'a>) {
+        for quasi in &tpl.quasis {
+            self.record_bin_path_references(quasi.value.raw.as_str());
+        }
         let suppress = self.in_tagged_template_quasi;
         self.in_tagged_template_quasi = false;
         if !suppress {
@@ -3708,16 +3955,19 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_queue_worker_constructor_param_sources(expr);
 
         if let Some(source) = new_url_import_source(expr) {
-            // A `new URL(specifier, import.meta.url)` whose specifier has no file
-            // extension may refer to a directory rather than a module (e.g.
-            // `new URL("./services", import.meta.url)` to obtain the directory URL
-            // via `fileURLToPath(...)`). Such a specifier cannot be resolved to a
-            // module, so marking it speculative causes the resolver to silently drop
-            // it when the target is unresolvable. Specifiers with an extension
-            // (e.g. `./worker.js`) keep `is_speculative = false` so genuinely
-            // missing files are still reported as `unresolved-import`.
-            // See issue #840.
-            let is_speculative = PathBuf::from(&source).extension().is_none();
+            // A speculative reference credits its target when it resolves, and
+            // the resolver drops it silently when it does not. Two rules make a
+            // `new URL(specifier, import.meta.url)` speculative:
+            // - The specifier has no file extension, so it may name a directory
+            //   (`new URL("./services", import.meta.url)`). See issue #840.
+            // - The expression is a direct argument of a filesystem call or of
+            //   `fileURLToPath`, so it names a file on disk. The file can be an
+            //   output that does not exist yet, or a probe for an optional file.
+            // Other specifiers with an extension (`new Worker(new URL("./worker.js",
+            // import.meta.url))`) keep `is_speculative = false`, so a missing file
+            // is still reported as `unresolved-import`.
+            let is_speculative = PathBuf::from(&source).extension().is_none()
+                || self.filesystem_path_new_url_spans.contains(&expr.span);
             self.dynamic_imports.push(DynamicImportInfo {
                 source,
                 span: expr.span,
@@ -3831,6 +4081,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.handle_this_member_assignment(format!("#{}", member.field.name).as_str(), expr);
         }
         self.capture_member_assign_sink(expr);
+        // `tool = await import("./tool")`: mark the import span handled before
+        // the walk so `visit_import_expression` does not record it again.
+        if matches!(expr.operator, AssignmentOperator::Assign)
+            && let AssignmentTarget::AssignmentTargetIdentifier(ident) = &expr.left
+        {
+            self.handle_dynamic_import_assignment(ident, &expr.right);
+        }
         walk::walk_assignment_expression(self, expr);
 
         let is_plain_assignment = matches!(expr.operator, AssignmentOperator::Assign);
@@ -3898,6 +4155,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        self.record_awaited_dynamic_import_member(&expr.object, expr.property.name.as_str());
         if is_import_meta_env_object(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: "import.meta.env".to_string(),
@@ -3905,6 +4163,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             });
         }
         if let Some(type_name) = self.asserted_receiver_type_name(&expr.object) {
+            self.member_accesses.push(MemberAccess {
+                object: type_name,
+                member: expr.property.name.to_string(),
+            });
+        }
+        if let Some(type_name) = self.map_get_value_type(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: type_name,
                 member: expr.property.name.to_string(),
@@ -3956,6 +4220,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        if let Some(member) = expr.static_property_name() {
+            self.record_awaited_dynamic_import_member(&expr.object, member.as_str());
+        }
         if let Expression::StaticMemberExpression(key) = &expr.expression
             && let Expression::Identifier(key_object) = &key.object
         {
@@ -4256,6 +4523,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
         self.record_bare_namespace_reference(ident);
+        self.count_local_import_loader_reference(ident.name.as_str());
         walk::walk_identifier_reference(self, ident);
     }
 }
@@ -4419,6 +4687,29 @@ fn is_string_literal_array(array: &ArrayExpression<'_>) -> bool {
         .elements
         .iter()
         .all(|element| matches!(element, ArrayExpressionElement::StringLiteral(_)))
+}
+
+/// `null`, `undefined` or `void <expr>`: a value that holds no instance.
+fn is_nullish_value(expr: &Expression<'_>) -> bool {
+    match unwrap_static_expr(expr) {
+        Expression::NullLiteral(_) => true,
+        Expression::Identifier(id) => id.name == "undefined",
+        Expression::UnaryExpression(unary) => unary.operator == UnaryOperator::Void,
+        _ => false,
+    }
+}
+
+/// The class name of a `new X()` expression, when `X` is a plain identifier
+/// and not a builtin constructor.
+fn constructed_class_name<'e>(expr: &Expression<'e>) -> Option<&'e str> {
+    let Expression::NewExpression(new_expr) = expr else {
+        return None;
+    };
+    let Expression::Identifier(callee) = &new_expr.callee else {
+        return None;
+    };
+    let name = callee.name.as_str();
+    (!super::helpers::is_builtin_constructor(name)).then_some(name)
 }
 
 fn unwrap_static_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {

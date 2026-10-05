@@ -1,0 +1,10 @@
+{
+  "name": "astro-starlight-config",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@astrojs/starlight": "*",
+    "@fontsource/inter": "*",
+    "astro": "*"
+  }
+}

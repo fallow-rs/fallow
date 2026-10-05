@@ -24314,15 +24314,22 @@
         },
         "used_in_scripts": {
           "type": "boolean",
-          "description": "Whether the dependency is invoked from package.json scripts or CI configs."
+          "description": "Whether the dependency is invoked from package.json scripts, CI configs\nor git hooks."
         },
         "is_used": {
           "type": "boolean",
-          "description": "Whether the dependency is used at all."
+          "description": "Whether the dependency is used at all: imported, invoked from scripts,\nor listed as a peer by a used package (`peer_of`)."
         },
         "import_count": {
           "type": "integer",
           "description": "Total import count."
+        },
+        "peer_of": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Used packages that list this dependency in their installed\n`peerDependencies`, required or optional, sorted by name. The\nunused-dependency check credits such a peer, because the package that\nlists it loads it at runtime. Absent when no used package lists it."
         },
         "sources": {
           "type": "array",
@@ -24330,6 +24337,17 @@
             "$ref": "#/definitions/TraceSource"
           },
           "description": "The configs that declare this name as a Module Federation remote alias\nunder `remotes`, one per config. A remote alias is provided by a\nremote container at runtime, not by an npm package. Absent when no\nFederation config declares the name (issue #2796)."
+        },
+        "tooling_credit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolingCredit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the unused devDependency check credits the dependency as tooling\nwhen no file imports it and no script, CI workflow or git hook runs it.\nWhen present, `is_used` is `true`. Absent otherwise."
         }
       },
       "required": [
@@ -29511,6 +29529,40 @@
         }
       ],
       "description": "One health section that a run produced.\n\nA section is in [`HealthReport::sections`] when the run computed it and\nthe report carries its result, also when that result is empty. The value\nset is OPEN: a later release can add a section, so a consumer must accept\na token that it does not know."
+    },
+    "ToolingCredit": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, `types-config` when a config\nfile, such as a tsconfig `types` entry, names the type package,\n`known-tooling` for a library from the tooling catalogue, and\n`known-tooling-config` when a command-line tool from the catalogue has\nits own config file. The set is open."
+        },
+        "plugin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The plugin that declares the dependency as tooling."
+        },
+        "config": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The config file found, relative to the project root, for\n`plugin-config` and `known-tooling-config`. A `package.json` path when\nthe config is a package.json key."
+        },
+        "reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The package that a script, CI workflow or git hook runs, for\n`plugin-reference`, or the package that a `@types/` package types,\nfor `types-target`."
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "description": "Why the unused devDependency check counts a dependency as used tooling\nalthough no source file imports it."
     }
   }
 }

@@ -1,10 +1,12 @@
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
+mod bundle_externalization;
 mod deprecated_exports;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 pub mod feature_flags;
+mod gitignored_targets;
 mod graph_confidence;
 mod iconify;
 mod inline_loaders;
@@ -48,6 +50,7 @@ pub(crate) mod test_support;
 pub use predicates::is_builtin_module;
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
+pub use unused_deps::peer_dependency_hosts;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -2005,6 +2008,7 @@ fn run_member_and_dependency_detectors(
                 plugin_result: input.plugin_result,
                 workspaces: input.workspaces,
                 resolved_modules: input.resolved_modules,
+                modules: input.modules,
                 line_offsets_by_file: input.line_offsets_by_file,
             })
         },
@@ -2441,8 +2445,8 @@ fn run_export_detectors(
         suppressions,
         line_offsets_by_file,
     );
+    populate_unused_type_findings(&mut results, config, graph, modules, types, &exports);
     populate_unused_export_findings(&mut results, config, exports);
-    populate_unused_type_findings(&mut results, config, graph, modules, types);
     populate_private_type_leak_findings(
         &mut results,
         graph,
@@ -2492,12 +2496,13 @@ fn populate_unused_type_findings(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     types: Vec<UnusedExport>,
+    unused_values: &[UnusedExport],
 ) {
     if config.rules.unused_types == Severity::Off {
         return;
     }
     let mut typed = types;
-    suppress_signature_backing_types(&mut typed, graph, modules);
+    suppress_signature_backing_types(&mut typed, unused_values, graph, modules);
     results.unused_types = typed
         .into_iter()
         .map(UnusedTypeFinding::with_actions)
@@ -2653,6 +2658,7 @@ struct DependencyDetectorInput<'a> {
     plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     workspaces: &'a [fallow_config::WorkspaceInfo],
     resolved_modules: &'a [ResolvedModule],
+    modules: &'a [ModuleInfo],
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
 }
 
@@ -2683,6 +2689,7 @@ fn populate_unlisted_dependency_findings(
             workspaces: input.workspaces,
             plugin_result: input.plugin_result,
             resolved_modules: input.resolved_modules,
+            modules: input.modules,
             line_offsets_by_file: input.line_offsets_by_file,
         })
         .into_iter()
@@ -3102,6 +3109,7 @@ mod tests {
                     exported_factory_returns: std::sync::Arc::default(),
                     exported_factory_return_object_shapes: std::sync::Arc::default(),
                     type_member_types: std::sync::Arc::default(),
+                    missing_export_targets: vec![],
                 })
                 .collect();
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -3189,6 +3197,7 @@ mod tests {
                 exported_factory_returns: std::sync::Arc::default(),
                 exported_factory_return_object_shapes: std::sync::Arc::default(),
                 type_member_types: std::sync::Arc::default(),
+                missing_export_targets: vec![],
             }];
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
             graph.modules[0].exports = vec![ExportSymbol {
@@ -3288,6 +3297,7 @@ mod tests {
                     exported_factory_returns: std::sync::Arc::default(),
                     exported_factory_return_object_shapes: std::sync::Arc::default(),
                     type_member_types: std::sync::Arc::default(),
+                    missing_export_targets: vec![],
                 })
                 .collect::<Vec<_>>();
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);

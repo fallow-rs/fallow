@@ -40,6 +40,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "docusaurus",
     "electron",
     "ember",
+    "eve",
     "expo",
     "expo-router",
     "gatsby",
@@ -68,6 +69,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "tanstack-router",
     "tsdown",
     "tsup",
+    "vercel",
     "vite",
     "vitepress",
     "waku",
@@ -357,6 +359,148 @@ pub fn federation_trace_provenance(
     provenance
 }
 
+/// Record why the unused devDependency check credits each plugin tooling
+/// dependency, so `--trace-dependency` explains the credit instead of calling
+/// the dependency unused.
+pub fn push_tooling_trace_credits(
+    provenance: &mut fallow_types::trace::TraceProvenance,
+    root: &Path,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    plugin_result: &AggregatedPluginResult,
+) {
+    for entry in &plugin_result.plugin_tooling {
+        let Some(evidence) = entry.evidence(&plugin_result.script_used_packages) else {
+            continue;
+        };
+        let credit = match evidence {
+            PluginToolingEvidence::OwnConfig(config) => fallow_types::trace::ToolingCredit {
+                reason: "plugin-config".to_owned(),
+                plugin: Some(entry.plugin.clone()),
+                config: Some(config.strip_prefix(root).unwrap_or(config).to_path_buf()),
+                reference: None,
+            },
+            PluginToolingEvidence::Reference(name) => fallow_types::trace::ToolingCredit {
+                reason: "plugin-reference".to_owned(),
+                plugin: Some(entry.plugin.clone()),
+                config: None,
+                reference: Some(name.to_owned()),
+            },
+        };
+        for dependency in &entry.dependencies {
+            provenance.push_tooling_credit(dependency.clone(), credit.clone());
+        }
+    }
+    push_types_trace_credits(provenance, plugin_result);
+    push_catalogue_trace_credits(provenance, root, workspaces, plugin_result);
+}
+
+/// Record why the unused devDependency check credits each catalogue entry in
+/// `devDependencies` that the trace would otherwise call unused: a library
+/// entry by name, a command-line tool by its own config file or its
+/// package.json key.
+fn push_catalogue_trace_credits(
+    provenance: &mut fallow_types::trace::TraceProvenance,
+    root: &Path,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    plugin_result: &AggregatedPluginResult,
+) {
+    let mut package_roots: Vec<&Path> = vec![root];
+    package_roots.extend(
+        workspaces
+            .iter()
+            .map(|ws| ws.root.as_path())
+            .filter(|ws_root| *ws_root != root),
+    );
+    let manifests: Vec<(PathBuf, serde_json::Value)> = package_roots
+        .iter()
+        .filter_map(|package_root| {
+            let path = package_root.join("package.json");
+            let content = std::fs::read_to_string(&path).ok()?;
+            serde_json::from_str(&content)
+                .ok()
+                .map(|value| (path, value))
+        })
+        .collect();
+    let mut names: Vec<&String> = plugin_result.dev_dependency_names.iter().collect();
+    names.sort_unstable();
+    for name in names {
+        if is_ambient_types_package(name) || types_package_target(name).is_some() {
+            continue;
+        }
+        let credit = match cli_tooling_config_patterns(name) {
+            None if is_known_tooling_dependency(name) => fallow_types::trace::ToolingCredit {
+                reason: "known-tooling".to_owned(),
+                plugin: None,
+                config: None,
+                reference: None,
+            },
+            None => continue,
+            Some(patterns) => {
+                let manifest_key = manifests
+                    .iter()
+                    .find(|(_, manifest)| manifest.get(name.as_str()).is_some())
+                    .map(|(path, _)| path.clone());
+                let Some(config) = manifest_key.or_else(|| {
+                    registry::find_config_file(patterns.iter().map(String::as_str), &package_roots)
+                }) else {
+                    continue;
+                };
+                fallow_types::trace::ToolingCredit {
+                    reason: "known-tooling-config".to_owned(),
+                    plugin: None,
+                    config: Some(config.strip_prefix(root).unwrap_or(&config).to_path_buf()),
+                    reference: None,
+                }
+            }
+        };
+        provenance.push_tooling_credit(name.clone(), credit);
+    }
+}
+
+/// Record why the unused devDependency check credits each type package in
+/// `devDependencies`: ambient globals, a declared target package, or a
+/// tsconfig `types` entry. A target that the code imports is credited by the trace
+/// itself, which reads the module graph.
+fn push_types_trace_credits(
+    provenance: &mut fallow_types::trace::TraceProvenance,
+    plugin_result: &AggregatedPluginResult,
+) {
+    let declared = plugin_result.dependency_binaries.declared_packages();
+    let mut names: Vec<&String> = plugin_result.dev_dependency_names.iter().collect();
+    names.sort_unstable();
+    for name in names {
+        let credit = if is_ambient_types_package(name) {
+            fallow_types::trace::ToolingCredit {
+                reason: "ambient-types".to_owned(),
+                plugin: None,
+                config: None,
+                reference: None,
+            }
+        } else if let Some(target) = types_package_target(name) {
+            if declared.contains(&target) {
+                fallow_types::trace::ToolingCredit {
+                    reason: "types-target".to_owned(),
+                    plugin: None,
+                    config: None,
+                    reference: Some(target),
+                }
+            } else if plugin_result.referenced_dependencies.contains(name) {
+                fallow_types::trace::ToolingCredit {
+                    reason: "types-config".to_owned(),
+                    plugin: None,
+                    config: None,
+                    reference: None,
+                }
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+        provenance.push_tooling_credit(name.clone(), credit);
+    }
+}
+
 /// Add a trace source for each remote that a literal runtime call names.
 fn push_runtime_remote_sources(
     provenance: &mut fallow_types::trace::TraceProvenance,
@@ -397,6 +541,33 @@ fn push_runtime_remote_sources(
 }
 
 impl PluginResult {
+    /// Register `entry` values that a bundler reads relative to the directory
+    /// of its config file. The project root run and the workspace run can read
+    /// the same config, so each value is anchored at the config directory. A
+    /// value with a leading `!` excludes its matches from every other value.
+    fn extend_config_dir_entry_patterns(
+        &mut self,
+        values: Vec<String>,
+        config_path: &Path,
+        root: &Path,
+    ) {
+        let (negated, positive): (Vec<String>, Vec<String>) =
+            values.into_iter().partition(|value| value.starts_with('!'));
+        let excluded: Vec<String> = negated
+            .iter()
+            .filter_map(|value| value.strip_prefix('!'))
+            .filter_map(|value| config_parser::normalize_config_path(value, config_path, root))
+            .collect();
+        self.entry_patterns.extend(
+            positive
+                .iter()
+                .filter_map(|value| config_parser::normalize_config_path(value, config_path, root))
+                .map(|pattern| {
+                    PathRule::new(pattern).with_excluded_globs(excluded.iter().cloned())
+                }),
+        );
+    }
+
     /// Register an entry pattern whose leading `../` segments are relative to
     /// the plugin root. The workspace prefix resolves them.
     fn push_parent_relative_entry_pattern(&mut self, pattern: String) {
@@ -1399,6 +1570,17 @@ pub trait Plugin: Send + Sync {
         PluginResult::default()
     }
 
+    /// Binaries whose `--config` / `-c` argument in a package script names a
+    /// config file of this plugin.
+    ///
+    /// A script such as `vitest run --config vitest.e2e.config.ts` points the
+    /// tool at a file that no `config_patterns()` entry matches. The plugin
+    /// system sends that file to `resolve_config` and credits its default
+    /// export as used.
+    fn script_config_binaries(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// The key name in package.json that holds inline configuration for this tool.
     /// When set (e.g., `"jest"` for the `"jest"` key in package.json), the plugin
     /// system will extract that key's value and call `resolve_config` with its
@@ -1658,8 +1840,13 @@ pub mod registry;
 mod tooling;
 
 pub(crate) use module_federation::runtime_remotes;
-pub use registry::{AggregatedPluginResult, PluginRegistry};
-pub(crate) use tooling::is_known_tooling_dependency;
+pub use registry::{
+    AggregatedPluginResult, PluginRegistry, PluginToolingDependencies, PluginToolingEvidence,
+};
+pub use tooling::types_package_target;
+pub(crate) use tooling::{
+    cli_tooling_config_patterns, is_ambient_types_package, is_known_tooling_dependency,
+};
 
 fn add_import_referenced_dependencies(result: &mut PluginResult, source: &str, config_path: &Path) {
     let imports = config_parser::extract_imports(source, config_path);
@@ -1722,6 +1909,7 @@ fn canonical_test_environment(environment: &str) -> &str {
 }
 
 mod adonis;
+mod ag_ui;
 mod angular;
 mod astro;
 mod ava;
@@ -1749,6 +1937,7 @@ mod drizzle;
 mod electron;
 mod ember;
 mod eslint;
+mod eve;
 mod expo;
 mod expo_router;
 mod firebase;
@@ -1776,6 +1965,7 @@ mod module_federation;
 mod msw;
 mod napi_rs;
 mod nestjs;
+mod nestjs_trpc;
 mod next_intl;
 mod nextjs;
 mod nitro;
@@ -1806,6 +1996,7 @@ mod react_native;
 mod react_router;
 mod redwoodsdk;
 mod relay;
+mod release_it;
 mod remark;
 mod remix;
 mod rolldown;

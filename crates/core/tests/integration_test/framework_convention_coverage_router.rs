@@ -303,3 +303,37 @@ fn react_router_flat_routes_custom_root_is_framework_used() {
         );
     }
 }
+
+fn collect_unused_dependency_names(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+    results
+        .unused_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.clone())
+        .collect()
+}
+
+#[test]
+fn react_router_default_entry_server_credits_isbot() {
+    let root = fixture_path("react-router-default-entry-server");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_deps = collect_unused_dependency_names(&results);
+    assert!(
+        !unused_deps.iter().any(|name| name == "isbot"),
+        "the default server entry imports isbot, unused dependencies: {unused_deps:?}"
+    );
+}
+
+#[test]
+fn react_router_authored_entry_server_does_not_credit_isbot() {
+    let root = fixture_path("react-router-authored-entry-server");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_deps = collect_unused_dependency_names(&results);
+    assert!(
+        unused_deps.iter().any(|name| name == "isbot"),
+        "an authored server entry without an isbot import leaves isbot unused: {unused_deps:?}"
+    );
+}

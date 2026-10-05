@@ -22,6 +22,10 @@ const ENABLERS: &[&str] = &[
 
 const ENTRY_PATTERNS: &[&str] = &["content-collections.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"];
 
+/// The same root config, listed as the plugin's own config file, so an
+/// existing one credits the tooling dependencies below.
+const ALWAYS_USED: &[&str] = &["content-collections.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"];
+
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "@content-collections/core",
     "@content-collections/vite",
@@ -38,6 +42,7 @@ define_plugin! {
     struct ContentCollectionsPlugin => "content-collections",
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
+    always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
 }
 

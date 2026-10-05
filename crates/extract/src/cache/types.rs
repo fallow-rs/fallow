@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 315;
+pub(super) const CACHE_VERSION: u32 = 327;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -54,10 +54,10 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1376);
+assert_cached_type_size!(CachedModule, 1440);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
-assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
+assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
 assert_cached_type_size!(CachedSuppression, 88);
 assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
 assert_cached_type_size!(CachedExport, 152);
@@ -76,7 +76,7 @@ assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 168);
-assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
+assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 56);
 assert_cached_type_size!(fallow_types::extract::TypeMemberTypeEntry, 72);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 
@@ -117,6 +117,15 @@ pub struct CachedModule {
     pub require_calls: Vec<CachedRequireCall>,
     /// Package names statically referenced through package path resolution.
     pub package_path_references: Box<[String]>,
+    /// Package names that a module augmentation (`declare module 'pkg'` in a
+    /// module file) names. They credit the package as a type-only use.
+    pub type_package_references: Box<[String]>,
+    /// Binary names found in `node_modules/.bin/<name>` paths in string
+    /// literals and template quasis. The analysis maps each name to the
+    /// package that declares the binary.
+    pub bin_path_references: Box<[String]>,
+    /// Package names from direct `require.resolve` calls, with call offsets.
+    pub package_resolve_sites: Box<[(String, u32)]>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<crate::MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
@@ -247,6 +256,10 @@ pub struct CachedModule {
     /// All-action `"use server"` module flag. Round-trips so the security
     /// `client-server-leak` BFS sees the action boundary on warm-cache loads.
     pub is_server_action_module: bool,
+    /// Global-scope declaration flag. Mirrors `ModuleInfo.has_global_declarations`.
+    pub has_global_declarations: bool,
+    /// `/// <reference path>` values. Mirrors `ModuleInfo.triple_slash_reference_paths`.
+    pub triple_slash_reference_paths: Box<[String]>,
     /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared props.
     /// Round-trips so the `unused-component-prop` detector sees them on
     /// warm-cache loads.
@@ -376,6 +389,8 @@ pub struct CachedPublicSignatureTypeReference {
     pub span_start: u32,
     /// Byte offset of the reference span end.
     pub span_end: u32,
+    /// True when the reference comes from a `satisfies` clause.
+    pub from_satisfies: bool,
 }
 
 /// Cached suppression directive.

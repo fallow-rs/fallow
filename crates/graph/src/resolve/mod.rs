@@ -40,8 +40,8 @@ pub use path_info::{
 };
 pub use react_native::{PlatformFamilyKey, has_react_native_plugin, platform_family_key};
 pub use types::{
-    OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule, ResolvedProject, ResolvedReExport,
-    ResolvedReplacedModuleTarget, ResolvedSourceEdge,
+    MissingExportTarget, OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule,
+    ResolvedProject, ResolvedReExport, ResolvedReplacedModuleTarget, ResolvedSourceEdge,
 };
 pub use work::ResolveWork;
 
@@ -535,6 +535,39 @@ struct ResolvedModuleBuildInput<'a> {
 }
 
 fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule {
+    let ctx = input.ctx;
+    let mut module = resolved_module_without_export_hints(input);
+    module.missing_export_targets = collect_missing_export_targets(ctx, &module);
+    module
+}
+
+/// Record the missing `exports` paths of each unresolved bare specifier once.
+fn collect_missing_export_targets(
+    ctx: &ResolveContext<'_>,
+    module: &ResolvedModule,
+) -> Vec<MissingExportTarget> {
+    let mut seen: FxHashSet<&str> = FxHashSet::default();
+    let mut targets: Vec<MissingExportTarget> = module
+        .all_resolved_source_edges()
+        .filter_map(|edge| match edge.target() {
+            ResolveResult::Unresolvable(specifier) => Some(specifier.as_str()),
+            _ => None,
+        })
+        .filter(|specifier| seen.insert(specifier))
+        .filter_map(|specifier| {
+            fallbacks::missing_package_export_paths(ctx, specifier).map(|paths| {
+                MissingExportTarget {
+                    specifier: specifier.to_string(),
+                    paths,
+                }
+            })
+        })
+        .collect();
+    targets.sort_unstable_by(|left, right| left.specifier.cmp(&right.specifier));
+    targets
+}
+
+fn resolved_module_without_export_hints(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule {
     ResolvedModule {
         file_id: input.module.file_id,
         path: input.file_path.to_path_buf(),
@@ -572,6 +605,7 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
             &input.module.exported_factory_return_object_shapes,
         ),
         type_member_types: Arc::clone(&input.module.type_member_types),
+        missing_export_targets: Vec::new(),
     }
 }
 

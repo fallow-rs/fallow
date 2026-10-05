@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{SanitizerScope, SinkLiteralValue};
 
-use super::super::helpers::array_element_type_from_type;
+use super::super::helpers::{array_element_type_from_type, map_value_type_from_type};
 use super::super::{ModuleInfoExtractor, SecurityPathSinkBinding};
 use super::{sink_literal_value, static_sink_literal_to_string, unwrap_static_expr};
 
@@ -92,6 +92,25 @@ impl ModuleInfoExtractor {
             scope.insert(name);
         } else {
             self.module_namespace_binding_names.insert(name);
+        }
+    }
+
+    /// Record a namespace binding that an assignment fills, in the scope that
+    /// declares the binding rather than the scope of the assignment. A reader
+    /// in a sibling function then sees the same binding, not a shadow.
+    pub(in crate::visitor) fn record_assigned_namespace_binding_name(&mut self, name: String) {
+        self.namespace_binding_names.push(name.clone());
+        let declaring_scope = self
+            .nested_declaration_stack
+            .iter()
+            .rposition(|scope| scope.contains(&name));
+        match declaring_scope.and_then(|index| self.scoped_namespace_binding_names.get_mut(index)) {
+            Some(scope) => {
+                scope.insert(name);
+            }
+            None => {
+                self.module_namespace_binding_names.insert(name);
+            }
         }
     }
 
@@ -329,6 +348,7 @@ impl ModuleInfoExtractor {
         // frame is not yet pushed, so a top-level function's array params would be
         // silently dropped. See issue #1793.
         let mut array_element_scope: FxHashMap<String, String> = FxHashMap::default();
+        let mut map_value_scope: FxHashMap<String, String> = FxHashMap::default();
         for param in &params.items {
             scope.extend(
                 param
@@ -343,6 +363,13 @@ impl ModuleInfoExtractor {
                     array_element_type_from_type(&type_annotation.type_annotation)
             {
                 array_element_scope.insert(id.name.to_string(), element);
+            }
+            if let BindingPattern::BindingIdentifier(id) = &param.pattern
+                && let Some(type_annotation) = param.type_annotation.as_deref()
+                && let Some(value) = map_value_type_from_type(&type_annotation.type_annotation)
+                && let Some(value) = self.resolve_class_type_param(&value)
+            {
+                map_value_scope.insert(id.name.to_string(), value);
             }
         }
         let sanitizer_scope = scope
@@ -370,6 +397,7 @@ impl ModuleInfoExtractor {
             .push(FxHashSet::default());
         self.scoped_array_binding_element_types
             .push(array_element_scope);
+        self.scoped_map_binding_value_types.push(map_value_scope);
         self.sanitizer_binding_stack.push(sanitizer_scope);
         self.literal_allowlist_binding_stack.push(allowlist_scope);
         self.risky_regex_binding_stack.push(risky_regex_scope);
@@ -382,6 +410,7 @@ impl ModuleInfoExtractor {
             self.nested_declaration_stack.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
+            self.scoped_map_binding_value_types.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
             self.risky_regex_binding_stack.pop();

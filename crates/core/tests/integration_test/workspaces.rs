@@ -738,3 +738,33 @@ fn workspace_tsconfig_path_alias_to_unbuilt_dist_resolves_to_source() {
         "utils/src/string.ts should be reachable via the subpath import, unused: {unused_files:?}"
     );
 }
+
+#[test]
+fn workspace_declaration_exports_with_dotted_names_resolve_to_source() {
+    let root = fixture_path("workspace-declaration-dotted-exports");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved_specifiers.is_empty(),
+        "declaration export targets should map back to source: {unresolved_specifiers:?}"
+    );
+
+    for reachable in [
+        "packages/lib/src/feature.port.ts",
+        "packages/lib/src/helper.mts",
+    ] {
+        assert!(
+            !results
+                .unused_files
+                .iter()
+                .any(|f| f.file.path.ends_with(reachable)),
+            "{reachable} should be reachable through the declaration export target"
+        );
+    }
+}

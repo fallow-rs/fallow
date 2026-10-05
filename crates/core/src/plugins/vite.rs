@@ -111,14 +111,49 @@ fn add_css_implementation_dependency(
     }
 }
 
+/// Vite entries that sit under its root directory.
+const ROOT_ENTRY_PATTERNS: &[&str] = &[
+    "src/main.{ts,tsx,js,jsx}",
+    "src/index.{ts,tsx,js,jsx}",
+    "index.html",
+];
+
+/// Re-base the default entries under the directory that the `root` option names.
+///
+/// Vite resolves `root` as a filesystem path and reads `index.html` from it.
+/// The static entry patterns stay at the config directory, so this adds only
+/// the entries under a root other than that directory.
+fn add_root_entry_patterns(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &std::path::Path,
+    root: &std::path::Path,
+) {
+    let Some(vite_root) = config_parser::extract_config_path(source, config_path, &["root"])
+        .and_then(|raw| config_parser::normalize_filesystem_config_path(&raw, config_path, root))
+    else {
+        return;
+    };
+    let vite_root = vite_root.trim_end_matches('/');
+    let config_dir = config_path
+        .parent()
+        .and_then(|dir| dir.strip_prefix(root).ok())
+        .map(config_parser::path_to_config_string)
+        .unwrap_or_default();
+    if vite_root.is_empty() || vite_root == config_dir {
+        return;
+    }
+    result.extend_entry_patterns(
+        ROOT_ENTRY_PATTERNS
+            .iter()
+            .map(|pattern| format!("{vite_root}/{pattern}")),
+    );
+}
+
 define_plugin!(
     struct VitePlugin => "vite",
     enablers: &["vite", "rolldown-vite"],
-    entry_patterns: &[
-        "src/main.{ts,tsx,js,jsx}",
-        "src/index.{ts,tsx,js,jsx}",
-        "index.html",
-    ],
+    entry_patterns: ROOT_ENTRY_PATTERNS,
     config_patterns: &["vite.config.{ts,js,mts,mjs}"],
     always_used: &["vite.config.{ts,js,mts,mjs}"],
     tooling_dependencies: &["vite", "@vitejs/plugin-react", "@vitejs/plugin-vue"],
@@ -162,6 +197,8 @@ define_plugin!(
         }
 
         super::test_alias::apply_test_block_aliases(&mut result, source, config_path, root);
+
+        add_root_entry_patterns(&mut result, source, config_path, root);
 
         let rollup_input = config_parser::extract_config_string_or_array(
             source,
@@ -352,6 +389,65 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resolve_config_reads_alias_replacement_through_local_path_helper() {
+        let source = r"
+            import { defineConfig } from 'vite';
+            import { fileURLToPath, URL } from 'node:url';
+            import path from 'node:path';
+
+            const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
+            function fromRoot(p) { return path.resolve(__dirname, p); }
+
+            export default defineConfig({
+                resolve: {
+                    alias: [
+                        { find: 'local-a', replacement: here('src/a.ts') },
+                        { find: 'local-b', replacement: fromRoot('lib/b.ts') },
+                    ]
+                }
+            });
+        ";
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![
+                ("local-a".to_string(), "src/a.ts".to_string()),
+                ("local-b".to_string(), "lib/b.ts".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_skips_alias_helper_with_two_parameters_or_a_condition() {
+        let source = r"
+            const two = (base, p) => path.resolve(base, p);
+            const pick = (p) => (process.env.X ? p : './other');
+            export default {
+                resolve: {
+                    alias: {
+                        'two-a': two(__dirname, 'src/a.ts'),
+                        'pick-b': pick('./src/b.ts'),
+                    }
+                }
+            };
+        ";
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(result.path_aliases.is_empty(), "{:?}", result.path_aliases);
+    }
+
     /// Issue #2806: Vite reads a leading `/` as relative to the project root.
     #[test]
     fn resolve_config_reads_a_leading_slash_alias_as_root_relative() {
@@ -535,6 +631,95 @@ mod tests {
             "build.lib.entry path-helper call should be extracted: {:?}",
             result.entry_patterns
         );
+    }
+
+    fn entry_pattern_strings(result: &PluginResult) -> Vec<&str> {
+        result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn resolve_config_evaluates_a_local_path_helper_call() {
+        let source = r"
+            import { fileURLToPath } from 'node:url';
+            import { resolve } from 'node:path';
+
+            const fromHere = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
+            function fromDir(rel) {
+                return resolve(__dirname, rel);
+            }
+            const viaPathname = function (rel) { return new URL(rel, import.meta.url).pathname; };
+
+            export default {
+                resolve: { alias: { 'some-mod': fromHere('./src/stub.ts') } },
+                build: {
+                    rollupOptions: {
+                        input: {
+                            main: fromHere('./src/main.ts'),
+                            second: fromDir('src/second.ts'),
+                            third: viaPathname('./src/third.ts'),
+                        },
+                    },
+                },
+            };
+        ";
+        let result = VitePlugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        let patterns = entry_pattern_strings(&result);
+        for expected in ["src/main.ts", "src/second.ts", "src/third.ts"] {
+            assert!(
+                patterns.contains(&expected),
+                "local helper call {expected} should be an entry: {patterns:?}"
+            );
+        }
+        assert_eq!(
+            result.path_aliases,
+            vec![("some-mod".to_string(), "src/stub.ts".to_string())]
+        );
+    }
+
+    #[test]
+    fn resolve_config_ignores_a_local_helper_with_an_unsupported_body() {
+        let source = r"
+            const base = 'src';
+            const fromBase = (rel) => `${base}/${rel}`;
+            const twoArgs = (dir, rel) => dir + rel;
+            const nested = (rel) => fromBase(rel);
+
+            export default {
+                resolve: { alias: { 'some-mod': fromBase('stub.ts') } },
+                build: {
+                    rollupOptions: {
+                        input: {
+                            a: fromBase('a.ts'),
+                            b: twoArgs('src', '/b.ts'),
+                            c: nested('c.ts'),
+                        },
+                    },
+                },
+            };
+        ";
+        let result = VitePlugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        let patterns = entry_pattern_strings(&result);
+        for unexpected in ["a.ts", "src/a.ts", "src/b.ts", "c.ts", "src/c.ts"] {
+            assert!(
+                !patterns.contains(&unexpected),
+                "an unsupported helper body must yield nothing, found {unexpected}: {patterns:?}"
+            );
+        }
+        assert!(result.path_aliases.is_empty(), "{:?}", result.path_aliases);
     }
 
     #[test]
@@ -911,5 +1096,82 @@ mod tests {
                 .any(|pattern| pattern.starts_with("src/lib.{")),
             "an extensionless lib entry resolves to the file, got {patterns:?}"
         );
+    }
+
+    fn entry_patterns_for(source: &str) -> Vec<String> {
+        VitePlugin
+            .resolve_config(
+                Path::new("/project/vite.config.ts"),
+                source,
+                Path::new("/project"),
+            )
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.clone())
+            .collect()
+    }
+
+    const REBASED_WEB_ENTRIES: &[&str] = &[
+        "web/index.html",
+        "web/src/main.{ts,tsx,js,jsx}",
+        "web/src/index.{ts,tsx,js,jsx}",
+    ];
+
+    #[test]
+    fn resolve_config_root_rebases_the_default_entries() {
+        for source in [
+            r#"export default { root: "./web" };"#,
+            r#"export default { root: "web/" };"#,
+            r#"
+                import { resolve } from "node:path";
+                export default { root: resolve(__dirname, "web") };
+            "#,
+            r#"
+                import { fileURLToPath, URL } from "node:url";
+                export default { root: fileURLToPath(new URL("./web", import.meta.url)) };
+            "#,
+        ] {
+            let patterns = entry_patterns_for(source);
+            for expected in REBASED_WEB_ENTRIES {
+                assert!(
+                    patterns.iter().any(|pattern| pattern == expected),
+                    "root should re-base the entry {expected}: {patterns:?} for {source}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_config_root_is_read_relative_to_the_config_directory() {
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/config/vite.config.ts"),
+            r#"export default { root: "../web" };"#,
+            Path::new("/project"),
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|rule| rule.pattern == "web/index.html"),
+            "got {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
+    fn resolve_config_without_a_nested_root_adds_no_rebased_entries() {
+        for source in [
+            "export default { build: { outDir: \"dist\" } };",
+            r#"export default { root: "." };"#,
+            r#"export default { root: "./" };"#,
+        ] {
+            let patterns = entry_patterns_for(source);
+            assert!(
+                !patterns
+                    .iter()
+                    .any(|pattern| pattern.ends_with("index.html")),
+                "no root means no extra entry: {patterns:?} for {source}"
+            );
+        }
     }
 }

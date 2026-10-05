@@ -24,6 +24,15 @@ use fallow_types::discover::FileId;
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?s)<!--.*?-->"));
 
+/// Regex to match a complete `<script>` element: the opening tag (group 1), the
+/// body, and the closing tag (group 2). The body is raw text, so markup inside
+/// it (for example a JS string that builds `<link>` or `<script src>` tags) is
+/// not part of the document. The browser ends the body at the first
+/// `</script`, so the lazy `.*?` matches the same boundary.
+static SCRIPT_ELEMENT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r#"(?si)(<script\b(?:[^>"']|"[^"]*"|'[^']*')*>).*?(</script\s*>)"#)
+});
+
 /// Regex to extract `src` attribute from `<script>` tags.
 /// Matches both `<script src="...">` and `<script type="module" src="...">`.
 /// Uses `(?s)` so `.` matches newlines (multi-line attributes).
@@ -72,12 +81,14 @@ pub fn is_remote_url(src: &str) -> bool {
 ///   interpolation has leaked into a checked-in HTML scaffold.
 /// - `###...###` covers ember-cli blueprint scaffold placeholders
 ///   (`###APPNAME###`, `###DUMMY###`) checked in as addon-fixture templates.
+/// - `${...}` covers JS template-literal interpolation and JSP / EL
+///   expressions (`${contextPath}/app.js`) in server-rendered templates.
 ///
-/// Neither shape is a legal URL or path character outside template engines,
-/// so the skip is generic across frameworks rather than gated on a plugin.
-/// Returns `true` for any `src` / `href` value that contains either marker.
+/// None of these shapes is a legal URL or path outside template engines, so
+/// the skip is generic across frameworks rather than gated on a plugin.
+/// Returns `true` for any `src` / `href` value that contains one of the markers.
 pub fn is_template_placeholder(value: &str) -> bool {
-    value.contains("{{") || value.contains("###")
+    value.contains("{{") || value.contains("###") || value.contains("${")
 }
 
 /// Extract local (non-remote) asset references from HTML-like markup.
@@ -87,7 +98,10 @@ pub fn is_template_placeholder(value: &str) -> bool {
 /// literal override so `` html`<script src="...">` `` in Hono/lit-html/htm
 /// layouts emits the same asset edges as a real `.html` file.
 pub fn collect_asset_refs(source: &str) -> Vec<String> {
-    let stripped = HTML_COMMENT_RE.replace_all(source, "");
+    let without_comments = HTML_COMMENT_RE.replace_all(source, "");
+    // Keep the opening tag so `<script src="...">` still matches, but drop the
+    // inline body: markup inside it is script text, not document markup.
+    let stripped = SCRIPT_ELEMENT_RE.replace_all(&without_comments, "$1$2");
     let mut refs: Vec<String> = Vec::new();
 
     for cap in SCRIPT_SRC_RE.captures_iter(&stripped) {
@@ -380,6 +394,64 @@ mod tests {
     fn skips_inline_script() {
         let info = parse_html_to_module(FileId(0), r#"<script>console.log("hello");</script>"#, 0);
         assert!(info.imports.is_empty());
+    }
+
+    #[test]
+    fn skips_script_tag_string_inside_inline_script_body() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<script>const markup = '<script src="./widget.js"></' + 'script>';</script>"#,
+            0,
+        );
+        assert!(
+            info.imports.is_empty(),
+            "markup inside an inline script body is not an asset reference; got {:?}",
+            info.imports
+        );
+    }
+
+    #[test]
+    fn skips_link_tag_string_inside_inline_script_body() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<script type="module">
+                 const css = `<link rel="stylesheet" href="./themes/dark.css">`;
+               </script>"#,
+            0,
+        );
+        assert!(
+            info.imports.is_empty(),
+            "markup inside an inline script body is not an asset reference; got {:?}",
+            info.imports
+        );
+    }
+
+    #[test]
+    fn extracts_script_src_next_to_inline_script() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<script>window.flags = { debug: true };</script>
+               <script src="./a.js"></script>
+               <script type="module" src="./b.js">/* ignored body */</script>"#,
+            0,
+        );
+        let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
+        assert_eq!(sources, vec!["./a.js", "./b.js"]);
+    }
+
+    #[test]
+    fn skips_js_interpolation_placeholder_in_link_href() {
+        let info = parse_html_to_module(
+            FileId(0),
+            r#"<link href="${base}/x.css" rel="stylesheet">
+               <script src="${contextPath}/app.js"></script>"#,
+            0,
+        );
+        assert!(
+            info.imports.is_empty(),
+            "`${{...}}` interpolation placeholders should not enter the import graph; got {:?}",
+            info.imports
+        );
     }
 
     #[test]

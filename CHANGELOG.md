@@ -82,6 +82,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A command-line tool from the tooling catalogue needs a reference to
+  count as used.** Before, a catalogue entry such as `oxlint`, `tsx`,
+  `npm-run-all` or `lint-staged` in `devDependencies` was credited by name,
+  so a tool that nothing runs never reported as unused, while
+  `--trace-dependency` called it unused. Now a catalogue entry marked as a
+  command-line tool is credited when a package.json script, a CI workflow
+  or a git hook runs it, when its own config file exists (a plugin config,
+  a catalogue `config` pattern such as `.jscpd.json`, or a package.json key
+  named after the tool), or when a plugin credits it. Catalogue entries
+  that are libraries rather than commands, such as `sass` or `jsdom`, keep
+  the credit by name, and `--trace-dependency` now reports that credit as
+  `known-tooling`, or `known-tooling-config` with the config file. Use
+  `ignoreDependencies` for a tool that the project runs in a way fallow
+  does not see, such as an editor integration.
+- **A `@types/X` devDependency needs a target or ambient globals to count
+  as used.** Before, every `@types/` package in `devDependencies` was
+  credited by name, so `@types/better-sqlite3` stayed silent in a project
+  with no `better-sqlite3` dependency, import or tsconfig entry. Now a
+  `@types/X` package is credited when the project declares `X`, imports
+  `X` (a type-only import counts) or names `X` in a tsconfig `types`
+  entry. A short list of type packages that declare globals is always
+  credited: `@types/node`, `@types/bun`, `bun-types`, `@types/deno`,
+  `@types/jest`, `@types/mocha`, `@types/jasmine`, `@types/qunit`,
+  `@types/web`, `@types/webpack-env`, `@types/chrome` and
+  `@types/firefox-webext-browser`. `--trace-dependency` names the credit
+  with the `ambient-types`, `types-target` and `types-config` reasons.
+  Production dependencies keep the plain credit. A `/// <reference
+  types="X" />` directive is not read yet; use `ignoreDependencies` for a
+  type package that only such a directive or another global use needs.
+- **A plugin credits its own tooling devDependencies only with evidence
+  that the project uses the tool.** Before, an active plugin credited every
+  package it declares as tooling, and a declared package is enough to
+  activate the plugin. So `karma` or `commitizen` in `devDependencies` with
+  no config file and no script never reported as unused. Now the credit
+  needs a config file of the plugin (`.c8rc.json`, `lefthook.yml`), its
+  config key in package.json, or a package.json script, CI workflow or git
+  hook that runs one of the plugin's packages. Git hooks are read for the
+  first time: commands in `.husky/` hook scripts, lefthook configs, and
+  simple-git-hooks and lint-staged configs (package.json key or own file)
+  now credit the packages they run. `--trace-dependency` names the credit
+  in a new `tooling_credit` field (`plugin-config` with the config file, or
+  `plugin-reference` with the package that a command runs) and reports such
+  a dependency as used, so the trace agrees with the report. Production
+  dependencies keep the plain credit. Use `ignoreDependencies` to keep a
+  tooling package that the project runs in a way fallow does not see.
 - **The Claude Code gate audits the install root from a subdirectory.**
   Before, the handler ran the gate script from the session directory. A
   session in a package directory then audited only that package and could
@@ -113,6 +158,551 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[Unreleased]` or sections that shipped before.
 
 ### Fixed
+
+- **An orphan module declaration file is now reported as an unused file.**
+  Before, fallow made every `.d.ts`, `.d.mts` and `.d.cts` file an entry
+  point and never reported one, so a stale declaration file and every module
+  that only it imported stayed used. Now a declaration file that is a module
+  (it has a top-level import or export and no `declare global` or
+  `declare module` block) is an entry point only when something points to
+  it: a sibling with the same stem (`foo.js` or `foo.ts` next to
+  `foo.d.ts`, `styles.css` next to `styles.css.d.ts`), a package.json `types`,
+  `typings`, `typesVersions` or `exports` `types` condition, a
+  `/// <reference path>` directive, or a tsconfig or jsconfig in its
+  directory chain whose `files`, `include` (everything below the config
+  when it sets neither) without an `exclude` match, or `typeRoots` covers
+  it. Otherwise fallow reports the file, and its imports no longer keep
+  other modules reachable. A reachable import still makes the file used.
+  Script-style declaration files and files with a `declare global` or
+  `declare module` block stay entry points. To keep such a file, add it to
+  `ignorePatterns` or add a `// fallow-ignore-file unused-file` comment.
+  The extraction cache version changes, so the first run after the upgrade
+  parses all files again.
+
+- **An optional peer of a used dependency is no longer reported as an
+  unused dependency.** A project lists an optional peer
+  (`peerDependenciesMeta.<name>.optional`) of a package it uses to turn on a
+  feature of that package, which then loads the peer at runtime where the
+  import graph does not see it. Before, fallow credited only the required
+  peers of a used package, so it reported such an optional peer as unused.
+  Now fallow credits required and optional peers alike. Only a used package
+  gives this credit, so the peers of an unused package stay reported.
+  `--trace-dependency` now reports a credited peer as used and names the
+  used packages that list it in a new `peer_of` field (JSON) and a
+  `Peer dependency of:` section (human). Before, the trace printed `UNUSED`
+  even for a required peer that the unused-dependency check credited.
+
+- **A devDependency that the same `package.json` lists in
+  `peerDependencies` is no longer reported as unused.** A package that
+  declares a peer often lists the same package in `devDependencies`, so the
+  peer is installed for its own build and tests. The consumer supplies the
+  peer at runtime, so the source of the package often does not import it.
+  Before, fallow reported that dev copy as an unused devDependency. Now
+  fallow credits it, for a required or an optional peer, in the root and in
+  each workspace `package.json`. This is the rule that the
+  `dev-dependency-in-production` check already applies to a dev and peer
+  pair. A devDependency with no peer entry stays reported.
+
+- **A `*` in a package `exports` target now matches files in nested
+  directories.** Before, fallow expanded the `*` like a shell glob, so it
+  matched only one path segment. With `"./*": "./src/*.ts"`, fallow did not
+  use `src/nested/deep.ts` as an entry point. Thus it reported the exports
+  of that file as unused, and with `"./src/*": "./src/*"` it reported the
+  nested files as unused. Now fallow uses the Node rule: the `*` can match a
+  substring that contains `/`, and each `*` in the target matches the same
+  substring. A file that does not end with the text after the `*` stays out
+  of the entry set.
+
+- **A destructured field of an inline-typed parameter now credits its
+  class.** For `function run(input: { service: Service })`, fallow already
+  credited `input.service.used()` to `Service.used`. The destructure form,
+  `const { service } = input; service.used();`, did not bind `service` to
+  `Service`, so fallow reported `Service.used` as an unused class member.
+  Now fallow resolves each destructured path the same way as a member
+  access, so renamed (`{ service: local }`) and nested keys also bind to
+  their class. The extraction cache version changes, so the first run after
+  the upgrade parses all files again.
+- **An awaited result of an async class factory credits the class
+  members.** Before, `const widget = await makeWidget()` did not bind
+  `widget` to the class that `makeWidget` returns. Thus fallow reported
+  each member that the code reads on `widget` as an unused class member.
+  Now an `async` factory that returns `new Widget()` on all paths, or that
+  has a `Promise<Widget>` return type, binds the awaited result to
+  `Widget`. This applies at the top level and in an async function, in the
+  same file and across modules. A call without `await` gives a promise, so
+  it does not credit the class. The extraction cache version changes, so
+  the first run after the upgrade parses all files again.
+
+- **Class members used through a fallback or a nullable ternary are
+  credited.** Before, fallow did not follow a local such as
+  `const cache = options.cache ?? new Cache()`, `pool || new Pool()` or
+  `flag ? Link.open(path) : undefined` to its class. Thus it reported every
+  member that the code called through that local as unused. Now fallow
+  binds the local to the class of the operand that holds the instance. A
+  ternary with `null`, `undefined` or `void 0` in one branch uses the other
+  branch. A `??` or `||` fallback uses `new X()` on the right, or a left
+  operand that fallow already binds to a class. When the two operands give
+  two different classes, fallow binds no class.
+
+- **A method called on a `Map` value counts as used.** Before, fallow
+  reported a class method as unused when the only call went through
+  `map.get(key)?.method()`, `map.get(key)!.method()`, or a local that holds
+  `map.get(key)`. Now fallow reads the value type `V` of a binding that is
+  typed `Map<K, V>` or `ReadonlyMap<K, V>`, or that starts as
+  `new Map<K, V>()`. This works for variables, parameters and class fields.
+  A member access on the result of `.get(...)` then credits class `V`. A
+  `for...of` loop over `map.values()` also types the loop variable as `V`.
+  The extraction cache version changes, so the first run after the upgrade
+  rebuilds the cache.
+
+- **A relative import of a missing gitignored path is not unresolved.**
+  Code can import a build output (`../dist/out.js`) or generated code
+  (`./generated/client`) that does not exist before the build. Before,
+  fallow reported each such import as unresolved. Now fallow does not
+  report a relative import when its target does not exist and an ignore
+  rule of the repository ignores the target or a parent directory. Fallow
+  reads the `.gitignore` and `.ignore` files from the repository root down
+  to the target, and `.git/info/exclude`. A nested ignore file applies
+  only below its own directory. The rules apply only inside a git
+  repository, as in source discovery. Fallow does not read the global git
+  excludes file, so the findings are the same on each machine. A target
+  that exists keeps the current behavior.
+
+- **An import with an empty specifier list credits its package.** Before,
+  fallow ignored `import {} from 'pkg'` and `import type {} from 'pkg'`,
+  because these imports bind no name. Thus it reported the package as an
+  unused dependency or devDependency. A relative form such as
+  `import type {} from './types'` did not keep the target file reachable.
+  Now fallow records the import as a side-effect import of the module. The
+  `import type {}` form counts as a type-only use of the package. The
+  extraction cache version changes, so the first run after the upgrade
+  rebuilds the cache.
+
+- **A module augmentation now credits the package that it names.** A
+  top-level `declare module 'pkg' { ... }` in a file with an import or an
+  export augments `pkg`, and TypeScript requires `pkg` to resolve. Before,
+  fallow did not count this declaration as a use, so it reported `pkg` as
+  an unused dependency or devDependency. Now the declaration credits `pkg`
+  as a type-only use. The same syntax in a file without an import or an
+  export declares an ambient module, so it credits nothing. A wildcard
+  name such as `'*.svg'` and a relative path also credit nothing. An
+  augmentation never reports an unlisted dependency. The extraction cache
+  version changes because the cached extraction output changes.
+
+- **A package subpath that maps to a missing gitignored path is not
+  unresolved.** A workspace package can export generated code, for example
+  `"exports": { "./enums": "./src/generated/enums.ts" }`. The generated
+  file does not exist before the generator runs. Before, fallow reported
+  each import of `store/enums` as unresolved. Now fallow does not report a
+  bare import of a project package when the matched `exports` entry names
+  only missing paths and an ignore rule of the repository ignores each of
+  them. The same ignore rules apply as for a relative import. A subpath
+  without an `exports` key, and a missing target that no rule ignores, stay
+  unresolved. The dependency findings for the package do not change.
+
+- **A file URL passed to a filesystem call is not an unresolved import.**
+  Code can give `new URL("./file", import.meta.url)` directly to a `node:fs`
+  call, such as `writeFileSync`, `existsSync` or `readFileSync`, or to
+  `fileURLToPath`. Before, fallow reported a missing target as an
+  `unresolved-import`. The target is a path on disk, for example an output
+  file that a script writes or a file that a test checks for. Now fallow
+  treats this reference as speculative. A target that exists stays in use,
+  and a missing target gives no finding. A `new URL` in other positions,
+  such as `new Worker(new URL("./worker.js", import.meta.url))`, still
+  reports a missing file. The extraction cache version changes to 316 and
+  the graph cache version changes to 66, so the first run after the upgrade
+  rebuilds both caches.
+
+- **A relative import into a tsconfig `outDir` resolves to the source file.**
+  A script or a test can import the emitted file of a package, for example
+  `../lib/types/helper.js` when the tsconfig sets `rootDir` to `src` and
+  `outDir` to `lib/types`. Before, fallow did not use the tsconfig to map
+  such an import. Thus it reported the import as unresolved when the output
+  was not on disk. Now fallow reads the `tsconfig*.json` files at the root
+  of the package that owns the target path, and maps the output path to the
+  source file. The extension rules are the same as for package entry
+  points: `.js` maps to `.ts` or `.tsx`, and `.mjs` maps to `.mts`. An
+  output path without a source file stays unresolved.
+
+- **A member read directly on an awaited dynamic import counts as a use.**
+  Before, fallow did not credit an export in code such as
+  `(await import('./loader')).run()` or `new (await import('./model')).Model()`.
+  Thus it reported each export of the target file as unused. Now fallow
+  credits the member that the code reads, also through a string key such
+  as `['run']` and through `.default`. The other exports of the target file
+  stay reported.
+
+- **Workspace exports with a declaration target resolve to source.** A
+  package can map a subpath to `./dist/feature.port.d.ts` in the `types`
+  condition. When `dist/` is absent, fallow maps the output file back to
+  `src/`. Before, it kept `.d` in the file name and looked for
+  `src/feature.port.d.ts`. Thus it reported the import as unresolved. Now
+  fallow removes the `.d.ts`, `.d.mts` or `.d.cts` suffix first, and keeps
+  every other dot in the name. The import resolves to
+  `src/feature.port.ts`. A declaration file that a package copies from
+  `src/` without change still resolves.
+
+- **Array destructuring of `Promise.all` credits each dynamic import.**
+  Before, this declaration gave no credit to the exports of `./a` and
+  `./b`:
+  `const [{ a }, b] = await Promise.all([import('./a'), import('./b')])`.
+  Thus fallow reported `a` and the members that the code reads through `b`
+  as unused exports. Now each pattern element gets the credit of the module at
+  the same index. A rest element keeps every later module whole. A hole
+  binds nothing, so that module gets no export credit.
+
+- **A dynamic `import()` in a local loader function credits the exports
+  that the code uses.** Before, fallow did not follow a loader function such
+  as `const loadView = () => import('./view')` or
+  `async function loadHelpers() { return await import('./helpers') }`. Thus
+  it reported the exports of the loaded module as unused. Now a loader that
+  is an argument of a call, as in `lazy(loadView)`, credits the `default`
+  export, the same as an inline `() => import('./view')`. A
+  `const m = await loadHelpers()` binding credits the members that the code
+  reads from `m`, and `const { a } = await loadHelpers()` credits `a`. When a
+  loader has a different use, or the file exports it, fallow credits all
+  exports of the loaded module. A loader that the code does not use credits
+  no export.
+
+- **A dynamic import assigned to an existing binding credits the members
+  that the code reads.** Code can declare a binding first and fill it later,
+  for example `let api: typeof import('./api')` at module level and
+  `api = await import('./api')` in a setup function. Before, fallow
+  recorded that `import()` only as a load of `./api`. Thus it reported
+  `api.load()` and every other export read through `api` as unused. Now the
+  assignment makes `api` a namespace binding in the scope that declares it,
+  as `const api = await import('./api')` does. A member read through `api`
+  in any function of that scope credits that export, and the other exports
+  stay reported. The parse cache version changes, so the first run after the
+  upgrade parses all files again.
+- **A tsup or tsdown `entry` given as a string or an object map is read.**
+  Before, fallow read `entry` only as an array. Thus it ignored
+  `entry: "src/index.ts"` and `entry: { main: "src/main.ts" }`, and it
+  reported those files and their imports as unused. Now fallow reads all
+  three forms. Each value of an object map is an entry point.
+
+- **A bare `node --test` script makes its test files entry points.**
+  Without file arguments, `node --test` runs the files that match the
+  default patterns of the Node test runner, such as `**/*.test.ts` and
+  `**/test/**/*.ts`. Before, fallow added no entry for such a script, so it
+  reported the test files and the helpers that they import as unused. Now
+  fallow adds the default patterns as entry patterns of the package that
+  owns the script. Flag values such as `--import tsx` or
+  `--test-reporter spec` are not file arguments. When the script names a
+  file, Node runs only that file, and fallow adds only that file.
+
+- **A `tsdown` or `tsup` config in a workspace package finds its `entry`
+  files.** These tools read each `entry` value relative to the directory of
+  the config file. Before, fallow read the values relative to the project
+  root when the tool was also a dependency of the root `package.json`. Thus
+  fallow reported the entry file of the package as unused. Now fallow
+  resolves each value from the config directory. A value with a leading `!`
+  now excludes its matches from the other `entry` values.
+
+- **A tsup or tsdown config array gives the entry points of each config.**
+  Before, fallow read `entry` only from a single config object. Thus it
+  ignored `export default defineConfig([{ entry: [...] }, { entry: {...} }])`
+  and `export default [...]`, and it reported those files and their imports
+  as unused. Now fallow reads `entry` from each object in the array. A spread
+  such as `{ ...shared, entry: {...} }` does not stop the lookup.
+
+- **A type that shapes an exported `const` through a wrapper call or a
+  type assertion is no longer an unused type.** Before, fallow read the
+  signature of an exported `const` only when the initializer was a function
+  or an arrow function. Thus the initializers
+  `memo(function Card(p: CardProps) {})`, `forwardRef<Handle, Props>(...)`,
+  `createContext<Value | null>(null)` and `"on" as Mode` did not keep
+  `CardProps`, `Handle`, `Props`, `Value` or `Mode` in use. Now fallow reads
+  the type arguments of a call or `new` initializer, the signature of a
+  function argument of that call, and the type of an `as` or `<T>`
+  assertion. Parentheses and `!` around the initializer have no effect. With
+  `private-type-leaks` on, a type that is not exported and that is in one of
+  these positions is now a private type leak. The extraction cache version
+  changes, so the first run after the upgrade parses all files again.
+
+- **tsdown configs in root `workspace` globs are used.** A root tsdown
+  config can set the `workspace` option. tsdown then builds each package
+  that a glob matches and loads the config file of that package. Before,
+  fallow reported those package config files as unused when the package did
+  not declare tsdown itself. Now fallow marks the config file in each
+  matched directory as used. It reads a glob, a glob array, an object with
+  an `include` value, and both branches of a conditional value.
+
+- **A type in the inferred return of an exported factory is not an unused
+  type.** Before, fallow read only explicit signatures. A factory without a
+  return type that returns a local function, for example
+  `function get(): Answers` in `return { get }`, did not count `Answers`.
+  Thus fallow reported the exported type as unused. Now fallow reads the
+  returned values of a function or arrow without a return type: inline
+  functions, `as` assertions, and local functions that a return statement
+  names. A type that only annotates a local value that the factory does not
+  return stays reported. With `private-type-leaks` on, a private type in
+  such a return now also gives a finding. This change invalidates the
+  extraction cache.
+
+- **`import.meta.resolve('pkg')` credits the package.** Before, fallow
+  reported a dependency as unused when its only reference was
+  `import.meta.resolve`, for example a package whose URL code gives to a
+  child process. Now `import.meta.resolve` credits a package with the same
+  limits as `require.resolve`: a bare package name or `<pkg>/package.json`
+  counts, and a deeper subpath does not. The extraction cache version
+  changes, so the first run after the upgrade parses all files again.
+
+- **A type in a `satisfies` clause on an exported `const` is no longer an
+  unused type.** Before, fallow did not read the `satisfies` clause of an
+  exported `const`. Thus in
+  `export const IDS = ["a"] as const satisfies readonly Id[]`, the type `Id`
+  was an unused type when no other file imported it. Now the type in the
+  clause is in use. A `satisfies` clause does not change the type of the
+  export, so a type that is not exported in that clause is not a private
+  type leak. Fallow now also reads the signature of a function or arrow
+  function under a `satisfies` clause. The extraction cache version changes,
+  so the first run after the upgrade parses all files again.
+
+- **Methods that `nestjs-trpc` calls are no longer reported as unused class
+  members.** The module calls `create` on a class that implements
+  `TRPCContext`, `onError` on a class that implements `TRPCErrorHandler`, and
+  `use` on a class that implements `TRPCMiddleware`. Before, fallow reported
+  these methods, because no project code calls them. A new `nestjs-trpc`
+  plugin credits each method only on a class that implements the matching
+  interface. Other methods on these classes still report.
+
+- **Markup inside an inline `<script>` body is no longer an HTML asset
+  reference.** Before, fallow read `<script src>` and `<link href>` tags in
+  the text of an inline script, for example in a JS string or a comment that
+  builds markup. This gave unresolved imports such as
+  `./themes/${name}.css`, and it made a file reachable that the page does
+  not load. Now fallow skips the body of each inline script and keeps the
+  `src` of the script tag. Fallow also skips a `src` or `href` value that
+  contains `${`, as it already does for `{{` and `###`. This covers JS
+  interpolation and JSP or EL expressions in server templates. The extraction
+  cache version changes, so the first run after the upgrade parses all
+  files again.
+
+- **A `node_modules/.bin/<name>` path in source credits the package.** Before,
+  fallow reported a dependency as unused when code only used its binary
+  through a path, for example `resolve('node_modules/.bin/tool')` as the
+  command of a child process. Now fallow reads the binary name from each
+  `node_modules/.bin/<name>` path in a string or a template literal. It maps
+  the name to a declared dependency with the same bin map that the script
+  analysis uses, and credits that package. A name that maps to no declared
+  dependency credits nothing and reports nothing. The extraction cache
+  version changes, so the first run after the upgrade parses all files again.
+
+- **A `require.resolve('pkg')` call reports an unlisted package.** Before,
+  fallow used the call only to credit a listed dependency. When the package
+  was not in `package.json`, fallow reported nothing, or it did not show the
+  file of the call. Now a call with one string argument, such as
+  `require.resolve('pkg/package.json')`, is an unlisted-dependency site, the
+  same as an import of the package. This includes `require` from
+  `createRequire(import.meta.url)` and a call in a `try` block. A package
+  name from a resolver function, a loop over a static table, or a call with
+  a `paths` option still only credits the dependency, because fallow cannot
+  be sure of the name. The parse cache version changed, so the first run
+  after the upgrade parses all files again.
+
+- **Expo config plugins in the app config are credited.** Before, fallow
+  did not read the `plugins` list in `app.json` or `app.config.*`. Thus it
+  reported a config plugin package as an unused dependency, because Expo
+  loads it by name and the source never imports it. Now fallow credits each
+  package in `plugins` and `expo.plugins`, as a string or as the first item
+  of a `[name, options]` tuple. A relative entry, such as
+  `./plugins/with-setting.js`, now keeps that local plugin file reachable.
+  This works with and without `expo-router`.
+
+- **eve agent modules are no longer reported as unused.** Before, fallow
+  did not know the eve agent framework. Thus it reported `agent/agent.ts`,
+  each tool, hook, channel and subagent module, and each eval file as
+  unused. Now a built-in `eve` plugin activates on the `eve` dependency or
+  on an `eve` script. It makes each module under `agent/` an entry point,
+  and it credits the `default` export that eve reads. Modules under a
+  `lib/` directory stay import-only, so fallow still reports a `lib/` module
+  that nothing imports. Files under `sandbox/workspace/` are not entry
+  points. The plugin also keeps `evals/**/*.eval.*` and
+  `evals/evals.config.*`.
+
+- **Hooks of an `AbstractAgent` subclass are no longer reported as unused.**
+  An agent from `@ag-ui/client` extends `AbstractAgent`. The agent runtime
+  calls the hooks of the subclass, such as `run`, `clone`, `onInitialize`,
+  `onError` and `onFinalize`. Before, fallow reported each hook that project
+  code did not call as an unused class member. Now a new `ag-ui` plugin
+  credits these hooks when the project depends on an `@ag-ui/` package.
+  The rule applies only to a class that extends `AbstractAgent` directly.
+  Other methods of the agent class are still reported.
+
+- **A release-it config and its plugins are no longer reported as
+  unused.** Before, fallow did not know release-it. Thus it reported a
+  `.release-it.mjs` config as an unused file, and also each local module
+  that the config imports. Now a built-in `release-it` plugin activates on
+  the `release-it` dependency. It keeps each `.release-it.*` config form
+  that release-it reads. It also reads the `release-it` key in
+  `package.json`. Each key of the `plugins` object and each `extends` value
+  that names a package credits that package as used. A key that is a
+  relative path, such as `./scripts/release-plugin.js`, keeps that file
+  reachable. The JSON5, YAML and TOML config forms are kept, but fallow does not
+  read their contents.
+
+- **Oxlint `jsPlugins` inside `overrides` count as used.** Before, fallow
+  read only the top-level `jsPlugins` array of an Oxlint config. Thus it
+  reported a plugin package that only an `overrides` entry loads as an
+  unused dev dependency. Now fallow also reads `jsPlugins` in each
+  `overrides` entry, in `.oxlintrc.json`, `oxlint.json` and
+  `oxlint.config.ts`. String entries, `{ "specifier": ... }` objects and
+  local plugin paths work as they do at the top level.
+
+- **An alias replacement that calls a local path helper resolves.** A Vite,
+  Vitest or webpack config can declare a helper such as
+  `const here = (p) => fileURLToPath(new URL(p, import.meta.url))` and use
+  `replacement: here("src/x.ts")`. Before, fallow did not read this
+  replacement. It reported the alias import as an unlisted dependency and
+  the target file as unused. Now fallow reads a call to a top-level helper in
+  the same file that has one parameter and returns one path expression. It
+  puts the string argument in place of the parameter. The helper can be an
+  arrow function, a function expression or a function declaration. Fallow
+  does not read a helper with more parameters, a default value, a
+  conditional body, or an import binding.
+
+- **Quoted commands that `concurrently` runs count as used.** Before,
+  fallow read every argument of `concurrently` as a script name. Thus in
+  `concurrently -n api,web "tsx watch src/api.ts" "vite"`, fallow did not
+  see `tsx`, `vite` or `src/api.ts`, and it could report the file as
+  unused. Now fallow parses each quoted command as a full script command.
+  It credits the binary, the file arguments and the package scripts that
+  the command calls. The value of `--teardown` is also a command. A
+  shortcut such as `npm:dev` stays a script name, and fallow skips the
+  values of options such as `--names` and `--prefix-colors`. The
+  `run-s` and `run-p` arguments stay script names.
+
+- **An exported type that backs only unused exports is now reported.**
+  Fallow hides an unused exported type when the signature of another export
+  in the same file uses it. Before, fallow also hid the type when that other
+  export was unused. For example, `export function summarize(): Summary`
+  with no import of `summarize` gave a finding for `summarize` and none for
+  `Summary`. Now fallow hides the type only when at least one export that
+  uses it is live. A type that is hidden counts as live for the types in
+  its own signature. A type that only its own signature uses, such as a
+  recursive tree node, is now also reported.
+
+- **A module that a test loads with `ssrLoadModule` is reachable.** Before,
+  fallow did not see an edge for `await server.ssrLoadModule('/src/a.ts')`
+  on a Vite dev server. Thus it reported the module as an unused file, or
+  reported its exports as unused. Now a call with a string literal argument
+  is a dynamic import. Fallow credits the destructured names, or the members
+  that the code reads from the result. Other exports of the module are still
+  unused exports. A computed argument does not make an edge. A specifier
+  that starts with `/` resolves against the Vite root. Fallow now tries the
+  nearest directory with a `package.json` before the project root, so this
+  also works in a nested package. The parse cache version changes, so the
+  first run after the upgrade parses all files again.
+
+- **A test spy call on a namespace import credits only the spied member.**
+  Before, `vi.spyOn(ns, 'helper')` in a test file passed the whole namespace
+  object to a call. Thus fallow credited every export of the module, and
+  unused exports of that module were not reported. Now a spy call with a
+  static member name counts as the member read `ns.helper`. This applies to
+  `vi.spyOn`, `jest.spyOn`, a `spyOn` that is global or imported from a test
+  framework, and the `mock.method` of `node:test`. A spy call with a computed
+  member name, or a local function named `spyOn`, still credits every
+  export. The extraction cache version changes, so the first run after the
+  upgrade rebuilds the cache.
+
+- **A vitest config that a package script passes with `--config` is read.**
+  Before, a script such as `vitest run --config vitest.e2e.config.ts` only
+  kept the config file itself from the unused-file report. Fallow did not
+  read the `test.include` of that file. Thus it reported the test files that
+  the config selects as unused. Now the vitest plugin reads a config that a
+  script passes to `vitest` with `--config` or `-c`. Its `test.include`
+  patterns become entry points, and its default export is used. These
+  patterns add to the patterns of the default `vitest.config.ts` and do not
+  replace them.
+
+- **An electron-vite config now sets the main and preload entries.** Before,
+  every file under `src/main` and `src/preload` was an entry point. Thus
+  fallow did not report an unused export in these files. Now, when
+  `electron.vite.config.*` has a `main` or `preload` section, fallow uses
+  the entries that electron-vite builds. These are the
+  `build.rollupOptions.input` and `build.lib.entry` values of the section.
+  When the section declares no entry, fallow uses the electron-vite default
+  `src/<section>/index` or `src/<section>/<section>` file. When fallow cannot
+  read the section, it keeps all files of that directory as entries. A
+  project without an electron-vite config keeps the old entries.
+
+- **Default electron-builder script config files stay used.** Before,
+  fallow kept only the YAML, JSON, JSON5 and TOML forms of the
+  electron-builder config. Thus it reported `electron-builder.js`,
+  `electron-builder.cjs` and `electron-builder.ts` as unused files.
+  electron-builder reads these files without `--config`. Now the Electron
+  plugin keeps them. `electron-builder.mjs` is not a default name, so fallow
+  still reports it when nothing references it.
+- **Starlight component overrides and custom CSS in the Astro config are
+  used.** Before, fallow did not read the options of the `@astrojs/starlight`
+  integration call in `integrations`. Thus it reported the files in
+  `components` and `customCss` as unused, and a package in `customCss` as an
+  unused dependency. Now a local path in these options is a used file, and a
+  package name is a used dependency.
+
+- **A config value that calls a local path helper resolves.** A config can
+  declare a helper such as
+  `const p = (rel) => fileURLToPath(new URL(rel, import.meta.url))` and use
+  `p("./src/entry.ts")` as a value. Before, fallow did not read this call.
+  Thus it reported the Vite `build.rollupOptions.input` entry and the
+  `resolve.alias` target as unused files. Now fallow evaluates a call to a
+  module-level helper with one parameter and one returned path expression.
+  The fix applies to all plugins that read entry values and alias
+  replacements with the shared config readers. A helper with more than one
+  parameter, or a helper that calls another helper, still gives no value.
+
+- **Vercel functions in the `api/` directory are entry points.** Vercel
+  deploys each file under `api/` as a serverless function, and no code
+  imports these files. Before, fallow reported them as unused files. Now the
+  Vercel plugin makes each `api/**` source file an entry point and credits
+  the handler exports (`default`, `config` and the HTTP method names, such
+  as `GET`). Vercel does not deploy a file or a directory whose name starts
+  with `_`, so fallow still reports such a file when nothing imports it.
+  The plugin now also activates when `vercel.json` exists at the package
+  root. Before, it activated only from a `vercel` or `@vercel/config`
+  dependency.
+- **A CI step that runs a file with Bun makes that file an entry point.**
+  Before, fallow read `bun scripts/a.ts`, `bun run scripts/a.ts` and
+  `bun --watch scripts/a.ts` in a GitHub Actions or GitLab CI step as a
+  script call. Thus it reported the file as unused. Now fallow uses the Bun
+  order: a declared package.json script with that name runs first. When no
+  script has the name and the argument is a script file path, the file is
+  an entry point. A name without a script file extension, such as
+  `bun run build`, still resolves to the script.
+- **Next.js `instant` and `prefetch` segment config exports are used.**
+  Next.js 16 reads `export const instant` and `export const prefetch` from
+  App Router pages and layouts. It also reads
+  `export const unstable_dynamicStaleTime` from pages. Before, fallow
+  reported these exports as unused. Now the Next.js plugin credits `instant`
+  and `prefetch` in `page` and `layout` files, and
+  `unstable_dynamicStaleTime` in `page` files only. Next.js rejects
+  `unstable_dynamicStaleTime` in a layout, so fallow still reports it there.
+  Route handlers do not change.
+- **The Vite `root` option now moves the default entries.** Before, fallow
+  looked for `index.html`, `src/main.*` and `src/index.*` only in the config
+  directory. Thus with `root: './web'`, it reported the scripts that
+  `web/index.html` loads as unused, and also the files they import. Now
+  fallow reads `root` and adds the same entries under that directory. It
+  resolves `root` against the config directory, and it reads the path
+  helpers `resolve`, `join` and `fileURLToPath(new URL(...))`.
+- **A file that a command substitution runs is an entry point.** Before,
+  fallow did not read the commands inside `$(...)` or backticks in
+  package.json scripts and CI steps. Thus a script such as
+  `STAMP="$(node scripts/stamp.ts)"` or a GitHub Actions step
+  ``run: KEY=`node scripts/key.ts` `` left the file reported as unused. Now
+  fallow parses the body of each substitution as a command of its own, also
+  inside double quotes and in a nested substitution. Text in single quotes,
+  `$((...))` arithmetic and `${...}` expressions do not count.
+
+- **React Router apps without `entry.server` no longer report `isbot` as
+  unused.** When the app directory has no `entry.server` file, React Router
+  uses its built-in server entry. That entry imports `isbot`. Before, fallow
+  did not know about this import and reported `isbot` as an unused
+  dependency. Now the React Router plugin marks `isbot` as used when the app
+  directory has no `entry.server.{ts,tsx,js,jsx}` file. When the app has its
+  own `entry.server` file, the imports of that file decide which packages
+  are used.
 
 - **Jest setup files that start with `<rootDir>` resolve.** Before, fallow
   did not replace the `<rootDir>` token in `setupFiles`,
@@ -260,6 +850,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The baseline accepts 2. 1 is new." They ask for a `--complexity` run only
   when a function is new. `fallow report --from` on an envelope from an
   older fallow keeps the earlier text.
+
+- **A workspace file can use a package that an ancestor manifest declares.**
+  Before, fallow checked a workspace file only against the `package.json` of
+  its own workspace. A package that only the root manifest or an ancestor
+  workspace declared was reported as an unlisted dependency, while a root
+  declaration counted as used. Now fallow walks from the owning workspace
+  through its ancestor workspaces to the root manifest and accepts the first
+  declaration it finds, when the workspace is private or when the file is not
+  production code (a test, config or build script, by the same rule that the
+  dev dependency checks use). A production file of a publishable workspace
+  keeps the strict check, because consumers of the published package do not
+  get the ancestor's dependency. A sibling workspace's manifest still does not
+  count.
+
+- **An ancestor workspace's dependency counts as used when a nested
+  workspace uses it.** Before, fallow credited an import only to the deepest
+  workspace that owns the file. When a nested workspace's build script used a
+  package that only the ancestor workspace declared, fallow reported the
+  ancestor's declaration as an unused dependency. Now an import that the
+  ancestor's declaration satisfies, by the rule of the unlisted dependency
+  check, counts as a use of that declaration. A production import of a
+  publishable nested workspace stays unlisted and does not count.
+
+- **A root dependency is used only when an import needs the root
+  declaration.** Before, any import of a package anywhere in the project
+  kept the root declaration of that package alive, also when the importing
+  workspace declared the package itself. Now each import counts for the
+  nearest manifest that installs the package: the owning workspace, then its
+  ancestor workspaces, then the root. A root declaration counts as used when
+  a file outside every workspace imports the package, or when no workspace
+  in the importer's chain installs it. A `peerDependencies` entry installs
+  nothing, so it does not take the use away from the root. The peer, script,
+  plugin and config credits of the root manifest do not change. This can
+  report new unused root dependencies.
+
+- **A workspace that bundles with every package external gets no credit
+  for its private siblings' packages.** A private sibling workspace is
+  inlined into the bundle of the workspace that depends on it, so fallow
+  credits the sibling's packages to that workspace. Before, this credit also
+  applied when the build kept every package external, so the sibling was not
+  inlined. Now the credit is removed when the depending workspace gives an
+  explicit signal: a file that imports `esbuild` and sets
+  `packages: 'external'`, or a package script that runs
+  `bun build --packages=external` or `esbuild --packages=external`. Without
+  such a signal the credit stays. This can report new unused workspace
+  dependencies.
 
 ### Changed
 

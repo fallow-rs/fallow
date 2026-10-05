@@ -73,6 +73,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -106,6 +107,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
             exported_factory_returns: std::sync::Arc::default(),
             exported_factory_return_object_shapes: std::sync::Arc::default(),
             type_member_types: std::sync::Arc::default(),
+            missing_export_targets: vec![],
         },
     ];
 

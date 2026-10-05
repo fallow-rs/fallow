@@ -14,6 +14,9 @@ pub struct VitestPlugin;
 
 const ENABLERS: &[&str] = &["vitest"];
 
+/// Binaries that read a `--config` / `-c` file as a vitest config.
+const SCRIPT_CONFIG_BINARIES: &[&str] = &["vitest"];
+
 const ENTRY_PATTERNS: &[&str] = &[
     "**/*.test.{ts,tsx,js,jsx}",
     "**/*.spec.{ts,tsx,js,jsx}",
@@ -125,6 +128,10 @@ impl Plugin for VitestPlugin {
 
     fn fixture_glob_patterns(&self) -> &'static [&'static str] {
         FIXTURE_PATTERNS
+    }
+
+    fn script_config_binaries(&self) -> &'static [&'static str] {
+        SCRIPT_CONFIG_BINARIES
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {

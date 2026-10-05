@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" href="../assets/base.css">
+  </head>
+  <body>
+    <script>
+      function renderTheme(name) {
+        return `<link rel="stylesheet" href="../assets/themes/${name}.css"><script src="./${name}.js"></` + `script>`;
+      }
+      const widgetMarkup = '<script src="./widget.js"></' + 'script>';
+    </script>
+  </body>
+</html>

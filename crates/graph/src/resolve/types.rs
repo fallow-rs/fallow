@@ -8,6 +8,7 @@ use oxc_resolver::Resolver;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use serde_json::Value;
 
+use fallow_config::TsconfigOutputMap;
 use fallow_types::discover::FileId;
 
 /// Result of resolving an import specifier.
@@ -295,6 +296,21 @@ pub struct ResolvedModule {
     /// and type-literal aliases. See `fallow_types::extract::TypeMemberTypeEntry`
     /// and issue #1785.
     pub type_member_types: Arc<[fallow_types::extract::TypeMemberTypeEntry]>,
+    /// Unresolved bare specifiers whose package `exports` entry names only
+    /// paths that do not exist, in specifier order. The resolver records the
+    /// paths so that the unresolved-import check can test them against the
+    /// ignore rules of the repository. No edge points at these paths.
+    pub missing_export_targets: Vec<MissingExportTarget>,
+}
+
+/// The missing paths that the `exports` map of a project package names for
+/// one unresolved bare specifier.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MissingExportTarget {
+    /// The import specifier, for example `store/enums`.
+    pub specifier: String,
+    /// The absolute paths that the matched `exports` entry names.
+    pub paths: Vec<PathBuf>,
 }
 
 impl Default for ResolvedModule {
@@ -319,6 +335,7 @@ impl Default for ResolvedModule {
             exported_factory_returns: Arc::default(),
             exported_factory_return_object_shapes: Arc::default(),
             type_member_types: Arc::default(),
+            missing_export_targets: vec![],
         }
     }
 }
@@ -449,6 +466,7 @@ impl CanonicalizeCache {
 pub(super) struct TsconfigCache {
     json: DashMap<PathBuf, Option<Arc<Value>>, FxBuildHasher>,
     chains: DashMap<PathBuf, Arc<[PathBuf]>, FxBuildHasher>,
+    output_maps: DashMap<PathBuf, Arc<TsconfigOutputMap>, FxBuildHasher>,
 }
 
 impl TsconfigCache {
@@ -480,6 +498,18 @@ impl TsconfigCache {
     /// Store the computed tsconfig chain for a source file.
     pub fn store_chain(&self, from_file: &Path, chain: Arc<[PathBuf]>) {
         self.chains.insert(from_file.to_path_buf(), chain);
+    }
+
+    /// Return the output-to-source map of a package root, building it on
+    /// first miss. Each package root reads its tsconfig files once per run.
+    pub fn output_map(&self, package_root: &Path) -> Arc<TsconfigOutputMap> {
+        if let Some(map) = self.output_maps.get(package_root) {
+            return Arc::clone(&map);
+        }
+        let map = Arc::new(TsconfigOutputMap::from_project(package_root));
+        self.output_maps
+            .insert(package_root.to_path_buf(), Arc::clone(&map));
+        map
     }
 }
 

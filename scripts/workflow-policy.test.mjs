@@ -1519,6 +1519,38 @@ test("Miri caches restore on PRs but save only on main", async () => {
   );
 });
 
+test("CodSpeed simulation keeps its compatible runner without downgrading walltime", () => {
+  const simulationJobs = [];
+  const supportedSimulationRunners = new Set(["ubuntu-24.04"]);
+
+  for (const file of readdirSync(".github/workflows")) {
+    if (!file.endsWith(".yml")) continue;
+    const workflow = readWorkflow(join(".github/workflows", file));
+    for (const match of indentedBlock(workflow, "jobs", 0).matchAll(/^ {2}([\w-]+):\n/gmu)) {
+      const name = match[1];
+      const job = indentedBlock(workflow, name, 2);
+      if (!/uses: CodSpeedHQ\/action@/u.test(job) || !/mode: simulation/u.test(job)) continue;
+      simulationJobs.push(`${file}/${name}`);
+      const runner = job.match(/^    runs-on: (.+)$/mu)?.[1];
+      assert.ok(
+        supportedSimulationRunners.has(runner),
+        `${file}/${name}: CodSpeed simulation needs its known-compatible runner, received ${runner}`,
+      );
+    }
+  }
+
+  assert.ok(simulationJobs.includes("bench.yml/benchmark"));
+  assert.ok(simulationJobs.includes("bench.yml/benchmark-full"));
+  assert.ok(simulationJobs.includes("bench-cli-instructions.yml/instructions"));
+  const benchmark = readWorkflow(".github/workflows/bench.yml");
+  for (const name of ["benchmark-harness", "determine-matrix"]) {
+    assert.match(indentedBlock(benchmark, name, 2), /runs-on: ubuntu-26\.04/u);
+  }
+  const walltime = readWorkflow(".github/workflows/bench-type-aware.yml");
+  assert.match(walltime, /mode: walltime/u);
+  assert.match(walltime, /runs-on: ubuntu-26\.04/u);
+});
+
 test("type-aware benchmarks supersede only the same pull request", async () => {
   const { runInNewContext } = await import("node:vm");
   const concurrency = indentedBlock(

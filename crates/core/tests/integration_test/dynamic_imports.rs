@@ -468,3 +468,94 @@ fn webpack_context_makes_files_reachable() {
         "orphan.ts should be unused (not in icons/), found: {unused_file_names:?}"
     );
 }
+
+#[test]
+fn member_read_on_awaited_dynamic_import_credits_that_export() {
+    let root = fixture_path("dynamic-import-direct-member");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            let path = export
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&export.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            format!("{path}:{}", export.export.export_name)
+        })
+        .collect();
+    unused_exports.sort();
+
+    assert_eq!(
+        unused_exports,
+        vec![
+            "src/a.ts:KA".to_string(),
+            "src/a.ts:unusedA".to_string(),
+            "src/b.ts:unusedB".to_string(),
+            "src/b.ts:usedB".to_string(),
+        ],
+        "a member read directly on an awaited dynamic import should credit only that export"
+    );
+}
+
+#[test]
+fn promise_all_array_destructuring_credits_each_dynamic_import() {
+    let root = fixture_path("dynamic-import-promise-all");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                e.export.path.file_name().unwrap().to_string_lossy(),
+                e.export.export_name
+            )
+        })
+        .collect();
+    unused.sort();
+
+    // `c` is destructured by name, `d` is a namespace binding. A rest element
+    // keeps the whole module of `e` alive. A hole leaves `f` unbound, so the
+    // import of `f` only loads the module.
+    assert_eq!(
+        unused,
+        vec!["c.ts:unusedC", "d.ts:unusedD", "f.ts:unusedF", "f.ts:usedF",],
+        "only exports that no Promise.all element reads should be unused"
+    );
+}
+
+#[test]
+fn dynamic_import_assigned_to_outer_binding_credits_member_reads() {
+    let root = fixture_path("dynamic-import-assigned-binding");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .filter_map(|export| {
+            let path = export
+                .export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&export.export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (path == "src/tool.ts").then(|| export.export.export_name.clone())
+        })
+        .collect();
+    assert_eq!(
+        unused_exports,
+        vec!["unusedTool".to_string()],
+        "`tool = await import(...)` must credit the members read through `tool`, \
+         and keep the unread export reported"
+    );
+}

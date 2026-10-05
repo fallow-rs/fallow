@@ -1,0 +1,8 @@
+{
+  "name": "tsdown-entry-object-map",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "tsdown": "1.0.0"
+  }
+}

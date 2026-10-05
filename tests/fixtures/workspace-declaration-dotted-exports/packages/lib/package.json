@@ -1,0 +1,15 @@
+{
+  "name": "@demo/lib",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./port": {
+      "types": "./dist/feature.port.d.ts",
+      "import": "./dist/feature.port.js"
+    },
+    "./mod": {
+      "types": "./dist/helper.d.mts",
+      "import": "./dist/helper.mjs"
+    }
+  }
+}

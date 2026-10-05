@@ -139,6 +139,31 @@ fn credit_package_path_references(graph: &mut graph::ModuleGraph, modules: &[ext
         for package_name in &module.package_path_references {
             record_graph_package_usage(graph, package_name, module.file_id, false);
         }
+        // A module augmentation credits the package as a type-only use. The
+        // unlisted-dependency check reports a package only at a resolved
+        // import site, so an undeclared augmented package stays unreported.
+        for package_name in &module.type_package_references {
+            record_graph_package_usage(graph, package_name, module.file_id, true);
+        }
+    }
+}
+
+/// Credit the package behind each `node_modules/.bin/<name>` path in source.
+///
+/// The persisted graph cache does not hold these credits: the bin map comes
+/// from `node_modules`, which the cache manifest does not track. Each run
+/// applies them to a built or a loaded graph.
+fn credit_bin_path_references(
+    graph: &mut graph::ModuleGraph,
+    modules: &[extract::ModuleInfo],
+    binaries: &scripts::DependencyBinaries,
+) {
+    for module in modules {
+        for binary in &module.bin_path_references {
+            if let Some(package_name) = binaries.package_for(binary) {
+                record_graph_package_usage(graph, &package_name, module.file_id, false);
+            }
+        }
     }
 }
 
@@ -697,11 +722,17 @@ impl<'a> AnalysisSession<'a> {
         );
         trace_pipeline_profile(&profile);
 
-        let trace_provenance = plugins::federation_trace_provenance(
+        let mut trace_provenance = plugins::federation_trace_provenance(
             &self.config.root,
             self.files(),
             &plugin_result.federation_sources,
             &core.modules,
+        );
+        plugins::push_tooling_trace_credits(
+            &mut trace_provenance,
+            &self.config.root,
+            self.workspaces(),
+            &plugin_result,
         );
         let mut output = assemble_full_output(
             core,
@@ -839,12 +870,19 @@ impl DeadCodeBackendPrelude<'_> {
         &self,
         modules: &[extract::ModuleInfo],
     ) -> fallow_types::trace::TraceProvenance {
-        plugins::federation_trace_provenance(
+        let mut provenance = plugins::federation_trace_provenance(
             &self.config.root,
             self.discovery.files(),
             &self.plugin_result.federation_sources,
             modules,
-        )
+        );
+        plugins::push_tooling_trace_credits(
+            &mut provenance,
+            &self.config.root,
+            self.discovery.workspaces(),
+            &self.plugin_result,
+        );
+        provenance
     }
 
     /// The plugin stage's result, after the workspace merge and the
@@ -1191,20 +1229,28 @@ fn try_load_analysis_graph_cache(
 
     let t = Instant::now();
     input.progress.set_stage("loading module graph cache...");
+    let unseeded_declaration_files = orphan_module_declaration_files(input, modules);
     let current = build_graph_cache_manifest(
         input.config,
         input.plugin_result,
         &entry_points.entry_points,
         input.files,
         modules,
+        &unseeded_declaration_files,
     );
     let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir).map_err(Some)?;
     if store.manifest.matches_inputs(&current) {
         let project = restore_cached_resolved_project(input, modules, &store.resolved_project)?;
         tracing::debug!("Graph cache hit: skipping import resolution and graph build");
+        let mut graph = store.graph;
+        credit_bin_path_references(
+            &mut graph,
+            modules,
+            &input.plugin_result.dependency_binaries,
+        );
 
         return Ok(GraphCacheHit {
-            graph: store.graph,
+            graph,
             project,
             elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
         });
@@ -1302,7 +1348,8 @@ fn build_analysis_graph_timed(
 ) -> TimedGraph {
     let t = Instant::now();
     input.progress.set_stage("building module graph...");
-    let graph = build_analysis_graph(&BuildAnalysisGraphInput {
+    let unseeded_declaration_files = orphan_module_declaration_files(input, modules);
+    let mut graph = build_analysis_graph(&BuildAnalysisGraphInput {
         config: input.config,
         plugin_result: input.plugin_result,
         project,
@@ -1310,11 +1357,26 @@ fn build_analysis_graph_timed(
         files: input.files,
         modules,
         workspaces: input.workspaces,
+        unseeded_declaration_files: &unseeded_declaration_files,
     });
+    credit_bin_path_references(
+        &mut graph,
+        modules,
+        &input.plugin_result.dependency_binaries,
+    );
     TimedGraph {
         graph,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
     }
+}
+
+/// The orphan module declaration files of this run, which the graph does not
+/// seed as entry points. See [`discover::find_orphan_module_declaration_files`].
+fn orphan_module_declaration_files(
+    input: &AnalysisCoreSharedInput<'_>,
+    modules: &[extract::ModuleInfo],
+) -> FxHashSet<discover::FileId> {
+    discover::find_orphan_module_declaration_files(&input.config.root, input.files, modules)
 }
 
 fn release_resolution_payloads(modules: &mut [extract::ModuleInfo]) {
@@ -1739,6 +1801,7 @@ struct BuildAnalysisGraphInput<'a> {
     files: &'a [discover::DiscoveredFile],
     modules: &'a [extract::ModuleInfo],
     workspaces: &'a [fallow_config::WorkspaceInfo],
+    unseeded_declaration_files: &'a FxHashSet<discover::FileId>,
 }
 
 /// Build the analysis graph and persist it for the next identical run.
@@ -1757,16 +1820,20 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
             input.entry_points,
             input.files,
             input.modules,
+            input.unseeded_declaration_files,
         )
     });
 
-    let mut graph = graph::ModuleGraph::build_with_reachability_roots_and_replacements(
+    let mut graph = graph::ModuleGraph::build_with_declaration_seeding(
         &input.project.modules,
         &input.project.replaced_module_targets,
-        &input.entry_points.all,
-        &input.entry_points.runtime,
-        &input.entry_points.test,
+        &graph::ReachabilityRoots {
+            all: &input.entry_points.all,
+            runtime: &input.entry_points.runtime,
+            test: &input.entry_points.test,
+        },
         input.files,
+        input.unseeded_declaration_files,
     );
     credit_package_path_references(&mut graph, input.modules);
     credit_workspace_package_usage(&mut graph, &input.project.modules, input.workspaces);
@@ -1802,10 +1869,16 @@ fn build_graph_cache_manifest(
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
     modules: &[extract::ModuleInfo],
+    unseeded_declaration_files: &FxHashSet<discover::FileId>,
 ) -> graph_cache::GraphCacheManifest {
     let mode = graph_cache::GraphCacheMode::new(
         resolver_options_hash(config),
-        entry_points_hash(entry_points, &config.root),
+        entry_points_hash(
+            entry_points,
+            files,
+            unseeded_declaration_files,
+            &config.root,
+        ),
         plugin_config_hash(plugin_result, &config.root),
     );
     // The parse stage already hashed every file it read, so keying the manifest
@@ -1862,9 +1935,13 @@ fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
 }
 
 /// Hash the entry-point set (sorted root-relative paths per role) so any change
-/// in reachability roots misses the cache.
+/// in reachability roots misses the cache. The declaration files the graph
+/// does not seed are reachability roots too: they depend on package.json,
+/// tsconfig and sibling files the manifest does not track.
 fn entry_points_hash(
     entry_points: &discover::CategorizedEntryPoints,
+    files: &[discover::DiscoveredFile],
+    unseeded_declaration_files: &FxHashSet<discover::FileId>,
     root: &std::path::Path,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -1879,6 +1956,16 @@ fn entry_points_hash(
         for key in keys {
             key.hash(&mut hasher);
         }
+    }
+    let mut unseeded: Vec<String> = files
+        .iter()
+        .filter(|file| unseeded_declaration_files.contains(&file.id))
+        .map(|file| root_relative_key(root, &file.path))
+        .collect();
+    unseeded.sort_unstable();
+    unseeded.len().hash(&mut hasher);
+    for key in unseeded {
+        key.hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -2109,15 +2196,35 @@ fn analyze_all_scripts(
 
     let nm_roots = collect_node_modules_roots(config, workspaces);
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, &all_dep_names);
+    let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let deps = ScriptDependencyContext {
         bin_map: &bin_map,
         all_dep_set: &all_dep_set,
         workspace_packages: &workspace_packages,
+        registry: &registry,
     };
 
     analyze_root_scripts(config, root_pkg, &deps, plugin_result);
     analyze_workspace_scripts(config, workspace_pkgs, &deps, plugin_result);
     analyze_ci_scripts(config, &bin_map, &all_dep_set, &all_scripts, plugin_result);
+    analyze_hook_scripts(
+        config,
+        workspaces,
+        &scripts::hooks::HookContext {
+            bin_map: &bin_map,
+            declared_packages: &all_dep_set,
+            scripts: &all_scripts,
+            ignored: scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
+        },
+        plugin_result,
+    );
+    plugin_result.dependency_binaries =
+        scripts::DependencyBinaries::new(config.root.clone(), bin_map, all_dep_set);
+    plugin_result.dev_dependency_names = root_pkg
+        .into_iter()
+        .chain(workspace_pkgs.iter().map(|(_, ws_pkg)| ws_pkg))
+        .flat_map(PackageJson::dev_dependency_names)
+        .collect();
 
     plugin_result
         .entry_point_roles
@@ -2148,6 +2255,7 @@ struct ScriptDependencyContext<'a> {
     bin_map: &'a rustc_hash::FxHashMap<String, String>,
     all_dep_set: &'a FxHashSet<String>,
     workspace_packages: &'a std::sync::Arc<scripts::WorkspacePackages>,
+    registry: &'a plugins::PluginRegistry,
 }
 
 /// The directory of a workspace package relative to the project root, with
@@ -2227,6 +2335,11 @@ fn analyze_root_scripts(
         scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     plugin_result.script_used_packages = script_analysis.used_packages;
+    plugin_result.merge_into(deps.registry.resolve_script_config_files(
+        &script_analysis.binary_config_files,
+        &config.root,
+        "",
+    ));
 
     for config_file in &script_analysis.config_files {
         plugin_result
@@ -2247,6 +2360,7 @@ type WsScriptOut = (
     Vec<String>,
     Vec<(String, String)>,
     Vec<(plugins::PathRule, String)>,
+    plugins::AggregatedPluginResult,
 );
 
 fn analyze_workspace_scripts(
@@ -2259,8 +2373,9 @@ fn analyze_workspace_scripts(
         .par_iter()
         .map(|(ws, ws_pkg)| analyze_one_workspace_scripts(config, ws, ws_pkg, deps))
         .collect();
-    for (used_packages, discovered_always_used, entry_patterns) in ws_results {
+    for (used_packages, discovered_always_used, entry_patterns, config_result) in ws_results {
         plugin_result.script_used_packages.extend(used_packages);
+        plugin_result.merge_into(config_result);
         plugin_result
             .discovered_always_used
             .extend(discovered_always_used);
@@ -2269,7 +2384,8 @@ fn analyze_workspace_scripts(
 }
 
 /// Analyze a single workspace package's scripts, returning its used packages,
-/// always-used config files, and entry patterns (all workspace-prefixed).
+/// always-used config files, entry patterns, and the plugin result of the
+/// config files that scripts pass to a plugin binary (all workspace-prefixed).
 fn analyze_one_workspace_scripts(
     config: &ResolvedConfig,
     ws: &fallow_config::WorkspaceInfo,
@@ -2280,7 +2396,12 @@ fn analyze_one_workspace_scripts(
     let mut discovered_always_used: Vec<(String, String)> = Vec::new();
     let mut entry_patterns: Vec<(plugins::PathRule, String)> = Vec::new();
     let Some(ref ws_scripts) = ws_pkg.scripts else {
-        return (used_packages, discovered_always_used, entry_patterns);
+        return (
+            used_packages,
+            discovered_always_used,
+            entry_patterns,
+            plugins::AggregatedPluginResult::default(),
+        );
     };
     let scripts_to_analyze = if config.production {
         scripts::filter_production_scripts(ws_scripts)
@@ -2299,6 +2420,11 @@ fn analyze_one_workspace_scripts(
         scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     used_packages.extend(ws_analysis.used_packages);
+    let config_result = deps.registry.resolve_script_config_files(
+        &ws_analysis.binary_config_files,
+        &ws.root,
+        &ws_prefix,
+    );
 
     for config_file in &ws_analysis.config_files {
         discovered_always_used.push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
@@ -2308,7 +2434,12 @@ fn analyze_one_workspace_scripts(
             entry_patterns.push((plugins::PathRule::new(pat), "scripts".to_string()));
         }
     }
-    (used_packages, discovered_always_used, entry_patterns)
+    (
+        used_packages,
+        discovered_always_used,
+        entry_patterns,
+        config_result,
+    )
 }
 
 /// Analyze CI config files for binary invocations and merge the results.
@@ -2335,6 +2466,33 @@ fn analyze_ci_scripts(
                 .entry_patterns
                 .push((plugins::PathRule::new(pat), "scripts".to_string()));
         }
+    }
+}
+
+/// Analyze git hook and staged-file commands for binary invocations and merge
+/// the invoked packages into the script-used set.
+///
+/// Hooks run on a developer machine, never in production, so production mode
+/// skips them, like the non-production package.json scripts.
+fn analyze_hook_scripts(
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    context: &scripts::hooks::HookContext<'_>,
+    plugin_result: &mut plugins::AggregatedPluginResult,
+) {
+    if config.production {
+        return;
+    }
+    let roots = std::iter::once(config.root.as_path()).chain(
+        workspaces
+            .iter()
+            .map(|ws| ws.root.as_path())
+            .filter(|root| *root != config.root.as_path()),
+    );
+    for root in roots {
+        plugin_result
+            .script_used_packages
+            .extend(scripts::hooks::analyze_hook_files(root, context));
     }
 }
 

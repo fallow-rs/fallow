@@ -58,6 +58,30 @@ impl TsconfigOutputMap {
         }
     }
 
+    /// Resolve an absolute output path, such as the target of a relative import,
+    /// to its source file.
+    ///
+    /// The path does not need to exist on disk. A path outside the project root
+    /// of this map is [`TsconfigOutputResolution::Unconfigured`].
+    #[must_use]
+    pub fn resolve_source_for_output_path(
+        &self,
+        output_path: &Path,
+        source_extensions: &[&str],
+    ) -> TsconfigOutputResolution {
+        let Some(output_path) = normalize_path(output_path) else {
+            return TsconfigOutputResolution::Unconfigured;
+        };
+        let relative = [self.display_root.as_deref(), self.root.as_deref()]
+            .into_iter()
+            .flatten()
+            .find_map(|root| output_path.strip_prefix(root).ok());
+        let Some(entry) = relative.and_then(Path::to_str) else {
+            return TsconfigOutputResolution::Unconfigured;
+        };
+        self.resolve_source_for_entry(entry, source_extensions)
+    }
+
     /// Resolve a generated entry while preserving whether the output was configured.
     #[must_use]
     pub fn resolve_source_for_entry(

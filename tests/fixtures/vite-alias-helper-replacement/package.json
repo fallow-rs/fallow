@@ -1,0 +1,8 @@
+{
+  "name": "vite-alias-helper-replacement",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vite": "^5.0.0"
+  }
+}

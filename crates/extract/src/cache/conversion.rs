@@ -234,6 +234,7 @@ fn cached_signature_refs_to_module(
             export_name: reference.export_name.clone(),
             type_name: reference.type_name.clone(),
             span: Span::new(reference.span_start, reference.span_end),
+            from_satisfies: reference.from_satisfies,
         })
         .collect()
 }
@@ -448,6 +449,7 @@ fn module_signature_refs_to_cached(
             type_name: reference.type_name.clone(),
             span_start: reference.span.start,
             span_end: reference.span.end,
+            from_satisfies: reference.from_satisfies,
         })
         .collect()
 }
@@ -489,6 +491,9 @@ pub fn cached_to_module_opts(
         dynamic_import_patterns: cached_dynamic_patterns_to_module(&cached.dynamic_import_patterns),
         require_calls: cached_require_calls_to_module(&cached.require_calls),
         package_path_references: cached.package_path_references.clone(),
+        type_package_references: cached.type_package_references.clone(),
+        bin_path_references: cached.bin_path_references.clone(),
+        package_resolve_sites: cached.package_resolve_sites.clone(),
         member_accesses: cached.member_accesses.clone().into(),
         semantic_facts: cached_opt_to_arc(cached.semantic_facts.as_deref()),
         whole_object_uses: Arc::from(&*cached.whole_object_uses),
@@ -543,6 +548,8 @@ pub fn cached_to_module_opts(
         di_key_sites: cached.di_key_sites.clone(),
         has_dynamic_provide: cached.has_dynamic_provide,
         is_server_action_module: cached.is_server_action_module,
+        has_global_declarations: cached.has_global_declarations,
+        triple_slash_reference_paths: cached.triple_slash_reference_paths.clone(),
         // Derived in `release_resolution_payload` from `imports` + `unused_import_bindings`
         // (both cached); never persisted, so the cache-load path leaves it empty.
         referenced_import_bindings: Vec::new(),
@@ -603,6 +610,9 @@ pub fn module_to_cached(
         dynamic_imports: module_dynamic_imports_to_cached(&module.dynamic_imports),
         require_calls: module_require_calls_to_cached(&module.require_calls),
         package_path_references: module.package_path_references.clone(),
+        type_package_references: module.type_package_references.clone(),
+        bin_path_references: module.bin_path_references.clone(),
+        package_resolve_sites: module.package_resolve_sites.clone(),
         member_accesses: module.member_accesses.to_vec(),
         semantic_facts: (!module.semantic_facts.is_empty())
             .then(|| Box::from(&*module.semantic_facts)),
@@ -658,6 +668,8 @@ pub fn module_to_cached(
         di_key_sites: module.di_key_sites.clone(),
         has_dynamic_provide: module.has_dynamic_provide,
         is_server_action_module: module.is_server_action_module,
+        has_global_declarations: module.has_global_declarations,
+        triple_slash_reference_paths: module.triple_slash_reference_paths.clone(),
         component_props: module.component_props.clone(),
         has_props_attrs_fallthrough: module.has_props_attrs_fallthrough,
         has_define_expose: module.has_define_expose,

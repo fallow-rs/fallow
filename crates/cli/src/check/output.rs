@@ -297,6 +297,7 @@ fn handle_trace_dependency(request: &TraceRequest<'_>, facts: &TraceFacts<'_>) -
         facts.script_used_packages,
     );
     trace.sources = facts.provenance.dependency_sources(pkg_name);
+    trace.apply_tooling_credit(facts.provenance.tooling_credit(pkg_name));
     report::print_dependency_trace(&trace, request.output, request.json_style);
     Some(ExitCode::SUCCESS)
 }

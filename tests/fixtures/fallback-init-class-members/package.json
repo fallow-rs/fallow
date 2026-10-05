@@ -1,0 +1,4 @@
+{
+  "name": "fallback-init-class-members",
+  "main": "src/index.ts"
+}

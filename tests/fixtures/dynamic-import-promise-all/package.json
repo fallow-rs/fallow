@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-import-promise-all",
+  "type": "module",
+  "main": "src/index.ts"
+}

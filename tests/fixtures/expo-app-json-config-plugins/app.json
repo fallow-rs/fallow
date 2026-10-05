@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "expo-app-json-config-plugins",
+    "plugins": [
+      "@sample/expo-plugin-pdf",
+      ["sample-expo-plugin-camera/app.plugin", { "permission": "Allow camera" }],
+      "./plugins/with-sample-setting.js"
+    ]
+  }
+}

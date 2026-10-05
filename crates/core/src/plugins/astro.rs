@@ -1,9 +1,17 @@
 //! Astro framework plugin.
 //!
 //! Detects Astro projects and marks pages, layouts, content, and middleware
-//! as entry points. Parses astro.config to extract referenced dependencies.
+//! as entry points. Parses astro.config to extract referenced dependencies,
+//! and the Starlight `components` overrides and `customCss` entries.
 
-use super::{Plugin, PluginResult};
+use std::path::Path;
+
+use oxc_ast::ast::{
+    Argument, CallExpression, Expression, ImportDeclarationSpecifier, ObjectExpression, Program,
+    Statement,
+};
+
+use super::{Plugin, PluginResult, config_parser};
 
 const ENABLERS: &[&str] = &["astro"];
 
@@ -73,7 +81,125 @@ define_plugin! {
         ),
         ("src/actions/index.{js,ts,mjs,mts,cjs,cts}", ACTION_EXPORTS),
     ],
-    resolve_config: imports_only,
+    resolve_config(config_path, source, root) {
+        let mut result = PluginResult::default();
+        crate::plugins::add_import_referenced_dependencies(&mut result, source, config_path);
+        for value in starlight_file_values(source, config_path) {
+            add_starlight_file_value(&mut result, &value, config_path, root);
+        }
+        result
+    },
+}
+
+const STARLIGHT_PACKAGE: &str = "@astrojs/starlight";
+
+/// Read the `components` override values and the `customCss` items of each
+/// Starlight integration call in the `integrations` array.
+fn starlight_file_values(source: &str, config_path: &Path) -> Vec<String> {
+    config_parser::extract_from_source(source, config_path, |program| {
+        let callees = starlight_import_names(program);
+        if callees.is_empty() {
+            return None;
+        }
+        let config = config_parser::find_config_object(program)?;
+        let integrations = config_parser::property_expr(config, "integrations")
+            .and_then(config_parser::array_expression)?;
+        let mut values = Vec::new();
+        for element in &integrations.elements {
+            let Some(Expression::CallExpression(call)) = element.as_expression() else {
+                continue;
+            };
+            let Some(options) = starlight_call_options(call, &callees) else {
+                continue;
+            };
+            collect_starlight_option_values(options, &mut values);
+        }
+        Some(values)
+    })
+    .unwrap_or_default()
+}
+
+/// The local names bound to the default export of the Starlight package.
+fn starlight_import_names(program: &Program<'_>) -> Vec<String> {
+    let mut names = Vec::new();
+    for stmt in &program.body {
+        let Statement::ImportDeclaration(decl) = stmt else {
+            continue;
+        };
+        if decl.source.value != STARLIGHT_PACKAGE {
+            continue;
+        }
+        for specifier in decl.specifiers.iter().flatten() {
+            match specifier {
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(default) => {
+                    names.push(default.local.name.to_string());
+                }
+                ImportDeclarationSpecifier::ImportSpecifier(named)
+                    if named.imported.name().as_ref() == "default" =>
+                {
+                    names.push(named.local.name.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    names
+}
+
+fn starlight_call_options<'a>(
+    call: &'a CallExpression<'a>,
+    callees: &[String],
+) -> Option<&'a ObjectExpression<'a>> {
+    let Expression::Identifier(callee) = &call.callee else {
+        return None;
+    };
+    if !callees.iter().any(|name| name == callee.name.as_str()) {
+        return None;
+    }
+    call.arguments
+        .first()
+        .and_then(Argument::as_expression)
+        .and_then(config_parser::object_expression)
+}
+
+fn collect_starlight_option_values(options: &ObjectExpression<'_>, values: &mut Vec<String>) {
+    if let Some(components) = config_parser::property_object(options, "components") {
+        for property in &components.properties {
+            if let Some(value) = property
+                .as_property()
+                .and_then(|prop| config_parser::expression_to_string(&prop.value))
+            {
+                values.push(value);
+            }
+        }
+    }
+    if let Some(custom_css) =
+        config_parser::property_expr(options, "customCss").and_then(config_parser::array_expression)
+    {
+        values.extend(custom_css.elements.iter().filter_map(|item| {
+            item.as_expression()
+                .and_then(config_parser::expression_to_string)
+        }));
+    }
+}
+
+/// Credit a Starlight file value: a local path is a used file, and a bare
+/// specifier is a used dependency.
+fn add_starlight_file_value(
+    result: &mut PluginResult,
+    value: &str,
+    config_path: &Path,
+    root: &Path,
+) {
+    if value.starts_with('.') || value.starts_with('/') {
+        if let Some(path) = config_parser::normalize_config_path(value, config_path, root) {
+            result.always_used_files.push(path);
+        }
+    } else if config_parser::is_package_specifier(value) {
+        result
+            .referenced_dependencies
+            .push(crate::resolve::extract_package_name(value));
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +211,57 @@ mod tests {
         let plugin = AstroPlugin;
         let prefixes = plugin.virtual_module_prefixes();
         assert!(prefixes.contains(&"astro:"));
+    }
+
+    fn resolve(source: &str) -> PluginResult {
+        let root = Path::new("/project");
+        AstroPlugin.resolve_config(&root.join("astro.config.mjs"), source, root)
+    }
+
+    #[test]
+    fn starlight_components_and_custom_css_are_credited() {
+        let result = resolve(
+            r#"
+            import { defineConfig } from "astro/config";
+            import { default as docs } from "@astrojs/starlight";
+            export default defineConfig({
+                integrations: [
+                    docs({
+                        components: { Footer: "./src/overrides/Footer.astro" },
+                        customCss: ["./src/theme.css", "@fontsource/inter/400.css"],
+                    }),
+                ],
+            });
+            "#,
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"src/overrides/Footer.astro".to_string())
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"src/theme.css".to_string())
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@fontsource/inter".to_string())
+        );
+    }
+
+    #[test]
+    fn options_of_other_integrations_are_not_credited() {
+        let result = resolve(
+            r#"
+            import other from "some-integration";
+            export default {
+                integrations: [other({ customCss: ["./src/theme.css"] })],
+            };
+            "#,
+        );
+        assert!(result.always_used_files.is_empty());
     }
 
     #[test]

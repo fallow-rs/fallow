@@ -103,7 +103,8 @@ jobs:
       - benchmark-harness
       - determine-matrix
     if: needs.determine-matrix.outputs.fast_matrix != '[]'
-    runs-on: ubuntu-26.04
+    # CodSpeed simulation currently rejects Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
@@ -144,7 +145,8 @@ jobs:
     name: CodSpeed full simulation (${{ matrix.label }})
     needs: benchmark-harness
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-26.04
+    # CodSpeed simulation currently rejects Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write

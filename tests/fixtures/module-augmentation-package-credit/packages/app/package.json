@@ -1,0 +1,8 @@
+{
+  "name": "@x/app",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@x/slots": "workspace:*",
+    "ambient-lib": "^1.0.0"
+  }
+}

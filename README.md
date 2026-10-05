@@ -39,22 +39,22 @@ Run it in the root of any JS or TS project:
 npx fallow
 ```
 
-A pull request gate on the vitest monorepo looks like this:
+A pull request gate on a fictional storefront monorepo might look like this:
 
 ```
 $ npx fallow audit --base HEAD~15
 Audit scope: 73 changed files vs HEAD~15
 
 ● Circular dependencies (24)
-  packages/vitest/src/runtime/runner/artifact.ts (6 cycles)
-    → run.ts → context.ts → artifact.ts
+  packages/storefront/src/orders/process.ts (6 cycles)
+    → payment.ts → context.ts → process.ts
 
 ── Duplication ────────────────────────────────────
 ⚠ 185 lines (0.2%) duplicated across 6 files
 
 ● High complexity functions (28)
-  packages/vitest/src/runtime/runner/run.ts
-    :566 runTest CRITICAL
+  packages/storefront/src/orders/payment.ts
+    :566 processPayment CRITICAL
           32 ! cyclomatic   47 ! cognitive  203 lines
 
 ── Styling ────────────────────────────────────────
@@ -64,7 +64,7 @@ Audit scope: 73 changed files vs HEAD~15
   audit gate excluded 98 inherited findings (run with --gate all to enforce)
 ```
 
-<sub>Excerpt from fallow 3.30.0 on vitest, over its last 15 commits, with timings removed. The gate failed (exit code 1) on findings in the changed files. It did not count the 98 findings that existed before the change.</sub>
+<sub>Illustrative output for a fictional project. The gate fails (exit code 1) on findings in changed files. Findings that existed before the change are excluded.</sub>
 
 fallow builds a repository graph of modules, exports, dependencies, functions, and styling tokens. Its analyses use that graph to find complexity, architecture drift, duplication, unused code, and risks in a pull request.
 

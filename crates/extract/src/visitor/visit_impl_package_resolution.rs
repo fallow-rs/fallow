@@ -29,6 +29,15 @@ fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     object.name == REQUIRE && member.property.name == "resolve"
 }
 
+/// Whether `expr` is `import.meta.resolve`. Code cannot rebind `import.meta`,
+/// so no shadow check applies.
+fn is_import_meta_resolve_callee(expr: &Expression<'_>) -> bool {
+    let Expression::StaticMemberExpression(member) = expr else {
+        return false;
+    };
+    matches!(member.object, Expression::ImportMeta(_)) && member.property.name == "resolve"
+}
+
 /// The value of a string literal or of a template literal without expressions.
 fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
     match argument {
@@ -40,6 +49,77 @@ fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
             .map(|cooked| cooked.as_str()),
         _ => None,
     }
+}
+
+/// Whether the program has top-level import or export syntax, the rule that
+/// TypeScript uses to treat a file as a module and not as a script.
+/// `export as namespace` alone does not make a module file.
+pub(super) fn program_has_module_syntax(program: &Program<'_>) -> bool {
+    program.body.iter().any(|statement| match statement {
+        Statement::TSNamespaceExportDeclaration(_) => false,
+        Statement::TSImportEqualsDeclaration(decl) => matches!(
+            decl.module_reference,
+            TSModuleReference::ExternalModuleReference(_)
+        ),
+        _ => statement.is_module_declaration(),
+    })
+}
+
+/// Whether TypeScript reads the program as adding to the global scope: a
+/// script file (no top-level import or export, see
+/// [`program_has_module_syntax`]), or a module file with a top-level
+/// `declare global` block or string-named `declare module` block (an ambient
+/// module declaration or a module augmentation).
+pub(super) fn program_has_global_declarations(program: &Program<'_>, is_module_file: bool) -> bool {
+    !is_module_file
+        || program.body.iter().any(|statement| {
+            matches!(
+                statement,
+                Statement::TSGlobalDeclaration(_) | Statement::TSExternalModuleDeclaration(_)
+            )
+        })
+}
+
+/// The `path` values of every `/// <reference path="..." />` directive in the
+/// program, in source order. `types`, `lib` and `no-default-lib` directives
+/// name packages or compiler settings, not files, and are skipped.
+pub(super) fn triple_slash_reference_paths(program: &Program<'_>) -> Vec<String> {
+    program
+        .comments
+        .iter()
+        .filter(|comment| comment.is_line())
+        .filter_map(|comment| {
+            reference_directive_path(comment.content_span().source_text(program.source_text))
+        })
+        .collect()
+}
+
+/// Parse the content of a line comment (the text after `//`) as a
+/// `/ <reference path="..." />` directive and return its `path` value.
+fn reference_directive_path(content: &str) -> Option<String> {
+    let rest = content.strip_prefix('/')?.trim_start();
+    let attributes = rest.strip_prefix("<reference")?;
+    if !attributes.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut search = attributes;
+    while let Some(index) = search.find("path") {
+        let preceded_by_space = search[..index]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace);
+        let after = &search[index + "path".len()..];
+        if preceded_by_space && let Some(value) = after.trim_start().strip_prefix('=') {
+            let value = value.trim_start();
+            let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+            let value = &value[quote.len_utf8()..];
+            let end = value.find(quote)?;
+            let path = value[..end].trim();
+            return (!path.is_empty()).then(|| path.to_string());
+        }
+        search = after;
+    }
+    None
 }
 
 fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
@@ -131,6 +211,37 @@ fn collect_static_object_string_property_values(
     }
 }
 
+/// The path segment that leads to the installed binaries of a package manager.
+const NODE_MODULES_BIN: &str = "node_modules/.bin/";
+
+/// The binary names in each `node_modules/.bin/<name>` path segment of `text`.
+///
+/// The segment must start the text or follow a character that cannot be part
+/// of a directory name, such as `/`, a space or a quote. The name ends at the
+/// first character that a binary name does not use, such as `/`, a space or a
+/// quote. A segment without a name gives nothing.
+fn bin_names_in_text(text: &str) -> impl Iterator<Item = &str> {
+    text.match_indices(NODE_MODULES_BIN)
+        .filter(|(start, _)| {
+            text[..*start]
+                .chars()
+                .next_back()
+                .is_none_or(|prev| !is_bin_name_char(prev))
+        })
+        .filter_map(|(start, _)| {
+            let rest = &text[start + NODE_MODULES_BIN.len()..];
+            let end = rest
+                .find(|ch: char| !is_bin_name_char(ch))
+                .unwrap_or(rest.len());
+            let name = &rest[..end];
+            (!name.is_empty()).then_some(name)
+        })
+}
+
+fn is_bin_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '+' | '@')
+}
+
 impl ModuleInfoExtractor {
     /// Whether `callee` is `require.resolve` on the `require` of the module.
     ///
@@ -174,11 +285,13 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn try_record_package_path_reference(&mut self, call: &CallExpression<'_>) {
-        if self.is_module_require_resolve(&call.callee)
+        if (self.is_module_require_resolve(&call.callee)
+            || is_import_meta_resolve_callee(&call.callee))
             && let Some(arg) = call.arguments.first()
         {
             let references = self.package_references_from_argument(arg);
             self.push_package_path_references(references);
+            self.try_record_package_resolve_site(call);
         }
 
         if let Expression::Identifier(callee) = &call.callee
@@ -191,6 +304,29 @@ impl ModuleInfoExtractor {
             let references = self.package_references_from_argument(arg);
             self.push_package_path_references(references);
         }
+    }
+
+    /// Record the site of a direct `require.resolve('pkg')` call.
+    ///
+    /// The argument is a string literal or a template literal without
+    /// expressions, so the call names the package at a known location. A call
+    /// with a second argument (the `paths` option) resolves from other
+    /// directories and gets no site. Names from resolver functions, loop
+    /// bindings and static tables also get no site: they only credit the
+    /// dependency.
+    fn try_record_package_resolve_site(&mut self, call: &CallExpression<'_>) {
+        if call.arguments.len() != 1 {
+            return;
+        }
+        let Some(package_name) = call
+            .arguments
+            .first()
+            .and_then(static_string_argument)
+            .and_then(package_from_resolution_specifier)
+        else {
+            return;
+        };
+        self.package_resolve_sites.push((package_name, call.span));
     }
 
     /// Record `require.resolve('./file')` as a reference to a project file.
@@ -224,6 +360,42 @@ impl ModuleInfoExtractor {
             is_speculative: true,
         });
         self.mark_import_load_kind(call.span, ImportLoadKind::PathReference);
+    }
+
+    /// Record the package that a module augmentation names.
+    ///
+    /// TypeScript treats `declare module 'pkg' { ... }` as an augmentation
+    /// only in a module file, and there `pkg` must resolve. So the declaration
+    /// is a type-only use of the package. In a script file the same syntax
+    /// declares an ambient module, which uses nothing. A wildcard pattern such
+    /// as `'*.svg'` and a relative path name no package.
+    pub(super) fn record_module_augmentation(&mut self, decl: &TSExternalModuleDeclaration<'_>) {
+        if !self.is_module_file || self.ambient_module_depth > 0 || decl.body.is_none() {
+            return;
+        }
+        let specifier = decl.id.value.as_str();
+        if specifier.contains('*') || !is_package_resolution_specifier(specifier) {
+            return;
+        }
+        if let Some(package_name) = package_name_from_specifier(specifier)
+            && !self.type_package_references.contains(&package_name)
+        {
+            self.type_package_references.push(package_name);
+        }
+    }
+
+    /// Record the binary name of each `node_modules/.bin/<name>` path in the
+    /// text of a string literal or a template quasi.
+    ///
+    /// Code hands such a path to a consumer that static analysis cannot
+    /// follow, such as a child process. The analysis maps the name to the
+    /// package that declares the binary and credits that package.
+    pub(super) fn record_bin_path_references(&mut self, text: &str) {
+        for name in bin_names_in_text(text) {
+            if !self.bin_path_references.iter().any(|known| known == name) {
+                self.bin_path_references.push(name.to_string());
+            }
+        }
     }
 
     fn push_package_path_references(&mut self, references: Vec<String>) {

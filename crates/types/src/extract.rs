@@ -31,6 +31,18 @@ pub struct ModuleInfo {
     pub require_calls: Vec<RequireCallInfo>,
     /// Package names statically referenced through package path resolution.
     pub package_path_references: Box<[String]>,
+    /// Package names that a module augmentation (`declare module 'pkg'` in a
+    /// module file) names. They credit the package as a type-only use.
+    pub type_package_references: Box<[String]>,
+    /// Binary names found in `node_modules/.bin/<name>` paths in string
+    /// literals and template quasis. The analysis maps each name to the
+    /// package that declares the binary.
+    pub bin_path_references: Box<[String]>,
+    /// Package names from direct `require.resolve('pkg')` calls, each with the
+    /// byte offset of its call. A name from a resolver function, a loop
+    /// binding or a static table has no site, because it is a heuristic
+    /// credit. The unlisted-dependency check reports a site like an import.
+    pub package_resolve_sites: Box<[(String, u32)]>,
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Arc<[MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
@@ -210,6 +222,18 @@ pub struct ModuleInfo {
     /// module, including a `"use server"` file with a non-action value
     /// export. Captured only by JS/TS extraction.
     pub is_server_action_module: bool,
+    /// `true` when TypeScript reads this file as adding to the global scope:
+    /// a script file (no top-level import or export), or a module file with a
+    /// top-level `declare global` block or string-named `declare module`
+    /// block. Read only for declaration files (`.d.ts`, `.d.mts`, `.d.cts`):
+    /// a declaration file without global declarations is seeded as an entry
+    /// point only when something points to it. Captured only by JS/TS
+    /// extraction; `false` for every other module.
+    pub has_global_declarations: bool,
+    /// Raw `path` values of `/// <reference path="..." />` directives in this
+    /// file, in source order. A declaration file named by one stays an entry
+    /// point. Captured only by JS/TS extraction.
+    pub triple_slash_reference_paths: Box<[String]>,
     /// Local names of import bindings that ARE referenced somewhere in this file
     /// (script value/type position OR template/markup). The complement of
     /// `unused_import_bindings` among `imports`. Derived by
@@ -395,6 +419,9 @@ impl ModuleInfo {
             dynamic_import_patterns: Vec::new(),
             require_calls: Vec::new(),
             package_path_references: Box::default(),
+            type_package_references: Box::default(),
+            bin_path_references: Box::default(),
+            package_resolve_sites: Box::default(),
             member_accesses: Arc::default(),
             semantic_facts: Arc::default(),
             whole_object_uses: Arc::default(),
@@ -437,6 +464,8 @@ impl ModuleInfo {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             is_server_action_module: false,
+            has_global_declarations: false,
+            triple_slash_reference_paths: Box::default(),
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             has_props_attrs_fallthrough: false,
@@ -510,6 +539,8 @@ impl ModuleInfo {
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
         Self::release_boxed_slice(&mut self.package_path_references);
+        Self::release_boxed_slice(&mut self.type_package_references);
+        Self::release_boxed_slice(&mut self.bin_path_references);
         Self::release_arc_slice(&mut self.whole_object_uses);
         Self::release_vec(&mut self.unused_import_bindings);
         Self::release_vec(&mut self.type_referenced_import_bindings);
@@ -1997,6 +2028,10 @@ pub struct FactoryReturnExport {
     pub export_name: String,
     /// The returned class's local name within the factory module.
     pub class_local_name: String,
+    /// The factory returns a promise of the class (an `async` function, or a
+    /// `Promise<Class>` return type). Only an awaited call result is the class.
+    #[serde(default)]
+    pub is_async: bool,
 }
 
 /// One resolved property of an object-literal factory return: a dotted property
@@ -2096,6 +2131,11 @@ pub struct PublicSignatureTypeReference {
     /// Reference span.
     #[serde(serialize_with = "serialize_span")]
     pub span: Span,
+    /// True when the reference comes from a `satisfies` clause. The clause
+    /// checks the value but does not change the exported type, so the type is
+    /// in use but is not a private type leak.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub from_satisfies: bool,
 }
 
 /// A member of an enum, class, or namespace.
@@ -2929,6 +2969,8 @@ pub struct FactoryFnMemberAccessFact {
     pub callee_name: String,
     /// Member accessed on the returned instance-like object.
     pub member: String,
+    /// The local holds the awaited call result (`const x = await factory()`).
+    pub awaited: bool,
 }
 
 /// A factory-returned value consumed opaquely, so every member of the class it
@@ -3701,7 +3743,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1352);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1416);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -4222,6 +4264,9 @@ mod tests {
                 is_type_only: false,
             }],
             package_path_references: vec!["react".to_string()].into(),
+            type_package_references: vec!["react".to_string()].into(),
+            bin_path_references: vec!["vite".to_string()].into(),
+            package_resolve_sites: vec![("react".to_string(), 0)].into(),
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
@@ -4278,6 +4323,7 @@ mod tests {
             exported_factory_returns: std::sync::Arc::from([FactoryReturnExport {
                 export_name: "useApi".to_string(),
                 class_local_name: "RESTApi".to_string(),
+                is_async: false,
             }]),
             exported_factory_return_object_shapes: std::sync::Arc::from([
                 FactoryReturnObjectShapeExport {
@@ -4302,6 +4348,7 @@ mod tests {
                 export_name: "kept".to_string(),
                 type_name: "Contract".to_string(),
                 span: span(),
+                from_satisfies: false,
             }],
             namespace_object_aliases: vec![NamespaceObjectAlias {
                 via_export_name: "api".to_string(),
@@ -4325,6 +4372,8 @@ mod tests {
             di_key_sites: Vec::new(),
             has_dynamic_provide: false,
             is_server_action_module: false,
+            has_global_declarations: false,
+            triple_slash_reference_paths: Box::default(),
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             has_props_attrs_fallthrough: false,
@@ -4378,9 +4427,12 @@ mod tests {
         assert_eq!(module.iconify_icon_names.len(), 1);
         assert_eq!(module.directives.len(), 1);
         assert_eq!(module.security_sinks_skipped, 1);
+        assert_eq!(module.package_resolve_sites.len(), 1);
         assert_released!(module.dynamic_imports);
         assert_released!(module.require_calls);
         assert_released!(module.package_path_references);
+        assert_released!(module.type_package_references);
+        assert_released!(module.bin_path_references);
         assert_released!(module.whole_object_uses);
         assert_released!(module.unused_import_bindings);
         assert_released!(module.type_referenced_import_bindings);

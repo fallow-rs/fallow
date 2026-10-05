@@ -1,0 +1,9 @@
+{
+  "name": "tool",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "build-kit": "1.0.0",
+    "cli-runtime-lib": "1.0.0"
+  }
+}

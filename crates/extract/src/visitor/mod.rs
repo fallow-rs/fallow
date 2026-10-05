@@ -4,9 +4,9 @@ mod react;
 mod visit_impl;
 
 use oxc_ast::ast::{
-    Argument, ArrowFunctionBody, BindingPattern, CallExpression, Expression, ImportExpression,
-    JSXMemberExpression, JSXMemberExpressionObject, ObjectPattern, ObjectProperty,
-    ObjectPropertyKind, Statement,
+    Argument, ArrayExpressionElement, ArrowFunctionBody, BindingPattern, CallExpression,
+    Expression, ImportExpression, JSXMemberExpression, JSXMemberExpressionObject, ObjectPattern,
+    ObjectProperty, ObjectPropertyKind, Statement,
 };
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -55,6 +55,18 @@ pub(crate) fn infer_props_field_array_element_type(
     array_element_type_from_type(field_type)
 }
 
+/// A local function that only returns a dynamic `import()`, with the count of
+/// its references and of the references whose shape credits a precise set of
+/// exports. A reference in any other shape credits the whole target module.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalImportLoader {
+    import_span: Span,
+    sources: Vec<String>,
+    references: usize,
+    credited_references: usize,
+    is_exported: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LocalClassExportInfo {
     members: Vec<MemberInfo>,
@@ -71,6 +83,7 @@ struct LocalSignatureTypeReference {
     owner_name: String,
     type_name: String,
     span: Span,
+    from_satisfies: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +155,8 @@ pub(crate) struct FactoryCallCandidate {
 pub(crate) struct FactoryReturnCandidate {
     local_name: String,
     callee_name: String,
+    /// `const local = await callee()`: the local holds the awaited result.
+    awaited: bool,
 }
 
 /// An unresolved object-literal property value captured while visiting a factory
@@ -332,6 +347,12 @@ pub(crate) struct ModuleInfoExtractor {
     import_load_kind_marks: Vec<(Span, ImportLoadKind)>,
     require_calls: Vec<RequireCallInfo>,
     package_path_references: Vec<String>,
+    type_package_references: Vec<String>,
+    bin_path_references: Vec<String>,
+    /// Direct `require.resolve('pkg')` calls: the package name and the call
+    /// span. Kept as a span until the spans are final, so a component-file
+    /// remap moves them.
+    package_resolve_sites: Vec<(String, Span)>,
     pub(crate) member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
     pending_computed_enum_key_uses: Vec<PendingComputedEnumKeyUse>,
@@ -344,6 +365,11 @@ pub(crate) struct ModuleInfoExtractor {
     has_angular_component_template_url: bool,
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
+    /// Top-level local loader functions keyed by binding name: a `const`
+    /// arrow or function expression, or a function declaration, whose body
+    /// returns an `import()`. Registered before the body walk because a
+    /// function declaration is hoisted above the code that calls it.
+    local_import_loaders: FxHashMap<String, LocalImportLoader>,
     namespace_binding_names: Vec<String>,
     module_namespace_binding_names: FxHashSet<String>,
     scoped_namespace_binding_names: Vec<FxHashSet<String>>,
@@ -352,6 +378,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// declaration is legal after the code that reads it, so walk order cannot
     /// answer whether a reference names a namespace object. See issue #2377.
     namespace_import_locals: FxHashSet<String>,
+    /// Test-framework spy APIs that a top-level binding or a global names in
+    /// this program (`vi`, `jest`, `spyOn`, the `mock` of `node:test`), keyed by
+    /// local name. Pre-registered before the body walk, so a declaration later
+    /// in the file still removes the global meaning of its name.
+    spy_api_locals: FxHashMap<String, visit_impl::SpyApi>,
     /// Default-import locals whose target shape is known only after graph
     /// resolution. Bare uses become semantic facts instead of joining the
     /// namespace-wide `whole_object_uses` stream.
@@ -368,6 +399,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// specifier local the graph already treats as a whole-object observation.
     /// See issue #2377.
     structured_namespace_reference_spans: FxHashSet<Span>,
+    /// Spans of `new URL(path, import.meta.url)` expressions passed directly
+    /// to a filesystem call or to `fileURLToPath`. The path names a file on
+    /// disk, not a module the code loads, so the reference is speculative.
+    filesystem_path_new_url_spans: FxHashSet<Span>,
     /// `(root local, namespace local)` for a namespace placed in an object
     /// literal bound to that root (`const api = { ns }`). The placement itself
     /// is precise, so a bare reference to the root is what hands the namespace
@@ -407,6 +442,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// and `for (const util of utils)` in the same lexical scope without leaking
     /// the binding to sibling functions.
     scoped_array_binding_element_types: Vec<FxHashMap<String, String>>,
+    /// Module-scope bindings typed `Map<K, V>` / `ReadonlyMap<K, V>` (or
+    /// initialized with `new Map<K, V>()`) of a non-builtin class `V`, keyed by
+    /// binding name -> value class name. Class fields use the class-scoped
+    /// `this@<id>.` key. A `<binding>.get(...)` result is then a receiver of `V`.
+    map_binding_value_types: FxHashMap<String, String>,
+    /// Block/function-scoped map value types, with the same scoping as
+    /// `scoped_array_binding_element_types`.
+    scoped_map_binding_value_types: Vec<FxHashMap<String, String>>,
     /// Top-level local function name -> declared return element class
     /// (`Promise<T>` / `T`, non-builtin). Populated by a `visit_program` pre-pass
     /// so `Promise.all(arr.map(cb))` can type its result from a map callback whose
@@ -468,6 +511,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// file-level export recording is suppressed while non-zero (issue #2349).
     /// Transient visitor state; never persisted.
     ambient_module_depth: u32,
+    /// Whether the walked program has top-level import or export syntax.
+    /// TypeScript reads `declare module 'pkg'` as an augmentation only in a
+    /// module file. Transient visitor state; never persisted.
+    is_module_file: bool,
     /// Depth of namespace bodies declared without the `export` keyword
     /// (`namespace Foo {}`, `declare namespace Foo {}`, legacy `module Foo {}`,
     /// dotted `namespace A.B.C {}`, and namespaces nested in those or in
@@ -547,6 +594,16 @@ pub(crate) struct ModuleInfoExtractor {
     /// `ModuleInfo.exported_factory_returns`, bounding the cross-module
     /// over-credit blast radius. See issue #1441 (Part A).
     strict_factory_return_functions: FxHashMap<String, String>,
+    /// The `async` counterpart of `strict_factory_return_functions`: factories
+    /// proven to resolve to one class. Exported with `is_async`, so only an
+    /// awaited cross-module call result credits the class.
+    strict_async_factory_return_functions: FxHashMap<String, String>,
+    /// Module-scope `async` (non-generator) functions. Their plain call result is
+    /// a promise, so only an awaited result binds the class they resolve to.
+    promise_factory_functions: FxHashSet<String>,
+    /// Module-scope generator functions. Awaiting the call gives the iterator,
+    /// so an awaited result never binds a class.
+    generator_factory_functions: FxHashSet<String>,
     /// Factory functions returning an object literal, captured at visit time and
     /// resolved at finalize (`resolve_factory_return_object_shapes`). See #1858.
     factory_return_object_candidates: Vec<FactoryReturnObjectCandidate>,
@@ -678,6 +735,10 @@ pub(crate) struct ModuleInfoExtractor {
     has_dynamic_provide: bool,
     /// All-action `"use server"` module flag, set in `visit_program`.
     is_server_action_module: bool,
+    /// Global-scope declaration flag, set in `visit_program`.
+    has_global_declarations: bool,
+    /// `/// <reference path>` values, set in `visit_program`.
+    triple_slash_reference_paths: Vec<String>,
     /// Module-scope `const NAME = "literal"` names: a DI key bound to a string
     /// literal has STRING identity (a provider supplying the literal, often
     /// inside a package, matches it), so its `di_key_sites` are dropped at
@@ -1421,14 +1482,30 @@ impl ModuleInfoExtractor {
             ));
     }
 
-    fn record_factory_fn_member_fact(&mut self, callee_name: String, member: String) {
+    fn record_factory_fn_member_fact(
+        &mut self,
+        callee_name: String,
+        member: String,
+        awaited: bool,
+    ) {
         self.semantic_facts
             .push(SemanticFact::FactoryFnMemberAccess(
                 FactoryFnMemberAccessFact {
                     callee_name,
                     member,
+                    awaited,
                 },
             ));
+    }
+
+    /// Whether a call of the same-file function `callee` gives the value that the
+    /// function returns: a sync call, or an awaited call of an `async` function.
+    fn call_result_is_returned_value(&self, callee: &str, awaited: bool) -> bool {
+        if awaited {
+            !self.generator_factory_functions.contains(callee)
+        } else {
+            !self.promise_factory_functions.contains(callee)
+        }
     }
 
     fn record_typed_property_member_fact(
@@ -1502,6 +1579,9 @@ impl ModuleInfoExtractor {
         }
         for require_call in &mut self.require_calls {
             require_call.span = remap(require_call.span);
+        }
+        for (_, span) in &mut self.package_resolve_sites {
+            *span = remap(*span);
         }
     }
 
@@ -1838,6 +1918,7 @@ impl ModuleInfoExtractor {
                             export_name: export_name.clone(),
                             type_name: reference.type_name.clone(),
                             span: reference.span,
+                            from_satisfies: reference.from_satisfies,
                         }),
                 );
         }
@@ -2084,13 +2165,17 @@ impl ModuleInfoExtractor {
             return;
         }
         let candidates = std::mem::take(&mut self.factory_return_candidates);
-        let mut deferred_factory_facts: Vec<(String, String)> = Vec::new();
+        let mut deferred_factory_facts: Vec<(String, String, bool)> = Vec::new();
         let mut deferred_object_property_facts: Vec<(String, String, String)> = Vec::new();
         let mut deferred_member_accesses: Vec<MemberAccess> = Vec::new();
         for candidate in candidates {
             // Same-file factory returning `new Class()`: bind the local to the
             // class so `resolve_bound_member_accesses` credits `x.member` directly.
             if let Some(class_name) = self.factory_return_functions.get(&candidate.callee_name) {
+                // A plain call of an `async` factory gives a promise, not the class.
+                if !self.call_result_is_returned_value(&candidate.callee_name, candidate.awaited) {
+                    continue;
+                }
                 let class_name = class_name.clone();
                 self.binding_target_names
                     .entry(candidate.local_name)
@@ -2140,8 +2225,11 @@ impl ModuleInfoExtractor {
             let object_prefix = format!("{}.", candidate.local_name);
             for access in &self.member_accesses {
                 if access.object == candidate.local_name {
-                    deferred_factory_facts
-                        .push((candidate.callee_name.clone(), access.member.clone()));
+                    deferred_factory_facts.push((
+                        candidate.callee_name.clone(),
+                        access.member.clone(),
+                        candidate.awaited,
+                    ));
                 } else if let Some(property_path) = access.object.strip_prefix(&object_prefix) {
                     // `const ui = importedObjectFactory(); ui.orders.member`: emit a
                     // fact the analyze layer joins against the factory's exported
@@ -2155,8 +2243,8 @@ impl ModuleInfoExtractor {
             }
         }
         self.member_accesses.extend(deferred_member_accesses);
-        for (callee_name, member) in deferred_factory_facts {
-            self.record_factory_fn_member_fact(callee_name, member);
+        for (callee_name, member, awaited) in deferred_factory_facts {
+            self.record_factory_fn_member_fact(callee_name, member, awaited);
         }
         for (callee_name, property_path, member) in deferred_object_property_facts {
             self.semantic_facts
@@ -2200,6 +2288,9 @@ impl ModuleInfoExtractor {
         let mut deferred_facts = Vec::new();
         for (callee_name, member) in inline_accesses {
             if let Some(class_name) = self.factory_return_functions.get(&callee_name) {
+                if !self.call_result_is_returned_value(&callee_name, false) {
+                    continue;
+                }
                 let object = class_name.clone();
                 self.member_accesses.push(MemberAccess { object, member });
                 continue;
@@ -2209,7 +2300,7 @@ impl ModuleInfoExtractor {
             }
         }
         for (callee_name, member) in deferred_facts {
-            self.record_factory_fn_member_fact(callee_name, member);
+            self.record_factory_fn_member_fact(callee_name, member, false);
         }
     }
 
@@ -2226,6 +2317,9 @@ impl ModuleInfoExtractor {
         for callee_name in callees {
             // Same-file factory: the class is known, mark it used wholesale.
             if let Some(class_name) = self.factory_return_functions.get(&callee_name) {
+                if !self.call_result_is_returned_value(&callee_name, false) {
+                    continue;
+                }
                 let class_name = class_name.clone();
                 self.whole_object_uses.push(class_name);
                 continue;
@@ -2253,7 +2347,9 @@ impl ModuleInfoExtractor {
     /// `resolve_factory_return_aliases` has populated the strict map. See issue
     /// #1441 (Part A).
     fn collect_exported_factory_returns(&self) -> Vec<fallow_types::extract::FactoryReturnExport> {
-        if self.strict_factory_return_functions.is_empty() {
+        if self.strict_factory_return_functions.is_empty()
+            && self.strict_async_factory_return_functions.is_empty()
+        {
             return Vec::new();
         }
         let mut out = Vec::new();
@@ -2270,6 +2366,15 @@ impl ModuleInfoExtractor {
                 out.push(fallow_types::extract::FactoryReturnExport {
                     export_name: export.name.to_string(),
                     class_local_name: class_local_name.clone(),
+                    is_async: false,
+                });
+            } else if let Some(class_local_name) =
+                self.strict_async_factory_return_functions.get(local_name)
+            {
+                out.push(fallow_types::extract::FactoryReturnExport {
+                    export_name: export.name.to_string(),
+                    class_local_name: class_local_name.clone(),
+                    is_async: true,
                 });
             }
         }
@@ -2889,10 +2994,6 @@ impl ModuleInfoExtractor {
         content_hash: u64,
         parsed: ParsedSuppressions,
     ) -> ModuleInfo {
-        let ParsedSuppressions {
-            suppressions,
-            unknown_kinds,
-        } = parsed;
         self.finalize_cjs_provenance();
         self.finalize_import_load_kinds();
         let namespace_object_aliases = self.finalize_resolution_phase();
@@ -2910,6 +3011,9 @@ impl ModuleInfoExtractor {
             dynamic_import_patterns: self.dynamic_import_patterns,
             require_calls: self.require_calls,
             package_path_references: self.package_path_references.into_boxed_slice(),
+            type_package_references: self.type_package_references.into_boxed_slice(),
+            bin_path_references: self.bin_path_references.into_boxed_slice(),
+            package_resolve_sites: finish_package_resolve_sites(self.package_resolve_sites),
             member_accesses: self.member_accesses.into(),
             semantic_facts: self.semantic_facts.into(),
             whole_object_uses: self.whole_object_uses.into(),
@@ -2919,8 +3023,8 @@ impl ModuleInfoExtractor {
             // Set by the parse layer, which owns the parser diagnostics.
             parse_error_count: 0,
             parse_panicked: false,
-            suppressions,
-            unknown_suppression_kinds: unknown_kinds,
+            suppressions: parsed.suppressions,
+            unknown_suppression_kinds: parsed.unknown_kinds,
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -2953,6 +3057,8 @@ impl ModuleInfoExtractor {
             di_key_sites: self.di_key_sites,
             has_dynamic_provide: self.has_dynamic_provide,
             is_server_action_module: self.is_server_action_module,
+            has_global_declarations: self.has_global_declarations,
+            triple_slash_reference_paths: self.triple_slash_reference_paths.into_boxed_slice(),
             // Populated in `release_resolution_payload`; empty at construction.
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
@@ -3034,6 +3140,18 @@ impl ModuleInfoExtractor {
             std::mem::take(&mut info.package_path_references).into_vec();
         package_path_references.append(&mut self.package_path_references);
         info.package_path_references = package_path_references.into_boxed_slice();
+        let mut type_package_references =
+            std::mem::take(&mut info.type_package_references).into_vec();
+        type_package_references.append(&mut self.type_package_references);
+        info.type_package_references = type_package_references.into_boxed_slice();
+        let mut bin_path_references = std::mem::take(&mut info.bin_path_references).into_vec();
+        bin_path_references.append(&mut self.bin_path_references);
+        info.bin_path_references = bin_path_references.into_boxed_slice();
+        let mut package_resolve_sites = std::mem::take(&mut info.package_resolve_sites).into_vec();
+        package_resolve_sites.extend(finish_package_resolve_sites(std::mem::take(
+            &mut self.package_resolve_sites,
+        )));
+        info.package_resolve_sites = package_resolve_sites.into_boxed_slice();
         let mut member_accesses = std::mem::take(&mut info.member_accesses).to_vec();
         member_accesses.append(&mut self.member_accesses);
         info.member_accesses = member_accesses.into();
@@ -3116,6 +3234,14 @@ impl ModuleInfoExtractor {
             .append(&mut self.svelte_dispatched_events);
         info.has_dynamic_dispatch |= self.has_dynamic_dispatch;
     }
+}
+
+/// Keep the start offset of each final resolve-call span.
+fn finish_package_resolve_sites(sites: Vec<(String, Span)>) -> Box<[(String, u32)]> {
+    sites
+        .into_iter()
+        .map(|(package_name, span)| (package_name, span.start))
+        .collect()
 }
 
 /// The statically named keys of a destructuring pattern, or `None` when the pattern
@@ -3333,6 +3459,49 @@ fn try_extract_property_callback_import<'a, 'b>(
     Some((import_expr, sources))
 }
 
+/// The element list of a `Promise.all([...])` initializer, seen through
+/// `await` and parentheses. Each element keeps its array index, so a caller
+/// can pair it with the matching element of an array destructuring pattern.
+/// Returns `None` when the array has a spread element, because a spread
+/// moves every later index. `Promise.allSettled` and `Promise.race` are not
+/// matched: their results do not hold the module objects at each index.
+#[must_use]
+pub(crate) fn extract_promise_all_elements<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> Option<&'b [ArrayExpressionElement<'a>]> {
+    let mut inner = expr;
+    loop {
+        match inner {
+            Expression::AwaitExpression(await_expr) => inner = &await_expr.argument,
+            Expression::ParenthesizedExpression(paren) => inner = &paren.expression,
+            _ => break,
+        }
+    }
+    let Expression::CallExpression(call) = inner else {
+        return None;
+    };
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    if member.property.name != "all"
+        || !matches!(&member.object, Expression::Identifier(object) if object.name == "Promise")
+        || call.arguments.len() != 1
+    {
+        return None;
+    }
+    let Some(Expression::ArrayExpression(array)) = call.arguments[0].as_expression() else {
+        return None;
+    };
+    if array
+        .elements
+        .iter()
+        .any(|element| matches!(element, ArrayExpressionElement::SpreadElement(_)))
+    {
+        return None;
+    }
+    Some(&array.elements)
+}
+
 #[must_use]
 /// Recursively unwrap an expression until it reaches an import expression.
 pub(crate) fn extract_import_expression<'a, 'b>(
@@ -3342,6 +3511,48 @@ pub(crate) fn extract_import_expression<'a, 'b>(
         Expression::AwaitExpression(await_expr) => extract_import_expression(&await_expr.argument),
         Expression::ImportExpression(imp) => Some(imp),
         Expression::ParenthesizedExpression(paren) => extract_import_expression(&paren.expression),
+        _ => None,
+    }
+}
+
+/// Vite dev-server method that loads a module by specifier for SSR.
+const SSR_LOAD_MODULE_METHOD: &str = "ssrLoadModule";
+
+#[must_use]
+/// Match `<receiver>.ssrLoadModule('<literal>')`, with an optional `await` or
+/// parentheses around the call, and return the call span and the specifier.
+///
+/// The Vite dev server loads the module like a dynamic `import()`. A leading
+/// `/` is relative to the Vite root, not to the file system. A computed
+/// argument is not a static edge, so it returns `None`.
+pub(crate) fn ssr_load_module_call(expr: &Expression<'_>) -> Option<(Span, String)> {
+    let call = match expr.without_parentheses() {
+        Expression::AwaitExpression(await_expr) => {
+            match await_expr.argument.without_parentheses() {
+                Expression::CallExpression(call) => call,
+                _ => return None,
+            }
+        }
+        Expression::CallExpression(call) => call,
+        _ => return None,
+    };
+    ssr_load_module_source(call).map(|source| (call.span, source))
+}
+
+#[must_use]
+/// Return the literal specifier of a `<receiver>.ssrLoadModule('<literal>')` call.
+pub(crate) fn ssr_load_module_source(call: &CallExpression<'_>) -> Option<String> {
+    let Expression::StaticMemberExpression(member) = call.callee.without_parentheses() else {
+        return None;
+    };
+    if member.property.name != SSR_LOAD_MODULE_METHOD {
+        return None;
+    }
+    match call.arguments.first()?.as_expression()? {
+        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first().map(|quasi| quasi.value.raw.to_string())
+        }
         _ => None,
     }
 }

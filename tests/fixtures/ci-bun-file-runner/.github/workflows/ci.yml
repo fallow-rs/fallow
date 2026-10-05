@@ -1,0 +1,10 @@
+name: ci
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bun scripts/bare-run.ts
+      - run: bun run scripts/explicit-run.ts
+      - run: bun --watch scripts/watch-run.ts
+      - run: bun run build

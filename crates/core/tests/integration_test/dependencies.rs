@@ -514,6 +514,114 @@ fn nested_workspace_dependency_usage_belongs_to_deepest_workspace() {
     );
 }
 
+fn unlisted_sites_for(
+    results: &fallow_types::results::AnalysisResults,
+    package_name: &str,
+) -> Vec<std::path::PathBuf> {
+    results
+        .unlisted_dependencies
+        .iter()
+        .filter(|dep| dep.dep.package_name == package_name)
+        .flat_map(|dep| dep.dep.imported_from.iter().map(|site| site.path.clone()))
+        .collect()
+}
+
+/// A workspace file may use a package that only an ancestor manifest declares
+/// when the workspace is private or the file is not production code. A
+/// production file of a publishable workspace keeps the strict check, because
+/// consumers of the published package do not get the ancestor's dependency.
+#[test]
+fn ancestor_manifest_satisfies_private_and_non_production_imports() {
+    let root = fixture_path("workspace-ancestor-manifest-dependencies");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        unlisted_sites_for(&results, "root-runtime-lib"),
+        vec![root.join("packages/public-lib/src/index.ts")],
+        "only the production file of the publishable workspace stays unlisted"
+    );
+    assert!(
+        unlisted_sites_for(&results, "root-test-helper").is_empty(),
+        "a test file may use the root devDependency"
+    );
+    assert!(
+        unlisted_sites_for(&results, "build-kit").is_empty(),
+        "a build script of a nested workspace may use the ancestor workspace's dependency"
+    );
+}
+
+/// An import that an ancestor workspace's declaration satisfies counts as a use
+/// of that declaration. An import that the strict check still reports as
+/// unlisted does not.
+#[test]
+fn ancestor_declaration_is_credited_when_it_satisfies_a_descendant_import() {
+    let root = fixture_path("workspace-ancestor-manifest-dependencies");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let reported = unused_dependency_names_for(&results, "packages/tool/package.json");
+    assert!(
+        !reported.iter().any(|name| name == "build-kit"),
+        "the nested build script uses the tool declaration of build-kit, got: {reported:?}"
+    );
+    assert!(
+        reported.iter().any(|name| name == "cli-runtime-lib"),
+        "a production import of the publishable nested workspace does not use the tool declaration, got: {reported:?}"
+    );
+    assert_eq!(
+        unlisted_sites_for(&results, "cli-runtime-lib"),
+        vec![root.join("packages/tool/packages/cli/src/index.ts")],
+        "the production import stays unlisted in the nested workspace"
+    );
+}
+
+/// Each import credits the nearest manifest that installs the package. A root
+/// declaration stays used only for an importer outside every workspace or an
+/// importer whose workspace chain does not install the package.
+#[test]
+fn root_declaration_is_credited_only_through_the_nearest_manifest() {
+    let root = fixture_path("root-dependency-nearest-manifest-credit");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let names_at = |deps: Vec<&fallow_types::results::UnusedDependency>, manifest: &str| {
+        let path = root.join(manifest);
+        let mut names: Vec<String> = deps
+            .into_iter()
+            .filter(|dep| dep.path == path)
+            .map(|dep| dep.package_name.clone())
+            .collect();
+        names.sort();
+        names
+    };
+    let prod: Vec<_> = results.unused_dependencies.iter().map(|d| &d.dep).collect();
+    let dev: Vec<_> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| &d.dep)
+        .collect();
+
+    assert_eq!(
+        names_at(prod.clone(), "package.json"),
+        vec!["shared-runtime".to_string(), "tool-lib".to_string()],
+        "a root declaration that every importer reaches through a nearer manifest is unused"
+    );
+    assert!(
+        names_at(dev.clone(), "package.json").is_empty(),
+        "a peer-only workspace declaration installs nothing, so the root devDependency stays used"
+    );
+    assert_eq!(
+        names_at(prod.clone(), "packages/tool/package.json"),
+        vec!["shared-runtime".to_string()],
+        "a workspace declaration that nothing in the workspace imports is still reported"
+    );
+    assert!(
+        names_at(prod.clone(), "packages/app/package.json").is_empty(),
+        "the workspace that imports shared-runtime keeps its declaration"
+    );
+}
+
 #[test]
 fn package_less_tsconfig_reference_credits_nearest_package_workspace() {
     let project = tempfile::tempdir().expect("create temp dir");
@@ -679,6 +787,62 @@ fn peer_dependency_of_parent_installed_package_is_not_unused() {
     assert!(
         unused_dep_names.contains(&"left-pad"),
         "unrelated unused dependencies should still be reported: {unused_dep_names:?}"
+    );
+}
+
+#[test]
+fn optional_peer_of_used_dependency_is_not_unused() {
+    let root = fixture_path("optional-peer-of-used-dependency");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dep_names.sort_unstable();
+
+    // `host` is imported and declares `opt-peer` as an optional peer, so the
+    // listed `opt-peer` turns on a host feature. `unused-host` is not imported,
+    // so its optional peer `peer-of-unused` gets no credit.
+    assert_eq!(
+        unused_dep_names,
+        vec!["peer-of-unused", "unused-host"],
+        "only the optional peer of a used host is credited"
+    );
+}
+
+#[test]
+fn dev_dependency_listed_as_own_peer_is_not_unused() {
+    let root = fixture_path("dev-dependency-listed-as-own-peer");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused_dev: Vec<(String, &str)> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| {
+            let manifest = d
+                .dep
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&d.dep.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (manifest, d.dep.package_name.as_str())
+        })
+        .collect();
+    unused_dev.sort_unstable();
+
+    // `react` (root, optional peer) and `react-dom` (workspace, required peer)
+    // are dev copies of the package's own peer. `left-pad` and `is-odd` have no
+    // peer entry and stay reported.
+    assert_eq!(
+        unused_dev,
+        vec![
+            ("package.json".to_string(), "left-pad"),
+            ("packages/lib/package.json".to_string(), "is-odd"),
+        ],
+        "a devDependency listed as the same manifest's peer is credited"
     );
 }
 
@@ -1159,6 +1323,28 @@ fn private_sibling_bundled_dependency_is_credited_to_the_consumer() {
     );
 }
 
+/// A consumer whose build leaves every package external does not inline the
+/// private sibling, so the sibling's packages do not need the consumer's
+/// declaration. The signal is esbuild `packages: 'external'` in a build file
+/// or `bun build --packages=external` in a package script.
+#[test]
+fn externalizing_consumer_gets_no_bundled_credit() {
+    for fixture in [
+        "private-workspace-externalized-esbuild",
+        "private-workspace-externalized-bun-build",
+    ] {
+        let config = create_config(fixture_path(fixture));
+        let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+        let reported = unused_dependency_names_for(&results, "packages/consumer/package.json");
+        assert_eq!(
+            reported,
+            vec!["lodash-es".to_string()],
+            "{fixture}: the externalized sibling's lodash-es is not credited to the consumer"
+        );
+    }
+}
+
 /// A published sibling is installed from the registry with its own dependency
 /// tree, so the consumer never needs the sibling's packages hoisted. Crediting
 /// them there would hide a real finding.
@@ -1361,5 +1547,163 @@ fn dev_dependency_of_a_private_sibling_is_not_credited() {
     assert!(
         reported.iter().any(|name| name == "lodash-es"),
         "a dev-only declaration in the private sibling must not credit the consumer, got: {reported:?}"
+    );
+}
+
+/// An import with an empty specifier list (`import {} from 'pkg'` or
+/// `import type {} from 'pkg'`) still names the package. It credits the
+/// package as a dependency, and a relative form keeps the target file
+/// reachable.
+#[test]
+fn empty_specifier_list_import_credits_package_and_file() {
+    let root = fixture_path("empty-specifier-import-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    let unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@x/settings"),
+        "`import {{}} from` should credit the dependency, found: {unused_dep_names:?}"
+    );
+    assert!(
+        !unused_dev_dep_names.contains(&"@x/settings"),
+        "`import type {{}} from` should credit the dev dependency, found: {unused_dev_dep_names:?}"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("packages/app/src/augment.ts")),
+        "`import type {{}} from './augment'` should keep the file reachable"
+    );
+}
+
+/// A top-level `declare module 'pkg' { ... }` in a module file augments the
+/// package, and TypeScript requires `pkg` to resolve. It credits the package
+/// as a type-only use. A `declare module` in a script file declares an
+/// ambient shim and credits nothing. Neither form reports an unlisted
+/// dependency.
+#[test]
+fn module_augmentation_credits_package() {
+    let root = fixture_path("module-augmentation-package-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dev_dep_names.contains(&"@x/slots"),
+        "the augmentation in a module file should credit the package, found: {unused_dev_dep_names:?}"
+    );
+    assert!(
+        unused_dev_dep_names.contains(&"ambient-lib"),
+        "the ambient declaration in a script file must not credit the package, found: {unused_dev_dep_names:?}"
+    );
+
+    let unlisted: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert_eq!(
+        unlisted,
+        vec!["missing-lib"],
+        "only the real import may report an unlisted dependency"
+    );
+}
+
+/// A plugin credits its own tooling devDependencies only with evidence that
+/// the project runs the tool: a config file of its own, its config in
+/// package.json, or a script, CI workflow or git hook that invokes it. A
+/// declared package alone activates the plugin and is no evidence.
+#[test]
+fn plugin_tooling_dev_dependency_needs_config_or_reference() {
+    let root = fixture_path("plugin-tooling-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    // Credited, each by a different kind of evidence:
+    // c8 (`.c8rc.json`), lefthook (`lefthook.yml`), simple-git-hooks (its
+    // package.json key), mocha (a script), ts-mocha (the mocha plugin, whose
+    // tool a script runs), syncpack (a simple-git-hooks command), size-limit
+    // (a lefthook command) and markdownlint-cli2 (a husky hook).
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["commitizen", "cz-conventional-changelog", "karma", "nyc"],
+        "only the tooling devDependencies without a config file or a reference should be reported"
+    );
+}
+
+/// A `@types/X` devDependency is credited only when the project declares X,
+/// imports X or names X in a tsconfig `types` entry, or when X is an ambient
+/// global type package such as `node` or `jest`.
+#[test]
+fn types_dev_dependency_needs_target_or_ambient_globals() {
+    let root = fixture_path("types-package-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    // Credited: @types/react (react is declared), @types/scope__pkg
+    // (@scope/pkg is declared), @types/geojson (a type-only import of
+    // geojson), @types/ws (a tsconfig `types` entry), and the ambient globals
+    // @types/node, @types/jest and bun-types.
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["@types/better-sqlite3", "@types/uuid"],
+        "only the type packages without a target, a tsconfig entry or ambient globals should be reported"
+    );
+}
+
+/// A command-line tool from the tooling catalogue is credited only when a
+/// package.json script, a CI workflow or a git hook runs it, or when its own
+/// config file exists. A catalogue entry that is not a command-line tool,
+/// such as `sass`, keeps its credit.
+#[test]
+fn catalogue_cli_dev_dependency_needs_reference_or_config() {
+    let root = fixture_path("catalogue-cli-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    // Credited: concurrently (a script), rimraf (a CI workflow), cross-env (a
+    // husky hook), prettier (a lint-staged command and `.prettierrc`),
+    // lint-staged (its package.json key), jscpd (`.jscpd.json`), madge
+    // (`.madgerc`) and sass (not a command-line tool).
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["npm-run-all", "oxlint", "tsx"],
+        "only the command-line tools without a reference or a config file should be reported"
     );
 }

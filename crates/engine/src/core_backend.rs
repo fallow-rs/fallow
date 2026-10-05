@@ -29,6 +29,7 @@ pub use fallow_core::plugins::manifest_entries::{
 pub use fallow_core::plugins::registry::builtin_config_patterns;
 pub use fallow_core::plugins::registry::builtin_plugin_names;
 pub use fallow_core::plugins::registry::is_external_plugin_active;
+pub use fallow_core::plugins::types_package_target;
 
 // Discovery vocabulary owned by the surviving core walk, re-exported so the
 // engine boundary keeps one definition per constant.
@@ -196,6 +197,16 @@ pub fn discover_files_config_candidates_and_diagnostics(
 /// others), such as `node:fs` or `fs`.
 pub fn is_builtin_module(name: &str) -> bool {
     fallow_core::analyze::is_builtin_module(name)
+}
+
+/// The used packages that list `package_name` as a peer dependency, required
+/// or optional, via the shared unused-dependency implementation.
+pub fn peer_dependency_hosts<'a>(
+    root: &Path,
+    used_packages: impl IntoIterator<Item = &'a str>,
+    package_name: &str,
+) -> Vec<String> {
+    fallow_core::analyze::peer_dependency_hosts(root, used_packages, package_name)
 }
 
 /// Discover the root and workspace package entry points via the shared core

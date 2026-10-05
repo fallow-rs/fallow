@@ -1,0 +1,8 @@
+{
+  "name": "cli",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  }
+}

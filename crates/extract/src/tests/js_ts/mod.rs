@@ -1,7 +1,9 @@
+mod bin_path_references;
 mod callee_uses;
 mod cjs;
 mod classes;
 mod complexity;
+mod declaration_scope;
 mod dynamic_imports;
 mod exports;
 mod html_tagged_template;
@@ -11,6 +13,7 @@ mod jsx_assets;
 mod jsx_retry;
 mod load_data;
 mod member_access;
+mod module_augmentation;
 mod react_structural;
 mod require_resolve;
 mod security_sources;

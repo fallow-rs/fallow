@@ -1,0 +1,11 @@
+{
+  "name": "@fixture/widgets",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "test:checks": "vitest -c=vitest.checks.config.ts"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.4"
+  }
+}

@@ -138,6 +138,7 @@ jobs:
               - 'crates/core/src/discover/mod.rs'
               - 'crates/core/src/plugins/commit_and_tag_version.rs'
               - 'crates/core/src/plugins/playwright.rs'
+              - 'crates/core/src/plugins/release_it.rs'
               - 'crates/core/src/plugins/storybook.rs'
               - 'crates/core/tests/integration_test/issue_2757_federation_option_shapes.rs'
               - 'crates/core/tests/integration_test/issue_2842_storybook_cross_workspace.rs'

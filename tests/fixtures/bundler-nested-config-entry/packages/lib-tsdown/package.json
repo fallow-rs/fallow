@@ -1,0 +1,7 @@
+{
+  "name": "lib-tsdown",
+  "private": true,
+  "devDependencies": {
+    "tsdown": "^0.15.0"
+  }
+}

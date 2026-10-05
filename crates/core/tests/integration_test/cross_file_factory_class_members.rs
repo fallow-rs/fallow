@@ -124,3 +124,43 @@ fn opaque_destructure_of_a_factory_result_suppresses_the_class() {
          reported: {rest_api:?}"
     );
 }
+
+/// `const x = await importedFactory()` must credit `x.member` on the class that the
+/// awaited factory resolves to, at the top level and inside an async function.
+///
+/// An async factory returns a promise of the class, so only an awaited call binds the
+/// class. `makePending()` without `await` gives a promise, and `Pending.onlyReadOnPromise`
+/// must stay reported. `Widget.neverUsed` and `Gauge.neverRead` are the controls that
+/// show the credit is per member and not for the full class.
+#[test]
+fn awaited_async_factory_result_credits_the_class() {
+    let unused = unused_members("awaited-factory-class-members");
+
+    for member in [
+        // `const widget = await makeWidget()` at the top level.
+        "Widget.usedAtTopLevel",
+        // `const inner = await makeWidget()` inside an async function.
+        "Widget.usedInAsyncFunction",
+        // The factory has a `Promise<Gauge>` return type and no `new` in the body.
+        "Gauge.readValue",
+        // `await` on a sync factory gives the same class.
+        "Plain.readAfterAwait",
+    ] {
+        assert!(
+            !unused.contains(&member.to_string()),
+            "{member} is read on an awaited factory result and must be credited, found: {unused:?}"
+        );
+    }
+    for member in [
+        "Widget.neverUsed",
+        "Gauge.neverRead",
+        // `makePending()` is not awaited, so the local holds a promise.
+        "Pending.onlyReadOnPromise",
+    ] {
+        assert!(
+            unused.contains(&member.to_string()),
+            "{member} has no read on an awaited factory result and must stay reported, \
+             found: {unused:?}"
+        );
+    }
+}

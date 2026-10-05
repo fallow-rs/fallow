@@ -11,10 +11,14 @@
 #[path = "integration_test/common.rs"]
 mod common;
 
+#[path = "integration_test/ag_ui_agent_hooks.rs"]
+mod ag_ui_agent_hooks;
 #[path = "integration_test/angular_ng_package.rs"]
 mod angular_ng_package;
 #[path = "integration_test/angular_unrendered_component.rs"]
 mod angular_unrendered_component;
+#[path = "integration_test/astro_starlight_config.rs"]
+mod astro_starlight_config;
 #[path = "integration_test/astro_unrendered_component.rs"]
 mod astro_unrendered_component;
 #[path = "integration_test/astro_unused_component_prop.rs"]
@@ -23,6 +27,10 @@ mod astro_unused_component_prop;
 mod barrel_exports;
 #[path = "integration_test/basic_analysis.rs"]
 mod basic_analysis;
+#[path = "integration_test/bundler_entry_object_map.rs"]
+mod bundler_entry_object_map;
+#[path = "integration_test/bundler_nested_config_entry.rs"]
+mod bundler_nested_config_entry;
 #[path = "integration_test/caching.rs"]
 mod caching;
 #[path = "integration_test/css_in_js_styled.rs"]
@@ -49,6 +57,10 @@ mod entry_load_closure;
 mod entry_output_mapping;
 #[path = "integration_test/entry_point_spans.rs"]
 mod entry_point_spans;
+#[path = "integration_test/eve_agent_plugin.rs"]
+mod eve_agent_plugin;
+#[path = "integration_test/expo_config_plugins.rs"]
+mod expo_config_plugins;
 #[path = "integration_test/external_plugins.rs"]
 mod external_plugins;
 #[path = "integration_test/extraction.rs"]
@@ -83,6 +95,8 @@ mod hono_html_tagged_template;
 mod html_entry;
 #[path = "integration_test/import_load_kinds.rs"]
 mod import_load_kinds;
+#[path = "integration_test/import_meta_resolve_package.rs"]
+mod import_meta_resolve_package;
 #[path = "integration_test/issue_1032_tsconfig_sibling_src_paths.rs"]
 mod issue_1032_tsconfig_sibling_src_paths;
 #[path = "integration_test/issue_1304_effect_schema_same_name.rs"]
@@ -131,6 +145,10 @@ mod nx_project_json;
 mod parse_degraded_diagnostic;
 #[path = "integration_test/redwoodsdk.rs"]
 mod redwoodsdk;
+#[path = "integration_test/relative_tsconfig_output_import.rs"]
+mod relative_tsconfig_output_import;
+#[path = "integration_test/release_it_plugin.rs"]
+mod release_it_plugin;
 #[path = "integration_test/rspress_theme.rs"]
 mod rspress_theme;
 #[path = "integration_test/rules_config.rs"]
@@ -139,14 +157,20 @@ mod rules_config;
 mod safe_analysis;
 #[path = "integration_test/sfc_parsing.rs"]
 mod sfc_parsing;
+#[path = "integration_test/signature_backing_unused_backer.rs"]
+mod signature_backing_unused_backer;
 #[path = "integration_test/size_limit_plugin.rs"]
 mod size_limit_plugin;
 #[path = "integration_test/skipped_file_reachability_caveat.rs"]
 mod skipped_file_reachability_caveat;
+#[path = "integration_test/ssr_load_module.rs"]
+mod ssr_load_module;
 #[path = "integration_test/svelte_dead_event.rs"]
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]
 mod symlink_root_containment;
+#[path = "integration_test/tsdown_root_workspace_globs.rs"]
+mod tsdown_root_workspace_globs;
 #[path = "integration_test/type_test_entries.rs"]
 mod type_test_entries;
 #[path = "integration_test/typed_receiver_scoping.rs"]
@@ -155,6 +179,8 @@ mod typed_receiver_scoping;
 mod unmeasured_zero_diagnostics;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
+#[path = "integration_test/vercel_api_directory_functions.rs"]
+mod vercel_api_directory_functions;
 #[path = "integration_test/waku.rs"]
 mod waku;
 #[path = "integration_test/workspaces.rs"]
@@ -180,6 +206,8 @@ mod misplaced_directive;
 mod mixed_client_server_barrel;
 #[path = "integration_test/nextjs_route_tree.rs"]
 mod nextjs_route_tree;
+#[path = "integration_test/node_test_bare_default_patterns.rs"]
+mod node_test_bare_default_patterns;
 #[path = "integration_test/non_loading_edges.rs"]
 mod non_loading_edges;
 #[path = "integration_test/pnpm_package_json_overrides_version.rs"]
@@ -202,6 +230,8 @@ mod react_component_intel;
 mod render_fan_in;
 #[path = "integration_test/require_resolve_relative.rs"]
 mod require_resolve_relative;
+#[path = "integration_test/resolve_call_unlisted.rs"]
+mod resolve_call_unlisted;
 #[path = "integration_test/security_catalogue_categories.rs"]
 mod security_catalogue_categories;
 #[path = "integration_test/security_client_server_leak.rs"]
@@ -271,6 +301,8 @@ mod workspace_cross_imports;
 #[path = "integration_test/workspace_internal_deps.rs"]
 mod workspace_internal_deps;
 
+#[path = "integration_test/ci_bun_file_runner.rs"]
+mod ci_bun_file_runner;
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
 #[path = "integration_test/issue_1441_factory_return_member.rs"]
@@ -339,6 +371,8 @@ mod issue_2940_ignore_pattern_negation;
 mod issue_2952_package_imports_workspace_dep;
 #[path = "integration_test/issue_2954_lint_targets_not_entries.rs"]
 mod issue_2954_lint_targets_not_entries;
+#[path = "integration_test/orphan_module_declaration_files.rs"]
+mod orphan_module_declaration_files;
 #[path = "integration_test/workspace_hoisted_package_imports.rs"]
 mod workspace_hoisted_package_imports;
 
@@ -479,6 +513,8 @@ mod issue_956_playwright_pnpm_exec;
 mod lexical_nodes;
 #[path = "integration_test/script_multiplexers.rs"]
 mod script_multiplexers;
+#[path = "integration_test/shell_command_substitution.rs"]
+mod shell_command_substitution;
 #[path = "integration_test/visibility_tags.rs"]
 mod visibility_tags;
 #[path = "integration_test/vue_options_api_prop_emit.rs"]
@@ -529,6 +565,9 @@ mod astro_template_map_class_member;
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 
+#[path = "integration_test/nestjs_trpc_interfaces.rs"]
+mod nestjs_trpc_interfaces;
+
 #[path = "integration_test/issue_2752_nuxt_components_scope.rs"]
 mod issue_2752_nuxt_components_scope;
 #[path = "integration_test/issue_2752_nuxt_local_layers.rs"]
@@ -551,7 +590,15 @@ mod issue_739_script_auto_imports;
 mod issue_740_pinia_store_auto_imports;
 #[path = "integration_test/issue_744_tsdown_config.rs"]
 mod issue_744_tsdown_config;
+#[path = "integration_test/namespace_spy_call_member.rs"]
+mod namespace_spy_call_member;
+#[path = "integration_test/node_modules_bin_path.rs"]
+mod node_modules_bin_path;
 #[path = "integration_test/pkg_utils_plugin.rs"]
 mod pkg_utils_plugin;
+#[path = "integration_test/vite_root_entries.rs"]
+mod vite_root_entries;
+#[path = "integration_test/vitest_script_config_arg.rs"]
+mod vitest_script_config_arg;
 #[path = "integration_test/webpack_inline_loaders.rs"]
 mod webpack_inline_loaders;

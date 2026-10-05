@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 use serde_json::Value;
 
+use fallow_config::TsconfigOutputResolution;
 use fallow_types::discover::FileId;
 
 use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
@@ -455,16 +456,58 @@ pub(super) fn try_source_fallback(
     let prefix: PathBuf = components[..first_output_pos].iter().collect();
 
     let suffix: PathBuf = components[last_output_pos + 1..].iter().collect();
-    suffix.file_stem()?; // Ensure the suffix has a filename
+    let file_name = suffix.file_name()?.to_str()?;
+    let stem = output_source_stem(file_name);
+    let source_dir = match suffix.parent() {
+        Some(parent) => prefix.join("src").join(parent),
+        None => prefix.join("src"),
+    };
 
     for ext in SOURCE_EXTS {
-        let source_candidate = prefix.join("src").join(suffix.with_extension(ext));
+        let source_candidate = source_dir.join(format!("{stem}.{ext}"));
         if let Some(&file_id) = path_to_id.get(source_candidate.as_path()) {
             return Some(file_id);
         }
     }
 
+    // A package can copy a hand-written declaration file from `src/` to the
+    // output directory unchanged.
+    if is_declaration_file_name(file_name) {
+        return path_to_id
+            .get(source_dir.join(file_name).as_path())
+            .copied();
+    }
+
     None
+}
+
+/// Declaration suffixes that build tools emit next to the output files.
+const DECLARATION_SUFFIXES: &[&str] = &[".d.ts", ".d.mts", ".d.cts"];
+
+fn declaration_stem(file_name: &str) -> Option<&str> {
+    DECLARATION_SUFFIXES
+        .iter()
+        .find_map(|suffix| file_name.strip_suffix(suffix))
+        .filter(|stem| !stem.is_empty())
+}
+
+fn is_declaration_file_name(file_name: &str) -> bool {
+    declaration_stem(file_name).is_some()
+}
+
+/// Return the source stem of a build output file name.
+///
+/// The stem keeps every dot in the base name. `feature.port.d.ts` and
+/// `feature.port.js` both give `feature.port`. `Path::with_extension` removes
+/// only the last extension, so it keeps `.d` in a declaration file name.
+fn output_source_stem(file_name: &str) -> &str {
+    if let Some(stem) = declaration_stem(file_name) {
+        return stem;
+    }
+    match file_name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => file_name,
+    }
 }
 
 /// Try to resolve a package `imports` entry from the nearest owning package.
@@ -604,6 +647,31 @@ pub(super) fn try_relative_package_root_source_fallback(
             .flatten()
             .map(ResolveResult::InternalModule)
     })
+}
+
+/// Resolve a relative import into a TypeScript output directory to its source.
+///
+/// A script or a test can import the emitted file (`../lib/types/a.js`) of a
+/// package whose tsconfig declares `rootDir` and `outDir`. The output is often
+/// not on disk, and `outDir` can have any name. The tsconfig files of the
+/// package that owns the target path map the output path to the source file.
+pub(super) fn try_relative_tsconfig_output_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !specifier.starts_with("./") && !specifier.starts_with("../") {
+        return None;
+    }
+    let target = normalize_path_lexically(&from_file.parent()?.join(specifier));
+    let manifest = nearest_package_manifest(ctx.package_manifests, &target)?;
+    let output_map = ctx.tsconfig_cache.output_map(&manifest.root);
+    let TsconfigOutputResolution::Resolved(source) =
+        output_map.resolve_source_for_output_path(&target, SOURCE_EXTS)
+    else {
+        return None;
+    };
+    lookup_internal_file_id(ctx, &source).map(ResolveResult::InternalModule)
 }
 
 pub(super) fn normalize_path_lexically(path: &Path) -> PathBuf {
@@ -787,16 +855,22 @@ fn resolve_package_map_target(
     target: &str,
     source_subpath: Option<&Path>,
 ) -> Option<FileId> {
-    let target = target.strip_prefix("./")?;
-    if target.starts_with("../") || target.starts_with('/') {
-        return None;
-    }
-    let target_path = manifest.root.join(target);
+    let target_path = package_map_target_path(manifest, target)?;
 
     lookup_internal_file_id(ctx, &target_path)
         .or_else(|| try_source_fallback(&target_path, ctx.raw_path_to_id))
         .or_else(|| try_source_fallback(&target_path, ctx.path_to_id))
         .or_else(|| source_subpath.and_then(|subpath| try_source_subpath(ctx, manifest, subpath)))
+}
+
+/// Join a package map target (`./src/index.ts`) to the package root. A target
+/// that leaves the package root is not a package path.
+fn package_map_target_path(manifest: &PackageManifestInfo, target: &str) -> Option<PathBuf> {
+    let target = target.strip_prefix("./")?;
+    if target.starts_with("../") || target.starts_with('/') {
+        return None;
+    }
+    Some(manifest.root.join(target))
 }
 
 fn resolve_package_map_targets(
@@ -1089,12 +1163,7 @@ fn try_manifest_workspace_resolution(
     };
 
     if let Some(exports) = manifest.package_json.exports.as_ref() {
-        let export_key = if subpath.is_empty() {
-            ".".to_string()
-        } else {
-            format!("./{subpath}")
-        };
-        return match package_map_target(exports, &export_key, ctx.condition_names) {
+        return match package_map_target(exports, &export_key(subpath), ctx.condition_names) {
             PackageMapTarget::Targets(targets) => {
                 match resolve_package_map_targets(ctx, manifest, &targets, Some(source_subpath)) {
                     Some(file_id) => ManifestWorkspaceResolution::Resolved(
@@ -1120,6 +1189,51 @@ fn try_manifest_workspace_resolution(
     }
 
     ManifestWorkspaceResolution::Continue
+}
+
+/// The `exports` key that a package subpath matches: `.` for the package
+/// root, else `./<subpath>`.
+fn export_key(subpath: &str) -> String {
+    if subpath.is_empty() {
+        ".".to_string()
+    } else {
+        format!("./{subpath}")
+    }
+}
+
+/// Return the paths that the `exports` map of a project package names for a
+/// bare `specifier`, when no named path exists on disk.
+///
+/// Generated code (`./src/generated/enums.ts`) does not exist before the
+/// generator runs, so such an import does not resolve. The unresolved-import
+/// check uses these paths to find out if the repository ignores the target.
+/// The result is `None` when the specifier does not name a project package,
+/// when the package has no `exports` map, when no `exports` key matches the
+/// subpath, when a target leaves the package root, or when a target exists.
+pub(super) fn missing_package_export_paths(
+    ctx: &ResolveContext<'_>,
+    specifier: &str,
+) -> Option<Vec<PathBuf>> {
+    if !is_bare_specifier(specifier) {
+        return None;
+    }
+    let pkg_name = extract_package_name(specifier);
+    let manifest = find_package_manifest(ctx.package_manifests, &pkg_name)?;
+    let exports = manifest.package_json.exports.as_ref()?;
+    let subpath = specifier
+        .strip_prefix(pkg_name.as_str())
+        .and_then(|s| s.strip_prefix('/'))
+        .unwrap_or("");
+    let PackageMapTarget::Targets(targets) =
+        package_map_target(exports, &export_key(subpath), ctx.condition_names)
+    else {
+        return None;
+    };
+    let paths = targets
+        .iter()
+        .map(|target| package_map_target_path(manifest, target))
+        .collect::<Option<Vec<_>>>()?;
+    (!paths.is_empty() && paths.iter().all(|path| !path.exists())).then_some(paths)
 }
 
 /// Resolve the stripped subpath as a relative import from inside the package
@@ -2224,6 +2338,76 @@ mod tests {
             try_source_fallback(&dist_path, &path_to_id),
             Some(FileId(6)),
             "dist/utils.mjs should fall back to src/utils.mts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_declaration_with_dotted_name() {
+        let src_path = PathBuf::from("/project/packages/lib/src/x.port.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/x.port.d.ts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/x.port.d.ts should fall back to src/x.port.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_module_declaration() {
+        let src_path = PathBuf::from("/project/packages/lib/src/x.mts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/x.d.mts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/x.d.mts should fall back to src/x.mts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_commonjs_declaration_in_subdir() {
+        let src_path = PathBuf::from("/project/packages/lib/src/sub/x.cts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/sub/x.d.cts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/sub/x.d.cts should fall back to src/sub/x.cts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_declaration_copied_from_src() {
+        let src_path = PathBuf::from("/project/packages/lib/src/globals.d.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/globals.d.ts");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/globals.d.ts should fall back to a copied src/globals.d.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_js_with_dotted_name() {
+        let src_path = PathBuf::from("/project/packages/lib/src/x.port.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/x.port.js");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/x.port.js should fall back to src/x.port.ts"
         );
     }
 

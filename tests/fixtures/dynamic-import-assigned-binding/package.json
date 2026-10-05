@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-import-assigned-binding",
+  "type": "module",
+  "main": "src/index.ts"
+}

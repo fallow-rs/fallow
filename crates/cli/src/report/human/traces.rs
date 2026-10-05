@@ -488,11 +488,56 @@ fn build_dependency_trace_human_lines(trace: &DependencyTrace) -> Vec<String> {
         lines.push(String::new());
         lines.push(format!(
             "  {}",
-            "Referenced from package.json scripts or CI configs.".dimmed()
+            "Referenced from package.json scripts, CI configs or git hooks.".dimmed()
         ));
+    }
+    if !trace.peer_of.is_empty() {
+        lines.push(String::new());
+        lines.push("  Peer dependency of:".to_string());
+        for host in &trace.peer_of {
+            lines.push(format!("    {} {host}", "->".dimmed()));
+        }
+        lines.push(format!(
+            "  {}",
+            "A used package lists this name as a peer and loads it at runtime.".dimmed()
+        ));
+    }
+    if let Some(credit) = &trace.tooling_credit {
+        lines.push(String::new());
+        lines.push(format!("  {}", describe_tooling_credit(credit).dimmed()));
     }
     lines.push(String::new());
     lines
+}
+
+fn describe_tooling_credit(credit: &fallow_types::trace::ToolingCredit) -> String {
+    let plugin = credit.plugin.as_deref().unwrap_or("unknown");
+    match (credit.reason.as_str(), &credit.config, &credit.reference) {
+        ("plugin-config", Some(config), _) => format!(
+            "Credited as tooling of the {plugin} plugin, which found its config in {}.",
+            config.display()
+        ),
+        ("plugin-reference", _, Some(reference)) => format!(
+            "Credited as tooling of the {plugin} plugin: a package.json script, CI config or git hook runs {reference}."
+        ),
+        ("ambient-types", _, _) => "Credited as a type package that declares globals.".to_string(),
+        ("types-target", _, Some(target)) => {
+            format!(
+                "Credited as the type package of {target}, which the project declares or imports."
+            )
+        }
+        ("types-config", _, _) => {
+            "Credited because a config file, such as a tsconfig types entry, names it.".to_string()
+        }
+        ("known-tooling", _, _) => {
+            "Credited as a known tooling package from the tooling catalogue.".to_string()
+        }
+        ("known-tooling-config", Some(config), _) => format!(
+            "Credited as a known command-line tool with its own config in {}.",
+            config.display()
+        ),
+        (reason, _, _) => format!("Credited as tooling ({reason})."),
+    }
 }
 
 fn build_clone_trace_human_lines(trace: &CloneTrace, root: &Path) -> Vec<String> {
@@ -921,7 +966,9 @@ mod tests {
             used_in_scripts: true,
             is_used: true,
             import_count: 1,
+            peer_of: Vec::new(),
             sources: Vec::new(),
+            tooling_credit: None,
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));
@@ -929,8 +976,125 @@ mod tests {
         assert!(rendered.contains("USED zod (1 import(s))"));
         assert!(rendered.contains("Imported by:"));
         assert!(rendered.contains("-> src/schema.ts (type-only)"));
-        assert!(rendered.contains("Referenced from package.json scripts or CI configs."));
+        assert!(
+            rendered.contains("Referenced from package.json scripts, CI configs or git hooks.")
+        );
         assert!(!rendered.contains("Source:"));
+    }
+
+    #[test]
+    fn a_peer_credited_trace_names_the_packages_that_list_it() {
+        let trace = DependencyTrace {
+            package_name: "opt-peer".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: true,
+            import_count: 0,
+            peer_of: vec!["host".to_string()],
+            sources: Vec::new(),
+            tooling_credit: None,
+        };
+
+        let rendered = plain(&build_dependency_trace_human_lines(&trace));
+
+        assert!(rendered.contains("USED opt-peer (0 import(s))"));
+        assert!(rendered.contains("Peer dependency of:"));
+        assert!(rendered.contains("-> host"));
+        assert!(!rendered.contains("Imported by:"));
+    }
+
+    #[test]
+    fn dependency_trace_explains_a_tooling_credit() {
+        let mut trace = DependencyTrace {
+            package_name: "tool-addon".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: false,
+            import_count: 0,
+            peer_of: Vec::new(),
+            sources: Vec::new(),
+            tooling_credit: None,
+        };
+        trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
+            reason: "plugin-reference".to_string(),
+            plugin: Some("tool".to_string()),
+            config: None,
+            reference: Some("tool".to_string()),
+        }));
+
+        let rendered = plain(&build_dependency_trace_human_lines(&trace));
+
+        assert!(rendered.contains("USED tool-addon (0 import(s))"));
+        assert!(rendered.contains(
+            "Credited as tooling of the tool plugin: a package.json script, CI config or git hook runs tool."
+        ));
+
+        let mut config_trace = DependencyTrace {
+            package_name: "tool".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: false,
+            import_count: 0,
+            peer_of: Vec::new(),
+            sources: Vec::new(),
+            tooling_credit: None,
+        };
+        config_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
+            reason: "plugin-config".to_string(),
+            plugin: Some("tool".to_string()),
+            config: Some(PathBuf::from(".toolrc.json")),
+            reference: None,
+        }));
+        let rendered = plain(&build_dependency_trace_human_lines(&config_trace));
+        assert!(rendered.contains("found its config in .toolrc.json."));
+
+        let mut types_trace = DependencyTrace {
+            package_name: "@types/lib".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: false,
+            import_count: 0,
+            peer_of: Vec::new(),
+            sources: Vec::new(),
+            tooling_credit: None,
+        };
+        types_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
+            reason: "types-target".to_string(),
+            plugin: None,
+            config: None,
+            reference: Some("lib".to_string()),
+        }));
+        let rendered = plain(&build_dependency_trace_human_lines(&types_trace));
+        assert!(rendered.contains(
+            "Credited as the type package of lib, which the project declares or imports."
+        ));
+
+        let mut cli_trace = DependencyTrace {
+            package_name: "tool-cli".to_string(),
+            imported_by: Vec::new(),
+            type_only_imported_by: Vec::new(),
+            used_in_scripts: false,
+            is_used: false,
+            import_count: 0,
+            peer_of: Vec::new(),
+            sources: Vec::new(),
+            tooling_credit: None,
+        };
+        cli_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
+            reason: "known-tooling-config".to_string(),
+            plugin: None,
+            config: Some(PathBuf::from(".toolrc")),
+            reference: None,
+        }));
+        let rendered = plain(&build_dependency_trace_human_lines(&cli_trace));
+        assert!(
+            rendered
+                .contains("Credited as a known command-line tool with its own config in .toolrc.")
+        );
     }
 
     #[test]
@@ -942,12 +1106,14 @@ mod tests {
             used_in_scripts: false,
             is_used: true,
             import_count: 1,
+            peer_of: Vec::new(),
             sources: vec![TraceSource {
                 kind: "module-federation".to_string(),
                 plugin: "webpack".to_string(),
                 config: PathBuf::from("webpack.config.js"),
                 key: "remotes".to_string(),
             }],
+            tooling_credit: None,
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));

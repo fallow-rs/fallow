@@ -22,21 +22,30 @@ fn unused_dep_flagged_when_never_imported() {
 }
 
 #[test]
-fn known_tooling_dev_deps_not_flagged_as_unused() {
+fn known_tooling_dev_deps_credit_libraries_and_referenced_cli_tools() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
-    let pkg = make_pkg(&[], &["jest", "vitest"], &[]);
+    let pkg = make_pkg(&[], &["jsdom", "sass", "jest", "vitest"], &[]);
     let config = test_config(PathBuf::from("/project"));
 
     let (unused, unused_dev, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
-
     assert!(unused.is_empty());
-    assert!(
-        !unused_dev.iter().any(|d| d.package_name == "jest"),
-        "jest is a known tooling dep and should be filtered"
+    let mut names: Vec<&str> = unused_dev.iter().map(|d| d.package_name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec!["jest", "vitest"],
+        "catalogue libraries keep their credit, command-line tools need a reference"
     );
+
+    let mut plugin_result = AggregatedPluginResult::default();
+    plugin_result
+        .script_used_packages
+        .extend(["jest".to_string(), "vitest".to_string()]);
+    let (_, unused_dev, _) =
+        find_unused_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
     assert!(
-        !unused_dev.iter().any(|d| d.package_name == "vitest"),
-        "vitest is a known tooling dep and should be filtered"
+        unused_dev.is_empty(),
+        "a script reference credits the command-line tools, found: {unused_dev:?}"
     );
 }
 
@@ -313,29 +322,48 @@ fn recursive_peer_dependencies_of_used_package_not_flagged() {
 }
 
 #[test]
-fn optional_peer_dependency_of_used_package_is_still_flagged_when_unused() {
+fn optional_peer_dependency_of_used_package_not_flagged() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let root = tmp.path();
-    std::fs::create_dir_all(root.join("node_modules/plugin-a")).expect("create plugin-a dir");
-    std::fs::write(
-        root.join("node_modules/plugin-a/package.json"),
-        r#"{
-  "name": "plugin-a",
-  "peerDependencies": {"optional-peer": "^1.0.0"},
-  "peerDependenciesMeta": {"optional-peer": {"optional": true}}
-}"#,
-    )
-    .expect("write plugin-a package");
+    for (name, peer) in [
+        ("plugin-a", "optional-peer"),
+        ("unused-plugin", "peer-of-unused"),
+    ] {
+        std::fs::create_dir_all(root.join("node_modules").join(name)).expect("create package dir");
+        std::fs::write(
+            root.join("node_modules").join(name).join("package.json"),
+            format!(
+                r#"{{
+  "name": "{name}",
+  "peerDependencies": {{"{peer}": "^1.0.0"}},
+  "peerDependenciesMeta": {{"{peer}": {{"optional": true}}}}
+}}"#
+            ),
+        )
+        .expect("write package");
+    }
 
     let (graph, _) = build_graph_with_npm_imports(&[("plugin-a", false)]);
-    let pkg = make_pkg(&["plugin-a", "optional-peer"], &[], &[]);
+    let pkg = make_pkg(
+        &[
+            "plugin-a",
+            "optional-peer",
+            "unused-plugin",
+            "peer-of-unused",
+        ],
+        &[],
+        &[],
+    );
     let config = test_config(root.to_path_buf());
 
     let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
+    let mut unused_names: Vec<&str> = unused.iter().map(|dep| dep.package_name.as_str()).collect();
+    unused_names.sort_unstable();
 
-    assert!(
-        unused.iter().any(|d| d.package_name == "optional-peer"),
-        "optional peer dependencies are not required by the used package and should still be reported: {unused:?}"
+    assert_eq!(
+        unused_names,
+        vec!["peer-of-unused", "unused-plugin"],
+        "an optional peer of a used package is credited; one of an unused package is not"
     );
 }
 
@@ -372,6 +400,32 @@ fn scoped_package_subpath_import_recognized_as_used() {
         unused.is_empty(),
         "@chakra-ui/react should be recognized as used via subpath import"
     );
+}
+
+/// A devDependency that the same manifest lists in `peerDependencies` installs
+/// the package's own peer for local build and test, so it is not unused. A
+/// devDependency with no peer entry stays reported.
+#[test]
+fn dev_dep_listed_as_own_peer_not_flagged() {
+    let (graph, _) = build_graph_with_npm_imports(&[]);
+    let pkg: PackageJson = serde_json::from_str(
+        r#"{
+  "name": "test-project",
+  "peerDependencies": {"react": "^18.0.0"},
+  "peerDependenciesMeta": {"react": {"optional": true}},
+  "devDependencies": {"react": "^18.3.1", "left-pad": "^1.0.0"}
+}"#,
+    )
+    .expect("pkg should deserialize");
+    let config = test_config(PathBuf::from("/project"));
+
+    let (_, unused_dev, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
+    let unused_dev_names: Vec<&str> = unused_dev
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+
+    assert_eq!(unused_dev_names, vec!["left-pad"]);
 }
 
 #[test]
@@ -501,6 +555,7 @@ fn path_alias_imports_not_reported_as_unlisted() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -572,6 +627,7 @@ fn multiple_unresolved_imports_collected() {
         exported_factory_returns: std::sync::Arc::default(),
         exported_factory_return_object_shapes: std::sync::Arc::default(),
         type_member_types: std::sync::Arc::default(),
+        missing_export_targets: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -612,21 +668,68 @@ fn all_deps_used_produces_no_unused() {
 }
 
 #[test]
-fn plugin_tooling_dev_deps_not_flagged() {
+fn plugin_tooling_dev_deps_need_evidence() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
-    let pkg = make_pkg(&[], &["my-dev-tool"], &[]);
+    let pkg = make_pkg(&[], &["my-dev-tool", "my-dev-tool-addon"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let unused_dev_names = |plugin_result: &AggregatedPluginResult| -> Vec<String> {
+        let (_, unused_dev, _) =
+            find_unused_dependencies(&graph, &pkg, &config, Some(plugin_result), &[]);
+        let mut names: Vec<String> = unused_dev.into_iter().map(|d| d.package_name).collect();
+        names.sort();
+        names
+    };
+    let tooling = |has_own_config: bool| {
+        let own_config = has_own_config.then(|| PathBuf::from("/project/.my-dev-toolrc"));
+        let mut plugin_result = AggregatedPluginResult::default();
+        plugin_result
+            .tooling_dependencies
+            .extend(["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()]);
+        plugin_result
+            .plugin_tooling
+            .push(crate::plugins::PluginToolingDependencies {
+                plugin: "my-dev-tool".to_string(),
+                dependencies: vec!["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()],
+                references: vec!["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()],
+                own_config,
+            });
+        plugin_result
+    };
+
+    assert_eq!(
+        unused_dev_names(&tooling(false)),
+        vec!["my-dev-tool".to_string(), "my-dev-tool-addon".to_string()],
+        "an active plugin without a config file or a reference credits nothing"
+    );
+    assert!(
+        unused_dev_names(&tooling(true)).is_empty(),
+        "a plugin that found its own config file credits its tooling dev deps"
+    );
+    let mut referenced = tooling(false);
+    referenced
+        .script_used_packages
+        .insert("my-dev-tool".to_string());
+    assert!(
+        unused_dev_names(&referenced).is_empty(),
+        "a script reference to the tool credits every tooling dev dep of its plugin"
+    );
+}
+
+#[test]
+fn plugin_tooling_prod_deps_keep_declared_credit() {
+    let (graph, _) = build_graph_with_npm_imports(&[]);
+    let pkg = make_pkg(&["my-runtime-tool"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
 
     let mut plugin_result = AggregatedPluginResult::default();
     plugin_result
         .tooling_dependencies
-        .push("my-dev-tool".to_string());
+        .push("my-runtime-tool".to_string());
 
-    let (_, unused_dev, _) =
-        find_unused_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
+    let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
 
     assert!(
-        !unused_dev.iter().any(|d| d.package_name == "my-dev-tool"),
-        "plugin tooling dev deps should not be flagged as unused"
+        unused.is_empty(),
+        "the evidence rule covers devDependencies only, found: {unused:?}"
     );
 }

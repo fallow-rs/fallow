@@ -21,6 +21,17 @@ dependencies, config patterns, manifest-derived entries, and detection rules.
 Activation must be derived from explicit project evidence such as a dependency,
 config file, or declared combinator.
 
+A plugin's tooling dependencies credit an unused devDependency only with
+evidence that the project runs the tool: a file that the plugin's config or
+always-used patterns match, its config key in package.json, or a script, CI
+workflow or git hook that invokes one of its tooling dependencies or exact
+enablers. `crates/core/src/plugins/registry/tooling_evidence.rs` records the
+config side per plugin, and `crates/core/src/scripts/hooks.rs` adds hook
+commands to the script-used set. Activation is not evidence, because a
+declared package activates the plugin. The unlisted-dependency and
+`dev-dependencies-in-production` checks still read every declared tooling
+dependency, and so do production dependencies.
+
 Framework-specific AST interpretation belongs in a built-in plugin. Portable
 declarative behavior belongs in the external plugin contract.
 

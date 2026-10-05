@@ -15,6 +15,9 @@ use super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, ProvidedDepend
 
 pub(crate) mod builtin;
 mod helpers;
+mod tooling_evidence;
+
+pub(crate) use tooling_evidence::find_config_file;
 
 /// Names of every built-in framework plugin, in registry order.
 ///
@@ -278,6 +281,56 @@ pub(crate) fn format_plugin_regex_errors(errors: &[PluginRegexValidationError]) 
     )
 }
 
+/// The tooling dependencies of one active plugin, plus the evidence that the
+/// project uses the plugin.
+///
+/// The unused devDependency check credits `dependencies` only when the plugin
+/// found a config of its own (`own_config`), or when a package.json script, a
+/// CI workflow or a git hook invokes one of `references`. An active plugin
+/// alone is no evidence: a declared package activates it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginToolingDependencies {
+    /// The plugin name.
+    pub plugin: String,
+    /// The tooling dependencies the plugin declares.
+    pub dependencies: Vec<String>,
+    /// The package names whose script, CI or hook invocation shows that the
+    /// project runs the plugin's tool: its tooling dependencies and its exact
+    /// enablers.
+    pub references: Vec<String>,
+    /// The config file the plugin found, or the package.json that holds its
+    /// config. Absolute path.
+    pub own_config: Option<PathBuf>,
+}
+
+/// Why a plugin's tooling dependencies are credited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginToolingEvidence<'a> {
+    /// The plugin found this config file, or the package.json with its config.
+    OwnConfig(&'a Path),
+    /// A script, CI workflow or git hook invokes this package.
+    Reference(&'a str),
+}
+
+impl PluginToolingDependencies {
+    /// The evidence that the project uses the plugin, given the packages that
+    /// scripts, CI workflows and git hooks invoke. `None` means the plugin's
+    /// tooling dependencies are not credited.
+    #[must_use]
+    pub fn evidence<'a>(
+        &'a self,
+        script_used_packages: &FxHashSet<String>,
+    ) -> Option<PluginToolingEvidence<'a>> {
+        if let Some(config) = &self.own_config {
+            return Some(PluginToolingEvidence::OwnConfig(config));
+        }
+        self.references
+            .iter()
+            .find(|name| script_used_packages.contains(name.as_str()))
+            .map(|name| PluginToolingEvidence::Reference(name))
+    }
+}
+
 /// Aggregated results from all active plugins for a project.
 #[derive(Debug, Clone, Default)]
 pub struct AggregatedPluginResult {
@@ -305,10 +358,25 @@ pub struct AggregatedPluginResult {
     pub discovered_always_used: Vec<(String, String)>,
     /// Setup files discovered from config parsing: (path, plugin_name).
     pub setup_files: Vec<(PathBuf, String)>,
-    /// Tooling dependencies (should not be flagged as unused devDeps).
+    /// Tooling dependencies of every active plugin, whether or not the plugin
+    /// found evidence that the project uses it. The unlisted-dependency and
+    /// dev-dependency-in-production checks read this list.
     pub tooling_dependencies: Vec<String>,
+    /// Tooling dependencies grouped by the active plugin that declares them,
+    /// with the evidence that decides whether an unused devDependency check
+    /// credits them. See [`PluginToolingDependencies`].
+    pub plugin_tooling: Vec<PluginToolingDependencies>,
     /// Package names discovered as used in package.json scripts (binary invocations).
     pub script_used_packages: FxHashSet<String>,
+    /// The binary names that the declared dependencies provide. Script
+    /// analysis fills it for the root result; workspace results keep the
+    /// default.
+    pub dependency_binaries: crate::scripts::DependencyBinaries,
+    /// The names that the root and workspace manifests declare in
+    /// `devDependencies`. Script analysis fills it for the root result, so
+    /// the trace credits a dependency only where the unused devDependency
+    /// check would.
+    pub dev_dependency_names: FxHashSet<String>,
     /// Import prefixes for virtual modules provided by active frameworks.
     /// Imports matching these prefixes should not be flagged as unlisted dependencies.
     pub virtual_module_prefixes: Vec<String>,
@@ -447,7 +515,10 @@ impl AggregatedPluginResult {
             discovered_always_used,
             setup_files,
             tooling_dependencies,
+            plugin_tooling,
             script_used_packages,
+            dependency_binaries: _,
+            dev_dependency_names,
             virtual_module_prefixes,
             virtual_package_suffixes,
             generated_import_patterns,
@@ -483,6 +554,8 @@ impl AggregatedPluginResult {
         self.discovered_always_used.extend(discovered_always_used);
         self.setup_files.extend(setup_files);
         self.tooling_dependencies.extend(tooling_dependencies);
+        self.plugin_tooling.extend(plugin_tooling);
+        self.dev_dependency_names.extend(dev_dependency_names);
         self.script_used_packages.extend(script_used_packages);
         extend_unique(&mut self.virtual_module_prefixes, virtual_module_prefixes);
         extend_unique(&mut self.virtual_package_suffixes, virtual_package_suffixes);
@@ -612,6 +685,16 @@ impl PluginRegistry {
             discovered_files,
             &mut result,
         );
+        tooling_evidence::record_plugin_tooling(
+            &tooling_evidence::ToolingEvidenceInput {
+                active: &active,
+                external_plugins: &self.external_plugins,
+                all_deps: &all_deps,
+                roots: &[root],
+                discovered_files,
+            },
+            &mut result,
+        );
 
         let config_matchers = compile_config_matchers(&active);
         let relative_files =
@@ -703,6 +786,22 @@ impl PluginRegistry {
         }
 
         process_workspace_active_plugins(&active, input, &mut result, &mut regex_errors);
+        // A config file at the project root applies to a workspace package too.
+        let evidence_roots: &[&Path] = if input.root == input.project_root {
+            &[input.root]
+        } else {
+            &[input.root, input.project_root]
+        };
+        tooling_evidence::record_plugin_tooling(
+            &tooling_evidence::ToolingEvidenceInput {
+                active: &active,
+                external_plugins: &self.external_plugins,
+                all_deps: &all_deps,
+                roots: evidence_roots,
+                discovered_files: &workspace_files,
+            },
+            &mut result,
+        );
         resolve_workspace_plugin_configs(&active, input, &mut result, &mut regex_errors);
 
         if regex_errors.is_empty() {
@@ -723,6 +822,74 @@ impl PluginRegistry {
             .filter(|p| !p.config_patterns().is_empty())
             .map(|p| (p.as_ref(), cached_plugin_config_matchers(p.as_ref())))
             .collect()
+    }
+
+    /// Resolve the config files that package scripts pass to a plugin binary
+    /// with `--config` / `-c`.
+    ///
+    /// `package_root` is the directory of the `package.json` that holds the
+    /// scripts, and `ws_prefix` is its path relative to the project root
+    /// (empty for the root package). Each file is resolved into its own
+    /// result, so a `test.include` in a script config adds entry patterns
+    /// and does not replace the patterns of the plugin's default config.
+    /// A file that a `config_patterns()` entry matches is skipped, because
+    /// the normal plugin run resolves it already.
+    pub(crate) fn resolve_script_config_files(
+        &self,
+        config_files: &[scripts::BinaryConfigFile],
+        package_root: &Path,
+        ws_prefix: &str,
+    ) -> AggregatedPluginResult {
+        let mut aggregated = AggregatedPluginResult::default();
+        for config_file in config_files {
+            let Some(rel_path) =
+                scripts::normalize_script_entry_pattern(ws_prefix, &config_file.path)
+            else {
+                continue;
+            };
+            for plugin in &self.plugins {
+                let plugin = plugin.as_ref();
+                if !plugin
+                    .script_config_binaries()
+                    .contains(&config_file.binary.as_str())
+                    || cached_plugin_config_matchers(plugin)
+                        .iter()
+                        .any(|m| m.is_match(rel_path.as_str()))
+                {
+                    continue;
+                }
+                let abs_path = package_root.join(config_file.path.trim_start_matches("./"));
+                let Ok(source) = std::fs::read_to_string(&abs_path) else {
+                    continue;
+                };
+                let mut file_result = AggregatedPluginResult::default();
+                file_result
+                    .entry_point_roles
+                    .insert(plugin.name().to_string(), plugin.entry_point_role());
+                let plugin_result = plugin.resolve_config(&abs_path, &source, package_root);
+                if let Err(errors) = process_config_result(
+                    plugin.name(),
+                    plugin_result,
+                    &mut file_result,
+                    Some(&abs_path),
+                ) {
+                    for error in errors {
+                        tracing::warn!("{error}");
+                    }
+                    continue;
+                }
+                if !ws_prefix.is_empty() {
+                    file_result.apply_workspace_prefix(ws_prefix);
+                }
+                // The tool loads the config module and reads its default export.
+                file_result.used_exports.push(PluginUsedExportRule::new(
+                    plugin.name().to_string(),
+                    super::UsedExportRule::new(rel_path.clone(), ["default"]),
+                ));
+                aggregated.merge_into(file_result);
+            }
+        }
+        aggregated
     }
 }
 

@@ -1,0 +1,12 @@
+{
+  "name": "import-meta-resolve-package",
+  "type": "module",
+  "main": "src/index.js",
+  "dependencies": {
+    "open-pkg": "1.0.0",
+    "@scope/data": "1.0.0",
+    "deep-pkg": "1.0.0",
+    "local-meta-pkg": "1.0.0",
+    "scoped-unused": "1.0.0"
+  }
+}

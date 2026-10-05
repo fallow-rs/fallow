@@ -92,3 +92,44 @@ fn arrow_wrapped_lazy_imports_credit_default_exports() {
         "unusedRouteHelper should remain unused; only default is credited via route callback import, unused exports: {unused_export_names:?}"
     );
 }
+
+#[test]
+fn local_loader_functions_credit_dynamic_import_exports() {
+    let root = fixture_path("dynamic-import-local-loader");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
+            )
+        })
+        .collect();
+    unused.sort();
+
+    let expected: Vec<(String, String)> = [
+        ("drawer.ts", "drawerTitle"),
+        ("helpers.ts", "unusedHelper"),
+        ("tools.ts", "unusedTool"),
+        ("view.tsx", "unusedView"),
+    ]
+    .iter()
+    .map(|(file, name)| ((*file).to_string(), (*name).to_string()))
+    .collect();
+
+    assert_eq!(
+        unused, expected,
+        "a loader passed as an argument credits `default`, a loader call bound with await \
+         credits the accessed or destructured names, a loader with any other use \
+         credits the whole module, and a loader without a reference credits nothing"
+    );
+}

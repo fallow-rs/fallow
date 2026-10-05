@@ -1,0 +1,11 @@
+{
+  "name": "optional-peer-of-used-dependency",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "host": "1.0.0",
+    "opt-peer": "1.0.0",
+    "unused-host": "1.0.0",
+    "peer-of-unused": "1.0.0"
+  }
+}

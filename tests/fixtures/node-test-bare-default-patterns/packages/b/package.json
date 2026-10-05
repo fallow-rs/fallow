@@ -1,0 +1,8 @@
+{
+  "name": "b",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "NODE_ENV=test node --experimental-strip-types --test"
+  }
+}

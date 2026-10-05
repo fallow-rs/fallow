@@ -318,3 +318,38 @@ fn html_public_root_relative_assets_are_reachable() {
         "missing public assets should still report unresolved, got: {html_unresolved:?}"
     );
 }
+
+#[test]
+fn html_inline_script_body_creates_no_asset_refs() {
+    let root = fixture_path("html-inline-script-body");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let html_unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        html_unresolved.is_empty(),
+        "markup inside an inline script body is not an asset reference, got unresolved: {html_unresolved:?}"
+    );
+
+    let unused_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_paths
+            .iter()
+            .any(|path| path.ends_with("assets/base.css")),
+        "base.css should stay reachable via the real <link href>, unused files: {unused_paths:?}"
+    );
+    assert!(
+        unused_paths
+            .iter()
+            .any(|path| path.ends_with("templates/widget.js")),
+        "a string inside an inline script body must not make widget.js reachable, unused files: {unused_paths:?}"
+    );
+}

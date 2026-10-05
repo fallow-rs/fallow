@@ -4,8 +4,8 @@ use fallow_types::discover::FileId;
 use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace,
-    ImportPathTraceSchemaVersion, NamespacedExportReferences, ReExportChain, TracedCloneGroup,
-    TracedExport, TracedReExport,
+    ImportPathTraceSchemaVersion, NamespacedExportReferences, ReExportChain, ToolingCredit,
+    TracedCloneGroup, TracedExport, TracedReExport,
 };
 use fallow_types::trace_chain::StarExportAmbiguity;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -952,15 +952,40 @@ pub fn trace_dependency(
 
     let import_count = imported_by.len();
     let used_in_scripts = script_used_packages.contains(package_name);
-    DependencyTrace {
+    let peer_of = crate::core_backend::peer_dependency_hosts(
+        root,
+        graph.package_usage.keys().map(String::as_str),
+        package_name,
+    );
+    let mut trace = DependencyTrace {
         package_name: package_name.to_string(),
         imported_by,
         type_only_imported_by,
         used_in_scripts,
-        is_used: import_count > 0 || used_in_scripts,
+        is_used: import_count > 0 || used_in_scripts || !peer_of.is_empty(),
         import_count,
+        peer_of,
         sources: Vec::new(),
-    }
+        tooling_credit: None,
+    };
+    trace.apply_tooling_credit(imported_types_target_credit(graph, package_name));
+    trace
+}
+
+/// The credit of a `@types/X` package whose target `X` the code imports, as
+/// the unused devDependency check gives it.
+fn imported_types_target_credit(graph: &ModuleGraph, package_name: &str) -> Option<ToolingCredit> {
+    let target = crate::core_backend::types_package_target(package_name)?;
+    graph
+        .package_usage
+        .get(target.as_str())
+        .is_some_and(|ids| !ids.is_empty())
+        .then(|| ToolingCredit {
+            reason: "types-target".to_string(),
+            plugin: None,
+            config: None,
+            reference: Some(target),
+        })
 }
 
 fn format_reference_kind(kind: ReferenceKind) -> String {

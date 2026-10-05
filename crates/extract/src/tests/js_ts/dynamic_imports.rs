@@ -1653,6 +1653,72 @@ fn new_url_parent_relative_extensionless_specifier_is_speculative() {
     );
 }
 
+// A `new URL(path, import.meta.url)` passed directly to a filesystem call or to
+// `fileURLToPath` names a path on disk, not a module the code loads. The file
+// can be an output that does not exist yet, or a probe for an optional file.
+// The reference is speculative: it credits the target when it resolves and is
+// dropped silently when it does not.
+
+fn new_url_import<'a>(info: &'a ModuleInfo, source: &str) -> &'a crate::DynamicImportInfo {
+    info.dynamic_imports
+        .iter()
+        .find(|i| i.source == source)
+        .unwrap_or_else(|| panic!("new URL('{source}', ...) should emit a dynamic import"))
+}
+
+#[test]
+fn new_url_passed_to_fs_call_is_speculative() {
+    let info = parse_source(
+        r#"
+import { writeFileSync, existsSync } from "node:fs";
+import * as fsp from "node:fs/promises";
+writeFileSync(new URL("../out/data.json", import.meta.url), "{}");
+export const gone = existsSync(new URL("./removed.ts", import.meta.url));
+export const text = fsp.readFile(new URL("./notes.md", import.meta.url), "utf8");
+"#,
+    );
+    for source in ["../out/data.json", "./removed.ts", "./notes.md"] {
+        assert!(
+            new_url_import(&info, source).is_speculative,
+            "new URL('{source}', ...) passed to a filesystem call must be speculative"
+        );
+    }
+}
+
+#[test]
+fn new_url_passed_to_file_url_to_path_is_speculative() {
+    let info = parse_source(
+        r#"
+import { fileURLToPath } from "node:url";
+import url from "node:url";
+export const entry = fileURLToPath(new URL("./runner.mjs", import.meta.url));
+export const other = url.fileURLToPath(new URL("./other.mjs", import.meta.url));
+"#,
+    );
+    for source in ["./runner.mjs", "./other.mjs"] {
+        assert!(
+            new_url_import(&info, source).is_speculative,
+            "new URL('{source}', ...) passed to fileURLToPath must be speculative"
+        );
+    }
+}
+
+#[test]
+fn new_url_passed_to_worker_is_not_speculative() {
+    let info = parse_source(
+        r#"
+export const w = new Worker(new URL("./worker.js", import.meta.url));
+export const s = someLoader(new URL("./loaded.js", import.meta.url));
+"#,
+    );
+    for source in ["./worker.js", "./loaded.js"] {
+        assert!(
+            !new_url_import(&info, source).is_speculative,
+            "new URL('{source}', ...) outside a filesystem call must not be speculative"
+        );
+    }
+}
+
 #[test]
 fn top_level_await_import_is_eager() {
     let info = parse_source(
@@ -1670,4 +1736,217 @@ const lazy = import("./lazy-no-await");
     let mut eager = eager_dynamic_import_sources(&info);
     eager.sort_unstable();
     assert_eq!(eager, ["./a", "./b", "./c"]);
+}
+
+#[test]
+fn awaited_dynamic_import_member_call_credits_member() {
+    let info = parse_source("async function f() { await (await import('./a')).usedA(); }");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./a");
+    assert!(info.dynamic_imports[0].local_name.is_none());
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["usedA"]);
+}
+
+#[test]
+fn awaited_dynamic_import_member_new_credits_member() {
+    let info = parse_source("async function f() { return new (await import('./b')).KB(); }");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./b");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["KB"]);
+}
+
+#[test]
+fn awaited_dynamic_import_string_key_and_default_credit_member() {
+    let info = parse_source(
+        "async function f() { (await import('./a'))['usedA'](); (await import('./b')).default(); }",
+    );
+    assert_eq!(info.dynamic_imports.len(), 2);
+    assert_eq!(info.dynamic_imports[0].source, "./a");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["usedA"]);
+    assert_eq!(info.dynamic_imports[1].source, "./b");
+    assert_eq!(info.dynamic_imports[1].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn awaited_conditional_dynamic_import_member_credits_both_branches() {
+    let info = parse_source("async function f() { (await import(cond ? './x' : './y')).run(); }");
+    assert_eq!(info.dynamic_imports.len(), 2);
+    for imp in &info.dynamic_imports {
+        assert_eq!(imp.destructured_names, vec!["run"]);
+        assert!(imp.local_name.is_none());
+    }
+}
+
+fn dynamic_import_shapes(info: &ModuleInfo) -> Vec<(&str, Vec<&str>, Option<&str>)> {
+    info.dynamic_imports
+        .iter()
+        .map(|imp| {
+            (
+                imp.source.as_str(),
+                imp.destructured_names.iter().map(String::as_str).collect(),
+                imp.local_name.as_deref(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn local_loader_passed_as_argument_credits_default() {
+    let info = parse_source(
+        r"
+const loadView = () => import('./view');
+export const View = lazy(loadView);
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [("./view", vec!["default"], None)]
+    );
+}
+
+#[test]
+fn awaited_local_loader_call_binds_like_awaited_import() {
+    let info = parse_source(
+        r"
+export async function run() {
+  const helpers = await loadHelpers();
+  helpers.used();
+  const { tool } = await loadTools();
+}
+async function loadHelpers() {
+  return await import('./helpers');
+}
+function loadTools() {
+  return import('./tools');
+}
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [
+            ("./helpers", vec![], Some("helpers")),
+            ("./tools", vec!["tool"], None),
+        ]
+    );
+}
+
+#[test]
+fn local_loader_with_other_use_credits_whole_module() {
+    let info = parse_source(
+        r"
+const loadPanel = () => import('./panel');
+lazy(loadPanel);
+export const ready = loadPanel().then((panel) => panel);
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [
+            ("./panel", vec!["default"], None),
+            ("./panel", vec![], Some("loadPanel")),
+        ]
+    );
+    assert!(
+        info.whole_object_uses
+            .iter()
+            .any(|name| name == "loadPanel")
+    );
+}
+
+#[test]
+fn exported_local_loader_credits_whole_module() {
+    let info = parse_source(
+        r"
+const loadA = () => import('./a');
+export function loadB() {
+  return import('./b');
+}
+export { loadA };
+",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [
+            ("./a", vec![], Some("loadA")),
+            ("./b", vec![], Some("loadB")),
+        ]
+    );
+}
+
+#[test]
+fn reassignable_loader_binding_keeps_bare_import_edge() {
+    let info = parse_source(
+        r"
+let loadView = () => import('./view');
+lazy(loadView);
+",
+    );
+    assert_eq!(dynamic_import_shapes(&info), [("./view", vec![], None)]);
+}
+
+#[test]
+fn unreferenced_local_loader_keeps_bare_import_edge() {
+    let info = parse_source(
+        r"
+const loadPanel = () => import('./panel');
+",
+    );
+    assert_eq!(dynamic_import_shapes(&info), [("./panel", vec![], None)]);
+    assert!(
+        !info
+            .whole_object_uses
+            .iter()
+            .any(|name| name == "loadPanel")
+    );
+}
+
+fn dynamic_import_bindings(info: &ModuleInfo) -> Vec<(&str, Vec<&str>, Option<&str>)> {
+    info.dynamic_imports
+        .iter()
+        .map(|imp| {
+            (
+                imp.source.as_str(),
+                imp.destructured_names.iter().map(String::as_str).collect(),
+                imp.local_name.as_deref(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn ssr_load_module_with_literal_path_is_a_dynamic_import() {
+    let info = parse_source(
+        r"
+const server = await createServer();
+const mod = await server.ssrLoadModule('/src/a.ts');
+const { used, other } = await server.ssrLoadModule(`/src/b.ts`);
+await server.ssrLoadModule('/src/c.ts');
+mod.used;
+",
+    );
+    assert_eq!(
+        dynamic_import_bindings(&info),
+        [
+            ("/src/a.ts", vec![], Some("mod")),
+            ("/src/b.ts", vec!["used", "other"], None),
+            ("/src/c.ts", vec![], None),
+        ]
+    );
+}
+
+#[test]
+fn ssr_load_module_with_computed_path_is_not_an_edge() {
+    let info = parse_source(
+        r"
+const server = await createServer();
+const computed = await server.ssrLoadModule(path);
+const templated = await server.ssrLoadModule(`/src/${name}.ts`);
+const literal = await server.ssrLoadModule('/src/known.ts');
+",
+    );
+    assert_eq!(
+        dynamic_import_bindings(&info),
+        [("/src/known.ts", vec![], Some("literal"))]
+    );
+    assert!(info.dynamic_import_patterns.is_empty());
 }
