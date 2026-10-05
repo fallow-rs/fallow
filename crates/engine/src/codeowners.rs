@@ -524,7 +524,6 @@ pub fn directory_group(relative_path: &Path) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn translate_bare_glob() {
@@ -737,12 +736,14 @@ mod tests {
 
     #[test]
     fn from_file_real_codeowners() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
+        let root = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
         let path = root.join(".github/CODEOWNERS");
         if path.exists() {
             let co = CodeOwners::from_file(&path).unwrap();

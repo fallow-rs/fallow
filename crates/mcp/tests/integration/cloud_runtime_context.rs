@@ -282,7 +282,9 @@ fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHa
 
 /// The workspace root, two levels above this crate.
 fn workspace_root() -> PathBuf {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    );
     path.pop();
     path.pop();
     path

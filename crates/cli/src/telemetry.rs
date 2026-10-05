@@ -2856,7 +2856,8 @@ mod tests {
     }
 
     fn read_telemetry_doc() -> Option<String> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/telemetry.md");
+        let path = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR")?)
+            .join("../../docs/telemetry.md");
         std::fs::read_to_string(path).ok()
     }
 

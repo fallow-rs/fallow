@@ -423,8 +423,10 @@ mod tests {
     use crate::session::AnalysisSession;
 
     fn fixture_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/public-package-members")
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures/public-package-members")
     }
 
     fn public_entry_paths(session: &AnalysisSession) -> Vec<PathBuf> {

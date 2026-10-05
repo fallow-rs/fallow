@@ -459,8 +459,10 @@ fn the_compatibility_entry_counts_the_tools_that_carry_the_output_cap() {
     );
 
     let doc = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/backwards-compatibility.md"),
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../docs/backwards-compatibility.md"),
     )
     .expect("docs/backwards-compatibility.md is readable");
 

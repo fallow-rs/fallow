@@ -54,7 +54,10 @@ use serde_json::Value;
 /// Path to the committed schema, resolved from this crate's manifest dir so the
 /// test tracks the real `docs/output-schema.json` without a rebuild.
 fn schema_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/output-schema.json")
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../docs/output-schema.json")
 }
 
 /// Loads `docs/output-schema.json` and compiles a per-`kind` draft-07 validator

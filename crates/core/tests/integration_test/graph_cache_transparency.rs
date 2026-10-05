@@ -642,15 +642,17 @@ fn resolver_cache_hit_preserves_ambient_type_only_star_lane() {
 /// Resolve a real-world benchmark fixture path. These are gitignored symlinks
 /// that may be absent on a fresh checkout, so callers skip when missing.
 fn benchmark_fixture_path(name: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("benchmarks")
-        .join("fixtures")
-        .join("real-world")
-        .join(name)
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .parent()
+    .unwrap()
+    .parent()
+    .unwrap()
+    .join("benchmarks")
+    .join("fixtures")
+    .join("real-world")
+    .join(name)
 }
 
 /// Run a real-world benchmark fixture cold then warm and assert `total_issues`

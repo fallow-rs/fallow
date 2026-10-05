@@ -1380,7 +1380,10 @@ mod tests {
     const NO_CONFIG: Option<PathBuf> = None;
 
     fn flags_fixture_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/feature-flag-suppression")
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures/feature-flag-suppression")
     }
 
     fn flag(kind: FlagKind, name: &str, path: &str) -> FeatureFlag {
@@ -1523,8 +1526,10 @@ mod tests {
     #[test]
     fn run_flags_empty_default_config_surfaces_detectors_hint() {
         colored::control::set_override(false);
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/flags-none-default");
+        let root = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures/flags-none-default");
         // Non-quiet so the built-in detectors hint renders on an empty result.
         let opts = FlagsOptions {
             quiet: false,
@@ -1536,8 +1541,10 @@ mod tests {
     #[test]
     fn run_flags_empty_custom_config_surfaces_terse_hint() {
         colored::control::set_override(false);
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/flags-none-custom");
+        let root = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures/flags-none-custom");
         let opts = FlagsOptions {
             quiet: false,
             ..flags_opts(&root, OutputFormat::Human)

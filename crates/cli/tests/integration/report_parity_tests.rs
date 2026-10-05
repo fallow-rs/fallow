@@ -9,11 +9,13 @@ use std::process::{Command, Output};
 use crate::common::{fallow_bin, git, strip_volatile_fields};
 
 fn workspace_fixture(path: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(path)
-        .canonicalize()
-        .expect("fixture path")
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../..")
+    .join(path)
+    .canonicalize()
+    .expect("fixture path")
 }
 
 fn run(root: &Path, args: &[String]) -> Output {

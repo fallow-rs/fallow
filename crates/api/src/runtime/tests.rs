@@ -114,7 +114,10 @@ fn metadata_and_dupes_do_not_inherit_analysis_stage_diagnostics() {
 /// names the entry points the analysis uses (issue #2804).
 #[test]
 fn project_info_runs_the_analysis_plugin_stage() {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let fixtures = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../tests/fixtures");
     let listing = |fixture: &str| {
         crate::serialize_project_info_programmatic_json(
             crate::run_project_info(&crate::ProjectInfoOptions {

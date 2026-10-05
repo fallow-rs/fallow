@@ -62,7 +62,10 @@ fn escaped_literal(text: &str) -> Option<String> {
 
 #[test]
 fn every_static_regex_pattern_compiles() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let src = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("src");
     let mut files = Vec::new();
     rust_sources(&src, &mut files);
 

@@ -197,8 +197,13 @@ mod tests {
 
     #[test]
     fn engine_root_does_not_reexport_broad_surface_modules() {
-        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
-            .expect("read engine lib");
+        let source = fs::read_to_string(
+            std::path::PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("src/lib.rs"),
+        )
+        .expect("read engine lib");
         let public_surface = source
             .split("#[cfg(test)]")
             .next()
@@ -223,9 +228,13 @@ mod tests {
 
     #[test]
     fn engine_session_owns_dead_code_pipeline_sequence() {
-        let session_source =
-            fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/session.rs"))
-                .expect("read engine session");
+        let session_source = fs::read_to_string(
+            std::path::PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("src/session.rs"),
+        )
+        .expect("read engine session");
         assert!(
             !session_source.contains("analyze_with_owned_parse_result_from_discovery"),
             "engine session must not delegate dead-code orchestration to the old core monolith"
@@ -247,9 +256,13 @@ mod tests {
 
     #[test]
     fn engine_session_owns_analysis_discovery() {
-        let session_source =
-            fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/session.rs"))
-                .expect("read engine session");
+        let session_source = fs::read_to_string(
+            std::path::PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("src/session.rs"),
+        )
+        .expect("read engine session");
         assert!(
             session_source.contains("crate::discover::prepare_analysis_discovery"),
             "engine session must build discovery through the engine discovery boundary"
@@ -824,9 +837,11 @@ mod tests {
     }
 
     fn workspace_fixture_path(name: &str) -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures")
-            .join(name)
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures")
+        .join(name)
     }
 
     fn trace_symbol_chain_fixture(

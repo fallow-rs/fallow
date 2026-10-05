@@ -554,8 +554,10 @@ mod tests {
         // (a `..`-relative root would make every seeded entry fail the
         // under-root check and spuriously warn `entry-outside-root`).
         std::fs::canonicalize(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../tests/fixtures/manifest-entries-external"),
+            std::path::PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+            )
+            .join("../../tests/fixtures/manifest-entries-external"),
         )
         .unwrap()
     }

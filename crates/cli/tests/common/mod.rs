@@ -35,7 +35,9 @@ pub fn fallow_bin() -> PathBuf {
 
 /// Returns the absolute path to a test fixture directory.
 pub fn fixture_path(name: &str) -> PathBuf {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    );
     path.pop(); // crates/
     path.pop(); // project root
     path.push("tests/fixtures");
@@ -137,7 +139,9 @@ pub fn run_fallow_raw_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOu
 /// Windows cannot execute the `.mjs` entry point directly, so the harness
 /// mirrors the editor integration by launching the script through Node.
 pub fn configure_type_aware_sidecar(cmd: &mut Command) {
-    let mut sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut sidecar = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    );
     sidecar.pop(); // crates/
     sidecar.pop(); // project root
     sidecar.push("tools/type-aware-sidecar/fallow-type-aware.mjs");

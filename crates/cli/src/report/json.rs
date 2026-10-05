@@ -3366,11 +3366,13 @@ mod tests {
             }
         }
 
-        let schema_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("docs")
-            .join("output-schema.json");
+        let schema_path = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("..")
+        .join("..")
+        .join("docs")
+        .join("output-schema.json");
         let raw = std::fs::read_to_string(&schema_path)
             .expect("docs/output-schema.json must be readable for the drift-guard test");
         let schema: serde_json::Value = serde_json::from_str(&raw).expect("schema parses");
@@ -3430,10 +3432,12 @@ mod tests {
     #[test]
     fn no_new_post_pass_helpers_in_json_rs() {
         const POST_PASS_ALLOW_LIST: &[(&str, &str)] = &[];
-        let source_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("report")
-            .join("json.rs");
+        let source_path = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("src")
+        .join("report")
+        .join("json.rs");
         let source = std::fs::read_to_string(&source_path).expect(
             "crates/cli/src/report/json.rs must be readable for the post-pass drift-guard test",
         );

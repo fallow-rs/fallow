@@ -5850,7 +5850,10 @@ type FindingIds = fn(&AnalysisResults) -> Vec<Option<String>>;
 /// the editor and `--format json` name one finding with one id.
 #[test]
 fn component_health_hints_carry_the_json_finding_id() {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let fixtures = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../tests/fixtures");
     let cases: [(&str, FindingIds); 3] = [
         ("prop-drilling", |r| {
             r.prop_drilling_chains

@@ -546,7 +546,10 @@ fn mcp_command_shapes_are_recognized_as_fallow_owned() {
 #[test]
 fn every_reason_is_documented_in_backwards_compatibility() {
     let doc = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/backwards-compatibility.md"),
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../docs/backwards-compatibility.md"),
     )
     .unwrap();
     for reason in Reason::ALL {

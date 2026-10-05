@@ -48,7 +48,9 @@ fn fallow_binary() -> String {
 
 /// Resolve a fixture path relative to the workspace root.
 fn fixture_path(name: &str) -> PathBuf {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    );
     path.pop();
     path.pop();
     path.push("tests/fixtures");

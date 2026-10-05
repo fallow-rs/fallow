@@ -228,10 +228,7 @@ mod tests {
 
     #[test]
     fn path_verdicts_over_shared_corpus() {
-        let corpus = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/test-path-corpus.txt"
-        ));
+        let corpus = include_str!("../tests/fixtures/test-path-corpus.txt");
         let rendered = corpus
             .lines()
             .filter(|line| !line.is_empty() && !line.starts_with('#'))

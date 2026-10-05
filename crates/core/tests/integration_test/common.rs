@@ -3,14 +3,16 @@ use std::path::PathBuf;
 use fallow_config::{ConfigOverride, FallowConfig, OutputFormat, PartialRulesConfig, RulesConfig};
 
 pub fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("tests")
-        .join("fixtures")
-        .join(name)
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .parent()
+    .unwrap()
+    .parent()
+    .unwrap()
+    .join("tests")
+    .join("fixtures")
+    .join(name)
 }
 
 pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {

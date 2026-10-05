@@ -471,11 +471,13 @@ struct Example {
 }
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("crates/cli should have a workspace parent")
-        .to_path_buf()
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .parent()
+    .and_then(Path::parent)
+    .expect("crates/cli should have a workspace parent")
+    .to_path_buf()
 }
 
 fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {

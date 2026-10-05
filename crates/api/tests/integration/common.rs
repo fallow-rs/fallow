@@ -7,7 +7,7 @@
 )]
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 /// Run `git` in `root` with a fixed identity and no signing, and fail the test
@@ -57,7 +57,9 @@ pub fn commit(root: &Path, message: &str) {
 /// `test_name` is the full test name in the `integration` binary. The child
 /// run filters on it with `--exact`, so it includes the module path.
 pub fn rerun_with_type_aware_sidecar(test_name: &str) {
-    let mut sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut sidecar = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    );
     sidecar.pop();
     sidecar.pop();
     sidecar.push("tools/type-aware-sidecar/fallow-type-aware.mjs");

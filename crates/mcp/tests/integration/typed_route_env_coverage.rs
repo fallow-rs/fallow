@@ -695,7 +695,10 @@ impl McpServer {
 }
 
 fn configure_type_aware_sidecar(command: &mut Command) {
-    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    );
+    let repository_root = manifest_dir
         .parent()
         .and_then(Path::parent)
         .expect("repository root");

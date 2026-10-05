@@ -49,11 +49,14 @@ pub(super) fn filled(value: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn cli_fallback_surfaces_are_explicitly_owned() {
-        let tools_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/tools");
+        let tools_dir = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("src/tools");
         let unconditional_cli_backed = [
             "check_runtime_coverage.rs",
             "cloud_reads.rs",

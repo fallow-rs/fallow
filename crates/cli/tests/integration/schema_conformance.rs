@@ -29,7 +29,10 @@ use tempfile::TempDir;
 
 /// Path to the committed schema, resolved from this crate's manifest dir.
 fn schema_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/output-schema.json")
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../docs/output-schema.json")
 }
 
 fn load_schema_root() -> Value {

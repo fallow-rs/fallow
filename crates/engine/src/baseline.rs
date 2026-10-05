@@ -4734,7 +4734,9 @@ mod tests {
     fn health_identity_move_is_not_followed_when_old_path_still_exists() {
         // The manifest dir makes the saved path a file that really exists, so
         // the function was fixed or deleted in place rather than moved.
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let root = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        );
         let baseline = identity_baseline(
             &[moved_finding(&root, "src/baseline.rs", "parseExpression")],
             &root,

@@ -316,7 +316,10 @@ mod tests {
     const NO_CONFIG: Option<PathBuf> = None;
 
     fn fixture_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/suppression-reasons")
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures/suppression-reasons")
     }
 
     fn suppressions_opts(root: &Path, output: OutputFormat) -> SuppressionsOptions<'_> {

@@ -978,7 +978,10 @@ mod tests {
             "unused_files": [{ "path": "src/dead.ts" }]
         });
 
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        let manifest_dir = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        );
+        let root = manifest_dir
             .parent()
             .and_then(Path::parent)
             .expect("workspace root");
@@ -1002,7 +1005,10 @@ mod tests {
             "unused_files": [{ "path": "src/dead.ts" }],
             "unused_exports": "invalid"
         });
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        let manifest_dir = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        );
+        let root = manifest_dir
             .parent()
             .and_then(Path::parent)
             .expect("workspace root");

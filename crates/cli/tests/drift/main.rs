@@ -57,10 +57,10 @@ const MAX_SHRINK_ITERS: u32 = 96;
 /// The base commit of every generated project, as seen from its head commit.
 const BASE_REF: &str = "HEAD~1";
 /// Failing seeds land here and replay first on the next run.
-const REGRESSIONS: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/drift/drift.proptest-regressions"
-);
+static REGRESSIONS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let dir = std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    format!("{dir}/tests/drift/drift.proptest-regressions")
+});
 
 fn case_count() -> u32 {
     std::env::var("FALLOW_DRIFT_CASES").map_or(DEFAULT_CASES, |value| {
@@ -95,7 +95,9 @@ fn run_invariant(name: &str, check: impl Fn(&ProjectModel) -> Verdict) {
         cases,
         max_shrink_iters: MAX_SHRINK_ITERS,
         rng_seed: RngSeed::Fixed(seed),
-        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(REGRESSIONS))),
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(
+            REGRESSIONS.as_str(),
+        ))),
         ..Config::default()
     };
     let mut runner = TestRunner::new(config);

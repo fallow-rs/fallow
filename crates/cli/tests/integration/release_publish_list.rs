@@ -23,11 +23,13 @@ use std::path::{Path, PathBuf};
 
 /// Repo root: `crates/cli` is two directories below it.
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("crates/cli sits two levels below the repo root")
-        .to_path_buf()
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .parent()
+    .and_then(Path::parent)
+    .expect("crates/cli sits two levels below the repo root")
+    .to_path_buf()
 }
 
 /// Package name from a `Cargo.toml`'s first `name = "..."` line (the `[package]`
