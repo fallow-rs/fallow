@@ -6,6 +6,8 @@
 //! real function, so its calls still count.
 //!
 //! `import.meta.resolve` credits a package with the same specifier limits.
+//! A specifier with a subpath, such as `pkg/lib/tsc`, credits `pkg`. Only a
+//! bare package name or `<pkg>/package.json` is an unlisted-dependency site.
 //! Code cannot rebind `import.meta`, so no shadow check applies.
 
 use crate::tests::parse_ts as parse_source;
@@ -109,12 +111,39 @@ fn import_meta_resolve_references_the_package() {
 }
 
 #[test]
-fn import_meta_resolve_follows_the_require_resolve_subpath_limits() {
-    let source = "export const a = import.meta.resolve('deep-pkg/dist/x.js');\n\
-         export const b = import.meta.resolve('node:fs');\n";
+fn a_deep_subpath_credits_the_package() {
+    let source = "import { createRequire } from 'node:module';\n\
+         const require = createRequire(import.meta.url);\n\
+         export const a = require.resolve('bridge-pkg/lib/tsc');\n\
+         export const b = require.resolve('@scope/tool/dist/cli.js');\n\
+         export const c = import.meta.resolve('deep-pkg/dist/x.js');\n\
+         export const d = import.meta.resolve('@scope/meta/sub');\n";
+    assert_eq!(
+        package_references(source),
+        ["bridge-pkg", "@scope/tool", "deep-pkg", "@scope/meta"],
+        "a subpath credits the package that owns it"
+    );
+}
+
+#[test]
+fn a_protocol_or_bare_scope_specifier_credits_nothing() {
+    let source = "export const a = import.meta.resolve('node:fs');\n\
+         export const b = require.resolve('@scope');\n\
+         export const c = require.resolve('@scope/');\n\
+         export const d = import.meta.resolve('#internal/x');\n";
     assert!(
         package_references(source).is_empty(),
-        "a deep subpath or a protocol specifier credits no package"
+        "a protocol, a bare scope or a subpath import credits no package"
+    );
+}
+
+#[test]
+fn a_deep_subpath_gets_no_unlisted_site() {
+    let source = "require.resolve('deep-pkg/lib/tsc');\n\
+         import.meta.resolve('@scope/meta/sub');\n";
+    assert!(
+        package_resolve_sites(source).is_empty(),
+        "a path alias can look like a package subpath, so only the package root is a site"
     );
 }
 

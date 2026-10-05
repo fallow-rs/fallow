@@ -14,3 +14,6 @@ for (const name of PACKAGES) {
 }
 
 export const searchedRoot = require.resolve('searched-pkg', { paths: [process.cwd()] });
+
+// A subpath can be a path alias, so it credits but is not an unlisted site.
+export const subpathFile = require.resolve('subpath-only-pkg/lib/tsc');

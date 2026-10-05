@@ -2,8 +2,9 @@
 //! call with one string argument names a package at a known source location.
 //! When the package is not in package.json, the call is an unlisted
 //! dependency, the same as an import of the package. A package name that comes
-//! from a resolver function, a loop over a static table, or a call with a
-//! `paths` option only credits the dependency and is not reported.
+//! from a resolver function, a loop over a static table, a call with a
+//! `paths` option, or a specifier with a deeper subpath only credits the
+//! dependency and is not reported.
 
 use super::common::{create_config, fixture_path};
 

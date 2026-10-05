@@ -122,11 +122,24 @@ fn reference_directive_path(content: &str) -> Option<String> {
     None
 }
 
+/// The package that a resolution specifier names: everything before the
+/// first `/`, or before the second `/` for a scoped package. A subpath, such
+/// as `pkg/lib/tsc`, resolves inside the package, so it names `pkg` too.
 fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
     if !is_package_resolution_specifier(specifier) {
         return None;
     }
-    let package_name = package_name_from_specifier(specifier)?;
+    package_name_from_specifier(specifier)
+}
+
+/// The package of a specifier that names the package root: a bare package
+/// name or `<pkg>/package.json`.
+///
+/// A path alias, such as `@/lib/x` or `src/lib/x` with a `baseUrl`, can look
+/// like a package subpath. A resolve call does not go through the resolver,
+/// so only a root specifier is sure enough to be an unlisted-dependency site.
+fn package_root_from_resolution_specifier(specifier: &str) -> Option<String> {
+    let package_name = package_from_resolution_specifier(specifier)?;
     let suffix = specifier
         .strip_prefix(package_name.as_str())
         .unwrap_or_default();
@@ -309,7 +322,9 @@ impl ModuleInfoExtractor {
     /// Record the site of a direct `require.resolve('pkg')` call.
     ///
     /// The argument is a string literal or a template literal without
-    /// expressions, so the call names the package at a known location. A call
+    /// expressions, so the call names the package at a known location. The
+    /// specifier must name the package root, see
+    /// [`package_root_from_resolution_specifier`]. A call
     /// with a second argument (the `paths` option) resolves from other
     /// directories and gets no site. Names from resolver functions, loop
     /// bindings and static tables also get no site: they only credit the
@@ -322,7 +337,7 @@ impl ModuleInfoExtractor {
             .arguments
             .first()
             .and_then(static_string_argument)
-            .and_then(package_from_resolution_specifier)
+            .and_then(package_root_from_resolution_specifier)
         else {
             return;
         };

@@ -322,6 +322,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/bundle/index.mjs`, and `node ./build` names `build.mjs`. A bare
   `node build` names no file.
 
+- **`require.resolve` and `import.meta.resolve` with a subpath credit the
+  package.** Before, fallow credited `pkg` for `require.resolve('pkg')` and
+  `require.resolve('pkg/package.json')`, but not for a deeper subpath such as
+  `require.resolve('pkg/lib/tsc')`. Thus it reported `pkg` as an unused
+  dependency. Now a specifier with any subpath credits its package: the text
+  before the first `/`, or before the second `/` for a scoped package. This
+  includes `require` from `createRequire(import.meta.url)`. A path alias can
+  look like a package subpath, and a resolve call does not go through the
+  resolver. Thus only a bare package name or `<pkg>/package.json` is an
+  unlisted-dependency site, as before. The extraction cache version changes,
+  so the first run after the upgrade parses all files again. Thanks to
+  [@DrJKL](https://github.com/DrJKL) for the report
+  ([#3213](https://github.com/fallow-rs/fallow/issues/3213)).
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,
@@ -664,8 +678,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported a dependency as unused when its only reference was
   `import.meta.resolve`, for example a package whose URL code gives to a
   child process. Now `import.meta.resolve` credits a package with the same
-  limits as `require.resolve`: a bare package name or `<pkg>/package.json`
-  counts, and a deeper subpath does not. The extraction cache version
+  limits as `require.resolve`. The extraction cache version
   changes, so the first run after the upgrade parses all files again.
 
 - **A type in a `satisfies` clause on an exported `const` is no longer an
