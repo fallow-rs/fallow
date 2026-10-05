@@ -22,6 +22,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "unprovided_injects": 1,
     "unrendered_components": 0,
     "unused_component_props": 0,
+    "absent_component_props": 0,
     "unused_component_emits": 0,
     "unused_component_inputs": 1,
     "unused_component_outputs": 1,

@@ -1,6 +1,6 @@
 mod declarations;
 mod helpers;
-mod react;
+pub(crate) mod react;
 mod visit_impl;
 
 use oxc_ast::ast::{
@@ -3062,6 +3062,7 @@ impl ModuleInfoExtractor {
             // Populated in `release_resolution_payload`; empty at construction.
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
+            component_contracts: None,
             has_props_attrs_fallthrough: false,
             has_define_expose: false,
             has_define_model: false,

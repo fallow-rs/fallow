@@ -319,6 +319,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unrendered-components",
     },
     RuleDef {
+        id: "fallow/absent-component-prop",
+        category: "Dead code",
+        name: "Absent optional component props",
+        short: "Known reachable callers omit an optional prop consumed inside its component",
+        full: "A used optional component input is supplied by none of its inspected reachable callers. The finding includes the declaration, framework, default presence and caller locations. Enable absent-component-props explicitly; it defaults to off. Supported contracts cover React, Preact, Solid, Qwik, Vue, Svelte, Astro, Angular, Lit and Ember. Unknown spreads, dynamic or escaped component references, ambiguous bindings, incomplete contracts and externally exposed APIs abstain. Review defaults and API intent manually; static analysis does not prove runtime unreachability.",
+        docs_path: "explanations/dead-code#absent-component-props",
+    },
+    RuleDef {
         id: "fallow/unused-component-prop",
         category: "Dead code",
         name: "Unused component props",
@@ -718,6 +726,10 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unrendered-component" => RuleGuide {
             example: "components/Orphan.vue is re-exported from a barrel (export { default as Orphan } from './Orphan.vue') but no template, registration, h() call, or dynamic import ever renders it.",
             how_to_fix: "Render the component where it belongs, or delete it and remove the dead barrel re-export. If it is rendered reflectively (a dynamic <component :is> from a non-literal value), suppress the line with // fallow-ignore-next-line unrendered-component.",
+        },
+        "fallow/absent-component-prop" => RuleGuide {
+            example: "Card declares highlight?: boolean with a false default, reads highlight in its render body, and every inspected reachable caller renders <Card /> without highlight.",
+            how_to_fix: "Review inspected callers, defaults and API intent. Keep intentional stable props, update the component manually, or add a declaration-line fallow-ignore-next-line absent-component-prop comment. This candidate has no automatic fix.",
         },
         "fallow/unused-component-prop" => RuleGuide {
             example: "Widget.vue declares defineProps<{ size: string }>(), or a React Widget({ size }) destructures `size`, but `size` is referenced nowhere in the component (Vue: its script or template; React: its function body or JSX).",
@@ -2108,7 +2120,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 48);
+        assert_eq!(CHECK_RULES.len(), 49);
     }
 
     #[test]

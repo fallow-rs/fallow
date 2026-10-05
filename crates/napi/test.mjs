@@ -814,4 +814,55 @@ writeFileSync(
   console.log("  [PASS] NAPI findings match the CLI");
 }
 
+const absentRoot = mkdtempSync(join(tmpdir(), "fallow-node-absent-"));
+try {
+  writeFileSync(
+    join(absentRoot, "package.json"),
+    JSON.stringify({
+      name: "absent-props-fixture",
+      private: true,
+      dependencies: { react: "19.0.0" },
+    }),
+  );
+  writeFileSync(join(absentRoot, ".fallowrc.json"), JSON.stringify({ entry: ["App.tsx"] }));
+  writeFileSync(
+    join(absentRoot, "Card.tsx"),
+    "export const Card = ({highlight = false}: {highlight?: boolean}) => <div>{highlight && <b>Featured</b>}</div>;\n",
+  );
+  writeFileSync(
+    join(absentRoot, "App.tsx"),
+    "import {Card} from './Card'; export const App = () => <Card />;\n",
+  );
+  const defaults = await detectDeadCode({ root: absentRoot, noCache: true });
+  assert.equal(defaults.absent_component_props?.length ?? 0, 0);
+  const enabled = await detectDeadCode({
+    root: absentRoot,
+    noCache: true,
+    absentComponentProps: true,
+  });
+  assert.equal(enabled.absent_component_props.length, 1);
+  const candidate = enabled.absent_component_props[0];
+  assert.equal(candidate.prop_name, "highlight");
+  assert.equal(candidate.has_default, true);
+  assert.equal(candidate.path, "Card.tsx");
+  assert.equal(candidate.inspected_call_sites[0].path, "App.tsx");
+  assert.ok(candidate.finding_id.includes("absent-component-prop"));
+  assert.ok(candidate.actions.length > 0);
+  assert.ok(candidate.actions.every((action) => action.auto_fixable === false));
+  assert.equal(enabled.summary.absent_component_props, 1);
+  writeFileSync(
+    join(absentRoot, "App.tsx"),
+    "import {Card} from './Card'; export const App = () => <Card highlight={false} />;\n",
+  );
+  const supplied = await detectDeadCode({
+    root: absentRoot,
+    noCache: true,
+    absentComponentProps: true,
+  });
+  assert.equal(supplied.absent_component_props?.length ?? 0, 0);
+  console.log("  [PASS] absent optional prop native selection and manual evidence");
+} finally {
+  rmSync(absentRoot, { recursive: true, force: true });
+}
+
 console.log("\nAll tests passed.");

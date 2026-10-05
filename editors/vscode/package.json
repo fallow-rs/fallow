@@ -314,6 +314,7 @@
             "unprovided-injects": true,
             "unrendered-components": true,
             "unused-component-props": true,
+            "absent-component-props": true,
             "unused-component-emits": true,
             "unused-component-inputs": true,
             "unused-component-outputs": true,
@@ -413,6 +414,9 @@
               "type": "boolean"
             },
             "unused-component-props": {
+              "type": "boolean"
+            },
+            "absent-component-props": {
               "type": "boolean"
             },
             "unused-component-emits": {

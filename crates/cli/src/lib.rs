@@ -870,6 +870,10 @@ enum Command {
         #[arg(long)]
         unused_component_props: bool,
 
+        /// Review optional props omitted by known reachable callers (enables this rule)
+        #[arg(long)]
+        absent_component_props: bool,
+
         /// Only report unused component emits
         #[arg(long)]
         unused_component_emits: bool,
@@ -4570,6 +4574,7 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
         unprovided_injects,
         unrendered_components,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -4593,6 +4598,7 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
         ("--unprovided-injects", *unprovided_injects),
         ("--unrendered-components", *unrendered_components),
         ("--unused-component-props", *unused_component_props),
+        ("--absent-component-props", *absent_component_props),
         ("--unused-component-emits", *unused_component_emits),
         ("--unused-component-inputs", *unused_component_inputs),
         ("--unused-component-outputs", *unused_component_outputs),

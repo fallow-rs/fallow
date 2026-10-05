@@ -470,6 +470,72 @@ fn push_member_access(usage: &mut TemplateUsage, object: &str, member: &str) {
     });
 }
 
+/// Read named component arguments using the existing quote-aware mustache tokenizer.
+pub fn collect_argument_reads(body: &str) -> (FxHashSet<String>, bool, bool) {
+    let mut dynamic = false;
+    let mut names = FxHashSet::default();
+    let mut incomplete = false;
+    let mut cursor = 0;
+    while let Some(relative) = body[cursor..].find("{{") {
+        let start = cursor + relative + 2;
+        let Some(relative_end) = body[start..].find("}}") else {
+            incomplete = true;
+            break;
+        };
+        let end = start + relative_end;
+        let inner = body[start..end].trim_matches(['~', ' ']);
+        if !inner.starts_with('!') {
+            argument_tokens(inner, &mut names, &mut incomplete, &mut dynamic);
+        }
+        cursor = end + 2;
+    }
+    (names, incomplete, dynamic)
+}
+
+fn argument_tokens(
+    inner: &str,
+    names: &mut FxHashSet<String>,
+    incomplete: &mut bool,
+    dynamic: &mut bool,
+) {
+    for token in TokenSplitter::new(inner) {
+        let token = token.trim_matches(['~', '{', '}', '#', '/']);
+        if matches!(token, "component" | "yield" | "outlet") {
+            *dynamic = true;
+        }
+        if is_literal(token) {
+            continue;
+        }
+        if let Some(inner) = token
+            .strip_prefix('(')
+            .and_then(|token| token.strip_suffix(')'))
+        {
+            argument_tokens(inner, names, incomplete, dynamic);
+            continue;
+        }
+        if let Some((_, value)) = token.split_once('=') {
+            argument_tokens(value, names, incomplete, dynamic);
+            continue;
+        }
+        if token == "this.args" {
+            *incomplete = true;
+            continue;
+        }
+        let Some(name) = token
+            .strip_prefix('@')
+            .or_else(|| token.strip_prefix("this.args."))
+        else {
+            continue;
+        };
+        let name = name.split('.').next().unwrap_or(name);
+        if is_plain_identifier(name) {
+            names.insert(name.to_string());
+        } else {
+            *incomplete = true;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

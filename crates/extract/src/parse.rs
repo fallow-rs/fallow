@@ -87,6 +87,51 @@ pub fn parse_source_to_module_with_flags(
         need_complexity,
         flag_patterns,
     );
+    if is_glimmer_file(path) {
+        for range in crate::glimmer::find_template_ranges(source) {
+            let (start, end) = (range.start, range.end);
+            let mut callers = crate::sfc_template::component_contracts::collect(
+                &source[start..end],
+                &module.imports,
+                fallow_types::extract::ComponentFramework::Ember,
+                start as u32,
+                module
+                    .component_contracts
+                    .as_deref()
+                    .map_or(&[], |facts| facts.spread_bindings.as_slice()),
+                module
+                    .component_contracts
+                    .as_deref()
+                    .map_or(&[], |facts| facts.aliases.as_slice()),
+            );
+            let (reads, incomplete, dynamic) =
+                crate::sfc_template::glimmer::collect_argument_reads(&source[start..end]);
+            if dynamic {
+                callers
+                    .incomplete_frameworks
+                    .push(fallow_types::extract::ComponentFramework::Ember);
+            }
+            if let Some(facts) = &mut module.component_contracts {
+                let owners: Vec<_> = facts
+                    .template_owners
+                    .iter()
+                    .filter(|owner| owner.start <= start as u32 && end as u32 <= owner.end)
+                    .collect();
+                if let [owner] = owners.as_slice() {
+                    for declaration in &mut facts.declarations {
+                        if declaration.component_span == owner.component_span
+                            && declaration.framework
+                                == fallow_types::extract::ComponentFramework::Ember
+                        {
+                            declaration.is_used |= reads.contains(&declaration.name);
+                            declaration.incomplete |= incomplete;
+                        }
+                    }
+                }
+            }
+            crate::component_contracts::merge(&mut module.component_contracts, callers, 0, None);
+        }
+    }
     module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
     module.iconify_icon_names = crate::iconify::extract_iconify_icon_names(path, source);
     let federation_facts =
@@ -419,6 +464,25 @@ fn assemble_module_info(input: ModuleAssemblyInput) -> ModuleInfo {
         degradation,
     } = input;
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
+    let mut contracts = semantic_usage.component_contracts;
+    if degradation.error_count > 0 || degradation.panicked {
+        for declaration in &mut contracts.declarations {
+            declaration.incomplete = true;
+        }
+        for invocation in &mut contracts.invocations {
+            invocation.unknown_props = true;
+        }
+    }
+    if !contracts.aliases.is_empty()
+        || !contracts.exports.is_empty()
+        || !contracts.declarations.is_empty()
+        || !contracts.invocations.is_empty()
+        || !contracts.escapes.is_empty()
+        || !contracts.incomplete_frameworks.is_empty()
+        || !contracts.spread_bindings.is_empty()
+    {
+        info.component_contracts = Some(Box::new(contracts));
+    }
     info.parse_error_count = degradation.error_count;
     info.parse_panicked = degradation.panicked;
     info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
@@ -1199,6 +1263,7 @@ pub struct SemanticUsage {
     /// [`compute_semantic_usage_for_extractor`], which is the layer that knows
     /// which of them the exported form declares.
     pub(crate) unreferenced_import_equals_bindings: Vec<String>,
+    pub(crate) component_contracts: fallow_types::extract::ComponentContractFacts,
 }
 
 pub fn compute_semantic_usage_for_extractor(
@@ -1211,6 +1276,7 @@ pub fn compute_semantic_usage_for_extractor(
     let mut semantic_usage = compute_semantic_usage_with_candidates(
         program,
         &extractor.imports,
+        &extractor.exports,
         &require_namespace_bindings,
         template_used,
         &computed_enum_key_spans,
@@ -1261,6 +1327,7 @@ fn report_unreferenced_import_equals_bindings(
 fn compute_semantic_usage_with_candidates(
     program: &Program<'_>,
     imports: &[ImportInfo],
+    exports: &[ExportInfo],
     require_namespace_bindings: &[String],
     template_used: &rustc_hash::FxHashSet<String>,
     module_binding_candidates: &rustc_hash::FxHashSet<Span>,
@@ -1351,6 +1418,7 @@ fn compute_semantic_usage_with_candidates(
         mock_api_reference_spans,
         module_binding_reference_spans,
         unreferenced_import_equals_bindings: import_equals.unreferenced,
+        component_contracts: crate::component_contracts::collect(&semantic, imports, exports),
     }
 }
 
@@ -1660,6 +1728,7 @@ pub fn compute_import_binding_usage(
     let mut semantic_usage = compute_semantic_usage_with_candidates(
         program,
         imports,
+        &[],
         import_equals_bindings,
         template_used,
         &rustc_hash::FxHashSet::default(),

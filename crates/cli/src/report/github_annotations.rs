@@ -825,6 +825,21 @@ fn collect_check_components(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
         out,
         env,
+        "absent_component_props",
+        "Absent optional component prop",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "Optional prop '{}.{}' is absent from inspected callers. {}",
+                s(it, "component_name"),
+                s(it, "prop_name"),
+                s(it, "explanation")
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
         "unused_component_props",
         "Unused component prop",
         Anchor::line_col,

@@ -157,6 +157,7 @@ impl DeadCodeAuditLedger {
             unprovided_injects,
             unrendered_components,
             unused_component_props,
+            absent_component_props,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -246,6 +247,7 @@ impl DeadCodeAuditLedger {
             "dynamic_segment_name_conflicts"
         );
         annotate!(unused_component_props, "unused_component_props");
+        annotate!(absent_component_props, "absent_component_props");
         annotate!(unused_component_emits, "unused_component_emits");
         annotate!(unused_component_inputs, "unused_component_inputs");
         annotate!(unused_component_outputs, "unused_component_outputs");
@@ -486,6 +488,16 @@ struct FrameworkFindingSlices<'a> {
         &'a [fallow_types::output_dead_code::DynamicSegmentNameConflictFinding],
 }
 
+#[derive(Clone, Copy)]
+struct ComponentContractFindingSlices<'a> {
+    unused_component_props: &'a [fallow_types::output_dead_code::UnusedComponentPropFinding],
+    absent_component_props: &'a [fallow_types::output_dead_code::AbsentComponentPropFinding],
+    unused_component_emits: &'a [fallow_types::output_dead_code::UnusedComponentEmitFinding],
+    unused_component_inputs: &'a [fallow_types::output_dead_code::UnusedComponentInputFinding],
+    unused_component_outputs: &'a [fallow_types::output_dead_code::UnusedComponentOutputFinding],
+    unused_svelte_events: &'a [fallow_types::output_dead_code::UnusedSvelteEventFinding],
+}
+
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
@@ -564,6 +576,7 @@ impl DeadCodeKeyCollector<'_> {
             unprovided_injects,
             unrendered_components,
             unused_component_props,
+            absent_component_props,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -637,13 +650,14 @@ impl DeadCodeKeyCollector<'_> {
             unused_class_members,
             unused_store_members,
         );
-        self.add_component_contract_findings(
+        self.add_component_contract_findings(&ComponentContractFindingSlices {
             unused_component_props,
+            absent_component_props,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
             unused_svelte_events,
-        );
+        });
         self.add_graph_findings(
             unresolved_imports,
             duplicate_exports,
@@ -714,6 +728,7 @@ enum AuditCollection {
     RouteCollisions,
     DynamicSegmentNameConflicts,
     UnusedComponentProps,
+    AbsentComponentProps,
     UnusedComponentEmits,
     UnusedComponentInputs,
     UnusedComponentOutputs,
@@ -724,7 +739,7 @@ enum AuditCollection {
 
 impl AuditCollection {
     #[cfg(test)]
-    const ALL: [Self; 44] = [
+    const ALL: [Self; 45] = [
         Self::UnusedFiles,
         Self::UnusedExports,
         Self::UnusedTypes,
@@ -763,6 +778,7 @@ impl AuditCollection {
         Self::RouteCollisions,
         Self::DynamicSegmentNameConflicts,
         Self::UnusedComponentProps,
+        Self::AbsentComponentProps,
         Self::UnusedComponentEmits,
         Self::UnusedComponentInputs,
         Self::UnusedComponentOutputs,
@@ -811,6 +827,7 @@ impl AuditCollection {
             Self::RouteCollisions => "route_collisions",
             Self::DynamicSegmentNameConflicts => "dynamic_segment_name_conflicts",
             Self::UnusedComponentProps => "unused_component_props",
+            Self::AbsentComponentProps => "absent_component_props",
             Self::UnusedComponentEmits => "unused_component_emits",
             Self::UnusedComponentInputs => "unused_component_inputs",
             Self::UnusedComponentOutputs => "unused_component_outputs",
@@ -1002,15 +1019,20 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_unused_store_members(unused_store_members);
     }
 
-    fn add_component_contract_findings(
-        &mut self,
-        unused_component_props: &[fallow_types::output_dead_code::UnusedComponentPropFinding],
-        unused_component_emits: &[fallow_types::output_dead_code::UnusedComponentEmitFinding],
-        unused_component_inputs: &[fallow_types::output_dead_code::UnusedComponentInputFinding],
-        unused_component_outputs: &[fallow_types::output_dead_code::UnusedComponentOutputFinding],
-        unused_svelte_events: &[fallow_types::output_dead_code::UnusedSvelteEventFinding],
-    ) {
+    fn add_component_contract_findings(&mut self, components: &ComponentContractFindingSlices<'_>) {
+        let ComponentContractFindingSlices {
+            unused_component_props,
+            absent_component_props,
+            unused_component_emits,
+            unused_component_inputs,
+            unused_component_outputs,
+            unused_svelte_events,
+        } = *components;
         self.add_unused_component_props(unused_component_props);
+        self.add_items(
+            AuditCollection::AbsentComponentProps,
+            absent_component_props,
+        );
         self.add_unused_component_emits(unused_component_emits);
         self.add_unused_component_inputs(unused_component_inputs);
         self.add_unused_component_outputs(unused_component_outputs);
@@ -1458,6 +1480,7 @@ pub fn retain_introduced_dead_code(
         unprovided_injects,
         unrendered_components,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -1517,6 +1540,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         unprovided_injects: _unprovided_injects,
         unrendered_components: _unrendered_components,
         unused_component_props: _unused_component_props,
+        absent_component_props: _absent_component_props,
         unused_component_emits: _unused_component_emits,
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
@@ -1651,6 +1675,7 @@ pub fn annotate_dead_code_json(
         unprovided_injects,
         unrendered_components,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -3631,6 +3656,30 @@ mod tests {
         isolated
     }
 
+    fn absent_component_prop_results(root: &Path) -> AnalysisResults {
+        let mut results = AnalysisResults::default();
+        results
+            .absent_component_props
+            .push(AbsentComponentPropFinding::with_actions(
+                AbsentComponentProp {
+                    path: root.join("src/App.vue"),
+                    component_name: "MyModal".into(),
+                    framework: "vue".into(),
+                    prop_name: "highlight".into(),
+                    line: 3,
+                    col: 2,
+                    has_default: true,
+                    inspected_call_sites: vec![ComponentPropCallSite {
+                        path: root.join("src/page.ts"),
+                        line: 8,
+                        col: 0,
+                    }],
+                    explanation: "Review known callers and API intent.".into(),
+                },
+            ));
+        results
+    }
+
     /// A config that sets every rule by `base` and, for the files of the
     /// fixtures that an `overrides` entry matches, by `scoped`. Each pair
     /// gives the severity of the rules at an even and at an odd position, so
@@ -3687,6 +3736,7 @@ mod tests {
             graph_boundary_catalog_override_results(&root),
             type_member_and_dependency_results(&root),
             framework_inject_and_render_results(&root),
+            absent_component_prop_results(&root),
             server_action_load_data_and_route_results(&root),
             angular_input_output_and_policy_results(&root),
             unused_store_member_results(&root),

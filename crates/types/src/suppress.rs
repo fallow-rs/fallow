@@ -124,6 +124,8 @@ pub enum IssueKind {
     /// declared prop that is referenced NOWHERE inside its own component.
     /// Single-component dead-input direction.
     UnusedComponentProp,
+    /// Used optional input absent from inspected reachable callers.
+    AbsentComponentProp,
     /// A Vue `<script setup>` `defineEmits` declared event that is EMITTED
     /// nowhere inside its own single-file component (no `emit('<name>')` call).
     /// Single-file dead-input direction.
@@ -249,6 +251,7 @@ impl IssueKind {
         Self::DynamicSegmentNameConflict,
         Self::UnrenderedComponent,
         Self::UnusedComponentProp,
+        Self::AbsentComponentProp,
         Self::UnusedComponentEmit,
         Self::UnusedComponentInput,
         Self::UnusedComponentOutput,
@@ -333,6 +336,7 @@ impl IssueKind {
             Self::DevDependencyInProduction => 53,
             Self::DeprecatedExportInUse => 54,
             Self::PackageCycle => 55,
+            Self::AbsentComponentProp => 56,
         }
     }
 
@@ -395,6 +399,7 @@ impl IssueKind {
             53 => Some(Self::DevDependencyInProduction),
             54 => Some(Self::DeprecatedExportInUse),
             55 => Some(Self::PackageCycle),
+            56 => Some(Self::AbsentComponentProp),
             _ => None,
         }
     }
@@ -806,6 +811,7 @@ mod tests {
             (53, IssueKind::DevDependencyInProduction),
             (54, IssueKind::DeprecatedExportInUse),
             (55, IssueKind::PackageCycle),
+            (56, IssueKind::AbsentComponentProp),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

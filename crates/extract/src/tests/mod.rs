@@ -1,4 +1,5 @@
 mod astro;
+mod component_contracts;
 mod css;
 mod graphql;
 mod js_ts;

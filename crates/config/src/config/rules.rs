@@ -148,6 +148,9 @@ pub struct RulesConfig {
     /// analyzer confidence is lower; warn encodes that without failing CI.
     #[serde(default = "Severity::default_warn", alias = "unused-component-prop")]
     pub unused_component_props: Severity,
+    /// Used optional inputs absent from inspected callers. Requires manual review; off by default.
+    #[serde(default = "Severity::default_off", alias = "absent-component-prop")]
+    pub absent_component_props: Severity,
     /// Vue `<script setup>` `defineEmits` declared event emitted nowhere inside
     /// its own single-file component (no `emit('<name>')` call). The single-file
     /// dead-input direction. Defaults to `warn`, not `error`: an emit can be part
@@ -435,6 +438,7 @@ impl Default for RulesConfig {
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
@@ -547,6 +551,7 @@ impl RulesConfig {
             IssueKind::DynamicSegmentNameConflict => self.dynamic_segment_name_conflict,
             IssueKind::UnrenderedComponent => self.unrendered_components,
             IssueKind::UnusedComponentProp => self.unused_component_props,
+            IssueKind::AbsentComponentProp => self.absent_component_props,
             IssueKind::UnusedComponentEmit => self.unused_component_emits,
             IssueKind::UnusedComponentInput => self.unused_component_inputs,
             IssueKind::UnusedComponentOutput => self.unused_component_outputs,
@@ -614,6 +619,7 @@ impl RulesConfig {
                 unprovided_injects,
                 unrendered_components,
                 unused_component_props,
+                absent_component_props,
                 unused_component_emits,
                 unused_component_inputs,
                 unused_component_outputs,
@@ -806,6 +812,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_component_props: Option<Severity>,
+    /// Optional override for absent optional component inputs.
+    #[serde(
+        default,
+        alias = "absent-component-prop",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub absent_component_props: Option<Severity>,
     /// Optional override for [`RulesConfig::unused_component_emits`].
     #[serde(
         default,
@@ -1127,6 +1140,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unprovided-injects",
     "unrendered-components",
     "unused-component-props",
+    "absent-component-props",
     "unused-component-emits",
     "unused-component-inputs",
     "unused-component-outputs",
@@ -1187,6 +1201,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unprovided-inject",
     "unrendered-component",
     "unused-component-prop",
+    "absent-component-prop",
     "unused-component-emit",
     "unused-component-input",
     "unused-component-output",
@@ -1663,6 +1678,7 @@ mod tests {
             unprovided_injects: Some(Severity::Off),
             unrendered_components: Some(Severity::Off),
             unused_component_props: Some(Severity::Off),
+            absent_component_props: Some(Severity::Off),
             unused_component_emits: Some(Severity::Off),
             unused_component_inputs: Some(Severity::Off),
             unused_component_outputs: Some(Severity::Off),
@@ -1774,7 +1790,7 @@ mod tests {
     /// more. See the note on [`KNOWN_RULE_NAMES`].
     #[test]
     fn known_rule_names_list_length_is_pinned() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 105);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 107);
     }
 
     /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -1843,8 +1859,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            110,
-            "expected 110 source-level alias attrs (55 per struct); got {}: {:?}",
+            112,
+            "expected 112 source-level alias attrs (56 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

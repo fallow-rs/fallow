@@ -225,6 +225,10 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
             "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
             "https://fallow.tools/docs/explanations/dead-code/#unrendered-components",
         )),
+        "Absent optional component props" => Some((
+            "Known reachable callers omit this used optional prop; review defaults and API intent manually",
+            "https://fallow.tools/docs/explanations/dead-code/#absent-component-props",
+        )),
         "Unused component props" => Some((
             "A Vue, Svelte, or React component prop referenced nowhere inside its own component (remove it or use it)",
             "https://fallow.tools/docs/explanations/dead-code/#unused-component-props",

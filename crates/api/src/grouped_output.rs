@@ -321,6 +321,11 @@ where
                 .unused_component_props
                 .push(item.clone());
         }
+        for item in &results.absent_component_props {
+            self.entry_for_path(&item.prop.path)
+                .absent_component_props
+                .push(item.clone());
+        }
         for item in &results.unused_component_emits {
             self.entry_for_path(&item.emit.path)
                 .unused_component_emits

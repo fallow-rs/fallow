@@ -1929,3 +1929,34 @@ fn cache_load_does_not_report_an_unreadable_cache_path_as_absent() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn cache_roundtrip_preserves_component_contract_evidence() {
+    let module = parse_from_content(
+        FileId(0),
+        Path::new("src/card.tsx"),
+        r"
+        import Card from './card';
+        const supplied = { enabled: undefined };
+        function View({compact=false}: {compact?:boolean}) {return <Card {...supplied}>{compact}</Card>;}
+    ",
+    );
+    let facts = module
+        .component_contracts
+        .as_deref()
+        .expect("contract facts");
+    assert_eq!(
+        facts
+            .declarations
+            .iter()
+            .find(|prop| prop.name == "compact")
+            .map(|prop| (prop.optional, prop.has_default, prop.is_used)),
+        Some((true, true, true))
+    );
+    assert_eq!(facts.invocations[0].supplied, ["children", "enabled"]);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let encoded = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&encoded).expect("decode component contracts");
+    let restored = cached_to_module(&decoded, FileId(0));
+    assert_eq!(restored.component_contracts, module.component_contracts);
+}

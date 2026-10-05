@@ -539,6 +539,15 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.component.component_name,
             ));
         }
+        for finding in &self.results.absent_component_props {
+            self.lines.push(format!(
+                "absent-component-prop:{}:{}:{}.{} (review candidate)",
+                self.rel(&finding.prop.path),
+                finding.prop.line,
+                finding.prop.component_name,
+                finding.prop.prop_name
+            ));
+        }
         for finding in &self.results.unused_component_props {
             self.lines.push(format!(
                 "unused-component-prop:{}:{}:{}",

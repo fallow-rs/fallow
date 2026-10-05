@@ -38,6 +38,7 @@
 //! their host files are normal `.ts` / `.gts` / `.gjs` sources.
 
 pub mod angular;
+pub mod component_contracts;
 pub mod glimmer;
 mod scanners;
 mod shared;

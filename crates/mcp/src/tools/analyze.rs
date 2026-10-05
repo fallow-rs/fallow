@@ -277,6 +277,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn absent_component_prop_selection_matches_typed_and_fallback_paths() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["absent-component-props".to_string()]),
+            ..AnalyzeParams::default()
+        };
+        let options = dead_code_options_from_params(&params).expect("options");
+        assert!(options.filters.absent_component_props);
+        assert!(!options.filters.unused_component_props);
+        assert!(!requires_cli_fallback(&params));
+        let fallback_params = AnalyzeParams {
+            group_by: Some("directory".to_string()),
+            ..params
+        };
+        assert!(requires_cli_fallback(&fallback_params));
+        let args = build_analyze_args(&fallback_params).expect("args");
+        assert!(args.iter().any(|arg| arg == "--absent-component-props"));
+        assert!(!args.iter().any(|arg| arg == "--unused-component-props"));
+    }
+
+    #[test]
     fn finding_ids_reach_both_paths_and_force_the_full_family() {
         let id = "dc1:unused-export:0123456789abcdef";
         let params = AnalyzeParams {
@@ -499,6 +519,78 @@ mod tests {
         ] {
             assert!(requires_cli_fallback(&params));
         }
+    }
+
+    #[tokio::test]
+    async fn absent_prop_typed_run_preserves_candidates_and_manual_evidence() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","private":true,"dependencies":{"react":"19.0.0"}}"#,
+        )
+        .expect("package");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"entry":["App.tsx"]}"#,
+        )
+        .expect("config");
+        std::fs::write(project.path().join("Card.tsx"), "export const Card = ({highlight}: {highlight?: boolean}) => <div>{highlight && <b>Featured</b>}</div>;\n").expect("component");
+        std::fs::write(
+            project.path().join("App.tsx"),
+            "import {Card} from './Card'; export const App = () => <Card />;\n",
+        )
+        .expect("caller");
+        let params = AnalyzeParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            ..AnalyzeParams::default()
+        };
+        let default_result = run_analyze("unused-binary-on-api-path", params)
+            .await
+            .expect("default result");
+        let ContentBlock::Text(default_text) = &default_result.content[0] else {
+            panic!("text")
+        };
+        let default_json: serde_json::Value =
+            serde_json::from_str(&default_text.text).expect("json");
+        assert!(
+            default_json
+                .get("absent_component_props")
+                .is_none_or(|value| value.as_array().is_some_and(Vec::is_empty))
+        );
+        let result = run_analyze(
+            "unused-binary-on-api-path",
+            AnalyzeParams {
+                root: Some(project.path().display().to_string()),
+                no_cache: Some(true),
+                issue_types: Some(vec!["absent-component-props".to_string()]),
+                ..AnalyzeParams::default()
+            },
+        )
+        .await
+        .expect("result");
+        assert_eq!(result.is_error, Some(false));
+        let ContentBlock::Text(text) = &result.content[0] else {
+            panic!("text")
+        };
+        let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
+        let findings = json["absent_component_props"]
+            .as_array()
+            .expect("candidate array");
+        assert_eq!(findings.len(), 1, "{json}");
+        let finding = &findings[0];
+        assert_eq!(finding["prop_name"], "highlight");
+        assert_eq!(finding["path"], "Card.tsx");
+        assert_eq!(finding["inspected_call_sites"][0]["path"], "App.tsx");
+        assert!(
+            finding["finding_id"]
+                .as_str()
+                .expect("id")
+                .contains("absent-component-prop")
+        );
+        let actions = finding["actions"].as_array().expect("manual actions");
+        assert!(!actions.is_empty());
+        assert!(actions.iter().all(|action| action["auto_fixable"] == false));
     }
 
     #[tokio::test]

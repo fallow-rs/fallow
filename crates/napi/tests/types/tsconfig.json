@@ -9,5 +9,5 @@
     "strict": true,
     "types": []
   },
-  "files": ["similar-code.compile.ts"]
+  "files": ["similar-code.compile.ts", "absent-props.compile.ts"]
 }

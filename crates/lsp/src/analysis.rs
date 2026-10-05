@@ -13,6 +13,7 @@ use ls_types::MessageType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::config_patterns::{self, UnmatchedConfigPattern};
+use crate::document_state::VersionSnapshot;
 use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
 use crate::session_store::{ConfigSources, EditorSessionStore, SessionKey, TakenSession};
@@ -265,6 +266,7 @@ pub struct LspAnalysisSnapshot {
     pub results: AnalysisResults,
     pub duplication: DuplicationReport,
     pub inline_complexity: Vec<InlineComplexityFinding>,
+    pub document_versions: VersionSnapshot,
 }
 
 impl LspAnalysisSnapshot {
@@ -277,7 +279,14 @@ impl LspAnalysisSnapshot {
             results,
             duplication,
             inline_complexity,
+            document_versions: VersionSnapshot::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_document_versions(mut self, versions: VersionSnapshot) -> Self {
+        self.document_versions = versions;
+        self
     }
 }
 

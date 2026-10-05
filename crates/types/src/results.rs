@@ -12,19 +12,20 @@ use crate::output::{
     FixAction, FixActionType, IssueAction, SuppressLineAction, SuppressLineKind, SuppressLineScope,
 };
 use crate::output_dead_code::{
-    BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
-    DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
-    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
-    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
+    DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -446,6 +447,9 @@ pub struct AnalysisResults {
     /// array natively. Default severity is `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_component_props: Vec<UnusedComponentPropFinding>,
+    /// Used optional component inputs absent from inspected reachable callers. Off by default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub absent_component_props: Vec<AbsentComponentPropFinding>,
     /// Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
     /// (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
     /// each entry carries a typed `actions` array natively. Default severity is
@@ -651,6 +655,7 @@ struct AnalysisResultsFrameworkMergeParts {
     route_collisions: Vec<RouteCollisionFinding>,
     dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
     unused_component_props: Vec<UnusedComponentPropFinding>,
+    absent_component_props: Vec<AbsentComponentPropFinding>,
     unused_component_emits: Vec<UnusedComponentEmitFinding>,
     unused_component_inputs: Vec<UnusedComponentInputFinding>,
     unused_component_outputs: Vec<UnusedComponentOutputFinding>,
@@ -737,6 +742,7 @@ fn split_merge_parts(
         route_collisions,
         dynamic_segment_name_conflicts,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -808,6 +814,7 @@ fn split_merge_parts(
             route_collisions,
             dynamic_segment_name_conflicts,
             unused_component_props,
+            absent_component_props,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -879,6 +886,7 @@ macro_rules! counted_analysis_result_fields {
             route_collisions => "route_collisions",
             dynamic_segment_name_conflicts => "dynamic_segment_name_conflicts",
             unused_component_props => "unused_component_props",
+            absent_component_props => "absent_component_props",
             unused_component_emits => "unused_component_emits",
             unused_component_inputs => "unused_component_inputs",
             unused_component_outputs => "unused_component_outputs",
@@ -921,6 +929,7 @@ impl_single_source_dead_code! {
     UnprovidedInjectFinding => inject.path,
     UnrenderedComponentFinding => component.path,
     UnusedComponentPropFinding => prop.path,
+    AbsentComponentPropFinding => prop.path,
     UnusedComponentEmitFinding => emit.path,
     UnusedComponentInputFinding => input.path,
     UnusedComponentOutputFinding => output.path,
@@ -1093,6 +1102,7 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
         unprovided_injects: _unprovided_injects,
         unrendered_components: _unrendered_components,
         unused_component_props: _unused_component_props,
+        absent_component_props: _absent_component_props,
         unused_component_emits: _unused_component_emits,
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
@@ -1297,6 +1307,8 @@ impl AnalysisResults {
             .extend(parts.dynamic_segment_name_conflicts);
         self.unused_component_props
             .extend(parts.unused_component_props);
+        self.absent_component_props
+            .extend(parts.absent_component_props);
         self.unused_component_emits
             .extend(parts.unused_component_emits);
         self.unused_component_inputs
@@ -1534,6 +1546,13 @@ impl AnalysisResults {
     }
 
     fn sort_core_component_prop_and_emit_findings(&mut self) {
+        self.absent_component_props.sort_by(|a, b| {
+            a.prop
+                .path
+                .cmp(&b.prop.path)
+                .then(a.prop.line.cmp(&b.prop.line))
+                .then(a.prop.prop_name.cmp(&b.prop.prop_name))
+        });
         self.unused_component_props.sort_by(|a, b| {
             a.prop
                 .path
@@ -2217,6 +2236,44 @@ pub struct UnusedComponentProp {
     pub line: u32,
     /// 0-based byte column offset of the prop declaration.
     pub col: u32,
+}
+
+/// One inspected reachable component invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ComponentPropCallSite {
+    /// Caller source path.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based opening-tag line.
+    pub line: u32,
+    /// 0-based original-source byte column.
+    pub col: u32,
+}
+
+/// A used optional input that no inspected reachable caller supplies.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AbsentComponentProp {
+    /// Source path of the input declaration.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// Semantic declaration name, or SFC filename stem.
+    pub component_name: String,
+    /// Public framework token.
+    pub framework: String,
+    /// Public optional input name.
+    pub prop_name: String,
+    /// 1-based declaration line.
+    pub line: u32,
+    /// 0-based declaration byte column.
+    pub col: u32,
+    /// Whether omission has a declared default.
+    pub has_default: bool,
+    /// Every inspected reachable caller, deterministically ordered.
+    pub inspected_call_sites: Vec<ComponentPropCallSite>,
+    /// Manual-review meaning and limits of static evidence.
+    pub explanation: String,
 }
 
 /// A Vue `<script setup>` `defineEmits` declared event that is EMITTED nowhere

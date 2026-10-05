@@ -750,6 +750,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         route_collisions: _route_collisions,
         dynamic_segment_name_conflicts: _dynamic_segment_name_conflicts,
         unused_component_props: _unused_component_props,
+        absent_component_props: _absent_component_props,
         unused_component_emits: _unused_component_emits,
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
@@ -881,6 +882,7 @@ fn retain_component_contract_findings_by_changed_files(
         unprovided_injects,
         unrendered_components,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -893,6 +895,7 @@ fn retain_component_contract_findings_by_changed_files(
     retain_by_changed_path(unprovided_injects, scope, |i| &i.inject.path);
     retain_by_changed_path(unrendered_components, scope, |c| &c.component.path);
     retain_by_changed_path(unused_component_props, scope, |p| &p.prop.path);
+    retain_by_changed_path(absent_component_props, scope, |p| &p.prop.path);
     retain_by_changed_path(unused_component_emits, scope, |e| &e.emit.path);
     retain_by_changed_path(unused_component_inputs, scope, |i| &i.input.path);
     retain_by_changed_path(unused_component_outputs, scope, |o| &o.output.path);

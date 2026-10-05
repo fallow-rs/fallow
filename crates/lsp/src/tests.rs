@@ -826,6 +826,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "unprovided-inject",
             "unrendered-component",
             "unused-component-prop",
+            "absent-component-prop",
             "unused-component-emit",
             "unused-component-input",
             "unused-component-output",
@@ -6009,5 +6010,352 @@ fn analyzed_security_diagnostics_carry_the_cli_finding_id() {
         data["security"]["category"].as_str(),
         Some("code-injection"),
         "findingId merges into the existing data object",
+    );
+}
+
+#[test]
+fn absent_component_prop_editor_analysis_severity_and_live_suppression() {
+    let project = tempfile::tempdir().expect("project");
+    let root = project.path();
+    let card = root.join("Card.tsx");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"fixture","private":true,"dependencies":{"react":"19.0.0"}}"#,
+    )
+    .expect("package");
+    std::fs::write(
+        root.join("App.tsx"),
+        "import {Card} from './Card'; export const App = () => <Card />;\n",
+    )
+    .expect("caller");
+    std::fs::write(&card, "export const Card = ({highlight}: {highlight?: boolean}) => <div>{highlight && <b>Featured</b>}</div>;\n").expect("component");
+    let analyze = || {
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut complexity = Vec::new();
+        let mut messages = Vec::new();
+        analyze_project_root_for_test(
+            root,
+            None,
+            None,
+            None,
+            false,
+            &mut results,
+            &mut duplication,
+            &mut complexity,
+            &mut messages,
+        );
+        (results, duplication)
+    };
+    std::fs::write(root.join(".fallowrc.json"), r#"{"entry":["App.tsx"]}"#).expect("config");
+    assert!(analyze().0.absent_component_props.is_empty());
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"entry":["App.tsx"],"rules":{"absent-component-props":"error"}}"#,
+    )
+    .expect("config");
+    let (results, duplication) = analyze();
+    assert_eq!(results.absent_component_props.len(), 1);
+    let map = crate::diagnostics::build_diagnostics(crate::diagnostics::DiagnosticInput::new(
+        &results,
+        &duplication,
+        root,
+    ));
+    let uri = Uri::from_file_path(&card).expect("uri");
+    let diagnostic = map
+        .get(&uri)
+        .expect("candidate declaration diagnostics")
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code == Some(NumberOrString::String("absent-component-prop".to_string()))
+        })
+        .expect("candidate diagnostic");
+    assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+    assert!(diagnostic.tags.is_none());
+    assert_eq!(
+        diagnostic
+            .related_information
+            .as_ref()
+            .expect("callers")
+            .len(),
+        1
+    );
+    let text = std::fs::read_to_string(&card).expect("live source");
+    let lines: Vec<_> = text.lines().collect();
+    let actions = crate::code_actions::build_code_action_response(
+        crate::code_actions::CodeActionInput::new(
+            &results,
+            Some(root),
+            &card,
+            &uri,
+            &diagnostic.range,
+            &lines,
+        )
+        .with_current_absent_prop_source(&text),
+    )
+    .expect("actions");
+    assert_eq!(actions.len(), 1, "candidate has suppression only");
+    let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+        panic!("expected suppression action");
+    };
+    assert!(action.title.starts_with("Dismiss optional prop review"));
+    let edits = &action
+        .edit
+        .as_ref()
+        .expect("edit")
+        .changes
+        .as_ref()
+        .expect("changes")[&uri];
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].range.start, edits[0].range.end);
+    std::fs::write(&card, format!("{}{text}", edits[0].new_text))
+        .expect("apply additive suppression");
+    assert!(
+        analyze().0.absent_component_props.is_empty(),
+        "suppression must be honored by shared analysis"
+    );
+}
+
+const ABSENT_PROP_FRAMEWORK_CASES: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "react",
+        "tsx",
+        "import {Card} from './Card'; export const App=()=> <Card />;",
+        "export function Card({flag=false}: {\nflag?:boolean\n}) {return <p>{flag ? 'yes' : 'no'}</p>}",
+        "Card",
+    ),
+    (
+        "vue",
+        "vue",
+        "<script setup lang='ts'>import Card from './Card.vue';</script><template><Card /></template>",
+        "<script setup lang='ts'>\nconst {flag=false}=defineProps<{\nflag?:boolean\n}>();\n</script><template><p>{{flag ? 'yes' : 'no'}}</p></template>",
+        "Card",
+    ),
+    (
+        "svelte",
+        "svelte",
+        "<script lang='ts'>import Card from './Card.svelte';</script><Card />",
+        "<script lang='ts'>\nlet {flag=false}:{\nflag?:boolean\n}=$props();\n</script><p>{flag ? 'yes' : 'no'}</p>",
+        "Card",
+    ),
+    (
+        "astro",
+        "astro",
+        "---\nimport Card from './Card.astro';\n---\n<Card />",
+        "---\ninterface Props {\nflag?:boolean\n}\nconst {flag=false}=Astro.props;\n---\n<p>{flag ? 'yes' : 'no'}</p>",
+        "Card",
+    ),
+    (
+        "@angular/core",
+        "ts",
+        "import {Component} from '@angular/core'; import {Card} from './Card'; @Component({selector:'app-root',imports:[Card],template:`<app-card />`}) export class App {}",
+        "import {Component,Input} from '@angular/core';\n@Component({selector:'app-card',template:`{{flag}}`}) export class Card {\n@Input() flag?:boolean;\n}",
+        "Card",
+    ),
+    (
+        "lit",
+        "ts",
+        "import {html} from 'lit'; import './Card'; export const view=html`<x-card></x-card>`;",
+        "import {LitElement,html} from 'lit'; import {customElement,property} from 'lit/decorators.js';\n@customElement('x-card') export class Card extends LitElement {\n@property({type:Boolean}) flag?:boolean;\nrender(){return html`<p>${this.flag}</p>`;}\n}",
+        "Card",
+    ),
+    (
+        "@glimmer/component",
+        "gts",
+        "import Card from './Card'; <template><Card /></template>",
+        "import Component from '@glimmer/component';\ninterface Signature {Args:{\nflag?:boolean\n}}\nexport default class Card extends Component<Signature> { <template><p>{{@flag}}</p></template> }",
+        "Card",
+    ),
+];
+
+#[test]
+fn absent_prop_framework_code_comments_roundtrip_through_shared_analysis() {
+    for &(dependency, extension, caller, source, name) in ABSENT_PROP_FRAMEWORK_CASES {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        let entry = format!("App.{extension}");
+        let card = root.join(format!("{name}.{extension}"));
+        std::fs::write(
+            root.join("package.json"),
+            json!({"name":"fixture","private":true,"dependencies":{dependency:"*"}}).to_string(),
+        )
+        .expect("package");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            json!({"entry":[entry],"rules":{"absent-component-props":"warn"}}).to_string(),
+        )
+        .expect("config");
+        std::fs::write(root.join(&entry), caller).expect("caller");
+        std::fs::write(&card, source).expect("component");
+        let analyze = || {
+            let mut results = AnalysisResults::default();
+            analyze_project_root_for_test(
+                root,
+                None,
+                None,
+                None,
+                false,
+                &mut results,
+                &mut DuplicationReport::default(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
+            results
+        };
+        let results = analyze();
+        let finding = results
+            .absent_component_props
+            .iter()
+            .find(|finding| finding.prop.prop_name == "flag")
+            .unwrap_or_else(|| {
+                panic!(
+                    "positive control for {dependency}: {:?}",
+                    results.absent_component_props
+                )
+            });
+        let mut mapper = crate::position::PositionMapper::default();
+        let diagnostic =
+            crate::diagnostics::absent_props::absent_prop_diagnostic(finding, &mut mapper)
+                .expect("candidate");
+        let uri = Uri::from_file_path(&card).expect("uri");
+        let actions = crate::code_actions::build_suppress_absent_prop_actions(
+            &results,
+            &card,
+            &uri,
+            &diagnostic.range,
+            source,
+        );
+        assert_eq!(actions.len(), 1, "{dependency}");
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("action")
+        };
+        let edits = &action
+            .edit
+            .as_ref()
+            .expect("edit")
+            .changes
+            .as_ref()
+            .expect("changes")[&uri];
+        let anchor = edits[0].range.start.line as usize;
+        let offset: usize = source
+            .split_inclusive('\n')
+            .take(anchor)
+            .map(str::len)
+            .sum();
+        let suppressed = format!(
+            "{}{}{}",
+            &source[..offset],
+            edits[0].new_text,
+            &source[offset..]
+        );
+        std::fs::write(&card, suppressed).expect("apply framework comment");
+        assert!(
+            analyze().absent_component_props.is_empty(),
+            "{dependency} suppression must affect shared detector"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn absent_prop_actions_require_the_saved_analysed_document_version() {
+    let project = tempfile::tempdir().expect("project");
+    let root = project.path();
+    let card = root.join("Card.tsx");
+    let source = "export function Card({highlight=false}: {\n  /*😀*/highlight?:boolean\n}) {return <p>{highlight ? 'yes' : 'no'}</p>}\n";
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"fixture","private":true,"dependencies":{"react":"*"}}"#,
+    )
+    .expect("package");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"entry":["App.tsx"],"rules":{"absent-component-props":"warn"}}"#,
+    )
+    .expect("config");
+    std::fs::write(
+        root.join("App.tsx"),
+        "import {Card} from './Card'; export const App=()=> <Card />;",
+    )
+    .expect("caller");
+    std::fs::write(&card, source).expect("saved valid component");
+    let mut results = AnalysisResults::default();
+    let mut duplication = DuplicationReport::default();
+    analyze_project_root_for_test(
+        root,
+        None,
+        None,
+        None,
+        false,
+        &mut results,
+        &mut duplication,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    );
+    let finding = results
+        .absent_component_props
+        .first()
+        .expect("positive shared analysis");
+    let diagnostic = crate::diagnostics::absent_props::absent_prop_diagnostic(
+        finding,
+        &mut crate::position::PositionMapper::default(),
+    )
+    .expect("candidate");
+    let uri = Uri::from_file_path(&card).expect("uri");
+    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    *backend.root.write().await = Some(root.to_path_buf());
+    *backend.analysis.write().await = Some(
+        analysis::LspAnalysisSnapshot::new(results, duplication, vec![])
+            .with_document_versions(snapshot_for(&uri, 7)),
+    );
+    install_document(backend, &uri, 7, source).await;
+    let request = || {
+        serde_json::from_value::<CodeActionParams>(json!({"textDocument":{"uri":uri.to_string()},"range":diagnostic.range,"context":{"diagnostics":[]}})).expect("request")
+    };
+    let actions = backend
+        .code_action(request())
+        .await
+        .expect("response")
+        .expect("candidate action");
+    assert_eq!(actions.len(), 1);
+    let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+        panic!("action")
+    };
+    assert_eq!(
+        action.diagnostics.as_ref().expect("linked diagnostic")[0]
+            .range
+            .start
+            .character,
+        8
+    );
+    for live in [
+        "const description = `\n  /*😀*/highlight\n`;\n",
+        "/*\n  😀    highlight\n*/\n",
+    ] {
+        install_document(backend, &uri, 8, live).await;
+        assert!(
+            backend
+                .code_action(request())
+                .await
+                .expect("unsaved response")
+                .is_none()
+        );
+        std::fs::write(&card, live).expect("save changed same-name source");
+        assert!(
+            backend
+                .code_action(request())
+                .await
+                .expect("saved stale response")
+                .is_none()
+        );
+    }
+    std::fs::write(&card, source).expect("restore saved declaration");
+    install_document(backend, &uri, 8, source).await;
+    assert!(
+        backend
+            .code_action(request())
+            .await
+            .expect("newer version")
+            .is_none()
     );
 }

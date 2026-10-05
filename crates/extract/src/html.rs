@@ -270,7 +270,16 @@ fn html_module_info(
         complexity,
     } = parts;
 
+    let contracts = crate::sfc_template::component_contracts::collect(
+        source,
+        &imports,
+        fallow_types::extract::ComponentFramework::Angular,
+        0,
+        &[],
+        &[],
+    );
     ModuleInfo {
+        component_contracts: Some(Box::new(contracts)),
         imports,
         member_accesses: member_accesses.into(),
         semantic_facts: semantic_facts.into(),

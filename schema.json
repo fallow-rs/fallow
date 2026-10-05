@@ -215,6 +215,7 @@
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
         "unused-component-props": "warn",
+        "absent-component-props": "off",
         "unused-component-emits": "warn",
         "unused-component-inputs": "warn",
         "unused-component-outputs": "warn",
@@ -1394,6 +1395,11 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "absent-component-props": {
+          "description": "Used optional inputs absent from inspected callers. Requires manual review; off by default.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unused-component-emits": {
           "description": "Vue `<script setup>` `defineEmits` declared event emitted nowhere inside\nits own single-file component (no `emit('<name>')` call). The single-file\ndead-input direction. Defaults to `warn`, not `error`: an emit can be part\nof a deliberately-stable public component API, so analyzer confidence is\nlower; warn encodes that without failing CI.",
           "$ref": "#/$defs/Severity",
@@ -2236,6 +2242,17 @@
             }
           ]
         },
+        "absent-component-props": {
+          "description": "Optional override for absent optional component inputs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unused-component-emits": {
           "description": "Optional override for [`RulesConfig::unused_component_emits`].",
           "anyOf": [
@@ -2743,6 +2760,13 @@
       "description": "Saved per-issue-type counts written by `--save-baseline` and compared by\n`--fail-on-regression`. Every count defaults to `0` when its key is missing,\nso hand-trimmed baselines stay loadable.",
       "type": "object",
       "properties": {
+        "absentComponentProps": {
+          "description": "Baseline count of optional component prop review candidates.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
         "analysisIdentity": {
           "description": "Compatibility identity for the analysis that produced these counts.\nMissing values in existing configs are treated as syntactic.",
           "$ref": "#/$defs/SemanticAnalysisIdentity",

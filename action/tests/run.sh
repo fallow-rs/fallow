@@ -1440,6 +1440,12 @@ assert_contains "$OUT_UCP_ANN" "::warning file=src/Widget.vue,line=12,col=5,titl
 OUT_UCP_FILTERED=$(jq '.unused_component_props = [{"path": "src/Widget.vue", "line": 12, "col": 0, "component_name": "Widget", "prop_name": "variant", "actions": []}, {"path": "src/Other.vue", "line": 3, "col": 0, "component_name": "Other", "prop_name": "size", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/Widget.vue"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_UCP_FILTERED" '.unused_component_props | length' "1" "ucp: filter-changed keeps only changed-file findings"
 
+OUT_ABSENT_FILTERED=$(jq -n '{"total_issues":2,"absent_component_props":[{"path":"src/Widget.vue","component_name":"Widget","prop_name":"flag","inspected_call_sites":[{"path":"src/main.vue","line":2,"col":0}]},{"path":"src/Other.vue","component_name":"Other","prop_name":"flag"}]}' | jq --argjson changed '["src/Widget.vue"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_ABSENT_FILTERED" '.absent_component_props | length' "1" "absent props: changed filter owns declaration"
+assert_json_value "$OUT_ABSENT_FILTERED" '.total_issues' "1" "absent props: changed filter recomputes enabled category total"
+assert_json_value "$OUT_ABSENT_FILTERED" '.absent_component_props[0].inspected_call_sites[0].path' "src/main.vue" "absent props: unchanged caller evidence survives"
+
+
 OUT_UCE=$(jq '.unused_component_emits = [{"path": "src/Widget.vue", "line": 14, "col": 0, "component_name": "Widget", "emit_name": "submit", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_UCE" "Unused component emits" "uce: shows summary row and section"
 assert_contains "$OUT_UCE" "submit" "uce: shows emit name in section"

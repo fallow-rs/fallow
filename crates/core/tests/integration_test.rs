@@ -188,6 +188,8 @@ mod waku;
 #[path = "integration_test/workspaces.rs"]
 mod workspaces;
 
+#[path = "integration_test/absent_component_props.rs"]
+mod absent_component_props;
 #[path = "integration_test/boundary_violations.rs"]
 mod boundary_violations;
 #[path = "integration_test/capability_e_route_exports.rs"]

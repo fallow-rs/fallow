@@ -19,6 +19,7 @@ mod asset_url;
 pub mod astro;
 pub mod cache;
 pub(crate) mod complexity;
+mod component_contracts;
 pub mod css;
 pub mod css_classes;
 pub mod css_in_js;

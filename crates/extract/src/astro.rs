@@ -586,7 +586,7 @@ pub(crate) fn parse_astro_to_module(
 
     let AstroFrontmatterAnalysis {
         mut extractor,
-        semantic_usage,
+        mut semantic_usage,
         props_harvest,
         complexity: frontmatter_complexity,
     } = analyze_astro_frontmatter(
@@ -605,6 +605,31 @@ pub(crate) fn parse_astro_to_module(
     let frontmatter_array_element_types = extractor.array_binding_element_types().clone();
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
+    crate::component_contracts::merge(
+        &mut info.component_contracts,
+        std::mem::take(&mut semantic_usage.component_contracts),
+        frontmatter_offset as u32,
+        Some(fallow_types::extract::ComponentFramework::Astro),
+    );
+    let mut caller_source = template.as_bytes().to_vec();
+    for &(start, end) in &masked {
+        caller_source[start..end].fill(b' ');
+    }
+    if let Ok(caller_source) = std::str::from_utf8(&caller_source) {
+        let callers = crate::sfc_template::component_contracts::collect(
+            caller_source,
+            &info.imports,
+            fallow_types::extract::ComponentFramework::Astro,
+            template_offset as u32,
+            info.component_contracts
+                .as_deref()
+                .map_or(&[], |facts| facts.spread_bindings.as_slice()),
+            info.component_contracts
+                .as_deref()
+                .map_or(&[], |facts| facts.aliases.as_slice()),
+        );
+        crate::component_contracts::merge(&mut info.component_contracts, callers, 0, None);
+    }
 
     // Member-expression component tags (`<SC.Card />`) feed the same
     // member-access stream namespace narrowing reads for `.tsx` (issue #2355).
@@ -655,6 +680,7 @@ pub(crate) fn parse_astro_to_module(
             .extend(crate::template_complexity::compute_astro_template_complexity(source));
     }
     info.line_offsets = line_offsets;
+    crate::component_contracts::attach_sfc_default_export(&mut info);
     info
 }
 
@@ -727,6 +753,16 @@ fn apply_astro_props(
             .saturating_add(u32::try_from(frontmatter_offset).unwrap_or(u32::MAX));
         prop.used_in_template =
             template_used.contains(&prop.local) || template_used.contains(&prop.name);
+        if let Some(facts) = &mut info.component_contracts {
+            for declaration in facts
+                .declarations
+                .iter_mut()
+                .filter(|declaration| declaration.name == prop.name)
+            {
+                declaration.is_used |= prop.used_in_script || prop.used_in_template;
+                declaration.incomplete |= info.has_props_attrs_fallthrough;
+            }
+        }
         info.component_props.push(prop);
     }
 }

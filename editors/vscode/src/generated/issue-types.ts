@@ -38,6 +38,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unprovided-injects": true,
   "unrendered-components": true,
   "unused-component-props": true,
+  "absent-component-props": true,
   "unused-component-emits": true,
   "unused-component-inputs": true,
   "unused-component-outputs": true,
@@ -62,6 +63,7 @@ export type IssueTypeKey = keyof typeof ISSUE_TYPE_DEFAULTS;
 export type IssueTypeConfig = Readonly<Record<IssueTypeKey, boolean>>;
 
 export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
+  "absent-component-prop": "absent-component-props",
   "boundary-call-violation": "boundary-violation",
   "boundary-call-violations": "boundary-violation",
   "boundary-calls": "boundary-violation",
@@ -239,6 +241,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "unused-component-prop",
     "label": "Unused Component Props"
+  },
+  {
+    "code": "absent-component-prop",
+    "label": "Absent Optional Component Props"
   },
   {
     "code": "unused-component-emit",

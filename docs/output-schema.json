@@ -823,6 +823,13 @@
           },
           "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props\nreferenced nowhere in their own component. Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
+        "absent_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AbsentComponentPropFinding"
+          },
+          "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -1432,6 +1439,13 @@
             "$ref": "#/definitions/UnusedComponentPropFinding"
           },
           "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props\nreferenced nowhere in their own component. Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "absent_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AbsentComponentPropFinding"
+          },
+          "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
         },
         "unused_component_emits": {
           "type": "array",
@@ -5987,6 +6001,10 @@
           "type": "integer",
           "description": "Vue, Svelte, or React props referenced nowhere inside their own component."
         },
+        "absent_component_props": {
+          "type": "integer",
+          "description": "Optional consumed props omitted by known reachable callers, for manual review."
+        },
         "unused_component_emits": {
           "type": "integer",
           "description": "Vue `<script setup>` emits emitted nowhere inside their own SFC."
@@ -6970,6 +6988,13 @@
           },
           "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props\nreferenced nowhere in their own component. Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
         },
+        "absent_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AbsentComponentPropFinding"
+          },
+          "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -7565,6 +7590,11 @@
           "type": "string",
           "const": "use-component-prop",
           "description": "Use a declared component prop or remove it from the component API\n(manual; used by unused-component-prop findings)."
+        },
+        {
+          "type": "string",
+          "const": "review-component-prop",
+          "description": "Review caller evidence, defaults and component API intent manually."
         },
         {
           "type": "string",
@@ -29570,6 +29600,122 @@
         "reason"
       ],
       "description": "Why the unused devDependency check counts a dependency as used tooling\nalthough no source file imports it."
+    },
+    "AbsentComponentPropFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Source path of the input declaration."
+        },
+        "component_name": {
+          "type": "string",
+          "description": "Semantic declaration name, or SFC filename stem."
+        },
+        "framework": {
+          "type": "string",
+          "description": "Public framework token."
+        },
+        "prop_name": {
+          "type": "string",
+          "description": "Public optional input name."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based declaration line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based declaration byte column."
+        },
+        "has_default": {
+          "type": "boolean",
+          "description": "Whether omission has a declared default."
+        },
+        "inspected_call_sites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ComponentPropCallSite"
+          },
+          "description": "Every inspected reachable caller, deterministically ordered."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Manual-review meaning and limits of static evidence."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "component_name",
+        "framework",
+        "prop_name",
+        "line",
+        "col",
+        "has_default",
+        "inspected_call_sites",
+        "explanation",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`AbsentComponentProp`] finding. There is no safe\nauto-fix: removing a declared prop is judgement-bearing (the prop may be part\nof a deliberately-stable public component API). Actions are manual\nremediation guidance plus a line-level suppress at the prop declaration."
+    },
+    "ComponentPropCallSite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Caller source path."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based opening-tag line."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based original-source byte column."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "One inspected reachable component invocation."
     }
   }
 }

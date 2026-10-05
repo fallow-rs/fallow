@@ -696,16 +696,28 @@ impl LanguageServer for FallowLspServer {
         let file_lines: Vec<&str> = file_content.lines().collect();
         let root = self.root.read().await.clone();
 
-        Ok(code_actions::build_code_action_response(
-            code_actions::CodeActionInput::new(
-                &analysis.results,
-                root.as_deref(),
-                &file_path,
-                uri,
-                &params.range,
-                &file_lines,
-            ),
-        ))
+        let mut input = code_actions::CodeActionInput::new(
+            &analysis.results,
+            root.as_deref(),
+            &file_path,
+            uri,
+            &params.range,
+            &file_lines,
+        );
+        if analysis
+            .document_versions
+            .get(uri)
+            .is_some_and(|snapshot| snapshot.matches_disk)
+            && self.documents.read().await.get(uri).is_some_and(|live| {
+                analysis
+                    .document_versions
+                    .get(uri)
+                    .is_some_and(|snapshot| snapshot.version == live.version)
+            })
+        {
+            input = input.with_current_absent_prop_source(&file_content);
+        }
+        Ok(code_actions::build_code_action_response(input))
     }
 
     #[expect(
@@ -1285,11 +1297,14 @@ impl FallowLspServer {
                 .with_changed_since_scope(output.changed_since_scope.as_ref())
                 .with_package_baselines(&package_baselines),
         );
-        *self.analysis.write().await = Some(LspAnalysisSnapshot::new(
-            output.analysis.results,
-            output.analysis.duplication,
-            output.inline_complexity,
-        ));
+        *self.analysis.write().await = Some(
+            LspAnalysisSnapshot::new(
+                output.analysis.results,
+                output.analysis.duplication,
+                output.inline_complexity,
+            )
+            .with_document_versions(version_snapshot.clone()),
+        );
 
         self.client
             .send_notification::<AnalysisComplete>(complete_params)

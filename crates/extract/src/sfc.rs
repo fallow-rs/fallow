@@ -468,6 +468,7 @@ pub(crate) fn parse_sfc_to_module(
 
     append_template_asset_imports(source, &mut combined);
     dedup_import_binding_lists(&mut combined);
+    apply_component_contracts(kind, source, &mut combined);
 
     combined
 }
@@ -600,11 +601,22 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     extractor.set_top_level_is_component_body(is_template_visible_script(input.kind, input.script));
     extractor.visit_program(&parser_return.program);
     let empty_template_used = FxHashSet::default();
-    let semantic_usage = crate::parse::compute_semantic_usage_for_extractor(
+    let mut semantic_usage = crate::parse::compute_semantic_usage_for_extractor(
         &parser_return.program,
         &mut extractor,
         &empty_template_used,
     );
+    if input.kind == SfcKind::Vue || is_template_visible_script(input.kind, input.script) {
+        crate::component_contracts::merge(
+            &mut input.combined.component_contracts,
+            std::mem::take(&mut semantic_usage.component_contracts),
+            input.script.byte_offset as u32,
+            Some(match input.kind {
+                SfcKind::Vue => fallow_types::extract::ComponentFramework::Vue,
+                SfcKind::Svelte => fallow_types::extract::ComponentFramework::Svelte,
+            }),
+        );
+    }
     let extraction = ExtractionResult::contiguous(&input.script.body, input.script.byte_offset);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
@@ -2112,4 +2124,62 @@ export const foo = 1;
                 [0];
         assert!(info.svelte_listened_events.contains(&"save".to_string()));
     }
+}
+
+fn apply_component_contracts(kind: SfcKind, source: &str, combined: &mut ModuleInfo) {
+    let framework = match kind {
+        SfcKind::Vue => fallow_types::extract::ComponentFramework::Vue,
+        SfcKind::Svelte => fallow_types::extract::ComponentFramework::Svelte,
+    };
+    let callers = crate::sfc_template::component_contracts::collect(
+        &mask_non_markup_regions(source),
+        &combined.imports,
+        framework,
+        0,
+        combined
+            .component_contracts
+            .as_deref()
+            .map_or(&[], |facts| facts.spread_bindings.as_slice()),
+        combined
+            .component_contracts
+            .as_deref()
+            .map_or(&[], |facts| facts.aliases.as_slice()),
+    );
+    crate::component_contracts::merge(&mut combined.component_contracts, callers, 0, None);
+    if let Some(facts) = &mut combined.component_contracts {
+        let credited: FxHashSet<String> = facts
+            .declarations
+            .iter()
+            .flat_map(|prop| [prop.local.clone(), prop.name.clone()])
+            .collect();
+        let usage = collect_template_usage_with_bound_targets(
+            kind,
+            source,
+            &credited,
+            &FxHashMap::default(),
+            &FxHashMap::default(),
+        );
+        for declaration in &mut facts.declarations {
+            declaration.is_used |= usage.used_bindings.contains(&declaration.local)
+                || usage.member_accesses.iter().any(|access| {
+                    access.object == declaration.local && access.member == declaration.name
+                });
+        }
+    }
+    if let Some(facts) = &mut combined.component_contracts {
+        for declaration in &mut facts.declarations {
+            if let Some(prop) = combined
+                .component_props
+                .iter()
+                .find(|prop| prop.name == declaration.name)
+            {
+                declaration.is_used |= prop.used_in_template;
+            }
+            declaration.incomplete |= combined.has_props_attrs_fallthrough
+                || combined.has_define_expose
+                || combined.has_define_model;
+        }
+    }
+
+    crate::component_contracts::attach_sfc_default_export(combined);
 }

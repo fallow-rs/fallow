@@ -1,3 +1,4 @@
+pub mod absent_props;
 mod component_health;
 mod quality;
 pub mod security;
@@ -109,6 +110,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     unused::push_import_diagnostics(&mut map, results, &mut mapper);
     unused::push_dep_diagnostics(&mut map, results, package_json_uri.as_ref(), root);
     unused::push_member_diagnostics(&mut map, results, &mut mapper);
+    absent_props::push_absent_prop_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplicate_export_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
     structural::push_circular_dep_diagnostics(&mut map, results, &mut mapper);
@@ -547,6 +549,7 @@ mod severity_gate {
             unprovided_injects: _,
             unrendered_components: _,
             unused_component_props: _,
+            absent_component_props: _,
             unused_component_emits: _,
             unused_component_inputs: _,
             unused_component_outputs: _,
@@ -1313,6 +1316,15 @@ mod severity_gate {
                                 col: 0,
                             },
                         ),
+                    );
+                }),
+            ),
+            (
+                "absent-component-prop",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.absent_component_props.push(
+                        crate::diagnostics::absent_props::tests::candidate(root.join("Card.tsx")),
                     );
                 }),
             ),

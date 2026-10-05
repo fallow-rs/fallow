@@ -778,6 +778,11 @@ fn activate_explicit_dead_code_opt_ins(
     filters: &DeadCodeFilters,
     rules: &mut fallow_config::RulesConfig,
 ) {
+    if filters.absent_component_props
+        && rules.absent_component_props == fallow_config::Severity::Off
+    {
+        rules.absent_component_props = fallow_config::Severity::Warn;
+    }
     if filters.private_type_leaks && rules.private_type_leaks == fallow_config::Severity::Off {
         rules.private_type_leaks = fallow_config::Severity::Warn;
     }
@@ -854,6 +859,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.unprovided_injects
         || filters.unrendered_components
         || filters.unused_component_props
+        || filters.absent_component_props
         || filters.unused_component_emits
         || filters.unused_component_inputs
         || filters.unused_component_outputs
@@ -924,6 +930,9 @@ fn apply_dead_code_component_filters(filters: &DeadCodeFilters, results: &mut An
     }
     if !filters.unrendered_components {
         results.unrendered_components.clear();
+    }
+    if !filters.absent_component_props {
+        results.absent_component_props.clear();
     }
     if !filters.unused_component_props {
         results.unused_component_props.clear();

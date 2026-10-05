@@ -37,16 +37,17 @@ use crate::output::{
     SuppressLineKind, SuppressLineScope,
 };
 use crate::results::{
-    BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction, DuplicateExport,
-    DuplicatePropShape, DynamicSegmentNameConflict, EmptyCatalogGroup, InvalidClientExport,
-    MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PackageCycle,
-    PolicyViolation, PrivateTypeLeak, PropDrillingChain, ReExportCycle, ReExportCycleKind,
-    RouteCollision, TestOnlyDependency, ThinWrapper, TypeOnlyDependency, UnlistedDependency,
-    UnprovidedInject, UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput,
-    UnusedComponentProp, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedLoadDataKey, UnusedMember, UnusedServerAction, UnusedSvelteEvent,
+    AbsentComponentProp, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
+    CircularDependency, DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction,
+    DuplicateExport, DuplicatePropShape, DynamicSegmentNameConflict, EmptyCatalogGroup,
+    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    MixedClientServerBarrel, PackageCycle, PolicyViolation, PrivateTypeLeak, PropDrillingChain,
+    ReExportCycle, ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper,
+    TypeOnlyDependency, UnlistedDependency, UnprovidedInject, UnrenderedComponent,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit,
+    UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember,
+    UnusedServerAction, UnusedSvelteEvent,
 };
 use crate::semantic::{
     SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
@@ -1981,6 +1982,65 @@ impl UnusedComponentPropFinding {
                 "Manual review required: public component APIs can intentionally keep stable props for external consumers.",
             ),
             suppress_line("// fallow-ignore-next-line unused-component-prop"),
+        ];
+        Self {
+            finding_id: None,
+            prop,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`AbsentComponentProp`] finding. There is no safe
+/// auto-fix: removing a declared prop is judgement-bearing (the prop may be part
+/// of a deliberately-stable public component API). Actions are manual
+/// remediation guidance plus a line-level suppress at the prop declaration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AbsentComponentPropFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub prop: AbsentComponentProp,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl AbsentComponentPropFinding {
+    /// Build the wrapper from a raw [`AbsentComponentProp`]. Emits a manual
+    /// fix action plus a line-level suppress.
+    #[must_use]
+    pub fn with_actions(prop: AbsentComponentProp) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::ReviewComponentProp,
+                "Review inspected callers, defaults and API intent",
+                "Retain or suppress intentional stable props, or update the component manually; static analysis does not prove runtime unreachability.",
+            ),
+            suppress_line("// fallow-ignore-next-line absent-component-prop"),
         ];
         Self {
             finding_id: None,
@@ -4134,6 +4194,7 @@ impl_gated_finding!(
     UnusedLoadDataKeyFinding,
     UnrenderedComponentFinding,
     UnusedComponentPropFinding,
+    AbsentComponentPropFinding,
     UnusedComponentEmitFinding,
     UnusedSvelteEventFinding,
     UnusedComponentInputFinding,
@@ -4740,6 +4801,7 @@ mod position_0_invariants {
                 FixActionType::UseLoadData => "use-load-data",
                 FixActionType::RenderComponent => "render-component",
                 FixActionType::UseComponentProp => "use-component-prop",
+                FixActionType::ReviewComponentProp => "review-component-prop",
                 FixActionType::EmitComponentEvent => "emit-component-event",
                 FixActionType::WireSvelteEvent => "wire-svelte-event",
                 FixActionType::ResolveRouteCollision => "resolve-route-collision",

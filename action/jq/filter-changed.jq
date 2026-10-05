@@ -89,6 +89,9 @@ def filter_check:
   (if .unused_component_props then
     .unused_component_props |= map(select(.path | in_changed))
   else . end) |
+  (if .absent_component_props then
+    .absent_component_props |= map(select(.path | in_changed))
+  else . end) |
   (if .unused_component_emits then
     .unused_component_emits |= map(select(.path | in_changed))
   else . end) |
@@ -148,6 +151,7 @@ def filter_check:
       (.unused_server_actions // [] | length) +
       (.unrendered_components // [] | length) +
       (.unused_component_props // [] | length) +
+      (.absent_component_props // [] | length) +
       (.unused_component_emits // [] | length) +
       (.unused_component_inputs // [] | length) +
       (.unused_component_outputs // [] | length) +

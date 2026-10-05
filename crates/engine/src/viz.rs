@@ -1387,6 +1387,25 @@ fn build_frameworks(
     index: &FileIndex<'_>,
     root: &Path,
 ) -> VizFrameworkData {
+    let analysis = build_framework_findings(results, index, root);
+    VizFrameworkData {
+        availability: analysis.availability,
+        detector_availability: VizAvailability::unavailable(
+            "detectors",
+            "Framework detector coverage did not complete",
+        ),
+        findings_truncated: analysis.findings_truncated,
+        findings: analysis.findings,
+        detected_frameworks: Vec::new(),
+        detectors: Vec::new(),
+    }
+}
+
+fn build_framework_findings(
+    results: &AnalysisResults,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> VizFindingAnalysis {
     let mut findings = Vec::new();
     let mut count = 0;
     macro_rules! add {
@@ -1432,6 +1451,11 @@ fn build_frameworks(
         "Unused component prop"
     );
     add!(
+        absent_component_props,
+        "absent-component-prop",
+        "Optional prop review candidate"
+    );
+    add!(
         unused_component_emits,
         "unused-component-emit",
         "Unused component event"
@@ -1475,17 +1499,7 @@ fn build_frameworks(
                 .to_string(),
         );
     }
-    VizFrameworkData {
-        availability: analysis.availability,
-        detector_availability: VizAvailability::unavailable(
-            "detectors",
-            "Framework detector coverage did not complete",
-        ),
-        findings_truncated: analysis.findings_truncated,
-        findings: analysis.findings,
-        detected_frameworks: Vec::new(),
-        detectors: Vec::new(),
-    }
+    analysis
 }
 
 fn build_feature_flags(

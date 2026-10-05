@@ -243,6 +243,8 @@ pub enum FixActionType {
     /// Use a declared component prop or remove it from the component API
     /// (manual; used by unused-component-prop findings).
     UseComponentProp,
+    /// Review caller evidence, defaults and component API intent manually.
+    ReviewComponentProp,
     /// Emit a declared component event or remove it from the component API
     /// (manual; used by unused-component-emit findings).
     EmitComponentEvent,

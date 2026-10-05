@@ -357,6 +357,11 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "unused-component-props",
     ),
     (
+        "Absent optional component props",
+        "absent_component_props",
+        "absent-component-props",
+    ),
+    (
         "Unused component emits",
         "unused_component_emits",
         "unused-component-emits",
@@ -973,6 +978,28 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
                     path_line_cell(it),
                     code_cell(it, "component_name"),
                     markdown_table_text(s(it, "framework")),
+                )
+            },
+        },
+        SectionSpec {
+            name: "Absent optional component props",
+            key: "absent_component_props",
+            header: "Known reachable callers omit this used optional prop. Review defaults and API intent manually; static analysis does not prove runtime unreachability.\n\n| File | Component prop | Default | Inspected callers |\n|------|----------------|---------|-------------------|\n",
+            row: |it| {
+                let callers = arr(it, "inspected_call_sites")
+                    .map(path_line_cell)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "| {} | {} | {} | {} |",
+                    path_line_cell(it),
+                    component_member_item(it, "prop_name"),
+                    if it.get("has_default").and_then(Value::as_bool) == Some(true) {
+                        "present"
+                    } else {
+                        "absent"
+                    },
+                    callers
                 )
             },
         },
@@ -1940,6 +1967,11 @@ const AUDIT_COMPONENT_ROWS: &[AuditRowSpec] = &[
     ("Unused component prop", "unused_component_props", |it| {
         component_member_item(it, "prop_name")
     }),
+    (
+        "Absent optional component prop",
+        "absent_component_props",
+        |it| component_member_item(it, "prop_name"),
+    ),
     ("Unused component emit", "unused_component_emits", |it| {
         format!(
             "{} emit {}",

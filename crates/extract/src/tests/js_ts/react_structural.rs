@@ -1728,3 +1728,158 @@ fn forwardref_genuinely_unused_generic_prop_is_harvested_unused() {
     );
     assert!(!info.component_functions[0].has_unharvestable_props);
 }
+
+#[test]
+fn component_contract_optional_default_and_module_level_caller() {
+    let info = parse_tsx(
+        r#"
+        interface Props { title: string; condensed?: boolean; }
+        export function Card({ title, condensed = false }: Props) {
+            return <div>{condensed ? title : 'expanded'}</div>;
+        }
+        const node = <Card title="example" />;
+    "#,
+    );
+    let facts = info
+        .component_contracts
+        .as_deref()
+        .expect("component contract facts are missing");
+    let prop = facts
+        .declarations
+        .iter()
+        .find(|prop| prop.name == "condensed")
+        .expect("optional declaration missing");
+    assert_eq!(
+        (prop.optional, prop.has_default, prop.is_used),
+        (true, true, true)
+    );
+    assert_eq!(facts.invocations[0].supplied, ["title"]);
+}
+
+#[test]
+fn component_contract_required_type_wins_over_destructure_default() {
+    let info = parse_tsx(
+        "function Card({ required = false, optional = false }: { required: boolean; optional?: boolean }) { return <div>{required}{optional}</div>; }",
+    );
+    let facts = info.component_contracts.as_deref().expect("contracts");
+    let required = facts
+        .declarations
+        .iter()
+        .find(|prop| prop.name == "required")
+        .expect("required");
+    let optional = facts
+        .declarations
+        .iter()
+        .find(|prop| prop.name == "optional")
+        .expect("optional");
+    assert_eq!((required.optional, required.has_default), (false, true));
+    assert_eq!((optional.optional, optional.has_default), (true, true));
+}
+
+#[test]
+fn component_contract_safe_alias_shadowing_and_escaped_lowercase_import() {
+    use fallow_types::extract::ComponentReference;
+    let info = parse_tsx(
+        r"import { Card as card } from './card'; const Alias = card;
+        const a = <Alias />; createElement(card, {flag: true});
+        function nested(Card: unknown) { return <Card />; }",
+    );
+    let facts = info.component_contracts.as_deref().expect("contracts");
+    assert!(
+        matches!(&facts.invocations[0].target, ComponentReference::Import { local, .. } if local == "card")
+    );
+    assert!(
+        matches!(&facts.invocations[1].target, ComponentReference::Local { name, .. } if name == "Card")
+    );
+    assert!(facts.escapes.iter().any(
+        |escape| matches!(escape, ComponentReference::Import { local, .. } if local == "card")
+    ));
+}
+
+#[test]
+fn component_contract_spread_safety_and_supplied_values() {
+    let info = parse_tsx(
+        r"import Card from './card';
+        const stable = { enabled: undefined }; const mutated = {};
+        mutated.enabled = true; export const publicAttrs = {};
+        const a = <Card {...stable} flag={false}>child</Card>;
+        const b = <Card {...mutated} />;
+        const c = <Card {...publicAttrs} />;
+        const d = <Card {...{ nested: false, ...{ explicit: undefined } }} />;",
+    );
+    let facts = info.component_contracts.as_deref().expect("contracts");
+    assert_eq!(
+        facts.invocations[0].supplied,
+        ["children", "enabled", "flag"]
+    );
+    assert!(!facts.invocations[0].unknown_props);
+    assert!(facts.invocations[1].unknown_props);
+    assert!(facts.invocations[2].unknown_props);
+    assert_eq!(facts.invocations[3].supplied, ["explicit", "nested"]);
+    assert!(!facts.invocations[3].unknown_props);
+}
+
+#[test]
+fn component_contract_distinguishes_property_write_from_read() {
+    let info = parse_tsx(
+        "function Card(props: { writeOnly?: boolean; read?: boolean }) { props.writeOnly = true; return <div>{String(props.read)}</div>; }",
+    );
+    let props = &info
+        .component_contracts
+        .as_deref()
+        .expect("contracts")
+        .declarations;
+    assert!(
+        !props
+            .iter()
+            .find(|p| p.name == "writeOnly")
+            .expect("write-only prop")
+            .is_used
+    );
+    assert!(
+        props
+            .iter()
+            .find(|p| p.name == "read")
+            .expect("read prop")
+            .is_used
+    );
+}
+
+#[test]
+fn component_contract_namespace_members_and_export_aliases() {
+    use fallow_types::extract::ComponentReference;
+    let info = parse_tsx(
+        "import * as UI from './barrel'; function Card({flag=false}) { return <div>{flag}</div>; } const Alias=Card; export {Alias as PublicCard}; export default Alias; const view=<UI.Card/>;",
+    );
+    let facts = info.component_contracts.as_deref().expect("contracts");
+    assert!(
+        matches!(&facts.invocations[0].target, ComponentReference::NamespaceMember {local,member,..} if local == "UI" && member == "Card")
+    );
+    let card = facts
+        .declarations
+        .iter()
+        .find(|prop| prop.name == "flag")
+        .expect("flag declaration");
+    assert!(
+        facts
+            .exports
+            .iter()
+            .any(|export| export.export_name == "PublicCard"
+                && export.target
+                    == ComponentReference::Local {
+                        name: "Card".into(),
+                        span_start: card.component_span
+                    })
+    );
+    assert!(
+        facts
+            .exports
+            .iter()
+            .any(|export| export.export_name == "default"
+                && export.target
+                    == ComponentReference::Local {
+                        name: "Card".into(),
+                        span_start: card.component_span
+                    })
+    );
+}

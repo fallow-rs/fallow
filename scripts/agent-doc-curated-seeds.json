@@ -724,6 +724,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--absent-component-props",
+      "column": "Issue Type",
+      "seed": "Known reachable callers omit an optional prop consumed inside its component"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--boundary-violations",
       "column": "Issue Type",
       "seed": "Import crosses a configured architecture boundary; Source file matches no configured architecture boundary zone; Zoned file calls a callee its zone forbids"
@@ -1963,6 +1969,12 @@
       "row": "--path",
       "column": "Description",
       "seed": "Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags"
+    },
+    {
+      "section": "issue-types",
+      "row": "absent-component-prop",
+      "column": "Description",
+      "seed": "Known reachable callers omit an optional prop consumed inside its component; Opt-in manual review candidate; defaults to off. Inspect caller evidence and defaults before changing the component. No automatic fix."
     },
     {
       "section": "issue-types",

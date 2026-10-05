@@ -430,6 +430,8 @@ pub struct DeadCodeFilters {
     pub unrendered_components: bool,
     /// Declared component props never used.
     pub unused_component_props: bool,
+    /// Review optional props omitted by known reachable callers.
+    pub absent_component_props: bool,
     /// Declared component emits never used.
     pub unused_component_emits: bool,
     /// Declared component inputs never bound.
@@ -493,6 +495,7 @@ impl DeadCodeFilters {
             || self.unprovided_injects
             || self.unrendered_components
             || self.unused_component_props
+            || self.absent_component_props
             || self.unused_component_emits
             || self.unused_component_inputs
             || self.unused_component_outputs
@@ -545,6 +548,7 @@ impl DeadCodeFilters {
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,
             "--unused-component-props" => self.unused_component_props = true,
+            "--absent-component-props" => self.absent_component_props = true,
             "--unused-component-emits" => self.unused_component_emits = true,
             "--unused-component-inputs" => self.unused_component_inputs = true,
             "--unused-component-outputs" => self.unused_component_outputs = true,

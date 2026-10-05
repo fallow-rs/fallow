@@ -1,3 +1,4 @@
+mod absent_component_prop;
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
@@ -1189,6 +1190,7 @@ fn populate_component_contract_findings(input: &mut FrameworkSpecificFindingsInp
     populate_unprovided_inject_findings(input);
     populate_unrendered_component_findings(input);
     populate_unused_component_prop_findings(input);
+    populate_absent_component_prop_findings(input);
     populate_unused_component_emit_findings(input);
     populate_unused_component_input_findings(input);
     populate_unused_component_output_findings(input);
@@ -1447,6 +1449,36 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
     input.results.unused_component_props =
         retain_unsuppressed(input, findings, IssueKind::UnusedComponentProp, |f| {
             Some((f.prop.path.as_path(), f.prop.line))
+        });
+}
+
+fn populate_absent_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.absent_component_props == Severity::Off
+        && !input.config.overrides.iter().any(|overrides| {
+            overrides
+                .rules
+                .absent_component_props
+                .is_some_and(|severity| severity != Severity::Off)
+        })
+    {
+        return;
+    }
+    let findings = absent_component_prop::find_absent_component_props(
+        &absent_component_prop::AbsentPropInput {
+            graph: input.graph,
+            modules: input.modules,
+            resolved_modules: input.resolved_modules,
+            declared_deps: input.declared_deps,
+            public_api_entry_points: input.public_api_entry_points,
+            line_offsets_by_file: input.line_offsets_by_file,
+        },
+    )
+    .into_iter()
+    .map(crate::results::AbsentComponentPropFinding::with_actions)
+    .collect();
+    input.results.absent_component_props =
+        retain_unsuppressed(input, findings, IssueKind::AbsentComponentProp, |finding| {
+            Some((finding.prop.path.as_path(), finding.prop.line))
         });
 }
 
@@ -3014,6 +3046,7 @@ mod tests {
             unprovided_injects: Severity::Off,
             unrendered_components: Severity::Off,
             unused_component_props: Severity::Off,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Off,
             unused_component_inputs: Severity::Off,
             unused_component_outputs: Severity::Off,

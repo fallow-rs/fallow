@@ -418,6 +418,11 @@ fn apply_dead_code_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
 
 fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
+        "absent-component-prop" => {
+            m.note = Some(
+                "Opt-in manual review candidate; defaults to off. Inspect caller evidence and defaults before changing the component. No automatic fix.",
+            );
+        }
         "private-type-leak" => {
             m.note = Some("Opt-in API hygiene check; the rule defaults to off");
         }

@@ -122,6 +122,11 @@ The MCP server converts the CLI's exit 1 into a successful result so the finding
 
 const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
+        topic: "absent_component_props",
+        summary: "Optional props that inspected callers do not supply.",
+        detail: r#"Select issue_types: ["absent-component-props"] to enable this default-off rule. Each candidate carries the declaration, framework, default presence and inspected caller locations. Review defaults and API intent manually; static evidence does not prove runtime unreachability. Its actions are not auto-fixable. Configured warning or error severity still controls the normal issue gates."#,
+    },
+    ToolGuideSection {
         topic: "boundary_violations",
         summary: "The alias that limits a run to architecture boundary violations.",
         detail: r#"Set boundary_violations=true to check only architecture boundary violations. It is a convenience alias for issue_types: ["boundary-violations"]. The response is the same structured JSON as a full run, with all issues found of that one type."#,

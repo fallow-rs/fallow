@@ -7,6 +7,8 @@
 
 mod common;
 
+mod absent_component_props;
+
 mod audit_attribution;
 mod audit_config_patterns;
 mod capability_parity;

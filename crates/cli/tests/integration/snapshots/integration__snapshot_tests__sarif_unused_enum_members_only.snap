@@ -404,6 +404,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/absent-component-prop",
+              "shortDescription": {
+                "text": "Known reachable callers omit an optional prop consumed inside its component"
+              },
+              "fullDescription": {
+                "text": "A used optional component input is supplied by none of its inspected reachable callers. The finding includes the declaration, framework, default presence and caller locations. Enable absent-component-props explicitly; it defaults to off. Supported contracts cover React, Preact, Solid, Qwik, Vue, Svelte, Astro, Angular, Lit and Ember. Unknown spreads, dynamic or escaped component references, ambiguous bindings, incomplete contracts and externally exposed APIs abstain. Review defaults and API intent manually; static analysis does not prove runtime unreachability."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#absent-component-props",
+              "defaultConfiguration": {
+                "level": "none"
+              }
+            },
+            {
               "id": "fallow/unused-component-emit",
               "shortDescription": {
                 "text": "A Vue <script setup> defineEmits event is emitted nowhere in its own component"

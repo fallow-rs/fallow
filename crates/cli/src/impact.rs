@@ -1673,6 +1673,16 @@ fn collect_component_findings(
             Some(f.component.component_name.clone()),
         );
     }
+    for finding in &results.absent_component_props {
+        push(
+            &finding.prop.path,
+            "absent-component-prop",
+            Some(format!(
+                "{}.{}",
+                finding.prop.component_name, finding.prop.prop_name
+            )),
+        );
+    }
     for f in &results.unused_component_props {
         push(
             &f.prop.path,

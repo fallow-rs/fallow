@@ -624,6 +624,7 @@ mod tests {
             IssueKind::DynamicSegmentNameConflict,
             IssueKind::UnrenderedComponent,
             IssueKind::UnusedComponentProp,
+            IssueKind::AbsentComponentProp,
             IssueKind::UnusedComponentEmit,
             IssueKind::UnusedComponentInput,
             IssueKind::UnusedComponentOutput,

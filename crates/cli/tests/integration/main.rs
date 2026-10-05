@@ -17,6 +17,7 @@ mod common;
 #[path = "../common/sign.rs"]
 mod sign;
 
+mod absent_component_prop_tests;
 mod agent_tests;
 mod audit_tests;
 mod baseline_growth_tests;

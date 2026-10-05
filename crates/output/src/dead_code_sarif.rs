@@ -1183,6 +1183,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unprovided-inject" => rules.unprovided_injects,
         "unrendered-component" => rules.unrendered_components,
         "unused-component-prop" => rules.unused_component_props,
+        "absent-component-prop" => rules.absent_component_props,
         "unused-component-emit" => rules.unused_component_emits,
         "unused-component-input" => rules.unused_component_inputs,
         "unused-component-output" => rules.unused_component_outputs,
@@ -1597,6 +1598,68 @@ fn push_component_contract_sarif_results(
 }
 
 /// Push SARIF results for unused component props, emits, inputs, and outputs.
+fn candidate_sarif_region(
+    snippets: &mut SourceSnippetCache,
+    path: &Path,
+    line: u32,
+    byte_col: u32,
+) -> serde_json::Value {
+    let mut region = serde_json::json!({"startLine":line});
+    if let Some(source) = snippets.line(path, line)
+        && let Some(prefix) = source.get(..byte_col as usize)
+    {
+        // SARIF defaults to UTF-16 code units when the run omits columnKind.
+        region["startColumn"] = serde_json::json!(prefix.encode_utf16().count() + 1);
+    }
+    region
+}
+
+fn push_absent_component_prop_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    ctx: &SarifCtx<'_>,
+    snippets: &mut SourceSnippetCache,
+) {
+    let start = sarif_results.len();
+    push_sarif_results(
+        sarif_results,
+        &ctx.results.absent_component_props,
+        snippets,
+        |finding| {
+            let prop = &finding.prop;
+            SarifFields {
+                rule_id: "fallow/absent-component-prop",
+                level: finding_level(finding, ctx.rules.absent_component_props),
+                message: format!(
+                    "Optional prop '{}.{}' is absent from inspected callers. {}",
+                    prop.component_name, prop.prop_name, prop.explanation
+                ),
+                uri: relative_uri(&prop.path, ctx.root),
+                region: Some((prop.line, prop.col + 1)),
+                source_path: Some(prop.path.clone()),
+                properties: Some(
+                    serde_json::json!({"framework":prop.framework,"hasDefault":prop.has_default}),
+                ),
+            }
+        },
+    );
+    for (result, finding) in sarif_results[start..]
+        .iter_mut()
+        .zip(&ctx.results.absent_component_props)
+    {
+        result["locations"][0]["physicalLocation"]["region"] = candidate_sarif_region(
+            snippets,
+            &finding.prop.path,
+            finding.prop.line,
+            finding.prop.col,
+        );
+        result["relatedLocations"] = serde_json::Value::Array(finding.prop.inspected_call_sites.iter().enumerate().map(|(index, site)| serde_json::json!({
+            "id": index + 1,
+            "message": {"text":"Inspected caller does not supply this optional prop"},
+            "physicalLocation": {"artifactLocation":{"uri":relative_uri(&site.path,ctx.root)},"region":candidate_sarif_region(snippets,&site.path,site.line,site.col)},
+        })).collect());
+    }
+}
+
 fn push_component_member_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
     ctx: &SarifCtx<'_>,
@@ -1607,6 +1670,7 @@ fn push_component_member_sarif_results(
         root,
         rules,
     } = *ctx;
+    push_absent_component_prop_sarif_results(sarif_results, ctx, snippets);
 
     push_sarif_results(
         sarif_results,

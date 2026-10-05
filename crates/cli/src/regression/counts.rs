@@ -75,6 +75,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub unused_component_props: usize,
     #[serde(default)]
+    pub absent_component_props: usize,
+    #[serde(default)]
     pub unused_component_emits: usize,
     #[serde(default)]
     pub unused_component_inputs: usize,
@@ -131,6 +133,7 @@ impl CheckCounts {
             unprovided_injects: results.unprovided_injects.len(),
             unrendered_components: results.unrendered_components.len(),
             unused_component_props: results.unused_component_props.len(),
+            absent_component_props: results.absent_component_props.len(),
             unused_component_emits: results.unused_component_emits.len(),
             unused_component_inputs: results.unused_component_inputs.len(),
             unused_component_outputs: results.unused_component_outputs.len(),
@@ -178,6 +181,7 @@ impl CheckCounts {
             // `fallow_config::RegressionBaseline` has no `unused_component_props`
             // field; default to 0 until the config baseline schema gains one.
             unused_component_props: 0,
+            absent_component_props: b.absent_component_props,
             // `fallow_config::RegressionBaseline` has no `unused_component_emits`
             // field; default to 0 until the config baseline schema gains one.
             unused_component_emits: 0,
@@ -218,6 +222,7 @@ impl CheckCounts {
         fallow_config::RegressionBaseline {
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
             total_issues: self.total_issues,
+            absent_component_props: self.absent_component_props,
             unused_files: self.unused_files,
             unused_exports: self.unused_exports,
             unused_types: self.unused_types,
@@ -263,6 +268,7 @@ impl CheckCounts {
         push_delta!(unprovided_injects);
         push_delta!(unrendered_components);
         push_delta!(unused_component_props);
+        push_delta!(absent_component_props);
         push_delta!(unused_component_emits);
         push_delta!(unused_component_inputs);
         push_delta!(unused_component_outputs);
@@ -358,6 +364,61 @@ mod tests {
     }
 
     #[test]
+    fn absent_prop_counts_survive_saved_config_baselines_and_report_delta() {
+        let mut results = AnalysisResults::default();
+        let finding = AbsentComponentPropFinding::with_actions(AbsentComponentProp {
+            path: PathBuf::from("src/Card.tsx"),
+            component_name: "Card".into(),
+            framework: "react".into(),
+            prop_name: "flag".into(),
+            line: 3,
+            col: 0,
+            has_default: true,
+            inspected_call_sites: vec![ComponentPropCallSite {
+                path: PathBuf::from("src/main.tsx"),
+                line: 5,
+                col: 0,
+            }],
+            explanation: "Review known callers and API intent.".into(),
+        });
+        results.absent_component_props.push(finding.clone());
+        let counts = CheckCounts::from_results(&results);
+        assert_eq!(counts.absent_component_props, 1);
+        assert_eq!(counts.total_issues, 1);
+        let saved = RegressionBaseline {
+            schema_version: REGRESSION_SCHEMA_VERSION,
+            fallow_version: "3.31.0".into(),
+            timestamp: "2026-10-05T12:00:00Z".into(),
+            git_sha: None,
+            analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
+            check: Some(counts),
+            dupes: None,
+            entry_weight: None,
+            flags: None,
+        };
+        let saved_json = serde_json::to_string(&saved).unwrap();
+        let loaded: RegressionBaseline = serde_json::from_str(&saved_json).unwrap();
+        let loaded_counts = loaded.check.unwrap();
+        assert_eq!(loaded_counts.absent_component_props, 1);
+        let config_json = serde_json::to_string(&loaded_counts.to_config_baseline()).unwrap();
+        let config: fallow_config::RegressionBaseline = serde_json::from_str(&config_json).unwrap();
+        let config_counts = CheckCounts::from_config_baseline(&config);
+        assert_eq!(config_counts.absent_component_props, 1);
+        assert_eq!(config_counts.total_issues, 1);
+        let mut second = finding;
+        second.prop.component_name = "Other".into();
+        results.absent_component_props.push(second);
+        let current = CheckCounts::from_results(&results);
+        assert_eq!(current.total_issues, 2);
+        assert_eq!(
+            config_counts.deltas(&current),
+            vec![("absent_component_props", 1)]
+        );
+        let legacy_counts: CheckCounts = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy_counts.absent_component_props, 0);
+    }
+
+    #[test]
     fn deltas_reports_changes_only() {
         let baseline = CheckCounts {
             total_issues: 10,
@@ -373,6 +434,7 @@ mod tests {
             unprovided_injects: 0,
             unrendered_components: 0,
             unused_component_props: 0,
+            absent_component_props: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -427,6 +489,7 @@ mod tests {
                 unprovided_injects: 0,
                 unrendered_components: 0,
                 unused_component_props: 0,
+                absent_component_props: 0,
                 unused_component_emits: 0,
                 unused_component_inputs: 0,
                 unused_component_outputs: 0,
@@ -477,6 +540,7 @@ mod tests {
             unprovided_injects: 0,
             unrendered_components: 0,
             unused_component_props: 0,
+            absent_component_props: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -532,6 +596,7 @@ mod tests {
             unprovided_injects: 0,
             unrendered_components: 0,
             unused_component_props: 0,
+            absent_component_props: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -574,6 +639,7 @@ mod tests {
             unprovided_injects: 0,
             unrendered_components: 0,
             unused_component_props: 0,
+            absent_component_props: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -614,6 +680,7 @@ mod tests {
             unprovided_injects: 0,
             unrendered_components: 0,
             unused_component_props: 0,
+            absent_component_props: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -648,6 +715,7 @@ mod tests {
             unprovided_injects: 1,
             unrendered_components: 1,
             unused_component_props: 0,
+            absent_component_props: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -691,6 +759,7 @@ mod tests {
             unprovided_injects: 0,
             unrendered_components: 0,
             unused_component_props: 0,
+            absent_component_props: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,

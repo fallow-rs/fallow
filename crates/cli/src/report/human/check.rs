@@ -1733,6 +1733,7 @@ fn build_policy_section(
         && results.unprovided_injects.is_empty()
         && results.unrendered_components.is_empty()
         && results.unused_component_props.is_empty()
+        && results.absent_component_props.is_empty()
         && results.unused_component_emits.is_empty()
         && results.unused_component_inputs.is_empty()
         && results.unused_component_outputs.is_empty()
@@ -1865,6 +1866,45 @@ fn push_component_io_sections(
     root: &Path,
     rules: &RulesConfig,
 ) {
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.absent_component_props,
+        title: "Absent optional component props",
+        level: if results
+            .absent_component_props
+            .iter()
+            .any(|finding| finding.effective_severity == Some(EffectiveSeverity::Error))
+        {
+            crate::report::Level::Error
+        } else {
+            crate::report::Level::Warn
+        },
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |finding: &AbsentComponentPropFinding| finding.prop.path.as_path(),
+        format_detail: &|finding: &AbsentComponentPropFinding| {
+            let prop = &finding.prop;
+            let callers = prop
+                .inspected_call_sites
+                .iter()
+                .map(|site| format!("{}:{}", format_display_path(&site.path, root), site.line))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                ":{} {}.{} (default: {})\n    {}\n    Inspected callers: {}",
+                prop.line,
+                prop.component_name,
+                prop.prop_name,
+                if prop.has_default {
+                    "present"
+                } else {
+                    "absent"
+                },
+                prop.explanation,
+                callers
+            )
+        },
+    });
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_component_props,
@@ -3307,6 +3347,9 @@ fn collect_framework_rules(
     for p in &results.unused_component_props {
         insert_matching_rule(rules, &p.prop.path, root, resolver);
     }
+    for p in &results.absent_component_props {
+        insert_matching_rule(rules, &p.prop.path, root, resolver);
+    }
     for e in &results.unused_component_emits {
         insert_matching_rule(rules, &e.emit.path, root, resolver);
     }
@@ -3805,6 +3848,11 @@ fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResul
     );
     push_summary_part(
         parts,
+        results.absent_component_props.len(),
+        "optional prop review candidates",
+    );
+    push_summary_part(
+        parts,
         results.unused_component_emits.len(),
         "unused component emits",
     );
@@ -4165,6 +4213,11 @@ fn check_summary_framework_categories(
             "Unused component props",
             results.unused_component_props.len(),
             severity_to_level(rules.unused_component_props),
+        ),
+        (
+            "Absent optional component props",
+            results.absent_component_props.len(),
+            severity_to_level(rules.absent_component_props),
         ),
         (
             "Unused component emits",

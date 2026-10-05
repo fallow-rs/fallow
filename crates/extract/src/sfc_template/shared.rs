@@ -513,6 +513,17 @@ fn parse_attrs(inner: &str, start: usize, braced_values: bool) -> Vec<ParsedAttr
             break;
         }
 
+        if braced_values && inner.as_bytes().get(index) == Some(&b'{') {
+            let Some((_, end)) = scan_curly_section(inner, index, 1, 1) else {
+                break;
+            };
+            attrs.push(ParsedAttr {
+                name: inner[index..end].to_string(),
+                value: None,
+            });
+            index = end;
+            continue;
+        }
         let (attr_name, next_index) = scan_attr_name(inner, index);
         index = skip_whitespace(inner, next_index);
 

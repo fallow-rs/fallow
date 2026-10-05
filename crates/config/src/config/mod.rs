@@ -778,6 +778,10 @@ pub struct RegressionConfig {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RegressionBaseline {
+    /// Baseline count of optional component prop review candidates.
+    #[serde(default)]
+    pub absent_component_props: usize,
+
     /// Compatibility identity for the analysis that produced these counts.
     /// Missing values in existing configs are treated as syntactic.
     #[serde(default)]
@@ -853,6 +857,16 @@ pub struct RegressionBaseline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regression_baseline_preserves_absent_component_prop_count() {
+        let baseline: RegressionBaseline =
+            serde_json::from_value(serde_json::json!({"absentComponentProps":7})).unwrap();
+        assert_eq!(
+            serde_json::to_value(baseline).unwrap()["absentComponentProps"],
+            7
+        );
+    }
 
     #[test]
     fn default_config_has_empty_collections() {

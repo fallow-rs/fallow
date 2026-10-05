@@ -689,6 +689,9 @@ fn filter_workspace_source_findings(
         .unused_component_props
         .retain(|finding| any_under(&finding.prop.path));
     results
+        .absent_component_props
+        .retain(|finding| any_under(&finding.prop.path));
+    results
         .unused_component_emits
         .retain(|finding| any_under(&finding.emit.path));
     results
@@ -1002,6 +1005,12 @@ fn apply_component_dead_code_override_rules(
             .unused_component_props
             != Severity::Off
     });
+    results.absent_component_props.retain(|p| {
+        config
+            .resolve_rules_for_path(&p.prop.path)
+            .absent_component_props
+            != Severity::Off
+    });
     results.unused_component_emits.retain(|e| {
         config
             .resolve_rules_for_path(&e.emit.path)
@@ -1164,6 +1173,9 @@ fn clear_base_component_dead_code(results: &mut AnalysisResults, rules: &RulesCo
     }
     if rules.unused_component_props == Severity::Off {
         results.unused_component_props.clear();
+    }
+    if rules.absent_component_props == Severity::Off {
+        results.absent_component_props.clear();
     }
     if rules.unused_component_emits == Severity::Off {
         results.unused_component_emits.clear();

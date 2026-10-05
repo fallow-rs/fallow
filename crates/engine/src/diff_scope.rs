@@ -106,6 +106,9 @@ fn filter_source_findings(
         .unused_component_props
         .retain(|finding| line_in_diff(&finding.prop.path, finding.prop.line));
     results
+        .absent_component_props
+        .retain(|finding| line_in_diff(&finding.prop.path, finding.prop.line));
+    results
         .unused_component_emits
         .retain(|finding| line_in_diff(&finding.emit.path, finding.emit.line));
     results

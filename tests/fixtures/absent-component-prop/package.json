@@ -1,0 +1,1 @@
+{ "name": "absent-component-prop-fixture", "private": true, "main": "src/main.tsx", "dependencies": { "react": "^18.3.0" } }

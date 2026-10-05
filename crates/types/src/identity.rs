@@ -33,19 +33,20 @@ use serde::Serialize;
 
 use crate::discover::StableFileKey;
 use crate::output_dead_code::{
-    BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
-    DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
-    EmptyCatalogGroupFinding, InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirectiveFinding, MixedClientServerBarrelFinding, PackageCycleFinding,
-    PolicyViolationFinding, PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
-    RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-    UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-    UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
-    UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+    AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
+    DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
+    PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+    TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+    UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+    UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+    UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
@@ -476,6 +477,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         route_collisions,
         dynamic_segment_name_conflicts,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -541,6 +543,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(route_collisions);
     visitor.visit(dynamic_segment_name_conflicts);
     visitor.visit(unused_component_props);
+    visitor.visit(absent_component_props);
     visitor.visit(unused_component_emits);
     visitor.visit(unused_component_inputs);
     visitor.visit(unused_component_outputs);
@@ -1005,6 +1008,16 @@ identified!(
 identified!(
     UnusedComponentPropFinding,
     token: |_t| "unused-component-prop",
+    parts: |f, p| vec![
+        p.key(&f.prop.path),
+        f.prop.component_name.clone(),
+        f.prop.prop_name.clone(),
+    ],
+    position: |g| (g.prop.line, g.prop.col, 0),
+);
+identified!(
+    AbsentComponentPropFinding,
+    token: |_t| "absent-component-prop",
     parts: |f, p| vec![
         p.key(&f.prop.path),
         f.prop.component_name.clone(),

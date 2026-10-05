@@ -259,6 +259,7 @@ mod tests {
             unprovided_injects: Severity::Off,
             unrendered_components: Severity::Off,
             unused_component_props: Severity::Off,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Off,
             unused_component_inputs: Severity::Off,
             unused_component_outputs: Severity::Off,
@@ -412,6 +413,7 @@ mod tests {
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
@@ -484,6 +486,7 @@ mod tests {
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
@@ -1079,6 +1082,7 @@ mod tests {
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
@@ -1165,6 +1169,7 @@ mod tests {
             unprovided_injects: Severity::Off,
             unrendered_components: Severity::Off,
             unused_component_props: Severity::Off,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Off,
             unused_component_inputs: Severity::Off,
             unused_component_outputs: Severity::Off,
@@ -3182,6 +3187,7 @@ mod tests {
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
+            absent_component_props: Severity::Off,
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
@@ -3440,6 +3446,7 @@ mod tests {
             ));
         let rules = RulesConfig {
             unused_component_props: Severity::Off,
+            absent_component_props: Severity::Off,
             ..RulesConfig::default()
         };
         let config = config_with_rules(rules);

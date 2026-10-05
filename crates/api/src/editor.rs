@@ -191,10 +191,10 @@ pub mod editor_extract {
 /// adapters.
 pub mod editor_results {
     pub use fallow_types::output_dead_code::{
-        BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-        CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
-        DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
-        EmptyCatalogGroupFinding, InvalidClientExportFinding,
+        AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
+        BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
+        DevDependencyInProductionFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+        DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
         MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
         MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
         PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
@@ -209,18 +209,19 @@ pub mod editor_results {
         UnusedSvelteEventFinding, UnusedTypeFinding,
     };
     pub use fallow_types::results::{
-        ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
-        BoundaryViolation, CircularDependency, CircularDependencyEdge, DependencyLocation,
-        DependencyOverrideMisconfigReason, DependencyOverrideSource, DeprecatedConsumerKind,
-        DeprecatedExportConsumer, DeprecatedExportInUse, DevDependencyInProduction,
-        DuplicateExport, DuplicateLocation, DuplicatePropShape, DuplicatePropShapeMember,
-        DynamicSegmentNameConflict, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
-        FlagConfidence, FlagKind, ImportSite, InvalidClientExport, MisconfiguredDependencyOverride,
-        MisplacedDirective, MixedClientServerBarrel, PackageCycle, PackageCycleEdge,
-        PolicyRuleKind, PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, PropDrillHop,
-        PropDrillingChain, ReExportCycle, ReExportCycleKind, ReactComponentIntel, ReactHookSummary,
-        ReactPropDrill, ReactPropIntel, ReferenceLocation, RenderFanInComponent, RenderFanInMetric,
-        RouteCollision, SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
+        AbsentComponentProp, ActiveSuppression, AnalysisResults, BoundaryCallViolation,
+        BoundaryCoverageViolation, BoundaryViolation, CircularDependency, CircularDependencyEdge,
+        ComponentPropCallSite, DependencyLocation, DependencyOverrideMisconfigReason,
+        DependencyOverrideSource, DeprecatedConsumerKind, DeprecatedExportConsumer,
+        DeprecatedExportInUse, DevDependencyInProduction, DuplicateExport, DuplicateLocation,
+        DuplicatePropShape, DuplicatePropShapeMember, DynamicSegmentNameConflict,
+        EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag, FlagConfidence, FlagKind,
+        ImportSite, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+        MixedClientServerBarrel, PackageCycle, PackageCycleEdge, PolicyRuleKind, PolicyViolation,
+        PolicyViolationSeverity, PrivateTypeLeak, PropDrillHop, PropDrillingChain, ReExportCycle,
+        ReExportCycleKind, ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel,
+        ReferenceLocation, RenderFanInComponent, RenderFanInMetric, RouteCollision,
+        SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
         SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
         SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
         SecurityNetworkContext, SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState,
@@ -1298,6 +1299,17 @@ pub(crate) mod tests {
         assert_eq!(target.unprovided_injects.len(), 1);
         assert_eq!(target.unrendered_components.len(), 1);
         assert_eq!(target.unused_component_props.len(), 1);
+        let candidate = &target.absent_component_props[0];
+        assert_eq!(candidate.prop.component_name, "Widget");
+        assert_eq!(candidate.prop.prop_name, "highlight");
+        assert!(candidate.prop.has_default);
+        assert_eq!(candidate.prop.framework, "vue");
+        assert_eq!(
+            candidate.prop.inspected_call_sites[0].path,
+            PathBuf::from("/main.vue")
+        );
+        assert_eq!(candidate.prop.explanation, "Review optional prop contract");
+
         assert_eq!(target.unused_component_emits.len(), 1);
         assert_eq!(target.unused_component_inputs.len(), 1);
         assert_eq!(target.unused_component_outputs.len(), 1);
@@ -1794,6 +1806,25 @@ pub(crate) mod tests {
                         prop_name: "size".to_string(),
                         line: 27,
                         col: 0,
+                    },
+                ),
+            ],
+            absent_component_props: vec![
+                super::editor_results::AbsentComponentPropFinding::with_actions(
+                    super::editor_results::AbsentComponentProp {
+                        path: "/Widget.vue".into(),
+                        component_name: "Widget".to_string(),
+                        framework: "vue".to_string(),
+                        prop_name: "highlight".to_string(),
+                        line: 27,
+                        col: 0,
+                        has_default: true,
+                        inspected_call_sites: vec![super::editor_results::ComponentPropCallSite {
+                            path: "/main.vue".into(),
+                            line: 1,
+                            col: 0,
+                        }],
+                        explanation: "Review optional prop contract".to_string(),
                     },
                 ),
             ],

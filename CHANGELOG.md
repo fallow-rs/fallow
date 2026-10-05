@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Review optional props omitted by known reachable callers** with
+  `fallow dead-code --absent-component-props`. The rule defaults to off and
+  supports React, Preact, Solid, Qwik, Vue, Svelte, Astro, Angular, Lit and Ember
+  component contracts. Findings include declaration and caller locations,
+  framework and default presence. Ambiguous or opaque consumers abstain.
+  Review defaults and API intent manually; static analysis does not prove
+  runtime unreachability, and the candidate has no automatic fix.
+
 - **`fallow report --from <file> --format markdown` renders a saved run as
   markdown.** Before, `report` refused the markdown format. Now a saved
   `dead-code`, `dupes`, `health` or bare combined envelope renders the same

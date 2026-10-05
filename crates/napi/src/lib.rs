@@ -49,6 +49,7 @@ pub struct DeadCodeOptions {
     pub unprovided_injects: Option<bool>,
     pub unrendered_components: Option<bool>,
     pub unused_component_props: Option<bool>,
+    pub absent_component_props: Option<bool>,
     pub unused_component_emits: Option<bool>,
     pub unused_component_inputs: Option<bool>,
     pub unused_component_outputs: Option<bool>,
@@ -396,6 +397,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 unprovided_injects: value.unprovided_injects.unwrap_or(false),
                 unrendered_components: value.unrendered_components.unwrap_or(false),
                 unused_component_props: value.unused_component_props.unwrap_or(false),
+                absent_component_props: value.absent_component_props.unwrap_or(false),
                 unused_component_emits: value.unused_component_emits.unwrap_or(false),
                 unused_component_inputs: value.unused_component_inputs.unwrap_or(false),
                 unused_component_outputs: value.unused_component_outputs.unwrap_or(false),
@@ -880,6 +882,7 @@ mod tests {
         assert!(filters.unused_enum_members);
         assert!(filters.unused_class_members);
         assert!(filters.unused_store_members);
+        assert!(filters.absent_component_props);
         assert!(filters.unresolved_imports);
         assert!(filters.unlisted_deps);
         assert!(filters.duplicate_exports);
@@ -893,6 +896,20 @@ mod tests {
         assert!(filters.unresolved_catalog_references);
         assert!(filters.unused_dependency_overrides);
         assert!(filters.misconfigured_dependency_overrides);
+    }
+
+    #[test]
+    fn absent_component_prop_opt_in_maps_without_enabling_unused_props() {
+        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+            absent_component_props: Some(true),
+            ..DeadCodeOptions::default()
+        })
+        .expect("options");
+        assert!(options.filters.absent_component_props);
+        assert!(!options.filters.unused_component_props);
+        let defaults =
+            api::DeadCodeOptions::try_from(DeadCodeOptions::default()).expect("defaults");
+        assert!(!defaults.filters.absent_component_props);
     }
 
     #[test]
@@ -927,6 +944,7 @@ mod tests {
             unprovided_injects: Some(true),
             unrendered_components: Some(true),
             unused_component_props: Some(true),
+            absent_component_props: Some(true),
             unused_component_emits: Some(true),
             unused_component_inputs: Some(true),
             unused_component_outputs: Some(true),

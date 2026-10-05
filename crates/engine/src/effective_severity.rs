@@ -31,10 +31,10 @@ use std::path::Path;
 
 use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use fallow_types::output_dead_code::{
-    BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
-    DuplicateExportFinding, DynamicSegmentNameConflictFinding, EffectiveSeverity,
-    EmptyCatalogGroupFinding, GatedFinding, InvalidClientExportFinding,
+    AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
+    DevDependencyInProductionFinding, DuplicateExportFinding, DynamicSegmentNameConflictFinding,
+    EffectiveSeverity, EmptyCatalogGroupFinding, GatedFinding, InvalidClientExportFinding,
     MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
@@ -176,6 +176,7 @@ file_scoped! {
     UnresolvedImportFinding => import.path, unresolved_imports;
     UnrenderedComponentFinding => component.path, unrendered_components;
     UnusedComponentPropFinding => prop.path, unused_component_props;
+    AbsentComponentPropFinding => prop.path, absent_component_props;
     UnusedComponentEmitFinding => emit.path, unused_component_emits;
     UnusedComponentInputFinding => input.path, unused_component_inputs;
     UnusedComponentOutputFinding => output.path, unused_component_outputs;
@@ -478,6 +479,7 @@ fn for_each_gated_finding(
         route_collisions,
         dynamic_segment_name_conflicts,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -544,6 +546,7 @@ fn for_each_gated_finding(
     visit(route_collisions, f);
     visit(dynamic_segment_name_conflicts, f);
     visit(unused_component_props, f);
+    visit(absent_component_props, f);
     visit(unused_component_emits, f);
     visit(unused_component_inputs, f);
     visit(unused_component_outputs, f);
@@ -600,6 +603,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         route_collisions,
         dynamic_segment_name_conflicts,
         unused_component_props,
+        absent_component_props,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -662,6 +666,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(route_collisions)
         || tally.add(dynamic_segment_name_conflicts)
         || tally.add(unused_component_props)
+        || tally.add(absent_component_props)
         || tally.add(unused_component_emits)
         || tally.add(unused_component_inputs)
         || tally.add(unused_component_outputs)

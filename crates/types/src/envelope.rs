@@ -134,6 +134,9 @@ pub struct CheckSummary {
     /// Vue, Svelte, or React props referenced nowhere inside their own component.
     #[serde(default)]
     pub unused_component_props: usize,
+    /// Optional consumed props omitted by known reachable callers, for manual review.
+    #[serde(default)]
+    pub absent_component_props: usize,
     /// Vue `<script setup>` emits emitted nowhere inside their own SFC.
     #[serde(default)]
     pub unused_component_emits: usize,

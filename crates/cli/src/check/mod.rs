@@ -41,6 +41,7 @@ pub struct IssueFilters {
     pub unprovided_injects: bool,
     pub unrendered_components: bool,
     pub unused_component_props: bool,
+    pub absent_component_props: bool,
     pub unused_component_emits: bool,
     pub unused_component_inputs: bool,
     pub unused_component_outputs: bool,
@@ -83,6 +84,7 @@ impl IssueFilters {
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,
             "--unused-component-props" => self.unused_component_props = true,
+            "--absent-component-props" => self.absent_component_props = true,
             "--unused-component-emits" => self.unused_component_emits = true,
             "--unused-component-inputs" => self.unused_component_inputs = true,
             "--unused-component-outputs" => self.unused_component_outputs = true,
@@ -123,6 +125,7 @@ impl IssueFilters {
             || self.unprovided_injects
             || self.unrendered_components
             || self.unused_component_props
+            || self.absent_component_props
             || self.unused_component_emits
             || self.unused_component_inputs
             || self.unused_component_outputs
@@ -161,6 +164,9 @@ impl IssueFilters {
 
     /// Enable off-by-default issue types when explicitly requested as filters.
     pub fn activate_explicit_opt_ins(&self, rules: &mut RulesConfig) {
+        if self.absent_component_props && rules.absent_component_props == Severity::Off {
+            rules.absent_component_props = Severity::Warn;
+        }
         if self.private_type_leaks && rules.private_type_leaks == Severity::Off {
             rules.private_type_leaks = Severity::Warn;
         }
@@ -225,6 +231,9 @@ impl IssueFilters {
         }
         if !self.unrendered_components {
             results.unrendered_components.clear();
+        }
+        if !self.absent_component_props {
+            results.absent_component_props.clear();
         }
         if !self.unused_component_props {
             results.unused_component_props.clear();
@@ -2348,6 +2357,7 @@ mod tests {
             unprovided_injects: false,
             unrendered_components: false,
             unused_component_props: false,
+            absent_component_props: false,
             unused_component_emits: false,
             unused_component_inputs: false,
             unused_component_outputs: false,
@@ -2944,6 +2954,7 @@ mod tests {
             unprovided_injects: true,
             unrendered_components: true,
             unused_component_props: true,
+            absent_component_props: true,
             unused_component_emits: true,
             unused_component_inputs: true,
             unused_component_outputs: true,

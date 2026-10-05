@@ -33,6 +33,8 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   deprecatedExportsInUse?: boolean;
   unusedEnumMembers?: boolean;
   unusedClassMembers?: boolean;
+  /** Review locally read optional props absent from inspected callers. Defaults to off. */
+  absentComponentProps?: boolean;
   unresolvedImports?: boolean;
   unlistedDeps?: boolean;
   duplicateExports?: boolean;
@@ -135,6 +137,7 @@ export interface AnalysisAction {
 }
 
 export interface DeadCodeSummary {
+  absent_component_props: number;
   total_issues: number;
   unused_files: number;
   unused_exports: number;
@@ -305,12 +308,29 @@ export interface StaleSuppressionFinding {
   [key: string]: unknown;
 }
 
+/** An optional prop review candidate. Static caller evidence does not prove runtime unreachability. */
+export interface AbsentComponentPropFinding {
+  path: string;
+  component_name: string;
+  prop_name: string;
+  framework: string;
+  line: number;
+  col: number;
+  has_default: boolean;
+  inspected_call_sites: Array<{ path: string; line: number; col: number }>;
+  explanation: string;
+  finding_id?: string;
+  actions: AnalysisAction[];
+  effective_severity?: 'warn' | 'error';
+}
+
 export interface DeadCodeReport {
   schema_version: number;
   version: string;
   elapsed_ms: number;
   total_issues: number;
   summary: DeadCodeSummary;
+  absent_component_props?: AbsentComponentPropFinding[];
   entry_points?: EntryPointSummary;
   unused_files: UnusedFileFinding[];
   unused_exports: UnusedExportFinding[];

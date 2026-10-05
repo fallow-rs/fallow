@@ -895,7 +895,7 @@ fn wrapper_callee_name<'a>(callee: &'a Expression<'_>) -> Option<&'a str> {
 /// Whether an arrow function's body returns JSX: either an expression-body arrow
 /// whose expression is JSX (`() => <.../>`) or a block-body arrow with a
 /// `return <.../>` statement.
-fn arrow_returns_jsx(arrow: &ArrowFunctionExpression<'_>) -> bool {
+pub fn arrow_returns_jsx(arrow: &ArrowFunctionExpression<'_>) -> bool {
     match BodyRef::arrow(&arrow.body) {
         BodyRef::Concise(expr) => is_jsx_expression(expr),
         BodyRef::Block(body) => body.statements.iter().any(statement_returns_jsx),
@@ -904,7 +904,7 @@ fn arrow_returns_jsx(arrow: &ArrowFunctionExpression<'_>) -> bool {
 
 /// Whether a function body contains a `return <jsx/>` statement at any depth
 /// (covering early returns and conditional branches that return JSX).
-fn function_body_returns_jsx(body: Option<&FunctionBody<'_>>) -> bool {
+pub fn function_body_returns_jsx(body: Option<&FunctionBody<'_>>) -> bool {
     let Some(body) = body else {
         return false;
     };

@@ -554,6 +554,7 @@ pub fn cached_to_module_opts(
         // (both cached); never persisted, so the cache-load path leaves it empty.
         referenced_import_bindings: Vec::new(),
         component_props: cached.component_props.clone(),
+        component_contracts: cached.component_contracts.clone(),
         has_props_attrs_fallthrough: cached.has_props_attrs_fallthrough,
         has_define_expose: cached.has_define_expose,
         has_define_model: cached.has_define_model,
@@ -598,11 +599,20 @@ pub fn module_to_cached(
     fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
     complexity_extracted: bool,
 ) -> CachedModule {
+    let mut cached = module_to_cached_payload(module);
+    cached.mtime_ns = fingerprint.mtime_ns;
+    cached.ctime_ns = fingerprint.ctime_ns;
+    cached.file_size = fingerprint.file_size;
+    cached.complexity_extracted = complexity_extracted;
+    cached
+}
+
+fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
-        mtime_ns: fingerprint.mtime_ns,
-        ctime_ns: fingerprint.ctime_ns,
-        file_size: fingerprint.file_size,
+        mtime_ns: 0,
+        ctime_ns: 0,
+        file_size: 0,
         last_access_secs: current_unix_seconds(),
         exports: module_exports_to_cached(&module.exports),
         imports: module_imports_to_cached(&module.imports),
@@ -614,8 +624,7 @@ pub fn module_to_cached(
         bin_path_references: module.bin_path_references.clone(),
         package_resolve_sites: module.package_resolve_sites.clone(),
         member_accesses: module.member_accesses.to_vec(),
-        semantic_facts: (!module.semantic_facts.is_empty())
-            .then(|| Box::from(&*module.semantic_facts)),
+        semantic_facts: cached_semantic_facts(&module.semantic_facts),
         whole_object_uses: Box::from(&*module.whole_object_uses),
         dynamic_import_patterns: module_dynamic_patterns_to_cached(&module.dynamic_import_patterns),
         parse_error_count: module.parse_error_count,
@@ -631,7 +640,7 @@ pub fn module_to_cached(
         ),
         line_offsets: module.line_offsets.clone(),
         complexity: module.complexity.clone(),
-        complexity_extracted,
+        complexity_extracted: false,
         flag_uses: module.flag_uses.clone(),
         flag_registry_facts: module.flag_registry_facts.clone(),
         class_heritage: module.class_heritage.clone(),
@@ -671,6 +680,7 @@ pub fn module_to_cached(
         has_global_declarations: module.has_global_declarations,
         triple_slash_reference_paths: module.triple_slash_reference_paths.clone(),
         component_props: module.component_props.clone(),
+        component_contracts: module.component_contracts.clone(),
         has_props_attrs_fallthrough: module.has_props_attrs_fallthrough,
         has_define_expose: module.has_define_expose,
         has_define_model: module.has_define_model,
@@ -716,4 +726,10 @@ pub fn module_to_cached_from_parts(
         fallow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
         !module.complexity.is_empty(),
     )
+}
+
+fn cached_semantic_facts(
+    facts: &[fallow_types::extract::SemanticFact],
+) -> Option<Box<[fallow_types::extract::SemanticFact]>> {
+    (!facts.is_empty()).then(|| Box::from(facts))
 }

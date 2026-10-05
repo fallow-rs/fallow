@@ -75,6 +75,7 @@ macro_rules! with_baseline_fields {
             unprovided_injects,
             unrendered_components,
             unused_component_props,
+            absent_component_props,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -582,6 +583,8 @@ pub struct BaselineData {
     /// Unused component props, keyed by `file:prop_name`.
     #[serde(default)]
     unused_component_props: Vec<String>,
+    #[serde(default)]
+    absent_component_props: Vec<String>,
     /// Unused component emits, keyed by `file:emit_name`.
     #[serde(default)]
     unused_component_emits: Vec<String>,
@@ -766,6 +769,7 @@ impl BaselineData {
             unprovided_injects: member_imports.unprovided_injects,
             unrendered_components: member_imports.unrendered_components,
             unused_component_props: member_imports.unused_component_props,
+            absent_component_props: member_imports.absent_component_props,
             unused_component_emits: member_imports.unused_component_emits,
             unused_component_inputs: member_imports.unused_component_inputs,
             unused_component_outputs: member_imports.unused_component_outputs,
@@ -821,6 +825,7 @@ impl BaselineData {
             + self.unprovided_injects.len()
             + self.unrendered_components.len()
             + self.unused_component_props.len()
+            + self.absent_component_props.len()
             + self.unused_component_emits.len()
             + self.unused_component_inputs.len()
             + self.unused_component_outputs.len()
@@ -1038,6 +1043,7 @@ struct BaselineMemberImportKeys {
     unprovided_injects: Vec<String>,
     unrendered_components: Vec<String>,
     unused_component_props: Vec<String>,
+    absent_component_props: Vec<String>,
     unused_component_emits: Vec<String>,
     unused_component_inputs: Vec<String>,
     unused_component_outputs: Vec<String>,
@@ -1061,6 +1067,10 @@ fn baseline_member_import_keys(
         unprovided_injects: inject_baseline_keys(&results.unprovided_injects, root),
         unrendered_components: component_baseline_keys(&results.unrendered_components, root),
         unused_component_props: component_prop_baseline_keys(&results.unused_component_props, root),
+        absent_component_props: absent_component_prop_baseline_keys(
+            &results.absent_component_props,
+            root,
+        ),
         unused_component_emits: component_emit_baseline_keys(&results.unused_component_emits, root),
         unused_component_inputs: component_input_baseline_keys(
             &results.unused_component_inputs,
@@ -1173,6 +1183,23 @@ fn component_baseline_keys(
                 "{}:{}",
                 relative_path(&c.component.path, root),
                 c.component.component_name
+            )
+        })
+        .collect()
+}
+
+fn absent_component_prop_baseline_keys(
+    items: &[crate::results::AbsentComponentPropFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|finding| {
+            format!(
+                "{}:{}:{}",
+                relative_path(&finding.prop.path, root),
+                finding.prop.component_name,
+                finding.prop.prop_name
             )
         })
         .collect()
@@ -1670,6 +1697,12 @@ impl BaselineFilterContext<'_> {
             &self.baseline.unused_component_props,
             self.root,
             component_prop_baseline_keys,
+        );
+        retain_new_by_keys(
+            &mut results.absent_component_props,
+            &self.baseline.absent_component_props,
+            self.root,
+            absent_component_prop_baseline_keys,
         );
         retain_new_by_keys(
             &mut results.unused_component_emits,
@@ -3465,6 +3498,7 @@ mod tests {
             unprovided_injects: vec![],
             unrendered_components: vec![],
             unused_component_props: vec![],
+            absent_component_props: vec![],
             unused_component_emits: vec![],
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
@@ -3536,6 +3570,7 @@ mod tests {
             unprovided_injects: vec![],
             unrendered_components: vec![],
             unused_component_props: vec![],
+            absent_component_props: vec![],
             unused_component_emits: vec![],
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
@@ -3594,6 +3629,7 @@ mod tests {
             unprovided_injects: vec![],
             unrendered_components: vec![],
             unused_component_props: vec![],
+            absent_component_props: vec![],
             unused_component_emits: vec![],
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],

@@ -464,6 +464,33 @@ fn push_markdown_component_sections(
     );
     markdown_section(
         out,
+        &results.absent_component_props,
+        "Absent optional component props",
+        |finding| {
+            let prop = &finding.prop;
+            let callers = prop
+                .inspected_call_sites
+                .iter()
+                .map(|site| markdown_code_span(&format!("{}:{}", rel(&site.path), site.line)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            vec![format!(
+                "- {} in {} ({}; default: {}). {} Inspected callers: {}",
+                markdown_code_span(&format!("{}.{}", prop.component_name, prop.prop_name)),
+                markdown_code_span(&format!("{}:{}", rel(&prop.path), prop.line)),
+                prop.framework,
+                if prop.has_default {
+                    "present"
+                } else {
+                    "absent"
+                },
+                prop.explanation,
+                callers
+            )]
+        },
+    );
+    markdown_section(
+        out,
         &results.unused_component_props,
         "Unused component props",
         |p| format_markdown_unused_component_prop(p, rel),
