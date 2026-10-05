@@ -240,8 +240,10 @@ npx fallow agent install             # apply it
 To register only the [MCP server](https://fallow.tools/docs/integrations/mcp/):
 
 ```json
-{ "mcpServers": { "fallow": { "command": "npx", "args": ["fallow-mcp"] } } }
+{ "mcpServers": { "fallow": { "command": "npx", "args": ["--yes", "--package", "fallow", "fallow-mcp"] } } }
 ```
+
+`--package fallow` selects the npm package that provides the `fallow-mcp` launcher.
 
 Scripts and agents that call the CLI directly add `--format json --quiet`. Each command then writes one typed JSON document to stdout:
 
