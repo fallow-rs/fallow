@@ -12,7 +12,10 @@ use fallow_config::TsconfigOutputResolution;
 use fallow_types::discover::FileId;
 
 use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
-use super::types::{OUTPUT_DIRS, PackageManifestInfo, ResolveContext, ResolveResult, SOURCE_EXTS};
+use super::types::{
+    MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS, PackageManifestInfo, ResolveContext, ResolveResult,
+    SOURCE_EXTS,
+};
 
 /// Return the post-prefix remainder when `specifier` matches the alias `prefix`
 /// at a path boundary, else `None`.
@@ -440,13 +443,45 @@ pub(super) fn try_source_fallback(
     resolved: &Path,
     path_to_id: &FxHashMap<&Path, FileId>,
 ) -> Option<FileId> {
-    let components: Vec<_> = resolved.components().collect();
+    try_source_fallback_with(Path::new(""), resolved, path_to_id, &[OUTPUT_DIRS])
+}
+
+/// Map a package manifest target below `lib/` to `src/`.
+///
+/// Callers run this only after the target is absent from the file set and
+/// after [`try_source_fallback`] found no match. `lib` (from
+/// `MISSING_ONLY_OUTPUT_DIRS`) applies only to the path below `package_root`,
+/// so a package directory named `lib` does not change the result. Generic
+/// relative imports never use this function.
+fn try_missing_only_source_fallback(
+    package_root: &Path,
+    resolved: &Path,
+    path_to_id: &FxHashMap<&Path, FileId>,
+) -> Option<FileId> {
+    let relative = resolved.strip_prefix(package_root).ok()?;
+    try_source_fallback_with(
+        package_root,
+        relative,
+        path_to_id,
+        &[OUTPUT_DIRS, MISSING_ONLY_OUTPUT_DIRS],
+    )
+}
+
+/// Map the last output directory component of `relative` (any name in
+/// `dir_lists`) to `src/`, and look up the result below `base` in `path_to_id`.
+fn try_source_fallback_with(
+    base: &Path,
+    relative: &Path,
+    path_to_id: &FxHashMap<&Path, FileId>,
+    dir_lists: &[&[&str]],
+) -> Option<FileId> {
+    let components: Vec<_> = relative.components().collect();
 
     let is_output_dir = |c: &std::path::Component| -> bool {
         if let std::path::Component::Normal(s) = c
             && let Some(name) = s.to_str()
         {
-            return OUTPUT_DIRS.contains(&name);
+            return dir_lists.iter().any(|dirs| dirs.contains(&name));
         }
         false
     };
@@ -458,7 +493,12 @@ pub(super) fn try_source_fallback(
         first_output_pos -= 1;
     }
 
-    let prefix: PathBuf = components[..first_output_pos].iter().collect();
+    let relative_prefix: PathBuf = components[..first_output_pos].iter().collect();
+    let prefix = if base.as_os_str().is_empty() {
+        relative_prefix
+    } else {
+        base.join(relative_prefix)
+    };
 
     let suffix: PathBuf = components[last_output_pos + 1..].iter().collect();
     let file_name = suffix.file_name()?.to_str()?;
@@ -865,6 +905,10 @@ fn resolve_package_map_target(
     lookup_internal_file_id(ctx, &target_path)
         .or_else(|| try_source_fallback(&target_path, ctx.raw_path_to_id))
         .or_else(|| try_source_fallback(&target_path, ctx.path_to_id))
+        .or_else(|| {
+            try_missing_only_source_fallback(&manifest.root, &target_path, ctx.raw_path_to_id)
+        })
+        .or_else(|| try_missing_only_source_fallback(&manifest.root, &target_path, ctx.path_to_id))
         .or_else(|| source_subpath.and_then(|subpath| try_source_subpath(ctx, manifest, subpath)))
 }
 
@@ -1787,6 +1831,101 @@ mod tests {
                 assert_eq!(
                     resolve_package_map_targets(ctx, manifest, &targets, None),
                     Some(FileId(9))
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn package_map_lib_target_maps_to_source_when_absent() {
+        let root = PathBuf::from("/project/packages/uses-lib");
+        let feature = root.join("src/features/feature.ts");
+        let index = root.join("src/index.ts");
+
+        with_package_map_ctx(
+            root,
+            Some("@repro/uses-lib"),
+            fallow_config::PackageJson::default(),
+            &[(feature, FileId(3)), (index, FileId(4))],
+            |ctx, manifest, _| {
+                assert_eq!(
+                    resolve_package_map_target(ctx, manifest, "./lib/features/feature.mjs", None),
+                    Some(FileId(3))
+                );
+                assert_eq!(
+                    resolve_package_map_target(ctx, manifest, "./lib/index.d.ts", None),
+                    Some(FileId(4))
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn package_map_tracked_lib_target_wins_over_source() {
+        let root = PathBuf::from("/project");
+        let lib_path = root.join("lib/index.js");
+        let src_path = root.join("src/index.ts");
+
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson::default(),
+            &[(lib_path, FileId(1)), (src_path, FileId(2))],
+            |ctx, manifest, _| {
+                assert_eq!(
+                    resolve_package_map_target(ctx, manifest, "./lib/index.js", None),
+                    Some(FileId(1))
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn package_map_lib_mapping_ignores_lib_above_package_root() {
+        let root = PathBuf::from("/project/packages/lib");
+        let outer_src = PathBuf::from("/project/packages/src/index.ts");
+
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson::default(),
+            &[(outer_src, FileId(5))],
+            |ctx, manifest, _| {
+                assert_eq!(
+                    resolve_package_map_target(ctx, manifest, "./index.js", None),
+                    None
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn generic_source_fallback_does_not_map_lib() {
+        let src_path = PathBuf::from("/project/src/x.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(0));
+
+        assert_eq!(
+            try_source_fallback(Path::new("/project/lib/x.js"), &path_to_id),
+            None
+        );
+    }
+
+    #[test]
+    fn package_map_dist_lib_target_prefers_output_dirs_mapping() {
+        let root = PathBuf::from("/project");
+        let nested = root.join("src/lib/x.ts");
+        let flat = root.join("src/x.ts");
+
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson::default(),
+            &[(nested, FileId(6)), (flat, FileId(7))],
+            |ctx, manifest, _| {
+                assert_eq!(
+                    resolve_package_map_target(ctx, manifest, "./dist/lib/x.js", None),
+                    Some(FileId(6))
                 );
             },
         );

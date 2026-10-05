@@ -345,6 +345,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their imports showed as unused files. Thanks to
   [@moltar](https://github.com/moltar) for the report
   ([#3209](https://github.com/fallow-rs/fallow/issues/3209)).
+- **Package entries under a missing `lib/` directory map back to `src/`.**
+  Many libraries build `src/` into `lib/` with tsup or tsdown. Before the
+  build, for example in a fresh clone or in CI, fallow reported the package
+  source as unused files. Now a `package.json` entry such as `./lib/index.mjs`
+  maps to the same-stem source file, such as `src/index.ts`. A workspace
+  import through an `exports` target under `lib/` also resolves to the source
+  file. The rule applies only when the `lib/` target is not on disk. Packages
+  with hand-written source in `lib/` keep their current result. A relative
+  import of a missing `lib/` file stays an unresolved import. Thanks to
+  [@moltar](https://github.com/moltar) for the report
+  ([#3208](https://github.com/fallow-rs/fallow/issues/3208)).
 
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before

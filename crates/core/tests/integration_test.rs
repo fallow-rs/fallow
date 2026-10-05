@@ -588,6 +588,8 @@ mod issue_2849_nuxt_og_image_templates;
 mod issue_2851_nuxt_package_layer_modules;
 #[path = "integration_test/issue_2870_workspace_missing_build_entry.rs"]
 mod issue_2870_workspace_missing_build_entry;
+#[path = "integration_test/issue_3208_lib_output_source.rs"]
+mod issue_3208_lib_output_source;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

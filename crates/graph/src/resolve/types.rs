@@ -739,6 +739,15 @@ mod tests {
 /// source file.
 pub const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "esm", "cjs"];
 
+/// Output directory names that map to `src/` only when the target is absent.
+///
+/// Many TypeScript libraries build `src/` into `lib/`, but older packages keep
+/// hand-written source in `lib/`. Thus `lib` maps to `src/` only when the
+/// `lib/` target is not on disk (for example in a fresh clone before the
+/// build), and only for package manifest targets. A `lib/` file that exists
+/// always wins, and generic relative imports never use this list.
+pub const MISSING_ONLY_OUTPUT_DIRS: &[&str] = &["lib"];
+
 /// Source extensions to try when mapping a built output file back to source.
 pub const SOURCE_EXTS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 

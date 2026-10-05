@@ -1,0 +1,8 @@
+{
+  "name": "@repro/consumer",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@repro/uses-lib": "workspace:*"
+  }
+}

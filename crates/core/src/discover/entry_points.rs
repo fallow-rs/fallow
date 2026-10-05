@@ -4,7 +4,7 @@ use super::walk::SOURCE_EXTENSIONS;
 use fallow_config::{
     EntryPointRole, PackageJson, ResolvedConfig, TsconfigOutputMap, TsconfigOutputResolution,
 };
-use fallow_graph::resolve::OUTPUT_DIRS;
+use fallow_graph::resolve::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -437,8 +437,23 @@ pub fn resolve_entry_path(
 /// Preserves any path prefix between the package root and the output dir,
 /// e.g. `./modules/dist/utils.js` → `base/modules/src/utils.ts`.
 ///
+/// `OUTPUT_DIRS` decide first. A `lib/` entry (`MISSING_ONLY_OUTPUT_DIRS`)
+/// maps only when the entry target is not on disk, so a package with
+/// hand-written source in `lib/` keeps its real entry.
+///
 /// Returns `Some(path)` if a source file is found.
 fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
+    try_output_dir_to_source_path(base, entry, OUTPUT_DIRS).or_else(|| {
+        let resolved = base.join(entry);
+        if is_bare_missing_only_dir(&resolved) || entry_target_exists(&resolved) {
+            return None;
+        }
+        try_output_dir_to_source_path(base, entry, MISSING_ONLY_OUTPUT_DIRS)
+    })
+}
+
+/// Map the last `dirs` component of `entry` to `src/` with the same stem.
+fn try_output_dir_to_source_path(base: &Path, entry: &str, dirs: &[&str]) -> Option<PathBuf> {
     let entry_path = Path::new(entry);
     let components: Vec<_> = entry_path.components().collect();
 
@@ -446,7 +461,7 @@ fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf>
         if let std::path::Component::Normal(s) = c
             && let Some(name) = s.to_str()
         {
-            return OUTPUT_DIRS.contains(&name);
+            return dirs.contains(&name);
         }
         false
     })?;
@@ -469,6 +484,24 @@ fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf>
     }
 
     None
+}
+
+/// Return `true` when `path` ends in a missing-only output directory, such as
+/// `./lib`. Such an entry has no file to map to a same-stem source file.
+fn is_bare_missing_only_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| MISSING_ONLY_OUTPUT_DIRS.contains(&name))
+}
+
+/// Return `true` when the filesystem probe would find `resolved` on disk: the
+/// exact file, an extension variant, or a directory index.
+fn entry_target_exists(resolved: &Path) -> bool {
+    resolved.is_file()
+        || SOURCE_EXTENSIONS
+            .iter()
+            .any(|ext| resolved.with_extension(ext).is_file())
+        || try_directory_index_entry(resolved).is_some()
 }
 
 /// Conventional source index file stems probed when a package.json entry lives
@@ -1931,6 +1964,71 @@ mod tests {
     mod resolve_entry_path_tests {
         use super::*;
 
+        fn resolve_main(root: &Path, entry: &str) -> Option<PathBuf> {
+            let canonical = dunce::canonicalize(root).unwrap();
+            resolve_entry_path(
+                &canonical,
+                entry,
+                &canonical,
+                EntryPointSource::PackageJsonMain,
+            )
+            .map(|entry_point| entry_point.path)
+        }
+
+        #[test]
+        fn hand_written_lib_entry_wins_over_unrelated_source_index() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let root = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::create_dir_all(root.join("lib")).unwrap();
+            std::fs::create_dir_all(root.join("src")).unwrap();
+            std::fs::write(root.join("lib/index.js"), "module.exports = {};").unwrap();
+            std::fs::write(root.join("src/index.ts"), "export {};").unwrap();
+
+            assert_eq!(
+                resolve_main(&root, "./lib/index.js"),
+                Some(root.join("./lib/index.js"))
+            );
+        }
+
+        #[test]
+        fn hand_written_lib_entry_does_not_fall_back_to_source_index() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let root = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::create_dir_all(root.join("lib")).unwrap();
+            std::fs::create_dir_all(root.join("src")).unwrap();
+            std::fs::write(root.join("lib/foo.js"), "module.exports = {};").unwrap();
+            std::fs::write(root.join("src/index.ts"), "export {};").unwrap();
+            std::fs::write(root.join("index.js"), "module.exports = {};").unwrap();
+
+            assert_eq!(
+                resolve_main(&root, "./lib/foo.js"),
+                Some(root.join("./lib/foo.js"))
+            );
+        }
+
+        #[test]
+        fn missing_lib_entry_without_same_stem_source_stays_unresolved() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let root = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::create_dir_all(root.join("src")).unwrap();
+            std::fs::write(root.join("src/index.ts"), "export {};").unwrap();
+
+            assert_eq!(resolve_main(&root, "./lib/foo.js"), None);
+        }
+
+        #[test]
+        fn missing_lib_entry_maps_to_same_stem_source() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let root = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::create_dir_all(root.join("src")).unwrap();
+            std::fs::write(root.join("src/index.ts"), "export {};").unwrap();
+
+            assert_eq!(
+                resolve_main(&root, "./lib/index.mjs"),
+                Some(root.join("src/index.ts"))
+            );
+        }
+
         #[test]
         fn resolves_existing_file() {
             let dir = tempfile::tempdir().expect("create temp dir");
@@ -2299,8 +2397,72 @@ mod tests {
             std::fs::create_dir_all(&src).unwrap();
             std::fs::write(src.join("foo.ts"), "export const f = 1;").unwrap();
 
-            let result = try_legacy_output_to_source_path(dir.path(), "./lib/foo.js");
+            let result = try_legacy_output_to_source_path(dir.path(), "./scripts/foo.js");
             assert!(result.is_none());
+        }
+
+        #[test]
+        fn maps_lib_entry_to_source_only_when_lib_target_is_missing() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("foo.ts"), "export const f = 1;").unwrap();
+
+            assert_eq!(
+                try_legacy_output_to_source_path(dir.path(), "./lib/foo.js"),
+                Some(src.join("foo.ts")),
+                "a missing lib/ build output maps to the same-stem source file"
+            );
+
+            let lib = dir.path().join("lib");
+            std::fs::create_dir_all(&lib).unwrap();
+            std::fs::write(lib.join("foo.js"), "exports.f = 1;").unwrap();
+            assert_eq!(
+                try_legacy_output_to_source_path(dir.path(), "./lib/foo.js"),
+                None,
+                "a lib/ file on disk stays the entry"
+            );
+        }
+
+        #[test]
+        fn lib_entry_without_extension_counts_as_present() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::create_dir_all(dir.path().join("src")).unwrap();
+            std::fs::write(dir.path().join("src/index.ts"), "export {};").unwrap();
+            std::fs::create_dir_all(dir.path().join("lib")).unwrap();
+            std::fs::write(dir.path().join("lib/index.js"), "module.exports = {};").unwrap();
+
+            assert_eq!(
+                try_legacy_output_to_source_path(dir.path(), "./lib/index"),
+                None
+            );
+            assert_eq!(try_legacy_output_to_source_path(dir.path(), "./lib"), None);
+        }
+
+        #[test]
+        fn maps_missing_lib_entry_with_nested_prefix() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let modules_src = dir.path().join("modules/src");
+            std::fs::create_dir_all(&modules_src).unwrap();
+            std::fs::write(modules_src.join("x.ts"), "export const x = 1;").unwrap();
+
+            assert_eq!(
+                try_legacy_output_to_source_path(dir.path(), "./modules/lib/x.mjs"),
+                Some(modules_src.join("x.ts"))
+            );
+        }
+
+        #[test]
+        fn bare_missing_lib_entry_does_not_map_to_source_directory() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::create_dir_all(dir.path().join("src")).unwrap();
+
+            assert_eq!(try_legacy_output_to_source_path(dir.path(), "./lib"), None);
+        }
+
+        #[test]
+        fn lib_is_not_an_index_fallback_output_dir() {
+            assert!(!is_entry_in_output_dir("./lib/foo.js"));
         }
 
         #[test]

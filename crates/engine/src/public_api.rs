@@ -8,7 +8,7 @@ use fallow_config::{
 use fallow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_graph::resolve::OUTPUT_DIRS;
+use fallow_graph::resolve::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
 
 use crate::{
     discover::{EntryPoint, EntryPointSource, SOURCE_EXTENSIONS},
@@ -293,7 +293,22 @@ fn is_package_root_index_entry(entry: &str) -> bool {
         .is_some_and(|name| name == "index" || name.starts_with("index."))
 }
 
+/// Map an output-directory entry to its same-stem source file.
+///
+/// Keep in sync with `try_legacy_output_to_source_path` in
+/// `fallow_core::discover::entry_points`. `OUTPUT_DIRS` decide first. A
+/// `lib/` entry maps only when the entry target is not on disk.
 fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
+    try_output_dir_to_source_path(base, entry, OUTPUT_DIRS).or_else(|| {
+        let resolved = base.join(entry);
+        if is_bare_missing_only_dir(&resolved) || entry_target_exists(&resolved) {
+            return None;
+        }
+        try_output_dir_to_source_path(base, entry, MISSING_ONLY_OUTPUT_DIRS)
+    })
+}
+
+fn try_output_dir_to_source_path(base: &Path, entry: &str, dirs: &[&str]) -> Option<PathBuf> {
     let entry_path = Path::new(entry);
     let components: Vec<_> = entry_path.components().collect();
 
@@ -301,7 +316,7 @@ fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf>
         if let Component::Normal(name) = component
             && let Some(name) = name.to_str()
         {
-            return OUTPUT_DIRS.contains(&name);
+            return dirs.contains(&name);
         }
         false
     })?;
@@ -323,6 +338,21 @@ fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf>
     }
 
     None
+}
+
+fn is_bare_missing_only_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| MISSING_ONLY_OUTPUT_DIRS.contains(&name))
+}
+
+/// Return `true` when the filesystem probe would find `resolved` on disk.
+fn entry_target_exists(resolved: &Path) -> bool {
+    resolved.is_file()
+        || SOURCE_EXTENSIONS
+            .iter()
+            .any(|ext| resolved.with_extension(ext).is_file())
+        || try_directory_index_entry(resolved).is_some()
 }
 
 fn is_entry_in_output_dir(entry: &str) -> bool {
@@ -623,6 +653,41 @@ mod tests {
                 public_entry_paths(&session),
                 vec![root.join("source/index.ts")],
                 "declarationDir should resolve with output present={with_output}"
+            );
+        }
+    }
+
+    #[test]
+    fn lib_public_entry_maps_to_source_only_when_lib_is_missing() {
+        for with_lib in [false, true] {
+            let directory = tempfile::tempdir().expect("temporary project directory");
+            let root = directory.path();
+            std::fs::create_dir_all(root.join("src")).expect("source directory");
+            std::fs::write(
+                root.join("package.json"),
+                r#"{"name":"lib-output-package","exports":{".":"./lib/index.mjs","./package.json":"./package.json"}}"#,
+            )
+            .expect("package manifest");
+            std::fs::write(root.join("src/index.ts"), "export const value = 1;\n")
+                .expect("source entry");
+            if with_lib {
+                std::fs::create_dir_all(root.join("lib")).expect("lib directory");
+                std::fs::write(root.join("lib/index.mjs"), "export const value = 1;\n")
+                    .expect("hand-written lib entry");
+            }
+
+            let session =
+                AnalysisSession::load_with_config(root, None, |_| {}).expect("project loads");
+            let entries = public_entry_paths(&session);
+            assert_eq!(
+                entries.iter().any(|path| path.ends_with("src/index.ts")),
+                !with_lib,
+                "src/index.ts is a public entry only when lib/ is missing (with_lib={with_lib}), entries: {entries:?}"
+            );
+            assert_eq!(
+                entries.iter().any(|path| path.ends_with("lib/index.mjs")),
+                with_lib,
+                "a lib/ file on disk stays the public entry (with_lib={with_lib}), entries: {entries:?}"
             );
         }
     }
