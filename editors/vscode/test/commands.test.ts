@@ -16,6 +16,7 @@ let mockBinaryVersions: Readonly<Record<string, string | null>> = {};
 let mockConfigPathSetting = "";
 let mockResolvedConfigRoots: string[] = [];
 let mockComplexityBreakdownEnabled = false;
+let mockIssueTypes: Readonly<Record<string, boolean>> = {};
 let mockTypeAwareSettings: {
   enabled: boolean;
   projects: readonly string[];
@@ -114,7 +115,7 @@ vi.mock("../src/config.js", () => ({
   getHealthTopFindings: () => 20,
   getComplexityBreakdownEnabled: () => mockComplexityBreakdownEnabled,
   getComplexityDecorationCap: () => 200,
-  getIssueTypes: () => ({}),
+  getIssueTypes: () => mockIssueTypes,
   getChangedSince: () => "",
   getPackageBaselines: () => true,
   getResolvedConfigPath: (workspaceRoot?: string) => {
@@ -161,6 +162,7 @@ import {
 import { AnalysisFailureBackoff } from "../src/analysisBackoff.js";
 import { resetBinarySkewToast } from "../src/binary-skew.js";
 import { resetTypeAwareDegradationNotice } from "../src/typeAwareDegradation.js";
+import type { FallowCheckResult } from "../src/types.js";
 
 const context = {} as unknown as vscode.ExtensionContext;
 const workspaceContext = {
@@ -173,6 +175,7 @@ beforeEach(() => {
   mockAutoDownload = true;
   mockConfigPathSetting = "";
   mockResolvedConfigRoots = [];
+  mockIssueTypes = {};
   mockTypeAwareSettings = { enabled: false, projects: [], require: "best-effort" };
   mockTypeAwareTimeoutSeconds = 0;
 });
@@ -548,6 +551,78 @@ describe("runAnalysis retry backoff", () => {
     mockBinaryVersions = {};
     setWorkspaceRoot(null);
     vi.clearAllMocks();
+  });
+
+  it("filters absent optional prop candidates without changing their review evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-absent-prop-"));
+    const script = join(dir, "fallow-cli.js");
+    const candidate = {
+      path: "src/Button.vue",
+      line: 7,
+      col: 2,
+      component_name: "Button",
+      prop_name: "highlight",
+      framework: "vue",
+      has_default: true,
+      inspected_call_sites: [{ path: "src/App.vue", line: 12, col: 4 }],
+      explanation:
+        "Known reachable callers omit this consumed optional prop. Review the default before changing it.",
+      finding_id: "dc1:absent-component-prop:0123456789abcdef",
+      effective_severity: "warn",
+      actions: [
+        {
+          type: "review-component-prop",
+          auto_fixable: false,
+          description: "Review the component contract",
+        },
+      ],
+    } satisfies NonNullable<FallowCheckResult["absent_component_props"]>[number];
+    const output = JSON.stringify({
+      check: { ...emptyCheck, absent_component_props: [candidate] },
+    });
+
+    try {
+      await writeFile(
+        script,
+        `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(output)});\n`,
+        "utf8",
+      );
+      await chmod(script, 0o755);
+      mockPathBinary = script;
+      setWorkspaceRoot(dir);
+      mockIssueTypes = { "absent-component-props": true };
+
+      const enabled = await runAnalysis(workspaceContext, undefined, {
+        backoff: new AnalysisFailureBackoff(),
+      });
+      expect(enabled.check?.absent_component_props).toEqual([candidate]);
+      expect(enabled.check?.total_issues).toBe(1);
+      expect(enabled.check?.summary.absent_component_props).toBe(1);
+
+      mockIssueTypes = { "absent-component-props": false };
+      const disabled = await runAnalysis(workspaceContext, undefined, {
+        backoff: new AnalysisFailureBackoff(),
+      });
+      expect(disabled.check?.absent_component_props).toEqual([]);
+      expect(disabled.check?.total_issues).toBe(0);
+      expect(disabled.check?.summary.absent_component_props).toBe(0);
+
+      const oldOutput = JSON.stringify({ check: emptyCheck });
+      await writeFile(
+        script,
+        `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(oldOutput)});\n`,
+        "utf8",
+      );
+      mockIssueTypes = { "absent-component-props": true };
+      const older = await runAnalysis(workspaceContext, undefined, {
+        backoff: new AnalysisFailureBackoff(),
+      });
+      expect(older.check?.total_issues).toBe(0);
+      expect(older.check?.summary.absent_component_props).toBe(0);
+    } finally {
+      setWorkspaceRoot(null);
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("runs analysis with the default max-file-size ceiling", async () => {

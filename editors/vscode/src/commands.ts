@@ -512,6 +512,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     unused_server_actions: types["unused-server-actions"] ? result.unused_server_actions : [],
     unused_load_data_keys: types["unused-load-data-keys"] ? result.unused_load_data_keys : [],
     unused_component_props: types["unused-component-props"] ? result.unused_component_props : [],
+    absent_component_props: types["absent-component-props"] ? result.absent_component_props : [],
     unused_component_emits: types["unused-component-emits"] ? result.unused_component_emits : [],
     unused_component_inputs: types["unused-component-inputs"] ? result.unused_component_inputs : [],
     unused_component_outputs: types["unused-component-outputs"]
@@ -578,6 +579,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
       (filtered.unused_optional_dependencies?.length ?? 0),
     unused_enum_members: filtered.unused_enum_members.length,
     unused_class_members: filtered.unused_class_members.length,
+    absent_component_props: filtered.absent_component_props?.length ?? 0,
     unresolved_imports: filtered.unresolved_imports.length,
     unlisted_dependencies: filtered.unlisted_dependencies.length,
     duplicate_exports: filtered.duplicate_exports.length,

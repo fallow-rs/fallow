@@ -34,6 +34,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-server-action": "symbol-method",
   "unused-load-data-keys": "symbol-property",
   "unused-component-prop": "symbol-property",
+  "absent-component-prop": "symbol-property",
   "unused-component-emit": "symbol-event",
   "unused-component-input": "symbol-property",
   "unused-component-output": "symbol-event",
@@ -345,6 +346,22 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               p.line,
               p.col,
               "unused-component-prop",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.absent_component_props) {
+      addCategory(
+        "absent-component-prop",
+        this.result.absent_component_props.map(
+          (p) =>
+            new IssueItem(
+              `${p.component_name}.${p.prop_name} (review)`,
+              p.path,
+              p.line,
+              p.col,
+              "absent-component-prop",
             ),
         ),
       );

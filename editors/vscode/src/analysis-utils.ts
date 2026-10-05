@@ -308,6 +308,7 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     (result.unused_server_actions?.length ?? 0) +
     (result.unused_load_data_keys?.length ?? 0) +
     (result.unused_component_props?.length ?? 0) +
+    (result.absent_component_props?.length ?? 0) +
     (result.unused_component_emits?.length ?? 0) +
     (result.unused_component_inputs?.length ?? 0) +
     (result.unused_component_outputs?.length ?? 0) +
