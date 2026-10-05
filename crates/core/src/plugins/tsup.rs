@@ -8,9 +8,9 @@ use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["tsup"];
 
-const CONFIG_PATTERNS: &[&str] = &["tsup.config.{ts,js,cjs,mjs}"];
+const CONFIG_PATTERNS: &[&str] = &["tsup.config.{ts,mts,cts,js,cjs,mjs,json}"];
 
-const ALWAYS_USED: &[&str] = &["tsup.config.{ts,js,cjs,mjs}"];
+const ALWAYS_USED: &[&str] = &["tsup.config.{ts,mts,cts,js,cjs,mjs,json}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["tsup"];
 
@@ -20,6 +20,7 @@ define_plugin! {
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
+    package_json_config_key: "tsup",
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
@@ -253,5 +254,21 @@ mod tests {
             Path::new("/project"),
         );
         assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_json_entry_object_map() {
+        let source = r#"{ "entry": { "index": "src/index.ts", "cli": "src/cli.ts" } }"#;
+        let result = TsupPlugin.resolve_config(
+            Path::new("/project/tsup.config.json"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/index.ts", "src/cli.ts"]);
+    }
+
+    #[test]
+    fn reads_package_json_config_key() {
+        assert_eq!(TsupPlugin.package_json_config_key(), Some("tsup"));
     }
 }

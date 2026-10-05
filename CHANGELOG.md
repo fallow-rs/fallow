@@ -337,6 +337,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the first run after the upgrade parses all files again. Thanks to
   [@DrJKL](https://github.com/DrJKL) for the report
   ([#3213](https://github.com/fallow-rs/fallow/issues/3213)).
+- **The tsdown and tsup plugins read JSON configs and the `package.json`
+  key.** Fallow now reads `entry` from `tsdown.config.json` and from the
+  `tsdown` key in the root `package.json`. The tsup plugin now reads
+  `tsup.config.json`, `tsup.config.mts`, `tsup.config.cts` and the `tsup` key
+  in the root `package.json`. Before, the entry files of these configs and
+  their imports showed as unused files. Thanks to
+  [@moltar](https://github.com/moltar) for the report
+  ([#3209](https://github.com/fallow-rs/fallow/issues/3209)).
 
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before

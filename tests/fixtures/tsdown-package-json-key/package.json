@@ -1,0 +1,11 @@
+{
+  "name": "tsdown-package-json-key",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "tsdown": "1.0.0"
+  },
+  "tsdown": {
+    "entry": ["src/main.ts", "src/worker.ts"]
+  }
+}

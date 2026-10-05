@@ -1,0 +1,11 @@
+{
+  "name": "tsup-package-json-key",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "tsup": "1.0.0"
+  },
+  "tsup": {
+    "entry": ["src/main.ts", "src/worker.ts"]
+  }
+}

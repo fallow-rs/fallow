@@ -12,14 +12,14 @@ use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["tsdown"];
 
-const CONFIG_PATTERNS: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs}"];
+const CONFIG_PATTERNS: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs,json}"];
 
-const ALWAYS_USED: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs}"];
+const ALWAYS_USED: &[&str] = &["tsdown.config.{ts,mts,cts,js,cjs,mjs,json}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["tsdown"];
 
 /// The config file names that tsdown loads in each workspace package.
-const WORKSPACE_CONFIG_FILE: &str = "tsdown.config.{ts,mts,cts,js,cjs,mjs}";
+const WORKSPACE_CONFIG_FILE: &str = "tsdown.config.{ts,mts,cts,js,cjs,mjs,json}";
 
 /// The `workspace.include` value that tells tsdown to read the package
 /// manager workspaces. It is not a glob.
@@ -31,6 +31,7 @@ define_plugin! {
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
+    package_json_config_key: "tsdown",
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
@@ -331,6 +332,22 @@ mod tests {
         assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
     }
 
+    #[test]
+    fn resolve_config_json_entry_object_map() {
+        let source = r#"{ "entry": { "index": "src/index.ts", "cli": "src/cli.ts" } }"#;
+        let result = TsdownPlugin.resolve_config(
+            Path::new("/project/tsdown.config.json"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["src/index.ts", "src/cli.ts"]);
+    }
+
+    #[test]
+    fn reads_package_json_config_key() {
+        assert_eq!(TsdownPlugin.package_json_config_key(), Some("tsdown"));
+    }
+
     fn workspace_patterns(config_path: &str, source: &str) -> Vec<String> {
         TsdownPlugin
             .resolve_config(Path::new(config_path), source, Path::new("/project"))
@@ -343,8 +360,8 @@ mod tests {
         assert_eq!(
             workspace_patterns("/project/tsdown.config.ts", source),
             vec![
-                "apps/cli/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
-                "packages/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+                "apps/cli/tsdown.config.{ts,mts,cts,js,cjs,mjs,json}",
+                "packages/*/tsdown.config.{ts,mts,cts,js,cjs,mjs,json}",
             ]
         );
     }
@@ -359,7 +376,7 @@ mod tests {
         "#;
         assert_eq!(
             workspace_patterns("/project/tsdown.config.ts", source),
-            vec!["packages/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}"]
+            vec!["packages/*/tsdown.config.{ts,mts,cts,js,cjs,mjs,json}"]
         );
     }
 
@@ -368,7 +385,7 @@ mod tests {
         let source = r#"export default { workspace: "libs/*" };"#;
         assert_eq!(
             workspace_patterns("/project/tools/tsdown.config.ts", source),
-            vec!["tools/libs/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}"]
+            vec!["tools/libs/*/tsdown.config.{ts,mts,cts,js,cjs,mjs,json}"]
         );
     }
 
@@ -386,9 +403,9 @@ mod tests {
         assert_eq!(
             workspace_patterns("/project/tsdown.config.ts", source),
             vec![
-                "apps/cli/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
-                "apps/host/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
-                "vendor/*/tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+                "apps/cli/tsdown.config.{ts,mts,cts,js,cjs,mjs,json}",
+                "apps/host/tsdown.config.{ts,mts,cts,js,cjs,mjs,json}",
+                "vendor/*/tsdown.config.{ts,mts,cts,js,cjs,mjs,json}",
             ]
         );
     }

@@ -54,3 +54,23 @@ fn tsup_config_array_entries_are_entry_points() {
 fn tsdown_config_array_entries_are_entry_points() {
     assert_object_map_values_are_entries("tsdown-config-array");
 }
+
+#[test]
+fn tsup_json_config_entries_are_entry_points() {
+    assert_object_map_values_are_entries("tsup-json-config");
+}
+
+#[test]
+fn tsup_package_json_key_entries_are_entry_points() {
+    assert_object_map_values_are_entries("tsup-package-json-key");
+}
+
+#[test]
+fn tsdown_json_config_entries_are_entry_points() {
+    assert_object_map_values_are_entries("tsdown-json-config");
+}
+
+#[test]
+fn tsdown_package_json_key_entries_are_entry_points() {
+    assert_object_map_values_are_entries("tsdown-package-json-key");
+}
