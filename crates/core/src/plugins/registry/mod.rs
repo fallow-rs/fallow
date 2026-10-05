@@ -336,6 +336,10 @@ impl PluginToolingDependencies {
 pub struct AggregatedPluginResult {
     /// All entry point patterns from active plugins: (rule, plugin_name).
     pub entry_patterns: Vec<(PathRule, String)>,
+    /// Plugins whose config already replaced their static entry patterns.
+    /// A later config of the same plugin adds to the config patterns and does
+    /// not remove them.
+    pub replaced_entry_plugins: FxHashSet<String>,
     /// Coverage role for each plugin contributing entry point patterns.
     pub entry_point_roles: rustc_hash::FxHashMap<String, EntryPointRole>,
     /// All config file patterns from active plugins.
@@ -504,6 +508,8 @@ impl AggregatedPluginResult {
     pub(crate) fn merge_into(&mut self, other: Self) {
         let Self {
             entry_patterns,
+            // Only the config pass of one plugin run reads this field.
+            replaced_entry_plugins: _,
             entry_point_roles,
             config_patterns,
             always_used,

@@ -1407,6 +1407,34 @@ fn process_config_result_replace_entry_patterns_removes_static_defaults() {
 }
 
 #[test]
+fn process_config_result_second_replacing_config_keeps_first_config_patterns() {
+    let mut aggregated = AggregatedPluginResult::default();
+    aggregated
+        .entry_patterns
+        .push((path_rule("**/*.spec.ts"), "playwright".to_string()));
+
+    for pattern in ["apps/one/ui/**/*.spec.ts", "apps/two/checks/**/*.spec.ts"] {
+        let config_result = PluginResult {
+            entry_patterns: vec![path_rule(pattern)],
+            replace_entry_patterns: true,
+            ..Default::default()
+        };
+        process_config_result("playwright", config_result, &mut aggregated, None).unwrap();
+    }
+
+    let patterns: Vec<&str> = aggregated
+        .entry_patterns
+        .iter()
+        .map(|(rule, _)| rule.pattern.as_str())
+        .collect();
+    assert_eq!(
+        patterns,
+        vec!["apps/one/ui/**/*.spec.ts", "apps/two/checks/**/*.spec.ts"],
+        "the static default goes, and the patterns of both configs stay"
+    );
+}
+
+#[test]
 fn process_config_result_replace_used_export_rules_removes_static_defaults() {
     let mut aggregated = AggregatedPluginResult::default();
     aggregated.used_exports.push(plugin_used_export_rule(

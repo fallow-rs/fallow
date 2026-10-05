@@ -159,6 +159,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Playwright entries follow static `testDir` and `testMatch` settings.**
+  Helpers outside the configured test directory can now report unused exports.
+  Project overrides inherit top-level settings, and multiple configs keep
+  each config's test entries. Filename matches are case insensitive, and
+  directory names containing glob characters are treated literally.
+  Regular expressions, extglobs and globs with
+  directory components conservatively keep scripts within `testDir`.
+  Unknown project directories keep conventional test patterns without dropping
+  known projects' entries. The graph cache version increases to invalidate
+  entry classifications from older builds.
+
 - **An orphan module declaration file is now reported as an unused file.**
   Before, fallow made every `.d.ts`, `.d.mts` and `.d.cts` file an entry
   point and never reported one, so a stale declaration file and every module

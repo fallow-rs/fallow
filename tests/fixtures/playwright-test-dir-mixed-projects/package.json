@@ -1,0 +1,8 @@
+{
+  "name": "playwright-test-dir-projects",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

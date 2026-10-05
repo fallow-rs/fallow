@@ -672,7 +672,10 @@ fn merge_plugin_result_fields(
     plugin_result: PluginResult,
     result: &mut AggregatedPluginResult,
 ) {
-    if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
+    if plugin_result.replace_entry_patterns
+        && !plugin_result.entry_patterns.is_empty()
+        && result.replaced_entry_plugins.insert(pname.to_string())
+    {
         result.entry_patterns.retain(|(_, name)| name != pname);
     }
     if plugin_result.replace_used_export_rules && !plugin_result.used_exports.is_empty() {
