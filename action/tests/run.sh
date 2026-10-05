@@ -3715,6 +3715,45 @@ assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-chan
 assert_issuekind_vscode_category_coverage "vscode DIAGNOSTIC_CATEGORIES" \
   "$DIR/../../editors/vscode/src/generated/issue-types.ts"
 
+# --- VS Code drift guard pipefail regression ---
+
+assert_large_vscode_drift_guard() {
+  local work rows output catalog wiring
+  work="$(mktemp -d)"
+  rows="$(fallow_dead_code_source_rows)"
+  catalog="$work/catalog.ts"
+  wiring="$work/editors/vscode/test/deadCodeKindDrift.test.ts"
+  mkdir -p "$work/action/tests" "$(dirname "$wiring")"
+  cp "$DIR/../../editors/vscode/src/generated/issue-types.ts" "$catalog"
+  cp "$DIR/../../editors/vscode/test/deadCodeKindDrift.test.ts" "$wiring"
+  # Matching tokens occur before padding that exceeds platform pipe buffers.
+  awk 'BEGIN { for (i = 0; i < 20000; i++) print "// large-source padding preserves the existing diagnostic catalog and finding wiring" }' > "$work/padding"
+  cat "$work/padding" >> "$catalog"
+  cat "$work/padding" >> "$wiring"
+
+  output="$(GUARD_DIR="$work/action/tests" FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="$rows" \
+    assert_issuekind_vscode_category_coverage "large vscode sources" "$catalog")"
+  assert_contains "$output" "✓ large vscode sources: every dead-code IssueKind appears in DIAGNOSTIC_CATEGORIES" \
+    "vscode drift guard: large catalog and wiring pass under pipefail"
+  assert_not_contains "$output" "✗" "vscode drift guard: large valid sources have no false omissions"
+
+  awk 'index($0, "\"absent-component-prop\"") == 0' "$catalog" > "$work/missing-code.ts"
+  output="$(GUARD_DIR="$work/action/tests" FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="$rows" \
+    assert_issuekind_vscode_category_coverage "large missing code" "$work/missing-code.ts")"
+  assert_contains "$output" 'absent diagnostic code(s): absent-component-prop -> code "absent-component-prop"' \
+    "vscode drift guard: large source still rejects a missing diagnostic code"
+
+  awk 'index($0, "field: \"absent_component_props\"") == 0' "$wiring" > "$work/missing-wiring.ts"
+  mv "$work/missing-wiring.ts" "$wiring"
+  output="$(GUARD_DIR="$work/action/tests" FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="$rows" \
+    assert_issuekind_vscode_category_coverage "large missing wiring" "$catalog")"
+  assert_contains "$output" 'absent result key(s): absent-component-prop -> absent_component_props' \
+    "vscode drift guard: large source still rejects a missing counted result key"
+  rm -rf "$work"
+}
+
+assert_large_vscode_drift_guard
+
 # --- Baseline staleness gate (issue #2673) ---
 
 echo ""

@@ -457,7 +457,7 @@ assert_issuekind_vscode_category_coverage() {
       skipped+=("$id")
       continue
     fi
-    if ! printf '%s' "$wiring_src" | grep -qE "field: \"${key}\""; then
+    if ! grep -qE "field: \"${key}\"" <<< "$wiring_src"; then
       missing_wiring+=("$id -> $key")
     fi
     if [ "$id" = "missing-suppression-reason" ]; then
@@ -468,7 +468,7 @@ assert_issuekind_vscode_category_coverage() {
     # family collapses to boundary-violation); the quotes bound the match so
     # "unused-file" never matches "unused-files".
     code="$(issuekind_diagnostic_code "$id")"
-    if printf '%s' "$ts_src" | grep -qE "\"${code}\""; then
+    if grep -qE "\"${code}\"" <<< "$ts_src"; then
       continue
     fi
     missing+=("$id -> code \"$code\"")
