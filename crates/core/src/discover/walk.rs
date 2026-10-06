@@ -1293,6 +1293,18 @@ fn config_candidate_basename_globs() -> &'static [String] {
                 let basename = pattern.rsplit('/').next().unwrap_or(pattern);
                 set.insert(basename.to_string());
             }
+            // Tooling evidence resolves always-used files, such as `.c8rc.json`,
+            // in workspace directories against the candidate index. A wildcard
+            // basename such as `*` would capture every file, so it stays out.
+            if plugin.tooling_dependencies().is_empty() {
+                continue;
+            }
+            for pattern in plugin.always_used() {
+                let basename = pattern.rsplit('/').next().unwrap_or(pattern);
+                if !basename.starts_with('!') && !basename.contains(['*', '?', '[']) {
+                    set.insert(basename.to_string());
+                }
+            }
         }
         let mut globs: Vec<String> = set.into_iter().collect();
         globs.sort_unstable();

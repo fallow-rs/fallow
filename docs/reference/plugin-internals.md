@@ -27,8 +27,16 @@ always-used patterns match, its config key in package.json, or a script, CI
 workflow or git hook that invokes one of its tooling dependencies or exact
 enablers. `crates/core/src/plugins/registry/tooling_evidence.rs` records the
 config side per plugin, and `crates/core/src/scripts/hooks.rs` adds hook
-commands to the script-used set. Activation is not evidence, because a
-declared package activates the plugin. The unlisted-dependency and
+commands to the script-used set. The root run probes the package root first,
+then the plugin config search roots, so a config file in a workspace package
+credits a tool that only the root manifest declares. The search roots resolve
+against the in-memory candidate index of the discovery walk, so the walk also
+captures the literal always-used file names of a plugin with tooling
+dependencies, such as `.c8rc.json`. The filesystem probe stays only for a
+directory that the walk does not enter, such as `.husky`, and only when that
+directory exists. Production mode skips the search roots, because it turns the
+unused devDependency check off. Activation is not evidence, because a declared
+package activates the plugin. The unlisted-dependency and
 `dev-dependencies-in-production` checks still read every declared tooling
 dependency, and so do production dependencies.
 

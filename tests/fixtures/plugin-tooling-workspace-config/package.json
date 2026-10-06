@@ -1,0 +1,12 @@
+{
+  "name": "plugin-tooling-workspace-config",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "c8": "^9.0.0",
+    "karma": "^6.4.0",
+    "nyc": "^15.0.0",
+    "prettier": "^3.0.0"
+  }
+}

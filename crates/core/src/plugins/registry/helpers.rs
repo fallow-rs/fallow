@@ -343,7 +343,16 @@ impl ConfigCandidateIndex {
         })
     }
 
-    fn glob_matches_in_dir(&self, dir: &Path, matcher: &globset::GlobMatcher) -> Vec<PathBuf> {
+    /// The file names that the discovery walk collected in the directory `dir`.
+    pub(super) fn names_in_dir(&self, dir: &Path) -> Option<&FxHashSet<OsString>> {
+        self.dirs.get(dir)
+    }
+
+    pub(super) fn glob_matches_in_dir(
+        &self,
+        dir: &Path,
+        matcher: &globset::GlobMatcher,
+    ) -> Vec<PathBuf> {
         self.dirs.get(dir).map_or_else(Vec::new, |names| {
             names
                 .iter()
@@ -447,7 +456,7 @@ fn pattern_has_glob(pattern: &str) -> bool {
 /// pattern excludes, such as `build`. The in-memory candidate index cannot
 /// contain files under them, so the filesystem probe is required to keep those
 /// configs (e.g. `.config/prisma.ts`, `build/webpack.prod.js`) discoverable.
-fn pattern_needs_filesystem(pattern: &str) -> bool {
+pub(super) fn pattern_needs_filesystem(pattern: &str) -> bool {
     let mut components = pattern.split('/').peekable();
     let mut needs_fs = false;
     while let Some(component) = components.next() {

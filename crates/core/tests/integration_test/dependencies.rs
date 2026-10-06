@@ -1808,3 +1808,28 @@ fn script_binary_credits_installing_package_without_node_modules() {
         "each tool that a script runs must be credited through its binary name"
     );
 }
+
+/// A tool that the root manifest declares is credited when its config file is
+/// only in a workspace package that does not declare the tool. A root-hoisted
+/// devDependency with a config file per package is a usual monorepo layout.
+#[test]
+fn plugin_tooling_root_dev_dependency_credited_by_workspace_config() {
+    let root = fixture_path("plugin-tooling-workspace-config");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    // c8, karma and prettier have a config file in `packages/app`. nyc has no
+    // config file and no reference anywhere.
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["nyc"],
+        "a config file in a workspace package should credit the root tooling devDependency"
+    );
+}

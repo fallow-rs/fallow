@@ -245,6 +245,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `remove-dependency` action stays auto-fixable, because the workspace
   declarations keep the package installed.
 
+- **A tool config file in a workspace package credits the root
+  devDependency of that tool.** Before, a root manifest that declared a tool
+  such as `karma`, `c8` or `prettier` reported it as an unused
+  devDependency when its only config file was in a workspace package that
+  did not declare the tool. Fallow looked for the config file at the
+  project root only. Now fallow also looks in the directories where it
+  finds plugin config files, so `packages/app/karma.conf.js` credits a
+  root `karma` devDependency. `--trace-dependency` shows that file in
+  `tooling_credit`.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

@@ -697,6 +697,15 @@ impl PluginRegistry {
                 external_plugins: &self.external_plugins,
                 all_deps: &all_deps,
                 roots: &[root],
+                // Production mode turns the unused devDependency check off, so a
+                // workspace config file credits nothing there and the probe of
+                // every search root is pure cost.
+                extra_roots: if production_mode {
+                    &[]
+                } else {
+                    config_search_roots
+                },
+                candidate_index,
                 discovered_files,
             },
             &mut result,
@@ -804,6 +813,8 @@ impl PluginRegistry {
                 external_plugins: &self.external_plugins,
                 all_deps: &all_deps,
                 roots: evidence_roots,
+                extra_roots: &[],
+                candidate_index: input.candidate_index,
                 discovered_files: &workspace_files,
             },
             &mut result,
