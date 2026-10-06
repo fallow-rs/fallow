@@ -117,6 +117,7 @@ mod tests {
         std::fs::write(path, "export {};\n").expect("file");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn missing_lib_entry_maps_to_source() {
         let dir = tempfile::tempdir().expect("temporary directory");
@@ -128,6 +129,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn discovered_lib_entry_stays_the_entry() {
         let dir = tempfile::tempdir().expect("temporary directory");
@@ -144,6 +146,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn undiscovered_lib_entry_on_disk_maps_to_source() {
         let dir = tempfile::tempdir().expect("temporary directory");
@@ -156,6 +159,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn discovered_check_runs_only_for_lib_entry_with_source() {
         let dir = tempfile::tempdir().expect("temporary directory");
@@ -186,6 +190,7 @@ mod tests {
         assert_eq!(calls.get(), 1);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn bare_lib_entry_does_not_map() {
         let dir = tempfile::tempdir().expect("temporary directory");
@@ -197,6 +202,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn output_dirs_map_without_the_discovered_check() {
         let dir = tempfile::tempdir().expect("temporary directory");
