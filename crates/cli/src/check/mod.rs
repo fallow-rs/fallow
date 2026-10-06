@@ -778,12 +778,10 @@ fn parse_type_aware_require(
 fn handle_trace_side_effects(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    trace_graph: Option<&fallow_engine::module_graph::RetainedModuleGraph>,
-    trace_timings: Option<&fallow_types::trace::PipelineTimings>,
-    script_used_packages: &rustc_hash::FxHashSet<String>,
-    trace_provenance: &fallow_engine::trace::TraceProvenance,
+    data: &CheckAnalysisData,
 ) -> Result<(), ExitCode> {
-    let trace_exit = trace_graph.and_then(|graph| {
+    let trace_timings = data.trace_timings.as_ref();
+    let trace_exit = data.trace_graph.as_ref().and_then(|graph| {
         crate::telemetry::note_graph_structure(graph);
         output::handle_type_aware_trace_output(
             graph,
@@ -800,8 +798,10 @@ fn handle_trace_side_effects(
                 config.output,
                 opts.json_style,
                 &output::TraceFacts {
-                    script_used_packages,
-                    provenance: trace_provenance,
+                    script_used_packages: &data.script_used_packages,
+                    provenance: &data.trace_provenance,
+                    workspaces: &data.workspaces,
+                    results: &data.results,
                 },
             )
         })
@@ -1142,14 +1142,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         process_clock::time(ProcessSpan::Analysis, || run_check_analysis(opts, &config))?;
     let _post_analysis = process_clock::start(ProcessSpan::PostAnalysis);
 
-    if let Err(code) = handle_trace_side_effects(
-        opts,
-        &config,
-        data.trace_graph.as_ref(),
-        data.trace_timings.as_ref(),
-        &data.script_used_packages,
-        &data.trace_provenance,
-    ) {
+    if let Err(code) = handle_trace_side_effects(opts, &config, &data) {
         // A focused trace / closure view exits here without building the full
         // CheckResult (where the normal path records find-state below). The full
         // analysis still ran, so record its find-state for telemetry on the

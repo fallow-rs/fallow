@@ -1,0 +1,5 @@
+{
+  "name": "optional-peer-in-workspace-install",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

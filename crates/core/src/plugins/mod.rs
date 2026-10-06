@@ -397,22 +397,58 @@ pub fn push_tooling_trace_credits(
 /// Record why the unused devDependency check credits each catalogue entry in
 /// `devDependencies` that the trace would otherwise call unused: a library
 /// entry by name, a command-line tool by its own config file or its
-/// package.json key.
+/// package.json key, and any entry that the same manifest lists in
+/// `peerDependencies`.
+///
+/// The check reads each declaring manifest on its own, so a credit here comes
+/// from a manifest that declares the name. A config in a sibling workspace
+/// gives no credit.
 fn push_catalogue_trace_credits(
     provenance: &mut fallow_types::trace::TraceProvenance,
     root: &Path,
     workspaces: &[fallow_config::WorkspaceInfo],
     plugin_result: &AggregatedPluginResult,
 ) {
-    let mut package_roots: Vec<&Path> = vec![root];
-    package_roots.extend(
-        workspaces
+    let manifests = read_trace_manifests(root, workspaces);
+    let mut names: Vec<&String> = plugin_result.dev_dependency_names.iter().collect();
+    names.sort_unstable();
+    for name in names {
+        let declaring: Vec<&(PathBuf, serde_json::Value)> = manifests
             .iter()
-            .map(|ws| ws.root.as_path())
-            .filter(|ws_root| *ws_root != root),
-    );
-    let manifests: Vec<(PathBuf, serde_json::Value)> = package_roots
-        .iter()
+            .filter(|(_, manifest)| manifest_lists(manifest, "devDependencies", name))
+            .collect();
+        if let Some(credit) = catalogue_credit(name, root, &declaring) {
+            provenance.push_tooling_credit(name.clone(), credit);
+        }
+        if let Some((path, _)) = declaring
+            .iter()
+            .find(|(_, manifest)| manifest_lists(manifest, "peerDependencies", name))
+        {
+            provenance.push_tooling_credit(
+                name.clone(),
+                fallow_types::trace::ToolingCredit {
+                    reason: "own-peer".to_owned(),
+                    plugin: None,
+                    config: Some(path.strip_prefix(root).unwrap_or(path).to_path_buf()),
+                    reference: None,
+                },
+            );
+        }
+    }
+}
+
+/// The root manifest and each workspace manifest, parsed, root first.
+fn read_trace_manifests(
+    root: &Path,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Vec<(PathBuf, serde_json::Value)> {
+    std::iter::once(root)
+        .chain(
+            workspaces
+                .iter()
+                .map(|ws| ws.root.as_path())
+                .filter(|ws_root| *ws_root != root),
+        )
         .filter_map(|package_root| {
             let path = package_root.join("package.json");
             let content = std::fs::read_to_string(&path).ok()?;
@@ -420,41 +456,43 @@ fn push_catalogue_trace_credits(
                 .ok()
                 .map(|value| (path, value))
         })
-        .collect();
-    let mut names: Vec<&String> = plugin_result.dev_dependency_names.iter().collect();
-    names.sort_unstable();
-    for name in names {
-        if is_ambient_types_package(name) || types_package_target(name).is_some() {
-            continue;
-        }
-        let credit = match cli_tooling_config_patterns(name) {
-            None if is_known_tooling_dependency(name) => fallow_types::trace::ToolingCredit {
-                reason: "known-tooling".to_owned(),
-                plugin: None,
-                config: None,
-                reference: None,
-            },
-            None => continue,
-            Some(patterns) => {
-                let manifest_key = manifests
-                    .iter()
-                    .find(|(_, manifest)| manifest.get(name.as_str()).is_some())
-                    .map(|(path, _)| path.clone());
-                let Some(config) = manifest_key.or_else(|| {
-                    registry::find_config_file(patterns.iter().map(String::as_str), &package_roots)
-                }) else {
-                    continue;
-                };
-                fallow_types::trace::ToolingCredit {
-                    reason: "known-tooling-config".to_owned(),
-                    plugin: None,
-                    config: Some(config.strip_prefix(root).unwrap_or(&config).to_path_buf()),
-                    reference: None,
-                }
-            }
-        };
-        provenance.push_tooling_credit(name.clone(), credit);
+        .collect()
+}
+
+fn manifest_lists(manifest: &serde_json::Value, section: &str, name: &str) -> bool {
+    manifest
+        .get(section)
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|deps| deps.contains_key(name))
+}
+
+/// The catalogue credit of `name` from the first declaring manifest that the
+/// unused devDependency check credits.
+fn catalogue_credit(
+    name: &str,
+    root: &Path,
+    declaring: &[&(PathBuf, serde_json::Value)],
+) -> Option<fallow_types::trace::ToolingCredit> {
+    if is_ambient_types_package(name) || types_package_target(name).is_some() {
+        return None;
     }
+    let Some(patterns) = cli_tooling_config_patterns(name) else {
+        return is_known_tooling_dependency(name).then(|| fallow_types::trace::ToolingCredit {
+            reason: "known-tooling".to_owned(),
+            plugin: None,
+            config: None,
+            reference: None,
+        });
+    };
+    let config = declaring.iter().find_map(|(path, manifest)| {
+        crate::analyze::cli_tool_own_config(name, patterns, root, path, Some(manifest))
+    })?;
+    Some(fallow_types::trace::ToolingCredit {
+        reason: "known-tooling-config".to_owned(),
+        plugin: None,
+        config: Some(config.strip_prefix(root).unwrap_or(&config).to_path_buf()),
+        reference: None,
+    })
 }
 
 /// Record why the unused devDependency check credits each type package in

@@ -57,3 +57,44 @@ fn the_trace_names_the_used_package_that_lists_the_peer() {
     assert_eq!(uncredited["is_used"], false, "{uncredited:#}");
     assert!(uncredited.get("peer_of").is_none(), "{uncredited:#}");
 }
+
+/// A workspace that installs the host in its own `node_modules` credits the
+/// optional peer in its manifest. The trace runs the same closure per
+/// workspace and names the host, and it names the manifest that the report
+/// still flags.
+#[test]
+fn the_trace_follows_a_host_installed_in_a_workspace() {
+    let fixture = "optional-peer-in-workspace-install";
+    let output = parse_json(&run_fallow(
+        "dead-code",
+        fixture,
+        &["--format", "json", "--quiet", "--no-cache"],
+    ));
+    let unused: Vec<&str> = output["unused_dependencies"]
+        .as_array()
+        .expect("unused_dependencies array")
+        .iter()
+        .map(|dep| dep["path"].as_str().expect("path"))
+        .collect();
+    assert_eq!(unused, vec!["packages/b/package.json"], "{output:#}");
+
+    let traced = parse_json(&run_fallow(
+        "dead-code",
+        fixture,
+        &[
+            "--trace-dependency",
+            "opt-peer",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    assert_eq!(traced["is_used"], true, "{traced:#}");
+    assert_eq!(traced["peer_of"], json!(["host"]), "{traced:#}");
+    assert_eq!(
+        traced["unused_in"],
+        json!(["packages/b/package.json"]),
+        "{traced:#}"
+    );
+}

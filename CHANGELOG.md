@@ -220,6 +220,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lost their tooling credit. Now a binary maps to every package that can
   provide it, and an installed package selects one of them.
 
+- **`--trace-dependency` now gives the same credits as the dependency
+  report.** The trace now reads each manifest that declares the
+  dependency, as the report does. A config file or a `package.json` key in
+  a sibling workspace no longer credits a command-line tool that another
+  manifest declares. A devDependency that the same manifest lists in
+  `peerDependencies` now traces as used, with the `own-peer` credit. The
+  peer credit now runs one closure for each workspace, so a host that only
+  a workspace installs credits its optional peer in the trace too. A new
+  `unused_in` field, and a `Reported unused in` block in the human output,
+  name each manifest that the report flags. An import credits only the
+  nearest manifest that installs the package, so a used name can still be
+  unused in the root manifest or in another workspace.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

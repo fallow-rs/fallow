@@ -1,0 +1,7 @@
+{
+  "name": "a",
+  "main": "index.js",
+  "devDependencies": {
+    "jscpd": "^4.0.0"
+  }
+}

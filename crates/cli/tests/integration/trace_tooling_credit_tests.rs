@@ -14,6 +14,9 @@ use serde_json::{Value, json};
 const FIXTURE: &str = "plugin-tooling-credit";
 const TYPES_FIXTURE: &str = "types-package-credit";
 const CATALOGUE_FIXTURE: &str = "catalogue-cli-credit";
+const CATALOGUE_WORKSPACES_FIXTURE: &str = "catalogue-cli-credit-workspaces";
+const OWN_PEER_FIXTURE: &str = "dev-dependency-listed-as-own-peer";
+const NEAREST_MANIFEST_FIXTURE: &str = "root-dependency-nearest-manifest-credit";
 
 fn trace(package: &str) -> Value {
     trace_in(FIXTURE, package)
@@ -132,6 +135,92 @@ fn catalogue_credits_name_their_evidence() {
     assert!(tsx.get("tooling_credit").is_none(), "{tsx:#}");
 }
 
+/// A config file or a package.json key in a sibling workspace does not
+/// configure a tool that another manifest declares, so the trace gives no
+/// credit, as the report does.
+#[test]
+fn a_sibling_workspace_config_gives_no_catalogue_credit() {
+    let madge = trace_in(CATALOGUE_WORKSPACES_FIXTURE, "madge");
+    assert_eq!(madge["is_used"], false, "{madge:#}");
+    assert!(madge.get("tooling_credit").is_none(), "{madge:#}");
+    assert_eq!(madge["unused_in"], json!(["package.json"]), "{madge:#}");
+
+    let jscpd = trace_in(CATALOGUE_WORKSPACES_FIXTURE, "jscpd");
+    assert_eq!(jscpd["is_used"], false, "{jscpd:#}");
+    assert!(jscpd.get("tooling_credit").is_none(), "{jscpd:#}");
+    assert_eq!(
+        jscpd["unused_in"],
+        json!(["packages/a/package.json"]),
+        "{jscpd:#}"
+    );
+}
+
+/// A devDependency that the same manifest lists in `peerDependencies` is the
+/// package's own peer. The trace credits it and names the manifest.
+#[test]
+fn an_own_peer_credit_names_the_manifest() {
+    let react = trace_in(OWN_PEER_FIXTURE, "react");
+    assert_eq!(react["is_used"], true, "{react:#}");
+    assert_eq!(
+        react["tooling_credit"],
+        json!({ "reason": "own-peer", "config": "package.json" }),
+        "{react:#}"
+    );
+
+    let react_dom = trace_in(OWN_PEER_FIXTURE, "react-dom");
+    assert_eq!(react_dom["is_used"], true, "{react_dom:#}");
+    assert_eq!(
+        react_dom["tooling_credit"],
+        json!({ "reason": "own-peer", "config": "packages/lib/package.json" }),
+        "{react_dom:#}"
+    );
+
+    let is_odd = trace_in(OWN_PEER_FIXTURE, "is-odd");
+    assert_eq!(is_odd["is_used"], false, "{is_odd:#}");
+    assert_eq!(
+        is_odd["unused_in"],
+        json!(["packages/lib/package.json"]),
+        "{is_odd:#}"
+    );
+}
+
+/// An import credits the nearest manifest that installs the package. The
+/// trace names each manifest that the report flags, also when a file imports
+/// the package.
+#[test]
+fn the_trace_names_each_manifest_the_report_flags() {
+    let shared = trace_in(NEAREST_MANIFEST_FIXTURE, "shared-runtime");
+    assert_eq!(shared["is_used"], true, "{shared:#}");
+    assert_eq!(
+        shared["unused_in"],
+        json!(["package.json", "packages/tool/package.json"]),
+        "{shared:#}"
+    );
+
+    let fallback = trace_in(NEAREST_MANIFEST_FIXTURE, "fallback-lib");
+    assert_eq!(fallback["is_used"], true, "{fallback:#}");
+    assert!(fallback.get("unused_in").is_none(), "{fallback:#}");
+}
+
+#[test]
+fn the_human_trace_names_each_manifest_the_report_flags() {
+    let output = run_fallow(
+        "dead-code",
+        NEAREST_MANIFEST_FIXTURE,
+        &["--trace-dependency", "tool-lib", "--quiet", "--no-cache"],
+    );
+    assert!(
+        output.stderr.contains("Reported unused in:"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("-> package.json"),
+        "{}",
+        output.stderr
+    );
+}
+
 fn assert_trace_agrees_with_report(fixture: &str) {
     let root = fixture_path(fixture);
     let report = parse_json(&run_fallow_in_root(
@@ -170,4 +259,5 @@ fn the_trace_agrees_with_the_report_for_every_dev_dependency() {
     assert_trace_agrees_with_report(FIXTURE);
     assert_trace_agrees_with_report(TYPES_FIXTURE);
     assert_trace_agrees_with_report(CATALOGUE_FIXTURE);
+    assert_trace_agrees_with_report(OWN_PEER_FIXTURE);
 }

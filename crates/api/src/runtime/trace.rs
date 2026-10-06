@@ -16,6 +16,9 @@ struct TraceArtifacts {
     graph: fallow_engine::module_graph::RetainedModuleGraph,
     script_used_packages: FxHashSet<String>,
     trace_provenance: fallow_engine::trace::TraceProvenance,
+    /// The findings of the analysis, which name the manifests that the
+    /// unused-dependency check flags.
+    results: fallow_types::results::AnalysisResults,
 }
 
 /// Trace why an export is considered used or unused.
@@ -232,9 +235,15 @@ pub fn run_trace_dependency(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
+        let workspace_roots: Vec<&std::path::Path> = session
+            .workspaces()
+            .iter()
+            .map(|ws| ws.root.as_path())
+            .collect();
         let mut output = fallow_engine::trace::trace_dependency(
             &artifacts.graph,
             session.root(),
+            &workspace_roots,
             &options.package_name,
             &artifacts.script_used_packages,
         );
@@ -246,6 +255,7 @@ pub fn run_trace_dependency(
                 .trace_provenance
                 .tooling_credit(&options.package_name),
         );
+        output.apply_unused_declarations(&artifacts.results, session.root());
         Ok(TraceDependencyProgrammaticOutput { output })
     })
 }
@@ -336,8 +346,13 @@ pub fn benchmark_trace_graph_family_compact_json(
         output: file,
     })?;
 
-    let dependency =
-        fallow_engine::trace::trace_dependency(graph, root, "trace-package", script_used_packages);
+    let dependency = fallow_engine::trace::trace_dependency(
+        graph,
+        root,
+        &[],
+        "trace-package",
+        script_used_packages,
+    );
     let dependency_import_count = dependency.import_count;
     let dependency_json =
         crate::serialize_trace_dependency_programmatic_json(TraceDependencyProgrammaticOutput {
@@ -526,6 +541,7 @@ fn trace_artifacts(session: &AnalysisSession) -> ProgrammaticResult<TraceArtifac
         graph,
         script_used_packages: artifacts.analysis.script_used_packages,
         trace_provenance: artifacts.analysis.trace_provenance,
+        results: artifacts.analysis.results,
     })
 }
 

@@ -24390,6 +24390,13 @@
             }
           ],
           "description": "Why the unused devDependency check credits the dependency as tooling\nwhen no file imports it and no script, CI workflow or git hook runs it.\nWhen present, `is_used` is `true`. Absent otherwise."
+        },
+        "unused_in": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The manifests that the unused-dependency check flags for this name,\nrelative to the project root and sorted. The check reads each\ndeclaring manifest on its own. An import credits the nearest manifest\nthat installs the package, so a name that one workspace uses can still\nbe unused in the root manifest or in another workspace. Absent when no\nmanifest is flagged."
         }
       },
       "required": [
@@ -29577,7 +29584,7 @@
       "properties": {
         "reason": {
           "type": "string",
-          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, `types-config` when a config\nfile, such as a tsconfig `types` entry, names the type package,\n`known-tooling` for a library from the tooling catalogue, and\n`known-tooling-config` when a command-line tool from the catalogue has\nits own config file. The set is open."
+          "description": "The evidence: `plugin-config` when the plugin that declares the\ndependency found its own config file, `plugin-reference` when a\npackage.json script, a CI workflow or a git hook runs one of that\nplugin's packages, `ambient-types` for a type package that declares\nglobals, `types-target` when the project declares or imports the\npackage that a `@types/` package types, `types-config` when a config\nfile, such as a tsconfig `types` entry, names the type package,\n`known-tooling` for a library from the tooling catalogue,\n`known-tooling-config` when a command-line tool from the catalogue has\nits own config file, and `own-peer` when the same manifest lists the\ndevDependency in `peerDependencies`. The set is open."
         },
         "plugin": {
           "type": [
@@ -29591,7 +29598,7 @@
             "string",
             "null"
           ],
-          "description": "The config file found, relative to the project root, for\n`plugin-config` and `known-tooling-config`. A `package.json` path when\nthe config is a package.json key."
+          "description": "The config file found, relative to the project root, for\n`plugin-config` and `known-tooling-config`. A `package.json` path when\nthe config is a package.json key. For `own-peer`, the manifest that\nlists the dependency."
         },
         "reference": {
           "type": [

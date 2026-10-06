@@ -1,6 +1,6 @@
 //! Shared trace output contracts for analysis and integration surfaces.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -266,16 +266,18 @@ pub struct ToolingCredit {
     /// globals, `types-target` when the project declares or imports the
     /// package that a `@types/` package types, `types-config` when a config
     /// file, such as a tsconfig `types` entry, names the type package,
-    /// `known-tooling` for a library from the tooling catalogue, and
+    /// `known-tooling` for a library from the tooling catalogue,
     /// `known-tooling-config` when a command-line tool from the catalogue has
-    /// its own config file. The set is open.
+    /// its own config file, and `own-peer` when the same manifest lists the
+    /// devDependency in `peerDependencies`. The set is open.
     pub reason: String,
     /// The plugin that declares the dependency as tooling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
     /// The config file found, relative to the project root, for
     /// `plugin-config` and `known-tooling-config`. A `package.json` path when
-    /// the config is a package.json key.
+    /// the config is a package.json key. For `own-peer`, the manifest that
+    /// lists the dependency.
     #[serde(
         serialize_with = "serde_path::serialize_option",
         default,
@@ -378,9 +380,56 @@ pub struct DependencyTrace {
     /// When present, `is_used` is `true`. Absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tooling_credit: Option<ToolingCredit>,
+    /// The manifests that the unused-dependency check flags for this name,
+    /// relative to the project root and sorted. The check reads each
+    /// declaring manifest on its own. An import credits the nearest manifest
+    /// that installs the package, so a name that one workspace uses can still
+    /// be unused in the root manifest or in another workspace. Absent when no
+    /// manifest is flagged.
+    #[serde(
+        default,
+        serialize_with = "serde_path::serialize_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub unused_in: Vec<PathBuf>,
 }
 
 impl DependencyTrace {
+    /// Record the manifests that the unused-dependency report flags for this
+    /// name, so the trace names each declaration that the report lists.
+    pub fn apply_unused_declarations(
+        &mut self,
+        results: &crate::results::AnalysisResults,
+        root: &Path,
+    ) {
+        let flagged = results
+            .unused_dependencies
+            .iter()
+            .map(|finding| &finding.dep)
+            .chain(
+                results
+                    .unused_dev_dependencies
+                    .iter()
+                    .map(|finding| &finding.dep),
+            )
+            .chain(
+                results
+                    .unused_optional_dependencies
+                    .iter()
+                    .map(|finding| &finding.dep),
+            )
+            .filter(|dep| dep.package_name == self.package_name)
+            .map(|dep| {
+                dep.path
+                    .strip_prefix(root)
+                    .unwrap_or(&dep.path)
+                    .to_path_buf()
+            });
+        self.unused_in.extend(flagged);
+        self.unused_in.sort();
+        self.unused_in.dedup();
+    }
+
     /// Attach the tooling credit of an otherwise unused dependency and count
     /// the dependency as used, so the trace agrees with the unused-dependency
     /// report. A dependency that an import or a script already uses keeps no

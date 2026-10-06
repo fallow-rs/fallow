@@ -102,6 +102,9 @@ pub fn trace_file(graph: &RetainedModuleGraph, root: &Path, file_path: &str) -> 
 }
 
 /// Trace where a dependency is used.
+///
+/// `workspace_roots` are the roots of the workspaces, so the peer-dependency
+/// credit runs one closure per workspace, as the unused-dependency check does.
 #[must_use]
 #[expect(
     clippy::implicit_hasher,
@@ -110,10 +113,17 @@ pub fn trace_file(graph: &RetainedModuleGraph, root: &Path, file_path: &str) -> 
 pub fn trace_dependency(
     graph: &RetainedModuleGraph,
     root: &Path,
+    workspace_roots: &[&Path],
     package_name: &str,
     script_used_packages: &FxHashSet<String>,
 ) -> DependencyTrace {
-    trace_impl::trace_dependency(graph.as_graph(), root, package_name, script_used_packages)
+    trace_impl::trace_dependency(
+        graph.as_graph(),
+        root,
+        workspace_roots,
+        package_name,
+        script_used_packages,
+    )
 }
 
 /// Trace duplicate-code groups that contain a source location.

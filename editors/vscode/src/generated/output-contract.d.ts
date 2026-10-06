@@ -11664,6 +11664,15 @@ sources?: TraceSource[]
  * When present, `is_used` is `true`. Absent otherwise.
  */
 tooling_credit?: (ToolingCredit | null)
+/**
+ * The manifests that the unused-dependency check flags for this name,
+ * relative to the project root and sorted. The check reads each
+ * declaring manifest on its own. An import credits the nearest manifest
+ * that installs the package, so a name that one workspace uses can still
+ * be unused in the root manifest or in another workspace. Absent when no
+ * manifest is flagged.
+ */
+unused_in?: string[]
 }
 /**
  * Why the unused devDependency check counts a dependency as used tooling
@@ -11678,9 +11687,10 @@ export interface ToolingCredit {
  * globals, `types-target` when the project declares or imports the
  * package that a `@types/` package types, `types-config` when a config
  * file, such as a tsconfig `types` entry, names the type package,
- * `known-tooling` for a library from the tooling catalogue, and
+ * `known-tooling` for a library from the tooling catalogue,
  * `known-tooling-config` when a command-line tool from the catalogue has
- * its own config file. The set is open.
+ * its own config file, and `own-peer` when the same manifest lists the
+ * devDependency in `peerDependencies`. The set is open.
  */
 reason: string
 /**
@@ -11690,7 +11700,8 @@ plugin?: (string | null)
 /**
  * The config file found, relative to the project root, for
  * `plugin-config` and `known-tooling-config`. A `package.json` path when
- * the config is a package.json key.
+ * the config is a package.json key. For `own-peer`, the manifest that
+ * lists the dependency.
  */
 config?: (string | null)
 /**

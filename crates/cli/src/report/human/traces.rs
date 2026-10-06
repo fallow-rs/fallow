@@ -506,6 +506,18 @@ fn build_dependency_trace_human_lines(trace: &DependencyTrace) -> Vec<String> {
         lines.push(String::new());
         lines.push(format!("  {}", describe_tooling_credit(credit).dimmed()));
     }
+    if !trace.unused_in.is_empty() {
+        lines.push(String::new());
+        lines.push("  Reported unused in:".to_string());
+        for path in &trace.unused_in {
+            lines.push(format!("    {} {}", "->".dimmed(), path.display()));
+        }
+        lines.push(format!(
+            "  {}",
+            "Each manifest is checked on its own. An import credits the nearest manifest that installs the package."
+                .dimmed()
+        ));
+    }
     lines.push(String::new());
     lines
 }
@@ -535,6 +547,10 @@ fn describe_tooling_credit(credit: &fallow_types::trace::ToolingCredit) -> Strin
         ("known-tooling-config", Some(config), _) => format!(
             "Credited as a known command-line tool with its own config in {}.",
             config.display()
+        ),
+        ("own-peer", Some(manifest), _) => format!(
+            "Credited as an own peer: {} lists it in peerDependencies and devDependencies.",
+            manifest.display()
         ),
         (reason, _, _) => format!("Credited as tooling ({reason})."),
     }
@@ -969,6 +985,7 @@ mod tests {
             peer_of: Vec::new(),
             sources: Vec::new(),
             tooling_credit: None,
+            unused_in: Vec::new(),
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));
@@ -994,6 +1011,7 @@ mod tests {
             peer_of: vec!["host".to_string()],
             sources: Vec::new(),
             tooling_credit: None,
+            unused_in: Vec::new(),
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));
@@ -1016,6 +1034,7 @@ mod tests {
             peer_of: Vec::new(),
             sources: Vec::new(),
             tooling_credit: None,
+            unused_in: Vec::new(),
         };
         trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "plugin-reference".to_string(),
@@ -1041,6 +1060,7 @@ mod tests {
             peer_of: Vec::new(),
             sources: Vec::new(),
             tooling_credit: None,
+            unused_in: Vec::new(),
         };
         config_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "plugin-config".to_string(),
@@ -1061,6 +1081,7 @@ mod tests {
             peer_of: Vec::new(),
             sources: Vec::new(),
             tooling_credit: None,
+            unused_in: Vec::new(),
         };
         types_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "types-target".to_string(),
@@ -1083,6 +1104,7 @@ mod tests {
             peer_of: Vec::new(),
             sources: Vec::new(),
             tooling_credit: None,
+            unused_in: Vec::new(),
         };
         cli_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "known-tooling-config".to_string(),
@@ -1114,6 +1136,7 @@ mod tests {
                 key: "remotes".to_string(),
             }],
             tooling_credit: None,
+            unused_in: Vec::new(),
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));

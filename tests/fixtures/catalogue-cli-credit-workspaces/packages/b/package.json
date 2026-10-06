@@ -1,0 +1,7 @@
+{
+  "name": "b",
+  "main": "index.js",
+  "jscpd": {
+    "threshold": 1
+  }
+}

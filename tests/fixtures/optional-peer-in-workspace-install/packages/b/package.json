@@ -1,0 +1,7 @@
+{
+  "name": "b",
+  "main": "index.js",
+  "dependencies": {
+    "opt-peer": "1.0.0"
+  }
+}

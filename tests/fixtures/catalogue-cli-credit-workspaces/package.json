@@ -1,0 +1,8 @@
+{
+  "name": "catalogue-cli-credit-workspaces",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "madge": "^8.0.0"
+  }
+}

@@ -164,19 +164,38 @@ impl PeerDependencyResolver {
 /// unused-dependency check: each one is used, or credited itself, and lists
 /// `package_name` in its installed `peerDependencies`, required or optional.
 ///
-/// `used_packages` are the package names the import graph records. The
-/// installed manifests are looked up from `package_root` and its ancestors, as
-/// the unused-dependency check does for the root `package.json`. The result is
-/// sorted and empty when no used package lists `package_name` as a peer.
-pub fn peer_dependency_hosts<'a>(
-    package_root: &Path,
-    used_packages: impl IntoIterator<Item = &'a str>,
+/// The check runs one closure for the root manifest and one for each
+/// workspace, and this function runs the same closures. The root closure
+/// starts from every package that the import graph records and looks up the
+/// installed manifests from `project_root` and its ancestors. A workspace
+/// closure starts from the packages that the files of that workspace import
+/// and looks up the installed manifests from the workspace root. The result
+/// is the union of the hosts, sorted, and empty when no closure credits
+/// `package_name`.
+pub fn peer_dependency_hosts(
+    graph: &ModuleGraph,
+    project_root: &Path,
+    workspace_roots: &[&Path],
     package_name: &str,
 ) -> Vec<String> {
-    let mut hosts = PeerDependencyResolver::new()
-        .peer_dependency_closure(package_root, used_packages)
+    let mut resolver = PeerDependencyResolver::new();
+    let mut hosts = resolver
+        .peer_dependency_closure(project_root, graph.package_usage.keys().map(String::as_str))
         .remove(package_name)
         .unwrap_or_default();
+    let ownership = WorkspaceOwnershipIndex::new(graph, workspace_roots);
+    let used_by_workspace = collect_workspace_used_packages(graph, workspace_roots, &ownership);
+    for ws_root in workspace_roots {
+        let Some(used) = used_by_workspace.get(ws_root) else {
+            continue;
+        };
+        if let Some(ws_hosts) = resolver
+            .peer_dependency_closure(ws_root, used.iter().copied())
+            .remove(package_name)
+        {
+            hosts.extend(ws_hosts);
+        }
+    }
     hosts.sort_unstable();
     hosts.dedup();
     hosts
@@ -736,29 +755,36 @@ fn is_credited_known_tooling(
         return shared.declared_packages.contains(target.as_str()) || is_used(&target);
     }
     if let Some(config) = crate::plugins::cli_tooling_config_patterns(dep) {
-        return cli_tool_has_own_config(dep, config, shared.project_root, pkg_path, pkg_content);
+        let manifest =
+            pkg_content.and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok());
+        return cli_tool_own_config(
+            dep,
+            config,
+            shared.project_root,
+            pkg_path,
+            manifest.as_ref(),
+        )
+        .is_some();
     }
     crate::plugins::is_known_tooling_dependency(dep)
 }
 
-/// Whether a command-line tool has a config file of its own next to the
-/// declaring package.json or at the project root, or its config under a
-/// package.json key named after it.
-fn cli_tool_has_own_config(
+/// The own config of a command-line tool that the manifest at `pkg_path`
+/// declares: the declaring package.json when it has a key named after the
+/// tool, else a config file next to that package.json or at the project
+/// root. A config in a sibling workspace does not count.
+pub fn cli_tool_own_config(
     dep: &str,
     config: &[String],
     project_root: &Path,
     pkg_path: &Path,
-    pkg_content: Option<&str>,
-) -> bool {
-    if pkg_content
-        .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok())
-        .is_some_and(|manifest| manifest.get(dep).is_some())
-    {
-        return true;
+    manifest: Option<&serde_json::Value>,
+) -> Option<PathBuf> {
+    if manifest.is_some_and(|manifest| manifest.get(dep).is_some()) {
+        return Some(pkg_path.to_path_buf());
     }
     if config.is_empty() {
-        return false;
+        return None;
     }
     let package_root = pkg_path.parent().unwrap_or(project_root);
     let roots: &[&Path] = if package_root == project_root {
@@ -766,7 +792,7 @@ fn cli_tool_has_own_config(
     } else {
         &[package_root, project_root]
     };
-    crate::plugins::registry::find_config_file(config.iter().map(String::as_str), roots).is_some()
+    crate::plugins::registry::find_config_file(config.iter().map(String::as_str), roots)
 }
 
 /// Build a reverse index from package name to workspace roots that import it.

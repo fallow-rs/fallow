@@ -49,6 +49,7 @@ mod unused_svelte_event;
 pub(crate) mod test_support;
 
 pub use predicates::is_builtin_module;
+pub(crate) use unused_deps::cli_tool_own_config;
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
 pub use unused_deps::peer_dependency_hosts;

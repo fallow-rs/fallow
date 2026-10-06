@@ -917,6 +917,7 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
 pub fn trace_dependency(
     graph: &ModuleGraph,
     root: &Path,
+    workspace_roots: &[&Path],
     package_name: &str,
     script_used_packages: &FxHashSet<String>,
 ) -> DependencyTrace {
@@ -952,11 +953,8 @@ pub fn trace_dependency(
 
     let import_count = imported_by.len();
     let used_in_scripts = script_used_packages.contains(package_name);
-    let peer_of = crate::core_backend::peer_dependency_hosts(
-        root,
-        graph.package_usage.keys().map(String::as_str),
-        package_name,
-    );
+    let peer_of =
+        crate::core_backend::peer_dependency_hosts(graph, root, workspace_roots, package_name);
     let mut trace = DependencyTrace {
         package_name: package_name.to_string(),
         imported_by,
@@ -967,6 +965,7 @@ pub fn trace_dependency(
         peer_of,
         sources: Vec::new(),
         tooling_credit: None,
+        unused_in: Vec::new(),
     };
     trace.apply_tooling_credit(imported_types_target_credit(graph, package_name));
     trace
@@ -3051,7 +3050,7 @@ mod tests {
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         let root = Path::new("/project");
 
-        let trace = trace_dependency(&graph, root, "lodash", &FxHashSet::default());
+        let trace = trace_dependency(&graph, root, &[], "lodash", &FxHashSet::default());
         assert!(trace.is_used);
         assert!(!trace.used_in_scripts);
         assert_eq!(trace.import_count, 1);
@@ -3078,7 +3077,7 @@ mod tests {
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         let root = Path::new("/project");
 
-        let trace = trace_dependency(&graph, root, "nonexistent-pkg", &FxHashSet::default());
+        let trace = trace_dependency(&graph, root, &[], "nonexistent-pkg", &FxHashSet::default());
         assert!(!trace.is_used);
         assert!(!trace.used_in_scripts);
         assert_eq!(trace.import_count, 0);
@@ -3107,7 +3106,7 @@ mod tests {
         let mut script_used = FxHashSet::default();
         script_used.insert("microbundle".to_string());
 
-        let trace = trace_dependency(&graph, root, "microbundle", &script_used);
+        let trace = trace_dependency(&graph, root, &[], "microbundle", &script_used);
         assert!(
             trace.is_used,
             "is_used must be true when the package is referenced from package.json scripts"
