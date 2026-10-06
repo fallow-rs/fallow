@@ -193,6 +193,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   showed as unused devDependencies. Now the config file alone activates the
   PostCSS plugin.
 
+- **A JSDoc `@import` tag now keeps the imported module used.** A checked
+  JavaScript file can load types with
+  `/** @import { Foo } from './types' */`. Before, fallow read only
+  `import('./types').Foo` type expressions in JSDoc, so it reported the
+  target module as an unused file and its types as unused. Now fallow reads
+  named and default bindings of an `@import` tag as type-only imports, also
+  when the clause continues on the next lines. For a namespace binding such
+  as `@import * as ns from './types'`, only the `ns.Foo` members that the
+  JSDoc types of the file use count as used. A module
+  declaration file that only an `@import` tag names stays used. The
+  extraction cache version changes, so the first run after the upgrade
+  parses all files again.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,
@@ -251,8 +264,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it. Otherwise fallow reports the file, and its imports no longer keep
   other modules reachable. A reachable import still makes the file used.
   Script-style declaration files and files with a `declare global` or
-  `declare module` block stay entry points. To keep such a file, add it to
-  `ignorePatterns` or add a `// fallow-ignore-file unused-file` comment.
+  `declare module` block stay entry points. To keep such a file and the
+  modules that it imports, add it to `entry`. `ignorePatterns` and a
+  `// fallow-ignore-file unused-file` comment only hide the report for the
+  file. Its imports still do not keep other modules reachable.
   The extraction cache version changes, so the first run after the upgrade
   parses all files again.
 

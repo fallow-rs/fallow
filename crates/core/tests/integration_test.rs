@@ -129,6 +129,8 @@ mod issue_948_vscode_provider_members;
 mod issue_952_package_path_resolution;
 #[path = "integration_test/issue_954_pino_transport_target.rs"]
 mod issue_954_pino_transport_target;
+#[path = "integration_test/jsdoc_import_tag.rs"]
+mod jsdoc_import_tag;
 #[path = "integration_test/jsx_assets_and_jsdoc.rs"]
 mod jsx_assets_and_jsdoc;
 #[path = "integration_test/kibana_framework_plugin.rs"]

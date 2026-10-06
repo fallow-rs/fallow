@@ -1,0 +1,6 @@
+{
+  "compilerOptions": {
+    "checkJs": true
+  },
+  "include": ["src"]
+}

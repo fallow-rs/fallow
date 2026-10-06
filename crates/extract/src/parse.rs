@@ -889,8 +889,8 @@ const fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Scan JSDoc comments for `import('./path').Member` type expressions and push
-/// them onto `imports` as type-only imports.
+/// Scan JSDoc comments for `import('./path').Member` type expressions and
+/// `@import` tags, and push them onto `imports` as type-only imports.
 ///
 /// JSDoc supports referencing types from other modules via `import()` expressions
 /// embedded in tag annotations, e.g.:
@@ -917,6 +917,7 @@ fn extract_jsdoc_import_types(imports: &mut Vec<ImportInfo>, comments: &[Comment
         return;
     }
 
+    let mut namespaces = Vec::new();
     for comment in comments {
         if !comment.is_jsdoc() {
             continue;
@@ -927,8 +928,285 @@ fn extract_jsdoc_import_types(imports: &mut Vec<ImportInfo>, comments: &[Comment
         if start >= end {
             continue;
         }
-        scan_jsdoc_imports_in(&source[start..end], imports);
+        let body = &source[start..end];
+        scan_jsdoc_imports_in(body, imports);
+        scan_jsdoc_import_tags_in(body, imports, &mut namespaces);
     }
+    if !namespaces.is_empty() {
+        push_jsdoc_namespace_members(imports, &namespaces, comments, source);
+    }
+}
+
+/// A namespace binding from a JSDoc `@import * as ns from './mod'` tag.
+struct JsdocNamespaceImport {
+    local: String,
+    source: String,
+}
+
+/// Push a type-only import for each `<ns>.<Member>` reference in the JSDoc
+/// type expressions of the file, plus a side-effect import that keeps the
+/// target module reachable when no member is used.
+///
+/// A namespace import credits every export of the target module. The binding
+/// of a JSDoc `@import` tag exists only in JSDoc types, so the members that
+/// the file reads are known, and only those members get credit.
+fn push_jsdoc_namespace_members(
+    imports: &mut Vec<ImportInfo>,
+    namespaces: &[JsdocNamespaceImport],
+    comments: &[Comment],
+    source: &str,
+) {
+    use fallow_types::extract::ImportedName;
+
+    let mut members: Vec<(usize, &str)> = Vec::new();
+    for comment in comments.iter().filter(|comment| comment.is_jsdoc()) {
+        let content_span = comment.content_span();
+        let start = content_span.start as usize;
+        let end = (content_span.end as usize).min(source.len());
+        if start >= end {
+            continue;
+        }
+        scan_jsdoc_namespace_members_in(&source[start..end], namespaces, &mut members);
+    }
+    for namespace in namespaces {
+        imports.push(jsdoc_type_import(
+            &namespace.source,
+            ImportedName::SideEffect,
+        ));
+    }
+    for (index, member) in members {
+        imports.push(jsdoc_type_import(
+            &namespaces[index].source,
+            ImportedName::Named(member.to_string()),
+        ));
+    }
+}
+
+/// Collect each `<ns>.<Member>` reference inside a JSDoc type brace group of
+/// one comment body. `members` holds `(namespace index, member)` pairs
+/// without duplicates.
+fn scan_jsdoc_namespace_members_in<'a>(
+    body: &'a str,
+    namespaces: &[JsdocNamespaceImport],
+    members: &mut Vec<(usize, &'a str)>,
+) {
+    let bytes = body.as_bytes();
+    let mut brace_stack: Vec<usize> = Vec::new();
+    let mut scanned = 0;
+    let mut pos = 0;
+    while pos < bytes.len() {
+        let starts_ident =
+            (bytes[pos].is_ascii_alphabetic() || bytes[pos] == b'_' || bytes[pos] == b'$')
+                && (pos == 0
+                    || !(is_ident_char(bytes[pos - 1]) || matches!(bytes[pos - 1], b'$' | b'.')));
+        if !starts_ident {
+            pos += 1;
+            continue;
+        }
+        let Some((ident, after)) = take_js_identifier(&body[pos..]) else {
+            pos += 1;
+            continue;
+        };
+        let ident_pos = pos;
+        pos += ident.len();
+        let Some(index) = namespaces
+            .iter()
+            .position(|namespace| namespace.local == ident)
+        else {
+            continue;
+        };
+        let Some((member, _)) = after.strip_prefix('.').and_then(take_js_identifier) else {
+            continue;
+        };
+        advance_jsdoc_brace_stack(bytes, &mut brace_stack, &mut scanned, ident_pos);
+        if !is_inside_jsdoc_type_brace_group(bytes, ident_pos, brace_stack.last().copied()) {
+            continue;
+        }
+        let entry = (index, member);
+        if !members.contains(&entry) {
+            members.push(entry);
+        }
+        pos += 1 + member.len();
+    }
+}
+
+const JSDOC_IMPORT_TAG: &str = "@import";
+
+/// Parse a single JSDoc comment body for TypeScript `@import` tags and push
+/// each imported binding as a type-only import.
+///
+/// ```js
+/// /** @import { Foo, Bar as Baz } from './types' */
+/// /** @import * as ns from './ns' */
+/// /** @import Def from './def' */
+/// ```
+///
+/// The tag must start a JSDoc line, and its clause can continue on the next
+/// lines until the module specifier or the next tag. A tag that does not parse
+/// as an import clause adds no import. A namespace binding goes to
+/// `namespaces` and not to `imports`, because the caller credits only the
+/// members that the file reads through it.
+fn scan_jsdoc_import_tags_in(
+    body: &str,
+    imports: &mut Vec<ImportInfo>,
+    namespaces: &mut Vec<JsdocNamespaceImport>,
+) {
+    let bytes = body.as_bytes();
+    let mut cursor = 0;
+    while let Some(rel) = body[cursor..].find(JSDOC_IMPORT_TAG) {
+        let tag_pos = cursor + rel;
+        cursor = tag_pos + JSDOC_IMPORT_TAG.len();
+        let starts_line = strip_jsdoc_line_prefix(line_prefix_before(bytes, tag_pos)).is_empty();
+        let ends_tag = bytes
+            .get(cursor)
+            .is_none_or(|&b| b.is_ascii_whitespace() || b == b'{' || b == b'*');
+        if !starts_line || !ends_tag {
+            continue;
+        }
+        let clause = jsdoc_import_tag_clause(&body[cursor..]);
+        let Some(parsed) = parse_jsdoc_import_clause(&clause) else {
+            continue;
+        };
+        if let Some(local) = parsed.namespace {
+            namespaces.push(JsdocNamespaceImport {
+                local: local.to_string(),
+                source: parsed.source.to_string(),
+            });
+        } else if parsed.names.is_empty() {
+            imports.push(jsdoc_type_import(
+                parsed.source,
+                fallow_types::extract::ImportedName::SideEffect,
+            ));
+        }
+        for name in parsed.names {
+            imports.push(jsdoc_type_import(parsed.source, name));
+        }
+    }
+}
+
+/// Join the text after an `@import` tag into one line. Continuation lines lose
+/// their JSDoc `*` prefix, and the clause stops before the next tag.
+fn jsdoc_import_tag_clause(rest: &str) -> String {
+    let mut lines = rest.split('\n');
+    let mut clause = lines.next().unwrap_or_default().to_string();
+    for line in lines {
+        let line = strip_jsdoc_line_prefix(line);
+        if line.starts_with('@') {
+            break;
+        }
+        clause.push(' ');
+        clause.push_str(line);
+    }
+    clause
+}
+
+/// The bindings and the module specifier of one JSDoc `@import` clause.
+struct JsdocImportClause<'a> {
+    /// Default and named bindings.
+    names: Vec<fallow_types::extract::ImportedName>,
+    /// The local name of a `* as ns` binding.
+    namespace: Option<&'a str>,
+    source: &'a str,
+}
+
+/// Parse `<bindings> from '<specifier>'`. Returns `None` when the clause is
+/// not a valid import clause.
+fn parse_jsdoc_import_clause(clause: &str) -> Option<JsdocImportClause<'_>> {
+    use fallow_types::extract::ImportedName;
+
+    let mut names = Vec::new();
+    let mut namespace = None;
+    let mut rest = clause.trim_start();
+    if let Some((ident, after)) = take_js_identifier(rest)
+        && ident != "from"
+    {
+        names.push(ImportedName::Default);
+        rest = after.trim_start();
+        match rest.strip_prefix(',') {
+            Some(after_comma) => rest = after_comma.trim_start(),
+            None => {
+                return parse_jsdoc_import_from(rest).map(|source| JsdocImportClause {
+                    names,
+                    namespace,
+                    source,
+                });
+            }
+        }
+    }
+    if let Some(after_star) = rest.strip_prefix('*') {
+        let after_as = after_star.trim_start().strip_prefix("as")?;
+        let (local, after_ns) = take_js_identifier(after_as.trim_start())?;
+        namespace = Some(local);
+        rest = after_ns;
+    } else if let Some(after_brace) = rest.strip_prefix('{') {
+        let close = after_brace.find('}')?;
+        for specifier in after_brace[..close].split(',') {
+            if let Some(name) = jsdoc_import_specifier_name(specifier) {
+                names.push(name);
+            }
+        }
+        rest = &after_brace[close + 1..];
+    } else if names.is_empty() {
+        return None;
+    }
+    parse_jsdoc_import_from(rest.trim_start()).map(|source| JsdocImportClause {
+        names,
+        namespace,
+        source,
+    })
+}
+
+/// Read the imported name of one `{ ... }` entry: `A`, `A as B`, `type A`,
+/// `'a-b' as B` or `default as B`.
+fn jsdoc_import_specifier_name(specifier: &str) -> Option<fallow_types::extract::ImportedName> {
+    use fallow_types::extract::ImportedName;
+
+    let specifier = specifier.trim();
+    let specifier = specifier
+        .strip_prefix("type")
+        .filter(|after| after.starts_with(char::is_whitespace))
+        .map_or(specifier, str::trim_start);
+    let name = match specifier.as_bytes().first()? {
+        quote @ (b'\'' | b'"') => {
+            let inner = &specifier[1..];
+            &inner[..inner.find(*quote as char)?]
+        }
+        _ => take_js_identifier(specifier)?.0,
+    };
+    if name == "default" {
+        return Some(ImportedName::Default);
+    }
+    Some(ImportedName::Named(name.to_string()))
+}
+
+/// Parse `from '<specifier>'` and return the non-empty specifier.
+fn parse_jsdoc_import_from(rest: &str) -> Option<&str> {
+    let (keyword, after) = take_js_identifier(rest)?;
+    if keyword != "from" {
+        return None;
+    }
+    let after = after.trim_start();
+    let quote = after.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+    let inner = &after[1..];
+    let source = &inner[..inner.find(quote)?];
+    (!source.is_empty()).then_some(source)
+}
+
+/// Split a leading JavaScript identifier (ASCII letters, digits, `_`, `$`)
+/// from `text`.
+fn take_js_identifier(text: &str) -> Option<(&str, &str)> {
+    let bytes = text.as_bytes();
+    if !bytes
+        .first()
+        .is_some_and(|&b| b.is_ascii_alphabetic() || b == b'_' || b == b'$')
+    {
+        return None;
+    }
+    let end = bytes
+        .iter()
+        .position(|&b| !(is_ident_char(b) || b == b'$'))
+        .unwrap_or(bytes.len());
+    Some(text.split_at(end))
 }
 
 /// Parse a single JSDoc comment body for `import('...').Member` expressions.
@@ -1058,7 +1336,8 @@ fn resolve_jsdoc_import(
     j
 }
 
-/// Build a type-only `ImportInfo` for a JSDoc `import('...')` reference. Spans
+/// Build a type-only `ImportInfo` for a JSDoc `import('...')` reference or
+/// `@import` tag. Spans
 /// are defaulted because JSDoc imports carry no real source position.
 fn jsdoc_type_import(
     source: &str,
@@ -1821,7 +2100,7 @@ pub fn compute_import_binding_usage(
 mod tests {
     use super::{
         advance_jsdoc_brace_stack, classify_jsdoc_visibility_tag, parse_source_to_module,
-        scan_jsdoc_imports_in,
+        scan_jsdoc_import_tags_in, scan_jsdoc_imports_in,
     };
     use fallow_types::discover::FileId;
     use fallow_types::extract::{ImportInfo, ImportedName, VisibilityTag};
@@ -2003,6 +2282,137 @@ mod tests {
             imports[0].imported_name,
             ImportedName::Named("Client".to_string())
         );
+    }
+
+    fn scan_tags(body: &str) -> Vec<(String, ImportedName)> {
+        let mut imports = Vec::new();
+        let mut namespaces = Vec::new();
+        scan_jsdoc_import_tags_in(body, &mut imports, &mut namespaces);
+        assert!(namespaces.is_empty());
+        assert!(imports.iter().all(|import| import.is_type_only));
+        assert!(imports.iter().all(|import| import.local_name.is_empty()));
+        imports
+            .into_iter()
+            .map(|import| (import.source, import.imported_name))
+            .collect()
+    }
+
+    fn named(source: &str, name: &str) -> (String, ImportedName) {
+        (source.to_string(), ImportedName::Named(name.to_string()))
+    }
+
+    #[test]
+    fn scan_jsdoc_import_tag_named_bindings() {
+        assert_eq!(
+            scan_tags(" @import { A, B as C, type D, 'e-f' as E } from '../types/foo' "),
+            vec![
+                named("../types/foo", "A"),
+                named("../types/foo", "B"),
+                named("../types/foo", "D"),
+                named("../types/foo", "e-f"),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_import_tag_namespace_default_and_mixed() {
+        assert_eq!(
+            scan_tags(" @import Def from './def' "),
+            vec![("./def".to_string(), ImportedName::Default)]
+        );
+        assert_eq!(
+            scan_tags(" @import Def, { $A, default as B } from './mixed' "),
+            vec![
+                ("./mixed".to_string(), ImportedName::Default),
+                named("./mixed", "$A"),
+                ("./mixed".to_string(), ImportedName::Default),
+            ]
+        );
+        assert_eq!(
+            scan_tags(" @import {} from './empty' "),
+            vec![("./empty".to_string(), ImportedName::SideEffect)]
+        );
+    }
+
+    fn jsdoc_tag_imports(source: &str) -> Vec<(String, ImportedName)> {
+        let info = parse_source_to_module(FileId(0), Path::new("src/index.js"), source, 0, false);
+        info.imports
+            .into_iter()
+            .filter(|import| import.is_type_only && import.local_name.is_empty())
+            .map(|import| (import.source, import.imported_name))
+            .collect()
+    }
+
+    #[test]
+    fn jsdoc_namespace_import_tag_credits_only_the_members_in_types() {
+        let source = r#"/** @import * as ns from "./ns" */
+/** @import * as unread from './unread' */
+/**
+ * Read ns.Prose in a sentence: no credit.
+ * @param {ns.Shape | ns.Line} a
+ * @returns {ns.Shape}
+ */
+export function draw(a) { return a; }
+/** @type {Array<ns.Point>} */
+export const points = [];
+"#;
+        assert_eq!(
+            jsdoc_tag_imports(source),
+            vec![
+                ("./ns".to_string(), ImportedName::SideEffect),
+                ("./unread".to_string(), ImportedName::SideEffect),
+                named("./ns", "Shape"),
+                named("./ns", "Line"),
+                named("./ns", "Point"),
+            ]
+        );
+    }
+
+    #[test]
+    fn jsdoc_namespace_import_tag_keeps_default_binding() {
+        assert_eq!(
+            jsdoc_tag_imports(
+                "/** @import Def, * as ns from './mod' */
+/** @type {ns.A} */
+export const a = 1;
+"
+            ),
+            vec![
+                ("./mod".to_string(), ImportedName::Default),
+                ("./mod".to_string(), ImportedName::SideEffect),
+                named("./mod", "A"),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_import_tag_spans_lines_and_tags() {
+        let body = "\n * @import {\n *   A,\n *   B,\n * } from './multi'\n * @import { C } from './next'\n * @param {A} a\n ";
+        assert_eq!(
+            scan_tags(body),
+            vec![
+                named("./multi", "A"),
+                named("./multi", "B"),
+                named("./next", "C"),
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_jsdoc_import_tag_ignores_non_tags_and_bad_clauses() {
+        for body in [
+            " Use @import { A } from './prose' in a sentence ",
+            " @imports { A } from './plural' ",
+            " @import { A } './missing-from' ",
+            " @import { A } from '' ",
+            " @import { A from './unclosed' ",
+            " @import { A }\n * @param {A} from './next-tag'",
+            " @import { A } from './truncated",
+            " @import",
+            " @import * from './no-alias' ",
+        ] {
+            assert!(scan_tags(body).is_empty(), "{body:?}");
+        }
     }
 
     #[test]
