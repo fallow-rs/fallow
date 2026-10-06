@@ -3,7 +3,7 @@
 use fallow_types::extract::{ImportedCallSite, ImportedName, ReExportInfo};
 
 use crate::discover::FileId;
-use crate::resolve::{ResolveResult, ResolvedModule};
+use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
@@ -90,14 +90,26 @@ impl<'a> ProofOrigins<'a> {
             .resolved_imports
             .iter()
             .filter(|import| import.info.local_name == local && !import.info.is_type_only);
-        let Some(import) = imports.next() else {
+        let Some(first) = imports.next() else {
             return Origin::Local(module.file_id, symbol_path(local, member));
         };
-        // Embedded script blocks can contain distinct imports with the same
-        // written binding name. Their merged facts do not establish one origin.
-        if imports.next().is_some() {
-            return Origin::Unknown;
+        let origin = self.import_origin(first, member, depth);
+        // Embedded script blocks can repeat one written binding name. The merged
+        // facts establish an origin only when every block resolves to it.
+        for import in imports {
+            if self.import_origin(import, member, depth) != origin {
+                return Origin::Unknown;
+            }
         }
+        origin
+    }
+
+    fn import_origin(
+        &mut self,
+        import: &ResolvedImport,
+        member: &[String],
+        depth: usize,
+    ) -> Origin {
         let symbol = match &import.info.imported_name {
             ImportedName::Named(name) => symbol_path(name, member),
             ImportedName::Default => symbol_path("default", member),

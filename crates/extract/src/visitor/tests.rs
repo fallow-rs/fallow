@@ -13397,6 +13397,36 @@ fn imported_call_sites_abstain_on_redeclared_and_non_esm_bindings() {
 }
 
 #[test]
+fn imported_call_sites_remap_a_call_at_the_start_of_an_embedded_script() {
+    let body = "make(\"First\");\nimport { defineProof as make } from \"@gdp-ts/core\";\n";
+    let cases = [
+        (
+            "view.vue",
+            format!(
+                "<template><p>Example</p></template>\n<script setup lang=\"ts\">{body}</script>"
+            ),
+        ),
+        (
+            "view.svelte",
+            format!("<p>Example</p>\n<script lang=\"ts\">{body}</script>"),
+        ),
+    ];
+    for (path, source) in cases {
+        let info = crate::parse_from_content(FileId(0), Path::new(path), &source);
+        let offsets: Vec<_> = info
+            .imported_call_sites
+            .iter()
+            .map(|call| call.span_start as usize)
+            .collect();
+        assert_eq!(
+            offsets,
+            vec![source.find("make(\"First\")").unwrap()],
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn imported_call_sites_preserve_embedded_script_scope_and_offsets() {
     let body = r#"
 import { defineProof as make } from "@gdp-ts/core";

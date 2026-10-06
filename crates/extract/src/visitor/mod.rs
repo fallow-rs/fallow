@@ -1573,7 +1573,9 @@ impl ModuleInfoExtractor {
         self.remap_handled_spans(&mut remap);
         self.remap_security_spans(&mut remap);
         for call in &mut self.imported_call_sites {
-            call.span_start = remap(Span::new(call.span_start, call.span_start)).start;
+            // `remap` keeps the empty span at offset 0 unchanged, but a call is
+            // never empty, so a one-byte span maps every call start.
+            call.span_start = remap(Span::new(call.span_start, call.span_start + 1)).start;
         }
     }
 

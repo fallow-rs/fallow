@@ -699,3 +699,44 @@ fn gdp_producer_abstains_on_conflicting_explicit_and_duplicate_local_exports() {
         ]
     );
 }
+
+#[test]
+fn gdp_producer_accepts_identical_imports_across_embedded_script_blocks() {
+    let block = "import { defineProof } from '@gdp-ts/core';";
+    let results = analyze_gdp_project(
+        &[
+            ("src/index.ts", "export {};"),
+            (
+                "src/Repeated.vue",
+                &format!(
+                    "<script lang=\"ts\">\n{block}\nexport const a = 1;\n</script>\n\n<script setup lang=\"ts\">\n{block}\nconst v = defineProof('VueRepeated');\n</script>\n"
+                ),
+            ),
+            (
+                "src/repeated.astro",
+                &format!(
+                    "---\n{block}\nconst v = defineProof('AstroRepeated');\n---\n<script>\n{block}\nconsole.log(defineProof);\n</script>\n"
+                ),
+            ),
+            (
+                "src/Conflicting.vue",
+                "<script lang=\"ts\">\nimport { defineProof } from './local';\nexport const a = 1;\n</script>\n\n<script setup lang=\"ts\">\nimport { defineProof } from '@gdp-ts/core';\nconst v = defineProof('VueConflict');\n</script>\n",
+            ),
+            ("src/local.ts", "export const defineProof = (kind) => kind;"),
+        ],
+        serde_json::json!([{"id":"trusted-producers","kind":"gdp-proof-producer","allowedFiles":["src/trusted/**"]}]),
+    );
+    let mut matched: Vec<_> = results
+        .policy_violations
+        .iter()
+        .map(|finding| finding.violation.matched.as_str())
+        .collect();
+    matched.sort_unstable();
+    assert_eq!(
+        matched,
+        [
+            "@gdp-ts/core.defineProof(\"AstroRepeated\")",
+            "@gdp-ts/core.defineProof(\"VueRepeated\")"
+        ]
+    );
+}

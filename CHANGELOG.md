@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls to `allowedFiles`. Add `proofKinds` to assign literal proof labels
   to specific owner modules. Analysis follows static imports and unambiguous
   re-export chains and checks every analyzed file, including unused files.
+  When the script blocks of one Vue, Svelte, or Astro file import the same
+  name, a call is checked when every block imports the same origin.
   Dynamic labels are checked by broad producer rules; kind-specific rules
   check only literal strings. This complements the gdp-ts lint preset and
   does not verify authorization logic. The parse cache version changes
@@ -102,6 +104,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Both members are additive and optional, and no `schema_version` changes.
 
 ### Changed
+
+- **`export default Name` now links the default export to the local binding
+  `Name`, the same as `export { Name as default }`.** Unused members of a class
+  that a file exports with `export default Name` are now reported. With
+  `ignoreExportsUsedInFile`, such a default export is now used when the file
+  also uses `Name`. The extraction cache version changes, so the first run
+  after the upgrade parses all files again.
 
 - **Health copies only visible hotspots when `--top` limits the list.**
   Scoring and grouped reports keep the complete hotspot data. The CLI
