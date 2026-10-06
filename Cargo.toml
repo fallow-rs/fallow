@@ -26,15 +26,15 @@ fallow-security = { version = "3.31.0", path = "crates/security" }
 fallow-types = { version = "3.31.0", path = "crates/types" }
 
 # Parsing & analysis
-oxc_allocator = "0.151"
-oxc_ast = "0.151"
-oxc_ast_visit = "0.151"
-oxc_parser = "0.151"
+oxc_allocator = "0.152"
+oxc_ast = "0.152"
+oxc_ast_visit = "0.152"
+oxc_parser = "0.152"
 oxc_resolver = { version = "11", features = ["yarn_pnp"] }
-oxc_semantic = "0.151"
-oxc_span = "0.151"
-oxc_str = "0.151"
-oxc_syntax = "0.151"
+oxc_semantic = "0.152"
+oxc_span = "0.152"
+oxc_str = "0.152"
+oxc_syntax = "0.152"
 oxc_coverage_instrument = "0.13.0"
 # CSS AST parser (browser-grade, built on Mozilla cssparser/selectors). Pinned
 # exact because it has no stable release line and pre-release semver matching is
