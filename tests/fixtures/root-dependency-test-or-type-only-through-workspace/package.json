@@ -1,0 +1,9 @@
+{
+  "name": "root-dependency-test-or-type-only-through-workspace",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "assert-lib": "1.0.0",
+    "schema-lib": "1.0.0"
+  }
+}

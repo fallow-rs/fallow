@@ -569,7 +569,7 @@ fn collect_ancestor_credited_packages<'a>(
 /// the package itself, the file may not use an ancestor declaration, or no
 /// ancestor workspace installs it.
 ///
-/// The walk tests `installed`, as [`workspace_chain_installs`] does. A
+/// The walk tests `installed`, as [`workspace_chain_installer`] does. A
 /// `peerDependencies` entry alone installs nothing, so it does not stop the
 /// walk before the ancestor that provides the package.
 fn ancestor_satisfying_import<'m, 'a>(
@@ -664,6 +664,61 @@ fn workspace_chain_installer<'a>(
         .filter_map(|workspace| manifests.get(workspace))
         .find(|manifest| manifest.installed.contains(package_name))
         .map(|manifest| manifest.root)
+}
+
+/// The importers of a package that the root manifest serves, under the same
+/// nearest-manifest attribution as [`collect_root_credited_packages`].
+///
+/// The root test-only and type-only checks read only these importers. An
+/// importer that a workspace chain installs the package for says nothing
+/// about the root declaration.
+struct RootImporters<'a> {
+    graph: &'a ModuleGraph,
+    manifests: Vec<WorkspaceManifest<'a>>,
+    ownership: WorkspaceOwnershipIndex,
+}
+
+impl<'a> RootImporters<'a> {
+    fn new(
+        graph: &'a ModuleGraph,
+        config: &ResolvedConfig,
+        workspaces: &'a [fallow_config::WorkspaceInfo],
+    ) -> Self {
+        let manifests = read_workspace_manifests(workspaces, config);
+        let ownership =
+            WorkspaceOwnershipIndex::new(graph, &dependency_owning_workspace_roots(&manifests));
+        Self {
+            graph,
+            manifests,
+            ownership,
+        }
+    }
+
+    /// Files that import `package_name` through the root declaration.
+    fn of(&self, package_name: &str) -> Vec<FileId> {
+        self.filter(self.graph.package_usage.get(package_name), package_name)
+    }
+
+    /// Files that import `package_name` only with `import type`, through the
+    /// root declaration.
+    fn type_only_of(&self, package_name: &str) -> Vec<FileId> {
+        self.filter(
+            self.graph.type_only_package_usage.get(package_name),
+            package_name,
+        )
+    }
+
+    fn filter(&self, file_ids: Option<&Vec<FileId>>, package_name: &str) -> Vec<FileId> {
+        file_ids
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|id| {
+                workspace_chain_installer(&self.manifests, &self.ownership, package_name, *id)
+                    .is_none()
+            })
+            .collect()
+    }
 }
 
 fn shared_dep_sets<'a>(
@@ -1467,6 +1522,10 @@ fn collect_workspace_unused_categories(
 /// In production mode, `import type { Foo } from 'pkg'` is erased at compile time,
 /// meaning the dependency is not needed at runtime. Such dependencies should be
 /// moved to devDependencies.
+///
+/// Only importers that reach the package through the root declaration count,
+/// see [`RootImporters`]. A root entry without such an importer is an unused
+/// dependency, not a type-only one.
 pub fn find_type_only_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
@@ -1476,6 +1535,7 @@ pub fn find_type_only_dependencies(
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    let root_importers = RootImporters::new(graph, config, workspaces);
 
     let mut type_only_deps = Vec::new();
 
@@ -1487,20 +1547,10 @@ pub fn find_type_only_dependencies(
             continue;
         }
 
-        let has_any_usage = graph.package_usage.contains_key(dep.as_str());
-        let has_type_only_usage = graph.type_only_package_usage.contains_key(dep.as_str());
+        let total_count = root_importers.of(&dep).len();
+        let type_only_count = root_importers.type_only_of(&dep).len();
 
-        if !has_any_usage {
-            continue;
-        }
-
-        let total_count = graph.package_usage.get(dep.as_str()).map_or(0, Vec::len);
-        let type_only_count = graph
-            .type_only_package_usage
-            .get(dep.as_str())
-            .map_or(0, Vec::len);
-
-        if has_type_only_usage && type_only_count == total_count {
+        if total_count > 0 && type_only_count == total_count {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -1571,20 +1621,23 @@ fn accepts_ancestor_declaration(
     owner_is_private || !is_production_module(module, config)
 }
 
-/// Return `true` when every file importing `dep` is a test/story or config file
-/// and the dependency is not exclusively type-only imported.
+/// Return `true` when every file that imports `dep` through the root
+/// declaration is a test/story or config file, and the dependency is not
+/// exclusively type-only imported.
 fn dependency_is_test_only(
     dep: &str,
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     test_globs: &globset::GlobSet,
+    root_importers: &RootImporters<'_>,
 ) -> bool {
-    let Some(file_ids) = graph.package_usage.get(dep) else {
+    let file_ids = root_importers.of(dep);
+    if file_ids.is_empty() {
         return false;
-    };
+    }
 
     let total_count = file_ids.len();
-    let type_only_count = graph.type_only_package_usage.get(dep).map_or(0, Vec::len);
+    let type_only_count = root_importers.type_only_of(dep).len();
     if type_only_count == total_count {
         return false;
     }
@@ -1604,6 +1657,9 @@ fn dependency_is_test_only(
 ///
 /// When NOT in production mode (where test files are still discovered), a dep
 /// that appears exclusively in test/story/config files should be a devDependency.
+///
+/// Like [`find_type_only_dependencies`], this reads only the importers that
+/// reach the package through the root declaration.
 pub fn find_test_only_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
@@ -1618,6 +1674,7 @@ pub fn find_test_only_dependencies(
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     let ignore_deps = &config.ignore_dependencies;
+    let root_importers = RootImporters::new(graph, config, workspaces);
 
     let mut test_only_deps = Vec::new();
 
@@ -1629,7 +1686,7 @@ pub fn find_test_only_dependencies(
             continue;
         }
 
-        if dependency_is_test_only(&dep, graph, config, test_globs) {
+        if dependency_is_test_only(&dep, graph, config, test_globs, &root_importers) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));
@@ -1729,9 +1786,9 @@ fn dependency_has_prod_value_import(
 /// (`@types/*`, `typescript`, ...), a workspace package, or config-ignored via
 /// `ignoreDependencies`.
 ///
-/// Like [`find_test_only_dependencies`], this checks the root `package.json`
-/// against the project-wide import graph; per-workspace `package.json` parity is
-/// a shared follow-up with the sibling dependency-family detectors.
+/// This checks the root `package.json` against the project-wide import graph;
+/// per-workspace `package.json` parity is a shared follow-up with the sibling
+/// dependency-family detectors.
 pub fn find_dev_dependencies_in_production(
     graph: &ModuleGraph,
     pkg: &PackageJson,

@@ -1901,3 +1901,62 @@ fn nodemon_package_json_config_key_credits_nodemon() {
         "nodemon has its config under nodemonConfig and must not be reported"
     );
 }
+
+/// A root declaration that every importer reaches through a nearer manifest
+/// gets one `unused-dependency` finding. The test-only and type-only checks
+/// read the same importers, so they do not also tell the user to move the
+/// root entry to `devDependencies`.
+#[test]
+fn root_dependency_used_only_through_a_workspace_gets_one_finding() {
+    let root = fixture_path("root-dependency-test-or-type-only-through-workspace");
+    let root_manifest = root.join("package.json");
+    let root_names = |deps: Vec<&fallow_types::results::UnusedDependency>| {
+        let mut names: Vec<String> = deps
+            .into_iter()
+            .filter(|dep| dep.path == root_manifest)
+            .map(|dep| dep.package_name.clone())
+            .collect();
+        names.sort();
+        names
+    };
+
+    let default =
+        fallow_core::analyze(&create_config(root.clone())).expect("analysis should succeed");
+    assert_eq!(
+        root_names(default.unused_dependencies.iter().map(|d| &d.dep).collect()),
+        vec!["assert-lib".to_string(), "schema-lib".to_string()],
+        "no importer uses the root declarations"
+    );
+    let test_only: Vec<&str> = default
+        .test_only_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        test_only.is_empty(),
+        "an unused root entry must not also get a test-only finding, got: {test_only:?}"
+    );
+
+    let production = fallow_core::analyze(&super::common::create_production_config(root))
+        .expect("production analysis should succeed");
+    assert!(
+        root_names(
+            production
+                .unused_dependencies
+                .iter()
+                .map(|d| &d.dep)
+                .collect()
+        )
+        .contains(&"schema-lib".to_string()),
+        "the root schema-lib declaration is unused in production mode"
+    );
+    let type_only: Vec<&str> = production
+        .type_only_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        type_only.is_empty(),
+        "an unused root entry must not also get a type-only finding, got: {type_only:?}"
+    );
+}

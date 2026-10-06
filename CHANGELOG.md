@@ -282,6 +282,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   walk passes peer-only entries and credits the first ancestor workspace that
   installs the package. The root manifest walk already used this rule.
 
+- **A root dependency that only workspaces use gets one finding.** Before, a
+  root `dependencies` entry could get an `unused-dependency` finding and also
+  a `test-only-dependency` or `type-only-dependency` finding. The first
+  finding said to remove the entry, the second said to move it to
+  `devDependencies`. This occurred when each importer was in a workspace that
+  installs the package itself. Now the test-only and type-only checks read
+  only the importers that use the root declaration, the same importers as
+  the unused check. Such a root entry now gets only the `unused-dependency`
+  finding.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

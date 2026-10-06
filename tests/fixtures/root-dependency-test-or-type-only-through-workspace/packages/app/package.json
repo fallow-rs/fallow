@@ -1,0 +1,11 @@
+{
+  "name": "app",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "schema-lib": "1.0.0"
+  },
+  "devDependencies": {
+    "assert-lib": "1.0.0"
+  }
+}
