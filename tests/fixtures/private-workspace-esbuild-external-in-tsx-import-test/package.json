@@ -1,0 +1,5 @@
+{
+  "name": "private-workspace-esbuild-external-in-tsx-import-test",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

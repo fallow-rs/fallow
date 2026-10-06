@@ -1,0 +1,18 @@
+{
+  "name": "consumer",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "lodash-es": "4.17.21",
+    "shared": "1.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0",
+    "vite": "5.0.0",
+    "vitest": "1.0.0"
+  }
+}

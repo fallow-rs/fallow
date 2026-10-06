@@ -292,6 +292,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the unused check. Such a root entry now gets only the `unused-dependency`
   finding.
 
+- **An esbuild call in a test file no longer removes the private-sibling
+  credit.** A consumer that depends on a private sibling gets credit for the
+  packages that the sibling ships, because its build inlines the sibling.
+  Before, any file of the consumer that imported esbuild and set
+  `packages: 'external'` removed this credit, test files included. Then
+  `fallow dead-code` reported the sibling's packages as unused in the
+  consumer. Now only a build file gives this signal. A build file is the
+  program file that a package script runs with a node runner (`node`,
+  `tsx`, `ts-node`, `babel-node` or `bun`), for example `build.mjs` in
+  `node build.mjs`, or a module of the same package that a build file
+  imports, statically or dynamically. A runner in test mode
+  (`node --test`, `bun test`) and a test runner such as
+  `vitest run test/plugin.test.ts` give no build file. A test file that a
+  node runner runs directly, such as `tsx test/plugin.test.ts`, also gives
+  no build file. A test file has `.test.` or `.spec.` in its name, or a
+  `test`, `tests` or `__tests__` directory in its path. A script argument
+  without an extension names its file when it has a path separator or a
+  `./` prefix: `node ./scripts/bundle` names `scripts/bundle.mjs` or
+  `scripts/bundle/index.mjs`, and `node ./build` names `build.mjs`. A bare
+  `node build` names no file.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

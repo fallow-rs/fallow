@@ -581,6 +581,7 @@ fn manifest<'a>(
         installed: declared.clone(),
         declared,
         externalizes_packages: false,
+        script_programs: Vec::new(),
     }
 }
 

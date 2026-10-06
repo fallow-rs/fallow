@@ -1,0 +1,5 @@
+{
+  "name": "private-workspace-externalized-esbuild-helper",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

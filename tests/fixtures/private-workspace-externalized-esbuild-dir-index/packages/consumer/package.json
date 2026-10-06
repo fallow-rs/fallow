@@ -1,0 +1,15 @@
+{
+  "name": "consumer",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "node ./scripts/bundle"
+  },
+  "dependencies": {
+    "lodash-es": "4.17.21",
+    "shared": "1.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
+}

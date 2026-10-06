@@ -317,6 +317,79 @@ struct WorkspaceManifest<'a> {
     /// A package script bundles with every package external
     /// (`bun build --packages=external`, `esbuild --packages=external`).
     externalizes_packages: bool,
+    /// The program file arguments that the package scripts run with a node
+    /// runner outside test mode, as written, for example `build.mjs` in
+    /// `node build.mjs`. These files and their import closure are the build
+    /// files for the esbuild `packages: 'external'` signal. The paths resolve
+    /// only for a workspace with a file that imports esbuild.
+    script_programs: Vec<String>,
+}
+
+/// The program file arguments that the scripts of `pkg` run with a node
+/// runner outside test mode.
+fn script_program_args(pkg: &PackageJson) -> Vec<String> {
+    pkg.scripts
+        .iter()
+        .flat_map(|scripts| scripts.values())
+        .flat_map(|script| crate::scripts::script_program_files(script))
+        .collect()
+}
+
+/// Absolute paths of the program files of `manifest`, resolved against the
+/// workspace root.
+fn script_file_paths(manifest: &WorkspaceManifest<'_>) -> FxHashSet<PathBuf> {
+    manifest
+        .script_programs
+        .iter()
+        .map(|file| normalize_lexically(&resolve_script_file(&manifest.root.join(file))))
+        .collect()
+}
+
+/// The file that a script file argument names. A runtime resolves an argument
+/// without an extension in this order: the exact file, the argument with a
+/// source extension, then the index file of the directory that it names. When
+/// no candidate exists, the argument path stays as it is.
+fn resolve_script_file(base: &Path) -> PathBuf {
+    if base.is_file() {
+        return base.to_path_buf();
+    }
+    let with_extension = crate::discover::SOURCE_EXTENSIONS
+        .iter()
+        .find_map(|extension| {
+            let mut candidate = base.as_os_str().to_owned();
+            candidate.push(".");
+            candidate.push(extension);
+            let candidate = PathBuf::from(candidate);
+            candidate.is_file().then_some(candidate)
+        });
+    let index = || {
+        crate::discover::SOURCE_EXTENSIONS
+            .iter()
+            .find_map(|extension| {
+                let candidate = base.join(format!("index.{extension}"));
+                candidate.is_file().then_some(candidate)
+            })
+    };
+    with_extension
+        .or_else(index)
+        .unwrap_or_else(|| base.to_path_buf())
+}
+
+/// Remove `.` components and apply `..` components without a file system
+/// lookup, so `./build.mjs` and `scripts/../build.mjs` compare equal to the
+/// module path.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
+    }
+    normalized
 }
 
 /// Names a workspace carries into anything that inlines its source.
@@ -364,6 +437,7 @@ fn read_workspace_manifests<'a>(
                         .values()
                         .any(|script| crate::scripts::script_externalizes_packages(script))
                 }),
+                script_programs: script_program_args(&pkg),
             })
         })
         .collect()
@@ -471,9 +545,13 @@ fn bundled_packages_for<'a>(
 /// Indices of the workspaces whose build leaves every package external.
 ///
 /// The signal is explicit: a package script that runs
-/// `bun build --packages=external` or `esbuild --packages=external`, or a file
-/// of the workspace that imports `esbuild` and sets `packages: 'external'`.
-/// Without it, a private sibling is assumed to be bundled.
+/// `bun build --packages=external` or `esbuild --packages=external`, or a build
+/// file that imports `esbuild` and sets `packages: 'external'`. A build file is
+/// a program file that a package script of the workspace runs with a node
+/// runner outside test mode and that does not look like a test, or a module of
+/// the same workspace that a build file imports (statically or dynamically). Other files, such as a test that calls esbuild, do
+/// not change how the workspace is built.
+/// Without a signal, a private sibling is assumed to be bundled.
 fn collect_externalizing_workspaces(
     graph: &ModuleGraph,
     manifests: &[WorkspaceManifest<'_>],
@@ -488,12 +566,24 @@ fn collect_externalizing_workspaces(
     let Some(file_ids) = graph.package_usage.get("esbuild") else {
         return externalizing;
     };
+    let candidates: FxHashSet<usize> = file_ids
+        .iter()
+        .filter_map(|id| ownership.workspace_index_for_file(*id))
+        .filter(|index| !externalizing.contains(index))
+        .collect();
+    if candidates.is_empty() {
+        return externalizing;
+    }
+    let build_files = collect_build_files(graph, manifests, ownership, &candidates);
     let mut checked: FxHashSet<FileId> = FxHashSet::default();
     for id in file_ids {
         let Some(index) = ownership.workspace_index_for_file(*id) else {
             continue;
         };
         if externalizing.contains(&index) || !checked.insert(*id) {
+            continue;
+        }
+        if !build_files.contains(id) {
             continue;
         }
         let Some(module) = graph.modules.get(id.0 as usize) else {
@@ -506,6 +596,57 @@ fn collect_externalizing_workspaces(
         }
     }
     externalizing
+}
+
+/// The build files of the `workspaces`: the program files that their package
+/// scripts run, plus the import closure of those files within the same
+/// workspace. The closure follows static and dynamic imports, but not
+/// type-only imports. A build script can delegate the bundler call to a helper
+/// module, as `build.mjs` does with `import "./lib/bundle.mjs"`.
+fn collect_build_files(
+    graph: &ModuleGraph,
+    manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+    workspaces: &FxHashSet<usize>,
+) -> FxHashSet<FileId> {
+    let script_files: FxHashMap<usize, FxHashSet<PathBuf>> = workspaces
+        .iter()
+        .filter_map(|index| {
+            let manifest = manifests.get(*index)?;
+            (!manifest.script_programs.is_empty()).then(|| (*index, script_file_paths(manifest)))
+        })
+        .collect();
+    if script_files.is_empty() {
+        return FxHashSet::default();
+    }
+    let mut pending: Vec<FileId> = graph
+        .modules
+        .iter()
+        .filter(|module| {
+            ownership
+                .workspace_index_for_file(module.file_id)
+                .and_then(|index| script_files.get(&index))
+                .is_some_and(|files| files.contains(&normalize_lexically(&module.path)))
+        })
+        .map(|module| module.file_id)
+        .collect();
+    let mut build_files: FxHashSet<FileId> = pending.iter().copied().collect();
+    while let Some(id) = pending.pop() {
+        let workspace = ownership.workspace_index_for_file(id);
+        for (target, symbols) in graph.outgoing_edge_symbols(id) {
+            let runs_target = symbols.is_empty()
+                || symbols
+                    .iter()
+                    .any(|symbol| !symbol.is_type_only && symbol.loads_target());
+            if runs_target
+                && ownership.workspace_index_for_file(target) == workspace
+                && build_files.insert(target)
+            {
+                pending.push(target);
+            }
+        }
+    }
+    build_files
 }
 
 /// Reverse index: workspace root -> packages with ANY file under that root using

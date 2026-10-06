@@ -224,6 +224,93 @@ pub fn script_externalizes_packages(script: &str) -> bool {
         })
 }
 
+/// Return the program files that a script runs with a node runner:
+/// `build.mjs` in `node build.mjs`, `scripts/build.ts` in
+/// `npx tsx scripts/build.ts`, or `build.ts` in `bun run build.ts`.
+///
+/// The program file is the first positional argument of the runner. A runner
+/// in test mode (`node --test`, `bun test`) runs test files, not a program,
+/// so it gives no file. A program file that looks like a test
+/// (`tsx test/a.test.ts`, `node test/run.mjs`) gives no file either. Other
+/// commands give no file: a test runner such as `vitest run test/a.test.ts`
+/// names test files, not a program.
+#[must_use]
+pub fn script_program_files(script: &str) -> Vec<String> {
+    shell::split_shell_operators(script)
+        .into_iter()
+        .filter_map(|segment| {
+            let words = shell::split_words(segment);
+            let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
+            command_program_file(&tokens)
+        })
+        .collect()
+}
+
+/// Node runner flags that run code from the command line instead of a file.
+const NODE_INLINE_CODE_FLAGS: &[&str] = &["-e", "--eval", "-p", "--print"];
+
+/// Node runner flags that take the next token as their value.
+const NODE_RUNNER_VALUE_FLAGS: &[&str] = &[
+    "-r",
+    "--require",
+    "--import",
+    "--loader",
+    "--experimental-loader",
+    "-C",
+    "--conditions",
+    "--env-file",
+    "--env-file-if-exists",
+    "--input-type",
+    "--tsconfig",
+];
+
+/// Path segments that hold test files.
+const TEST_DIRECTORY_SEGMENTS: &[&str] = &["test", "tests", "__tests__"];
+
+/// Whether a program file looks like a test: `.test.` or `.spec.` in the file
+/// name, or a `test`, `tests` or `__tests__` directory in the path. A
+/// `node:test` file often runs without `--test`, as in `tsx test/a.test.ts`.
+fn looks_like_test_file(path: &str) -> bool {
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
+    let file_name = segments.next_back().unwrap_or_default();
+    file_name.contains(".test.")
+        || file_name.contains(".spec.")
+        || segments.any(|segment| TEST_DIRECTORY_SEGMENTS.contains(&segment))
+}
+
+fn command_program_file(tokens: &[&str]) -> Option<String> {
+    let idx = shell::skip_initial_wrappers(tokens, 0)?;
+    // `bun build.ts` and `bun --watch build.ts` run a file with Bun itself.
+    // `bun x tsx build.ts` runs a binary, as `npx tsx build.ts` does.
+    let runs_binary = tokens[idx] != "bun" || matches!(tokens.get(idx + 1), Some(&("x" | "exec")));
+    let runner_idx = if runs_binary {
+        shell::advance_past_package_manager(tokens, idx)?
+    } else {
+        idx
+    };
+    let runner = tool_name(tokens[runner_idx]);
+    if !NODE_RUNNERS.contains(&runner) {
+        return None;
+    }
+    let mut i = runner_idx + 1;
+    while let Some(&token) = tokens.get(i) {
+        if NODE_INLINE_CODE_FLAGS.contains(&token) || token.starts_with("--test") {
+            return None;
+        }
+        if NODE_RUNNER_VALUE_FLAGS.contains(&token) {
+            i += 2;
+            continue;
+        }
+        if token.starts_with('-') || (runner == "bun" && matches!(token, "run" | "run-script")) {
+            i += 1;
+            continue;
+        }
+        return (looks_like_file_path(token) && !looks_like_test_file(token))
+            .then(|| token.to_string());
+    }
+    None
+}
+
 fn command_externalizes_packages(tokens: &[&str]) -> bool {
     let Some(idx) = shell::skip_initial_wrappers(tokens, 0) else {
         return false;
@@ -2961,6 +3048,52 @@ mod tests {
             "echo bun build --packages=external",
         ] {
             assert!(!script_externalizes_packages(script), "{script}");
+        }
+    }
+
+    #[test]
+    fn script_program_files_reads_node_runner_programs() {
+        for (script, expected) in [
+            ("node build.mjs", "build.mjs"),
+            ("node ./scripts/bundle", "./scripts/bundle"),
+            ("NODE_ENV=production node --import tsx build.ts", "build.ts"),
+            ("npx tsx scripts/build.ts --watch", "scripts/build.ts"),
+            ("bun run scripts/build.ts", "scripts/build.ts"),
+            ("bun --watch build.ts", "build.ts"),
+            ("bun x tsx build.ts", "build.ts"),
+            ("rm -rf dist && node build.mjs src/index.ts", "build.mjs"),
+            (
+                "tsx --tsconfig tsconfig.build.json scripts/build.ts",
+                "scripts/build.ts",
+            ),
+            ("node scripts/contest.mjs", "scripts/contest.mjs"),
+            ("node ./build", "./build"),
+        ] {
+            assert_eq!(script_program_files(script), vec![expected], "{script}");
+        }
+    }
+
+    #[test]
+    fn script_program_files_ignores_tests_and_other_commands() {
+        for script in [
+            "vitest run test/plugin.test.ts",
+            "node --test test/plugin.test.mjs",
+            "tsx --test test/plugin.test.ts",
+            "node --test-reporter=spec --test test/a.test.mjs",
+            "bun test test/plugin.test.ts",
+            "bun build ./src/index.ts --outdir dist",
+            "bun run build",
+            "node -e \"require('./build.js')\"",
+            "jest test/plugin.test.ts",
+            "node --import tsx test/plugin.test.ts",
+            "tsx test/plugin.test.ts",
+            "node test/run.mjs",
+            "node tests/run.mjs",
+            "node src/__tests__/run.mjs",
+            "node src/plugin.spec.mjs",
+            "node build",
+        ] {
+            assert!(script_program_files(script).is_empty(), "{script}");
         }
     }
 

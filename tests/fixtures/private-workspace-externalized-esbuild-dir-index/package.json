@@ -1,0 +1,5 @@
+{
+  "name": "private-workspace-externalized-esbuild-dir-index",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

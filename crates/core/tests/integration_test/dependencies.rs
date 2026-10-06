@@ -1396,11 +1396,18 @@ fn private_sibling_bundled_dependency_is_credited_to_the_consumer() {
 /// A consumer whose build leaves every package external does not inline the
 /// private sibling, so the sibling's packages do not need the consumer's
 /// declaration. The signal is esbuild `packages: 'external'` in a build file
-/// or `bun build --packages=external` in a package script.
+/// or `bun build --packages=external` in a package script. A script argument
+/// without an extension, such as `node scripts/build`, names the build file
+/// with a source extension or the index file of the directory. A module that
+/// a build file imports is also a build file, so `build.mjs` can delegate the
+/// esbuild call to `lib/bundle.mjs`.
 #[test]
 fn externalizing_consumer_gets_no_bundled_credit() {
     for fixture in [
         "private-workspace-externalized-esbuild",
+        "private-workspace-externalized-esbuild-helper",
+        "private-workspace-externalized-esbuild-no-extension",
+        "private-workspace-externalized-esbuild-dir-index",
         "private-workspace-externalized-bun-build",
     ] {
         let config = create_config(fixture_path(fixture));
@@ -1411,6 +1418,34 @@ fn externalizing_consumer_gets_no_bundled_credit() {
             reported,
             vec!["lodash-es".to_string()],
             "{fixture}: the externalized sibling's lodash-es is not credited to the consumer"
+        );
+    }
+}
+
+/// An esbuild call with `packages: 'external'` in a test file does not change
+/// how the consumer is built. Only a file that a node runner script runs
+/// outside test mode is a build file, and a test file is never one. A test
+/// runner that names the test file (`vitest run test/plugin.test.ts`,
+/// `node --test test/plugin.test.mjs`) or a node runner that runs it directly
+/// (`node --import tsx test/plugin.test.ts`, `tsx test/plugin.test.ts`) does
+/// not make it a build file, so the consumer keeps the credit for the private
+/// sibling.
+#[test]
+fn esbuild_external_in_test_file_keeps_bundled_credit() {
+    for fixture in [
+        "private-workspace-esbuild-external-in-test",
+        "private-workspace-esbuild-external-in-named-test",
+        "private-workspace-esbuild-external-in-node-test",
+        "private-workspace-esbuild-external-in-tsx-import-test",
+        "private-workspace-esbuild-external-in-tsx-test",
+    ] {
+        let config = create_config(fixture_path(fixture));
+        let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+        let reported = unused_dependency_names_for(&results, "packages/consumer/package.json");
+        assert!(
+            !reported.iter().any(|name| name == "lodash-es"),
+            "{fixture}: the build inlines the private sibling, so its lodash-es stays credited to the consumer, got: {reported:?}"
         );
     }
 }
