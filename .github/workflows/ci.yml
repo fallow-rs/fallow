@@ -164,6 +164,8 @@ jobs:
               - 'crates/cli/tests/drift/**'
               - 'crates/cli/tests/integration/exit_code_tests.rs'
               - 'crates/cli/src/agent_install/mcp.rs'
+              - 'crates/cli/src/agent_install/mod.rs'
+              - 'crates/cli/src/agent_install/status.rs'
               - 'crates/cli/src/audit_tests.rs'
               - 'crates/cli/src/base_worktree.rs'
               - 'crates/cli/src/ci_template.rs'

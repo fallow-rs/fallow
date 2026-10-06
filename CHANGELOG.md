@@ -196,6 +196,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow hooks status` and `fallow agent status` show paths with `/` on
+  Windows.** Before, the `path` fields in the JSON status output and the
+  status rows used `\`, for example `.codex\hooks\fallow-gate.sh`. Now
+  every path in this output uses `/` on all platforms, as other Fallow JSON
+  output does. The install lines of `fallow hooks install` also use `/`.
+
 - **A `postcss.config.*` file now credits the PostCSS plugins that it names,
   also when the project declares no `postcss` package.** A bundler such as
   Next.js loads the config with its own copy of PostCSS. Before, fallow read

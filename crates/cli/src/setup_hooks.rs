@@ -1610,15 +1610,32 @@ fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
+/// Render a path relative to `root` with `/` separators on every platform,
+/// so the status JSON keeps one path shape on Windows too.
 pub fn display_rel(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .map_or_else(|_| path.display().to_string(), |p| p.display().to_string())
+    crate::agent_install::display_path(root, None, path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn display_rel_uses_forward_slashes() {
+        let root = Path::new("/project");
+        // A Windows path renders with `\`. On Unix the same text is one file
+        // name, so this shape fails on every platform without the fix.
+        let windows_shape = root.join(".codex\\hooks\\fallow-gate.sh");
+        assert_eq!(
+            display_rel(root, &windows_shape),
+            ".codex/hooks/fallow-gate.sh"
+        );
+        assert_eq!(
+            display_rel(root, &root.join(".codex").join("hooks.json")),
+            ".codex/hooks.json"
+        );
+    }
 
     fn opts(root: &Path) -> SetupHooksOptions<'_> {
         SetupHooksOptions {
