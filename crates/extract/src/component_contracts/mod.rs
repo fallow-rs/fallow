@@ -951,6 +951,10 @@ impl ContractCollector<'_, '_> {
     }
 
     fn collect_escapes(&mut self) {
+        // A file can reference one binding many times. Keep one escape per target,
+        // so the final sort works on unique targets only.
+        let mut escaped: FxHashSet<ComponentReference> =
+            self.facts.escapes.iter().cloned().collect();
         for node in self.semantic.nodes().iter() {
             if matches!(node.kind(), AstKind::StaticMemberExpression(member) if matches!(member.property.name.as_str(), "innerHTML" | "outerHTML"))
             {
@@ -974,24 +978,28 @@ impl ContractCollector<'_, '_> {
             let target = self.binding_reference(id, 0);
             let ComponentReference::Local { span_start, .. } = &target else {
                 if matches!(target, ComponentReference::Import { .. })
+                    && !escaped.contains(&target)
                     && !self.static_angular_registry(node.id())
                     && !self
                         .safe_reference_parent(self.semantic.nodes().parent_kind(node.id()), span)
                 {
+                    escaped.insert(target.clone());
                     self.facts.escapes.push(target);
                 }
                 continue;
             };
             if self.components.contains(span_start)
+                && !escaped.contains(&target)
                 && !self.static_angular_registry(node.id())
                 && !self.safe_reference_parent(self.semantic.nodes().parent_kind(node.id()), span)
             {
+                escaped.insert(target.clone());
                 self.facts.escapes.push(target);
             }
         }
         self.facts
             .escapes
-            .sort_by_key(|reference| format!("{reference:?}"));
+            .sort_by_cached_key(|reference| format!("{reference:?}"));
         self.facts.escapes.dedup();
         self.facts
             .incomplete_frameworks

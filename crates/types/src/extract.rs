@@ -4922,7 +4922,7 @@ pub enum ComponentFramework {
 }
 
 /// Stable component binding identity, independent of transient parser symbols.
-#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, bitcode::Encode, bitcode::Decode)]
 pub enum ComponentReference {
     /// A same-module declaration, including resolved immutable local aliases.
     Local {
