@@ -1,0 +1,8 @@
+{
+  "name": "kit-lib",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "peerDependencies": {
+    "build-kit": "^1.0.0"
+  }
+}

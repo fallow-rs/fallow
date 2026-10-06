@@ -709,3 +709,50 @@ fn peer_only_declaration_does_not_install() {
         &[app]
     ));
 }
+
+/// A manifest that lists `package_name` only in `peerDependencies`.
+fn peer_only_manifest<'a>(
+    root: &'a str,
+    package_name: &str,
+    is_private: bool,
+) -> super::super::WorkspaceManifest<'a> {
+    let mut peer = manifest(root, &[package_name], is_private);
+    peer.installed.clear();
+    peer
+}
+
+#[test]
+fn ancestor_walk_passes_a_peer_only_intermediate_workspace() {
+    let manifests = [
+        manifest("/project/apps/tool", &["build-kit"], true),
+        peer_only_manifest("/project/apps/tool/packages/lib", "build-kit", false),
+        manifest("/project/apps/tool/packages/lib/cli", &[], true),
+    ];
+
+    assert_eq!(
+        ancestor_root_for(
+            "/project/apps/tool/packages/lib/cli/src/index.ts",
+            "build-kit",
+            &manifests
+        ),
+        Some(PathBuf::from("/project/apps/tool")),
+        "the ancestor that installs the package gets the credit"
+    );
+}
+
+#[test]
+fn peer_only_owner_credits_the_installing_ancestor() {
+    let manifests = [
+        manifest("/project/apps/tool", &["build-kit"], true),
+        peer_only_manifest("/project/apps/tool/packages/cli", "build-kit", true),
+    ];
+
+    assert_eq!(
+        ancestor_root_for(
+            "/project/apps/tool/packages/cli/src/index.ts",
+            "build-kit",
+            &manifests
+        ),
+        Some(PathBuf::from("/project/apps/tool")),
+    );
+}

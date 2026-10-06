@@ -1,0 +1,5 @@
+{
+  "name": "workspace-ancestor-peer-only-chain",
+  "private": true,
+  "workspaces": ["packages/kit", "packages/kit/lib", "packages/kit/lib/cli", "packages/kit/app"]
+}

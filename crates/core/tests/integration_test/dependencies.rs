@@ -576,6 +576,30 @@ fn ancestor_declaration_is_credited_when_it_satisfies_a_descendant_import() {
     );
 }
 
+/// A `peerDependencies` entry installs nothing. A peer-only entry in the
+/// owning workspace or in an intermediate ancestor does not stop the walk to
+/// the ancestor workspace that installs the package.
+#[test]
+fn ancestor_credit_passes_peer_only_declarations() {
+    let root = fixture_path("workspace-ancestor-peer-only-chain");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let manifest = root.join("packages/kit/package.json");
+    let reported: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .filter(|dep| dep.dep.path == manifest)
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+    assert!(
+        reported.is_empty(),
+        "the kit devDependencies satisfy the nested imports, got: {reported:?}"
+    );
+    assert!(unlisted_sites_for(&results, "build-kit").is_empty());
+    assert!(unlisted_sites_for(&results, "format-kit").is_empty());
+}
+
 /// Each import credits the nearest manifest that installs the package. A root
 /// declaration stays used only for an importer outside every workspace or an
 /// importer whose workspace chain does not install the package.

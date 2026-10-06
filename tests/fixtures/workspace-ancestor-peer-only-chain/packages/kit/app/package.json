@@ -1,0 +1,8 @@
+{
+  "name": "kit-app",
+  "private": true,
+  "main": "src/index.ts",
+  "peerDependencies": {
+    "format-kit": "^1.0.0"
+  }
+}

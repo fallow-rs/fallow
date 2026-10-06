@@ -1,0 +1,9 @@
+{
+  "name": "kit",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "build-kit": "^1.0.0",
+    "format-kit": "^1.0.0"
+  }
+}

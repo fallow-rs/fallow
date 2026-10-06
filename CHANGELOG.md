@@ -274,6 +274,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `import=tsx`. nodemon is now also credited when its config is under the
   package.json `nodemonConfig` key. A YAML `.mocharc` file is not parsed.
 
+- **A peer-only entry no longer hides the ancestor workspace that installs a
+  package.** A `peerDependencies` entry installs nothing. Before, a peer-only
+  entry in a nested workspace, or in a workspace between it and an ancestor,
+  stopped the ancestor walk. The ancestor workspace that installs the package
+  then got no credit, and fallow reported its declaration as unused. Now the
+  walk passes peer-only entries and credits the first ancestor workspace that
+  installs the package. The root manifest walk already used this rule.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

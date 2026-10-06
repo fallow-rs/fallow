@@ -537,7 +537,7 @@ fn collect_workspace_used_packages<'a>(
 /// Reverse index: workspace root -> packages that a descendant workspace's files
 /// import through that workspace's declaration.
 ///
-/// A file whose own workspace does not declare a package may use the first
+/// A file whose own workspace does not install a package may use the first
 /// ancestor workspace that does, under the rule of
 /// [`accepts_ancestor_declaration`] that the unlisted-dependency check applies.
 /// The import then counts as a use of that ancestor's declaration, so the two
@@ -565,9 +565,13 @@ fn collect_ancestor_credited_packages<'a>(
 }
 
 /// The ancestor workspace whose declaration satisfies an import of
-/// `package_name` in file `id`, or `None` when the owning workspace declares
+/// `package_name` in file `id`, or `None` when the owning workspace installs
 /// the package itself, the file may not use an ancestor declaration, or no
-/// ancestor workspace declares it.
+/// ancestor workspace installs it.
+///
+/// The walk tests `installed`, as [`workspace_chain_installs`] does. A
+/// `peerDependencies` entry alone installs nothing, so it does not stop the
+/// walk before the ancestor that provides the package.
 fn ancestor_satisfying_import<'m, 'a>(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
@@ -578,7 +582,7 @@ fn ancestor_satisfying_import<'m, 'a>(
 ) -> Option<&'m WorkspaceManifest<'a>> {
     let index = ownership.workspace_index_for_file(id)?;
     let owner = manifests.get(index)?;
-    if owner.declared.contains(package_name) {
+    if owner.installed.contains(package_name) {
         return None;
     }
     let module = graph.modules.get(id.0 as usize)?;
@@ -589,7 +593,7 @@ fn ancestor_satisfying_import<'m, 'a>(
         .ancestors_of(index)
         .iter()
         .filter_map(|ancestor| manifests.get(*ancestor))
-        .find(|ancestor| ancestor.declared.contains(package_name))
+        .find(|ancestor| ancestor.installed.contains(package_name))
 }
 
 /// Packages whose import in at least one file is attributed to the root
