@@ -1,0 +1,4 @@
+{
+  "require": ["tsx", "./test/setup.ts"],
+  "node-option": ["loader=ts-node/esm"]
+}

@@ -265,6 +265,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does. Only Playwright adds the test entries of all its configs together.
   Other test runner plugins keep the entries of the last config, as before.
 
+- **A runtime loader that a tool config loads is no longer an unused
+  devDependency.** Jest needs `ts-node` to read `jest.config.ts`, so a
+  TypeScript Jest config now credits `ts-node`, or the loader that its
+  `@jest-config-loader` pragma names. The Mocha plugin now reads `.mocharc`
+  files and the package.json `mocha` key. It credits the packages in
+  `require` and the loader packages in `node-option`, for example
+  `import=tsx`. nodemon is now also credited when its config is under the
+  package.json `nodemonConfig` key. A YAML `.mocharc` file is not parsed.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

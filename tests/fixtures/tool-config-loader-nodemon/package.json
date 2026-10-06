@@ -1,0 +1,15 @@
+{
+  "name": "tool-config-loader-nodemon",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "nodemonConfig": {
+    "watch": ["src"]
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}

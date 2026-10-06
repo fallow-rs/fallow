@@ -1,0 +1,14 @@
+{
+  "name": "tool-config-loader-jest",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "ts-node": "^10.0.0",
+    "tsx": "^4.0.0"
+  }
+}

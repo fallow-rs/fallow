@@ -29,6 +29,16 @@ use super::{Plugin, PluginResult};
 /// Built-in Jest reporter names that should not be treated as dependencies.
 const BUILTIN_REPORTERS: &[&str] = &["default", "verbose", "summary"];
 
+/// The package Jest uses to load a TypeScript config file when the file names
+/// no other loader.
+const DEFAULT_TS_CONFIG_LOADER: &str = "ts-node";
+
+/// The docblock pragma that names the loader for a TypeScript config file.
+const CONFIG_LOADER_PRAGMA: &str = "@jest-config-loader";
+
+/// Config file extensions that Jest loads through a TypeScript loader.
+const TS_CONFIG_EXTENSIONS: &[&str] = &["ts", "mts", "cts"];
+
 /// Maximum depth for following `projects` chains across nested Jest configs.
 /// Real monorepos rarely chain more than 2 levels (root, then per-package);
 /// 4 is a generous ceiling that also bounds pathological inputs.
@@ -87,6 +97,31 @@ define_plugin!(
     },
 );
 
+/// The package that Jest needs to load `config_path` when it is a TypeScript
+/// file: the package that the `@jest-config-loader` pragma names, else
+/// `ts-node`.
+fn ts_config_loader(config_path: &Path, source: &str) -> Option<String> {
+    let extension = config_path.extension().and_then(|ext| ext.to_str())?;
+    if !TS_CONFIG_EXTENSIONS.contains(&extension) {
+        return None;
+    }
+    let pragma_loader = source
+        .match_indices(CONFIG_LOADER_PRAGMA)
+        .find_map(|(at, _)| {
+            let rest = &source[at + CONFIG_LOADER_PRAGMA.len()..];
+            if !rest.starts_with(char::is_whitespace) {
+                return None;
+            }
+            rest.split_whitespace()
+                .next()
+                .filter(|name| config_parser::is_package_specifier(name))
+        });
+    Some(pragma_loader.map_or_else(
+        || DEFAULT_TS_CONFIG_LOADER.to_string(),
+        crate::resolve::extract_package_name,
+    ))
+}
+
 /// Parse a Jest config and recurse into any `projects` entries.
 ///
 /// The visited set is keyed by canonicalized config path so cycles
@@ -117,6 +152,10 @@ fn extract_jest_config(
         (source.to_string(), config_path.to_path_buf())
     };
     let parse_path: &Path = &parse_path_buf;
+
+    if let Some(loader) = ts_config_loader(config_path, source) {
+        result.referenced_dependencies.push(loader);
+    }
 
     let imports = config_parser::extract_imports(&parse_source, parse_path);
     for imp in &imports {
@@ -1451,6 +1490,65 @@ mod tests {
             result.referenced_dependencies.len(),
             1,
             "no extra deps should be credited from a package.json with no jest key, got: {:?}",
+            result.referenced_dependencies,
+        );
+    }
+
+    #[test]
+    fn typescript_config_credits_ts_node_as_the_default_loader() {
+        assert_eq!(
+            ts_config_loader(Path::new("/project/jest.config.ts"), "export default {};"),
+            Some("ts-node".to_string())
+        );
+        assert_eq!(
+            ts_config_loader(
+                Path::new("/project/jest.config.cts"),
+                "module.exports = {};"
+            ),
+            Some("ts-node".to_string())
+        );
+    }
+
+    #[test]
+    fn typescript_config_credits_the_loader_that_the_pragma_names() {
+        let source = "/** @jest-config-loader esbuild-register */\nexport default {};";
+        assert_eq!(
+            ts_config_loader(Path::new("/project/jest.config.ts"), source),
+            Some("esbuild-register".to_string())
+        );
+    }
+
+    #[test]
+    fn loader_options_pragma_does_not_name_the_loader() {
+        let source =
+            "/** @jest-config-loader-options {\"transpileOnly\": true} */\nexport default {};";
+        assert_eq!(
+            ts_config_loader(Path::new("/project/jest.config.ts"), source),
+            Some("ts-node".to_string())
+        );
+    }
+
+    #[test]
+    fn javascript_config_needs_no_loader() {
+        assert_eq!(
+            ts_config_loader(Path::new("/project/jest.config.js"), "module.exports = {};"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_config_credits_the_typescript_config_loader() {
+        let result = JestPlugin.resolve_config(
+            Path::new("/project/jest.config.ts"),
+            "export default { testEnvironment: 'node' };",
+            Path::new("/project"),
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .iter()
+                .any(|dep| dep == "ts-node"),
+            "jest.config.ts must credit ts-node, got: {:?}",
             result.referenced_dependencies,
         );
     }

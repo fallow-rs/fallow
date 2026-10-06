@@ -1840,6 +1840,7 @@ macro_rules! define_plugin {
         $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
         $(, provided_dependencies: $provided_dependencies:expr)?
+        $(, package_json_config_key: $pkg_key:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         $(,)?
     ) => {
@@ -1864,6 +1865,12 @@ macro_rules! define_plugin {
             $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
             $( fn generated_type_import_prefixes(&self) -> &'static [&'static str] { $generated_type_prefixes } )?
             $( fn provided_dependencies(&self) -> Vec<ProvidedDependencyRule> { $provided_dependencies } )?
+
+            $(
+                fn package_json_config_key(&self) -> Option<&'static str> {
+                    Some($pkg_key)
+                }
+            )?
 
             $(
                 fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {

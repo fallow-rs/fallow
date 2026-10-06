@@ -1833,3 +1833,47 @@ fn plugin_tooling_root_dev_dependency_credited_by_workspace_config() {
         "a config file in a workspace package should credit the root tooling devDependency"
     );
 }
+
+fn unused_dev_dependency_names(fixture: &str) -> Vec<String> {
+    let config = create_config(fixture_path(fixture));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut names: Vec<String> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.clone())
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+/// Jest loads a TypeScript config file through `ts-node`, so `ts-node` is
+/// used when `jest.config.ts` exists. Another runtime loader that nothing
+/// loads stays unused.
+#[test]
+fn jest_typescript_config_credits_its_config_loader() {
+    assert_eq!(
+        unused_dev_dependency_names("tool-config-loader-jest"),
+        vec!["tsx"],
+        "ts-node loads jest.config.ts and must not be reported"
+    );
+}
+
+/// Mocha loads the packages in the `require` and `node-option` entries of
+/// its config file. A loader that the config does not name stays unused.
+#[test]
+fn mocha_config_credits_required_loaders() {
+    assert_eq!(
+        unused_dev_dependency_names("tool-config-loader-mocha"),
+        vec!["@swc/register"],
+        "tsx (require) and ts-node (node-option loader) must not be reported"
+    );
+}
+
+/// nodemon reads its config from the package.json `nodemonConfig` key.
+#[test]
+fn nodemon_package_json_config_key_credits_nodemon() {
+    assert!(
+        unused_dev_dependency_names("tool-config-loader-nodemon").is_empty(),
+        "nodemon has its config under nodemonConfig and must not be reported"
+    );
+}

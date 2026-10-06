@@ -1,6 +1,7 @@
 //! nodemon plugin.
 //!
-//! Detects nodemon projects and marks config files as always used.
+//! Detects nodemon projects and marks config files as always used. nodemon
+//! also reads its config from the package.json `nodemonConfig` key.
 
 use super::Plugin;
 
@@ -15,4 +16,5 @@ define_plugin! {
     enablers: ENABLERS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
+    package_json_config_key: "nodemonConfig",
 }
