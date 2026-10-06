@@ -196,6 +196,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow health --format markdown` with groups shows project-relative paths on
+  Windows.** The finding rows of a grouped health report showed the absolute
+  path, such as `D:/repo/src/a.ts`, because the project root used backslashes
+  and the finding path used forward slashes. Now both sides use forward
+  slashes, so the rows show `src/a.ts`. A saved report rendered with
+  `fallow report --from` already showed the relative path.
+
 - **`fallow hooks status` and `fallow agent status` show paths with `/` on
   Windows.** Before, the `path` fields in the JSON status output and the
   status rows used `\`, for example `.codex\hooks\fallow-gate.sh`. Now

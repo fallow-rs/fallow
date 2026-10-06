@@ -209,11 +209,14 @@ fn write_finding_row(out: &mut String, finding: &Value, root_prefix: &str) {
         .get("path")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    // A live Windows run gives the root with backslashes and the finding path
+    // with forward slashes, so compare both with forward slashes.
+    let path = path.replace('\\', "/");
+    let root_prefix = root_prefix.replace('\\', "/");
     let path = path
-        .strip_prefix(root_prefix)
-        .filter(|rest| !root_prefix.is_empty() && rest.starts_with(['/', '\\']))
-        .map_or(path, |rest| rest.trim_start_matches(['/', '\\']))
-        .replace('\\', "/");
+        .strip_prefix(root_prefix.as_str())
+        .filter(|rest| !root_prefix.is_empty() && rest.starts_with('/'))
+        .map_or(path.as_str(), |rest| rest.trim_start_matches('/'));
     let line = count(finding, "line");
     let crap = finding
         .get("crap")
@@ -315,6 +318,31 @@ mod tests {
         let out = build_health_groups_markdown(&envelope(), "/repo");
         assert!(out.contains("<summary><code>@team/b</code>: 1 finding</summary>"));
         assert!(out.contains("| `src/b.ts:3` | `big` | critical | 30 | 40 | - | 90 |"));
+    }
+
+    #[test]
+    fn details_strip_a_windows_root_with_either_separator() {
+        let envelope = |path: &str| {
+            serde_json::json!({
+                "grouped_by": "owner",
+                "groups": [{
+                    "key": "@team/w",
+                    "files_analyzed": 1,
+                    "functions_above_threshold": 1,
+                    "findings": [{ "path": path, "line": 1, "name": "w" }]
+                }]
+            })
+        };
+        for (path, root) in [
+            ("D:/a/repo/src/w.ts", r"D:\a\repo"),
+            (r"D:\a\repo\src\w.ts", "D:/a/repo"),
+        ] {
+            let out = build_health_groups_markdown(&envelope(path), root);
+            assert!(
+                out.contains("| `src/w.ts:1` | `w` |"),
+                "{path} {root}: {out}"
+            );
+        }
     }
 
     #[test]
