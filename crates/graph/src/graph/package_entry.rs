@@ -53,14 +53,13 @@ fn match_canonical_entry_under_package<'a>(
         })
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     // A module whose discovered (raw) path goes through a symlinked directory
     // has a raw path that differs from the canonical entry path. The raw-map
     // lookup cannot reach it, so the package-scoped canonical match must.
-    #[cfg(unix)]
     #[cfg_attr(miri, ignore)]
     #[test]
     fn scoped_canonical_matches_module_reached_through_symlink() {
