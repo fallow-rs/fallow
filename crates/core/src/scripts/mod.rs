@@ -30,7 +30,7 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub use resolve::{
-    DependencyBinaries, build_bin_to_package_map, resolve_binary_to_package,
+    DependencyBinaries, build_bin_to_package_map, resolve_binary_to_packages,
     resolve_known_dependency_binary,
 };
 pub use shell::command_substitutions;
@@ -1468,11 +1468,11 @@ fn accumulate_parsed_commands(
     result: &mut ScriptAnalysis,
 ) {
     for wrapper in ENV_WRAPPERS {
-        if command.split_whitespace().any(|token| token == *wrapper) {
-            let pkg = resolve_binary_to_package(wrapper, root, bin_map);
-            if !is_builtin_command(wrapper) {
-                result.used_packages.insert(pkg);
-            }
+        if command.split_whitespace().any(|token| token == *wrapper) && !is_builtin_command(wrapper)
+        {
+            result
+                .used_packages
+                .extend(resolve_binary_to_packages(wrapper, root, bin_map));
         }
     }
 
@@ -1480,12 +1480,16 @@ fn accumulate_parsed_commands(
         if !cmd.binary.is_empty() && !is_builtin_command(&cmd.binary) {
             if NODE_RUNNERS.contains(&cmd.binary.as_str()) {
                 if cmd.binary != "node" && cmd.binary != "bun" {
-                    let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
-                    result.used_packages.insert(pkg);
+                    result.used_packages.extend(resolve_binary_to_packages(
+                        &cmd.binary,
+                        root,
+                        bin_map,
+                    ));
                 }
             } else {
-                let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
-                result.used_packages.insert(pkg);
+                result
+                    .used_packages
+                    .extend(resolve_binary_to_packages(&cmd.binary, root, bin_map));
             }
         }
 
@@ -3743,38 +3747,39 @@ mod tests {
     #[test]
     fn tsc_maps_to_typescript() {
         let pkg =
-            resolve_binary_to_package("tsc", Path::new("/nonexistent"), &FxHashMap::default());
-        assert_eq!(pkg, "typescript");
+            resolve_binary_to_packages("tsc", Path::new("/nonexistent"), &FxHashMap::default());
+        assert_eq!(pkg, ["typescript"]);
     }
 
     #[test]
     fn ng_maps_to_angular_cli() {
-        let pkg = resolve_binary_to_package("ng", Path::new("/nonexistent"), &FxHashMap::default());
-        assert_eq!(pkg, "@angular/cli");
+        let pkg =
+            resolve_binary_to_packages("ng", Path::new("/nonexistent"), &FxHashMap::default());
+        assert_eq!(pkg, ["@angular/cli"]);
     }
 
     #[test]
     fn biome_maps_to_biomejs() {
         let pkg =
-            resolve_binary_to_package("biome", Path::new("/nonexistent"), &FxHashMap::default());
-        assert_eq!(pkg, "@biomejs/biome");
+            resolve_binary_to_packages("biome", Path::new("/nonexistent"), &FxHashMap::default());
+        assert_eq!(pkg, ["@biomejs/biome"]);
     }
 
     #[test]
     fn unknown_binary_is_identity() {
-        let pkg = resolve_binary_to_package(
+        let pkg = resolve_binary_to_packages(
             "my-custom-tool",
             Path::new("/nonexistent"),
             &FxHashMap::default(),
         );
-        assert_eq!(pkg, "my-custom-tool");
+        assert_eq!(pkg, ["my-custom-tool"]);
     }
 
     #[test]
-    fn run_s_maps_to_npm_run_all() {
+    fn run_s_maps_to_npm_run_all_and_its_fork() {
         let pkg =
-            resolve_binary_to_package("run-s", Path::new("/nonexistent"), &FxHashMap::default());
-        assert_eq!(pkg, "npm-run-all");
+            resolve_binary_to_packages("run-s", Path::new("/nonexistent"), &FxHashMap::default());
+        assert_eq!(pkg, ["npm-run-all", "npm-run-all2"]);
     }
 
     #[test]
@@ -5413,11 +5418,12 @@ mod tests {
                 let _ = is_env_assignment(&s);
             }
 
-            /// resolve_binary_to_package should always return a non-empty string.
+            /// resolve_binary_to_packages should always return non-empty package names.
             #[test]
             fn resolve_binary_always_non_empty(binary in "[a-z][a-z0-9-]{0,20}") {
-                let result = resolve_binary_to_package(&binary, Path::new("/nonexistent"), &FxHashMap::default());
-                prop_assert!(!result.is_empty(), "Package name should never be empty");
+                let result = resolve_binary_to_packages(&binary, Path::new("/nonexistent"), &FxHashMap::default());
+                prop_assert!(!result.is_empty(), "Package list should never be empty");
+                prop_assert!(result.iter().all(|pkg| !pkg.is_empty()), "Package name should never be empty");
             }
 
             /// Chained scripts should produce at least as many commands as operators + 1

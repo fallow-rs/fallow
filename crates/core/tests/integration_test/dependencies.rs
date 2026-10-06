@@ -1738,3 +1738,27 @@ fn postcss_config_credits_plugins_without_postcss_dependency() {
         "the bundler loads postcss.config.mjs: {unused_files:?}"
     );
 }
+
+/// A script binary credits the package that installs it, also when
+/// `node_modules` is missing. The binary name differs from the package name
+/// here: `run-p` comes from `npm-run-all2`, `ember` from `ember-cli`, `ncu`
+/// from `npm-check-updates`, and so on.
+#[test]
+fn script_binary_credits_installing_package_without_node_modules() {
+    let root = fixture_path("script-binary-package-credit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    unused_dev_dep_names.sort_unstable();
+
+    assert_eq!(
+        unused_dev_dep_names,
+        vec!["unused-control"],
+        "each tool that a script runs must be credited through its binary name"
+    );
+}

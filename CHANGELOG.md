@@ -206,6 +206,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extraction cache version changes, so the first run after the upgrade
   parses all files again.
 
+- **A script binary now credits the package that installs it when the
+  binary name and the package name are different.** Before, `run-p` and
+  `run-s` credited only `npm-run-all`, so a project with `npm-run-all2`
+  reported it as unused. Without `node_modules`, scripts such as
+  `ember build`, `nest build`, `cap sync`, `cucumber-js`, `depcruise`, `cz`,
+  `tsgo`, `flow`, `ncu`, `dotenv`, `npmPkgJsonLint`, `i18next` and
+  `manypkg` did not credit `ember-cli`, `@nestjs/cli`, `@capacitor/cli`,
+  `@cucumber/cucumber`, `dependency-cruiser`, `commitizen`,
+  `@typescript/native-preview`, `flow-bin`, `npm-check-updates`,
+  `dotenv-cli`, `npm-package-json-lint`, `i18next-parser` and
+  `@manypkg/cli`. Plugins that need a script reference, such as Ember, also
+  lost their tooling credit. Now a binary maps to every package that can
+  provide it, and an installed package selects one of them.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

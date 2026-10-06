@@ -1,0 +1,47 @@
+{
+  "name": "script-binary-package-credit",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "all": "run-p lint test",
+    "seq": "run-s lint test",
+    "lint": "depcruise src",
+    "test": "cucumber-js",
+    "build": "ember build --environment=production",
+    "server": "nest build",
+    "mobile": "cap sync",
+    "commit": "cz",
+    "typecheck": "tsgo --noEmit",
+    "flow": "flow check",
+    "upgrade": "ncu -u",
+    "start": "dotenv -e .env -- node src/index.js",
+    "pkglint": "npmPkgJsonLint .",
+    "i18n": "i18next 'src/**'",
+    "mono": "manypkg check"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0",
+    "@nestjs/core": "^10.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
+    "@cucumber/cucumber": "^11.0.0",
+    "@manypkg/cli": "^0.21.0",
+    "@nestjs/cli": "^10.0.0",
+    "@typescript/native-preview": "^7.0.0-dev.20250601.1",
+    "commitizen": "^4.3.0",
+    "dependency-cruiser": "^16.0.0",
+    "dotenv-cli": "^7.4.0",
+    "ember-cli": "^5.0.0",
+    "ember-cli-babel": "^8.0.0",
+    "ember-cli-htmlbars": "^6.0.0",
+    "ember-source": "^5.0.0",
+    "flow-bin": "^0.250.0",
+    "i18next-parser": "^9.0.0",
+    "npm-check-updates": "^17.0.0",
+    "npm-package-json-lint": "^8.0.0",
+    "npm-run-all2": "^7.0.0",
+    "unused-control": "^1.0.0"
+  }
+}
