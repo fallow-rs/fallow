@@ -481,6 +481,26 @@ fn api_and_cli_use_duplicate_output_contracts_from_types() {
     }
 }
 
+/// `env!` writes the checkout path into the compiled crate. A build cache then
+/// cannot share the crate between worktrees, so tests read the variable at run
+/// time.
+#[test]
+fn sources_read_manifest_dir_at_run_time() {
+    let forbidden = concat!("env!(\"", "CARGO_MANIFEST_DIR", "\")");
+    let offenders: Vec<String> = rust_sources_under(["crates"])
+        .into_iter()
+        .filter(|source_path| {
+            read_source_without_line_comments(source_path)
+                .unwrap_or_else(|error| panic!("read {source_path}: {error}"))
+                .contains(forbidden)
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "read CARGO_MANIFEST_DIR with std::env::var_os at run time, not {forbidden}: {offenders:?}"
+    );
+}
+
 #[test]
 fn api_and_cli_use_trace_output_contracts_from_types() {
     let trace_contract_types = [
