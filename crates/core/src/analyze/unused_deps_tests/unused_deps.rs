@@ -367,6 +367,100 @@ fn optional_peer_dependency_of_used_package_not_flagged() {
     );
 }
 
+/// An optional peer that the manifest does not list is not turned on, so it
+/// does not pass credit on to its own peers, required or optional. A listed
+/// optional peer does.
+#[test]
+fn unlisted_optional_peer_does_not_credit_its_own_peers() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    for (name, manifest) in [
+        (
+            "host",
+            r#"{"name":"host","peerDependencies":{"unlisted-mid":"^1","listed-mid":"^1"},
+"peerDependenciesMeta":{"unlisted-mid":{"optional":true},"listed-mid":{"optional":true}}}"#,
+        ),
+        (
+            "unlisted-mid",
+            r#"{"name":"unlisted-mid","peerDependencies":{"leaf-a":"^1","leaf-b":"^1"},
+"peerDependenciesMeta":{"leaf-a":{"optional":true}}}"#,
+        ),
+        (
+            "listed-mid",
+            r#"{"name":"listed-mid","peerDependencies":{"leaf-c":"^1"},
+"peerDependenciesMeta":{"leaf-c":{"optional":true}}}"#,
+        ),
+    ] {
+        std::fs::create_dir_all(root.join("node_modules").join(name)).expect("create package dir");
+        std::fs::write(
+            root.join("node_modules").join(name).join("package.json"),
+            manifest,
+        )
+        .expect("write package");
+    }
+
+    let (graph, _) = build_graph_with_npm_imports(&[("host", false)]);
+    let pkg = make_pkg(
+        &["host", "listed-mid", "leaf-a", "leaf-b", "leaf-c"],
+        &[],
+        &[],
+    );
+    let config = test_config(root.to_path_buf());
+
+    let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, None, &[]);
+    let mut unused_names: Vec<&str> = unused.iter().map(|dep| dep.package_name.as_str()).collect();
+    unused_names.sort_unstable();
+
+    assert_eq!(unused_names, vec!["leaf-a", "leaf-b"]);
+}
+
+/// The root check credits a root package through an optional peer that only
+/// a workspace manifest lists. The workspace turns the optional peer on for
+/// the shared install, so the root closure follows it.
+#[test]
+fn optional_peer_listed_by_workspace_credits_root_peer() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    for (name, manifest) in [
+        (
+            "host",
+            r#"{"name":"host","peerDependencies":{"mid":"^1"},
+"peerDependenciesMeta":{"mid":{"optional":true}}}"#,
+        ),
+        ("mid", r#"{"name":"mid","peerDependencies":{"leaf":"^1"}}"#),
+    ] {
+        std::fs::create_dir_all(root.join("node_modules").join(name)).expect("create package dir");
+        std::fs::write(
+            root.join("node_modules").join(name).join("package.json"),
+            manifest,
+        )
+        .expect("write package");
+    }
+    let ws_root = root.join("packages").join("app");
+    std::fs::create_dir_all(&ws_root).expect("create workspace dir");
+    std::fs::write(
+        ws_root.join("package.json"),
+        r#"{"name":"app","dependencies":{"host":"^1","mid":"^1"}}"#,
+    )
+    .expect("write workspace package");
+    let workspaces = vec![WorkspaceInfo {
+        root: ws_root,
+        name: "app".to_string(),
+        is_internal_dependency: false,
+    }];
+
+    let (graph, _) = build_graph_with_npm_imports(&[("host", false)]);
+    let pkg = make_pkg(&["leaf"], &[], &[]);
+    let config = test_config(root.to_path_buf());
+
+    let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, None, &workspaces);
+
+    assert!(
+        !unused.iter().any(|dep| dep.package_name == "leaf"),
+        "leaf is a required peer of mid, which the workspace lists: {unused:?}"
+    );
+}
+
 #[test]
 fn unused_dep_location_is_correct() {
     let (graph, _) = build_graph_with_npm_imports(&[]);

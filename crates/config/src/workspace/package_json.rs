@@ -250,6 +250,15 @@ impl PackageJson {
             .unwrap_or_default()
     }
 
+    /// Whether `peerDependenciesMeta` marks the peer `dep` as optional.
+    #[must_use]
+    pub fn peer_dependency_is_optional(&self, dep: &str) -> bool {
+        self.peer_dependencies_meta
+            .as_ref()
+            .and_then(|meta| meta.get(dep))
+            .is_some_and(|meta| meta.optional)
+    }
+
     /// Extract entry points from package.json fields.
     #[must_use]
     pub fn entry_points(&self) -> Vec<String> {

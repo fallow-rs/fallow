@@ -206,9 +206,16 @@ pub fn peer_dependency_hosts(
     graph: &crate::graph::ModuleGraph,
     root: &Path,
     workspace_roots: &[&Path],
+    ignore_patterns: &fallow_config::IgnorePatternSet,
     package_name: &str,
 ) -> Vec<String> {
-    fallow_core::analyze::peer_dependency_hosts(graph, root, workspace_roots, package_name)
+    fallow_core::analyze::peer_dependency_hosts(
+        graph,
+        root,
+        workspace_roots,
+        ignore_patterns,
+        package_name,
+    )
 }
 
 /// Discover the root and workspace package entry points via the shared core

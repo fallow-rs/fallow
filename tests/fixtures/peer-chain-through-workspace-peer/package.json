@@ -1,0 +1,8 @@
+{
+  "name": "peer-chain-through-workspace-peer",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "leaf": "1.0.0"
+  }
+}

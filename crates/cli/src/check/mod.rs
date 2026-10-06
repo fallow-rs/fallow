@@ -802,6 +802,7 @@ fn handle_trace_side_effects(
                     provenance: &data.trace_provenance,
                     workspaces: &data.workspaces,
                     results: &data.results,
+                    ignore_patterns: &config.ignore_patterns,
                 },
             )
         })

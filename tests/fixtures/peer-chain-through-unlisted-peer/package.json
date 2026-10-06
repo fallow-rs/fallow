@@ -1,0 +1,13 @@
+{
+  "name": "peer-chain-through-unlisted-peer",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "host": "1.0.0",
+    "listed-mid": "1.0.0",
+    "leaf-a": "1.0.0",
+    "leaf-b": "1.0.0",
+    "leaf-c": "1.0.0",
+    "leaf-d": "1.0.0"
+  }
+}

@@ -21,6 +21,9 @@ pub(super) struct TraceFacts<'a> {
     /// The findings of the analysis, which name the manifests that the
     /// unused-dependency check flags.
     pub results: &'a fallow_types::results::AnalysisResults,
+    /// The configured `ignorePatterns`, so the dependency trace hides the same
+    /// workspace manifests as the unused-dependency check.
+    pub ignore_patterns: &'a fallow_config::IgnorePatternSet,
 }
 
 /// Handle `--trace`, `--trace-file`, and `--trace-dependency` early returns.
@@ -304,6 +307,7 @@ fn handle_trace_dependency(request: &TraceRequest<'_>, facts: &TraceFacts<'_>) -
         request.graph,
         request.root,
         &workspace_roots,
+        facts.ignore_patterns,
         pkg_name,
         facts.script_used_packages,
     );

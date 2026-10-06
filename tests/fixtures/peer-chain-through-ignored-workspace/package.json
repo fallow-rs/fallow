@@ -1,0 +1,10 @@
+{
+  "name": "peer-chain-through-ignored-workspace",
+  "private": true,
+  "main": "src/index.ts",
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "host": "1.0.0",
+    "leaf": "1.0.0"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "ignored",
+  "private": true,
+  "dependencies": {
+    "mid": "1.0.0"
+  }
+}

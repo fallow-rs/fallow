@@ -912,12 +912,14 @@ pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<F
 /// (`.github/workflows/*.yml`, `.gitlab-ci.yml`). The same set the unused-deps
 /// detector consults; passing it in lets the trace output match the detector's
 /// view of "used" instead of reporting `is_used=false` for tools invoked only
-/// through scripts.
+/// through scripts. `ignore_patterns` hide workspace manifests from the peer
+/// closure, as in the unused-dependency check.
 #[must_use]
 pub fn trace_dependency(
     graph: &ModuleGraph,
     root: &Path,
     workspace_roots: &[&Path],
+    ignore_patterns: &fallow_config::IgnorePatternSet,
     package_name: &str,
     script_used_packages: &FxHashSet<String>,
 ) -> DependencyTrace {
@@ -953,8 +955,13 @@ pub fn trace_dependency(
 
     let import_count = imported_by.len();
     let used_in_scripts = script_used_packages.contains(package_name);
-    let peer_of =
-        crate::core_backend::peer_dependency_hosts(graph, root, workspace_roots, package_name);
+    let peer_of = crate::core_backend::peer_dependency_hosts(
+        graph,
+        root,
+        workspace_roots,
+        ignore_patterns,
+        package_name,
+    );
     let mut trace = DependencyTrace {
         package_name: package_name.to_string(),
         imported_by,
@@ -3050,7 +3057,14 @@ mod tests {
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         let root = Path::new("/project");
 
-        let trace = trace_dependency(&graph, root, &[], "lodash", &FxHashSet::default());
+        let trace = trace_dependency(
+            &graph,
+            root,
+            &[],
+            &fallow_config::IgnorePatternSet::empty(),
+            "lodash",
+            &FxHashSet::default(),
+        );
         assert!(trace.is_used);
         assert!(!trace.used_in_scripts);
         assert_eq!(trace.import_count, 1);
@@ -3077,7 +3091,14 @@ mod tests {
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         let root = Path::new("/project");
 
-        let trace = trace_dependency(&graph, root, &[], "nonexistent-pkg", &FxHashSet::default());
+        let trace = trace_dependency(
+            &graph,
+            root,
+            &[],
+            &fallow_config::IgnorePatternSet::empty(),
+            "nonexistent-pkg",
+            &FxHashSet::default(),
+        );
         assert!(!trace.is_used);
         assert!(!trace.used_in_scripts);
         assert_eq!(trace.import_count, 0);
@@ -3106,7 +3127,14 @@ mod tests {
         let mut script_used = FxHashSet::default();
         script_used.insert("microbundle".to_string());
 
-        let trace = trace_dependency(&graph, root, &[], "microbundle", &script_used);
+        let trace = trace_dependency(
+            &graph,
+            root,
+            &[],
+            &fallow_config::IgnorePatternSet::empty(),
+            "microbundle",
+            &script_used,
+        );
         assert!(
             trace.is_used,
             "is_used must be true when the package is referenced from package.json scripts"

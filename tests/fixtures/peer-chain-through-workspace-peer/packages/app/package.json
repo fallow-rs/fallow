@@ -1,0 +1,9 @@
+{
+  "name": "app",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "host": "1.0.0",
+    "mid": "1.0.0"
+  }
+}

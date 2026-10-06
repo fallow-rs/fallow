@@ -244,6 +244,7 @@ pub fn run_trace_dependency(
             &artifacts.graph,
             session.root(),
             &workspace_roots,
+            &session.config().ignore_patterns,
             &options.package_name,
             &artifacts.script_used_packages,
         );
@@ -350,6 +351,7 @@ pub fn benchmark_trace_graph_family_compact_json(
         graph,
         root,
         &[],
+        &fallow_config::IgnorePatternSet::empty(),
         "trace-package",
         script_used_packages,
     );

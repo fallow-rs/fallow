@@ -105,6 +105,9 @@ pub fn trace_file(graph: &RetainedModuleGraph, root: &Path, file_path: &str) -> 
 ///
 /// `workspace_roots` are the roots of the workspaces, so the peer-dependency
 /// credit runs one closure per workspace, as the unused-dependency check does.
+/// `ignore_patterns` are the configured `ignorePatterns`. A workspace
+/// `package.json` that they match does not turn on an optional peer, as in the
+/// unused-dependency check.
 #[must_use]
 #[expect(
     clippy::implicit_hasher,
@@ -114,6 +117,7 @@ pub fn trace_dependency(
     graph: &RetainedModuleGraph,
     root: &Path,
     workspace_roots: &[&Path],
+    ignore_patterns: &fallow_config::IgnorePatternSet,
     package_name: &str,
     script_used_packages: &FxHashSet<String>,
 ) -> DependencyTrace {
@@ -121,6 +125,7 @@ pub fn trace_dependency(
         graph.as_graph(),
         root,
         workspace_roots,
+        ignore_patterns,
         package_name,
         script_used_packages,
     )

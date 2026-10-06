@@ -1,0 +1,8 @@
+{
+  "name": "peer-chain-through-root-peer",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "mid": "1.0.0"
+  }
+}

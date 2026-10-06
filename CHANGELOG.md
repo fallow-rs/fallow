@@ -391,6 +391,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Peer dependency of:` section (human). Before, the trace printed `UNUSED`
   even for a required peer that the unused-dependency check credited.
 
+- **An optional peer that the project does not list no longer credits its
+  own peers.** A used package can declare an optional peer that is installed
+  but that the project does not list in its `package.json`. The project does
+  not turn on that peer. Before, fallow still followed the peers of that
+  optional peer, so a listed package that only it declared was not reported
+  as unused. Now an optional peer passes credit on only when the root
+  `package.json` or a workspace `package.json` lists it in any dependency
+  field, peers included, because the project has one shared install. A
+  workspace `package.json` that `ignorePatterns` hides does not count. A
+  required peer passes credit on as before. `--trace-dependency` uses the same
+  rule, so the trace and the report agree.
+
 - **A devDependency that the same `package.json` lists in
   `peerDependencies` is no longer reported as unused.** A package that
   declares a peer often lists the same package in `devDependencies`, so the
