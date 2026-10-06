@@ -1388,6 +1388,7 @@ mod tests {
                 path: PathBuf::from("/repo/package.json"),
                 line: 3,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
 
         let changed = FxHashSet::default();

@@ -256,6 +256,7 @@ mod tests {
                 path: PathBuf::from("/project/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unused_dependencies
@@ -265,6 +266,7 @@ mod tests {
                 path: PathBuf::from("/project/packages/ui/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unused_dev_dependencies
@@ -274,6 +276,7 @@ mod tests {
                 path: PathBuf::from("/project/packages/ui/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
 
         let ws_root = PathBuf::from("/project/packages/ui");
@@ -529,6 +532,7 @@ mod tests {
                 path: PathBuf::from("/project/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unused_dev_dependencies
@@ -538,6 +542,7 @@ mod tests {
                 path: PathBuf::from("/project/package.json"),
                 line: 10,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
 
         let changed = rustc_hash::FxHashSet::default(); // empty set
@@ -730,6 +735,7 @@ mod tests {
                     path: PathBuf::from("/project/packages/ui/package.json"),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         results
@@ -741,6 +747,7 @@ mod tests {
                     path: PathBuf::from("/project/package.json"),
                     line: 7,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
 
@@ -1006,6 +1013,7 @@ mod tests {
                     path: PathBuf::from("/project/package.json"),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         results
@@ -1255,6 +1263,7 @@ mod tests {
                 path: PathBuf::from("/project/packages/ui/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unused_dependencies
@@ -1264,6 +1273,7 @@ mod tests {
                 path: PathBuf::from("/project/packages/api/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unused_dependencies
@@ -1273,6 +1283,7 @@ mod tests {
                 path: PathBuf::from("/project/packages/legacy/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
 
         let roots = [
@@ -1419,6 +1430,7 @@ mod tests {
                 path: PathBuf::from("/project/package.json"),
                 line: 42,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unused_catalog_entries

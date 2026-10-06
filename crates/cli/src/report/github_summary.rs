@@ -540,7 +540,16 @@ fn row_sort_path(item: &Value) -> Option<&str> {
 }
 
 fn check_workspace_context(item: &Value) -> String {
-    backtick_join(item, "used_in_workspaces")
+    let workspaces = backtick_join(item, "used_in_workspaces");
+    if !workspaces.is_empty() {
+        return workspaces;
+    }
+    let declaring = backtick_join(item, "declared_and_imported_in");
+    if declaring.is_empty() {
+        String::new()
+    } else {
+        format!("declared and imported in {declaring}")
+    }
 }
 
 #[expect(

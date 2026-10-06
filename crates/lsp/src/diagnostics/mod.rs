@@ -765,6 +765,7 @@ mod severity_gate {
                                 path: root.join("package.json"),
                                 line: 3,
                                 used_in_workspaces: Vec::new(),
+                                declared_and_imported_in: Vec::new(),
                             },
                         ),
                     );
@@ -783,6 +784,7 @@ mod severity_gate {
                                 path: root.join("package.json"),
                                 line: 4,
                                 used_in_workspaces: Vec::new(),
+                                declared_and_imported_in: Vec::new(),
                             },
                         ),
                     );
@@ -801,6 +803,7 @@ mod severity_gate {
                                 path: root.join("package.json"),
                                 line: 5,
                                 used_in_workspaces: Vec::new(),
+                                declared_and_imported_in: Vec::new(),
                             },
                         ),
                     );

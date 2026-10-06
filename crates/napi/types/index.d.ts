@@ -218,6 +218,7 @@ export interface UnusedDependencyFinding {
   line: number;
   col: number;
   used_in_workspaces?: string[];
+  declared_and_imported_in?: string[];
   actions?: AnalysisAction[];
   [key: string]: unknown;
 }

@@ -610,29 +610,56 @@ fn collect_root_credited_packages<'a>(
         .package_usage
         .iter()
         .filter(|(package_name, file_ids)| {
-            file_ids
-                .iter()
-                .any(|id| !workspace_chain_installs(manifests, ownership, package_name, *id))
+            file_ids.iter().any(|id| {
+                workspace_chain_installer(manifests, ownership, package_name, *id).is_none()
+            })
         })
         .map(|(package_name, _)| package_name.as_str())
         .collect()
 }
 
-/// Return `true` when the workspace that owns file `id`, or one of its
-/// ancestor workspaces, installs `package_name`.
-fn workspace_chain_installs(
+/// Reverse index: package name -> roots of the workspaces whose declaration an
+/// import of the package uses instead of the root declaration.
+///
+/// A root finding reads this index to name the nearer manifests that keep the
+/// package installed, so the finding does not look like "never imported".
+fn collect_nearer_manifest_credit<'a>(
+    graph: &'a ModuleGraph,
     manifests: &[WorkspaceManifest<'_>],
+    ownership: &WorkspaceOwnershipIndex,
+) -> FxHashMap<&'a str, Vec<PathBuf>> {
+    let mut credit: FxHashMap<&str, Vec<PathBuf>> = FxHashMap::default();
+    for (package_name, file_ids) in &graph.package_usage {
+        let mut roots: Vec<PathBuf> = file_ids
+            .iter()
+            .filter_map(|id| workspace_chain_installer(manifests, ownership, package_name, *id))
+            .map(Path::to_path_buf)
+            .collect();
+        if roots.is_empty() {
+            continue;
+        }
+        roots.sort();
+        roots.dedup();
+        credit.insert(package_name.as_str(), roots);
+    }
+    credit
+}
+
+/// The root of the nearest workspace, the owner of file `id` or one of its
+/// ancestor workspaces, that installs `package_name`. `None` when no
+/// workspace in the chain installs it.
+fn workspace_chain_installer<'a>(
+    manifests: &[WorkspaceManifest<'a>],
     ownership: &WorkspaceOwnershipIndex,
     package_name: &str,
     id: FileId,
-) -> bool {
-    let Some(index) = ownership.workspace_index_for_file(id) else {
-        return false;
-    };
+) -> Option<&'a Path> {
+    let index = ownership.workspace_index_for_file(id)?;
     std::iter::once(index)
         .chain(ownership.ancestors_of(index).iter().copied())
         .filter_map(|workspace| manifests.get(workspace))
-        .any(|manifest| manifest.installed.contains(package_name))
+        .find(|manifest| manifest.installed.contains(package_name))
+        .map(|manifest| manifest.root)
 }
 
 fn shared_dep_sets<'a>(
@@ -727,6 +754,7 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
                 path: input.pkg_path.to_path_buf(),
                 line,
                 used_in_workspaces,
+                declared_and_imported_in: Vec::new(),
             }
         })
         .collect()
@@ -1103,6 +1131,8 @@ struct DependencyUsageIndices<'a> {
     /// Packages with at least one import attributed to the root manifest, see
     /// [`collect_root_credited_packages`].
     root_credited_packages: FxHashSet<&'a str>,
+    /// See [`collect_nearer_manifest_credit`].
+    nearer_manifest_credit: FxHashMap<&'a str, Vec<PathBuf>>,
     package_workspace_usage: FxHashMap<String, Vec<PathBuf>>,
     workspace_used_packages: FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: FxHashMap<&'a Path, FxHashSet<&'a str>>,
@@ -1130,8 +1160,10 @@ fn collect_dependency_usage_indices<'a>(
     let ancestor_credited_packages =
         collect_ancestor_credited_packages(graph, config, &manifests, &ownership);
     let root_credited_packages = collect_root_credited_packages(graph, &manifests, &ownership);
+    let nearer_manifest_credit = collect_nearer_manifest_credit(graph, &manifests, &ownership);
     DependencyUsageIndices {
         root_credited_packages,
+        nearer_manifest_credit,
         package_workspace_usage: collect_package_workspace_usage(
             graph,
             &workspace_roots,
@@ -1160,13 +1192,24 @@ fn collect_root_unused_dependencies(
             || linked_workspaces.contains(dep)
     };
 
-    collect_root_unused_categories(
+    let mut triple = collect_root_unused_categories(
         pkg,
         shared,
         &is_used_globally,
         &root_pkg_path,
         root_pkg_content.as_deref(),
-    )
+    );
+    let (prod, dev, optional) = &mut triple;
+    for dep in prod
+        .iter_mut()
+        .chain(dev.iter_mut())
+        .chain(optional.iter_mut())
+    {
+        if let Some(roots) = usage.nearer_manifest_credit.get(dep.package_name.as_str()) {
+            dep.declared_and_imported_in.clone_from(roots);
+        }
+    }
+    triple
 }
 
 /// Root findings for packages that nothing in the project imports.

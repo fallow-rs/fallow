@@ -5093,6 +5093,13 @@
             "type": "string"
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "declared_and_imported_in": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots whose package.json declares this package for the files\nthat import it. Only a root finding fills this field: these imports use\nthe nearer workspace declaration, so the root declaration stays unused."
         }
       },
       "required": [
@@ -10409,6 +10416,13 @@
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
         },
+        "declared_and_imported_in": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots whose package.json declares this package for the files\nthat import it. Only a root finding fills this field: these imports use\nthe nearer workspace declaration, so the root declaration stays unused."
+        },
         "finding_id": {
           "type": [
             "string",
@@ -10488,6 +10502,13 @@
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
         },
+        "declared_and_imported_in": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots whose package.json declares this package for the files\nthat import it. Only a root finding fills this field: these imports use\nthe nearer workspace declaration, so the root declaration stays unused."
+        },
         "finding_id": {
           "type": [
             "string",
@@ -10566,6 +10587,13 @@
             "type": "string"
           },
           "description": "Workspace roots that import this package even though the declaring workspace does not."
+        },
+        "declared_and_imported_in": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Workspace roots whose package.json declares this package for the files\nthat import it. Only a root finding fills this field: these imports use\nthe nearer workspace declaration, so the root declaration stays unused."
         },
         "finding_id": {
           "type": [

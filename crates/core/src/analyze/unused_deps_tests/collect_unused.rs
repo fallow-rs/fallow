@@ -677,7 +677,8 @@ fn chain_installs(
     graph.modules[0].path = PathBuf::from(file);
     let roots: Vec<&Path> = manifests.iter().map(|manifest| manifest.root).collect();
     let ownership = super::super::WorkspaceOwnershipIndex::new(&graph, &roots);
-    super::super::workspace_chain_installs(manifests, &ownership, package_name, FileId(0))
+    super::super::workspace_chain_installer(manifests, &ownership, package_name, FileId(0))
+        .is_some()
 }
 
 #[test]

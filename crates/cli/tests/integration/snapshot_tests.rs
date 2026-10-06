@@ -184,6 +184,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     r.unused_dev_dependencies
         .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
@@ -192,6 +193,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     r.unused_enum_members
         .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
@@ -263,6 +265,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             },
         ));
     r.type_only_dependencies
@@ -625,6 +628,7 @@ fn compact_unused_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     results
         .unused_dependencies
@@ -634,6 +638,7 @@ fn compact_unused_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_deps_only", lines.join("\n"));
@@ -651,6 +656,7 @@ fn compact_unused_dev_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_dev_deps_only", lines.join("\n"));
@@ -669,6 +675,7 @@ fn compact_unused_optional_deps_only_snapshot() {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             },
         ));
     let lines = build_compact_lines(&results, &root);
@@ -1055,6 +1062,7 @@ fn json_unused_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let value = api_check_json_document(&results, &root, Duration::ZERO)
         .expect("JSON build should succeed");
@@ -1293,6 +1301,7 @@ fn sarif_unused_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1548,6 +1557,7 @@ fn json_workspace_dep_snapshot() {
             path: root.join("packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     results
         .unused_dev_dependencies
@@ -1557,6 +1567,7 @@ fn json_workspace_dep_snapshot() {
             path: root.join("packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let value = api_check_json_document(&results, &root, Duration::ZERO)
         .expect("JSON build should succeed");
@@ -1576,6 +1587,7 @@ fn sarif_workspace_dep_snapshot() {
             path: root.join("packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let rules = RulesConfig::default();
     let sarif = build_sarif(&results, &root, &rules);
@@ -1676,6 +1688,7 @@ fn codeclimate_unused_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -1916,6 +1929,7 @@ fn codeclimate_unused_dev_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -1936,6 +1950,7 @@ fn codeclimate_unused_optional_deps_only_snapshot() {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             },
         ));
     let cc =
@@ -2027,6 +2042,7 @@ fn codeclimate_workspace_dep_snapshot() {
             path: root.join("packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let cc =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
@@ -2536,6 +2552,7 @@ fn json_unused_dev_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let value = api_check_json_document(&results, &root, Duration::ZERO)
         .expect("JSON build should succeed");
@@ -2555,6 +2572,7 @@ fn sarif_unused_dev_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 12,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -2577,6 +2595,7 @@ fn json_unused_optional_deps_only_snapshot() {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             },
         ));
     let value = api_check_json_document(&results, &root, Duration::ZERO)
@@ -2598,6 +2617,7 @@ fn sarif_unused_optional_deps_only_snapshot() {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             },
         ));
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
@@ -2620,6 +2640,7 @@ fn compact_workspace_dep_snapshot() {
             path: root.join("packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_workspace_deps", lines.join("\n"));
@@ -2732,6 +2753,7 @@ fn markdown_unused_deps_only_snapshot() {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_unused_deps_only", output);
@@ -2905,6 +2927,7 @@ fn markdown_workspace_dep_snapshot() {
             path: root.join("packages/ui/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_workspace_deps", output);

@@ -1303,6 +1303,7 @@ mod tests {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         });
         dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
         results.unused_dependencies.push(dep);

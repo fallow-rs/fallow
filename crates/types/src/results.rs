@@ -2553,6 +2553,16 @@ pub struct UnusedDependency {
     )]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub used_in_workspaces: Vec<PathBuf>,
+    /// Workspace roots whose package.json declares this package for the files
+    /// that import it. Only a root finding fills this field: these imports use
+    /// the nearer workspace declaration, so the root declaration stays unused.
+    #[serde(
+        default,
+        serialize_with = "serde_path::serialize_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub declared_and_imported_in: Vec<PathBuf>,
 }
 
 /// Where in package.json a dependency is listed.
@@ -4314,6 +4324,7 @@ mod tests {
             path: PathBuf::from("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }
     }
 
@@ -4571,6 +4582,7 @@ mod tests {
                 path: PathBuf::from(path),
                 line,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             })
         };
         r.unused_dependencies.push(mk("b/package.json", 3, "zlib"));
@@ -4597,6 +4609,7 @@ mod tests {
                 path: PathBuf::from("package.json"),
                 line: 10,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         r.unused_dev_dependencies
             .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
@@ -4605,6 +4618,7 @@ mod tests {
                 path: PathBuf::from("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         r.sort();
         assert_eq!(r.unused_dev_dependencies[0].dep.package_name, "jest");
@@ -4624,6 +4638,7 @@ mod tests {
                     path: PathBuf::from("package.json"),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         r.unused_optional_dependencies
@@ -4634,6 +4649,7 @@ mod tests {
                     path: PathBuf::from("package.json"),
                     line: 2,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         r.sort();
@@ -5022,6 +5038,7 @@ mod tests {
             path: PathBuf::from("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         };
         let json = serde_json::to_value(&dep).unwrap();
         assert_eq!(json["location"], "devDependencies");
@@ -5032,6 +5049,7 @@ mod tests {
             path: PathBuf::from("package.json"),
             line: 3,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         };
         let json2 = serde_json::to_value(&dep2).unwrap();
         assert_eq!(json2["location"], "dependencies");
@@ -5042,6 +5060,7 @@ mod tests {
             path: PathBuf::from("package.json"),
             line: 7,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         };
         let json3 = serde_json::to_value(&dep3).unwrap();
         assert_eq!(json3["location"], "optionalDependencies");
@@ -5428,6 +5447,7 @@ mod tests {
                 path: PathBuf::from("ignored/package.json"),
                 line: 3,
                 used_in_workspaces: vec![],
+                declared_and_imported_in: Vec::new(),
             })],
             ..AnalysisResults::default()
         };

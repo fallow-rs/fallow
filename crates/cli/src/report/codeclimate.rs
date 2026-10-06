@@ -1659,6 +1659,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 0,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));
@@ -2275,6 +2276,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 10,
                 used_in_workspaces: vec![root.join("packages/app")],
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let output = codeclimate_issues_to_value(&api_codeclimate_issues(&results, &root, &rules));

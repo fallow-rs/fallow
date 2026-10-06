@@ -3295,6 +3295,7 @@ mod tests {
                 path: PathBuf::from("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             })],
             unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
                 UnusedDependency {
@@ -3303,6 +3304,7 @@ mod tests {
                     path: PathBuf::from("package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             )],
             ..Default::default()
@@ -3346,6 +3348,7 @@ mod tests {
                     path: PathBuf::from("/repo/packages/app-a/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 }),
                 UnusedDependencyFinding::with_actions(UnusedDependency {
                     package_name: "lodash-es".to_string(),
@@ -3353,6 +3356,7 @@ mod tests {
                     path: PathBuf::from("/repo/packages/app-b/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 }),
             ],
             ..Default::default()
@@ -3380,6 +3384,7 @@ mod tests {
                     path: PathBuf::from("/repo/packages/app-a/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 }),
                 UnusedDependencyFinding::with_actions(UnusedDependency {
                     package_name: "lodash-es".to_string(),
@@ -3387,6 +3392,7 @@ mod tests {
                     path: PathBuf::from("/repo/packages/app-b/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 }),
             ],
             ..Default::default()
@@ -3415,6 +3421,7 @@ mod tests {
                 path: PathBuf::from("/repo/packages/app/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             })],
             ..Default::default()
         };
@@ -4962,6 +4969,7 @@ mod tests {
                     path: PathBuf::from("package.json"),
                     line: 15,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         r.unused_enum_members
@@ -5379,6 +5387,7 @@ mod tests {
                 path: p("packages/app/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             })],
             circular_dependencies: vec![CircularDependencyFinding::with_actions(
                 CircularDependency {

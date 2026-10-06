@@ -219,16 +219,25 @@ fn sarif_dep_fields(
     section: &str,
     col: u32,
 ) -> SarifFields {
-    let workspace_context = if dep.used_in_workspaces.is_empty() {
-        String::new()
-    } else {
-        let workspaces = dep
-            .used_in_workspaces
+    let join_workspaces = |paths: &[std::path::PathBuf]| {
+        paths
             .iter()
             .map(|path| relative_uri(path, root))
             .collect::<Vec<_>>()
-            .join(", ");
-        format!("; imported in other workspaces: {workspaces}")
+            .join(", ")
+    };
+    let workspace_context = if !dep.used_in_workspaces.is_empty() {
+        format!(
+            "; imported in other workspaces: {}",
+            join_workspaces(&dep.used_in_workspaces)
+        )
+    } else if !dep.declared_and_imported_in.is_empty() {
+        format!(
+            "; declared and imported in other workspaces: {}",
+            join_workspaces(&dep.declared_and_imported_in)
+        )
+    } else {
+        String::new()
     };
     SarifFields {
         rule_id,
@@ -2246,6 +2255,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn root_dependency_message_names_the_workspaces_that_declare_and_import_it() {
+        let root = Path::new("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "left-pad".to_owned(),
+                location: fallow_types::results::DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 0,
+                used_in_workspaces: Vec::new(),
+                declared_and_imported_in: vec![root.join("packages/app")],
+            }));
+
+        let sarif =
+            build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder);
+        let message = sarif
+            .pointer("/runs/0/results/0/message/text")
+            .and_then(serde_json::Value::as_str)
+            .expect("SARIF message");
+        assert_eq!(
+            message,
+            "Package 'left-pad' is in dependencies but never imported; declared and imported in other workspaces: packages/app"
+        );
+    }
+
     /// The reported defect: `npm init -y` writes a `package.json` whose
     /// dependency block can sit on one line, and `find_dep_line_in_json` also
     /// falls back to line 1 for a key it cannot locate. Every unused dependency
@@ -2273,6 +2309,7 @@ mod tests {
                     path: root.join("package.json"),
                     line: 1,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 }));
         }
 
@@ -2336,6 +2373,7 @@ mod tests {
                     path: manifest.clone(),
                     line: chalk_line,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 }));
             build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder)
                 .pointer("/runs/0/results/0/partialFingerprints/tools.fallow.fingerprint~1v1")
@@ -2480,6 +2518,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 3,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unlisted_dependencies

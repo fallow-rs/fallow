@@ -622,6 +622,52 @@ fn root_declaration_is_credited_only_through_the_nearest_manifest() {
     );
 }
 
+/// A root finding for a package that a nearer manifest supplies names the
+/// workspaces that declare the package and import it. Without this context the
+/// finding reads as "never imported", which the import graph contradicts.
+#[test]
+fn root_finding_names_the_workspaces_that_declare_and_import_the_package() {
+    let root = fixture_path("root-dependency-nearest-manifest-credit");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let finding_at = |name: &str, manifest: &str| {
+        let path = root.join(manifest);
+        results
+            .unused_dependencies
+            .iter()
+            .map(|finding| &finding.dep)
+            .find(|dep| dep.package_name == name && dep.path == path)
+            .unwrap_or_else(|| panic!("{name} should be unused in {manifest}"))
+            .clone()
+    };
+
+    let shared = finding_at("shared-runtime", "package.json");
+    assert_eq!(
+        shared.declared_and_imported_in,
+        vec![root.join("packages/app")],
+        "the app workspace declares shared-runtime and imports it"
+    );
+    assert!(shared.used_in_workspaces.is_empty());
+
+    let tool_lib = finding_at("tool-lib", "package.json");
+    assert_eq!(
+        tool_lib.declared_and_imported_in,
+        vec![root.join("packages/tool")],
+        "the nested cli import uses the declaration of the tool workspace"
+    );
+
+    let workspace = finding_at("shared-runtime", "packages/tool/package.json");
+    assert!(
+        workspace.declared_and_imported_in.is_empty(),
+        "a workspace finding keeps its context in used_in_workspaces"
+    );
+    assert_eq!(
+        workspace.used_in_workspaces,
+        vec![root.join("packages/app")]
+    );
+}
+
 #[test]
 fn package_less_tsconfig_reference_credits_nearest_package_workspace() {
     let project = tempfile::tempdir().expect("create temp dir");

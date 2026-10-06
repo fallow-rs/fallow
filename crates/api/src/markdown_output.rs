@@ -3312,6 +3312,7 @@ mod caveat_markdown_tests {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         });
         dep.reachability_caveats.clone_from(&caveats);
         results.unused_dependencies.push(dep);

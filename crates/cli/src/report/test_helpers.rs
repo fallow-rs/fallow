@@ -58,6 +58,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     r.unused_dev_dependencies
         .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
@@ -66,6 +67,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }));
     r.unused_optional_dependencies
         .push(UnusedOptionalDependencyFinding::with_actions(
@@ -75,6 +77,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
                 path: root.join("package.json"),
                 line: 15,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             },
         ));
     r.unused_enum_members

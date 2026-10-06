@@ -3990,6 +3990,12 @@ line: number
  */
 used_in_workspaces?: string[]
 /**
+ * Workspace roots whose package.json declares this package for the files
+ * that import it. Only a root finding fills this field: these imports use
+ * the nearer workspace declaration, so the root declaration stays unused.
+ */
+declared_and_imported_in?: string[]
+/**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
  * Line and column are not inputs, so the id survives line shifts,
@@ -4051,6 +4057,12 @@ line: number
  */
 used_in_workspaces?: string[]
 /**
+ * Workspace roots whose package.json declares this package for the files
+ * that import it. Only a root finding fills this field: these imports use
+ * the nearer workspace declaration, so the root declaration stays unused.
+ */
+declared_and_imported_in?: string[]
+/**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
  * Line and column are not inputs, so the id survives line shifts,
@@ -4111,6 +4123,12 @@ line: number
  * Workspace roots that import this package even though the declaring workspace does not.
  */
 used_in_workspaces?: string[]
+/**
+ * Workspace roots whose package.json declares this package for the files
+ * that import it. Only a root finding fills this field: these imports use
+ * the nearer workspace declaration, so the root declaration stays unused.
+ */
+declared_and_imported_in?: string[]
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.

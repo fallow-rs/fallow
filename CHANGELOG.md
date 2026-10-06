@@ -233,6 +233,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nearest manifest that installs the package, so a used name can still be
   unused in the root manifest or in another workspace.
 
+- **A root dependency finding now names the workspaces that declare and
+  import the package.** When every import of a root dependency uses the
+  declaration in a nearer workspace `package.json`, fallow reports the root
+  declaration as unused. Before, the finding said only "never imported",
+  but the import graph showed an import, so the finding looked like a false
+  positive. Now the finding has a new `declared_and_imported_in` field with
+  those workspace roots. The human output shows
+  `lodash (package.json; declared and imported in packages/app)`. SARIF,
+  GitHub annotations and the GitHub summary show the same workspaces. The
+  `remove-dependency` action stays auto-fixable, because the workspace
+  declarations keep the package installed.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

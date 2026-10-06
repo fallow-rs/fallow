@@ -291,6 +291,7 @@ fn unused_dependency(package: &str, manifest: &Path) -> UnusedDependencyFinding 
         path: manifest.to_path_buf(),
         line: 5,
         used_in_workspaces: Vec::new(),
+        declared_and_imported_in: Vec::new(),
     })
 }
 
@@ -312,6 +313,7 @@ fn fill_dependency_collections(results: &mut AnalysisResults, changed: &Path, un
             path: manifest.to_path_buf(),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         };
         results
             .unused_dependencies

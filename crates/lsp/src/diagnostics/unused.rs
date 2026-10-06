@@ -1488,6 +1488,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
 
         let duplication = empty_duplication();
@@ -1515,6 +1516,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
 
         let duplication = empty_duplication();
@@ -1672,6 +1674,7 @@ mod tests {
                     path: root.join("package.json"),
                     line: 12,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
 

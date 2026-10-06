@@ -1426,6 +1426,7 @@ pub(crate) mod tests {
             path: "/pkg.json".into(),
             line,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }
     }
 

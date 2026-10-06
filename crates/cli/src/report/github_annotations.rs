@@ -263,10 +263,14 @@ fn caveat_note(item: &Value) -> String {
 
 fn workspace_context(item: &Value) -> String {
     let workspaces = joined_strs(item, "used_in_workspaces", ", ");
-    if workspaces.is_empty() {
+    if !workspaces.is_empty() {
+        return format!("\n\nImported in other workspaces: {workspaces}");
+    }
+    let declaring = joined_strs(item, "declared_and_imported_in", ", ");
+    if declaring.is_empty() {
         String::new()
     } else {
-        format!("\n\nImported in other workspaces: {workspaces}")
+        format!("\n\nDeclared and imported in other workspaces: {declaring}")
     }
 }
 

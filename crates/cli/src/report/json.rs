@@ -1721,6 +1721,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 10,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         let elapsed = Duration::from_millis(0);
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
@@ -1743,6 +1744,7 @@ mod tests {
                 path: root.join("packages/shared/package.json"),
                 line: 6,
                 used_in_workspaces: vec![root.join("packages/consumer")],
+                declared_and_imported_in: Vec::new(),
             }));
         let elapsed = Duration::from_millis(0);
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
@@ -1766,6 +1768,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 15,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         let elapsed = Duration::from_millis(0);
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
@@ -1787,6 +1790,7 @@ mod tests {
                     path: root.join("package.json"),
                     line: 12,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         let elapsed = Duration::from_millis(0);
@@ -2549,6 +2553,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
@@ -2575,6 +2580,7 @@ mod tests {
                 path: root.join("packages/shared/package.json"),
                 line: 5,
                 used_in_workspaces: vec![root.join("packages/consumer")],
+                declared_and_imported_in: Vec::new(),
             }));
         let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 

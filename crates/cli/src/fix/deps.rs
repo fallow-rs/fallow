@@ -297,6 +297,7 @@ mod tests {
             path: pkg_path.to_path_buf(),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }
     }
 
@@ -426,6 +427,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -459,6 +461,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -492,6 +495,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 1,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -538,6 +542,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 5,
                     used_in_workspaces: vec![root.join("packages/consumer")],
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -585,6 +590,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -623,6 +629,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -658,6 +665,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -669,6 +677,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -702,6 +711,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -733,6 +743,7 @@ mod tests {
                     path: pkg_path,
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -761,6 +772,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -789,6 +801,7 @@ mod tests {
                     path: pkg_path,
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -815,6 +828,7 @@ mod tests {
                     path: pkg_path,
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -843,6 +857,7 @@ mod tests {
                     path: pkg_path,
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
@@ -874,6 +889,7 @@ mod tests {
                     path: pkg_path.clone(),
                     line: 3,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );

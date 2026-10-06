@@ -552,6 +552,56 @@ fn annotations_package_manager_drives_fix_commands() {
     );
 }
 
+fn root_dependency_declared_in_workspace_envelope() -> Value {
+    json!({
+        "kind": "dead-code",
+        "schema_version": 7,
+        "total_issues": 1,
+        "elapsed_ms": 12,
+        "unused_dependencies": [
+            {
+                "path": "package.json",
+                "line": 7,
+                "package_name": "left-pad",
+                "declared_and_imported_in": ["packages/app", "packages/web"]
+            }
+        ]
+    })
+}
+
+#[test]
+fn annotations_name_the_workspaces_that_declare_and_import_a_root_dependency() {
+    let rendered = render_annotations(
+        EnvelopeKind::DeadCode,
+        &root_dependency_declared_in_workspace_envelope(),
+        &plain_options(),
+    );
+    assert!(
+        rendered.contains("Declared and imported in other workspaces: packages/app, packages/web"),
+        "{rendered}"
+    );
+    // The workspace declarations keep the package installed, so the root
+    // declaration can go.
+    assert!(
+        rendered.contains("Run: npm uninstall left-pad"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn summary_names_the_workspaces_that_declare_and_import_a_root_dependency() {
+    let rendered = render_summary(
+        EnvelopeKind::DeadCode,
+        &root_dependency_declared_in_workspace_envelope(),
+        &LinkContext::default(),
+    );
+    assert!(
+        rendered
+            .contains("| `left-pad` | declared and imported in `packages/app`, `packages/web` |"),
+        "{rendered}"
+    );
+}
+
 #[test]
 fn annotations_security_candidates_render_at_notice_level() {
     let rendered = render_annotations(

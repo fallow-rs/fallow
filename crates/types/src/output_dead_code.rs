@@ -4412,6 +4412,7 @@ mod mutation_gate {
             path: PathBuf::from("/p/package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         }
     }
 

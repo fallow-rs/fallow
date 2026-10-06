@@ -551,6 +551,36 @@ const ROOT_MANIFEST: &str = "package.json";
 /// Clause introducing the workspaces that import the package.
 const IMPORTED_IN: &str = "imported in ";
 
+/// Clause introducing the workspaces that declare the package and import it.
+const DECLARED_AND_IMPORTED_IN: &str = "declared and imported in ";
+
+/// The relation between a dependency finding and the workspaces its label
+/// lists.
+#[derive(Clone, Copy)]
+enum WorkspaceClause {
+    /// The workspaces import the package, but the declaring manifest does not.
+    ImportedIn,
+    /// The workspaces declare the package and import it, so the root
+    /// declaration of the finding stays unused.
+    DeclaredAndImportedIn,
+}
+
+impl WorkspaceClause {
+    const fn intro(self) -> &'static str {
+        match self {
+            Self::ImportedIn => IMPORTED_IN,
+            Self::DeclaredAndImportedIn => DECLARED_AND_IMPORTED_IN,
+        }
+    }
+
+    /// Whether the label names a root manifest. The clause names other
+    /// manifests that declare the same package, so the label must say which
+    /// declaration the finding is about.
+    const fn names_root_manifest(self) -> bool {
+        matches!(self, Self::DeclaredAndImportedIn)
+    }
+}
+
 /// Marker for a path shortened from the left.
 const PATH_ELLIPSIS: &str = ".../";
 
@@ -648,24 +678,32 @@ fn summarize_workspaces(workspaces: &[String], budget: usize) -> String {
 /// path takes the whole label and the clause goes.
 ///
 /// Split out from the printer so the wording and the width are testable.
-fn dep_label(pkg_label: &str, workspaces: &[String], budget: usize) -> Option<String> {
+fn dep_label(
+    pkg_label: &str,
+    clause: WorkspaceClause,
+    workspaces: &[String],
+    budget: usize,
+) -> Option<String> {
     // A package name wide enough to leave no usable budget renders bare. The
     // name is never shortened: it is the identity a reader looks up and passes
     // to `fallow fix`, and a truncated one is unusable.
     if budget < MIN_LABEL_WIDTH {
         return None;
     }
-    let manifest = (pkg_label != ROOT_MANIFEST).then_some(pkg_label);
     if workspaces.is_empty() {
-        return manifest.map(|path| elide_path(path, budget));
+        return (pkg_label != ROOT_MANIFEST).then(|| elide_path(pkg_label, budget));
     }
+    let manifest =
+        (pkg_label != ROOT_MANIFEST || clause.names_root_manifest()).then_some(pkg_label);
+    let intro = clause.intro();
     let separator = if manifest.is_some() { "; " } else { "" };
-    let clause = separator.chars().count() + IMPORTED_IN.chars().count();
+    let clause_width = separator.chars().count() + intro.chars().count();
     let head = match manifest {
+        Some(ROOT_MANIFEST) => ROOT_MANIFEST.to_string(),
         Some(path) => {
             let head = elide_path(
                 path,
-                budget.saturating_sub(clause + MIN_WORKSPACE_LIST_WIDTH),
+                budget.saturating_sub(clause_width + MIN_WORKSPACE_LIST_WIDTH),
             );
             if !names_owning_directory(&head) {
                 return Some(elide_path(path, budget));
@@ -675,13 +713,14 @@ fn dep_label(pkg_label: &str, workspaces: &[String], budget: usize) -> Option<St
         None => String::new(),
     };
     let Some(list_budget) = budget
-        .checked_sub(head.chars().count() + clause)
+        .checked_sub(head.chars().count() + clause_width)
         .filter(|width| *width >= MIN_WORKSPACE_LIST_WIDTH)
     else {
-        return (!head.is_empty()).then_some(head);
+        // The root manifest names nothing without its clause.
+        return (!head.is_empty() && head != ROOT_MANIFEST).then_some(head);
     };
     let list = summarize_workspaces(workspaces, list_budget);
-    Some(format!("{head}{separator}{IMPORTED_IN}{list}"))
+    Some(format!("{head}{separator}{intro}{list}"))
 }
 
 /// Render `name` plus its bounded label. `reserved` is the width of the text
@@ -690,22 +729,36 @@ fn dep_label(pkg_label: &str, workspaces: &[String], budget: usize) -> Option<St
 fn format_dep_with_pkg(
     name: &str,
     pkg_path: &Path,
-    used_in_workspaces: &[PathBuf],
+    (clause, context_workspaces): (WorkspaceClause, &[PathBuf]),
     root: &Path,
     reserved: usize,
 ) -> String {
     // Normalized separators: the label's elision snaps to path segments, and a
     // Windows-shaped path would otherwise present as one unbreakable segment.
     let pkg_label = format_display_path(pkg_path, root);
-    let workspaces: Vec<String> = used_in_workspaces
+    let workspaces: Vec<String> = context_workspaces
         .iter()
         .map(|path| format_display_path(path, root))
         .collect();
     let budget =
         DEP_LINE_WIDTH.saturating_sub(name.chars().count() + DEP_LINE_DECORATION + reserved);
-    match dep_label(&pkg_label, &workspaces, budget) {
+    match dep_label(&pkg_label, clause, &workspaces, budget) {
         Some(label) => format!("{} ({})", name.bold(), label.dimmed()),
         None => name.bold().to_string(),
+    }
+}
+
+/// The label context of an unused dependency. A workspace finding lists the
+/// other workspaces that import the package. A root finding lists the
+/// workspaces whose own declaration their imports use.
+fn unused_dependency_context(dep: &UnusedDependency) -> (WorkspaceClause, &[PathBuf]) {
+    if dep.used_in_workspaces.is_empty() && !dep.declared_and_imported_in.is_empty() {
+        (
+            WorkspaceClause::DeclaredAndImportedIn,
+            &dep.declared_and_imported_in,
+        )
+    } else {
+        (WorkspaceClause::ImportedIn, &dep.used_in_workspaces)
     }
 }
 
@@ -715,8 +768,9 @@ fn format_dep_with_pkg(
 trait NamedPkgDep {
     fn pkg_name(&self) -> &str;
     fn pkg_path(&self) -> &Path;
-    fn used_in_workspaces(&self) -> &[PathBuf] {
-        &[]
+    /// The workspaces the label lists and their relation to the finding.
+    fn workspace_context(&self) -> (WorkspaceClause, &[PathBuf]) {
+        (WorkspaceClause::ImportedIn, &[])
     }
     /// Degraded-parse caveats on the verdict behind this finding. Only the
     /// three unused-dependency arrays carry them; every other dep finding
@@ -733,8 +787,8 @@ impl NamedPkgDep for UnusedDependency {
     fn pkg_path(&self) -> &Path {
         &self.path
     }
-    fn used_in_workspaces(&self) -> &[PathBuf] {
-        &self.used_in_workspaces
+    fn workspace_context(&self) -> (WorkspaceClause, &[PathBuf]) {
+        unused_dependency_context(self)
     }
 }
 
@@ -763,8 +817,8 @@ impl NamedPkgDep for UnusedDependencyFinding {
     fn pkg_path(&self) -> &Path {
         &self.dep.path
     }
-    fn used_in_workspaces(&self) -> &[PathBuf] {
-        &self.dep.used_in_workspaces
+    fn workspace_context(&self) -> (WorkspaceClause, &[PathBuf]) {
+        unused_dependency_context(&self.dep)
     }
     fn caveats(&self) -> &[ReachabilityCaveat] {
         &self.reachability_caveats
@@ -778,8 +832,8 @@ impl NamedPkgDep for UnusedDevDependencyFinding {
     fn pkg_path(&self) -> &Path {
         &self.dep.path
     }
-    fn used_in_workspaces(&self) -> &[PathBuf] {
-        &self.dep.used_in_workspaces
+    fn workspace_context(&self) -> (WorkspaceClause, &[PathBuf]) {
+        unused_dependency_context(&self.dep)
     }
     fn caveats(&self) -> &[ReachabilityCaveat] {
         &self.reachability_caveats
@@ -793,8 +847,8 @@ impl NamedPkgDep for UnusedOptionalDependencyFinding {
     fn pkg_path(&self) -> &Path {
         &self.dep.path
     }
-    fn used_in_workspaces(&self) -> &[PathBuf] {
-        &self.dep.used_in_workspaces
+    fn workspace_context(&self) -> (WorkspaceClause, &[PathBuf]) {
+        unused_dependency_context(&self.dep)
     }
     fn caveats(&self) -> &[ReachabilityCaveat] {
         &self.reachability_caveats
@@ -855,7 +909,7 @@ fn push_human_pkg_dep_section<T: NamedPkgDep>(input: &mut HumanPkgDepSectionInpu
                 format_dep_with_pkg(
                     dep.pkg_name(),
                     dep.pkg_path(),
-                    dep.used_in_workspaces(),
+                    dep.workspace_context(),
                     input.root,
                     caveat_width,
                 ),
@@ -4412,6 +4466,7 @@ mod tests {
                 path: root.join("packages/app/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         assert_eq!(
             collect_matching_rules(&deps, &root, &resolver),
@@ -4717,6 +4772,7 @@ mod tests {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         });
         dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
         results.unused_dependencies.push(dep);
@@ -4797,6 +4853,7 @@ mod tests {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         });
         dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
         results.unused_dependencies.push(dep);
@@ -4885,6 +4942,7 @@ mod tests {
             path: root.join("package.json"),
             line: 5,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         };
 
         let mut prod = UnusedDependencyFinding::with_actions(dependency(
@@ -4963,6 +5021,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
 
         let rules = RulesConfig::default();
@@ -5182,6 +5241,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -5202,6 +5262,7 @@ mod tests {
                 path: root.join("packages/web/package.json"),
                 line: 8,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -5222,6 +5283,7 @@ mod tests {
                 path: root.join("packages/shared/package.json"),
                 line: 8,
                 used_in_workspaces: vec![root.join("packages/consumer")],
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -5242,6 +5304,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 8,
                 used_in_workspaces: vec![root.join("packages/consumer")],
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -5249,6 +5312,29 @@ mod tests {
         assert!(text.contains("lodash-es"));
         assert!(text.contains("(imported in packages/consumer)"));
         assert!(!text.contains("(package.json; imported in packages/consumer)"));
+    }
+
+    #[test]
+    fn unused_root_dep_names_the_workspaces_that_declare_and_import_it() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 8,
+                used_in_workspaces: Vec::new(),
+                declared_and_imported_in: vec![root.join("packages/app")],
+            }));
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+        assert!(
+            text.contains("lodash (package.json; declared and imported in packages/app)"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -5293,6 +5379,7 @@ mod tests {
                 path: manifest,
                 line: 8,
                 used_in_workspaces: workspaces,
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -5323,6 +5410,7 @@ mod tests {
             path: root.join("packages/mobile-application/package.json"),
             line: 8,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         });
         dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
         let mut results = AnalysisResults::default();
@@ -5354,6 +5442,7 @@ mod tests {
     fn dep_label_caps_the_workspace_list_and_keeps_whole_paths() {
         let label = dep_label(
             "packages/tsc/package.json",
+            WorkspaceClause::ImportedIn,
             &[
                 "packages/bench".to_string(),
                 "packages/treeshake".to_string(),
@@ -5371,6 +5460,7 @@ mod tests {
     fn dep_label_elides_a_deep_manifest_on_segment_boundaries() {
         let label = dep_label(
             "packages/platform/internal/tooling/generators/package.json",
+            WorkspaceClause::ImportedIn,
             &[],
             40,
         )
@@ -5383,6 +5473,7 @@ mod tests {
     fn dep_label_drops_the_clause_that_would_erode_the_manifest_path() {
         let label = dep_label(
             "packages/platform/design-system/package.json",
+            WorkspaceClause::ImportedIn,
             &["packages/platform/web-application".to_string()],
             DEP_LINE_WIDTH - "@internal/design-system-tokens".len() - DEP_LINE_DECORATION,
         )
@@ -5393,6 +5484,32 @@ mod tests {
     }
 
     #[test]
+    fn root_dep_label_without_room_for_the_declaring_workspaces_stays_bare() {
+        let workspaces = ["packages/app".to_string()];
+        // The root manifest alone says nothing, so it renders only with the
+        // clause that it introduces.
+        assert_eq!(
+            dep_label(
+                ROOT_MANIFEST,
+                WorkspaceClause::DeclaredAndImportedIn,
+                &workspaces,
+                31
+            ),
+            None
+        );
+        assert_eq!(
+            dep_label(
+                ROOT_MANIFEST,
+                WorkspaceClause::DeclaredAndImportedIn,
+                &workspaces,
+                60
+            )
+            .as_deref(),
+            Some("package.json; declared and imported in packages/app")
+        );
+    }
+
+    #[test]
     fn dep_label_is_dropped_when_the_package_name_consumes_the_line() {
         let manifest = "packages/platform/design-system/package.json";
         let workspaces = ["packages/platform/web-application".to_string()];
@@ -5400,9 +5517,12 @@ mod tests {
         // the narrowest label that still names something. Both budgets are
         // literals: as MIN_LABEL_WIDTH +/- 1 they would follow the constant
         // and leave the boundary it exists to express unpinned.
-        assert_eq!(dep_label(manifest, &workspaces, 15), None);
         assert_eq!(
-            dep_label(manifest, &workspaces, 16).as_deref(),
+            dep_label(manifest, WorkspaceClause::ImportedIn, &workspaces, 15),
+            None
+        );
+        assert_eq!(
+            dep_label(manifest, WorkspaceClause::ImportedIn, &workspaces, 16).as_deref(),
             Some(".../package.json")
         );
     }
@@ -5906,6 +6026,7 @@ mod tests {
                 path: root.join("package.json"),
                 line: 1,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);

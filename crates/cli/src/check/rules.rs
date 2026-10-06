@@ -75,6 +75,7 @@ mod tests {
                 path: PathBuf::from("/project/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         r.unused_dev_dependencies
             .push(UnusedDevDependencyFinding::with_actions(UnusedDependency {
@@ -83,6 +84,7 @@ mod tests {
                 path: PathBuf::from("/project/package.json"),
                 line: 5,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         r.unused_enum_members
             .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
@@ -1310,6 +1312,7 @@ mod tests {
                     path: PathBuf::from("/project/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         let rules = RulesConfig::default();
@@ -1328,6 +1331,7 @@ mod tests {
                     path: PathBuf::from("/project/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         let rules = RulesConfig {

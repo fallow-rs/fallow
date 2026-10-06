@@ -1978,6 +1978,7 @@ mod tests {
             path: path.to_path_buf(),
             line: 4,
             used_in_workspaces: Vec::new(),
+            declared_and_imported_in: Vec::new(),
         })
     }
 
@@ -2132,6 +2133,7 @@ mod tests {
                 path: package_json.clone(),
                 line: 10,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .unused_optional_dependencies
@@ -2142,6 +2144,7 @@ mod tests {
                     path: package_json.clone(),
                     line: 11,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ));
         results
@@ -2919,6 +2922,7 @@ mod tests {
                 path: pkg.clone(),
                 line: 8,
                 used_in_workspaces: Vec::new(),
+                declared_and_imported_in: Vec::new(),
             }));
         results
             .type_only_dependencies

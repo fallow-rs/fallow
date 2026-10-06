@@ -4976,6 +4976,7 @@ mod tests {
                     path: std::path::PathBuf::from("/package.json"),
                     line: 1,
                     used_in_workspaces: Vec::new(),
+                    declared_and_imported_in: Vec::new(),
                 },
             ),
         );
