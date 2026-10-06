@@ -23,7 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to specific owner modules. Analysis follows static imports and unambiguous
   re-export chains and checks every analyzed file, including unused files.
   When the script blocks of one Vue, Svelte, or Astro file import the same
-  name, a call is checked when every block imports the same origin.
+  name, a call is checked when every block imports the same origin. Calls in
+  Vue, Svelte, Astro, or MDX template expressions and in Astro inline client
+  scripts are not checked.
   Dynamic labels are checked by broad producer rules; kind-specific rules
   check only literal strings. This complements the gdp-ts lint preset and
   does not verify authorization logic. The parse cache version changes
