@@ -2511,10 +2511,12 @@ fn discover_all_entry_points(
         input.workspace_pkgs,
     );
     let runtime_seeds = discover::workspace_runtime_script_seeds(&workspace_packages);
+    let discovered = discover::DiscoveredPaths::new(input.files);
     let script_workspaces = discover::ScriptWorkspaces {
         packages: &workspace_packages,
         project_root: &input.config.root,
         runtime_seeds: &runtime_seeds,
+        discovered: Some(&discovered),
     };
     let root_discovery = discover::discover_root_entry_points(
         input.config,

@@ -351,9 +351,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source as unused files. Now a `package.json` entry such as `./lib/index.mjs`
   maps to the same-stem source file, such as `src/index.ts`. A workspace
   import through an `exports` target under `lib/` also resolves to the source
-  file. The rule applies only when the `lib/` target is not on disk. Packages
-  with hand-written source in `lib/` keep their current result. A relative
-  import of a missing `lib/` file stays an unresolved import. Thanks to
+  file. The rule applies only when the `lib/` target is not in the analyzed
+  files: it is not on disk, or `.gitignore` or `ignorePatterns` excludes it.
+  Packages with hand-written source in `lib/` keep their current result. A
+  relative import of a missing `lib/` file stays an unresolved import. Thanks to
   [@moltar](https://github.com/moltar) for the report
   ([#3208](https://github.com/fallow-rs/fallow/issues/3208)).
 

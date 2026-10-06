@@ -119,3 +119,68 @@ fn hand_written_lib_entry_does_not_fall_back_to_source_index() {
         "the index fallback must not replace the lib/ entry, unused: {unused:?}"
     );
 }
+
+/// Mark `root` as a git repository so that the walk applies `.gitignore`.
+fn mark_git_root(root: &Path) {
+    std::fs::create_dir_all(root.join(".git")).expect("git directory");
+}
+
+/// Write a package whose `lib/` build output is on disk but gitignored.
+fn write_ignored_lib_output_package(package_dir: &Path, name: &str) {
+    std::fs::create_dir_all(package_dir.join("lib")).expect("lib directory");
+    std::fs::create_dir_all(package_dir.join("src")).expect("src directory");
+    std::fs::write(
+        package_dir.join("package.json"),
+        format!(r#"{{"name":"{name}","main":"./lib/index.mjs"}}"#),
+    )
+    .expect("package manifest");
+    std::fs::write(package_dir.join(".gitignore"), "lib/\n").expect("gitignore");
+    std::fs::write(
+        package_dir.join("lib/index.mjs"),
+        "export const value = 1;\n",
+    )
+    .expect("ignored build output");
+    std::fs::write(
+        package_dir.join("src/index.ts"),
+        "import { helper } from './helper';\nexport const value = helper;\n",
+    )
+    .expect("source entry");
+    std::fs::write(
+        package_dir.join("src/helper.ts"),
+        "export const helper = 1;\n",
+    )
+    .expect("source helper");
+}
+
+#[test]
+fn ignored_lib_output_on_disk_maps_root_entry_to_source() {
+    let directory = tempfile::tempdir().expect("temporary project directory");
+    let root = directory.path();
+    mark_git_root(root);
+    write_ignored_lib_output_package(root, "built-lib");
+
+    assert_eq!(
+        unused_file_paths(root),
+        Vec::<String>::new(),
+        "a lib/ entry outside the discovered file set must map to src/"
+    );
+}
+
+#[test]
+fn ignored_lib_output_on_disk_maps_workspace_entry_to_source() {
+    let directory = tempfile::tempdir().expect("temporary project directory");
+    let root = directory.path();
+    mark_git_root(root);
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"workspace-root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("root manifest");
+    write_ignored_lib_output_package(&root.join("packages/built-lib"), "built-lib");
+
+    assert_eq!(
+        unused_file_paths(root),
+        Vec::<String>::new(),
+        "a workspace lib/ entry outside the discovered file set must map to src/"
+    );
+}

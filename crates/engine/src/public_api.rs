@@ -8,7 +8,7 @@ use fallow_config::{
 use fallow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_graph::resolve::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
+use fallow_graph::resolve::{OUTPUT_DIRS, directory_index_entry, output_entry_to_source_path};
 
 use crate::{
     discover::{EntryPoint, EntryPointSource, SOURCE_EXTENSIONS},
@@ -163,6 +163,12 @@ fn add_package_public_api_entry_points(
     }
 
     let output_map = TsconfigOutputMap::from_project(package_root);
+    let file_id_for = |path: &Path| {
+        path_to_file_id
+            .get(path)
+            .copied()
+            .or_else(|| resolve_entry_via_canonical(graph, path_to_file_id, package_root, path))
+    };
     for entry in package_json.entry_points() {
         let Some(entry_point) = resolve_public_api_entry_path(
             package_root,
@@ -170,24 +176,28 @@ fn add_package_public_api_entry_points(
             canonical_project_root,
             EntryPointSource::PackageJsonExports,
             &output_map,
+            &|path| file_id_for(path).is_some(),
         ) else {
             continue;
         };
 
-        if let Some(file_id) = path_to_file_id.get(&entry_point.path).copied().or_else(|| {
-            resolve_entry_via_canonical(graph, path_to_file_id, package_root, &entry_point.path)
-        }) {
+        if let Some(file_id) = file_id_for(&entry_point.path) {
             public_api_entry_points.insert(file_id);
         }
     }
 }
 
+/// Resolve a package entry to a source path.
+///
+/// `is_discovered` returns `true` for a path in the graph. A `lib/` entry
+/// outside the graph maps to `src/`, the same as a missing `lib/` entry.
 fn resolve_public_api_entry_path(
     base: &Path,
     entry: &str,
     canonical_root: &Path,
     source: EntryPointSource,
     output_map: &TsconfigOutputMap,
+    is_discovered: &dyn Fn(&Path) -> bool,
 ) -> Option<EntryPoint> {
     if entry.contains('*') || entry_has_parent_dir(entry) {
         return None;
@@ -199,7 +209,9 @@ fn resolve_public_api_entry_path(
         }
         TsconfigOutputResolution::ConfiguredButUnresolved => {}
         TsconfigOutputResolution::Unconfigured => {
-            if let Some(source_path) = try_legacy_output_to_source_path(base, entry) {
+            if let Some(source_path) =
+                output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
+            {
                 return validated_entry_point(&source_path, canonical_root, source);
             }
 
@@ -233,7 +245,7 @@ fn resolve_entry_via_filesystem_probe(
         }
     }
 
-    if let Some(index_entry) = try_directory_index_entry(&resolved) {
+    if let Some(index_entry) = directory_index_entry(&resolved, SOURCE_EXTENSIONS) {
         return validated_entry_point(&index_entry, canonical_root, source);
     }
 
@@ -266,16 +278,6 @@ fn validated_entry_point(
         })
 }
 
-fn try_directory_index_entry(resolved: &Path) -> Option<PathBuf> {
-    for ext in SOURCE_EXTENSIONS {
-        let candidate = resolved.join(format!("index.{ext}"));
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 fn is_package_root_index_entry(entry: &str) -> bool {
     let mut components = Path::new(entry)
         .components()
@@ -291,68 +293,6 @@ fn is_package_root_index_entry(entry: &str) -> bool {
     file_name
         .to_str()
         .is_some_and(|name| name == "index" || name.starts_with("index."))
-}
-
-/// Map an output-directory entry to its same-stem source file.
-///
-/// Keep in sync with `try_legacy_output_to_source_path` in
-/// `fallow_core::discover::entry_points`. `OUTPUT_DIRS` decide first. A
-/// `lib/` entry maps only when the entry target is not on disk.
-fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
-    try_output_dir_to_source_path(base, entry, OUTPUT_DIRS).or_else(|| {
-        let resolved = base.join(entry);
-        if is_bare_missing_only_dir(&resolved) || entry_target_exists(&resolved) {
-            return None;
-        }
-        try_output_dir_to_source_path(base, entry, MISSING_ONLY_OUTPUT_DIRS)
-    })
-}
-
-fn try_output_dir_to_source_path(base: &Path, entry: &str, dirs: &[&str]) -> Option<PathBuf> {
-    let entry_path = Path::new(entry);
-    let components: Vec<_> = entry_path.components().collect();
-
-    let output_pos = components.iter().rposition(|component| {
-        if let Component::Normal(name) = component
-            && let Some(name) = name.to_str()
-        {
-            return dirs.contains(&name);
-        }
-        false
-    })?;
-
-    let prefix: PathBuf = components[..output_pos]
-        .iter()
-        .filter(|component| !matches!(component, Component::CurDir))
-        .collect();
-    let suffix: PathBuf = components[output_pos + 1..].iter().collect();
-
-    for ext in SOURCE_EXTENSIONS {
-        let source_candidate = base
-            .join(&prefix)
-            .join("src")
-            .join(suffix.with_extension(ext));
-        if source_candidate.exists() {
-            return Some(source_candidate);
-        }
-    }
-
-    None
-}
-
-fn is_bare_missing_only_dir(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| MISSING_ONLY_OUTPUT_DIRS.contains(&name))
-}
-
-/// Return `true` when the filesystem probe would find `resolved` on disk.
-fn entry_target_exists(resolved: &Path) -> bool {
-    resolved.is_file()
-        || SOURCE_EXTENSIONS
-            .iter()
-            .any(|ext| resolved.with_extension(ext).is_file())
-        || try_directory_index_entry(resolved).is_some()
 }
 
 fn is_entry_in_output_dir(entry: &str) -> bool {
@@ -690,6 +630,35 @@ mod tests {
                 "a lib/ file on disk stays the public entry (with_lib={with_lib}), entries: {entries:?}"
             );
         }
+    }
+
+    #[test]
+    fn ignored_lib_public_entry_on_disk_maps_to_source() {
+        let directory = tempfile::tempdir().expect("temporary project directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join("src")).expect("source directory");
+        std::fs::create_dir_all(root.join("lib")).expect("lib directory");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lib-output-package","exports":{".":"./lib/index.mjs"}}"#,
+        )
+        .expect("package manifest");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"ignorePatterns":["lib/**"]}"#,
+        )
+        .expect("fallow config");
+        std::fs::write(root.join("src/index.ts"), "export const value = 1;\n")
+            .expect("source entry");
+        std::fs::write(root.join("lib/index.mjs"), "export const value = 1;\n")
+            .expect("ignored build output");
+
+        let session = AnalysisSession::load_with_config(root, None, |_| {}).expect("project loads");
+        let entries = public_entry_paths(&session);
+        assert!(
+            entries.iter().any(|path| path.ends_with("src/index.ts")),
+            "a lib/ entry outside the discovered file set maps to src/, entries: {entries:?}"
+        );
     }
 
     #[test]

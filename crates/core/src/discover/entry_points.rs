@@ -4,7 +4,7 @@ use super::walk::SOURCE_EXTENSIONS;
 use fallow_config::{
     EntryPointRole, PackageJson, ResolvedConfig, TsconfigOutputMap, TsconfigOutputResolution,
 };
-use fallow_graph::resolve::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
+use fallow_graph::resolve::{OUTPUT_DIRS, directory_index_entry, output_entry_to_source_path};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -167,6 +167,7 @@ fn resolve_entry_path_with_tracking(
     canonical_root: &Path,
     source: EntryPointSource,
     skipped_entries: Option<&mut FxHashMap<String, usize>>,
+    discovered: Option<&DiscoveredPaths<'_>>,
 ) -> Option<EntryPoint> {
     let output_map = TsconfigOutputMap::from_project(base);
     resolve_entry_path_with_output_map(
@@ -175,8 +176,60 @@ fn resolve_entry_path_with_tracking(
         canonical_root,
         source,
         skipped_entries,
-        &output_map,
+        EntryTargets {
+            output_map: &output_map,
+            discovered,
+        },
     )
+}
+
+/// The discovered files that a package entry must belong to.
+///
+/// A `lib/` entry whose file is on disk but outside this set (because of
+/// `.gitignore` or `ignorePatterns`) maps to `src/`, the same as a missing
+/// `lib/` entry. The path set is built on first use, so a project without
+/// such an entry does not pay for it.
+pub struct DiscoveredPaths<'a> {
+    files: &'a [DiscoveredFile],
+    /// Indexes into `files`, sorted by path. The index holds no borrow, so
+    /// `DiscoveredPaths` stays covariant in `'a`.
+    by_path: std::sync::OnceLock<Vec<usize>>,
+}
+
+impl<'a> DiscoveredPaths<'a> {
+    /// Wrap the discovered files of a project.
+    #[must_use]
+    pub const fn new(files: &'a [DiscoveredFile]) -> Self {
+        Self {
+            files,
+            by_path: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Return `true` when `path` is a discovered file. The lookup matches
+    /// the graph entry lookup: the path as given, then its canonical form.
+    fn contains(&self, path: &Path) -> bool {
+        let by_path = self.by_path.get_or_init(|| {
+            let mut indexes: Vec<usize> = (0..self.files.len()).collect();
+            indexes.sort_unstable_by(|a, b| self.files[*a].path.cmp(&self.files[*b].path));
+            indexes
+        });
+        let has = |candidate: &Path| {
+            by_path
+                .binary_search_by(|index| self.files[*index].path.as_path().cmp(candidate))
+                .is_ok()
+        };
+        has(path) || dunce::canonicalize(path).is_ok_and(|canonical| has(&canonical))
+    }
+}
+
+/// What a package entry resolves against: the tsconfig output map of the
+/// package and, when known, the discovered files of the project.
+#[derive(Clone, Copy)]
+struct EntryTargets<'a> {
+    output_map: &'a TsconfigOutputMap,
+    /// `None` keeps the disk check: a `lib/` file on disk stays the entry.
+    discovered: Option<&'a DiscoveredPaths<'a>>,
 }
 
 fn resolve_entry_path_with_output_map(
@@ -185,7 +238,7 @@ fn resolve_entry_path_with_output_map(
     canonical_root: &Path,
     source: EntryPointSource,
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
-    output_map: &TsconfigOutputMap,
+    targets: EntryTargets<'_>,
 ) -> Option<EntryPoint> {
     if entry.contains('*') {
         return None;
@@ -206,7 +259,7 @@ fn resolve_entry_path_with_output_map(
         canonical_root,
         source.clone(),
         skipped_entries.as_deref_mut(),
-        output_map,
+        targets,
     ) {
         return result;
     }
@@ -244,9 +297,12 @@ fn resolve_entry_via_output_dir(
     canonical_root: &Path,
     source: EntryPointSource,
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
-    output_map: &TsconfigOutputMap,
+    targets: EntryTargets<'_>,
 ) -> OutputDirEntry {
-    match output_map.resolve_source_for_entry(entry, SOURCE_EXTENSIONS) {
+    match targets
+        .output_map
+        .resolve_source_for_entry(entry, SOURCE_EXTENSIONS)
+    {
         TsconfigOutputResolution::Resolved(source_path) => {
             return OutputDirEntry::ShortCircuit(validated_entry_point(
                 &source_path,
@@ -260,7 +316,10 @@ fn resolve_entry_via_output_dir(
         TsconfigOutputResolution::Unconfigured => {}
     }
 
-    if let Some(source_path) = try_legacy_output_to_source_path(base, entry) {
+    let is_discovered = |path: &Path| targets.discovered.is_none_or(|set| set.contains(path));
+    if let Some(source_path) =
+        output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
+    {
         return OutputDirEntry::ShortCircuit(validated_entry_point(
             &source_path,
             canonical_root,
@@ -324,7 +383,7 @@ fn resolve_entry_via_filesystem_probe(
         }
     }
 
-    if let Some(index_entry) = try_directory_index_entry(&resolved) {
+    if let Some(index_entry) = directory_index_entry(&resolved, SOURCE_EXTENSIONS) {
         return validated_entry_point(
             &index_entry,
             canonical_root,
@@ -343,16 +402,6 @@ fn resolve_entry_via_filesystem_probe(
             "package.json root index entry is missing; falling back to source index"
         );
         return validated_entry_point(&source_path, canonical_root, entry, source, skipped_entries);
-    }
-    None
-}
-
-fn try_directory_index_entry(resolved: &Path) -> Option<PathBuf> {
-    for ext in SOURCE_EXTENSIONS {
-        let candidate = resolved.join(format!("index.{ext}"));
-        if candidate.is_file() {
-            return Some(candidate);
-        }
     }
     None
 }
@@ -425,85 +474,8 @@ pub fn resolve_entry_path(
     canonical_root: &Path,
     source: EntryPointSource,
 ) -> Option<EntryPoint> {
-    resolve_entry_path_with_tracking(base, entry, canonical_root, source, None)
+    resolve_entry_path_with_tracking(base, entry, canonical_root, source, None, None)
 }
-/// Try to map an entry path from an output directory to its source equivalent.
-///
-/// Given `base=/project/packages/ui` and `entry=./dist/utils.js`, this tries:
-/// - `/project/packages/ui/src/utils.ts`
-/// - `/project/packages/ui/src/utils.tsx`
-/// - etc. for all source extensions
-///
-/// Preserves any path prefix between the package root and the output dir,
-/// e.g. `./modules/dist/utils.js` → `base/modules/src/utils.ts`.
-///
-/// `OUTPUT_DIRS` decide first. A `lib/` entry (`MISSING_ONLY_OUTPUT_DIRS`)
-/// maps only when the entry target is not on disk, so a package with
-/// hand-written source in `lib/` keeps its real entry.
-///
-/// Returns `Some(path)` if a source file is found.
-fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
-    try_output_dir_to_source_path(base, entry, OUTPUT_DIRS).or_else(|| {
-        let resolved = base.join(entry);
-        if is_bare_missing_only_dir(&resolved) || entry_target_exists(&resolved) {
-            return None;
-        }
-        try_output_dir_to_source_path(base, entry, MISSING_ONLY_OUTPUT_DIRS)
-    })
-}
-
-/// Map the last `dirs` component of `entry` to `src/` with the same stem.
-fn try_output_dir_to_source_path(base: &Path, entry: &str, dirs: &[&str]) -> Option<PathBuf> {
-    let entry_path = Path::new(entry);
-    let components: Vec<_> = entry_path.components().collect();
-
-    let output_pos = components.iter().rposition(|c| {
-        if let std::path::Component::Normal(s) = c
-            && let Some(name) = s.to_str()
-        {
-            return dirs.contains(&name);
-        }
-        false
-    })?;
-
-    let prefix: PathBuf = components[..output_pos]
-        .iter()
-        .filter(|c| !matches!(c, std::path::Component::CurDir))
-        .collect();
-
-    let suffix: PathBuf = components[output_pos + 1..].iter().collect();
-
-    for ext in SOURCE_EXTENSIONS {
-        let source_candidate = base
-            .join(&prefix)
-            .join("src")
-            .join(suffix.with_extension(ext));
-        if source_candidate.exists() {
-            return Some(source_candidate);
-        }
-    }
-
-    None
-}
-
-/// Return `true` when `path` ends in a missing-only output directory, such as
-/// `./lib`. Such an entry has no file to map to a same-stem source file.
-fn is_bare_missing_only_dir(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| MISSING_ONLY_OUTPUT_DIRS.contains(&name))
-}
-
-/// Return `true` when the filesystem probe would find `resolved` on disk: the
-/// exact file, an extension variant, or a directory index.
-fn entry_target_exists(resolved: &Path) -> bool {
-    resolved.is_file()
-        || SOURCE_EXTENSIONS
-            .iter()
-            .any(|ext| resolved.with_extension(ext).is_file())
-        || try_directory_index_entry(resolved).is_some()
-}
-
 /// Conventional source index file stems probed when a package.json entry lives
 /// in an ignored output directory. Ordered by preference.
 const SOURCE_INDEX_FALLBACK_STEMS: &[&str] = &["src/index", "src/main", "index", "main"];
@@ -656,7 +628,10 @@ fn push_package_json_entries(
             canonical_root,
             EntryPointSource::PackageJsonMain,
             Some(&mut discovery.skipped_entries),
-            &output_map,
+            EntryTargets {
+                output_map: &output_map,
+                discovered: workspaces.discovered,
+            },
         ) {
             discovery.entries.push(ep);
         }
@@ -686,7 +661,8 @@ fn push_package_json_entries(
 /// The workspace packages that a script command selects by name, by
 /// directory, or all of them (`yarn workspace web node scripts/a.ts`,
 /// `pnpm -r exec tsx scripts/a.ts`), and the project root that a file
-/// outside the calling package resolves against.
+/// outside the calling package resolves against. Also the discovered files
+/// that the package entries of every package resolve against.
 #[derive(Clone, Copy)]
 pub struct ScriptWorkspaces<'a> {
     /// The workspace packages of the project, the root package included.
@@ -696,6 +672,9 @@ pub struct ScriptWorkspaces<'a> {
     /// The scripts of each package, by package directory, that a runtime
     /// script of another package calls ([`workspace_runtime_script_seeds`]).
     pub runtime_seeds: &'a RuntimeScriptSeeds,
+    /// The discovered files of the project. `None` keeps the disk check for
+    /// `lib/` entries.
+    pub discovered: Option<&'a DiscoveredPaths<'a>>,
 }
 
 /// The scripts of each package, by package directory relative to the
@@ -744,6 +723,7 @@ impl ScriptPackage<'_> {
                 &canonical_project_root,
                 EntryPointSource::PackageJsonScript,
                 Some(skipped_entries),
+                self.workspaces.discovered,
             );
         }
         resolve_entry_path_with_output_map(
@@ -752,7 +732,10 @@ impl ScriptPackage<'_> {
             self.canonical_root,
             EntryPointSource::PackageJsonScript,
             Some(skipped_entries),
-            self.output_map,
+            EntryTargets {
+                output_map: self.output_map,
+                discovered: self.workspaces.discovered,
+            },
         )
     }
 }
@@ -1065,10 +1048,12 @@ pub fn discover_entry_points(
         .collect();
     let packages = collect_workspace_packages(&config.root, root_pkg.as_ref(), &workspace_pkgs);
     let runtime_seeds = workspace_runtime_script_seeds(&packages);
+    let discovered = DiscoveredPaths::new(files);
     let script_workspaces = ScriptWorkspaces {
         packages: &packages,
         project_root: &config.root,
         runtime_seeds: &runtime_seeds,
+        discovered: Some(&discovered),
     };
     let mut discovery = discover_root_entry_points(
         config,
@@ -1182,7 +1167,10 @@ fn collect_nested_package_entries(
             search.canonical_root,
             EntryPointSource::PackageJsonExports,
             Some(&mut *skipped_entries),
-            &output_map,
+            EntryTargets {
+                output_map: &output_map,
+                discovered: search.workspaces.discovered,
+            },
         ) {
             entries.runtime.push(ep);
         }
@@ -1277,7 +1265,10 @@ pub fn discover_workspace_package_entry_points(
                 &canonical_ws_root,
                 EntryPointSource::PackageJsonMain,
                 Some(&mut discovery.skipped_entries),
-                &output_map,
+                EntryTargets {
+                    output_map: &output_map,
+                    discovered: workspaces.discovered,
+                },
             ) {
                 discovery.entries.push(ep);
             }
@@ -2270,6 +2261,7 @@ mod tests {
                 &canonical,
                 EntryPointSource::PackageJsonScript,
                 Some(&mut skipped_entries),
+                None,
             );
 
             assert!(result.is_none(), "unsafe entry should be skipped");
@@ -2364,6 +2356,12 @@ mod tests {
 
     mod output_to_source_tests {
         use super::*;
+
+        /// The output mapping without a discovered file set: a `lib/` file on
+        /// disk counts as present.
+        fn try_legacy_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
+            output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, |_| true)
+        }
 
         #[test]
         fn maps_dist_to_src_with_ts_extension() {
@@ -2950,6 +2948,7 @@ mod tests {
                 packages: &packages,
                 project_root: &config.root,
                 runtime_seeds: &runtime_seeds,
+                discovered: None,
             },
         )
     }
@@ -2971,6 +2970,7 @@ mod tests {
                 packages: &packages,
                 project_root: &config.root,
                 runtime_seeds: &RuntimeScriptSeeds::default(),
+                discovered: None,
             },
         )
     }
@@ -3245,6 +3245,7 @@ mod tests {
                 packages: &packages,
                 project_root: root,
                 runtime_seeds: &runtime_seeds,
+                discovered: None,
             },
         );
 
@@ -3289,6 +3290,7 @@ mod tests {
             packages: &packages,
             project_root: root,
             runtime_seeds: &runtime_seeds,
+            discovered: None,
         };
         let config = config_for(root);
 
