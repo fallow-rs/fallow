@@ -255,6 +255,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root `karma` devDependency. `--trace-dependency` shows that file in
   `tooling_credit`.
 
+- **Playwright entries read every `defineConfig` argument and the default
+  `testDir`.** Playwright merges `defineConfig(a, b, ...)` from left to
+  right. Before, fallow read only one argument, so a test file that a later
+  argument or an imported base config selected was reported as unused. Now
+  the last argument that sets `testDir` or `testMatch` wins. An imported or
+  spread argument keeps every script below `testDir`. A static `testMatch`
+  without `testDir` now applies below the config directory, as Playwright
+  does. Only Playwright adds the test entries of all its configs together.
+  Other test runner plugins keep the entries of the last config, as before.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,

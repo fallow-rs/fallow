@@ -337,7 +337,8 @@ pub struct AggregatedPluginResult {
     /// All entry point patterns from active plugins: (rule, plugin_name).
     pub entry_patterns: Vec<(PathRule, String)>,
     /// Plugins whose config already replaced their static entry patterns.
-    /// A later config of the same plugin adds to the config patterns and does
+    /// A later config of a plugin that sets
+    /// `accumulate_config_entry_patterns` adds to the config patterns and does
     /// not remove them.
     pub replaced_entry_plugins: FxHashSet<String>,
     /// Coverage role for each plugin contributing entry point patterns.

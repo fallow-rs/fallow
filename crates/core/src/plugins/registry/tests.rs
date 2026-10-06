@@ -1151,6 +1151,7 @@ fn process_config_result_merges_all_fields() {
     let config_result = PluginResult {
         entry_patterns: vec![path_rule("src/routes/**/*.ts")],
         replace_entry_patterns: false,
+        accumulate_config_entry_patterns: false,
         replace_used_export_rules: false,
         used_exports: vec![used_export_rule("src/routes/**/*.ts", &["loader"])],
         used_class_members: vec![fallow_config::UsedClassMemberRule::from("agInit")],
@@ -1244,6 +1245,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
     let result1 = PluginResult {
         entry_patterns: vec![path_rule("a.ts")],
         replace_entry_patterns: false,
+        accumulate_config_entry_patterns: false,
         replace_used_export_rules: false,
         used_exports: vec![used_export_rule("a.ts", &["default"])],
         used_class_members: vec![],
@@ -1263,6 +1265,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
     let result2 = PluginResult {
         entry_patterns: vec![path_rule("b.ts")],
         replace_entry_patterns: false,
+        accumulate_config_entry_patterns: false,
         replace_used_export_rules: false,
         used_exports: vec![used_export_rule("b.ts", &["loader"])],
         used_class_members: vec![],
@@ -1417,6 +1420,7 @@ fn process_config_result_second_replacing_config_keeps_first_config_patterns() {
         let config_result = PluginResult {
             entry_patterns: vec![path_rule(pattern)],
             replace_entry_patterns: true,
+            accumulate_config_entry_patterns: true,
             ..Default::default()
         };
         process_config_result("playwright", config_result, &mut aggregated, None).unwrap();
@@ -1431,6 +1435,34 @@ fn process_config_result_second_replacing_config_keeps_first_config_patterns() {
         patterns,
         vec!["apps/one/ui/**/*.spec.ts", "apps/two/checks/**/*.spec.ts"],
         "the static default goes, and the patterns of both configs stay"
+    );
+}
+
+#[test]
+fn process_config_result_later_replacing_config_wins_without_accumulation() {
+    let mut aggregated = AggregatedPluginResult::default();
+    aggregated
+        .entry_patterns
+        .push((path_rule("**/*.test.ts"), "vitest".to_string()));
+
+    for pattern in ["a/**/*.t.ts", "b/**/*.t.ts"] {
+        let config_result = PluginResult {
+            entry_patterns: vec![path_rule(pattern)],
+            replace_entry_patterns: true,
+            ..Default::default()
+        };
+        process_config_result("vitest", config_result, &mut aggregated, None).unwrap();
+    }
+
+    let patterns: Vec<&str> = aggregated
+        .entry_patterns
+        .iter()
+        .map(|(rule, _)| rule.pattern.as_str())
+        .collect();
+    assert_eq!(
+        patterns,
+        vec!["b/**/*.t.ts"],
+        "a plugin that does not accumulate keeps only the last config's patterns"
     );
 }
 

@@ -1515,6 +1515,81 @@ pub(crate) fn find_variable_init_object<'a>(
     None
 }
 
+/// The init expression of the first top-level variable declaration of `name`.
+fn find_variable_init<'a>(program: &'a Program<'a>, name: &str) -> Option<&'a Expression<'a>> {
+    top_level_variable_declarations(program)
+        .flat_map(|decl| &decl.declarations)
+        .find(|declarator| {
+            matches!(&declarator.id, BindingPattern::BindingIdentifier(id) if id.name == name)
+        })
+        .and_then(|declarator| declarator.init.as_ref())
+}
+
+/// The expression that the config file exports with `export default` or
+/// `module.exports =`.
+fn exported_config_expression<'a>(program: &'a Program<'a>) -> Option<&'a Expression<'a>> {
+    program.body.iter().find_map(|stmt| match stmt {
+        Statement::ExportDefaultDeclaration(decl) => decl.declaration.as_expression(),
+        Statement::ExpressionStatement(expr_stmt) => match &expr_stmt.expression {
+            Expression::AssignmentExpression(assign) if is_module_exports_target(&assign.left) => {
+                Some(&assign.right)
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+/// The call that `expr` stands for, through parentheses, type assertions and
+/// one top-level variable binding.
+fn config_call<'a>(
+    program: &'a Program<'a>,
+    expr: &'a Expression<'a>,
+    follow_binding: bool,
+) -> Option<&'a CallExpression<'a>> {
+    match expr {
+        Expression::CallExpression(call) => Some(call),
+        Expression::ParenthesizedExpression(paren) => {
+            config_call(program, &paren.expression, follow_binding)
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            config_call(program, &ts_sat.expression, follow_binding)
+        }
+        Expression::TSAsExpression(ts_as) => {
+            config_call(program, &ts_as.expression, follow_binding)
+        }
+        Expression::Identifier(id) if follow_binding => {
+            config_call(program, find_variable_init(program, &id.name)?, false)
+        }
+        _ => None,
+    }
+}
+
+/// The arguments of an exported config call with more than one argument, such
+/// as `defineConfig(base, { ... })`, in source order.
+///
+/// Some tools merge every argument into one config. Each argument resolves to
+/// its object. An argument that does not resolve to one local object is
+/// `None`, because it can set any key: a spread, an imported binding, or a
+/// nested call that merges more than one argument. Returns `None` when the
+/// exported config is not a call with more than one argument.
+pub(crate) fn find_config_merge_arguments<'a>(
+    program: &'a Program<'a>,
+) -> Option<Vec<Option<&'a ObjectExpression<'a>>>> {
+    let call = config_call(program, exported_config_expression(program)?, true)?;
+    if call.arguments.len() < 2 {
+        return None;
+    }
+    let resolve = |arg: &'a Argument<'a>| {
+        let expr = arg.as_expression()?;
+        if config_call(program, expr, true).is_some_and(|nested| nested.arguments.len() > 1) {
+            return None;
+        }
+        resolve_config_argument(program, expr, MAX_CONFIG_WRAPPER_DEPTH)
+    };
+    Some(call.arguments.iter().map(resolve).collect())
+}
+
 /// Every top-level variable declaration, including the one an
 /// `export const NAME = ...` declaration wraps.
 fn top_level_variable_declarations<'a>(

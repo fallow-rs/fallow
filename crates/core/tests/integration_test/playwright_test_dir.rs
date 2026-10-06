@@ -128,3 +128,38 @@ fn later_spread_does_not_narrow_to_an_overwritten_test_dir() {
         findings.unused_files
     );
 }
+
+fn assert_file_reported(findings: &Findings, file: &str) {
+    assert!(
+        findings.unused_files.iter().any(|p| p.ends_with(file)),
+        "{file} is not a test entry and must be reported, got {:?}",
+        findings.unused_files
+    );
+}
+
+/// `defineConfig` merges all of its arguments. An imported argument can set
+/// `testMatch`, so the `testDir` of a later argument keeps every script.
+#[test]
+fn define_config_with_imported_argument_keeps_its_test_files() {
+    let findings = analyze_fixture("playwright-define-config-imported-base");
+    assert_spec_reachable(&findings, "e2e/login.pw.ts");
+    assert_spec_reachable(&findings, "e2e/helper.ts");
+    assert_file_reported(&findings, "orphan.ts");
+}
+
+/// A later `defineConfig` argument overrides the `testDir` of an earlier one.
+#[test]
+fn define_config_later_argument_wins() {
+    let findings = analyze_fixture("playwright-define-config-two-objects");
+    assert_spec_reachable(&findings, "e2e/login.pw.ts");
+    assert_file_reported(&findings, "a/old.pw.ts");
+}
+
+/// Without `testDir`, Playwright applies `testMatch` below the config
+/// directory.
+#[test]
+fn test_match_without_test_dir_applies_below_config_dir() {
+    let findings = analyze_fixture("playwright-test-match-without-test-dir");
+    assert_spec_reachable(&findings, "src/login.e2e.ts");
+    assert_file_reported(&findings, "src/orphan.ts");
+}

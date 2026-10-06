@@ -681,11 +681,11 @@ fn merge_plugin_result_fields(
     plugin_result: PluginResult,
     result: &mut AggregatedPluginResult,
 ) {
-    if plugin_result.replace_entry_patterns
-        && !plugin_result.entry_patterns.is_empty()
-        && result.replaced_entry_plugins.insert(pname.to_string())
-    {
-        result.entry_patterns.retain(|(_, name)| name != pname);
+    if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
+        let first_replacement = result.replaced_entry_plugins.insert(pname.to_string());
+        if first_replacement || !plugin_result.accumulate_config_entry_patterns {
+            result.entry_patterns.retain(|(_, name)| name != pname);
+        }
     }
     if plugin_result.replace_used_export_rules && !plugin_result.used_exports.is_empty() {
         result.used_exports.retain(|rule| rule.plugin_name != pname);

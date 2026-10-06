@@ -210,6 +210,10 @@ pub struct PluginResult {
     /// and Jest treat their config's include/testMatch as a replacement for built-in
     /// defaults, so when the config is explicit the static patterns must be dropped.
     replace_entry_patterns: bool,
+    /// When true, a replacing config removes only the static defaults, and the
+    /// replacing configs of one plugin run add their patterns together. When
+    /// false, the last replacing config of the plugin wins.
+    accumulate_config_entry_patterns: bool,
     /// When true, `used_exports` from config replace the plugin's static
     /// `used_export_rules()` defaults instead of adding to them.
     replace_used_export_rules: bool,

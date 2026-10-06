@@ -88,13 +88,14 @@ define_plugin!(
             None => result.extend_entry_patterns(DEFAULT_TEST_ENTRY_PATTERNS.iter().copied()),
         }
         result.replace_entry_patterns = true;
+        result.accumulate_config_entry_patterns = true;
 
         result
     },
 );
 
 /// A `testDir` or `testMatch` value of one config scope.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 enum ScopeValue<T> {
     Absent,
     Static(T),
@@ -136,28 +137,40 @@ fn test_entry_patterns(
     config_dir: &Path,
 ) -> Option<Vec<String>> {
     let scopes = config_parser::extract_from_source(source, config_path, |program| {
+        if let Some(arguments) = config_parser::find_config_merge_arguments(program) {
+            return Some(config_test_scopes(
+                scope_from(
+                    merged_property(&arguments, "testDir"),
+                    merged_property(&arguments, "testMatch"),
+                ),
+                merged_projects(&arguments),
+            ));
+        }
         let config = config_parser::find_config_object(program)?;
-        Some(config_test_scopes(config))
+        Some(config_test_scopes(
+            scope_of(config),
+            scope_property(config, "projects"),
+        ))
     })?;
 
     let mut patterns = Vec::new();
     for scope in scopes {
-        let ScopeValue::Static(test_dir) = scope.test_dir else {
-            patterns.extend(
-                DEFAULT_TEST_ENTRY_PATTERNS
-                    .iter()
-                    .skip(TEST_FILE_NAME_PATTERNS.len())
-                    .map(|pattern| (*pattern).to_string()),
-            );
-            continue;
+        let test_dir = match (scope.test_dir, &scope.test_match) {
+            (ScopeValue::Static(test_dir), _) => test_dir,
+            // Playwright uses the config directory when `testDir` is not set.
+            // Only a static `testMatch` narrows that directory enough to give
+            // entries; the conventional directories stay as a fallback.
+            (ScopeValue::Absent, ScopeValue::Static(_)) => {
+                patterns.extend(conventional_test_dir_patterns());
+                ".".to_string()
+            }
+            _ => {
+                patterns.extend(conventional_test_dir_patterns());
+                continue;
+            }
         };
         let Some(prefix) = test_dir_prefix(&test_dir, root, config_dir) else {
-            patterns.extend(
-                DEFAULT_TEST_ENTRY_PATTERNS
-                    .iter()
-                    .skip(TEST_FILE_NAME_PATTERNS.len())
-                    .map(|pattern| (*pattern).to_string()),
-            );
+            patterns.extend(conventional_test_dir_patterns());
             continue;
         };
         match scope.test_match {
@@ -181,10 +194,60 @@ fn test_entry_patterns(
     Some(patterns)
 }
 
+/// The conventional test directory patterns of [`DEFAULT_TEST_ENTRY_PATTERNS`].
+fn conventional_test_dir_patterns() -> impl Iterator<Item = String> {
+    DEFAULT_TEST_ENTRY_PATTERNS
+        .iter()
+        .skip(TEST_FILE_NAME_PATTERNS.len())
+        .map(|pattern| (*pattern).to_string())
+}
+
+/// The value of `key` in a `defineConfig(a, b, ...)` call. Playwright merges
+/// the arguments from left to right, so the last argument that sets the key
+/// wins. An unresolved argument can set the key, so it makes the value
+/// dynamic unless a later argument sets the key.
+fn merged_property<'a>(
+    arguments: &[Option<&'a ObjectExpression<'a>>],
+    key: &str,
+) -> ScopeValue<&'a Expression<'a>> {
+    for argument in arguments.iter().rev() {
+        let Some(object) = argument else {
+            return ScopeValue::Dynamic;
+        };
+        match scope_property(object, key) {
+            ScopeValue::Absent => {}
+            value => return value,
+        }
+    }
+    ScopeValue::Absent
+}
+
+/// The `projects` of a `defineConfig(a, b, ...)` call. Playwright merges the
+/// projects of the arguments by name, so the projects are static only when
+/// one argument gives them.
+fn merged_projects<'a>(
+    arguments: &[Option<&'a ObjectExpression<'a>>],
+) -> ScopeValue<&'a Expression<'a>> {
+    let mut projects = ScopeValue::Absent;
+    for argument in arguments {
+        let Some(object) = argument else {
+            return ScopeValue::Dynamic;
+        };
+        match (scope_property(object, "projects"), &projects) {
+            (ScopeValue::Absent, _) => {}
+            (value, ScopeValue::Absent) => projects = value,
+            _ => return ScopeValue::Dynamic,
+        }
+    }
+    projects
+}
+
 /// Known projects keep their entries even when another project is dynamic.
 /// Unknown projects also keep the top-level scope and conventional defaults.
-fn config_test_scopes(config: &ObjectExpression<'_>) -> Vec<TestScope> {
-    let top = scope_of(config);
+fn config_test_scopes<'a>(
+    top: TestScope,
+    projects: ScopeValue<&'a Expression<'a>>,
+) -> Vec<TestScope> {
     let inherited = TestScope {
         test_dir: top.test_dir.clone(),
         test_match: ScopeValue::Dynamic,
@@ -193,7 +256,7 @@ fn config_test_scopes(config: &ObjectExpression<'_>) -> Vec<TestScope> {
         test_dir: ScopeValue::Dynamic,
         test_match: ScopeValue::Dynamic,
     };
-    let projects = match scope_property(config, "projects") {
+    let projects = match projects {
         ScopeValue::Absent => return vec![top],
         ScopeValue::Static(expr) => expr,
         ScopeValue::Dynamic => return vec![inherited, unknown],
@@ -229,13 +292,23 @@ fn config_test_scopes(config: &ObjectExpression<'_>) -> Vec<TestScope> {
 }
 
 fn scope_of(obj: &ObjectExpression<'_>) -> TestScope {
-    let test_dir = match scope_property(obj, "testDir") {
+    scope_from(
+        scope_property(obj, "testDir"),
+        scope_property(obj, "testMatch"),
+    )
+}
+
+fn scope_from(
+    test_dir: ScopeValue<&Expression<'_>>,
+    test_match: ScopeValue<&Expression<'_>>,
+) -> TestScope {
+    let test_dir = match test_dir {
         ScopeValue::Absent => ScopeValue::Absent,
         ScopeValue::Dynamic => ScopeValue::Dynamic,
         ScopeValue::Static(expr) => config_parser::expression_to_path_string(expr)
             .map_or(ScopeValue::Dynamic, ScopeValue::Static),
     };
-    let test_match = match scope_property(obj, "testMatch") {
+    let test_match = match test_match {
         ScopeValue::Absent => ScopeValue::Absent,
         ScopeValue::Dynamic => ScopeValue::Dynamic,
         ScopeValue::Static(expr) => {
@@ -997,9 +1070,87 @@ mod tests {
 
     #[test]
     fn missing_test_dir_restates_default_entries() {
-        let result = resolve(r"export default defineConfig({ testMatch: '*.e2e.ts' });");
+        let result = resolve(r"export default defineConfig({ timeout: 1000 });");
         assert!(result.replace_entry_patterns);
         assert_eq!(entry_patterns(&result), default_patterns());
+    }
+
+    #[test]
+    fn missing_test_dir_applies_test_match_below_config_dir() {
+        let result = resolve_at(
+            "/project/web/playwright.config.ts",
+            r"export default defineConfig({ testMatch: '*.e2e.ts' });",
+        );
+        assert_eq!(
+            test_dir_patterns(&result),
+            [
+                DEFAULT_TEST_ENTRY_PATTERNS[TEST_FILE_NAME_PATTERNS.len()..].to_vec(),
+                vec!["web/**/*.[eE]2[eE].[tT][sS]"],
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
+    fn define_config_arguments_merge_with_last_wins() {
+        for (source, selected, rejected) in [
+            (
+                "export default defineConfig({ testDir: './a' }, { testDir: './ui', testMatch: '*.pw.ts' });",
+                "ui/live.pw.ts",
+                "a/live.pw.ts",
+            ),
+            (
+                "export default defineConfig({ testDir: './ui', testMatch: '*.pw.ts' }, { timeout: 1000 });",
+                "ui/live.pw.ts",
+                "outside/live.pw.ts",
+            ),
+            (
+                "const base = { testMatch: '*.pw.ts' }; export default defineConfig(base, { testDir: './ui' });",
+                "ui/live.pw.ts",
+                "ui/live.other.ts",
+            ),
+            (
+                "import base from './base'; export default defineConfig(base, { testDir: './ui' });",
+                "ui/live.other.ts",
+                "outside/live.other.ts",
+            ),
+            (
+                "import base from './base'; export default defineConfig({ testDir: './wrong' }, base);",
+                "tests/live.pw.ts",
+                "outside/live.other.ts",
+            ),
+            (
+                "const config = defineConfig(shared, { testDir: './ui' }); export default config;",
+                "ui/live.other.ts",
+                "outside/live.other.ts",
+            ),
+            (
+                "export default defineConfig({ testDir: './ui', projects: [{ testDir: './a' }] }, { projects: [{ testDir: './b' }] });",
+                "ui/live.other.ts",
+                "outside/live.other.ts",
+            ),
+        ] {
+            let result = resolve(source);
+            let matchers: Vec<_> = result
+                .entry_patterns
+                .iter()
+                .map(|rule| {
+                    globset::GlobBuilder::new(&rule.pattern)
+                        .literal_separator(true)
+                        .build()
+                        .unwrap()
+                        .compile_matcher()
+                })
+                .collect();
+            assert!(
+                matchers.iter().any(|matcher| matcher.is_match(selected)),
+                "the config selects {selected}: {source}"
+            );
+            assert!(
+                !matchers.iter().any(|matcher| matcher.is_match(rejected)),
+                "the config does not select {rejected}: {source}"
+            );
+        }
     }
 
     #[test]
