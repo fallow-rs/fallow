@@ -189,6 +189,7 @@ jobs:
               - 'crates/mcp/Cargo.toml'
               - 'crates/mcp/src/lib.rs'
               - 'crates/mcp/src/server/tests/e2e.rs'
+              - 'crates/mcp/tests/integration/cloud_runtime_context.rs'
               - 'crates/mcp/src/server/tests/run.rs'
               - 'crates/mcp/tests/integration/main.rs'
               - 'crates/mcp/tests/integration/typed_route_env_coverage.rs'

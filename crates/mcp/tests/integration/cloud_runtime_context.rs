@@ -204,6 +204,15 @@ fn get_cloud_review_packet_posts_the_scope_and_returns_the_packet() {
         request.starts_with("POST /v1/coverage/acme%2Fweb/review-packet "),
         "the tool must reach the review-packet endpoint: {request}"
     );
+    let (_, posted) = request
+        .split_once("\r\n\r\n")
+        .expect("the request has a body");
+    let posted: serde_json::Value = serde_json::from_str(posted).expect("the body is JSON");
+    assert_eq!(
+        posted["files"],
+        serde_json::json!(["src/a.ts"]),
+        "the body must carry the scope: {posted}"
+    );
 }
 
 #[test]
@@ -265,10 +274,7 @@ fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHa
     let captured = Arc::clone(&request);
     let handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept request");
-        let mut buffer = [0_u8; 4096];
-        let read = stream.read(&mut buffer).expect("read request");
-        *captured.lock().expect("capture lock") =
-            String::from_utf8_lossy(&buffer[..read]).into_owned();
+        *captured.lock().expect("capture lock") = read_request(&mut stream);
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
             body.len()
@@ -278,6 +284,37 @@ fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHa
             .expect("write response");
     });
     (format!("http://{addr}"), request, handle)
+}
+
+/// Read one whole HTTP request: the headers, then `content-length` bytes of
+/// body. A POST body can arrive after the headers. A stub that answers and
+/// closes with unread bytes makes Windows reset the connection, and the
+/// client then fails with os error 10053.
+fn read_request(stream: &mut std::net::TcpStream) -> String {
+    const HEADER_END: &[u8] = b"\r\n\r\n";
+    let mut data = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let header_len = loop {
+        if let Some(pos) = data.windows(HEADER_END.len()).position(|w| w == HEADER_END) {
+            break pos + HEADER_END.len();
+        }
+        let read = stream.read(&mut chunk).expect("read request headers");
+        assert_ne!(read, 0, "the client closed before the headers ended");
+        data.extend_from_slice(&chunk[..read]);
+    };
+    let headers = String::from_utf8_lossy(&data[..header_len]).to_ascii_lowercase();
+    let body_len = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:"))
+        .map_or(0, |value| {
+            value.trim().parse::<usize>().expect("content-length")
+        });
+    while data.len() < header_len + body_len {
+        let read = stream.read(&mut chunk).expect("read request body");
+        assert_ne!(read, 0, "the client closed before the body ended");
+        data.extend_from_slice(&chunk[..read]);
+    }
+    String::from_utf8_lossy(&data).into_owned()
 }
 
 /// The workspace root, two levels above this crate.
