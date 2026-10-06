@@ -118,7 +118,7 @@ open = "5"
 # Testing
 criterion = { package = "codspeed-criterion-compat", version = "=4.7.0", default-features = false }
 insta = { version = "1", features = ["yaml"] }
-jsonschema = { version = "0.57", default-features = false }
+jsonschema = { version = "0.58", default-features = false }
 proptest = "1"
 tempfile = "3"
 libc = "0.2"
