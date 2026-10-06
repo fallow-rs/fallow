@@ -529,12 +529,15 @@ jobs:
       # glibc cross-gcc cannot link C objects into a musl binary, so the MCP
       # build for this one target uses cargo-zigbuild (zig cc as a musl-capable
       # C cross-compiler). Pinned to the pair validated locally against
-      # rquickjs-sys 0.12. x86_64-musl (native musl-gcc) and aarch64-gnu (glibc
-      # cross-gcc against a glibc target) keep the plain cargo build.
+      # rquickjs-sys 0.12. cargo-zigbuild 0.23.0 or later is required: it drops
+      # the `--fix-cortex-a53-843419` linker arg that rustc 1.98 passes for
+      # this target and that zig rejects. x86_64-musl (native musl-gcc) and
+      # aarch64-gnu (glibc cross-gcc against a glibc target) keep the plain
+      # cargo build.
       - name: Install cargo-zigbuild for aarch64-musl C cross-compile
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          python3 -m pip install --user --break-system-packages cargo-zigbuild==0.22.3 ziglang==0.16.0
+          python3 -m pip install --user --break-system-packages cargo-zigbuild==0.23.4 ziglang==0.16.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cargo-zigbuild" --version
           python3 -m ziglang version
