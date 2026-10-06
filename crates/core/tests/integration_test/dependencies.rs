@@ -1707,3 +1707,34 @@ fn catalogue_cli_dev_dependency_needs_reference_or_config() {
         "only the command-line tools without a reference or a config file should be reported"
     );
 }
+
+/// A bundler such as Next.js runs postcss.config.* with its own copy of
+/// PostCSS, so the project often declares no `postcss` package. The packages
+/// that the config names in `plugins` are still in use.
+#[test]
+fn postcss_config_credits_plugins_without_postcss_dependency() {
+    let root = fixture_path("postcss-config-without-postcss-dependency");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        unused_dev_dep_names.is_empty(),
+        "postcss.config.mjs names every devDependency: {unused_dev_dep_names:?}"
+    );
+
+    let unused_files: Vec<&str> = results
+        .unused_files
+        .iter()
+        .filter_map(|f| f.file.path.file_name())
+        .filter_map(|f| f.to_str())
+        .collect();
+    assert!(
+        !unused_files.contains(&"postcss.config.mjs"),
+        "the bundler loads postcss.config.mjs: {unused_files:?}"
+    );
+}

@@ -185,6 +185,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `postcss.config.*` file now credits the PostCSS plugins that it names,
+  also when the project declares no `postcss` package.** A bundler such as
+  Next.js loads the config with its own copy of PostCSS. Before, fallow read
+  the config only when `postcss` was a declared dependency. In a Tailwind v4
+  project, `@tailwindcss/postcss` and the other PostCSS plugins in the config
+  showed as unused devDependencies. Now the config file alone activates the
+  PostCSS plugin.
+
 - **Script directory imports no longer resolve to a sibling stylesheet or
   component.** An import of `./Button` now reaches `Button/index.ts` before
   an inferred `Button.css` or `Button.vue`. The same rule applies to aliases,
