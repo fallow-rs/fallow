@@ -87,6 +87,39 @@ fn warm_metadata_cache_reports_source_that_becomes_unreadable() {
     assert!(!warm.read_failures[0].error.is_empty());
 }
 
+/// Restore the mtime of a rewritten file, then wait until its ctime differs
+/// from `ctime_before`. A filesystem with a coarse clock can give the rewrite
+/// the same ctime as the first write. The test is about a moved ctime, so it
+/// applies the timestamps again until the clock ticks. Windows reports no
+/// ctime, so the loop stops at once there.
+fn restore_mtime_once_ctime_moves(
+    path: &std::path::Path,
+    accessed: std::time::SystemTime,
+    modified: std::time::SystemTime,
+    ctime_before: u64,
+) {
+    for _ in 0..200 {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("open source for timestamp restore")
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_accessed(accessed)
+                    .set_modified(modified),
+            )
+            .expect("restore source timestamps");
+        let metadata = std::fs::metadata(path).expect("source metadata after restore");
+        let ctime =
+            fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata).ctime_ns;
+        if ctime == 0 || ctime != ctime_before {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the ctime of {} did not move", path.display());
+}
+
 /// The metadata fast path must not serve a cached module for a file that was
 /// rewritten to the same length with its modification time restored.
 ///
@@ -110,6 +143,7 @@ fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
     let metadata = std::fs::metadata(&path).expect("source metadata");
     let modified = metadata.modified().expect("source mtime");
     let accessed = metadata.accessed().unwrap_or(modified);
+    let ctime_before = SourceFingerprint::from_metadata(&metadata).ctime_ns;
     let discovered = [DiscoveredFile {
         id: FileId(0),
         path: path.clone(),
@@ -128,17 +162,7 @@ fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
     );
 
     std::fs::write(&path, after).expect("rewrite source");
-    let handle = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&path)
-        .expect("open source for timestamp restore");
-    handle
-        .set_times(
-            std::fs::FileTimes::new()
-                .set_accessed(accessed)
-                .set_modified(modified),
-        )
-        .expect("restore source timestamps");
+    restore_mtime_once_ctime_moves(&path, accessed, modified, ctime_before);
     let rewritten = std::fs::metadata(&path).expect("source metadata after rewrite");
     assert_eq!(rewritten.len(), metadata.len());
     assert_eq!(rewritten.modified().expect("mtime after rewrite"), modified);
