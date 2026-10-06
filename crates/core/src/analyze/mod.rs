@@ -254,43 +254,6 @@ fn public_workspace_roots<'a>(
         .collect()
 }
 
-/// Resolve a canonicalized entry-point path against the canonical form of the
-/// modules UNDER `package_root`, without canonicalizing the whole project.
-///
-/// Only reached when an entry point matches neither a raw module path nor the
-/// canonicalized-entry-against-raw-map lookup, i.e. the module is reached through
-/// an intra-project symlink so its stored (raw) path differs from its canonical
-/// path. Scoping the scan to the entry's own package keeps a fruitless miss
-/// (e.g. a `bin` script that is not a discovered module) bounded by that
-/// package's file count instead of the entire graph.
-fn resolve_entry_via_scoped_canonical(
-    graph: &ModuleGraph,
-    package_root: &std::path::Path,
-    canonical_entry: &std::path::Path,
-) -> Option<FileId> {
-    match_canonical_entry_under_package(
-        graph.modules.iter().map(|m| (m.path.as_path(), m.file_id)),
-        package_root,
-        canonical_entry,
-    )
-}
-
-/// Pure core of [`resolve_entry_via_scoped_canonical`], decoupled from
-/// `ModuleGraph` for direct unit testing of the symlink-resolution path. Returns
-/// the `FileId` of the first candidate under `package_root` whose canonical form
-/// equals `canonical_entry`.
-fn match_canonical_entry_under_package<'a>(
-    candidates: impl Iterator<Item = (&'a std::path::Path, FileId)>,
-    package_root: &std::path::Path,
-    canonical_entry: &std::path::Path,
-) -> Option<FileId> {
-    candidates
-        .filter(|(path, _)| path.starts_with(package_root))
-        .find_map(|(path, file_id)| {
-            (dunce::canonicalize(path).ok().as_deref() == Some(canonical_entry)).then_some(file_id)
-        })
-}
-
 fn add_package_public_api_entry_points(
     public_api_entry_points: &mut FxHashSet<FileId>,
     graph: &ModuleGraph,
@@ -303,32 +266,24 @@ fn add_package_public_api_entry_points(
         return;
     }
 
+    let file_id_for = |path: &std::path::Path| {
+        graph.package_entry_file_id(package_root, path, |candidate| {
+            path_to_file_id.get(candidate).copied()
+        })
+    };
+    let is_discovered = |path: &std::path::Path| file_id_for(path).is_some();
     for entry in package_json.entry_points() {
-        let Some(entry_point) = crate::discover::resolve_entry_path(
+        let Some(entry_point) = crate::discover::resolve_entry_path_with_discovered(
             package_root,
             &entry,
             canonical_project_root,
             crate::discover::EntryPointSource::PackageJsonExports,
+            &is_discovered,
         ) else {
             continue;
         };
 
-        if let Some(file_id) = path_to_file_id
-            .get(entry_point.path.as_path())
-            .copied()
-            .or_else(|| {
-                dunce::canonicalize(&entry_point.path)
-                    .ok()
-                    .and_then(|canonical| {
-                        path_to_file_id
-                            .get(canonical.as_path())
-                            .copied()
-                            .or_else(|| {
-                                resolve_entry_via_scoped_canonical(graph, package_root, &canonical)
-                            })
-                    })
-            })
-        {
+        if let Some(file_id) = file_id_for(&entry_point.path) {
             public_api_entry_points.insert(file_id);
         }
     }
@@ -1664,7 +1619,7 @@ fn populate_duplicate_prop_shape_findings(input: &mut FrameworkSpecificFindingsI
 /// ([`add_package_public_api_entry_points`]) already canonicalizes the ENTRY and
 /// matches it against raw module paths, which covers every project without
 /// intra-project symlinks. The residual symlinked-module case is handled lazily
-/// and package-scoped by [`resolve_entry_via_scoped_canonical`], so the common
+/// and package-scoped by `ModuleGraph::package_entry_file_id`, so the common
 /// path pays zero canonicalize syscalls.
 fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, FileId> {
     graph
@@ -2862,6 +2817,73 @@ fn run_unresolved_import_detector(
 
 #[cfg(test)]
 mod tests {
+    /// Public API entries of a package with `exports` set to `./lib/index.mjs`
+    /// and a graph that holds only `src/index.ts`.
+    fn lib_export_public_entries(with_lib_on_disk: bool) -> Vec<std::path::PathBuf> {
+        use fallow_types::discover::{DiscoveredFile, FileId};
+
+        let directory = tempfile::tempdir().expect("temporary project directory");
+        let root = dunce::canonicalize(directory.path()).expect("canonical root");
+        std::fs::create_dir_all(root.join("src")).expect("src directory");
+        std::fs::write(root.join("src/index.ts"), "export const value = 1;\n")
+            .expect("source entry");
+        if with_lib_on_disk {
+            std::fs::create_dir_all(root.join("lib")).expect("lib directory");
+            std::fs::write(root.join("lib/index.mjs"), "export const value = 1;\n")
+                .expect("build output outside the file set");
+        }
+        let package_json: fallow_config::PackageJson =
+            serde_json::from_str(r#"{"name":"lib-output","exports":{".":"./lib/index.mjs"}}"#)
+                .expect("package manifest");
+
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: root.join("src/index.ts"),
+            size_bytes: 0,
+        }];
+        let resolved_modules = vec![crate::resolve::ResolvedModule {
+            file_id: FileId(0),
+            path: files[0].path.clone(),
+            ..Default::default()
+        }];
+        let graph = crate::graph::ModuleGraph::build(&resolved_modules, &[], &files);
+        let path_to_file_id = super::graph_file_ids_by_path(&graph);
+
+        let mut entries = rustc_hash::FxHashSet::default();
+        super::add_package_public_api_entry_points(
+            &mut entries,
+            &graph,
+            &path_to_file_id,
+            &root,
+            &package_json,
+            &root,
+        );
+        let mut paths: Vec<std::path::PathBuf> = entries
+            .into_iter()
+            .map(|file_id| graph.modules[file_id.0 as usize].path.clone())
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    #[test]
+    fn lib_public_entry_outside_the_graph_maps_to_source() {
+        let missing = lib_export_public_entries(false);
+        assert_eq!(
+            missing.len(),
+            1,
+            "a missing lib/ entry maps to src/: {missing:?}"
+        );
+        assert_eq!(
+            lib_export_public_entries(true)
+                .iter()
+                .map(|path| path.ends_with("src/index.ts"))
+                .collect::<Vec<_>>(),
+            vec![true],
+            "a lib/ entry on disk but outside the graph must map to src/"
+        );
+    }
+
     #[test]
     fn exact_framework_contract_only_replaces_its_matching_plugin_rule() {
         use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
@@ -2900,66 +2922,6 @@ mod tests {
             &contract,
             &extra_member
         ));
-    }
-
-    // Exercises the public-API entry-point fallback (`resolve_entry_via_scoped_canonical`)
-    // for the intra-project-symlink case it exists to handle: a module whose
-    // discovered (raw) path goes through a symlinked directory, so its raw path
-    // differs from the canonicalized entry-point path. The common no-symlink path
-    // is covered by the byte-identical integration corpus; this pins the residual
-    // branch that the raw-map lookup cannot reach.
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn scoped_canonical_matches_module_reached_through_symlink() {
-        use fallow_types::discover::FileId;
-
-        let dir = tempfile::tempdir().unwrap();
-        let real_dir = dir.path().join("real");
-        std::fs::create_dir(&real_dir).unwrap();
-        let real_file = real_dir.join("mod.ts");
-        std::fs::write(&real_file, "export const x = 1;\n").unwrap();
-        // `link/` resolves to `real/`, so the module discovered at `link/mod.ts`
-        // canonicalizes to `real/mod.ts`.
-        let link_dir = dir.path().join("link");
-        std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
-
-        let module_raw_path = link_dir.join("mod.ts");
-        let canonical_entry = dunce::canonicalize(&real_file).unwrap();
-        let package_root = dir.path();
-
-        // The symlinked module under the package is found by canonical match.
-        let candidates = [(module_raw_path.as_path(), FileId(7))];
-        assert_eq!(
-            super::match_canonical_entry_under_package(
-                candidates.iter().copied(),
-                package_root,
-                &canonical_entry,
-            ),
-            Some(FileId(7)),
-        );
-
-        // A candidate outside the package_root is filtered out, even on a match.
-        let outside_root = dir.path().join("other-package");
-        assert_eq!(
-            super::match_canonical_entry_under_package(
-                candidates.iter().copied(),
-                &outside_root,
-                &canonical_entry,
-            ),
-            None,
-        );
-
-        // A non-matching canonical target yields no entry point.
-        let unrelated = dunce::canonicalize(dir.path()).unwrap().join("nope.ts");
-        assert_eq!(
-            super::match_canonical_entry_under_package(
-                candidates.iter().copied(),
-                package_root,
-                &unrelated,
-            ),
-            None,
-        );
     }
 
     #[test]

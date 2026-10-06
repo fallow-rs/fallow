@@ -15,6 +15,7 @@ mod namespace_aliases;
 mod namespace_indexes;
 mod namespace_re_exports;
 mod narrowing;
+mod package_entry;
 mod partition_order;
 mod public_exports;
 mod re_exports;

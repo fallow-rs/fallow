@@ -20,6 +20,10 @@ use super::types::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
 /// hand-written `lib/` file in the analyzed file set stays the entry, and a
 /// `lib/` build output that `.gitignore` or `ignorePatterns` excludes maps to
 /// `src/`.
+///
+/// The probe and `is_discovered` run only for a `lib/` entry that has a
+/// same-stem source file. Other entries never call `is_discovered`, so a
+/// caller can build an expensive lookup on first use.
 pub fn output_entry_to_source_path(
     base: &Path,
     entry: &str,
@@ -28,13 +32,14 @@ pub fn output_entry_to_source_path(
 ) -> Option<PathBuf> {
     output_dir_to_source_path(base, entry, OUTPUT_DIRS, source_extensions).or_else(|| {
         let resolved = base.join(entry);
-        if is_bare_missing_only_dir(&resolved)
-            || probed_entry_target(&resolved, source_extensions)
-                .is_some_and(|target| is_discovered(&target))
-        {
+        if is_bare_missing_only_dir(&resolved) {
             return None;
         }
-        output_dir_to_source_path(base, entry, MISSING_ONLY_OUTPUT_DIRS, source_extensions)
+        let source =
+            output_dir_to_source_path(base, entry, MISSING_ONLY_OUTPUT_DIRS, source_extensions)?;
+        let target_present = probed_entry_target(&resolved, source_extensions)
+            .is_some_and(|target| is_discovered(&target));
+        (!target_present).then_some(source)
     })
 }
 
@@ -149,6 +154,36 @@ mod tests {
             output_entry_to_source_path(dir.path(), "./lib/index.js", EXTS, |_| false),
             Some(dir.path().join("src/index.ts"))
         );
+    }
+
+    #[test]
+    fn discovered_check_runs_only_for_lib_entry_with_source() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        write(&dir.path().join("index.js"));
+        write(&dir.path().join("lib/other.js"));
+        write(&dir.path().join("lib/index.js"));
+        write(&dir.path().join("src/index.ts"));
+        let calls = std::cell::Cell::new(0);
+        let count = |_: &Path| {
+            calls.set(calls.get() + 1);
+            true
+        };
+
+        assert_eq!(
+            output_entry_to_source_path(dir.path(), "./index.js", EXTS, count),
+            None
+        );
+        assert_eq!(
+            output_entry_to_source_path(dir.path(), "./lib/other.js", EXTS, count),
+            None
+        );
+        assert_eq!(calls.get(), 0, "no lib/ entry with a source file, no check");
+
+        assert_eq!(
+            output_entry_to_source_path(dir.path(), "./lib/index.js", EXTS, count),
+            None
+        );
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]

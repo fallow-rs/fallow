@@ -167,7 +167,7 @@ fn resolve_entry_path_with_tracking(
     canonical_root: &Path,
     source: EntryPointSource,
     skipped_entries: Option<&mut FxHashMap<String, usize>>,
-    discovered: Option<&DiscoveredPaths<'_>>,
+    discovered: Option<IsDiscovered<'_>>,
 ) -> Option<EntryPoint> {
     let output_map = TsconfigOutputMap::from_project(base);
     resolve_entry_path_with_output_map(
@@ -182,6 +182,10 @@ fn resolve_entry_path_with_tracking(
         },
     )
 }
+
+/// Return `true` when a path is part of the analyzed files. A `lib/` package
+/// entry whose file is on disk but not analyzed maps to `src/`.
+pub type IsDiscovered<'a> = &'a (dyn Fn(&Path) -> bool + Sync);
 
 /// The discovered files that a package entry must belong to.
 ///
@@ -208,7 +212,8 @@ impl<'a> DiscoveredPaths<'a> {
 
     /// Return `true` when `path` is a discovered file. The lookup matches
     /// the graph entry lookup: the path as given, then its canonical form.
-    fn contains(&self, path: &Path) -> bool {
+    #[must_use]
+    pub fn contains(&self, path: &Path) -> bool {
         let by_path = self.by_path.get_or_init(|| {
             let mut indexes: Vec<usize> = (0..self.files.len()).collect();
             indexes.sort_unstable_by(|a, b| self.files[*a].path.cmp(&self.files[*b].path));
@@ -229,7 +234,7 @@ impl<'a> DiscoveredPaths<'a> {
 struct EntryTargets<'a> {
     output_map: &'a TsconfigOutputMap,
     /// `None` keeps the disk check: a `lib/` file on disk stays the entry.
-    discovered: Option<&'a DiscoveredPaths<'a>>,
+    discovered: Option<IsDiscovered<'a>>,
 }
 
 fn resolve_entry_path_with_output_map(
@@ -316,7 +321,11 @@ fn resolve_entry_via_output_dir(
         TsconfigOutputResolution::Unconfigured => {}
     }
 
-    let is_discovered = |path: &Path| targets.discovered.is_none_or(|set| set.contains(path));
+    let is_discovered = |path: &Path| {
+        targets
+            .discovered
+            .is_none_or(|is_discovered| is_discovered(path))
+    };
     if let Some(source_path) =
         output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
     {
@@ -468,6 +477,11 @@ fn validated_entry_point(
     })
 }
 
+/// Resolve a package entry path with the disk check: a `lib/` file on disk
+/// stays the entry, also when the analysis does not include it.
+///
+/// Use [`resolve_entry_path_with_discovered`] when the analyzed files are
+/// known.
 pub fn resolve_entry_path(
     base: &Path,
     entry: &str,
@@ -475,6 +489,27 @@ pub fn resolve_entry_path(
     source: EntryPointSource,
 ) -> Option<EntryPoint> {
     resolve_entry_path_with_tracking(base, entry, canonical_root, source, None, None)
+}
+
+/// Resolve a package entry path against the analyzed files.
+///
+/// A `lib/` file on disk that `is_discovered` rejects counts as absent, so
+/// the entry maps to the same-stem file under `src/`.
+pub fn resolve_entry_path_with_discovered(
+    base: &Path,
+    entry: &str,
+    canonical_root: &Path,
+    source: EntryPointSource,
+    is_discovered: IsDiscovered<'_>,
+) -> Option<EntryPoint> {
+    resolve_entry_path_with_tracking(
+        base,
+        entry,
+        canonical_root,
+        source,
+        None,
+        Some(is_discovered),
+    )
 }
 /// Conventional source index file stems probed when a package.json entry lives
 /// in an ignored output directory. Ordered by preference.
@@ -672,9 +707,14 @@ pub struct ScriptWorkspaces<'a> {
     /// The scripts of each package, by package directory, that a runtime
     /// script of another package calls ([`workspace_runtime_script_seeds`]).
     pub runtime_seeds: &'a RuntimeScriptSeeds,
-    /// The discovered files of the project. `None` keeps the disk check for
-    /// `lib/` entries.
-    pub discovered: Option<&'a DiscoveredPaths<'a>>,
+    /// Return `true` for a file of the analyzed file set. `None` keeps the
+    /// disk check for `lib/` entries.
+    ///
+    /// The predicate must cover the full analyzed file set of the project:
+    /// the same set that the graph later matches entries against. Workspace
+    /// scope and `--changed-since` filter findings after the analysis, so
+    /// they do not narrow this set.
+    pub discovered: Option<IsDiscovered<'a>>,
 }
 
 /// The scripts of each package, by package directory relative to the
@@ -1049,11 +1089,12 @@ pub fn discover_entry_points(
     let packages = collect_workspace_packages(&config.root, root_pkg.as_ref(), &workspace_pkgs);
     let runtime_seeds = workspace_runtime_script_seeds(&packages);
     let discovered = DiscoveredPaths::new(files);
+    let is_discovered = |path: &Path| discovered.contains(path);
     let script_workspaces = ScriptWorkspaces {
         packages: &packages,
         project_root: &config.root,
         runtime_seeds: &runtime_seeds,
-        discovered: Some(&discovered),
+        discovered: Some(&is_discovered),
     };
     let mut discovery = discover_root_entry_points(
         config,

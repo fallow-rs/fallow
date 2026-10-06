@@ -164,10 +164,9 @@ fn add_package_public_api_entry_points(
 
     let output_map = TsconfigOutputMap::from_project(package_root);
     let file_id_for = |path: &Path| {
-        path_to_file_id
-            .get(path)
-            .copied()
-            .or_else(|| resolve_entry_via_canonical(graph, path_to_file_id, package_root, path))
+        graph.package_entry_file_id(package_root, path, |candidate| {
+            path_to_file_id.get(candidate).copied()
+        })
     };
     for entry in package_json.entry_points() {
         let Some(entry_point) = resolve_public_api_entry_path(
@@ -314,35 +313,6 @@ fn try_source_index_fallback(base: &Path) -> Option<PathBuf> {
         }
     }
     None
-}
-
-fn resolve_entry_via_canonical(
-    graph: &fallow_graph::graph::ModuleGraph,
-    path_to_file_id: &FxHashMap<PathBuf, FileId>,
-    package_root: &Path,
-    entry_path: &Path,
-) -> Option<FileId> {
-    dunce::canonicalize(entry_path).ok().and_then(|canonical| {
-        path_to_file_id
-            .get(&canonical)
-            .copied()
-            .or_else(|| resolve_entry_via_scoped_canonical(graph, package_root, &canonical))
-    })
-}
-
-fn resolve_entry_via_scoped_canonical(
-    graph: &fallow_graph::graph::ModuleGraph,
-    package_root: &Path,
-    canonical_entry: &Path,
-) -> Option<FileId> {
-    graph
-        .modules
-        .iter()
-        .filter(|module| module.path.starts_with(package_root))
-        .find_map(|module| {
-            (dunce::canonicalize(&module.path).ok().as_deref() == Some(canonical_entry))
-                .then_some(module.file_id)
-        })
 }
 
 fn add_exportless_package_source_indexes(
