@@ -775,6 +775,13 @@ mod tests {
         );
     }
 
+    /// A project root that is absolute on every platform. `/project` has no
+    /// drive letter, so it is not absolute on Windows, and the plugin then
+    /// does not use the config directory for `<rootDir>`.
+    fn absolute_project_root() -> PathBuf {
+        std::env::temp_dir().join("fallow-jest-project")
+    }
+
     #[test]
     fn resolve_config_root_dir_token_uses_the_root_dir_option() {
         // Kibana layout: a nested config sets `rootDir` to the repository
@@ -786,22 +793,20 @@ mod tests {
                 globalSetup: "<rootDir>/src/packages/pkg/global_setup.ts"
             };
         "#;
-        let result = JestPlugin.resolve_config(
-            Path::new("/project/src/packages/pkg/jest.config.js"),
-            source,
-            Path::new("/project"),
-        );
+        let root = absolute_project_root();
+        let result =
+            JestPlugin.resolve_config(&root.join("src/packages/pkg/jest.config.js"), source, &root);
         assert!(
             result
                 .setup_files
-                .contains(&PathBuf::from("/project/src/packages/pkg/setup_test.ts")),
+                .contains(&root.join("src/packages/pkg/setup_test.ts")),
             "setup files: {:?}",
             result.setup_files
         );
         assert!(
             result
                 .setup_files
-                .contains(&PathBuf::from("/project/src/packages/pkg/global_setup.ts"))
+                .contains(&root.join("src/packages/pkg/global_setup.ts"))
         );
     }
 
@@ -830,23 +835,21 @@ mod tests {
                 ]
             };
         "#;
-        let result = JestPlugin.resolve_config(
-            Path::new("/project/apps/web/jest.config.js"),
-            source,
-            Path::new("/project"),
-        );
+        let root = absolute_project_root();
+        let result =
+            JestPlugin.resolve_config(&root.join("apps/web/jest.config.js"), source, &root);
         let mut setup_files = result.setup_files;
         setup_files.sort();
         assert_eq!(
             setup_files,
             [
-                "/project/apps/web/after.ts",
-                "/project/apps/web/global.ts",
-                "/project/apps/web/pkg-a/setup.ts",
-                "/project/apps/web/pkg-b/teardown.ts",
-                "/project/plain.ts",
+                "apps/web/after.ts",
+                "apps/web/global.ts",
+                "apps/web/pkg-a/setup.ts",
+                "apps/web/pkg-b/teardown.ts",
+                "plain.ts",
             ]
-            .map(PathBuf::from)
+            .map(|rel| root.join(rel))
         );
     }
 
@@ -883,15 +886,10 @@ mod tests {
         let source = r#"
             module.exports = { setupFiles: ["<rootDir>/setup.ts"] };
         "#;
-        let result = JestPlugin.resolve_config(
-            Path::new("/project/packages/a/jest.config.js"),
-            source,
-            Path::new("/project"),
-        );
-        assert_eq!(
-            result.setup_files,
-            vec![PathBuf::from("/project/packages/a/setup.ts")]
-        );
+        let root = absolute_project_root();
+        let result =
+            JestPlugin.resolve_config(&root.join("packages/a/jest.config.js"), source, &root);
+        assert_eq!(result.setup_files, vec![root.join("packages/a/setup.ts")]);
     }
 
     #[test]

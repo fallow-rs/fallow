@@ -137,6 +137,7 @@ jobs:
               - 'crates/core/src/discover/entry_points.rs'
               - 'crates/core/src/discover/mod.rs'
               - 'crates/core/src/plugins/commit_and_tag_version.rs'
+              - 'crates/core/src/plugins/jest.rs'
               - 'crates/core/src/plugins/playwright.rs'
               - 'crates/core/src/plugins/release_it.rs'
               - 'crates/core/src/plugins/storybook.rs'
