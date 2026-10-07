@@ -5130,6 +5130,21 @@ run_architecture_analyze "$ARCH_FIXTURE" INPUT_ISSUE_TYPES="cycles, boundaries"
 assert_contains "$ARCH_ARGV" "--cycles --boundaries" \
   "architecture: issue-types forwards the architecture filter flags"
 
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_ISSUE_TYPES="cycles, unused-exports"
+if [ "$ARCH_EXIT" -eq 2 ]; then
+  pass "architecture: an unknown issue-types value exits 2"
+else
+  fail "architecture: an unknown issue-types value exits 2" "exit $ARCH_EXIT: $ARCH_STDOUT"
+fi
+assert_contains "$ARCH_STDOUT" "::error::Invalid issue-types value for the architecture command: 'unused-exports'. Valid values: cycles, boundaries, policy." \
+  "architecture: the issue-types error names the valid values"
+assert_not_contains "$ARCH_ARGV" "--unused-exports" \
+  "architecture: an unknown issue-types value does not run the analysis"
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_ISSUE_TYPES="policy"
+assert_contains "$ARCH_ARGV" "--policy" \
+  "architecture: issue-types accepts policy"
+
 run_architecture_analyze "$ARCH_FIXTURE" INPUT_FORMAT="sarif"
 assert_contains "$ARCH_ARGV" "--sarif-file" \
   "architecture: format sarif writes the SARIF file in the same run"

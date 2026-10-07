@@ -97,7 +97,7 @@ variables:
   # count it reports is zero because nothing was measured. Warns and passes by
   # default, because a scope that legitimately holds no source should not break.
   FALLOW_FAIL_ON_EMPTY_ANALYSIS: "false"
-  FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports
+  FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports (not applied to architecture)
   FALLOW_TYPE_AWARE: ""                  # true/false overrides repository typeAware.enabled; empty defers to config
   FALLOW_TYPE_AWARE_PROJECTS: ""         # Comma-separated tsconfig paths; empty uses automatic project discovery
   FALLOW_TYPE_AWARE_REQUIRE: ""           # best-effort or complete; empty defers to repository typeAware.require
@@ -603,6 +603,13 @@ variables:
             IFS=',' read -ra TYPES <<< "$FALLOW_ISSUE_TYPES"
             for t in "${TYPES[@]}"; do
               t="$(echo "$t" | xargs)"
+              case "$t" in
+                cycles|boundaries|policy) ;;
+                *)
+                  echo "ERROR: Invalid FALLOW_ISSUE_TYPES value for the architecture command: '${t}'. Valid values: cycles, boundaries, policy."
+                  exit 2
+                  ;;
+              esac
               ARGS+=("--${t}")
               ISSUE_TYPE_FLAGS+=("--${t}")
             done

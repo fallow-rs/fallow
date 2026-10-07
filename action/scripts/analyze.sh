@@ -246,6 +246,13 @@ build_command_args() {
         IFS=',' read -ra TYPES <<< "$INPUT_ISSUE_TYPES"
         for t in "${TYPES[@]}"; do
           t="$(echo "$t" | xargs)"
+          case "$t" in
+            cycles|boundaries|policy) ;;
+            *)
+              printf '%s\n' "::error::Invalid issue-types value for the architecture command: '${t}'. Valid values: cycles, boundaries, policy."
+              exit 2
+              ;;
+          esac
           ARGS+=("--${t}")
           ISSUE_TYPE_FLAGS+=("--${t}")
         done

@@ -2421,6 +2421,23 @@ run_generated_gitlab_fixture "$ARCH_WORK" \
 assert_contains "$(grep '^fallow architecture ' "$FALLOW_TEST_LOG")" "--cycles --policy" \
   "gitlab architecture: FALLOW_ISSUE_TYPES forwards the architecture filter flags"
 
+: > "$FALLOW_TEST_LOG"
+OUT=$(run_generated_gitlab_fixture "$ARCH_WORK" \
+  MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
+  FALLOW_TEST_LOG="$FALLOW_TEST_LOG" \
+  FALLOW_COMMAND=architecture \
+  FALLOW_ISSUE_TYPES="boundaries, circular-deps")
+ARCH_STATUS=$?
+if [ "$ARCH_STATUS" = "2" ]; then
+  pass "gitlab architecture: an unknown FALLOW_ISSUE_TYPES value exits 2"
+else
+  fail "gitlab architecture: an unknown FALLOW_ISSUE_TYPES value exits 2" "got $ARCH_STATUS: $OUT"
+fi
+assert_contains "$OUT" "ERROR: Invalid FALLOW_ISSUE_TYPES value for the architecture command: 'circular-deps'. Valid values: cycles, boundaries, policy." \
+  "gitlab architecture: the FALLOW_ISSUE_TYPES error names the valid values"
+assert_not_contains "$(cat "$FALLOW_TEST_LOG")" "fallow architecture " \
+  "gitlab architecture: an unknown FALLOW_ISSUE_TYPES value does not run the analysis"
+
 OUT=$(run_generated_gitlab_fixture "$ARCH_WORK" \
   MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
   FALLOW_COMMAND=architectural)

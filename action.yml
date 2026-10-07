@@ -257,7 +257,7 @@ inputs:
     description: 'Comma-separated issue types to report (dead-code and architecture commands). Valid for dead-code: unused-files, unused-exports, unused-types, unused-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps. Valid for architecture: cycles, boundaries, policy.'
     required: false
   include-entry-exports:
-    description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis; also configurable persistently via includeEntryExports in your fallow config.'
+    description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis (not applied to architecture); also configurable persistently via includeEntryExports in your fallow config.'
     required: false
     default: 'false'
   type-aware:
@@ -365,7 +365,7 @@ outputs:
     description: 'true when the loaded file carries no key the running command writes into its own baselines, so it is a baseline another command saved or an object with nothing of that command in it. Empty when no baseline was loaded, when the baseline belongs to the command that read it, or when the fallow version predates the member. A baseline saved on a project with nothing to record is empty and is NOT reported here.'
     value: ${{ steps.analyze.outputs.baseline_unrecognised }}
   baseline-saved-by:
-    description: 'The command that saved the loaded baseline (dead-code, dupes or health), when baseline-unrecognised is true and the file names a writer that fallow knows. Empty otherwise, and when the fallow version predates the member. The value set is open: a later fallow can add a writer.'
+    description: 'The command that saved the loaded baseline (dead-code, dupes or health), when baseline-unrecognised is true and the file names a writer that fallow knows. A baseline that the architecture command saves is a dead-code baseline, so it reports dead-code. Empty otherwise, and when the fallow version predates the member. The value set is open: a later fallow can add a writer.'
     value: ${{ steps.analyze.outputs.baseline_saved_by }}
   baseline-gate-trips:
     description: 'true when the baseline has entries that match nothing and the run could judge it, or when the loaded file is not this command''s own baseline. That is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'
