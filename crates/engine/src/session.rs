@@ -1249,8 +1249,8 @@ impl AnalysisSession {
             self.changed_since_kept_parse(need_complexity, fingerprints)?;
         let mut guard = self.parsed_cache.lock().ok()?;
         let cache = guard.as_mut()?;
-        // Another call changed the cache while this call read files. Its
-        // modules can differ from the checked ones, so take the full parse.
+        // A concurrent cache change during the reads falls back to a full
+        // parse. This is rare and accepted.
         if !Arc::ptr_eq(&cache.modules, &kept_modules)
             || cache.read_started_ns != kept_read_started_ns
         {
@@ -1952,20 +1952,32 @@ mod tests {
                 .ctime_ns
         };
 
+        // Set the read start relative to the file's own ctime, so the test
+        // does not depend on how much time passed since the write.
+        let set_read_started = |session: &mut AnalysisSession, offset: u64| {
+            if let Some(cache) = session
+                .parsed_cache
+                .get_mut()
+                .expect("parse cache")
+                .as_mut()
+            {
+                let ctime = cache.fingerprints[0].ctime_ns;
+                assert!(ctime > 0, "the platform reports a ctime");
+                cache.read_started_ns = ctime.saturating_add(offset);
+            }
+        };
+
+        set_read_started(&mut session, 0);
         assert_eq!(
             stored_ctime(&session),
             0,
-            "a file written just before the parse is not settled"
+            "a fingerprint inside the window is not settled"
         );
 
-        if let Some(cache) = session
-            .parsed_cache
-            .get_mut()
-            .expect("parse cache")
-            .as_mut()
-        {
-            cache.read_started_ns = u64::MAX;
-        }
+        set_read_started(
+            &mut session,
+            fallow_types::source_fingerprint::TIMESTAMP_SETTLE_WINDOW_NS,
+        );
         assert!(
             stored_ctime(&session) > 0,
             "a settled fingerprint keeps its ctime"
