@@ -318,10 +318,10 @@ inputs:
     required: false
   # Bare invocation selectors
   only:
-    description: 'Run only these analyses when no command is specified (comma-separated: dead-code,dupes,health)'
+    description: 'Run only these analyses when no command is specified (comma-separated: dead-code,architecture,dupes,health)'
     required: false
   skip:
-    description: 'Skip these analyses when no command is specified (comma-separated: dead-code,dupes,health)'
+    description: 'Skip these analyses when no command is specified (comma-separated: dead-code,architecture,dupes,health)'
     required: false
 
 outputs:

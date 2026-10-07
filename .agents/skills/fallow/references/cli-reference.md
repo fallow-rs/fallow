@@ -219,7 +219,7 @@ fallow dead-code --format json --quiet --include-entry-exports
 
 Reports circular dependencies, re-export cycles, package cycles, boundary violations (with boundary coverage and forbidden calls) and rule-pack policy violations. The command runs the `dead-code` analysis with these issue types selected. The JSON output is the `dead-code` envelope (`kind: "dead-code"`) with the same arrays, finding ids, exit codes and baselines. The global scope and output flags (`--format`, `--changed-since`, `--workspace`, `--baseline`, `--save-baseline`) work as on `dead-code`.
 
-`fallow dead-code` still reports these findings by default until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. A baseline that `fallow architecture --save-baseline` writes records an issue-type-filtered scope, so `--fail-on-stale-baseline` does not gate on it.
+`fallow dead-code` still reports these findings by default until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. `fallow architecture` reports only part of the issue types, so `--fail-on-stale-baseline` does not gate on it, with any baseline. A baseline that `fallow architecture --save-baseline` writes lists only the architecture findings, and `fallow dead-code` warns when it reads such a baseline.
 
 | Flag | Selects |
 |---|---|

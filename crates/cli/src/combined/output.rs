@@ -763,8 +763,10 @@ fn print_check_section(
         return 0;
     };
     // `--only architecture` reports no dead-code finding type, so the section
-    // starts at its own "Architecture" heading.
-    if show_headers && opts.architecture != crate::check::ArchitectureSelection::Only {
+    // starts at its own "Architecture" heading. With `--quiet` there is no
+    // section heading, so the category itself is named "Architecture".
+    let only_architecture = opts.architecture == crate::check::ArchitectureSelection::Only;
+    if show_headers && !only_architecture {
         eprintln!();
         eprintln!("── Dead Code ──────────────────────────────────────");
     }
@@ -785,6 +787,8 @@ fn print_check_section(
             exit_reason: false,
             architecture_layout: if show_headers {
                 report::ArchitectureLayout::Split
+            } else if only_architecture {
+                report::ArchitectureLayout::Only
             } else {
                 report::ArchitectureLayout::Embedded
             },

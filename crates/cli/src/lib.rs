@@ -1020,7 +1020,7 @@ enum Command {
         #[arg(long)]
         cycles: bool,
 
-        /// Only report boundary violations
+        /// Only report boundary violations, boundary coverage and forbidden calls
         #[arg(long)]
         boundaries: bool,
 

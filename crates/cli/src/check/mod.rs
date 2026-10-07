@@ -961,9 +961,9 @@ fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {
         return;
     }
     eprintln!(
-        "Warning: saving regression baseline with --changed-since, --workspace, or \
-         --changed-workspaces active. The baseline will reflect only scoped results, \
-         not the full project."
+        "Warning: saving regression baseline from a scoped run (--changed-since, \
+         --workspace, --changed-workspaces, a path, or --only/--skip architecture). \
+         The baseline will reflect only scoped results, not the full project."
     );
 }
 

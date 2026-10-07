@@ -190,7 +190,7 @@ variables:
   FALLOW_THREADS: ""
 
   # Bare invocation selectors
-  FALLOW_ONLY: ""               # Comma-separated: check,dupes,health
+  FALLOW_ONLY: ""               # Comma-separated: check,architecture,dupes,health
   FALLOW_SKIP: ""
 
   # Advanced: pin remote MR-integration scripts to a specific tag or commit.

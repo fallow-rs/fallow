@@ -1043,7 +1043,7 @@
           "name": "--boundaries",
           "type": "bool",
           "required": false,
-          "description": "Only report boundary violations",
+          "description": "Only report boundary violations, boundary coverage and forbidden calls",
           "possible_values": [
             "true",
             "false"

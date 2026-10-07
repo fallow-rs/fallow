@@ -554,6 +554,22 @@ fn bare_only_architecture_human_has_no_dead_code_heading() {
 }
 
 #[test]
+fn bare_only_architecture_quiet_keeps_the_architecture_category() {
+    let dir = architecture_project("");
+    let output = run_bare(dir.path(), &["--only", "architecture", "--quiet"]);
+    assert!(
+        output.stdout.contains("── Architecture "),
+        "{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("── Structure "),
+        "{}",
+        output.stdout
+    );
+}
+
+#[test]
 fn bare_group_by_renders_an_architecture_category_per_group() {
     let dir = architecture_project("");
     let output = run_bare(
