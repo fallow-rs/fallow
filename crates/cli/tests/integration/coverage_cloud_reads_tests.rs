@@ -9,7 +9,7 @@
 //! header, `repo_path` matching, `coverage review-packet` and
 //! `coverage deployment-changes`.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::Command;
@@ -20,6 +20,7 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 
 use crate::common::{CommandOutput, fallow_bin, fixture_path, parse_json};
+use crate::http_stub::read_request;
 
 /// One scripted mock response.
 struct MockResponse {
@@ -72,36 +73,6 @@ fn serve(responses: Vec<MockResponse>) -> (String, Captured, thread::JoinHandle<
         }
     });
     (format!("http://{addr}"), captured, handle)
-}
-
-fn read_request(stream: &mut TcpStream) -> String {
-    let mut data = Vec::new();
-    let mut buf = [0_u8; 8192];
-    loop {
-        let read = stream.read(&mut buf).expect("read request");
-        if read == 0 {
-            break;
-        }
-        data.extend_from_slice(&buf[..read]);
-        let text = String::from_utf8_lossy(&data);
-        let Some(head_end) = text.find("\r\n\r\n") else {
-            continue;
-        };
-        let content_length = text[..head_end]
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                name.trim()
-                    .eq_ignore_ascii_case("content-length")
-                    .then(|| value.trim().parse::<usize>().ok())
-                    .flatten()
-            })
-            .unwrap_or(0);
-        if data.len() >= head_end + 4 + content_length {
-            break;
-        }
-    }
-    String::from_utf8_lossy(&data).into_owned()
 }
 
 fn write_response(stream: &mut TcpStream, response: &MockResponse) {

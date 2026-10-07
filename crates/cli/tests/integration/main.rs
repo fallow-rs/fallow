@@ -14,6 +14,8 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+#[path = "../common/http_stub.rs"]
+mod http_stub;
 #[path = "../common/sign.rs"]
 mod sign;
 

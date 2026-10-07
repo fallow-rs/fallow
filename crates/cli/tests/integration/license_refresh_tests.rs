@@ -13,13 +13,14 @@
 //! up. These tests drive the real binary against a stub of that endpoint and
 //! assert the request sequence and the terminal error text.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::common::fallow_bin;
+use crate::http_stub::read_request;
 
 struct MockResponse {
     status: u16,
@@ -77,26 +78,6 @@ fn accept_before_deadline(listener: &TcpListener) -> Option<TcpStream> {
             Err(err) => panic!("accept request: {err}"),
         }
     }
-}
-
-fn read_request(stream: &mut TcpStream) -> String {
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .expect("set read timeout");
-    let mut request = Vec::new();
-    let mut buffer = [0_u8; 1024];
-    loop {
-        let len = stream.read(&mut buffer).expect("read request");
-        if len == 0 {
-            break;
-        }
-        request.extend_from_slice(&buffer[..len]);
-        // The refresh request carries no body, so the header terminator ends it.
-        if request.windows(4).any(|window| window == b"\r\n\r\n") {
-            break;
-        }
-    }
-    String::from_utf8_lossy(&request).to_string()
 }
 
 fn write_response(stream: &mut TcpStream, status: u16, body: &str) {
