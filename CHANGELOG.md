@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   architecture findings. `--skip architecture` removes them from the dead-code
   section. The health score and the `--save-baseline` file do not change.
 - Telemetry records `fallow architecture` runs as the `architecture` workflow.
+- The GitHub Action accepts `command: architecture` and the GitLab template
+  accepts `FALLOW_COMMAND: architecture`. `issue-types` and
+  `FALLOW_ISSUE_TYPES` take `cycles`, `boundaries` and `policy` for this
+  command.
 
 ### Deprecated
 
