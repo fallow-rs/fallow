@@ -1307,7 +1307,8 @@ fn build_audit_health_json_with_report(
             let root_prefix = format!("{}/", health.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
             if let Some(ref base) = result.base_snapshot {
-                let mut base_health = base.health.clone();
+                let mut base_health =
+                    fallow_api::audit_keys::complexity_baseline_keys(&base.health);
                 base_health.extend(base.styling.iter().cloned());
                 annotate_health_json(&mut json, report, &health.config.root, &base_health);
             }

@@ -1073,6 +1073,13 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 
 With `--gate new-only`, inherited error-severity findings can be present in the JSON output while the verdict remains `pass`; check the `attribution` object and per-finding `introduced` booleans.
 
+A complexity finding matches its base finding by file path and function name. The line and the exceeded category do not affect the match, and a renamed file keeps its match. A complexity finding is introduced in these cases:
+
+- No base finding matches it.
+- A metric that the head finding exceeds has a higher value than in the base finding.
+
+An unchanged or decreased metric keeps the finding inherited, also when the exceeded category changes (for example from `both` to `cyclomatic`). When one file has more than one finding with the same function name, each base finding matches at most one head finding. Head findings with unchanged metric values match first. The other findings then match in line order.
+
 ### JSON contract: which fields are severity-aware
 
 | Field | Severity-aware? | What it counts |

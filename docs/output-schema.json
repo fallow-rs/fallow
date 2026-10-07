@@ -3561,7 +3561,7 @@
             "boolean",
             "null"
           ],
-          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot."
+          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, or when a metric that it exceeds has a higher\nvalue than in that base finding."
         }
       },
       "required": [

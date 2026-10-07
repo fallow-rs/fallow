@@ -75,6 +75,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reproduction (Closes
   [#3276](https://github.com/fallow-rs/fallow/issues/3276)).
 
+- **`fallow audit --gate new-only` compares complexity values with the base.**
+  Before, the gate matched complexity findings by path, function name and
+  exceeded category, and did not compare the values. A function that got
+  worse above the limit stayed inherited and passed. A function that improved
+  from `both` to `cyclomatic` counted as introduced and failed. Now a finding
+  matches its base finding by path and function name. It is introduced when
+  no base finding matches, or when a metric that it exceeds has a higher
+  value than in the base finding. Unchanged and decreased values stay
+  inherited. Line shifts and renamed files keep the match. Same-named findings
+  in one file, for example class methods, now count separately in
+  `complexity_introduced` and `complexity_inherited`. The audit base snapshot
+  cache version changes, so the first audit after the upgrade analyzes the
+  base again. Thanks to [@rodrigouroz](https://github.com/rodrigouroz) for the
+  report and the reproduction
+  ([#3277](https://github.com/fallow-rs/fallow/issues/3277)).
+
 ## [3.32.0] - 2026-10-06
 
 ### Added

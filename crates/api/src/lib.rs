@@ -24,6 +24,7 @@ use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 mod analysis_context;
+mod audit_complexity;
 /// Stable per-finding keys and audit ledgers that compare head results against
 /// a base snapshot, plus helpers that annotate output JSON with
 /// introduced-vs-pre-existing attribution.
