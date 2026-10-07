@@ -1058,12 +1058,6 @@
           ]
         },
         {
-          "name": "--top",
-          "type": "string",
-          "required": false,
-          "description": "Show only the top N items per category. Human output only"
-        },
-        {
           "name": "--file",
           "type": "string",
           "required": false,

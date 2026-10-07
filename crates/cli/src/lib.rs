@@ -1028,10 +1028,6 @@ enum Command {
         #[arg(long)]
         policy: bool,
 
-        /// Show only the top N items per category. Human output only.
-        #[arg(long)]
-        top: Option<usize>,
-
         /// Only report issues in the specified file(s). Accepts multiple values.
         /// The full project graph is still built, but only issues in matching files
         /// are reported.
@@ -4561,7 +4557,6 @@ fn dispatch_architecture_command(command: Command, dispatch: &DispatchContext<'_
         cycles,
         boundaries,
         policy,
-        top,
         file,
         finding_id,
         path,
@@ -4597,7 +4592,7 @@ fn dispatch_architecture_command(command: Command, dispatch: &DispatchContext<'_
             type_aware: dispatch.cli.type_aware_override(),
             type_aware_project: dispatch.cli.type_aware_project.clone(),
             type_aware_require: dispatch.cli.type_aware_require,
-            top,
+            top: None,
             file,
             scope,
             finding_ids,

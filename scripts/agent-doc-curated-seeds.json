@@ -18,7 +18,7 @@
       "section": "commands",
       "row": "architecture",
       "column": "Key Flags",
-      "seed": "`--cycles`, `--boundaries`, `--policy`, `--top`, `--file`, `--finding-id`, `path`"
+      "seed": "`--cycles`, `--boundaries`, `--policy`, `--file`, `--finding-id`, `path`"
     },
     {
       "section": "commands",
