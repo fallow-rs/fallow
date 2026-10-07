@@ -8,6 +8,7 @@ Complete command and flag specifications for all fallow CLI commands.
 
 - [Commands](#commands)
 - [`dead-code`: Dead Code Analysis](#dead-code-dead-code-analysis)
+- [`architecture`: Cycles, Boundaries and Policy Rules](#architecture-cycles-boundaries-and-policy-rules)
 - [`dupes`: Duplication Detection](#dupes-duplication-detection)
 - [`fix`: Auto-Remove Unused Code](#fix-auto-remove-unused-code)
 - [`list`: Project Introspection](#list-project-introspection)
@@ -47,6 +48,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 |---|---|---|
 | `fallow` | Run full codebase analysis: cleanup + duplication + health (default) | `--only`, `--skip`, `--production`, `--production-dead-code`, `--production-health`, `--production-dupes`, `--ci`, `--fail-on-issues`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--score`, `--trend`, `--save-snapshot`, `--include-entry-exports` |
 | `dead-code` | Dead code analysis (`check` is an alias) | `--unused-exports`, `--changed-since`, `--changed-workspaces`, `--production`, `--file`, `--include-entry-exports`, `--stale-suppressions`, `--ci`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
+| `architecture` | Check import cycles, boundaries and policy rules (`guard` shows the rules before an edit) | `--cycles`, `--boundaries`, `--policy`, `--top`, `--file`, `--finding-id`, `path` |
 | `watch` | Watch for changes and re-run analysis | `--no-clear` |
 | `type-aware` | Inspect the optional TypeScript semantic companion |  |
 | `doctor` | Diagnose project readiness without analysis or mutation |  |
@@ -209,6 +211,38 @@ fallow dead-code --format json --quiet --file src/utils.ts --file src/helpers.ts
 
 # Catch typos in entry file exports
 fallow dead-code --format json --quiet --include-entry-exports
+```
+
+---
+
+## `architecture`: Cycles, Boundaries and Policy Rules
+
+Reports circular dependencies, re-export cycles, package cycles, boundary violations (with boundary coverage and forbidden calls) and rule-pack policy violations. The command runs the `dead-code` analysis with these issue types selected. The JSON output is the `dead-code` envelope (`kind: "dead-code"`) with the same arrays, finding ids, exit codes and baselines. The global scope and output flags (`--format`, `--changed-since`, `--workspace`, `--baseline`, `--save-baseline`) work as on `dead-code`.
+
+`fallow dead-code` still reports these findings by default until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. A baseline that `fallow architecture --save-baseline` writes records an issue-type-filtered scope, so `--fail-on-stale-baseline` does not gate on it.
+
+| Flag | Selects |
+|---|---|
+| `--cycles` | Circular dependencies, re-export cycles and package cycles (`dead-code --circular-deps --re-export-cycles --package-cycles`) |
+| `--boundaries` | Boundary violations, boundary coverage and forbidden calls (`dead-code --boundary-violations`) |
+| `--policy` | Rule-pack policy violations (`dead-code --policy-violations`) |
+| `--file <PATH>` | Only report findings in these files |
+| `--finding-id <ID>` | Only report the findings with these ids |
+| `--top <N>` | Show only the top N items per category (human output only) |
+
+Without a selection flag, the command reports every architecture issue type.
+
+### Examples
+
+```bash
+# Before an edit: the rules that apply to the files
+fallow guard src/ui/App.ts --format json --quiet
+
+# After an edit: cycles, boundaries and policy rules
+fallow architecture --format json --quiet
+
+# Only import cycles on the changed files
+fallow architecture --cycles --changed-since main --format json --quiet
 ```
 
 ---

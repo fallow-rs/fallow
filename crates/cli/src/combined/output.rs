@@ -781,6 +781,11 @@ fn print_check_section(
             json_style: crate::json_style::JsonStyle::Compact,
             fail_on_parse_error: false,
             exit_reason: false,
+            architecture_layout: if show_headers {
+                report::ArchitectureLayout::Split
+            } else {
+                report::ArchitectureLayout::Embedded
+            },
         },
     );
     exit_code_to_u8(code)

@@ -124,6 +124,12 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         probe: &["guard", "src/index.ts"],
     },
     TaskRow {
+        task: "check import cycles, boundaries and policy rules after changing code",
+        command: "fallow architecture",
+        note: None,
+        probe: &["architecture"],
+    },
+    TaskRow {
         task: "surface security candidates",
         command: "fallow security",
         note: None,

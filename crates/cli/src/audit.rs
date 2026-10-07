@@ -2200,6 +2200,7 @@ fn run_audit_check<'a>(
         defer_performance: false,
         analysis_snapshot,
         explain_skipped: opts.explain_skipped,
+        surface: crate::check::CheckSurface::DeadCode,
     }) {
         Ok(mut result) => {
             if let Some(changed_files) = changed_files {

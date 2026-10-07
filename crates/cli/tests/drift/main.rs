@@ -339,6 +339,32 @@ fn i1_check_output_equals_dead_code_output() {
 
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i14_architecture_output_equals_dead_code_structure_filters() {
+    run_invariant("I14", |model| {
+        let project = Project::new(model, true);
+        let architecture = run_cli(&project.root, &["architecture".to_string()]);
+        let structure_flags = run_cli(
+            &project.root,
+            &[
+                "dead-code",
+                "--circular-deps",
+                "--re-export-cycles",
+                "--package-cycles",
+                "--boundary-violations",
+                "--policy-violations",
+            ]
+            .map(str::to_string),
+        );
+        cli_envelope(&structure_flags);
+        project.explain(invariants::i14_architecture_identical(
+            &architecture,
+            &structure_flags,
+        ))
+    });
+}
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i2_finding_sets_agree_across_surfaces() {
     run_invariant("I2", |model| {
         let project = Project::new(model, true);

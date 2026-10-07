@@ -222,6 +222,7 @@ fn build_combined_check_options<'a>(
         defer_performance: true,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         explain_skipped: opts.explain_skipped,
+        surface: crate::check::CheckSurface::DeadCode,
     })
 }
 

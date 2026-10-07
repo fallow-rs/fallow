@@ -27,7 +27,7 @@ pub mod rules;
 pub use filtering::resolve_workspace_scope;
 pub use filtering::try_get_changed_files;
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
     pub unused_files: bool,
     pub unused_exports: bool,
@@ -348,6 +348,23 @@ impl TraceOptions {
     }
 }
 
+/// The command a standalone dead-code pipeline run reports for.
+///
+/// Both commands run the same analysis. The surface changes only the human
+/// layout and the hint that points from `dead-code` to `architecture`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CheckSurface {
+    /// `fallow dead-code`.
+    #[default]
+    DeadCode,
+    /// `fallow architecture`: cycles, boundaries and rule-pack policy rules.
+    Architecture,
+}
+
+/// The stderr hint that `fallow dead-code` prints when it reports an
+/// architecture finding.
+pub const ARCHITECTURE_HINT: &str = "Tip: run `fallow architecture` for import cycles, boundaries and policy rules. A future major version removes them from `fallow dead-code`.";
+
 pub struct CheckOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
@@ -433,6 +450,8 @@ pub struct CheckOptions<'a> {
     /// which built-in discovery ignore patterns removed candidate source files
     /// (issue #2638). The typed diagnostics reach JSON either way.
     pub explain_skipped: bool,
+    /// The command this run reports for. Only the standalone print reads it.
+    pub surface: CheckSurface,
 }
 
 /// Result of executing check analysis without printing.
@@ -1426,6 +1445,7 @@ pub fn benchmark_dead_code_json(
         defer_performance: false,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         explain_skipped: false,
+        surface: CheckSurface::DeadCode,
     })?;
     let rendered = report::render_check_json(&report::CheckJsonRenderInput {
         package_baselines: &result.package_baselines,
@@ -1492,6 +1512,8 @@ pub struct PrintCheckOptions {
     /// when the caller owns the exit code, as `audit` does, or prints one line
     /// for all its sections, as the bare run does.
     pub exit_reason: bool,
+    /// Where the human report renders the architecture findings.
+    pub architecture_layout: report::ArchitectureLayout,
 }
 
 struct PreparedPrintCheck<'a> {
@@ -1568,6 +1590,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             css_requested: false,
             json_style: opts.json_style,
             include_fragments: true,
+            architecture_layout: opts.architecture_layout,
         },
         regression_json: opts.regression_json,
         quiet: opts.quiet,
@@ -1859,6 +1882,21 @@ fn print_finding_id_query_note(result: &CheckResult, quiet: bool) {
     );
 }
 
+/// Point a human `fallow dead-code` run that reports an architecture finding at
+/// `fallow architecture`. The line goes to stderr, so stdout stays the same.
+fn print_architecture_hint(opts: &CheckOptions<'_>, results: &AnalysisResults) {
+    use colored::Colorize;
+
+    if opts.surface != CheckSurface::DeadCode
+        || opts.quiet
+        || !matches!(opts.output, OutputFormat::Human)
+        || !report::has_architecture_findings(results)
+    {
+        return;
+    }
+    eprintln!("{}", ARCHITECTURE_HINT.dimmed());
+}
+
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
         opts.save_baseline,
@@ -1915,8 +1953,13 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             json_style: opts.json_style,
             fail_on_parse_error: result.config.fail_on_parse_error,
             exit_reason: true,
+            architecture_layout: match opts.surface {
+                CheckSurface::DeadCode => report::ArchitectureLayout::Embedded,
+                CheckSurface::Architecture => report::ArchitectureLayout::Only,
+            },
         },
     );
+    print_architecture_hint(opts, &result.results);
 
     if opts.include_dupes && result.config.duplicates.enabled {
         let Some(files) = result.retained_files.as_deref() else {

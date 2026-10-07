@@ -165,6 +165,37 @@ pub(crate) struct ReportContext<'a> {
     /// source text. `false` is `fallow dupes --no-fragments`. Every other
     /// renderer and analysis ignores it.
     pub(crate) include_fragments: bool,
+    /// Human dead-code only: where the architecture findings render. Every
+    /// other renderer and format ignores it.
+    pub(crate) architecture_layout: ArchitectureLayout,
+}
+
+/// Where the human dead-code report renders the architecture findings
+/// (import cycles, boundary violations and rule-pack policy violations).
+///
+/// The layout changes only the human lines. The findings, the totals, the
+/// footer and every machine-readable format stay the same.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ArchitectureLayout {
+    /// Inside the dead-code "Structure" and "Policy" categories (`fallow dead-code`).
+    #[default]
+    Embedded,
+    /// In a separate "Architecture" section after the dead-code lines (bare `fallow`).
+    Split,
+    /// Under one "Architecture" category (`fallow architecture`).
+    Only,
+}
+
+/// Whether the results hold an architecture finding: an import cycle, a
+/// boundary violation or a rule-pack policy violation.
+pub(crate) fn has_architecture_findings(results: &fallow_types::results::AnalysisResults) -> bool {
+    !results.circular_dependencies.is_empty()
+        || !results.re_export_cycles.is_empty()
+        || !results.package_cycles.is_empty()
+        || !results.boundary_violations.is_empty()
+        || !results.boundary_coverage_violations.is_empty()
+        || !results.boundary_call_violations.is_empty()
+        || !results.policy_violations.is_empty()
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -400,7 +431,13 @@ pub(crate) fn print_results(
                     ctx.rules,
                     ctx.elapsed,
                     ctx.quiet,
-                    ctx.summary_heading,
+                    ctx.summary_heading.then_some(
+                        if ctx.architecture_layout == ArchitectureLayout::Only {
+                            "Architecture Summary"
+                        } else {
+                            "Dead Code Summary"
+                        },
+                    ),
                     human::check::RunStatus {
                         run_fails: run_fails(ctx),
                         failed_parse_files: ctx.failed_parse_files,
@@ -418,6 +455,7 @@ pub(crate) fn print_results(
                     explain: ctx.explain,
                     run_fails: run_fails(ctx),
                     failed_parse_files: ctx.failed_parse_files,
+                    architecture_layout: ctx.architecture_layout,
                 });
             }
             ExitCode::SUCCESS
@@ -1530,6 +1568,7 @@ mod tests {
             css_requested: false,
             json_style: crate::json_style::JsonStyle::Compact,
             include_fragments: true,
+            architecture_layout: ArchitectureLayout::Embedded,
         }
     }
 

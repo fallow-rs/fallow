@@ -635,6 +635,7 @@ pub fn command_without_global_baseline(command: &Command) -> Option<&'static str
     match command {
         // These use the flags, or reject them with their own message.
         Command::Check { .. }
+        | Command::Architecture { .. }
         | Command::Dupes { .. }
         | Command::Health { .. }
         | Command::Audit { .. }

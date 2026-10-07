@@ -674,6 +674,7 @@ fn health_report_context<'a>(
         css_requested: options.css_requested,
         json_style: options.json_style,
         include_fragments: true,
+        architecture_layout: report::ArchitectureLayout::Embedded,
     }
 }
 

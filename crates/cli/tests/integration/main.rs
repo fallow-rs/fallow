@@ -21,6 +21,7 @@ mod sign;
 
 mod absent_component_prop_tests;
 mod agent_tests;
+mod architecture_tests;
 mod audit_tests;
 mod baseline_growth_tests;
 mod caveat_surface_tests;

@@ -148,6 +148,7 @@ fn command_is_file_scoped(command: Option<&Command>) -> bool {
         command,
         Some(
             Command::Check { file, .. }
+                | Command::Architecture { file, .. }
                 | Command::Security { file, .. }
                 | Command::Suppressions { file, .. }
         ) if !file.is_empty()
@@ -159,6 +160,7 @@ fn command_runs_full_project_analysis(command: Option<&Command>) -> bool {
         command,
         None | Some(
             Command::Check { .. }
+                | Command::Architecture { .. }
                 | Command::Dupes { .. }
                 | Command::Health { .. }
                 | Command::Flags { .. }
@@ -227,6 +229,7 @@ fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::
         None
         | Some(
             Command::Check { .. }
+            | Command::Architecture { .. }
             | Command::Dupes { .. }
             | Command::Health { .. }
             | Command::Audit { .. }
@@ -246,7 +249,7 @@ pub fn telemetry_workflow_for_command(
         None | Some(Command::Flags { .. } | Command::Watch { .. }) => {
             telemetry::Workflow::CodeQualityReview
         }
-        Some(Command::Check { .. }) => telemetry::Workflow::DeadCode,
+        Some(Command::Check { .. } | Command::Architecture { .. }) => telemetry::Workflow::DeadCode,
         Some(Command::Dupes { .. }) => telemetry::Workflow::Dupes,
         Some(Command::Health { .. }) => telemetry::Workflow::Health,
         Some(Command::Audit { .. } | Command::DecisionSurface { .. }) => telemetry::Workflow::Audit,
