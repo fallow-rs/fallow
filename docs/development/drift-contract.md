@@ -62,6 +62,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I11 | A finding-id query gives the same findings and the same answer on every surface | Checked by the harness |
 | I12 | Every security finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
 | I13 | A `--group` selector and a `--trend-from` baseline give the same groups and group trend status on every surface | Checked by the harness |
+| I14 | `architecture` output equals `dead-code` output with the five structure flags | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -394,6 +395,16 @@ An MCP result goes through the normalizer of the envelope in its text content.
   equality. The selected group must have `trend_status: compared`.
 - **Designed exceptions**: a generated project without any group skips the
   check.
+- **Status**: checked by the harness.
+
+### I14: `architecture` selects the dead-code structure findings
+
+- **Statement**: `fallow architecture` and `fallow dead-code --circular-deps
+  --re-export-cycles --package-cycles --boundary-violations
+  --policy-violations` give byte-identical JSON and the same exit code.
+- **Surfaces**: CLI.
+- **Comparison**: the full JSON report, after the volatile fields are removed.
+- **Designed exceptions**: the volatile fields.
 - **Status**: checked by the harness.
 
 ## How the harness works
