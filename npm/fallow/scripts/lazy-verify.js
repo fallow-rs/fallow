@@ -42,12 +42,24 @@ const VERIFY_LOG_ENV = "FALLOW_VERIFY_LOG";
 // keyed by `code` so independent failure modes are still surfaced.
 const _warningEmitted = new Set();
 
+// Write to fd 2 directly. Under Bun, the first use of `process.stderr` sets
+// O_NONBLOCK on the pipe, and the platform binary inherits that pipe (and
+// stdout too when stderr and stdout share one pipe). See issue #3276.
+// Diagnostics are best-effort, so a failed write is ignored.
+function writeStderr(text) {
+  try {
+    fs.writeSync(2, text);
+  } catch {
+    // Ignore: no reader, or a closed descriptor.
+  }
+}
+
 function warnOnce(code, message) {
   if (_warningEmitted.has(code)) {
     return;
   }
   _warningEmitted.add(code);
-  process.stderr.write(`fallow: ${message}\n`);
+  writeStderr(`fallow: ${message}\n`);
 }
 
 function isVerifyLogEnabled(env) {
@@ -68,7 +80,7 @@ function emitVerifyLog(env, payload) {
       parts.push(`${key}=${v}`);
     }
   }
-  process.stderr.write(`fallow-verify ${parts.join(" ")}\n`);
+  writeStderr(`fallow-verify ${parts.join(" ")}\n`);
 }
 
 // The sentinel binds the same binaries that verify-binary checks, so a new

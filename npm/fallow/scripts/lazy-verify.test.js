@@ -69,13 +69,15 @@ function cleanup(dir) {
 
 function captureStderr(t) {
   const lines = [];
-  const original = process.stderr.write.bind(process.stderr);
-  process.stderr.write = (chunk) => {
+  // lazy-verify writes diagnostics to fd 2 with fs.writeSync (issue #3276).
+  const original = fs.writeSync;
+  fs.writeSync = (fd, chunk, ...rest) => {
+    if (fd !== 2) return original(fd, chunk, ...rest);
     lines.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
-    return true;
+    return chunk.length;
   };
   t.after(() => {
-    process.stderr.write = original;
+    fs.writeSync = original;
   });
   return { lines };
 }

@@ -102,8 +102,13 @@ function printVerifyError(verifyResult) {
   );
 }
 
+// Call only after the child exits. Bun sets O_NONBLOCK on fd 1 when a script
+// first reads `process.stdout`. The child inherits that open file description,
+// so a large write from the binary fails with EAGAIN and the output is cut
+// short (issue #3276).
 function writeVerifiedLineIfVersionQuery(verifyResult, version) {
   if (isVersionQuery(process.argv)) {
+    guardBrokenStdout();
     process.stdout.write(`${describeVerified(verifyResult, version)}\n`);
   }
 }
@@ -205,7 +210,8 @@ function guardBrokenStdout() {
 // handling stay identical to a bare `fallow` invocation.
 function runBinary(binaryBaseName, options = {}) {
   const prependArgs = Array.isArray(options.prependArgs) ? options.prependArgs : [];
-  guardBrokenStdout();
+  // Do not read `process.stdout` or write to `process.stderr` before the child
+  // exits: under Bun that makes the inherited pipes non-blocking for the child.
   const { pkg, manifestPath, platformPkgDir } = resolvePlatformPaths();
   const resolvedVersion = readResolvedVersion(manifestPath);
 

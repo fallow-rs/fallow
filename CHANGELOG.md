@@ -21,6 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compares the content hash. The parse cache version and the duplication cache
   version change, so the first run after the upgrade parses all files again.
 
+- **The npm launcher no longer cuts short the output of the binary under
+  Bun.** When Bun ran the `fallow` launcher with stdout on a pipe, the JSON
+  output stopped after approximately 64 to 150 KB, and the exit code was 0.
+  The VS Code extension then failed to parse the JSON. The cause was the first
+  use of `process.stdout` or `process.stderr` in the launcher. Under Bun, this
+  sets the shared pipe to non-blocking mode, and the binary inherits that
+  mode. A large write from the binary then failed. Now the launcher does not
+  use these streams before the binary exits, and it writes the verification
+  warnings directly to the stderr descriptor. Thanks to
+  [@codingthat](https://github.com/codingthat) for the report and the
+  reproduction (Closes
+  [#3276](https://github.com/fallow-rs/fallow/issues/3276)).
+
 ## [3.32.0] - 2026-10-06
 
 ### Added
