@@ -762,7 +762,9 @@ fn print_check_section(
     let Some(result) = check_result else {
         return 0;
     };
-    if show_headers {
+    // `--only architecture` reports no dead-code finding type, so the section
+    // starts at its own "Architecture" heading.
+    if show_headers && opts.architecture != crate::check::ArchitectureSelection::Only {
         eprintln!();
         eprintln!("── Dead Code ──────────────────────────────────────");
     }

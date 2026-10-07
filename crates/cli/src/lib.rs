@@ -4129,6 +4129,9 @@ fn run_combined_scoped(
     let (output, quiet, fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let scoped_run = scope.is_some();
+    let architecture = combined::resolve_architecture_selection(&cli.only, &cli.skip);
+    // A narrowed dead-code section saves narrowed regression counts.
+    let narrowed_report = architecture != check::ArchitectureSelection::All;
     combined::run_combined(&combined::CombinedOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -4167,6 +4170,7 @@ fn run_combined_scoped(
         run_check: analyses.run_check,
         run_dupes: analyses.run_dupes,
         run_health: analyses.run_health,
+        architecture,
         dupes: cli.dupes_overrides(),
         score: cli.score || cli.trend || cli.trend_from.is_some(),
         trend: cli.trend || cli.trend_from.is_some(),
@@ -4181,7 +4185,8 @@ fn run_combined_scoped(
             cli.changed_since.is_some()
                 || cli.workspace.is_some()
                 || cli.changed_workspaces.is_some()
-                || scoped_run,
+                || scoped_run
+                || narrowed_report,
         ),
     })
 }

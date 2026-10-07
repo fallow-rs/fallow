@@ -28,7 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output flags as `fallow dead-code`, and its JSON output is the `dead-code`
   envelope with the same arrays and finding ids. Run `fallow guard <files>`
   before an edit and `fallow architecture` after it. Bare `fallow` shows these
-  findings in an "Architecture" section.
+  findings in an "Architecture" section, also with `--group-by` and
+  `--summary`. With `--group-by`, `fallow architecture` shows one
+  "Architecture" heading per group.
+- Bare `fallow` accepts `architecture` in `--only` and `--skip`.
+  `--only architecture` runs the dead-code analysis and reports only the
+  architecture findings. `--skip architecture` removes them from the dead-code
+  section. The health score and the `--save-baseline` file do not change.
+- Telemetry records `fallow architecture` runs as the `architecture` workflow.
 
 ### Deprecated
 

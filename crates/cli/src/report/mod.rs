@@ -431,13 +431,16 @@ pub(crate) fn print_results(
                     ctx.rules,
                     ctx.elapsed,
                     ctx.quiet,
-                    ctx.summary_heading.then_some(
-                        if ctx.architecture_layout == ArchitectureLayout::Only {
-                            "Architecture Summary"
-                        } else {
-                            "Dead Code Summary"
-                        },
-                    ),
+                    human::check::SummaryStyle {
+                        heading: ctx.summary_heading.then_some(
+                            if ctx.architecture_layout == ArchitectureLayout::Only {
+                                "Architecture Summary"
+                            } else {
+                                "Dead Code Summary"
+                            },
+                        ),
+                        layout: ctx.architecture_layout,
+                    },
                     human::check::RunStatus {
                         run_fails: run_fails(ctx),
                         failed_parse_files: ctx.failed_parse_files,
@@ -677,6 +680,7 @@ fn print_grouped_results(
                 explain: ctx.explain,
                 run_fails: run_fails(ctx),
                 failed_parse_files: ctx.failed_parse_files,
+                architecture_layout: ctx.architecture_layout,
             });
             ExitCode::SUCCESS
         }

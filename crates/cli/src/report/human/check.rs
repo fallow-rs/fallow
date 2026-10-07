@@ -3675,6 +3675,8 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub(in crate::report) failed_parse_files: usize,
+    /// Where each group renders the architecture findings.
+    pub(in crate::report) architecture_layout: ArchitectureLayout,
 }
 
 /// Whether the results carry an opt-in component health signal. These do not
@@ -3749,6 +3751,7 @@ fn emit_grouped_body(
     rules: &RulesConfig,
     seen_footers: &mut FxHashSet<String>,
     explain: bool,
+    layout: ArchitectureLayout,
 ) {
     if let Some(ref owners) = group.owners
         && !owners.is_empty()
@@ -3756,7 +3759,7 @@ fn emit_grouped_body(
         outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
     }
 
-    let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
+    let lines = grouped_lines(&group.results, root, rules, explain, layout);
     for line in &lines {
         if line.contains("fallow.tools/docs/") && !seen_footers.insert(line.clone()) {
             continue;
@@ -3771,6 +3774,35 @@ fn emit_grouped_body(
         );
         eprintln!();
     }
+}
+
+/// The lines of one `--group-by` group. Outside the `Embedded` layout, the
+/// architecture findings move to one "Architecture" category: after the
+/// dead-code categories for bare `fallow`, first for `fallow architecture`.
+fn grouped_lines(
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    explain: bool,
+    layout: ArchitectureLayout,
+) -> Vec<String> {
+    if layout == ArchitectureLayout::Embedded {
+        return build_human_lines_with_explain(results, root, rules, None, explain);
+    }
+    let dead_code = with_explain(
+        build_dead_code_lines(results, root, rules, None, false),
+        explain,
+    );
+    let architecture = with_explain(
+        build_architecture_lines(results, root, rules, true),
+        explain,
+    );
+    let (first, second) = if layout == ArchitectureLayout::Only {
+        (architecture, dead_code)
+    } else {
+        (dead_code, architecture)
+    };
+    first.into_iter().chain(second).collect()
 }
 
 fn emit_grouped_final_status(
@@ -3828,7 +3860,14 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
 
         let header_text = grouped_header_text(group, root, resolver, total);
         outln!("{}", header_text.cyan().bold());
-        emit_grouped_body(group, root, rules, &mut seen_footers, explain);
+        emit_grouped_body(
+            group,
+            root,
+            rules,
+            &mut seen_footers,
+            explain,
+            input.architecture_layout,
+        );
     }
 
     if !quiet {
@@ -4094,6 +4133,15 @@ fn build_summary_footer(
     parts.join(" \u{00b7} ")
 }
 
+/// The layout of a `--summary` table.
+#[derive(Clone, Copy)]
+pub(in crate::report) struct SummaryStyle<'a> {
+    /// The bold heading above the rows, or `None` for no heading.
+    pub(in crate::report) heading: Option<&'a str>,
+    /// `Split` puts the architecture rows under their own label.
+    pub(in crate::report) layout: ArchitectureLayout,
+}
+
 /// The gate result that picks the final status line of a run.
 #[derive(Clone, Copy)]
 pub(in crate::report) struct RunStatus {
@@ -4109,9 +4157,10 @@ pub(in crate::report) fn print_check_summary(
     rules: &RulesConfig,
     elapsed: Duration,
     quiet: bool,
-    heading: Option<&str>,
+    style: SummaryStyle<'_>,
     status: RunStatus,
 ) {
+    let SummaryStyle { heading, layout } = style;
     let RunStatus {
         run_fails,
         failed_parse_files,
@@ -4128,7 +4177,13 @@ pub(in crate::report) fn print_check_summary(
         print_check_summary_heading(heading);
     }
 
-    print_check_summary_rows(&check_summary_categories(results, rules));
+    if layout == ArchitectureLayout::Split {
+        let (dead_code, architecture) = split_summary_categories(results, rules);
+        print_check_summary_rows(&dead_code);
+        print_architecture_summary_rows(&architecture);
+    } else {
+        print_check_summary_rows(&check_summary_categories(results, rules));
+    }
     print_check_summary_total(total);
     print_check_summary_caveat_note(results);
 
@@ -4475,6 +4530,40 @@ fn print_check_summary_rows(categories: &[(&str, usize, Level)]) {
             outln!("  {}  {name}", colored_summary_count(*count, *level));
         }
     }
+}
+
+/// The rows of the architecture findings in a `--summary` table.
+const ARCHITECTURE_SUMMARY_ROWS: [&str; 5] = [
+    "Circular dependencies",
+    "Re-export cycles",
+    "Package cycles",
+    "Boundary violations",
+    "Policy violations",
+];
+
+/// One `--summary` row: the label, the count and the level of the count.
+type SummaryRow = (&'static str, usize, Level);
+
+/// Split the summary rows into the dead-code rows and the architecture rows,
+/// each in the order of [`check_summary_categories`].
+fn split_summary_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> (Vec<SummaryRow>, Vec<SummaryRow>) {
+    check_summary_categories(results, rules)
+        .into_iter()
+        .partition(|(name, _, _)| !ARCHITECTURE_SUMMARY_ROWS.contains(name))
+}
+
+/// Print the architecture rows under their own "Architecture" label, like the
+/// separate section of the bare `fallow` report. Prints nothing without a row.
+fn print_architecture_summary_rows(categories: &[(&str, usize, Level)]) {
+    if categories.iter().all(|(_, count, _)| *count == 0) {
+        return;
+    }
+    outln!();
+    outln!("  {}", "Architecture".bold());
+    print_check_summary_rows(categories);
 }
 
 fn colored_summary_count(count: usize, level: Level) -> String {
@@ -6582,6 +6671,50 @@ mod tests {
         assert_eq!(
             lines.dead_code,
             build_human_lines(&results, &root, &RulesConfig::default(), None)
+        );
+    }
+
+    #[test]
+    fn split_summary_moves_the_architecture_rows() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let (dead_code, architecture) = split_summary_categories(&results, &RulesConfig::default());
+        let names = |rows: &[(&str, usize, Level)]| -> Vec<String> {
+            rows.iter()
+                .map(|(name, _, _)| (*name).to_string())
+                .collect()
+        };
+        assert_eq!(
+            names(&architecture),
+            ARCHITECTURE_SUMMARY_ROWS.map(String::from)
+        );
+        assert!(names(&dead_code).contains(&"Duplicate exports".to_string()));
+        assert_eq!(
+            dead_code.len() + architecture.len(),
+            check_summary_categories(&results, &RulesConfig::default()).len()
+        );
+    }
+
+    #[test]
+    fn grouped_split_lines_use_one_architecture_category() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let rules = RulesConfig::default();
+        let text = plain(&grouped_lines(
+            &results,
+            &root,
+            &rules,
+            false,
+            ArchitectureLayout::Split,
+        ));
+        assert!(text.contains("\u{2500}\u{2500} Architecture "), "{text}");
+        assert_eq!(text.matches("Policy violations").count(), 1, "{text}");
+        let unused = text.find("Duplicate exports").expect("dead-code lines");
+        let architecture = text.find("\u{2500}\u{2500} Architecture ").expect("arch");
+        assert!(unused < architecture, "{text}");
+        assert_eq!(
+            grouped_lines(&results, &root, &rules, false, ArchitectureLayout::Embedded),
+            build_human_lines(&results, &root, &rules, None)
         );
     }
 

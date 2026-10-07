@@ -454,3 +454,174 @@ fn root_help_puts_guard_and_architecture_together() {
         lines[guard_cmd + 1]
     );
 }
+
+fn run_bare(root: &Path, args: &[&str]) -> CommandOutput {
+    let mut full = vec!["--root", root.to_str().expect("utf-8 path"), "--no-cache"];
+    full.extend_from_slice(args);
+    run_fallow_raw(&full)
+}
+
+#[test]
+fn bare_only_architecture_reports_the_architecture_findings() {
+    let dir = architecture_project("");
+    let bare = run_bare(
+        dir.path(),
+        &["--only", "architecture", "--format", "json", "--quiet"],
+    );
+    let architecture = run("architecture", dir.path(), &["--format", "json", "--quiet"]);
+    let bare_json = parse_json(&bare);
+    let architecture_json = parse_json(&architecture);
+    for key in ARCHITECTURE_ARRAYS {
+        assert_eq!(
+            bare_json["check"][key], architecture_json[key],
+            "{key} must match `fallow architecture`"
+        );
+    }
+    assert_eq!(array_len(&bare_json["check"], "circular_dependencies"), 1);
+    assert_eq!(array_len(&bare_json["check"], "unused_exports"), 0);
+    assert!(bare_json.get("dupes").is_none(), "no duplication section");
+    assert!(bare_json.get("health").is_none(), "no health section");
+}
+
+#[test]
+fn bare_only_dead_code_and_architecture_is_the_full_dead_code_section() {
+    let dir = architecture_project("");
+    let both = run_bare(
+        dir.path(),
+        &[
+            "--only",
+            "dead-code,architecture",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let dead_code = run_bare(
+        dir.path(),
+        &["--only", "dead-code", "--format", "json", "--quiet"],
+    );
+    assert_eq!(canonical_report(&both), canonical_report(&dead_code));
+}
+
+#[test]
+fn bare_skip_architecture_drops_only_the_architecture_findings() {
+    let dir = architecture_project("");
+    let full = run_bare(dir.path(), &["--format", "json", "--quiet"]);
+    let skipped = run_bare(
+        dir.path(),
+        &["--skip", "architecture", "--format", "json", "--quiet"],
+    );
+    let full_json = parse_json(&full);
+    let skipped_json = parse_json(&skipped);
+    assert!(array_len(&full_json["check"], "circular_dependencies") > 0);
+    for key in ARCHITECTURE_ARRAYS {
+        assert_eq!(
+            array_len(&skipped_json["check"], key),
+            0,
+            "{key} is dropped"
+        );
+    }
+    assert_eq!(
+        skipped_json["check"]["unused_exports"], full_json["check"]["unused_exports"],
+        "the other dead-code findings stay"
+    );
+    assert!(
+        skipped_json.get("dupes").is_some(),
+        "duplication still runs"
+    );
+    assert_eq!(
+        skipped_json["health"]["health_score"], full_json["health"]["health_score"],
+        "dropping report lines does not change the health score"
+    );
+}
+
+#[test]
+fn bare_only_architecture_human_has_no_dead_code_heading() {
+    let dir = architecture_project("");
+    let output = run_bare(dir.path(), &["--only", "architecture"]);
+    assert!(
+        output.stderr.contains("── Architecture ──"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("── Dead Code ──"),
+        "the run reports no dead-code finding types: {}",
+        output.stderr
+    );
+    assert!(output.stdout.contains("Circular dependencies"));
+    assert!(!output.stdout.contains("Unused exports"));
+}
+
+#[test]
+fn bare_group_by_renders_an_architecture_category_per_group() {
+    let dir = architecture_project("");
+    let output = run_bare(
+        dir.path(),
+        &["--only", "dead-code", "--group-by", "directory"],
+    );
+    assert!(
+        output.stdout.contains("── Architecture "),
+        "architecture category in the groups: {}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("── Structure "),
+        "the cycles leave the Structure category: {}",
+        output.stdout
+    );
+    assert!(!output.stdout.contains("── Policy "), "{}", output.stdout);
+    assert!(output.stdout.contains("Circular dependencies"));
+    assert!(output.stdout.contains("Policy violations"));
+}
+
+#[test]
+fn architecture_group_by_uses_one_architecture_heading() {
+    let dir = architecture_project("");
+    let output = run("architecture", dir.path(), &["--group-by", "directory"]);
+    assert!(
+        output.stdout.contains("── Architecture "),
+        "{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("── Structure "),
+        "{}",
+        output.stdout
+    );
+    assert!(!output.stdout.contains("── Policy "), "{}", output.stdout);
+    assert!(output.stdout.contains("Circular dependencies"));
+    assert!(output.stdout.contains("Policy violations"));
+}
+
+#[test]
+fn bare_summary_groups_the_architecture_rows() {
+    let dir = architecture_project("");
+    let output = run_bare(dir.path(), &["--only", "dead-code", "--summary"]);
+    let heading = output
+        .stdout
+        .find("Architecture")
+        .unwrap_or_else(|| panic!("architecture row group: {}", output.stdout));
+    let unused = output.stdout.find("Unused exports").expect("unused row");
+    let cycles = output
+        .stdout
+        .find("Circular dependencies")
+        .expect("cycle row");
+    let policy = output.stdout.find("Policy violations").expect("policy row");
+    let total = output.stdout.find("Total").expect("total row");
+    assert!(unused < heading, "{}", output.stdout);
+    assert!(heading < cycles && cycles < total, "{}", output.stdout);
+    assert!(heading < policy && policy < total, "{}", output.stdout);
+}
+
+#[test]
+fn dead_code_summary_keeps_one_row_list() {
+    let dir = architecture_project("");
+    let output = run("dead-code", dir.path(), &["--summary"]);
+    assert!(output.stdout.contains("Circular dependencies"));
+    assert!(
+        !output.stdout.contains("Architecture"),
+        "dead-code keeps its row list: {}",
+        output.stdout
+    );
+}

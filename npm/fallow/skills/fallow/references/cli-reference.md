@@ -231,7 +231,9 @@ Reports circular dependencies, re-export cycles, package cycles, boundary violat
 
 Without a selection flag, the command reports every architecture issue type.
 
-With `--group-by`, each group uses the `dead-code` category headings ("Structure" and "Policy"), not one "Architecture" heading.
+With `--group-by`, each group shows its findings under one "Architecture" heading.
+
+Bare `fallow --only architecture` runs the `dead-code` analysis and reports only these findings in the `check` section. Bare `fallow --skip architecture` removes them from the `check` section. The health score, the duplication section and the file that `--save-baseline` writes stay the same as in a run without the value. The regression counts follow the narrowed section.
 
 ### Examples
 
@@ -1957,8 +1959,8 @@ Available on all commands:
 | `--tolerance` | `string` | `0` | Allowed increase: `"2%"` (percentage) or `"5"` (absolute). Default: `"0"` |
 | `--regression-baseline` | `string` | - | Path to a standalone regression baseline file. Without it, fallow uses `regression.baseline` from the config |
 | `--save-regression-baseline` | `string` | - | Save current issue counts. With no path, update `regression.baseline` in the discovered fallow config or create `.fallowrc.json`; with a path, write a standalone baseline file |
-| `--only` | `dead-code\|dupes\|health` | - | Run only specific analyses (e.g., `--only dead-code,dupes`). Values: `dead-code` (alias: `check`), `dupes`, `health` |
-| `--skip` | `dead-code\|dupes\|health` | - | Skip specific analyses (e.g., `--skip health`). Values: `dead-code` (alias: `check`), `dupes`, `health` |
+| `--only` | `dead-code\|dupes\|health\|architecture` | - | Run only specific analyses (e.g., `--only dead-code,dupes`). Values: `dead-code` (alias: `check`), `dupes`, `health`, `architecture`. `architecture` alone runs the dead-code analysis and reports only import cycles, boundary violations and policy violations |
+| `--skip` | `dead-code\|dupes\|health\|architecture` | - | Skip specific analyses (e.g., `--skip health`). Values: `dead-code` (alias: `check`), `dupes`, `health`, `architecture`. `architecture` alone removes import cycles, boundary violations and policy violations from the dead-code section |
 | `--dupes-mode` | `strict\|mild\|weak\|semantic` | - | Override duplication detection mode in combined mode |
 | `--dupes-near` | `bool` | `false` | Enable function-scoped near-miss clone detection in combined mode |
 | `--dupes-threshold` | `string` | - | Override duplication threshold in combined mode |
@@ -2000,8 +2002,8 @@ guarded edits.
 <!-- generated:flags:fallow-combined:start -->
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--only` | `dead-code\|dupes\|health` | - | Run only specific analyses when no subcommand is given |
-| `--skip` | `dead-code\|dupes\|health` | - | Skip specific analyses when no subcommand is given |
+| `--only` | `dead-code\|dupes\|health\|architecture` | - | Run only specific analyses when no subcommand is given |
+| `--skip` | `dead-code\|dupes\|health\|architecture` | - | Skip specific analyses when no subcommand is given |
 | `--production` | `bool` | `false` | Production mode: exclude test/story/dev files, only start/build scripts, report type-only dependencies |
 | `--no-production` | `bool` | `false` | Force production mode OFF for every analysis, overriding a project config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with `--production` |
 | `--production-dead-code` | `bool` | `false` | Run dead-code analysis in production mode when using bare combined mode |
@@ -2391,7 +2393,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 }
 ```
 
-Use `--only` or `--skip` to control which analyses are included in the combined output. Use `--coverage` and `--coverage-root` to feed Istanbul coverage data to the embedded health analysis for exact CRAP scoring.
+Use `--only` or `--skip` to control which analyses are included in the combined output. The `architecture` value selects the import cycles, boundary violations and policy violations of the dead-code analysis: `--only architecture` reports only them, and `--skip architecture` removes them. Human output shows them in an "Architecture" section, also with `--group-by` and `--summary`. Use `--coverage` and `--coverage-root` to feed Istanbul coverage data to the embedded health analysis for exact CRAP scoring.
 
 With `--score`, the combined output's `health` section includes a `health_score` object (same schema as `health --score`). With `--trend`, it includes a `health_trend` object comparing against the most recent saved snapshot. With `--save-snapshot`, a vital signs snapshot is persisted for future trend comparisons.
 

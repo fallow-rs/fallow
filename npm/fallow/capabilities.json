@@ -399,7 +399,8 @@
       "possible_values": [
         "dead-code",
         "dupes",
-        "health"
+        "health",
+        "architecture"
       ]
     },
     {
@@ -410,7 +411,8 @@
       "possible_values": [
         "dead-code",
         "dupes",
-        "health"
+        "health",
+        "architecture"
       ]
     },
     {
