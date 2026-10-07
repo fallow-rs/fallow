@@ -7468,7 +7468,7 @@ mod tests {
             ),
             (
                 vec!["fallow", "architecture", "--cycles"],
-                telemetry::Workflow::DeadCode,
+                telemetry::Workflow::Architecture,
             ),
         ];
         for (argv, expected) in distinct {

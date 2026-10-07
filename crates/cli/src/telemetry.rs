@@ -636,6 +636,7 @@ pub enum Workflow {
     Impact,
     Security,
     SimilarCode,
+    Architecture,
     Fix,
     Explain,
     ProjectInventory,
@@ -661,6 +662,7 @@ impl Workflow {
         match self {
             Workflow::Audit
             | Workflow::DeadCode
+            | Workflow::Architecture
             | Workflow::Health
             | Workflow::Dupes
             | Workflow::CodeQualityReview
@@ -1555,7 +1557,7 @@ fn telemetry_context_field_purposes() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "workflow",
-            "Prioritizes audit, dead-code, health, dupes, and integration workflows.",
+            "Prioritizes audit, dead-code, architecture, health, dupes, and integration workflows.",
         ),
         (
             "integration_surface",
@@ -2426,7 +2428,7 @@ fn followup_kind(workflow: Workflow) -> FollowupKind {
         Workflow::Audit => FollowupKind::Audit,
         Workflow::Security => FollowupKind::Security,
         Workflow::Health => FollowupKind::Health,
-        Workflow::DeadCode => FollowupKind::Check,
+        Workflow::DeadCode | Workflow::Architecture => FollowupKind::Check,
         Workflow::Dupes => FollowupKind::Dupes,
         Workflow::Fix => FollowupKind::Fix,
         Workflow::Explain => FollowupKind::Explain,
@@ -2989,6 +2991,7 @@ mod tests {
         for workflow in [
             Workflow::Audit,
             Workflow::DeadCode,
+            Workflow::Architecture,
             Workflow::Health,
             Workflow::Dupes,
             Workflow::CodeQualityReview,

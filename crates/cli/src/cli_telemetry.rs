@@ -249,7 +249,8 @@ pub fn telemetry_workflow_for_command(
         None | Some(Command::Flags { .. } | Command::Watch { .. }) => {
             telemetry::Workflow::CodeQualityReview
         }
-        Some(Command::Check { .. } | Command::Architecture { .. }) => telemetry::Workflow::DeadCode,
+        Some(Command::Check { .. }) => telemetry::Workflow::DeadCode,
+        Some(Command::Architecture { .. }) => telemetry::Workflow::Architecture,
         Some(Command::Dupes { .. }) => telemetry::Workflow::Dupes,
         Some(Command::Health { .. }) => telemetry::Workflow::Health,
         Some(Command::Audit { .. } | Command::DecisionSurface { .. }) => telemetry::Workflow::Audit,

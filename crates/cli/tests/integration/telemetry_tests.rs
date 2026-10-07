@@ -583,6 +583,27 @@ fn file_scoped_custom_rules_file_output_are_coarse_context_dimensions() {
     );
 }
 
+/// `fallow architecture` has its own workflow value and notes its find-state on
+/// the JSON and the human exit paths.
+#[test]
+fn architecture_records_its_own_workflow_with_find_state() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+    for args in [
+        &["architecture", "--format", "json", "--quiet"][..],
+        &["architecture", "--quiet"][..],
+        &["architecture", "--cycles", "--format", "json", "--quiet"][..],
+    ] {
+        let event = inspect_event(dir.path(), args, &[]);
+        assert_eq!(event["workflow"].as_str(), Some("architecture"), "{args:?}");
+        assert_eq!(
+            event["findings_present"].as_bool(),
+            Some(false),
+            "a clean architecture run must report findings_present=false: {args:?}"
+        );
+    }
+}
+
 #[test]
 fn health_reports_file_and_function_scale_buckets() {
     let dir = tempfile::tempdir().expect("temp project");
