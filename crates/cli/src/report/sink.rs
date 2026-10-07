@@ -13,6 +13,13 @@
 //! stderr (plain `eprintln!`); interactive terminal chrome (the `--explain`
 //! tip, the combined orientation header) is gated on [`is_redirected`] so it
 //! never pollutes the file.
+//!
+//! Stdout writes go through [`write_all_retrying`]. A parent process can make
+//! the stdout pipe non-blocking (Bun does this, issue #3276), so a large write
+//! can fail with `WouldBlock`. The sink then waits until stdout is writable and
+//! writes the remaining bytes. A closed reader (`BrokenPipe`) stops further
+//! stdout output without an error. The sink keeps any other stdout write error,
+//! and [`finish_stdout`] changes it into exit code 2 at the end of the run.
 
 use std::fmt;
 use std::io::{self, BufWriter, Write};
@@ -28,12 +35,27 @@ struct SinkInner {
     /// suppress the "Report written" confirmation when a command errored out
     /// before rendering anything (the error went to stdout, the file is empty).
     wrote: bool,
+    /// State of stdout after the last report write.
+    stdout: StdoutState,
+}
+
+/// Result of the stdout writes so far.
+enum StdoutState {
+    /// All writes succeeded.
+    Open,
+    /// The reader closed the pipe. The sink drops further output without an
+    /// error, so `fallow ... | head` stays clean.
+    Closed,
+    /// A write failed with an error other than `BrokenPipe`. The sink drops
+    /// further output, and [`finish_stdout`] reports the error.
+    Failed(io::Error),
 }
 
 static SINK: Mutex<SinkInner> = Mutex::new(SinkInner {
     file: None,
     error: None,
     wrote: false,
+    stdout: StdoutState::Open,
 });
 
 fn lock() -> std::sync::MutexGuard<'static, SinkInner> {
@@ -81,21 +103,112 @@ pub fn write_fmt_line(args: fmt::Arguments<'_>) {
     if inner.error.is_some() {
         return;
     }
-    if inner.file.is_some() {
-        inner.wrote = true;
-    }
-    let result = match inner.file.as_mut() {
-        Some(writer) => writeln!(writer, "{args}"),
-        None => {
-            // Ignore stdout write errors (e.g. a closed pipe) rather than
-            // panicking the way `println!` would.
-            let _ = writeln!(io::stdout(), "{args}");
-            Ok(())
-        }
+    let Some(writer) = inner.file.as_mut() else {
+        write_stdout_line(&mut inner, args);
+        return;
     };
+    let result = writeln!(writer, "{args}");
+    inner.wrote = true;
     if let Err(error) = result {
         inner.error = Some(error);
     }
+}
+
+/// Write a line to stdout, also when `--output-file` is set. Backs the
+/// `stdoutln!` macro for command output that does not use the file sink.
+pub fn write_stdout_fmt_line(args: fmt::Arguments<'_>) {
+    let mut inner = lock();
+    write_stdout_line(&mut inner, args);
+}
+
+fn write_stdout_line(inner: &mut SinkInner, args: fmt::Arguments<'_>) {
+    if !matches!(inner.stdout, StdoutState::Open) {
+        return;
+    }
+    let mut line = fmt::format(args);
+    line.push('\n');
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    match write_all_retrying(&mut handle, line.as_bytes(), wait_until_stdout_writable) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+            inner.stdout = StdoutState::Closed;
+        }
+        Err(error) => inner.stdout = StdoutState::Failed(error),
+    }
+}
+
+/// Write all of `buf` and flush `writer`. On `WouldBlock`, call `wait` and try
+/// again with the remaining bytes. Retry on `Interrupted`. Return any other
+/// error.
+fn write_all_retrying<W: Write>(
+    writer: &mut W,
+    mut buf: &[u8],
+    wait: impl Fn() -> io::Result<()>,
+) -> io::Result<()> {
+    while !buf.is_empty() {
+        match writer.write(buf) {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(written) => buf = &buf[written..],
+            Err(error) => retry_or_fail(error, &wait)?,
+        }
+    }
+    loop {
+        match writer.flush() {
+            Ok(()) => return Ok(()),
+            Err(error) => retry_or_fail(error, &wait)?,
+        }
+    }
+}
+
+fn retry_or_fail(error: io::Error, wait: &impl Fn() -> io::Result<()>) -> io::Result<()> {
+    match error.kind() {
+        io::ErrorKind::Interrupted => Ok(()),
+        io::ErrorKind::WouldBlock => wait(),
+        _ => Err(error),
+    }
+}
+
+/// Block until stdout accepts more bytes. A hang-up or an error on the fd also
+/// ends the wait, so that the next write returns the real error.
+#[cfg(unix)]
+fn wait_until_stdout_writable() -> io::Result<()> {
+    use rustix::event::{PollFd, PollFlags, poll};
+    use std::os::fd::AsFd;
+
+    let stdout = io::stdout();
+    let fd = stdout.as_fd();
+    let mut fds = [PollFd::new(&fd, PollFlags::OUT)];
+    match poll(&mut fds, None) {
+        Ok(_) | Err(rustix::io::Errno::INTR) => Ok(()),
+        Err(errno) => Err(errno.into()),
+    }
+}
+
+/// A parent process on Windows does not give a non-blocking stdout pipe. If a
+/// write still returns `WouldBlock`, wait a short time before the next try.
+#[cfg(not(unix))]
+fn wait_until_stdout_writable() -> io::Result<()> {
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(1);
+    std::thread::sleep(RETRY_DELAY);
+    Ok(())
+}
+
+/// Report a stdout write failure at the end of the run. A failed write gives
+/// exit code 2 and a message on stderr, so that a cut-off report never looks
+/// like a successful run. A closed reader keeps `code`.
+pub fn finish_stdout(code: std::process::ExitCode) -> std::process::ExitCode {
+    let mut inner = lock();
+    if !matches!(inner.stdout, StdoutState::Failed(_)) {
+        return code;
+    }
+    let StdoutState::Failed(error) = std::mem::replace(&mut inner.stdout, StdoutState::Closed)
+    else {
+        return code;
+    };
+    drop(inner);
+    eprintln!("Error: failed to write the report to stdout: {error}");
+    std::process::ExitCode::from(2)
 }
 
 /// Write a line of report content to the sink. Drop-in replacement for
@@ -111,6 +224,18 @@ macro_rules! outln {
 
 pub(crate) use outln;
 
+/// Write a line to stdout through the sink, also when `--output-file` is set.
+/// Drop-in replacement for `println!` on large command output that does not
+/// use the file sink. Unlike `println!`, it writes the full line to a
+/// non-blocking stdout pipe and does not panic on a closed reader.
+macro_rules! stdoutln {
+    ($($arg:tt)*) => {
+        $crate::report::sink::write_stdout_fmt_line(::std::format_args!($($arg)*))
+    };
+}
+
+pub(crate) use stdoutln;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +250,83 @@ mod tests {
         let mut inner = lock();
         inner.file = None;
         inner.error = None;
+    }
+
+    /// A writer that accepts at most `chunk` bytes per call and returns
+    /// `error_kind` before each accepted chunk.
+    struct ChokedWriter {
+        data: Vec<u8>,
+        chunk: usize,
+        calls: usize,
+        error_kind: io::ErrorKind,
+        flushed: bool,
+    }
+
+    impl Write for ChokedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.calls += 1;
+            if self.calls % 2 == 1 {
+                return Err(self.error_kind.into());
+            }
+            let len = buf.len().min(self.chunk);
+            self.data.extend_from_slice(&buf[..len]);
+            Ok(len)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushed = true;
+            Ok(())
+        }
+    }
+
+    fn choked(error_kind: io::ErrorKind) -> ChokedWriter {
+        ChokedWriter {
+            data: Vec::new(),
+            chunk: 7,
+            calls: 0,
+            error_kind,
+            flushed: false,
+        }
+    }
+
+    #[test]
+    fn retries_would_block_until_all_bytes_are_written() {
+        let payload: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+        let mut writer = choked(io::ErrorKind::WouldBlock);
+        let waits = std::cell::Cell::new(0);
+        write_all_retrying(&mut writer, &payload, || {
+            waits.set(waits.get() + 1);
+            Ok(())
+        })
+        .expect("write succeeds after retries");
+        assert_eq!(writer.data, payload);
+        assert!(writer.flushed);
+        assert!(waits.get() > 0, "WouldBlock must call the wait function");
+    }
+
+    #[test]
+    fn retries_interrupted_without_waiting() {
+        let mut writer = choked(io::ErrorKind::Interrupted);
+        write_all_retrying(&mut writer, b"hello world", || {
+            panic!("Interrupted must not call the wait function")
+        })
+        .expect("write succeeds after retries");
+        assert_eq!(writer.data, b"hello world");
+    }
+
+    #[test]
+    fn returns_other_write_errors() {
+        let mut writer = choked(io::ErrorKind::BrokenPipe);
+        let error = write_all_retrying(&mut writer, b"x", || Ok(())).expect_err("error");
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn returns_the_wait_error() {
+        let mut writer = choked(io::ErrorKind::WouldBlock);
+        let error = write_all_retrying(&mut writer, b"x", || Err(io::Error::other("poll failed")))
+            .expect_err("error");
+        assert_eq!(error.to_string(), "poll failed");
     }
 
     #[test]

@@ -3444,7 +3444,14 @@ fn finalize_report_file(
 /// return the process exit code. This is the crate's single entry point; the
 /// `fallow` binary and the multicall `fallow-multicall` binary both delegate
 /// here so there is exactly one clap tree and one dispatch path.
+///
+/// A stdout write error other than a closed pipe changes the exit code to 2,
+/// so that a cut-off report never looks like a successful run.
 pub fn run() -> ExitCode {
+    report::sink::finish_stdout(run_command())
+}
+
+fn run_command() -> ExitCode {
     process_clock::mark_process_start();
     install_signal_handlers();
     install_spawn_hooks();

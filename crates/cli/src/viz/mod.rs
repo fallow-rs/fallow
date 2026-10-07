@@ -308,7 +308,7 @@ fn viz_health_options<'a>(
 /// parent-creating, like the HTML path), otherwise to stdout.
 fn write_text_format(opts: &VizOptions<'_>, content: &str) -> ExitCode {
     let Some(path) = opts.output_path else {
-        println!("{content}");
+        crate::report::sink::stdoutln!("{content}");
         return ExitCode::SUCCESS;
     };
     if let Err(message) = write_output(path, content) {

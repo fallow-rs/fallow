@@ -90,6 +90,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   base again. Thanks to [@rodrigouroz](https://github.com/rodrigouroz) for the
   report and the reproduction
   ([#3277](https://github.com/fallow-rs/fallow/issues/3277)).
+- **The report on stdout is now complete when the parent process makes the
+  stdout pipe non-blocking.** Bun sets `O_NONBLOCK` on a pipe that it shares
+  with a child process. A large report write then failed with `EAGAIN`, and
+  fallow stopped the output at the size of the pipe buffer and exited with the
+  normal exit code. Now fallow waits until stdout accepts more bytes and writes
+  the remaining part of the report. The `list`, `schema`, `config`, `fix` and
+  text `viz` output use the same writer. A closed reader, for example
+  `fallow | head`, still stops the output without an error. Any other stdout
+  write error now prints a message on stderr and gives exit code 2. See
+  [#3276](https://github.com/fallow-rs/fallow/issues/3276). Thanks
+  @codingthat for the report.
 
 ## [3.32.0] - 2026-10-06
 

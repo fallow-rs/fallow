@@ -20,7 +20,7 @@ pub fn run_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
     let schema = build_cli_schema(&cmd);
     match json_style.serialize(&schema) {
         Ok(json) => {
-            println!("{json}");
+            crate::report::sink::stdoutln!("{json}");
             ExitCode::SUCCESS
         }
         Err(e) => {
