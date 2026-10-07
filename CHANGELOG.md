@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cached content. For a more recent file, the next run reads the file and
   compares the content hash. The parse cache version and the duplication cache
   version change, so the first run after the upgrade parses all files again.
+- `fallow dead-code --summary` now lists the rule-pack "Policy violations"
+  row. The total already counted these findings.
+- The human status line of `fallow dead-code` now counts policy violations,
+  boundary coverage violations and boundary call violations. Boundary
+  violations show as "boundary violation" instead of "violation". Before, a run
+  with only policy violations printed a status line with no count.
+- The `Failed:` line of bare `fallow` now says "1 issue" and "1 clone group"
+  in the singular.
 ### Added
 
 - **`fallow architecture`** reports import cycles, boundary violations and
@@ -53,17 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   They keep working in v3. `fallow dead-code` keeps reporting these findings
   until the next major version, and its human output points to
   `fallow architecture` when it reports one.
-
-### Fixed
-
-- `fallow dead-code --summary` now lists the rule-pack "Policy violations"
-  row. The total already counted these findings.
-- The human status line of `fallow dead-code` now counts policy violations,
-  boundary coverage violations and boundary call violations. Boundary
-  violations show as "boundary violation" instead of "violation". Before, a run
-  with only policy violations printed a status line with no count.
-- The `Failed:` line of bare `fallow` now says "1 issue" and "1 clone group"
-  in the singular.
 
 ## [3.32.0] - 2026-10-06
 
