@@ -1191,6 +1191,45 @@ impl AnalysisSession {
         })
     }
 
+    /// The file positions that changed since the kept parse, with the read
+    /// start and the modules of that parse.
+    ///
+    /// The fingerprints are compared under the lock. The unsettled files are
+    /// read after it, so a concurrent caller does not wait on disk work.
+    /// Returns `None` when there is no kept parse, when it lacks the requested
+    /// complexity, or when the file set differs.
+    fn changed_since_kept_parse(
+        &self,
+        need_complexity: bool,
+        fingerprints: &[SourceFingerprint],
+    ) -> Option<(Vec<usize>, u64, Arc<[ModuleInfo]>)> {
+        let unsettled = std::cell::RefCell::new(Vec::new());
+        let guard = self.parsed_cache.lock().ok()?;
+        let cache = guard.as_ref()?;
+        if need_complexity && !cache.need_complexity {
+            return None;
+        }
+        let mut changed = changed_file_indices(
+            &cache.fingerprints,
+            cache.read_started_ns,
+            fingerprints,
+            &|index| {
+                unsettled.borrow_mut().push(index);
+                true
+            },
+        )?;
+        let kept_read_started_ns = cache.read_started_ns;
+        let kept_modules = Arc::clone(&cache.modules);
+        drop(guard);
+        changed.extend(unsettled.into_inner().into_iter().filter(|&index| {
+            !self.files().get(index).is_some_and(|file| {
+                crate::session_reuse::module_matches_source(&kept_modules, file.id, &file.path)
+            })
+        }));
+        changed.sort_unstable();
+        Some((changed, kept_read_started_ns, kept_modules))
+    }
+
     /// Parse only the files whose fingerprint changed since the cached parse,
     /// and keep the other cached modules. When no file changed, return the
     /// cached modules as they are.
@@ -1206,22 +1245,20 @@ impl AnalysisSession {
         read_started_ns: u64,
         cancellation: Option<&AtomicBool>,
     ) -> Option<SharedParsedModules> {
+        let (changed, kept_read_started_ns, kept_modules) =
+            self.changed_since_kept_parse(need_complexity, fingerprints)?;
         let mut guard = self.parsed_cache.lock().ok()?;
         let cache = guard.as_mut()?;
-        if need_complexity && !cache.need_complexity {
+        // Another call changed the cache while this call read files. Its
+        // modules can differ from the checked ones, so take the full parse.
+        if !Arc::ptr_eq(&cache.modules, &kept_modules)
+            || cache.read_started_ns != kept_read_started_ns
+        {
             return None;
         }
-        let modules = &cache.modules;
-        let changed = changed_file_indices(
-            &cache.fingerprints,
-            cache.read_started_ns,
-            fingerprints,
-            &|index| {
-                self.files().get(index).is_some_and(|file| {
-                    crate::session_reuse::module_matches_source(modules, file.id, &file.path)
-                })
-            },
-        )?;
+        // Release the extra reference, so the merge below can update the
+        // modules in place.
+        drop(kept_modules);
         if changed.is_empty() {
             // Each recent file had the kept content, and the content was read
             // after `read_started_ns`, so the fingerprints now prove it from
@@ -1886,6 +1923,52 @@ mod tests {
         assert!(
             session.parsed_cache.lock().expect("parse cache").is_none(),
             "the next run parses through the persisted cache, which checks the content"
+        );
+    }
+
+    /// A flush writes the kept modules to the persisted cache. A fingerprint
+    /// that did not settle before the kept parse read the file must lose its
+    /// ctime there, or the next run takes the metadata fast path on it.
+    #[cfg(unix)]
+    #[test]
+    fn a_flush_stores_an_unsettled_fingerprint_without_its_ctime() {
+        let (project, mut session) = session_with_source("export const kept = 1;\n");
+        drop(session.parse_modules(false, None));
+        let path = project.path().join("src/index.ts");
+        let stored_ctime = |session: &AnalysisSession| {
+            let _ = std::fs::remove_dir_all(&session.config.cache_dir);
+            session.disk_cache_stale.store(true, Ordering::SeqCst);
+            session.flush_parse_cache();
+            let store = fallow_extract::cache::CacheStore::load(
+                &session.config.cache_dir,
+                &session.config.root,
+                session.config.cache_config_hash,
+                crate::project_config::resolve_cache_max_size_bytes(&session.config),
+            )
+            .expect("flush writes the parse cache");
+            store
+                .get_by_path_only(&path)
+                .expect("flushed module")
+                .ctime_ns
+        };
+
+        assert_eq!(
+            stored_ctime(&session),
+            0,
+            "a file written just before the parse is not settled"
+        );
+
+        if let Some(cache) = session
+            .parsed_cache
+            .get_mut()
+            .expect("parse cache")
+            .as_mut()
+        {
+            cache.read_started_ns = u64::MAX;
+        }
+        assert!(
+            stored_ctime(&session) > 0,
+            "a settled fingerprint keeps its ctime"
         );
     }
 

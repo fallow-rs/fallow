@@ -223,7 +223,10 @@ pub struct AnalysisParseMetrics {
 ///
 /// `read_started_ns` is the time before the parse read the sources. A
 /// fingerprint that is not older than that time by the settle window is stored
-/// without its ctime, so the next run compares content for that file.
+/// without its ctime, so the next run compares content for that file. The
+/// metadata is read here, after the parse. A save between the parse read and
+/// this read gives a ctime newer than `read_started_ns`, so that fingerprint
+/// never settles and is stored without its ctime.
 fn update_cache(
     store: &mut cache::CacheStore,
     modules: &[extract::ModuleInfo],

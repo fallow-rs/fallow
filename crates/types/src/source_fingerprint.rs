@@ -97,6 +97,9 @@ impl SourceFingerprint {
     /// filesystem timestamp tick as the previous write can keep both
     /// timestamps, so a fingerprint inside the window does not prove the
     /// content.
+    ///
+    /// An mtime in the future never settles. That is safe: the file only
+    /// costs a content read on each run until the clock passes it.
     #[must_use]
     pub const fn is_settled_before(self, read_started_ns: u64) -> bool {
         let newest = if self.mtime_ns > self.ctime_ns {
@@ -133,7 +136,9 @@ impl SourceFingerprint {
 ///
 /// The window is larger than the coarsest timestamp resolution in use (two
 /// seconds on FAT, one second on HFS+ and ext3) and the lag of a coarse kernel
-/// clock behind the wall clock.
+/// clock behind the wall clock. It assumes that the clock that stamps the
+/// files is within the window of the local clock. A network filesystem whose
+/// server clock is further behind can still hide a same-tick write.
 pub const TIMESTAMP_SETTLE_WINDOW_NS: u64 = 3_000_000_000;
 
 /// The current wall-clock time in nanoseconds since the Unix epoch, or `0`
