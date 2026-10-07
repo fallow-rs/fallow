@@ -331,7 +331,10 @@ files again. The session then takes its modules from the store when the root,
 the parse cache config hash, the ordered file list and each file fingerprint
 match a kept parse. Any difference, including a file that was added or
 removed, makes the session parse through the persisted cache, which parses the
-changed files only. A fingerprint with no ctime (Windows) is never kept. The
+changed files only. A fingerprint with no ctime (Windows) is never kept. A
+kept fingerprint that is not three seconds older than the read of its parse
+can belong to a same-length write in the same timestamp tick, so the session
+reads that file and compares its content hash with the kept module. The
 store never changes an answer:
 `crates/mcp/tests/integration/warm_session.rs` compares the text of each typed
 answer with and without the store.

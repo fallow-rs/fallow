@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A warm run no longer reuses the analysis of the previous content of a
+  file.** The parse cache, the duplication token cache and the kept modules of
+  a long-lived session trusted a file when its modification time, change time
+  and size matched. A same-length save in the same filesystem timestamp tick
+  keeps all three values. A save while a run parsed the file gave the cached
+  analysis the metadata of the new content. In both cases the next run
+  reported findings for the old content. Now a cache trusts the metadata only
+  when both timestamps are at least three seconds older than the read of the
+  cached content. For a more recent file, the next run reads the file and
+  compares the content hash. The parse cache version and the duplication cache
+  version change, so the first run after the upgrade parses all files again.
+
 ## [3.32.0] - 2026-10-06
 
 ### Added

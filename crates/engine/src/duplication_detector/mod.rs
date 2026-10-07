@@ -158,6 +158,7 @@ fn tokenize_corpus_for_duplicates(
         .filter(|_| files.len() >= config.min_corpus_size_for_token_cache);
     let token_cache = cache_root.map(TokenCache::load);
 
+    let read_started_ns = fallow_types::source_fingerprint::now_ns();
     let file_data = tokenize_duplication_files(
         files,
         &DuplicationTokenizeContext {
@@ -174,7 +175,16 @@ fn tokenize_corpus_for_duplicates(
     );
 
     if let (Some(cache_root), Some(cache)) = (cache_root, token_cache) {
-        save_duplication_token_cache(cache_root, cache, files, &file_data, token_cache_mode);
+        save_duplication_token_cache(
+            cache_root,
+            cache,
+            files,
+            &file_data,
+            TokenCacheWrite {
+                mode: token_cache_mode,
+                read_started_ns,
+            },
+        );
     }
 
     tracing::info!(
@@ -468,21 +478,33 @@ fn tokenize_duplication_source(
     }
 }
 
+/// How the token cache stores the tokens of one run.
+#[derive(Clone, Copy)]
+struct TokenCacheWrite {
+    mode: TokenCacheMode,
+    /// The time before the run took file metadata and read sources.
+    read_started_ns: u64,
+}
+
 fn save_duplication_token_cache(
     cache_root: &Path,
     mut cache: TokenCache,
     files: &[DiscoveredFile],
     file_data: &[TokenizedFile],
-    mode: TokenCacheMode,
+    write: TokenCacheWrite,
 ) {
     for file in file_data {
-        if !file.cache_hit
-            && let Some(metadata) = &file.metadata
-        {
+        let Some(metadata) = &file.metadata else {
+            continue;
+        };
+        if file.cache_hit {
+            cache.refresh_fingerprint(&file.path, metadata, write.read_started_ns);
+        } else {
             cache.insert(
                 &file.path,
                 metadata,
-                mode,
+                write.read_started_ns,
+                write.mode,
                 &cache::TokenPayload {
                     hashed_tokens: &file.hashed_tokens,
                     file_tokens: &file.file_tokens,
