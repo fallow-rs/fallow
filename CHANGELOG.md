@@ -28,18 +28,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output flags as `fallow dead-code`, and its JSON output is the `dead-code`
   envelope with the same arrays and finding ids. Run `fallow guard <files>`
   before an edit and `fallow architecture` after it. Bare `fallow` shows these
-  findings in an "Architecture" section, also with `--group-by` and
-  `--summary`. With `--group-by`, `fallow architecture` shows one
-  "Architecture" heading per group.
+  findings in an "Architecture" category after the other dead-code categories,
+  with and without `--quiet`, and also with `--group-by` and `--summary`. With
+  `--group-by`, `fallow architecture` shows one "Architecture" heading per
+  group. In JSON, `fallow architecture` names itself in `next_steps` and
+  `_meta.docs` points to the architecture page.
 - Bare `fallow` accepts `architecture` in `--only` and `--skip`.
   `--only architecture` runs the dead-code analysis and reports only the
-  architecture findings. `--skip architecture` removes them from the dead-code
+  architecture findings, and its `Failed:` line names `architecture`.
+  `--skip architecture` removes them from the dead-code
   section. The health score and the `--save-baseline` file do not change.
 - Telemetry records `fallow architecture` runs as the `architecture` workflow.
 - The GitHub Action accepts `command: architecture` and the GitLab template
   accepts `FALLOW_COMMAND: architecture`. `issue-types` and
   `FALLOW_ISSUE_TYPES` take `cycles`, `boundaries` and `policy` for this
-  command.
+  command. Another value stops the job with exit code 2 and an error that
+  names the valid values.
 
 ### Deprecated
 
@@ -54,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `fallow dead-code --summary` now lists the rule-pack "Policy violations"
   row. The total already counted these findings.
+- The human status line of `fallow dead-code` now counts policy violations,
+  boundary coverage violations and boundary call violations. Boundary
+  violations show as "boundary violation" instead of "violation". Before, a run
+  with only policy violations printed a status line with no count.
+- The `Failed:` line of bare `fallow` now says "1 issue" and "1 clone group"
+  in the singular.
 
 ## [3.32.0] - 2026-10-06
 

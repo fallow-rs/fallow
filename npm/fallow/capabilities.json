@@ -1027,7 +1027,7 @@
     },
     {
       "name": "architecture",
-      "description": "Check import cycles, boundaries and policy rules (`guard` shows the rules before an edit)",
+      "description": "Check import cycles, boundaries and policy rules after editing",
       "flags": [
         {
           "name": "--cycles",

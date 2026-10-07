@@ -369,24 +369,168 @@ fn bare_fallow_human_shows_architecture_section() {
         dir.path().to_str().expect("utf-8 path"),
         "--no-cache",
     ]);
-    let combined = format!("{}{}", output.stderr, output.stdout);
     assert!(
-        output.stderr.contains("── Architecture ──"),
-        "architecture section heading: {}",
+        !output.stderr.contains("── Architecture"),
+        "no top-level architecture section heading on stderr: {}",
         output.stderr
     );
     let dead_code = output.stderr.find("── Dead Code ──").expect("dead code");
-    let architecture = output.stderr.find("── Architecture ──").expect("arch");
     let duplication = output.stderr.find("── Duplication ──").expect("dupes");
-    assert!(dead_code < architecture && architecture < duplication);
+    let status = output
+        .stderr
+        .find("1 policy violation (")
+        .unwrap_or_else(|| panic!("dead-code status line: {}", output.stderr));
+    assert!(
+        dead_code < status && status < duplication,
+        "the status line stays in the Dead Code section: {}",
+        output.stderr
+    );
+    for title in ["Circular dependencies", "Policy violations"] {
+        assert_eq!(
+            last_category_before(&output.stdout, title),
+            Some("Architecture"),
+            "{title} sits in the Architecture category: {}",
+            output.stdout
+        );
+    }
+    let unused = output.stdout.find("── Unused Code ").expect("unused code");
+    let architecture = output.stdout.find("── Architecture ").expect("arch");
+    assert!(unused < architecture, "{}", output.stdout);
     assert!(
         !output.stdout.contains("── Structure ──"),
         "the cycles leave the dead-code Structure category: {}",
         output.stdout
     );
-    assert!(combined.contains("Circular dependencies"));
-    assert!(combined.contains("Policy violations"));
     assert!(!output.stderr.contains("Tip: run `fallow architecture`"));
+}
+
+/// The label of the last `── Label ──` category heading in `text` before the
+/// first occurrence of `needle`.
+fn last_category_before<'a>(text: &'a str, needle: &str) -> Option<&'a str> {
+    let end = text.find(needle)?;
+    text[..end]
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("── ")?.split(" ─").next())
+}
+
+#[test]
+fn bare_fallow_quiet_uses_the_same_architecture_category() {
+    let dir = architecture_project("");
+    let plain = run_bare(dir.path(), &[]);
+    let quiet = run_bare(dir.path(), &["--quiet"]);
+    for output in [&plain, &quiet] {
+        assert_eq!(
+            last_category_before(&output.stdout, "Circular dependencies"),
+            Some("Architecture"),
+            "{}",
+            output.stdout
+        );
+        assert!(
+            !output.stdout.contains("── Structure "),
+            "{}",
+            output.stdout
+        );
+        assert!(!output.stdout.contains("── Policy "), "{}", output.stdout);
+    }
+}
+
+#[test]
+fn dead_code_quiet_keeps_the_structure_and_policy_categories() {
+    let dir = architecture_project("");
+    let output = run("dead-code", dir.path(), &["--quiet"]);
+    assert!(output.stdout.contains("── Structure "), "{}", output.stdout);
+    assert!(output.stdout.contains("── Policy "), "{}", output.stdout);
+    assert!(
+        !output.stdout.contains("── Architecture "),
+        "{}",
+        output.stdout
+    );
+}
+
+#[test]
+fn architecture_status_line_names_policy_and_boundary_violations() {
+    let dir = architecture_project("");
+    let policy = run("architecture", dir.path(), &["--policy"]);
+    assert!(
+        policy.stderr.contains("1 policy violation ("),
+        "policy status line: {}",
+        policy.stderr
+    );
+    let boundaries = run("architecture", dir.path(), &["--boundaries"]);
+    assert!(
+        boundaries.stderr.contains("1 boundary violation ("),
+        "boundary status line: {}",
+        boundaries.stderr
+    );
+}
+
+#[test]
+fn bare_only_architecture_failure_line_names_architecture() {
+    let dir = architecture_project(r#""circular-dependency": "error""#);
+    let output = run_bare(dir.path(), &["--only", "architecture"]);
+    assert_eq!(output.code, 1, "{}", output.stderr);
+    assert!(
+        output.stderr.contains("Failed: architecture (3 issues)"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("Failed: dead-code"),
+        "{}",
+        output.stderr
+    );
+}
+
+#[test]
+fn bare_summary_without_dead_code_rows_starts_at_the_architecture_label() {
+    let dir = architecture_project(r#""unused-export": "off", "unused-file": "off""#);
+    let output = run_bare(dir.path(), &["--only", "dead-code", "--summary"]);
+    assert!(
+        output.stdout.starts_with("  Architecture"),
+        "no leading blank line: {:?}",
+        output.stdout
+    );
+}
+
+#[test]
+fn architecture_json_points_to_the_architecture_docs() {
+    let dir = architecture_project("");
+    let output = run(
+        "architecture",
+        dir.path(),
+        &["--format", "json", "--quiet", "--explain"],
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["_meta"]["docs"], "https://fallow.tools/docs/cli/architecture/",
+        "{}",
+        output.stdout
+    );
+    let dead_code = run(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet", "--explain"],
+    );
+    let dead_code = parse_json(&dead_code);
+    assert_eq!(
+        dead_code["_meta"]["docs"],
+        "https://fallow.tools/docs/cli/dead-code/"
+    );
+}
+
+#[test]
+fn architecture_help_uses_one_description() {
+    const DESCRIPTION: &str = "Check import cycles, boundaries and policy rules after editing";
+    let root = run_fallow_raw(&["--help"]);
+    let row = root
+        .stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("architecture "))
+        .expect("architecture command row");
+    assert!(row.contains(DESCRIPTION), "{row}");
+    let short = run_fallow_raw(&["architecture", "-h"]);
+    assert!(short.stdout.starts_with(DESCRIPTION), "{}", short.stdout);
 }
 
 #[test]
@@ -540,13 +684,18 @@ fn bare_only_architecture_human_has_no_dead_code_heading() {
     let dir = architecture_project("");
     let output = run_bare(dir.path(), &["--only", "architecture"]);
     assert!(
-        output.stderr.contains("── Architecture ──"),
+        output.stdout.starts_with("── Architecture "),
         "{}",
-        output.stderr
+        output.stdout
     );
     assert!(
         !output.stderr.contains("── Dead Code ──"),
         "the run reports no dead-code finding types: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("── Architecture"),
+        "one architecture heading: {}",
         output.stderr
     );
     assert!(output.stdout.contains("Circular dependencies"));

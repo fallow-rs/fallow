@@ -966,8 +966,8 @@ struct TelemetryEvent {
     /// `outcome` gate. Absent on commands that run no analysis (admin commands)
     /// and on older binaries. On the combined `code_quality_review` and `audit`
     /// workflows this is an OR across the sub-analyses; per-analysis find-rate
-    /// is answerable only on the standalone `dead_code` / `dupes` / `health`
-    /// workflows.
+    /// is answerable on the standalone `dead_code` / `architecture` / `dupes` /
+    /// `health` / `security` workflows.
     #[serde(skip_serializing_if = "Option::is_none")]
     findings_present: Option<bool>,
     /// Coarse bucket of the rendered analysis result count. Never serializes
@@ -1623,7 +1623,7 @@ fn telemetry_result_field_purposes() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "findings_present",
-            "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable only on standalone dead_code, dupes, and health.",
+            "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable on the standalone dead_code, architecture, dupes, health, and security workflows.",
         ),
         (
             "result_count_bucket",
@@ -4005,6 +4005,18 @@ mod tests {
     }
 
     // --- field_purposes and transport_headers (lines 1398-1532) ---
+
+    #[test]
+    fn findings_present_purpose_lists_every_standalone_workflow() {
+        let purposes = field_purposes();
+        let (_, purpose) = purposes
+            .iter()
+            .find(|(field, _)| *field == "findings_present")
+            .expect("findings_present purpose");
+        for workflow in ["dead_code", "architecture", "dupes", "health", "security"] {
+            assert!(purpose.contains(workflow), "{workflow}: {purpose}");
+        }
+    }
 
     #[test]
     fn field_purposes_is_non_empty_and_unique() {

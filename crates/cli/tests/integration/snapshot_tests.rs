@@ -74,6 +74,7 @@ fn api_check_json_document(
             audit_changed: false,
             has_external_plugins: false,
             baseline_recheck: None,
+            command: "dead-code",
         }),
         telemetry_analysis_run_id: None,
     })

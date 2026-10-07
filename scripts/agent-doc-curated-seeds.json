@@ -24,7 +24,7 @@
       "section": "commands",
       "row": "architecture",
       "column": "Purpose",
-      "seed": "Check import cycles, boundaries and policy rules (`guard` shows the rules before an edit)"
+      "seed": "Check import cycles, boundaries and policy rules after editing"
     },
     {
       "section": "commands",

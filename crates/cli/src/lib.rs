@@ -182,7 +182,7 @@ macro_rules! top_level_core_command_groups {
 Analysis:
   dead-code      Analyze unused code and dependency hygiene
   guard          Show which architecture rules apply to files before editing
-  architecture   Check import cycles, boundaries, and policy rules after editing
+  architecture   Check import cycles, boundaries and policy rules after editing
   dupes          Find copy-paste and structural code duplication
   health         Analyze complexity, maintainability, hotspots, and coverage gaps
   flags          Detect feature flag usage patterns
@@ -1013,7 +1013,10 @@ enum Command {
         path: Option<std::path::PathBuf>,
     },
 
-    /// Check import cycles, boundaries and policy rules (`guard` shows the rules before an edit)
+    /// Check import cycles, boundaries and policy rules after editing
+    ///
+    /// Run `fallow guard <files>` before an edit to see the rules that apply to
+    /// those files.
     Architecture {
         /// Only report import cycles: circular dependencies, re-export cycles
         /// and package cycles
