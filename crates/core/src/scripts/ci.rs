@@ -726,6 +726,28 @@ jobs:
     }
 
     #[test]
+    fn heredoc_js_array_literal_not_entry_file() {
+        let content = r"
+jobs:
+  discover:
+    steps:
+      - name: Build matrix
+        run: |
+          node <<'NODE'
+          const roots = process.env.SCOPE === 'public'
+            ? ['packages/apps/public']
+            : ['packages/apps/internal', 'packages/apps/public'];
+          NODE
+";
+        let analysis = analyze_content(content);
+        assert!(
+            !analysis.entry_files.iter().any(|f| f.contains('[')),
+            "a JS array literal must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    #[test]
     fn grep_perl_regex_fragment_not_entry_file() {
         let content = r"
 jobs:

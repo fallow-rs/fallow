@@ -2921,6 +2921,11 @@ pub fn could_be_file_path(token: &str) -> bool {
         if !matches!(close_offset, Some(offset) if offset > 0) {
             return false;
         }
+        // A path separator inside one bracket group is a JS array literal
+        // (`['a/b']` after quote stripping), not a route segment like `[id]`.
+        if close_offset.is_some_and(|offset| after_open[..offset].contains('/')) {
+            return false;
+        }
     }
 
     true
@@ -4776,6 +4781,14 @@ mod tests {
         ));
         assert!(!super::looks_like_file_path("}}/api/health/ready\""));
         assert!(!super::looks_like_file_path("${{ env.BASE_URL }}"));
+    }
+
+    #[test]
+    fn looks_like_file_path_js_array_literal_not_file() {
+        assert!(!super::looks_like_file_path("[packages/app/public]"));
+        assert!(!super::looks_like_file_path("[packages/a/internal,"));
+        assert!(super::looks_like_file_path("src/app/[id]/page.tsx"));
+        assert!(super::looks_like_file_path("src/app/[...slug]/page.tsx"));
     }
 
     #[test]

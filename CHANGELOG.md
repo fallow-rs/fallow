@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A JavaScript array in a CI `run:` block no longer becomes an entry
+  pattern.** A heredoc such as `node <<'NODE'` that holds
+  `['packages/apps/public']` produced the token `[packages/apps/public]`. That
+  token failed glob compilation and logged `invalid entry pattern` on every
+  run. The scanner now rejects a bracket group that contains `/`. Route
+  segments such as `[id]` and `[...slug]` still pass.
+
 ## [3.32.0] - 2026-10-06
 
 ### Added
