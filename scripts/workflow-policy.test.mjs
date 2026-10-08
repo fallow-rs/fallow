@@ -1276,6 +1276,30 @@ test("no PGO workflow sets a global RUSTFLAGS that drops the Windows stack flags
   }
 });
 
+// cc forwards the rustc profile flags to Apple clang, whose raw profile format
+// differs from the Rust profiler runtime (rust-lang/cc-rs#1986). Remove with #3285.
+test("PGO workflows keep the macOS C code out of the profile", () => {
+  for (const file of ["release.yml", "pgo-validate.yml"]) {
+    const steps = workflowSteps(readWorkflow(join(".github/workflows", file)));
+    const generate = steps.find((step) => step.startsWith("name: Build instrumented"));
+    const resolve = steps.find((step) => step.startsWith("name: Resolve PGO build flags"));
+    for (const [step, flag, sink] of [
+      [generate, "-fno-profile-generate", /export "/u],
+      [resolve, "-fno-profile-use", /" >> "\$GITHUB_ENV"/u],
+    ]) {
+      assert.ok(step, `${file} needs the step that sets ${flag}`);
+      assert.match(step, /\*-apple-darwin\)/u);
+      for (const name of ["CFLAGS", "CXXFLAGS"]) {
+        const line = step
+          .split("\n")
+          .find((l) => l.includes(`${name}_\${FALLOW_TARGET//-/_}=${flag}`));
+        assert.ok(line, `${file} must set ${name}_<target>=${flag}`);
+        assert.match(line, sink);
+      }
+    }
+  }
+});
+
 test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => {
   const workflow = readWorkflow(".github/workflows/pgo-validate.yml");
   const release = readWorkflow(".github/workflows/release.yml");
