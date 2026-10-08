@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `codegen*.{ts,js,cjs,mjs}` and uses the `documents` globs of each config as
   entry points. The codegen run reads those files, so no import reaches them.
   On a large Nx monorepo this removed about 300 false unused files.
+- **Commands of Nx `run-commands` targets now count as scripts.** A command in a
+  `project.json` target, such as `tsx scripts/seed.ts` or
+  `jest --config ./jest-integration.config.ts`, credited nothing. Fallow now
+  reads the `command` and `commands` of every `nx:run-commands` target, with
+  the `{projectRoot}` and `{workspaceRoot}` tokens and the `configurations`
+  that set their own command. A call to another target of the same project,
+  such as `nx ts-node -- src/run.ts`, uses the command of that target. A target
+  that runs from another directory is skipped, because its relative paths
+  would point at the wrong files.
 
 ## [3.32.0] - 2026-10-06
 

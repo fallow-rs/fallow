@@ -2305,6 +2305,35 @@ fn collect_node_modules_roots<'a>(
     nm_roots
 }
 
+/// Scripts that the Nx `run-commands` targets of `<dir>/project.json` run, keyed
+/// `nx:<target>` so they never collide with a `package.json` script.
+#[expect(
+    clippy::disallowed_types,
+    reason = "joins the std HashMap of package.json scripts"
+)]
+fn nx_target_scripts(
+    dir: &std::path::Path,
+    project_root: &str,
+    production: bool,
+) -> std::collections::HashMap<String, String> {
+    let Ok(source) = std::fs::read_to_string(dir.join("project.json")) else {
+        return std::collections::HashMap::new();
+    };
+    let commands: std::collections::HashMap<String, String> =
+        scripts::nx_targets::run_commands_scripts(&source, project_root)
+            .into_iter()
+            .collect();
+    let commands = if production {
+        scripts::filter_production_scripts(&commands)
+    } else {
+        commands
+    };
+    commands
+        .into_iter()
+        .map(|(target, command)| (format!("nx:{target}"), command))
+        .collect()
+}
+
 /// Analyze the root package.json scripts and fold the results into the plugin result.
 fn analyze_root_scripts(
     config: &ResolvedConfig,
@@ -2312,17 +2341,19 @@ fn analyze_root_scripts(
     deps: &ScriptDependencyContext<'_>,
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
-    let Some(pkg) = root_pkg else {
-        return;
-    };
-    let Some(ref pkg_scripts) = pkg.scripts else {
-        return;
-    };
-    let scripts_to_analyze = if config.production {
-        scripts::filter_production_scripts(pkg_scripts)
+    let pkg_scripts = root_pkg
+        .and_then(|pkg| pkg.scripts.clone())
+        .unwrap_or_default();
+    let mut scripts_to_analyze = if config.production {
+        scripts::filter_production_scripts(&pkg_scripts)
     } else {
         pkg_scripts.clone()
     };
+    scripts_to_analyze.extend(nx_target_scripts(&config.root, "", config.production));
+    if scripts_to_analyze.is_empty() {
+        return;
+    }
+    let pkg_scripts = &pkg_scripts;
     let catalog =
         scripts::ScriptCatalog::from_scripts_with_bodies(pkg_scripts, &scripts_to_analyze)
             .with_workspaces(std::sync::Arc::clone(deps.workspace_packages), "");
@@ -2342,9 +2373,11 @@ fn analyze_root_scripts(
     ));
 
     for config_file in &script_analysis.config_files {
-        plugin_result
-            .discovered_always_used
-            .push((config_file.clone(), "scripts".to_string()));
+        if let Some(path) = scripts::normalize_script_entry_pattern("", config_file) {
+            plugin_result
+                .discovered_always_used
+                .push((path, "scripts".to_string()));
+        }
     }
     for entry in &script_analysis.entry_files {
         if let Some(pat) = scripts::normalize_script_entry_pattern("", entry) {
@@ -2395,22 +2428,25 @@ fn analyze_one_workspace_scripts(
     let mut used_packages = Vec::new();
     let mut discovered_always_used: Vec<(String, String)> = Vec::new();
     let mut entry_patterns: Vec<(plugins::PathRule, String)> = Vec::new();
-    let Some(ref ws_scripts) = ws_pkg.scripts else {
+    let ws_prefix = workspace_dir(&config.root, ws);
+    let ws_scripts = ws_pkg.scripts.clone().unwrap_or_default();
+    let mut scripts_to_analyze = if config.production {
+        scripts::filter_production_scripts(&ws_scripts)
+    } else {
+        ws_scripts.clone()
+    };
+    scripts_to_analyze.extend(nx_target_scripts(&ws.root, &ws_prefix, config.production));
+    if scripts_to_analyze.is_empty() {
         return (
             used_packages,
             discovered_always_used,
             entry_patterns,
             plugins::AggregatedPluginResult::default(),
         );
-    };
-    let scripts_to_analyze = if config.production {
-        scripts::filter_production_scripts(ws_scripts)
-    } else {
-        ws_scripts.clone()
-    };
-    let ws_prefix = workspace_dir(&config.root, ws);
-    let catalog = scripts::ScriptCatalog::from_scripts_with_bodies(ws_scripts, &scripts_to_analyze)
-        .with_workspaces(std::sync::Arc::clone(deps.workspace_packages), &ws_prefix);
+    }
+    let catalog =
+        scripts::ScriptCatalog::from_scripts_with_bodies(&ws_scripts, &scripts_to_analyze)
+            .with_workspaces(std::sync::Arc::clone(deps.workspace_packages), &ws_prefix);
     let ws_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &ws.root,
@@ -2427,7 +2463,9 @@ fn analyze_one_workspace_scripts(
     );
 
     for config_file in &ws_analysis.config_files {
-        discovered_always_used.push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
+        if let Some(path) = scripts::normalize_script_entry_pattern(&ws_prefix, config_file) {
+            discovered_always_used.push((path, "scripts".to_string()));
+        }
     }
     for entry in &ws_analysis.entry_files {
         if let Some(pat) = scripts::normalize_script_entry_pattern(&ws_prefix, entry) {

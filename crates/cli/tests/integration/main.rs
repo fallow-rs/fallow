@@ -65,6 +65,7 @@ mod logging_tests;
 mod migrate_tests;
 mod monorepo_report_paths_tests;
 mod non_gating_ci_level_tests;
+mod nx_run_commands_tests;
 mod output_file_tests;
 mod package_baselines_tests;
 mod package_cycle_tests;

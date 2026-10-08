@@ -15,6 +15,7 @@ mod command_forms_tests;
 mod flag_credits;
 pub mod hooks;
 mod node_test;
+pub mod nx_targets;
 mod resolve;
 mod shell;
 mod workspace_selection;

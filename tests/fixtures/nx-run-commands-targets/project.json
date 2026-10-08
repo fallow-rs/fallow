@@ -1,0 +1,17 @@
+{
+  "name": "nx-run-commands-targets",
+  "targets": {
+    "tsx": {
+      "executor": "nx:run-commands",
+      "options": { "command": "tsx" }
+    },
+    "seed": {
+      "executor": "nx:run-commands",
+      "options": { "command": "nx tsx -- scripts/seed.ts" }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "options": { "commands": ["jest --config ./integration.jest.ts"] }
+    }
+  }
+}
