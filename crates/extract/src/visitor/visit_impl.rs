@@ -68,6 +68,8 @@ mod visit_package_resolution;
 mod visit_pinia;
 #[path = "visit_impl_playwright.rs"]
 mod visit_playwright;
+#[path = "visit_impl_reflection.rs"]
+mod visit_reflection;
 #[path = "visit_impl_scope_bindings.rs"]
 mod visit_scope_bindings;
 #[path = "visit_impl_security_classifiers.rs"]
@@ -3861,6 +3863,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.try_record_relative_require_resolve(expr);
         self.record_bare_require_call(expr);
         self.record_whole_object_call_use(expr);
+        self.record_reflective_whole_object_use(expr);
         self.record_namespace_spy_call(expr);
         self.record_import_meta_glob_patterns(expr);
         self.record_require_context_pattern(expr);

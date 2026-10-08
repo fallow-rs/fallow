@@ -15,6 +15,7 @@ mod load_data;
 mod member_access;
 mod module_augmentation;
 mod react_structural;
+mod reflective_object_uses;
 mod require_resolve;
 mod security_sources;
 mod signature_references;
