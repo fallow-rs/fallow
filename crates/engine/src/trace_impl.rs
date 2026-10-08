@@ -923,35 +923,7 @@ pub fn trace_dependency(
     package_name: &str,
     script_used_packages: &FxHashSet<String>,
 ) -> DependencyTrace {
-    let imported_by: Vec<PathBuf> = graph
-        .package_usage
-        .get(package_name)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(|fid| {
-                    graph
-                        .modules
-                        .get(fid.0 as usize)
-                        .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let type_only_imported_by: Vec<PathBuf> = graph
-        .type_only_package_usage
-        .get(package_name)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(|fid| {
-                    graph
-                        .modules
-                        .get(fid.0 as usize)
-                        .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let (imported_by, type_only_imported_by) = package_importers(graph, root, package_name);
 
     let import_count = imported_by.len();
     let used_in_scripts = script_used_packages.contains(package_name);
@@ -976,6 +948,49 @@ pub fn trace_dependency(
     };
     trace.apply_tooling_credit(imported_types_target_credit(graph, package_name));
     trace
+}
+
+/// The files that import `package_name`, each listed once, and the subset
+/// whose every import of the package is type-only.
+///
+/// The graph records one usage entry per import, so a file with two imports
+/// of the package appears twice. A file with a type-only import and a value
+/// import is not a type-only importer.
+fn package_importers(
+    graph: &ModuleGraph,
+    root: &Path,
+    package_name: &str,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let counts = |usage: &FxHashMap<String, Vec<FileId>>| {
+        let mut counts: FxHashMap<FileId, usize> = FxHashMap::default();
+        for &fid in usage.get(package_name).into_iter().flatten() {
+            *counts.entry(fid).or_default() += 1;
+        }
+        counts
+    };
+    let mut all = counts(&graph.package_usage);
+    let type_only = counts(&graph.type_only_package_usage);
+    let mut imported_by = Vec::new();
+    let mut type_only_imported_by = Vec::new();
+    for &fid in graph.package_usage.get(package_name).into_iter().flatten() {
+        // The first entry of a file takes its count, so a repeat finds none.
+        let Some(total) = all.remove(&fid) else {
+            continue;
+        };
+        let Some(module) = graph.modules.get(fid.0 as usize) else {
+            continue;
+        };
+        let path = module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf();
+        if type_only.get(&fid) == Some(&total) {
+            type_only_imported_by.push(path.clone());
+        }
+        imported_by.push(path);
+    }
+    (imported_by, type_only_imported_by)
 }
 
 /// The credit of a `@types/X` package whose target `X` the code imports, as

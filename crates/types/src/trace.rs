@@ -349,10 +349,11 @@ pub struct TracedReExport {
 pub struct DependencyTrace {
     /// The dependency name being traced.
     pub package_name: String,
-    /// Files that import this dependency.
+    /// Files that import this dependency, each listed once.
     #[serde(serialize_with = "serde_path::serialize_vec")]
     pub imported_by: Vec<PathBuf>,
-    /// Files that import this dependency with type-only imports.
+    /// Files whose every import of this dependency is type-only, each listed
+    /// once.
     #[serde(serialize_with = "serde_path::serialize_vec")]
     pub type_only_imported_by: Vec<PathBuf>,
     /// Whether the dependency is invoked from package.json scripts, CI configs
@@ -361,7 +362,7 @@ pub struct DependencyTrace {
     /// Whether the dependency is used at all: imported, invoked from scripts,
     /// or listed as a peer by a used package (`peer_of`).
     pub is_used: bool,
-    /// Total import count.
+    /// Number of files that import this dependency.
     pub import_count: usize,
     /// Used packages that list this dependency in their installed
     /// `peerDependencies`, required or optional, sorted by name. The

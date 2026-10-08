@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cached content. For a more recent file, the next run reads the file and
   compares the content hash. The parse cache version and the duplication cache
   version change, so the first run after the upgrade parses all files again.
+- `fallow dead-code --trace-dependency` now lists each importing file once.
+  Before, a file appeared one time for each imported name, so
+  `import { a, b } from "pkg"` listed the file twice and doubled
+  `import_count`. `import_count` is now the number of importing files.
+  `type_only_imported_by` now lists only files whose every import of the
+  package is type-only. Before, a file with a type-only import and a value
+  import showed as "(type-only)".
 - `fallow dead-code --summary` now lists the rule-pack "Policy violations"
   row. The total already counted these findings.
 - The human status line of `fallow dead-code` now counts policy violations,

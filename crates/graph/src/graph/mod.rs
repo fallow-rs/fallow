@@ -170,9 +170,11 @@ pub struct ModuleGraph {
     pub modules: Vec<ModuleNode>,
     /// Flat edge storage for cache-friendly iteration.
     edges: Vec<Edge>,
-    /// Maps npm package names to the set of `FileId`s that import them.
+    /// Maps npm package names to the `FileId`s that import them, with one
+    /// entry per import. A file with two imports of a package appears twice.
     pub package_usage: FxHashMap<String, Vec<FileId>>,
-    /// Maps npm package names to the set of `FileId`s that import them with type-only imports.
+    /// Maps npm package names to the `FileId`s that import them with type-only
+    /// imports, with one entry per type-only import.
     /// A package appearing here but not in `package_usage` (or only in both) indicates
     /// it's only used for types and could be a devDependency.
     pub type_only_package_usage: FxHashMap<String, Vec<FileId>>,
