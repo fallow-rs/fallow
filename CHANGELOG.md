@@ -77,8 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gates. After a prune, `--fail-on-stale-baseline` passes, and the baseline
   hides the same findings as before. `--check` writes nothing and exits 1 when
   an entry can be pruned. `--dead-code-baseline`, `--health-baseline` and
-  `--dupes-baseline` override the config paths. A file with an older key form
-  is skipped with the command that saves it again. The stale-baseline warning
+  `--dupes-baseline` override the config paths, and `--coverage` gives the
+  coverage input for CRAP scores. A file with an older key form, or with
+  fields from a newer version, is skipped with the command that saves it
+  again. The stale-baseline warning
   and gate message now name the prune command. (#3281, requested by
   @BenMcGit)
 - **`fallow architecture`** reports import cycles, boundary violations and

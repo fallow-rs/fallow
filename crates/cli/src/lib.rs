@@ -124,8 +124,9 @@ use cli_production::{ProductionModes, resolve_production_modes};
 use cli_startup::build_tracing_filter;
 use cli_startup::{
     bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
-    cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
-    reject_global_baseline_flags, run_pre_dispatch_checks, setup_tracing, validate_inputs,
+    cli_bare_combined_baseline_flag, cli_global_baseline_flag, cli_has_bare_coverage_input,
+    parse_cli_args, reject_global_baseline_flags, run_pre_dispatch_checks, setup_tracing,
+    validate_inputs,
 };
 #[cfg(test)]
 use cli_telemetry::TelemetryRun;
@@ -2321,6 +2322,15 @@ enum BaselinesCli {
         /// The duplication baseline to prune. Overrides `audit.dupesBaseline`.
         #[arg(long, value_name = "PATH")]
         dupes_baseline: Option<PathBuf>,
+
+        /// The coverage input for CRAP scores, as for `fallow health
+        /// --coverage`. Use the input that the health baseline was saved with.
+        #[arg(long, value_name = "PATH")]
+        coverage: Option<PathBuf>,
+
+        /// Rebase the file paths of the coverage input onto this root.
+        #[arg(long, value_name = "PATH")]
+        coverage_root: Option<PathBuf>,
     },
 }
 
@@ -5656,14 +5666,25 @@ fn dispatch_baselines_command(
         dead_code_baseline,
         health_baseline,
         dupes_baseline,
+        coverage,
+        coverage_root,
     } = subcommand;
     let cli = dispatch.cli;
     let root = dispatch.root;
     let output = dispatch.output;
-    if let Some(flag) = baselines_prune_rejected_flag(cli) {
+    if let Some(flag) = baselines_prune_narrowing_flag(cli) {
         return emit_error(
             &format!(
                 "`fallow baselines prune` always analyzes the whole project, so it does not accept `{flag}`. A narrowed run would remove valid entries."
+            ),
+            2,
+            output,
+        );
+    }
+    if let Some(flag) = cli_global_baseline_flag(cli) {
+        return emit_error(
+            &format!(
+                "`fallow baselines prune` does not accept `{flag}`. Name the files with --dead-code-baseline, --health-baseline and --dupes-baseline, or with `audit.*Baseline` in the config."
             ),
             2,
             output,
@@ -5712,7 +5733,12 @@ fn dispatch_baselines_command(
         Ok(production) => production,
         Err(code) => return code,
     };
-    let coverage_inputs = match resolve_coverage_inputs(None, None, output, || Ok(config.health)) {
+    let coverage_inputs = match resolve_coverage_inputs(
+        coverage.as_deref(),
+        coverage_root.as_deref(),
+        output,
+        || Ok(config.health),
+    ) {
         Ok(inputs) => inputs,
         Err(code) => return code,
     };
@@ -5734,19 +5760,19 @@ fn dispatch_baselines_command(
     })
 }
 
-/// The first flag on the command line that would narrow the prune run or that
-/// names another baseline.
-fn baselines_prune_rejected_flag(cli: &Cli) -> Option<&'static str> {
+/// The first flag or environment variable that would narrow the prune run.
+fn baselines_prune_narrowing_flag(cli: &Cli) -> Option<&'static str> {
     [
         (cli.changed_since.is_some(), "--changed-since"),
         (cli.workspace.is_some(), "--workspace"),
         (cli.changed_workspaces.is_some(), "--changed-workspaces"),
         (cli.diff_file.is_some(), "--diff-file"),
+        (cli.diff_stdin, "--diff-stdin"),
+        (
+            std::env::var_os("FALLOW_DIFF_FILE").is_some_and(|value| !value.is_empty()),
+            "FALLOW_DIFF_FILE",
+        ),
         (cli.production, "--production"),
-        (cli.baseline.is_some(), "--baseline"),
-        (cli.save_baseline.is_some(), "--save-baseline"),
-        (cli.fail_on_baseline_growth, "--fail-on-baseline-growth"),
-        (cli.baseline_base.is_some(), "--baseline-base"),
     ]
     .into_iter()
     .find_map(|(present, flag)| present.then_some(flag))

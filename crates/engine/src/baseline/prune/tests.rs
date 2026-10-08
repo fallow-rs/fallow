@@ -303,3 +303,58 @@ fn consumed_slots_follow_the_greedy_match() {
     assert_eq!(consumed_severity_slots([2, 1, 0], [1, 1, 2]), [1, 1, 1]);
     assert_eq!(consumed_severity_slots([5, 5, 5], [1, 1, 1]), [1, 1, 1]);
 }
+
+fn located(
+    root: &Path,
+    path: &str,
+    exceeded: ExceededThreshold,
+) -> fallow_output::ComplexityViolation {
+    let mut finding = make_health_finding_with(root, "f", 1, exceeded, FindingSeverity::High);
+    finding.path = root.join(path);
+    finding
+}
+
+#[test]
+fn health_prune_keeps_an_emptied_identity_key_that_blocks_a_second_move_candidate() {
+    let root = Path::new("/nonexistent-fallow-prune-root");
+    let saved = [
+        located(root, "src/old.ts", ExceededThreshold::Cyclomatic),
+        located(root, "src/a.ts", ExceededThreshold::Crap),
+    ];
+    let baseline =
+        HealthBaselineData::from_findings(&saved, &[], &[], root).with_identity(&saved, root);
+    let content = health_content(&baseline);
+    let current = vec![
+        located(root, "src/x.ts", ExceededThreshold::Cyclomatic),
+        located(root, "src/a.ts", ExceededThreshold::Cyclomatic),
+    ];
+
+    let pruned = prune_health_baseline(&content, &current, root).unwrap();
+    let rewritten: HealthBaselineData =
+        serde_json::from_str(&pruned.content.expect("the crap slot was removed")).unwrap();
+    let hidden = |baseline: &HealthBaselineData| -> Vec<String> {
+        filter_new_health_findings(
+            current.clone(),
+            baseline,
+            root,
+            HealthBaselineMode::Identity,
+        )
+        .into_iter()
+        .map(|finding| finding.path.display().to_string())
+        .collect()
+    };
+    assert_eq!(hidden(&baseline), hidden(&rewritten));
+}
+
+#[test]
+fn prune_refuses_a_file_with_unknown_fields() {
+    let results = make_results();
+    let mut value: serde_json::Value = serde_json::from_str(&dead_code_content(&results)).unwrap();
+    value["future_findings"] = serde_json::json!(["x"]);
+    assert_eq!(
+        prune_dead_code(&value.to_string(), &results),
+        Err(BaselinePruneRefusal::UnknownFields(vec![
+            "future_findings".to_owned()
+        ]))
+    );
+}

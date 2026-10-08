@@ -358,10 +358,22 @@ impl BaselineKind {
     /// `path`.
     #[must_use]
     pub fn prune_command(self, path: &Path) -> String {
+        // The prune flags resolve a relative path against the project root,
+        // while `--baseline` resolves it against the working directory. An
+        // absolute path names the same file in both.
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let display = absolute.display().to_string();
+        let quoted = if display
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '+'))
+        {
+            display
+        } else {
+            format!("'{}'", display.replace('\'', "'\\''"))
+        };
         format!(
-            "fallow baselines prune --{}-baseline {}",
-            self.as_str(),
-            path.display()
+            "fallow baselines prune --{}-baseline {quoted}",
+            self.as_str()
         )
     }
 
@@ -4813,7 +4825,11 @@ mod tests {
             std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
         );
         let baseline = identity_baseline(
-            &[moved_finding(&root, "src/baseline.rs", "parseExpression")],
+            &[moved_finding(
+                &root,
+                "src/baseline/mod.rs",
+                "parseExpression",
+            )],
             &root,
         );
         let filtered = super::filter_new_health_findings(

@@ -6,7 +6,7 @@
 //! matches, so a pruned file hides the same findings and has no stale entry.
 //! Prune never adds an entry, so it needs no growth gate.
 
-#![allow(
+#![expect(
     clippy::print_stderr,
     reason = "the human report goes to stderr like the other baseline notes"
 )]
@@ -18,7 +18,7 @@ use fallow_config::OutputFormat;
 use fallow_engine::baseline::{BaselineKind, BaselinePrune, BaselinePruneRefusal, PrunedEntry};
 
 use crate::combined::{CombinedOptions, CombinedResults, collect_combined_results};
-use crate::{emit_error, report};
+use crate::report;
 
 /// The most removed keys that the human report lists for one file.
 const HUMAN_REMOVED_KEY_LIMIT: usize = 10;
@@ -96,37 +96,24 @@ struct FileOutcome {
 enum PruneFailure {
     Refused(BaselinePruneRefusal),
     MissingAnalysis(&'static str),
+    Unreadable(String),
 }
 
 pub fn run_baselines_prune(opts: &BaselinesPruneOptions<'_>) -> ExitCode {
-    let mut contents = Vec::new();
-    for (kind, path) in opts.targets.iter() {
-        match std::fs::read_to_string(path) {
-            Ok(content) => contents.push((kind, path.to_path_buf(), content)),
-            Err(error) => {
-                return emit_error(
-                    &format!(
-                        "failed to read the {} baseline {}: {error}",
-                        kind.as_str(),
-                        display_path(path, opts.root)
-                    ),
-                    2,
-                    opts.output,
-                );
-            }
-        }
-    }
-
     let results = match collect_combined_results(&combined_options(opts)) {
         Ok(results) => results,
         Err(code) => return code,
     };
 
-    let mut outcomes: Vec<FileOutcome> = contents
-        .into_iter()
-        .map(|(kind, path, content)| {
-            let pruned = prune_one(kind, &content, &results, opts.root);
-            outcome_for(kind, path, pruned, opts.check)
+    let mut outcomes: Vec<FileOutcome> = opts
+        .targets
+        .iter()
+        .map(|(kind, path)| {
+            let pruned = match std::fs::read_to_string(path) {
+                Ok(content) => prune_one(kind, &content, &results, opts.root),
+                Err(error) => Err(PruneFailure::Unreadable(error.to_string())),
+            };
+            outcome_for(kind, path.to_path_buf(), pruned, opts.check)
         })
         .collect();
     if !opts.check {
@@ -148,9 +135,7 @@ pub fn run_baselines_prune(opts: &BaselinesPruneOptions<'_>) -> ExitCode {
             exit
         };
     }
-    if !opts.quiet {
-        print_human(&outcomes, opts.check, opts.root);
-    }
+    print_human(&outcomes, opts.check, opts.root, opts.quiet);
     exit
 }
 
@@ -303,6 +288,11 @@ fn outcome_for(
                     (Status::Refused, refusal.reason(), Some(refusal.code()))
                 }
                 PruneFailure::MissingAnalysis(reason) => (Status::Error, reason.to_owned(), None),
+                PruneFailure::Unreadable(error) => (
+                    Status::Error,
+                    format!("cannot read the file ({error})"),
+                    None,
+                ),
             };
             FileOutcome {
                 kind,
@@ -338,6 +328,11 @@ fn write_outcome(outcome: &mut FileOutcome, root: &Path) {
 }
 
 fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+    // A rename would replace the link itself with a regular file. A save
+    // refuses a symbolic link too.
+    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err("the path is a symbolic link".to_owned());
+    }
     let file_name = path
         .file_name()
         .ok_or_else(|| "the path has no file name".to_owned())?
@@ -351,8 +346,10 @@ fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
         contents,
         fallow_engine::write_guard::WriteTarget::Path,
     )
-    .map_err(|error| error.to_string())?;
-    std::fs::rename(&temp, path).map_err(|error| {
+    .and_then(|()| {
+        std::fs::rename(&temp, path).map_err(fallow_engine::write_guard::WriteFailure::File)
+    })
+    .map_err(|error| {
         let _ = std::fs::remove_file(&temp);
         error.to_string()
     })
@@ -386,8 +383,23 @@ fn save_command(outcome: &FileOutcome, root: &Path) -> String {
     format!(
         "fallow {} --save-baseline {}",
         outcome.kind.as_str(),
-        display_path(&outcome.path, root)
+        shell_quote(&display_path(&outcome.path, root))
     )
+}
+
+/// Quote a word for a POSIX shell. The paths come from the project config, and
+/// an agent can run an action `command` in a shell, so a path must never add
+/// a command of its own.
+fn shell_quote(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '+'));
+    if plain {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
 }
 
 fn prune_json(outcomes: &[FileOutcome], check: bool, root: &Path) -> serde_json::Value {
@@ -438,9 +450,16 @@ fn prune_actions(outcomes: &[FileOutcome], check: bool, root: &Path) -> Vec<serd
         actions.push(serde_json::json!({
             "type": "stage-baselines",
             "auto_fixable": false,
-            "description": "Commit the pruned baseline files with the change that fixed the findings",
+            "description": "Stage the pruned baseline files and commit them with the change that fixed the findings",
             "paths": written,
-            "command": format!("git add -- {}", written.join(" ")),
+            "command": format!(
+                "git add -- {}",
+                written
+                    .iter()
+                    .map(|path| shell_quote(path))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
         }));
     }
     if check
@@ -470,8 +489,13 @@ fn prune_actions(outcomes: &[FileOutcome], check: bool, root: &Path) -> Vec<serd
     actions
 }
 
-fn print_human(outcomes: &[FileOutcome], check: bool, root: &Path) {
+/// Print the report. `--quiet` keeps only the skipped and failed files, so a
+/// run that exits 2 always says why.
+fn print_human(outcomes: &[FileOutcome], check: bool, root: &Path, quiet: bool) {
     for outcome in outcomes {
+        if quiet && !matches!(outcome.status, Status::Refused | Status::Error) {
+            continue;
+        }
         let path = display_path(&outcome.path, root);
         let kind = outcome.kind.as_str();
         match outcome.status {
@@ -501,12 +525,14 @@ fn print_human(outcomes: &[FileOutcome], check: bool, root: &Path) {
                 save_command(outcome, root)
             ),
             Status::Error => eprintln!(
-                "Error: {kind} baseline {path}: {}",
-                outcome.reason.as_deref().unwrap_or_default()
+                "Error: {kind} baseline {path}: {}. To save it: {}",
+                outcome.reason.as_deref().unwrap_or_default(),
+                save_command(outcome, root)
             ),
         }
     }
     if check
+        && !quiet
         && outcomes
             .iter()
             .any(|outcome| outcome.status == Status::WouldPrune)
@@ -538,4 +564,22 @@ fn print_removed(removed: &[PrunedEntry]) {
 
 const fn entry_noun(count: usize) -> &'static str {
     if count == 1 { "entry" } else { "entries" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_quote;
+
+    #[test]
+    fn shell_quote_keeps_plain_paths_and_quotes_the_rest() {
+        assert_eq!(
+            shell_quote("baselines/dead-code.json"),
+            "baselines/dead-code.json"
+        );
+        assert_eq!(shell_quote("a b.json"), "'a b.json'");
+        assert_eq!(shell_quote("x;rm -rf ~.json"), "'x;rm -rf ~.json'");
+        assert_eq!(shell_quote("$(id).json"), "'$(id).json'");
+        assert_eq!(shell_quote("it's.json"), "'it'\\''s.json'");
+        assert_eq!(shell_quote(""), "''");
+    }
 }

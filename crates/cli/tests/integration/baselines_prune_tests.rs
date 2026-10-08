@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::common::{CommandOutput, parse_json, run_fallow_raw};
+use crate::common::{CommandOutput, parse_json, run_fallow_raw, run_fallow_raw_with_env};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -321,4 +321,47 @@ fn a_cli_path_overrides_the_config_and_prunes_one_file() {
     let files = json["files"].as_array().unwrap();
     assert_eq!(files.len(), 1, "{json}");
     assert_eq!(files[0]["status"], "pruned");
+}
+
+#[test]
+fn a_missing_file_fails_alone_and_the_others_are_pruned() {
+    let dir = project();
+    save_all(&dir);
+    std::fs::remove_file(dir.path().join("baselines/health.json")).unwrap();
+    std::fs::remove_file(dir.path().join("src/dead.ts")).unwrap();
+
+    let (output, json) = prune(&dir, &[]);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(file_status(&json, "health")["status"], "error");
+    assert_eq!(file_status(&json, "dead-code")["status"], "pruned");
+}
+
+#[test]
+fn prune_rejects_a_diff_from_the_environment() {
+    let dir = project();
+    save_all(&dir);
+    let diff = dir.path().join("changes.diff");
+    std::fs::write(
+        &diff,
+        "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-x\n+y\n",
+    )
+    .unwrap();
+    let output = run_fallow_raw_with_env(
+        &[
+            "baselines",
+            "prune",
+            "--root",
+            root_arg(&dir),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_DIFF_FILE", diff.to_str().unwrap())],
+    );
+    assert_eq!(output.code, 2, "{}", output.stdout);
+    assert!(
+        output.stdout.contains("does not accept `FALLOW_DIFF_FILE`"),
+        "{}",
+        output.stdout
+    );
 }

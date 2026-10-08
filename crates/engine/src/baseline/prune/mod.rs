@@ -69,6 +69,9 @@ pub enum BaselinePruneRefusal {
     /// The duplication baseline holds clone keys that older versions shared
     /// between unrelated groups (issue #3290).
     SharedCloneKeys,
+    /// The file has fields that this version does not know, probably from a
+    /// newer version. A rewrite would drop them.
+    UnknownFields(Vec<String>),
 }
 
 impl BaselinePruneRefusal {
@@ -82,6 +85,7 @@ impl BaselinePruneRefusal {
             Self::UnknownKeyScheme(_) => "unknown-key-scheme",
             Self::IncompatibleIdentity(_) => "incompatible-identity",
             Self::SharedCloneKeys => "shared-clone-keys",
+            Self::UnknownFields(_) => "unknown-fields",
         }
     }
 
@@ -110,6 +114,10 @@ impl BaselinePruneRefusal {
                 "the file has clone keys that older versions shared between unrelated groups"
                     .to_owned()
             }
+            Self::UnknownFields(fields) => format!(
+                "the file has fields that this version does not know ({}); a newer fallow version probably saved it",
+                fields.join(", ")
+            ),
         }
     }
 }
@@ -130,10 +138,40 @@ fn parse_own_kind(
     }
 }
 
-fn parse_value<T: serde::de::DeserializeOwned>(
-    value: serde_json::Value,
+/// Parse the file and refuse it when a rewrite would drop a field with data.
+///
+/// The structs skip empty fields on save, so a field that is absent from the
+/// round trip is unknown only when the file holds data in it.
+fn parse_value<T: serde::de::DeserializeOwned + serde::Serialize>(
+    value: &serde_json::Value,
 ) -> Result<T, BaselinePruneRefusal> {
-    serde_json::from_value(value).map_err(|error| BaselinePruneRefusal::Parse(error.to_string()))
+    let parsed =
+        T::deserialize(value).map_err(|error| BaselinePruneRefusal::Parse(error.to_string()))?;
+    let round_trip = serde_json::to_value(&parsed)
+        .map_err(|error| BaselinePruneRefusal::Parse(error.to_string()))?;
+    if let (Some(original), Some(known)) = (value.as_object(), round_trip.as_object()) {
+        let unknown: Vec<String> = original
+            .iter()
+            .filter(|(key, field)| {
+                key.as_str() != "kind" && !known.contains_key(key.as_str()) && !is_empty_json(field)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        if !unknown.is_empty() {
+            return Err(BaselinePruneRefusal::UnknownFields(unknown));
+        }
+    }
+    Ok(parsed)
+}
+
+fn is_empty_json(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => true,
+        serde_json::Value::Array(items) => items.is_empty(),
+        serde_json::Value::Object(fields) => fields.is_empty(),
+        serde_json::Value::String(text) => text.is_empty(),
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => false,
+    }
 }
 
 fn serialize<T: serde::Serialize>(
@@ -186,7 +224,8 @@ pub fn prune_dead_code_baseline(
     root: &Path,
     identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<BaselinePrune, BaselinePruneRefusal> {
-    let mut baseline: BaselineData = parse_value(parse_own_kind(content, BaselineKind::DeadCode)?)?;
+    let mut baseline: BaselineData =
+        parse_value(&parse_own_kind(content, BaselineKind::DeadCode)?)?;
     match baseline.identity.as_deref() {
         None => return Err(BaselinePruneRefusal::LegacyKeys),
         Some(scheme) if scheme != BASELINE_KEY_SCHEME => {
@@ -243,7 +282,7 @@ pub fn prune_dupes_baseline(
     report: &DuplicationReport,
 ) -> Result<BaselinePrune, BaselinePruneRefusal> {
     let mut baseline: DuplicationBaselineData =
-        parse_value(parse_own_kind(content, BaselineKind::Dupes)?)?;
+        parse_value(&parse_own_kind(content, BaselineKind::Dupes)?)?;
     if baseline.has_unparsed_collision_keys() {
         return Err(BaselinePruneRefusal::SharedCloneKeys);
     }
@@ -327,7 +366,8 @@ fn retain_rows(rows: &mut Vec<String>, keep: &[bool]) {
 ///
 /// `finding_counts` and `identity_finding_counts` lose the slots that matched
 /// no current finding. Identity buckets follow a moved file as `--baseline`
-/// does and keep their saved key. The runtime-coverage keys and the refactoring
+/// does and keep their saved key. An emptied identity bucket stays as an empty
+/// map when the run reports its key, so the move matching does not change. The runtime-coverage keys and the refactoring
 /// target keys stay as they are, because this run does not compute them.
 ///
 /// # Errors
@@ -340,7 +380,7 @@ pub fn prune_health_baseline(
     root: &Path,
 ) -> Result<BaselinePrune, BaselinePruneRefusal> {
     let mut baseline: HealthBaselineData =
-        parse_value(parse_own_kind(content, BaselineKind::Health)?)?;
+        parse_value(&parse_own_kind(content, BaselineKind::Health)?)?;
     if baseline.finding_counts.is_empty() && !baseline.findings.is_empty() {
         return Err(BaselinePruneRefusal::LegacyKeys);
     }
@@ -355,6 +395,9 @@ pub fn prune_health_baseline(
         "finding_counts",
         &mut removed,
     );
+    baseline
+        .finding_counts
+        .retain(|_, counts| !counts.is_empty());
     if !baseline.identity_finding_counts.is_empty() {
         let current_identity = health_finding_counts(findings, root, HealthBaselineMode::Identity);
         let remaps: FxHashMap<String, String> = moved_identity_bucket_remaps(
@@ -371,6 +414,13 @@ pub fn prune_health_baseline(
             "identity_finding_counts",
             &mut removed,
         );
+        // A saved identity key that the run also reports is never a move
+        // candidate. Dropping its emptied bucket would make it one, and a
+        // second candidate with the same function name stops another bucket
+        // from following its move. So the key stays, with no slots.
+        baseline
+            .identity_finding_counts
+            .retain(|key, counts| !counts.is_empty() || current_identity.contains_key(key));
     }
 
     let content = if removed.is_empty() {
@@ -434,7 +484,6 @@ fn prune_count_buckets(
             }
         }
     }
-    saved.retain(|_, counts| !counts.is_empty());
 }
 
 /// The saved slots per severity that the greedy match of
