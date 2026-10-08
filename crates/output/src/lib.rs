@@ -121,10 +121,14 @@ pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use baseline_staleness::{
     BaselineScopeReasons, BaselineStaleness, BaselineStalenessAdvisory, ScopeReason,
 };
+#[cfg(feature = "schema")]
+pub use check::ArchitectureSchemaVersion;
 pub use check::{
-    CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
-    GroupByMode, apply_config_fixable_to_duplicate_exports, build_check_output,
+    ARCHITECTURE_SCHEMA_VERSION, CHECK_SCHEMA_VERSION, CheckEnvelope, CheckGroupedEntry,
+    CheckGroupedOutput, CheckOutput, CheckOutputInput, GroupByMode,
+    apply_config_fixable_to_duplicate_exports, build_check_output,
     harmonize_dead_code_health_suppress_line_actions, harmonize_multi_kind_suppress_line_actions,
+    serialize_architecture_grouped_json_output, serialize_architecture_json_output,
     serialize_check_grouped_json_output, serialize_check_json_output,
 };
 pub use ci_output::{
@@ -274,9 +278,10 @@ pub use inspect_envelopes::{
     serialize_inspect_json_output,
 };
 pub use issue_contract::{
-    ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, CHECK_DOCS,
-    CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, check_meta,
-    issue_output_contract_by_code, issue_output_contracts, rule_docs_url,
+    ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, ARCHITECTURE_DOCS,
+    ARCHITECTURE_RESULT_KEYS, CHECK_DOCS, CODECLIMATE_RESULT_CODES, IssueOutputContract,
+    TsAliasMeta, architecture_meta, check_meta, issue_output_contract_by_code,
+    issue_output_contracts, rule_docs_url,
 };
 pub use json_paths::{normalize_uri, strip_root_prefix};
 pub use list_envelopes::{

@@ -71,9 +71,10 @@ export interface AppState {
 export const createState = (data: VizData, canvas: HTMLCanvasElement): AppState | null => {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  // Mode A dashboards are dark-first; the toggle switches to the light
-  // (Mode B report) palette.
-  const dark = true;
+  // As on fallow.tools: a stored choice wins, otherwise the operating
+  // system picks. Day paper is the default look.
+  const stored = storedTheme();
+  const dark = stored === null ? systemPrefersDark() : stored === "dark";
   return {
     data,
     index: buildIndex(data),
@@ -102,6 +103,30 @@ export const createState = (data: VizData, canvas: HTMLCanvasElement): AppState 
     helpOpen: false,
     requestRender: () => {},
   };
+};
+
+/** The same key as fallow.tools and fallow.cloud use for the theme choice. */
+const THEME_KEY = "fallow-theme";
+
+const systemPrefersDark = (): boolean =>
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+const storedTheme = (): string | null => {
+  try {
+    return window.localStorage.getItem(THEME_KEY);
+  } catch {
+    return null;
+  }
+};
+
+/** Keep the viewer's theme choice; without storage the system choice applies. */
+export const storeTheme = (dark: boolean): void => {
+  try {
+    window.localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
+  } catch {
+    // Storage unavailable (some file:// contexts): the default applies next time.
+  }
 };
 
 export const setDarkMode = (state: AppState, dark: boolean): void => {

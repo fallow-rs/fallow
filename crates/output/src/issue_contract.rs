@@ -11,6 +11,9 @@ const DOCS_BASE: &str = "https://fallow.tools/docs";
 /// Docs URL for the dead-code/check command.
 pub const CHECK_DOCS: &str = "https://fallow.tools/docs/cli/dead-code/";
 
+/// Docs URL for the architecture command.
+pub const ARCHITECTURE_DOCS: &str = "https://fallow.tools/docs/cli/architecture/";
+
 /// `_meta` description for the per-finding `actions[]` array shared across
 /// JSON output.
 pub const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggestions. Each entry carries a `type` discriminant (kebab-case) plus a per-action `auto_fixable` bool. Consumers dispatch on `type` to choose the remediation and filter on `auto_fixable` of each individual entry.";
@@ -110,6 +113,38 @@ pub fn check_meta() -> Meta {
     }
 }
 
+/// The `AnalysisResults` arrays that `fallow architecture` reports: import
+/// cycles, boundary violations and rule-pack policy violations.
+///
+/// One list for the `_meta.rules` filter, the human report and the
+/// programmatic selection, so the three cannot disagree.
+pub const ARCHITECTURE_RESULT_KEYS: &[&str] = &[
+    "circular_dependencies",
+    "re_export_cycles",
+    "package_cycles",
+    "boundary_violations",
+    "boundary_coverage_violations",
+    "boundary_call_violations",
+    "policy_violations",
+];
+
+/// Build the `_meta` object for `fallow architecture --format json --explain`.
+///
+/// It has the dead-code field definitions, the architecture docs URL, and
+/// only the rules of the [`ARCHITECTURE_RESULT_KEYS`] arrays.
+#[must_use]
+pub fn architecture_meta() -> Meta {
+    let mut meta = check_meta();
+    let architecture_codes: Vec<&'static str> = issue_output_contracts()
+        .filter(|contract| ARCHITECTURE_RESULT_KEYS.contains(&contract.result_key))
+        .map(|contract| contract.code)
+        .collect();
+    meta.rules
+        .retain(|code, _| architecture_codes.contains(&code.as_str()));
+    meta.docs = Some(ARCHITECTURE_DOCS.to_string());
+    meta
+}
+
 /// Public docs URL for a rule's `docs_path` relative to the docs site root.
 ///
 /// A page URL ends with a slash, before any `#anchor`, because that is the
@@ -138,6 +173,34 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[test]
+    fn architecture_meta_lists_only_architecture_rules() {
+        let meta = architecture_meta();
+        let expected: BTreeSet<&str> = issue_output_contracts()
+            .filter(|contract| ARCHITECTURE_RESULT_KEYS.contains(&contract.result_key))
+            .map(|contract| contract.code)
+            .collect();
+        let actual: BTreeSet<&str> = meta.rules.keys().map(String::as_str).collect();
+
+        assert_eq!(actual, expected);
+        assert_eq!(meta.docs.as_deref(), Some(ARCHITECTURE_DOCS));
+        assert_eq!(meta.field_definitions, check_meta().field_definitions);
+    }
+
+    #[test]
+    fn every_architecture_result_key_names_a_result_row() {
+        let keys: BTreeSet<&str> = issue_output_contracts()
+            .map(|contract| contract.result_key)
+            .collect();
+        for key in ARCHITECTURE_RESULT_KEYS {
+            assert!(keys.contains(key), "`{key}` is not a result array key");
+        }
+        let architecture_rows = issue_output_contracts()
+            .filter(|contract| ARCHITECTURE_RESULT_KEYS.contains(&contract.result_key))
+            .count();
+        assert_eq!(architecture_rows, ARCHITECTURE_RESULT_KEYS.len());
+    }
 
     #[test]
     fn every_result_row_has_output_contract() {

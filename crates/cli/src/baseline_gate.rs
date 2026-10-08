@@ -53,8 +53,9 @@ pub struct LoadedBaselineStaleness {
     /// note, the gate line and `baseline_staleness.saved_by` all use this one
     /// value. Two reads of the same path can give two answers.
     pub saved_by: Option<BaselineKind>,
-    /// True when a dead-code baseline has no `identity`, so it uses the legacy
-    /// key forms. Always false for `dupes`.
+    /// True when the baseline uses a legacy key form: a dead-code baseline
+    /// without `identity`, or a `dupes` baseline with keys from the shared
+    /// empty-sequence bucket of issue #3290. Always false for `health`.
     pub legacy_keys: bool,
 }
 

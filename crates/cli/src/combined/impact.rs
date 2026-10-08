@@ -26,8 +26,8 @@ pub(super) fn record_combined_cache_state(
 /// Whether this combined invocation is a true WHOLE-PROJECT run, the only shape
 /// allowed to write the Impact project track. Every narrowing that would make
 /// the counts not a stable whole-project denominator disqualifies it:
-/// - not all three analyses ran (`--only` / `--skip`): a partial count is not a
-///   whole-project total;
+/// - not all three analyses ran, or the dead-code section is narrowed
+///   (`--only` / `--skip`): a partial count is not a whole-project total;
 /// - any scope narrowing (`--changed-since` / `--workspace` /
 ///   `--changed-workspaces`): a subset count;
 /// - a process-wide diff filter is active (`--diff-file` / `--diff-stdin`,
@@ -35,7 +35,10 @@ pub(super) fn record_combined_cache_state(
 /// - production mode (global or per-analysis): a different finding denominator
 ///   that must not interleave with default-mode records.
 fn is_whole_project_run(opts: &CombinedOptions<'_>) -> bool {
-    let all_analyses = opts.run_check && opts.run_dupes && opts.run_health;
+    let all_analyses = opts.run_check
+        && opts.run_dupes
+        && opts.run_health
+        && opts.architecture == crate::check::ArchitectureSelection::All;
     let no_scope_narrowing = opts.changed_since.is_none()
         && opts.workspace.is_none()
         && opts.changed_workspaces.is_none();

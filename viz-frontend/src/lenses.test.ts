@@ -55,7 +55,7 @@ describe("lens registry", () => {
     expect(lensById("unused").count(appState)).toEqual({ value: 3, unit: "affected files" });
     expect(lensById("duplication").count(appState)).toEqual({
       value: 4,
-      unit: "clone groups",
+      unit: "duplicated blocks",
     });
     expect(lensById("architecture").count(appState)).toEqual({
       value: 5,
@@ -63,6 +63,20 @@ describe("lens registry", () => {
     });
     expect(lensById("health").count(appState)).toEqual({ value: 6, unit: "hotspot files" });
     expect(lensById("security").count(appState)).toEqual({ value: 2, unit: "candidates" });
+  });
+
+  it("counts every architecture finding, cut-off ones included, not only violations", () => {
+    const appState = state({
+      files: [],
+      summary: { boundary_violations: 0 },
+      architecture: {
+        availability: { state: "complete", count: 0, unit: "violations" },
+        findings: [{ kind: "circular-dependency" }, { kind: "re-export-cycle" }],
+        findings_truncated: 75,
+      },
+    });
+
+    expect(lensById("architecture").count(appState)).toEqual({ value: 77, unit: "findings" });
   });
 
   it("distinguishes unavailable security from zero findings", () => {

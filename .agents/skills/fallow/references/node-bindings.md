@@ -15,7 +15,7 @@ const similarCode = await detectSimilarCode({ root: process.cwd(), files: ['src/
 const health = await computeHealth({ root: process.cwd(), score: true, ownershipEmails: 'handle' });
 ```
 
-The async functions are `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. Each returns the same JSON envelope the CLI emits for `--format json`.
+The async functions are `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectArchitecture`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. Each returns the same JSON envelope the CLI emits for `--format json`. `detectArchitecture` returns the `kind: "architecture"` envelope of `fallow architecture`; `detectCircularDependencies` and `detectBoundaryViolations` return the `dead-code` envelope.
 
 `detectSimilarCode` returns a precisely typed `SimilarCodeReport` with generation provenance, embedding semantics, effective `generation.scope.paths`, completion, skips, cache accounting, diagnostics, and read-only candidate actions. Treat the materialized scope as provenance. Preserve the raw report when a candidate may be inspected later.
 

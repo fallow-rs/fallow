@@ -110,7 +110,7 @@ pub(crate) fn print_fix_summary(envelope: &Value) -> ExitCode {
 #[must_use]
 pub fn render_summary(kind: EnvelopeKind, envelope: &Value, links: &LinkContext) -> String {
     match kind {
-        EnvelopeKind::DeadCode => render_check_summary(envelope),
+        EnvelopeKind::DeadCode | EnvelopeKind::Architecture => render_check_summary(envelope),
         EnvelopeKind::Dupes => render_dupes_summary(envelope),
         EnvelopeKind::Health => render_health_summary(envelope),
         EnvelopeKind::Audit => render_audit_summary(envelope),

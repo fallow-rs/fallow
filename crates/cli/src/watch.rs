@@ -435,6 +435,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         css_requested: false,
         json_style: opts.json_style,
         include_fragments: true,
+        architecture_layout: report::ArchitectureLayout::Embedded,
     };
     let report_code = report::print_results(&results, &ctx, config.output, None);
     if report_code != ExitCode::SUCCESS {

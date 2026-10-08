@@ -16,6 +16,18 @@
     },
     {
       "section": "commands",
+      "row": "architecture",
+      "column": "Key Flags",
+      "seed": "`--cycles`, `--boundaries`, `--policy`, `--file`, `--finding-id`, `path`"
+    },
+    {
+      "section": "commands",
+      "row": "architecture",
+      "column": "Purpose",
+      "seed": "Check import cycles, boundaries and policy rules after editing"
+    },
+    {
+      "section": "commands",
       "row": "audit",
       "column": "Key Flags",
       "seed": "`--production-dead-code`, `--production-health`, `--production-dupes`, `--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`, `--max-crap`, `--coverage`"
@@ -108,7 +120,7 @@
       "section": "commands",
       "row": "dead-code",
       "column": "Purpose",
-      "seed": "Analyze project for unused code and circular dependencies"
+      "seed": "Analyze project for unused code and dependency hygiene"
     },
     {
       "section": "commands",
@@ -1212,7 +1224,7 @@
       "section": "flags:global",
       "row": "--baseline",
       "column": "Description",
-      "seed": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it"
+      "seed": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it"
     },
     {
       "section": "flags:global",
@@ -1542,13 +1554,13 @@
       "section": "flags:global",
       "row": "--sarif-file",
       "column": "Description",
-      "seed": "Write SARIF output to a file (in addition to the primary --format output). Used by bare `fallow`, `dead-code` and `security`. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
+      "seed": "Write SARIF output to a file (in addition to the primary --format output). Used by bare `fallow`, `dead-code`, `architecture` and `security`. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
     },
     {
       "section": "flags:global",
       "row": "--save-baseline",
       "column": "Description",
-      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
+      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
     },
     {
       "section": "flags:global",
@@ -2443,6 +2455,12 @@
       "row": "audit",
       "column": "Description",
       "seed": "Combined dead-code, complexity, duplication, and styling audit for changed files with a pass/warn/fail verdict"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "check_architecture",
+      "column": "Description",
+      "seed": "Architecture check: import cycles, boundary violations, and rule-pack policy violations in the `architecture` envelope, each with a stable finding_id"
     },
     {
       "section": "mcp-tools",

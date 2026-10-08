@@ -516,6 +516,65 @@ pub fn mcp_envelope(
     envelope
 }
 
+/// The `fallow architecture` envelope of every surface, labelled for a diff:
+/// the CLI, `fallow_api::run_architecture`, and the MCP `check_architecture`
+/// tool on its typed path and on its CLI fallback.
+///
+/// The fallback path is proved by a `baseline` with no entries, which only the
+/// CLI reads: `empty_baseline` is a dead-code baseline of an empty project.
+///
+/// # Panics
+///
+/// Panics when a surface fails or returns another root `kind`.
+pub fn architecture_envelopes(
+    server: &mut McpServer,
+    root: &Path,
+    empty_baseline: &Path,
+) -> Vec<(String, Value)> {
+    let cli = cli_envelope(&run_cli(root, &["architecture".to_string()]));
+    let api = fallow_api::run_architecture(&fallow_api::ArchitectureOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            no_cache: true,
+            explain: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        ..fallow_api::ArchitectureOptions::default()
+    })
+    .and_then(fallow_api::serialize_architecture_programmatic_json)
+    .unwrap_or_else(|err| panic!("fallow_api run_architecture failed: {err:?}"));
+    let arguments = json!({"root": root.display().to_string(), "no_cache": true});
+    let typed = server.call_tool("check_architecture", &arguments);
+    let mut fallback_arguments = arguments;
+    fallback_arguments["baseline"] = json!(empty_baseline.display().to_string());
+    let fallback = server.call_tool("check_architecture", &fallback_arguments);
+    assert!(
+        fallback.get("baseline_staleness").is_some(),
+        "the MCP check_architecture call with a baseline did not take the CLI path: {fallback}"
+    );
+    let envelopes = vec![
+        ("CLI".to_string(), cli),
+        ("fallow_api".to_string(), api),
+        ("MCP Typed".to_string(), typed),
+        ("MCP CliFallback".to_string(), fallback),
+    ];
+    for (label, envelope) in &envelopes {
+        assert_eq!(
+            envelope["kind"], "architecture",
+            "{label} returned another root kind: {envelope}"
+        );
+    }
+    envelopes
+}
+
+/// The finding keys of each labelled `fallow architecture` envelope.
+pub fn architecture_keys(envelopes: &[(String, Value)]) -> Vec<(String, KeySet)> {
+    envelopes
+        .iter()
+        .map(|(label, envelope)| (label.clone(), dead_code_keys(envelope)))
+        .collect()
+}
+
 /// Run one analysis through `fallow_api` in this process and reduce it to keys.
 ///
 /// # Panics

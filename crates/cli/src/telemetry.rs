@@ -166,7 +166,7 @@ pub fn note_result_count(count: usize) {
     FINDINGS_PRESENT.fetch_max(value, Ordering::Relaxed);
 
     let capped = count.min(RESULT_COUNT_MAX) as u16;
-    let _ = RESULT_COUNT_CAPPED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    let _ = RESULT_COUNT_CAPPED.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
         let next = match current {
             RESULT_COUNT_UNSET => capped,
             RESULT_COUNT_UNKNOWN => RESULT_COUNT_UNKNOWN,
@@ -230,11 +230,11 @@ pub fn note_report_truncation(truncated: bool, reason: TruncationReason) {
     if truncated {
         REPORT_TRUNCATED.store(REPORT_TRUNCATION_TRUE, Ordering::Relaxed);
         let reason_state = truncation_reason_to_state(reason);
-        let _ = TRUNCATION_REASON.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = TRUNCATION_REASON.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.max(reason_state))
         });
     } else {
-        let _ = REPORT_TRUNCATED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let _ = REPORT_TRUNCATED.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             if current == REPORT_TRUNCATION_UNSET {
                 Some(REPORT_TRUNCATION_FALSE)
             } else {
@@ -636,6 +636,7 @@ pub enum Workflow {
     Impact,
     Security,
     SimilarCode,
+    Architecture,
     Fix,
     Explain,
     ProjectInventory,
@@ -661,6 +662,7 @@ impl Workflow {
         match self {
             Workflow::Audit
             | Workflow::DeadCode
+            | Workflow::Architecture
             | Workflow::Health
             | Workflow::Dupes
             | Workflow::CodeQualityReview
@@ -964,8 +966,8 @@ struct TelemetryEvent {
     /// `outcome` gate. Absent on commands that run no analysis (admin commands)
     /// and on older binaries. On the combined `code_quality_review` and `audit`
     /// workflows this is an OR across the sub-analyses; per-analysis find-rate
-    /// is answerable only on the standalone `dead_code` / `dupes` / `health`
-    /// workflows.
+    /// is answerable on the standalone `dead_code` / `architecture` / `dupes` /
+    /// `health` / `security` workflows.
     #[serde(skip_serializing_if = "Option::is_none")]
     findings_present: Option<bool>,
     /// Coarse bucket of the rendered analysis result count. Never serializes
@@ -1555,7 +1557,7 @@ fn telemetry_context_field_purposes() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "workflow",
-            "Prioritizes audit, dead-code, health, dupes, and integration workflows.",
+            "Prioritizes audit, dead-code, architecture, health, dupes, and integration workflows.",
         ),
         (
             "integration_surface",
@@ -1621,7 +1623,7 @@ fn telemetry_result_field_purposes() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "findings_present",
-            "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable only on standalone dead_code, dupes, and health.",
+            "Whether the analysis surfaced any findings, decoupled from the exit-code gate. On combined and audit workflows it is an OR across sub-analyses; per-analysis find-rate is answerable on the standalone dead_code, architecture, dupes, health, and security workflows.",
         ),
         (
             "result_count_bucket",
@@ -2426,7 +2428,7 @@ fn followup_kind(workflow: Workflow) -> FollowupKind {
         Workflow::Audit => FollowupKind::Audit,
         Workflow::Security => FollowupKind::Security,
         Workflow::Health => FollowupKind::Health,
-        Workflow::DeadCode => FollowupKind::Check,
+        Workflow::DeadCode | Workflow::Architecture => FollowupKind::Check,
         Workflow::Dupes => FollowupKind::Dupes,
         Workflow::Fix => FollowupKind::Fix,
         Workflow::Explain => FollowupKind::Explain,
@@ -2989,6 +2991,7 @@ mod tests {
         for workflow in [
             Workflow::Audit,
             Workflow::DeadCode,
+            Workflow::Architecture,
             Workflow::Health,
             Workflow::Dupes,
             Workflow::CodeQualityReview,
@@ -4002,6 +4005,18 @@ mod tests {
     }
 
     // --- field_purposes and transport_headers (lines 1398-1532) ---
+
+    #[test]
+    fn findings_present_purpose_lists_every_standalone_workflow() {
+        let purposes = field_purposes();
+        let (_, purpose) = purposes
+            .iter()
+            .find(|(field, _)| *field == "findings_present")
+            .expect("findings_present purpose");
+        for workflow in ["dead_code", "architecture", "dupes", "health", "security"] {
+            assert!(purpose.contains(workflow), "{workflow}: {purpose}");
+        }
+    }
 
     #[test]
     fn field_purposes_is_non_empty_and_unique() {

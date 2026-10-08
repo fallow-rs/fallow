@@ -4,8 +4,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
-    DUPES_SCHEMA_VERSION, DupesOutput, DupesOutputInput, GroupByMode,
+    CHECK_SCHEMA_VERSION, CheckEnvelope, CheckGroupedEntry, CheckGroupedOutput, CheckOutput,
+    CheckOutputInput, DUPES_SCHEMA_VERSION, DupesOutput, DupesOutputInput, GroupByMode,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     harmonize_multi_kind_suppress_line_actions as harmonize_typed_suppress_line_actions,
     strip_root_prefix,
@@ -20,8 +20,11 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 
 use crate::{DupesReportPayload, DuplicationGroup, DuplicationGrouping, ResultGroup};
 
-/// Inputs for `fallow dead-code --format json` output assembly.
+/// Inputs for `fallow dead-code --format json` and
+/// `fallow architecture --format json` output assembly.
 pub struct CheckJsonOutputInput<'a> {
+    /// The command family member: sets the root `kind` and `schema_version`.
+    pub envelope: CheckEnvelope,
     /// Typed dead-code results to serialize.
     pub results: &'a AnalysisResults,
     /// Project root; its prefix is stripped from every path in the output.
@@ -93,6 +96,7 @@ pub struct CheckJsonExtraOutputs {
 }
 
 struct CheckJsonEnvelopeInput<'a> {
+    schema_version: u32,
     results: &'a AnalysisResults,
     elapsed: Duration,
     config_fixable: bool,
@@ -102,8 +106,10 @@ struct CheckJsonEnvelopeInput<'a> {
     next_steps: Vec<NextStep>,
 }
 
-/// Inputs for grouped dead-code JSON output assembly.
+/// Inputs for grouped dead-code and architecture JSON output assembly.
 pub struct GroupedCheckJsonOutputInput<'a> {
+    /// The command family member: sets the root `kind` and `schema_version`.
+    pub envelope: CheckEnvelope,
     /// Applied refs for exact workspace package roots.
     pub package_baselines: Vec<fallow_output::PackageBaselineStatus>,
     /// This run's view of the loaded baseline, for baseline runs.
@@ -226,6 +232,7 @@ pub fn serialize_check_json(
     input: CheckJsonOutputInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let envelope = build_check_json_envelope(CheckJsonEnvelopeInput {
+        schema_version: input.envelope.schema_version(),
         results: input.results,
         elapsed: input.elapsed,
         config_fixable: input.config_fixable,
@@ -234,8 +241,13 @@ pub fn serialize_check_json(
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     });
-    let mut output =
-        fallow_output::serialize_check_json_output(envelope, input.telemetry_analysis_run_id)?;
+    let run_id = input.telemetry_analysis_run_id;
+    let mut output = match input.envelope {
+        CheckEnvelope::DeadCode => fallow_output::serialize_check_json_output(envelope, run_id)?,
+        CheckEnvelope::Architecture => {
+            fallow_output::serialize_architecture_json_output(envelope, run_id)?
+        }
+    };
     strip_json_root_prefix(&mut output, input.root);
     Ok(output)
 }
@@ -249,6 +261,7 @@ pub fn serialize_check_json_payload(
     input: CheckJsonPayloadInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let envelope = build_check_json_envelope(CheckJsonEnvelopeInput {
+        schema_version: CHECK_SCHEMA_VERSION,
         results: input.results,
         elapsed: input.elapsed,
         config_fixable: input.config_fixable,
@@ -289,7 +302,7 @@ pub fn serialize_grouped_check_json(
     let envelope = CheckGroupedOutput {
         package_baselines: input.package_baselines,
         request_outcomes: input.request_outcomes,
-        schema_version: SchemaVersion(CHECK_SCHEMA_VERSION),
+        schema_version: SchemaVersion(input.envelope.schema_version()),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(input.elapsed.as_millis() as u64),
         grouped_by: input.grouped_by,
@@ -304,10 +317,15 @@ pub fn serialize_grouped_check_json(
         next_steps: input.next_steps,
     };
 
-    let mut output = fallow_output::serialize_check_grouped_json_output(
-        envelope,
-        input.telemetry_analysis_run_id,
-    )?;
+    let run_id = input.telemetry_analysis_run_id;
+    let mut output = match input.envelope {
+        CheckEnvelope::DeadCode => {
+            fallow_output::serialize_check_grouped_json_output(envelope, run_id)?
+        }
+        CheckEnvelope::Architecture => {
+            fallow_output::serialize_architecture_grouped_json_output(envelope, run_id)?
+        }
+    };
     strip_json_root_prefix(&mut output, input.root);
     Ok(output)
 }
@@ -412,7 +430,7 @@ pub fn serialize_grouped_duplication_json(
 
 fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
     let mut output = build_check_output(CheckOutputInput {
-        schema_version: CHECK_SCHEMA_VERSION,
+        schema_version: input.schema_version,
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: input.elapsed,
         results: input.results.clone(),
@@ -455,6 +473,7 @@ mod tests {
     fn grouped_check_json_carries_workspace_diagnostics_with_relative_paths() {
         let root = Path::new("/project");
         let output = serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+            envelope: CheckEnvelope::DeadCode,
             package_baselines: Vec::new(),
             gate_outcomes: None,
             request_outcomes: None,
@@ -487,5 +506,68 @@ mod tests {
             output["workspace_diagnostics"][0]["kind"],
             "source-read-failure"
         );
+        assert_eq!(output["kind"], "dead-code-grouped");
+        assert_eq!(output["schema_version"], CHECK_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn architecture_envelope_sets_kind_and_schema_version() {
+        let root = Path::new("/project");
+        let results = AnalysisResults::default();
+        let flat = serialize_check_json(CheckJsonOutputInput {
+            envelope: CheckEnvelope::Architecture,
+            results: &results,
+            root,
+            elapsed: Duration::ZERO,
+            config_fixable: false,
+            meta: None,
+            extras: CheckJsonExtraOutputs::default(),
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+            telemetry_analysis_run_id: None,
+        })
+        .expect("architecture JSON serializes");
+        assert_eq!(flat["kind"], "architecture");
+        assert_eq!(
+            flat["schema_version"],
+            fallow_output::ARCHITECTURE_SCHEMA_VERSION
+        );
+
+        let grouped = serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+            envelope: CheckEnvelope::Architecture,
+            package_baselines: Vec::new(),
+            gate_outcomes: None,
+            request_outcomes: None,
+            finding_id_query: None,
+            baseline_staleness: None,
+            groups: &[],
+            original: &results,
+            root,
+            elapsed: Duration::ZERO,
+            grouped_by: GroupByMode::Directory,
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+            telemetry_analysis_run_id: None,
+        })
+        .expect("grouped architecture JSON serializes");
+        assert_eq!(grouped["kind"], "architecture-grouped");
+        assert_eq!(
+            grouped["schema_version"],
+            fallow_output::ARCHITECTURE_SCHEMA_VERSION
+        );
+
+        let payload = serialize_check_json_payload(CheckJsonPayloadInput {
+            results: &results,
+            root,
+            elapsed: Duration::ZERO,
+            config_fixable: false,
+            extras: CheckJsonExtraOutputs::default(),
+            workspace_diagnostics: Vec::new(),
+        })
+        .expect("embedded payload serializes");
+        assert_eq!(payload["schema_version"], CHECK_SCHEMA_VERSION);
+        assert!(payload.get("kind").is_none());
     }
 }

@@ -30,6 +30,9 @@ use crate::report::sink::outln;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EnvelopeKind {
     DeadCode,
+    /// `fallow architecture`: the dead-code body with its own `kind` and
+    /// `schema_version`.
+    Architecture,
     Dupes,
     Health,
     Audit,
@@ -39,6 +42,23 @@ pub enum EnvelopeKind {
     /// field (see `crates/output/src/fix.rs`), so `fallow report --from`
     /// detects it by its stable top-level keys rather than a `kind` string.
     Fix,
+}
+
+impl EnvelopeKind {
+    /// Whether the envelope has the dead-code body at its root:
+    /// `dead-code` or `architecture`.
+    pub const fn is_dead_code_family(self) -> bool {
+        matches!(self, Self::DeadCode | Self::Architecture)
+    }
+}
+
+impl From<fallow_output::CheckEnvelope> for EnvelopeKind {
+    fn from(envelope: fallow_output::CheckEnvelope) -> Self {
+        match envelope {
+            fallow_output::CheckEnvelope::DeadCode => Self::DeadCode,
+            fallow_output::CheckEnvelope::Architecture => Self::Architecture,
+        }
+    }
 }
 
 /// Render and print the annotation stream for one envelope, resolving the
@@ -86,7 +106,9 @@ pub(crate) fn collect_annotations(
 ) -> Vec<Annotation> {
     let mut out = Vec::new();
     match kind {
-        EnvelopeKind::DeadCode => collect_check(envelope, pm, &mut out),
+        EnvelopeKind::DeadCode | EnvelopeKind::Architecture => {
+            collect_check(envelope, pm, &mut out);
+        }
         EnvelopeKind::Dupes => collect_dupes(envelope, &mut out),
         EnvelopeKind::Health => collect_health(envelope, &mut out),
         EnvelopeKind::Security => collect_security(envelope, &mut out),

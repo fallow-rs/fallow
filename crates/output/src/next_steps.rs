@@ -73,6 +73,9 @@ pub struct DeadCodeNextStepsInput<'a> {
     pub has_external_plugins: bool,
     /// The loaded baseline this run was too narrow to judge, when there is one.
     pub baseline_recheck: Option<BaselineRecheckInput<'a>>,
+    /// The subcommand that ran (`dead-code` or `architecture`). The
+    /// `scope-workspaces` step names it.
+    pub command: &'a str,
 }
 
 /// Runtime-independent inputs for standalone duplication next steps.
@@ -256,7 +259,7 @@ pub fn build_dead_code_next_steps(input: DeadCodeNextStepsInput<'_>) -> Vec<Next
         impact_digest_step(input.impact_digest),
         trace_unused_export(input.results, input.root),
         trace_deprecated_export(input.results, input.root),
-        scope_workspaces(input.workspace_ref),
+        scope_workspaces(input.workspace_ref, input.command),
         audit_changed(input.audit_changed),
     ]
     .into_iter()
@@ -317,7 +320,7 @@ pub fn build_combined_next_steps(input: &CombinedNextStepsInput<'_>) -> Vec<Next
         setup_pointer(input.offer_setup),
         impact_digest_step(input.impact_digest),
         trace_unused_export_from_input(input.trace_unused_export.as_ref()),
-        scope_workspaces(input.workspace_ref),
+        scope_workspaces(input.workspace_ref, "dead-code"),
         trace_clone(input.clone_fingerprints),
         complexity_breakdown(input.has_complexity_findings),
         audit_changed(input.audit_changed),
@@ -554,11 +557,11 @@ fn audit_changed(applicable: bool) -> Option<NextStep> {
     ))
 }
 
-fn scope_workspaces(workspace_ref: Option<&str>) -> Option<NextStep> {
+fn scope_workspaces(workspace_ref: Option<&str>, command: &str) -> Option<NextStep> {
     let reference = workspace_ref?;
     Some(next_step(
         "scope-workspaces",
-        format!("fallow dead-code --changed-workspaces {reference}"),
+        format!("fallow {command} --changed-workspaces {reference}"),
         "scope a monorepo run to the packages your branch touched",
     ))
 }
@@ -647,6 +650,7 @@ mod tests {
             audit_changed: false,
             has_external_plugins: false,
             baseline_recheck: None,
+            command: "dead-code",
         }
     }
 
@@ -865,6 +869,33 @@ mod tests {
         assert_eq!(steps[0].id, "trace-unused-export");
         assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
         assert_valid(&steps[0]);
+    }
+
+    #[test]
+    fn scope_workspaces_step_names_the_command_that_ran() {
+        let results = AnalysisResults {
+            unused_exports: vec![unused_export("/project/src/a.ts", "alpha")],
+            ..AnalysisResults::default()
+        };
+        let scope_command = |command| {
+            build_dead_code_next_steps(DeadCodeNextStepsInput {
+                workspace_ref: Some("origin/main"),
+                command,
+                ..dead_code_input(&results)
+            })
+            .into_iter()
+            .find(|step| step.id == "scope-workspaces")
+            .map(|step| step.command)
+        };
+
+        assert_eq!(
+            scope_command("dead-code").as_deref(),
+            Some("fallow dead-code --changed-workspaces origin/main")
+        );
+        assert_eq!(
+            scope_command("architecture").as_deref(),
+            Some("fallow architecture --changed-workspaces origin/main")
+        );
     }
 
     #[test]

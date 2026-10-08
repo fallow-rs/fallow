@@ -382,7 +382,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
                 return crate::report::github_summary::print_fix_summary(&envelope);
             }
             Ok(envelope) => match opts.json_style.serialize(&envelope) {
-                Ok(json) => println!("{json}"),
+                Ok(json) => crate::report::sink::stdoutln!("{json}"),
                 Err(e) => {
                     eprintln!("Error: failed to serialize fix output: {e}");
                     return ExitCode::from(2);
@@ -711,7 +711,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
             }
             Ok(envelope) => match input.json_style.serialize(&envelope) {
-                Ok(json) => println!("{json}"),
+                Ok(json) => crate::report::sink::stdoutln!("{json}"),
                 Err(e) => {
                     eprintln!("Error: failed to serialize fix output: {e}");
                     return Err(ExitCode::from(2));

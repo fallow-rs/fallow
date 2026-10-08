@@ -41,10 +41,11 @@ use crate::keys::{
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
     Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_envelope_with_baseline,
-    api_envelope, api_finding_id_query, api_keys, api_security, cli_analysis_envelope, cli_audit,
-    cli_combined, cli_envelope, cli_finding_id_query, cli_human_verdict_code, cli_keys,
-    cli_save_baseline, cli_security, cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope,
-    mcp_finding_id_query, mcp_security, mcp_supports, run_cli, run_cli_format,
+    api_envelope, api_finding_id_query, api_keys, api_security, architecture_envelopes,
+    architecture_keys, cli_analysis_envelope, cli_audit, cli_combined, cli_envelope,
+    cli_finding_id_query, cli_human_verdict_code, cli_keys, cli_save_baseline, cli_security,
+    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_security,
+    mcp_supports, run_cli, run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -326,6 +327,26 @@ fn ids_sound_and_equal(context: &str, results: &[(String, Vec<IdentifiedFinding>
 }
 
 #[test]
+fn a_failed_fixture_git_command_reports_the_missing_directory() {
+    let dir = tempfile::tempdir().expect("create case dir");
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(&root).expect("create project dir");
+    model::git(&root, &["init", "-q", "-b", "main"]);
+    std::fs::remove_dir_all(root.join(".git/objects")).expect("remove objects dir");
+    std::fs::write(root.join("a.ts"), "export const a = 1;\n").expect("write file");
+
+    let message = std::panic::catch_unwind(|| model::git(&root, &["add", "-A"]))
+        .expect_err("git add without an object directory fails");
+    let message = message
+        .downcast_ref::<String>()
+        .expect("the panic message is a string");
+    assert!(
+        message.contains(".git=present .git/objects=missing"),
+        "{message}"
+    );
+}
+
+#[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i1_check_output_equals_dead_code_output() {
     run_invariant("I1", |model| {
@@ -334,6 +355,43 @@ fn i1_check_output_equals_dead_code_output() {
         let dead_code = run_cli(&project.root, &["dead-code".to_string()]);
         cli_envelope(&dead_code);
         project.explain(invariants::i1_alias_identical(&check, &dead_code))
+    });
+}
+
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i14_architecture_findings_equal_dead_code_structure_filters() {
+    run_invariant("I14", |model| {
+        let project = Project::new(model, true);
+        for grouped in [false, true] {
+            let group_by: &[&str] = if grouped {
+                &["--group-by", "directory"]
+            } else {
+                &[]
+            };
+            let mut architecture_args = vec!["architecture".to_string()];
+            architecture_args.extend(group_by.iter().map(|arg| (*arg).to_string()));
+            let architecture = run_cli(&project.root, &architecture_args);
+            let mut structure_args: Vec<String> = [
+                "dead-code",
+                "--circular-deps",
+                "--re-export-cycles",
+                "--package-cycles",
+                "--boundary-violations",
+                "--policy-violations",
+            ]
+            .map(str::to_string)
+            .to_vec();
+            structure_args.extend(group_by.iter().map(|arg| (*arg).to_string()));
+            let structure_flags = run_cli(&project.root, &structure_args);
+            cli_envelope(&structure_flags);
+            project.explain(invariants::i14_architecture_identical(
+                &architecture,
+                &structure_flags,
+                grouped,
+            ))?;
+        }
+        Ok(())
     });
 }
 
@@ -351,6 +409,44 @@ fn i2_finding_sets_agree_across_surfaces() {
         }
         Ok(())
     });
+}
+
+/// I2 for `fallow architecture`: the CLI, `fallow_api::run_architecture` and
+/// both paths of the MCP `check_architecture` tool report the same findings
+/// with the same finding ids, all under `kind: "architecture"`.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i2_architecture_finding_sets_agree_across_surfaces() {
+    run_invariant("I2", |model| {
+        let project = Project::new(model, true);
+        let empty_baseline = empty_dead_code_baseline(&project);
+        let envelopes =
+            with_server(|server| architecture_envelopes(server, &project.root, &empty_baseline));
+        project.explain(invariants::surfaces_agree(
+            "architecture finding sets differ",
+            &architecture_keys(&envelopes),
+        ))?;
+        project.explain(ids_sound_and_equal(
+            "architecture",
+            &surface_ids(&envelopes),
+        ))
+    });
+}
+
+/// A dead-code baseline with no entries, saved from an empty project in the
+/// scratch directory. It hides nothing, so a run that loads it reports the
+/// same findings as a run without it.
+fn empty_dead_code_baseline(project: &Project) -> PathBuf {
+    let target = project.scratch.join("empty-dead-code-baseline.json");
+    if target.is_file() {
+        return target;
+    }
+    let empty = project.scratch.join("empty-project");
+    std::fs::create_dir_all(&empty).expect("create empty project");
+    std::fs::write(empty.join("package.json"), r#"{"name":"empty"}"#)
+        .expect("write empty manifest");
+    cli_save_baseline(Analysis::DeadCode, &empty, &target);
+    target
 }
 
 /// The group fields that a `--group` selector and a `--trend-from` baseline
@@ -1578,6 +1674,13 @@ const VERDICT_COMMANDS: &[VerdictCommand] = &[
         arm: Arm::Default,
     },
     VerdictCommand {
+        args: &["architecture"],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: true,
+        arm: Arm::Default,
+    },
+    VerdictCommand {
         args: &["dupes"],
         rule: ExitRule::Enforced,
         requires_object: false,
@@ -1643,6 +1746,25 @@ const VERDICT_COMMANDS: &[VerdictCommand] = &[
         arm: Arm::Regression,
     },
 ];
+
+/// Every command row that states a verdict has an I7 case, so a new analysis
+/// command cannot skip the JSON-versus-human verdict comparison.
+#[test]
+fn every_verdict_command_row_has_an_i7_case() {
+    for row in fallow_types::command_surfaces::COMMAND_ENVELOPES {
+        let covered = VERDICT_COMMANDS
+            .iter()
+            .any(|command| command.args.first() == Some(&row.command));
+        assert_eq!(
+            covered,
+            row.verdict,
+            "`fallow {}`: COMMAND_ENVELOPES says verdict={} but VERDICT_COMMANDS {} it",
+            row.command,
+            row.verdict,
+            if covered { "lists" } else { "lacks" }
+        );
+    }
+}
 
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]

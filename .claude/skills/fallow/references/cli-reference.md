@@ -8,6 +8,7 @@ Complete command and flag specifications for all fallow CLI commands.
 
 - [Commands](#commands)
 - [`dead-code`: Dead Code Analysis](#dead-code-dead-code-analysis)
+- [`architecture`: Cycles, Boundaries and Policy Rules](#architecture-cycles-boundaries-and-policy-rules)
 - [`dupes`: Duplication Detection](#dupes-duplication-detection)
 - [`fix`: Auto-Remove Unused Code](#fix-auto-remove-unused-code)
 - [`list`: Project Introspection](#list-project-introspection)
@@ -47,6 +48,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 |---|---|---|
 | `fallow` | Run full codebase analysis: cleanup + duplication + health (default) | `--only`, `--skip`, `--production`, `--production-dead-code`, `--production-health`, `--production-dupes`, `--ci`, `--fail-on-issues`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--score`, `--trend`, `--save-snapshot`, `--include-entry-exports` |
 | `dead-code` | Dead code analysis (`check` is an alias) | `--unused-exports`, `--changed-since`, `--changed-workspaces`, `--production`, `--file`, `--include-entry-exports`, `--stale-suppressions`, `--ci`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
+| `architecture` | Check import cycles, boundaries and policy rules after editing | `--cycles`, `--boundaries`, `--policy`, `--file`, `--finding-id`, `path` |
 | `watch` | Watch for changes and re-run analysis | `--no-clear` |
 | `type-aware` | Inspect the optional TypeScript semantic companion |  |
 | `doctor` | Diagnose project readiness without analysis or mutation |  |
@@ -209,6 +211,56 @@ fallow dead-code --format json --quiet --file src/utils.ts --file src/helpers.ts
 
 # Catch typos in entry file exports
 fallow dead-code --format json --quiet --include-entry-exports
+```
+
+---
+
+## `architecture`: Cycles, Boundaries and Policy Rules
+
+Reports circular dependencies, re-export cycles, package cycles, boundary violations (with boundary coverage and forbidden calls) and rule-pack policy violations. The command runs the `dead-code` analysis with these issue types selected. The JSON output has `kind: "architecture"` (with `--group-by`: `architecture-grouped`) and its own `schema_version`. The arrays, finding ids, actions, exit codes, gate outcomes and baselines are the same as on `dead-code`. A saved baseline keeps `kind: "dead-code"`. `fallow report --from` renders a saved architecture envelope in every format. The global scope and output flags (`--format`, `--changed-since`, `--workspace`, `--baseline`, `--save-baseline`) work as on `dead-code`.
+
+`fallow dead-code` still reports these findings by default until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. `fallow architecture` reports only part of the issue types, so `--fail-on-stale-baseline` does not gate on it, with any baseline. A baseline that `fallow architecture --save-baseline` writes lists only the architecture findings, and `fallow dead-code` warns when it reads such a baseline.
+
+| Flag | Selects |
+|---|---|
+| `--cycles` | Circular dependencies, re-export cycles and package cycles (`dead-code --circular-deps --re-export-cycles --package-cycles`) |
+| `--boundaries` | Boundary violations, boundary coverage and forbidden calls (`dead-code --boundary-violations`) |
+| `--policy` | Rule-pack policy violations (`dead-code --policy-violations`) |
+| `--file <PATH>` | Only report findings in these files |
+| `--finding-id <ID>` | Only report the findings with these ids |
+
+Without a selection flag, the command reports every architecture issue type.
+
+```json
+{
+  "kind": "architecture",
+  "schema_version": 1,
+  "total_issues": 1,
+  "circular_dependencies": [
+    { "files": ["src/a.ts", "src/b.ts"], "length": 2, "finding_id": "dc1:circular-dependency:...", "actions": [] }
+  ],
+  "boundary_violations": [],
+  "policy_violations": []
+}
+```
+
+The MCP tool is `check_architecture` and the Node binding is `detectArchitecture`.
+
+With `--group-by`, each group shows its findings under one "Architecture" heading.
+
+Bare `fallow --only architecture` runs the `dead-code` analysis and reports only these findings in the `check` section. Bare `fallow --skip architecture` removes them from the `check` section. The health score, the duplication section and the file that `--save-baseline` writes stay the same as in a run without the value. The regression counts follow the narrowed section.
+
+### Examples
+
+```bash
+# Before an edit: the rules that apply to the files
+fallow guard src/ui/App.ts --format json --quiet
+
+# After an edit: cycles, boundaries and policy rules
+fallow architecture --format json --quiet
+
+# Only import cycles on the changed files
+fallow architecture --cycles --changed-since main --format json --quiet
 ```
 
 ---
@@ -1035,6 +1087,13 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | error | 2 | Runtime error (invalid ref, not a git repo) |
 
 With `--gate new-only`, inherited error-severity findings can be present in the JSON output while the verdict remains `pass`; check the `attribution` object and per-finding `introduced` booleans.
+
+A complexity finding matches its base finding by file path and function name. The line and the exceeded category do not affect the match, and a renamed file keeps its match. A complexity finding is introduced in these cases:
+
+- No base finding matches it.
+- A metric that the head finding exceeds has a higher value than in the base finding.
+
+An unchanged or decreased metric keeps the finding inherited, also when the exceeded category changes (for example from `both` to `cyclomatic`). When one file has more than one finding with the same function name, each base finding matches at most one head finding. Head findings with unchanged metric values match first. The other findings then match in line order.
 
 ### JSON contract: which fields are severity-aware
 
@@ -1922,8 +1981,8 @@ Available on all commands:
 | `--tolerance` | `string` | `0` | Allowed increase: `"2%"` (percentage) or `"5"` (absolute). Default: `"0"` |
 | `--regression-baseline` | `string` | - | Path to a standalone regression baseline file. Without it, fallow uses `regression.baseline` from the config |
 | `--save-regression-baseline` | `string` | - | Save current issue counts. With no path, update `regression.baseline` in the discovered fallow config or create `.fallowrc.json`; with a path, write a standalone baseline file |
-| `--only` | `dead-code\|dupes\|health` | - | Run only specific analyses (e.g., `--only dead-code,dupes`). Values: `dead-code` (alias: `check`), `dupes`, `health` |
-| `--skip` | `dead-code\|dupes\|health` | - | Skip specific analyses (e.g., `--skip health`). Values: `dead-code` (alias: `check`), `dupes`, `health` |
+| `--only` | `dead-code\|dupes\|health\|architecture` | - | Run only specific analyses (e.g., `--only dead-code,dupes`). Values: `dead-code` (alias: `check`), `dupes`, `health`, `architecture`. `architecture` alone runs the dead-code analysis and reports only import cycles, boundary violations and policy violations |
+| `--skip` | `dead-code\|dupes\|health\|architecture` | - | Skip specific analyses (e.g., `--skip health`). Values: `dead-code` (alias: `check`), `dupes`, `health`, `architecture`. `architecture` alone removes import cycles, boundary violations and policy violations from the dead-code section |
 | `--dupes-mode` | `strict\|mild\|weak\|semantic` | - | Override duplication detection mode in combined mode |
 | `--dupes-near` | `bool` | `false` | Enable function-scoped near-miss clone detection in combined mode |
 | `--dupes-threshold` | `string` | - | Override duplication threshold in combined mode |
@@ -1965,8 +2024,8 @@ guarded edits.
 <!-- generated:flags:fallow-combined:start -->
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--only` | `dead-code\|dupes\|health` | - | Run only specific analyses when no subcommand is given |
-| `--skip` | `dead-code\|dupes\|health` | - | Skip specific analyses when no subcommand is given |
+| `--only` | `dead-code\|dupes\|health\|architecture` | - | Run only specific analyses when no subcommand is given |
+| `--skip` | `dead-code\|dupes\|health\|architecture` | - | Skip specific analyses when no subcommand is given |
 | `--production` | `bool` | `false` | Production mode: exclude test/story/dev files, only start/build scripts, report type-only dependencies |
 | `--no-production` | `bool` | `false` | Force production mode OFF for every analysis, overriding a project config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with `--production` |
 | `--production-dead-code` | `bool` | `false` | Run dead-code analysis in production mode when using bare combined mode |
@@ -2356,7 +2415,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 }
 ```
 
-Use `--only` or `--skip` to control which analyses are included in the combined output. Use `--coverage` and `--coverage-root` to feed Istanbul coverage data to the embedded health analysis for exact CRAP scoring.
+Use `--only` or `--skip` to control which analyses are included in the combined output. The `architecture` value selects the import cycles, boundary violations and policy violations of the dead-code analysis: `--only architecture` reports only them, and `--skip architecture` removes them. Human output shows them in an "Architecture" category after the other dead-code categories, with and without `--quiet`, and also with `--group-by` and `--summary`. Use `--coverage` and `--coverage-root` to feed Istanbul coverage data to the embedded health analysis for exact CRAP scoring.
 
 With `--score`, the combined output's `health` section includes a `health_score` object (same schema as `health --score`). With `--trend`, it includes a `health_trend` object comparing against the most recent saved snapshot. With `--save-snapshot`, a vital signs snapshot is persisted for future trend comparisons.
 

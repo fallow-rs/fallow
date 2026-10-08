@@ -301,8 +301,14 @@ fn distinct_fragment_inputs(instances: &[CloneInstance]) -> Vec<(FragmentTokeniz
 }
 
 fn normalized_fragment_sequence(path: &Path, fragment: &str) -> Vec<u64> {
-    let tokens = super::tokenize::tokenize_file(path, fragment, false);
-    super::normalize::normalize_and_hash(&tokens.tokens, DetectionMode::Strict)
+    let mut tokens = super::tokenize::tokenize_file(path, fragment, false).tokens;
+    if tokens.is_empty() {
+        // A clone can stop inside a block, so its fragment may not parse on its
+        // own. Without this fallback, every such group hashes to the same empty
+        // sequence and the baseline matches groups by report order.
+        tokens = super::tokenize::tokenize_unparsed_fragment(fragment);
+    }
+    super::normalize::normalize_and_hash(&tokens, DetectionMode::Strict)
         .into_iter()
         .map(|token| token.hash)
         .collect()
@@ -322,6 +328,23 @@ fn hash_normalized_sequences(sequences: &[Vec<u64>]) -> u64 {
         }
     }
     xxh3_64(&bytes)
+}
+
+/// Report whether a baseline key comes from the shared empty-sequence bucket.
+///
+/// Versions before the fix for issue #3290 gave every clone group whose code
+/// did not parse on its own the hash of an empty token sequence, with a `-rN`
+/// suffix in report order. Such a key cannot address one group, so a baseline
+/// that contains one must be saved again. A report with only one such group
+/// had no suffix, so its key is not detected here. That group shows as new
+/// once, until the next save.
+#[must_use]
+pub fn is_unparsed_collision_key(key: &str) -> bool {
+    let bucket = format!(
+        "{FINGERPRINT_PREFIX}{:016x}-r",
+        hash_normalized_sequences(&[Vec::new()])
+    );
+    key.starts_with(&bucket)
 }
 
 fn fingerprint_for_hash(hash: u64) -> String {
@@ -634,6 +657,87 @@ mod tests {
                 clone
             })
             .collect()
+    }
+
+    /// A clone that stops before the closing brace of its function does not
+    /// parse on its own.
+    fn unclosed_function_fragment(constant: u32) -> String {
+        format!(
+            "export function scale(items: number[]): number[] {{\n  const out = items.map((item) => item * {constant});\n  return out;\n"
+        )
+    }
+
+    #[test]
+    fn unparseable_fragments_keep_distinct_fingerprints() {
+        let first = unclosed_function_fragment(7);
+        let second = unclosed_function_fragment(13);
+        assert_ne!(
+            hash_instances(&group(&[&first, &first], 3).instances),
+            hash_instances(&group(&[&second, &second], 3).instances),
+            "different code must not share the empty-sequence hash"
+        );
+    }
+
+    #[test]
+    fn detects_keys_from_the_old_empty_sequence_bucket() {
+        assert!(is_unparsed_collision_key("dup:c77b3abb6f87acd9-r3:2"));
+        assert!(!is_unparsed_collision_key("dup:c77b3abb6f87acd9:2"));
+        assert!(!is_unparsed_collision_key("dup:6f87acd9:2"));
+        let fragment = unclosed_function_fragment(7);
+        let fingerprints = CloneFingerprintSet::from_groups(&[group(&[&fragment, &fragment], 3)]);
+        let key = fingerprints.ignored_clone_key_for_group(&group(&[&fragment, &fragment], 3));
+        assert!(!is_unparsed_collision_key(&key));
+    }
+
+    #[test]
+    fn unparseable_fragments_ignore_whitespace_and_comments() {
+        let compact = unclosed_function_fragment(7);
+        let spaced = compact.replace("  return out;", "  // done\n    return   out;");
+        assert_eq!(
+            hash_instances(&group(&[&compact], 3).instances),
+            hash_instances(&group(&[&spaced], 3).instances),
+        );
+    }
+
+    #[test]
+    fn baseline_reports_only_the_new_unparseable_clone() {
+        use super::super::types::DuplicationReport;
+        use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
+
+        let root = Path::new("/project");
+        let pair = |constant: u32, name: &str| {
+            let fragment = unclosed_function_fragment(constant);
+            let mut clone = group(&[&fragment, &fragment], 3);
+            for (index, instance) in clone.instances.iter_mut().enumerate() {
+                instance.file = root.join(format!("src/{name}-{index}.ts"));
+            }
+            clone
+        };
+        let baseline_report = DuplicationReport {
+            clone_groups: vec![pair(7, "a"), pair(13, "c"), pair(29, "e")],
+            ..Default::default()
+        };
+        let baseline = DuplicationBaselineData::from_report(&baseline_report, root);
+
+        let mut current = baseline_report.clone_groups;
+        current.push(pair(3, "g"));
+        let filtered = filter_new_clone_groups(
+            DuplicationReport {
+                clone_groups: current,
+                ..Default::default()
+            },
+            &baseline,
+            root,
+        );
+        let files: Vec<_> = filtered
+            .clone_groups
+            .iter()
+            .flat_map(|clone| clone.instances.iter().map(|i| i.file.clone()))
+            .collect();
+        assert_eq!(
+            files,
+            vec![root.join("src/g-0.ts"), root.join("src/g-1.ts")]
+        );
     }
 
     #[test]

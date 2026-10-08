@@ -57,7 +57,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 deser-value = "0.9"
 deser-yaml = "0.9"
 semver = "1"
-jsonc-parser = { version = "0.33", features = ["cst", "serde", "serde_json"] }
+jsonc-parser = { version = "0.34", features = ["cst", "serde", "serde_json"] }
 toml = "1.1"
 toml_edit = "0.25"
 schemars = "1"
@@ -72,7 +72,7 @@ dunce = "1"
 ignore = "0.4"
 glob = "0.3"
 globset = { version = "0.4", features = ["serde1"] }
-rustix = { version = "1", features = ["fs", "process"] }
+rustix = { version = "1", features = ["event", "fs", "process"] }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
 
 # Hashing
@@ -218,6 +218,7 @@ missing_const_for_fn = "allow"          # Not a const library
 fallible_impl_from = "allow"            # From impls that can fail are intentional
 use_self = "allow"                      # Too noisy with generics
 unused_async_trait_impl = "allow"       # Trait signatures (tower-lsp, rmcp) require async fn without .await
+assert_is_empty = "allow"               # The assert_eq! form needs `[] as [T; 0]` for most collections
 
 # Allow cargo lints that are unavoidable
 multiple_crate_versions = "allow"       # Transitive dependency version conflicts

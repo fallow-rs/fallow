@@ -11,7 +11,7 @@ use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{ModuleInfo, SourceParseDegradation, SourceReadFailure};
 #[cfg(test)]
 use fallow_types::results::AnalysisResults;
-use fallow_types::source_fingerprint::SourceFingerprint;
+use fallow_types::source_fingerprint::{SourceFingerprint, now_ns};
 use fallow_types::workspace::{WorkspaceDiagnostic, merge_workspace_diagnostics};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -63,6 +63,11 @@ pub struct AnalysisSession {
 struct ParsedModuleCache {
     need_complexity: bool,
     fingerprints: Vec<SourceFingerprint>,
+    /// The wall-clock time before the session read `fingerprints`. A
+    /// fingerprint that is not settled before this time can belong to a
+    /// later write in the same timestamp tick, so it does not prove that the
+    /// module is current.
+    read_started_ns: u64,
     modules: Arc<[ModuleInfo]>,
     /// The read failures of the parse, kept so that an incremental parse can
     /// record the full set of the project again.
@@ -415,11 +420,10 @@ impl AnalysisSession {
                 files,
                 need_complexity: cache.need_complexity,
                 fingerprint_of: &|file: &DiscoveredFile| {
-                    cache
-                        .fingerprints
-                        .get(file.id.0 as usize)
-                        .copied()
-                        .unwrap_or_else(|| SourceFingerprint::new(0, 0))
+                    cache.fingerprints.get(file.id.0 as usize).map_or_else(
+                        || SourceFingerprint::new(0, 0),
+                        |fingerprint| fingerprint.for_content_read_at(cache.read_started_ns),
+                    )
                 },
             },
         );
@@ -734,11 +738,17 @@ impl AnalysisSession {
     /// output in the session cache.
     #[must_use]
     pub fn parsed_parts_uncached(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
+        let read_started_ns = now_ns();
         let fingerprints = self
             .warm_parse
             .as_ref()
             .and_then(|_| source_fingerprints_for_files(self.files()));
-        if let Some(warm) = self.warm_parse(need_complexity, fingerprints.as_deref(), None) {
+        if let Some(warm) = self.warm_parse(
+            need_complexity,
+            fingerprints.as_deref(),
+            read_started_ns,
+            None,
+        ) {
             return self.parsed_parts_from_modules(warm.modules.to_vec(), warm.metrics);
         }
         let ParsedModules {
@@ -1039,28 +1049,26 @@ impl AnalysisSession {
         need_complexity: bool,
         cancellation: Option<&AtomicBool>,
     ) -> SharedParsedModules {
+        let read_started_ns = now_ns();
         let fingerprints = source_fingerprints_for_files(self.files());
-        if let Some(fingerprints) = fingerprints.as_ref() {
-            if let Some(modules) = self.cached_modules(need_complexity, fingerprints) {
-                self.parse_counts.record(SessionParseCounts {
-                    modules_reused: modules.len(),
-                    ..SessionParseCounts::default()
-                });
-                return SharedParsedModules {
-                    modules,
-                    metrics: reused_parse_metrics(),
-                };
-            }
-            if let Some(parsed) =
-                self.reparse_changed_modules(need_complexity, fingerprints, cancellation)
-            {
-                return parsed;
-            }
+        if let Some(fingerprints) = fingerprints.as_ref()
+            && let Some(parsed) = self.reparse_changed_modules(
+                need_complexity,
+                fingerprints,
+                read_started_ns,
+                cancellation,
+            )
+        {
+            return parsed;
         }
 
-        let (modules, metrics, has_complexity, modules_reused, problems) = if let Some(warm) =
-            self.warm_parse(need_complexity, fingerprints.as_deref(), cancellation)
-        {
+        let (modules, metrics, has_complexity, modules_reused, problems) = if let Some(warm) = self
+            .warm_parse(
+                need_complexity,
+                fingerprints.as_deref(),
+                read_started_ns,
+                cancellation,
+            ) {
             let reused = if warm.reused { warm.modules.len() } else { 0 };
             (warm.modules, warm.metrics, true, reused, warm.problems)
         } else {
@@ -1092,6 +1100,7 @@ impl AnalysisSession {
             *cache = Some(ParsedModuleCache {
                 need_complexity: has_complexity,
                 fingerprints,
+                read_started_ns,
                 modules: Arc::clone(&modules),
                 read_failures: problems.read_failures,
                 parse_degradations: problems.parse_degradations,
@@ -1119,6 +1128,7 @@ impl AnalysisSession {
         &self,
         need_complexity: bool,
         fingerprints: Option<&[SourceFingerprint]>,
+        read_started_ns: u64,
         cancellation: Option<&AtomicBool>,
     ) -> Option<WarmParsedModules> {
         let store = self.warm_parse.as_deref()?;
@@ -1130,6 +1140,7 @@ impl AnalysisSession {
             cache_config_hash: self.config.cache_config_hash,
             files: self.files(),
             fingerprints: fingerprints?,
+            read_started_ns,
         };
         if !key.is_reusable() {
             return None;
@@ -1180,8 +1191,48 @@ impl AnalysisSession {
         })
     }
 
+    /// The file positions that changed since the kept parse, with the read
+    /// start and the modules of that parse.
+    ///
+    /// The fingerprints are compared under the lock. The unsettled files are
+    /// read after it, so a concurrent caller does not wait on disk work.
+    /// Returns `None` when there is no kept parse, when it lacks the requested
+    /// complexity, or when the file set differs.
+    fn changed_since_kept_parse(
+        &self,
+        need_complexity: bool,
+        fingerprints: &[SourceFingerprint],
+    ) -> Option<(Vec<usize>, u64, Arc<[ModuleInfo]>)> {
+        let unsettled = std::cell::RefCell::new(Vec::new());
+        let guard = self.parsed_cache.lock().ok()?;
+        let cache = guard.as_ref()?;
+        if need_complexity && !cache.need_complexity {
+            return None;
+        }
+        let mut changed = changed_file_indices(
+            &cache.fingerprints,
+            cache.read_started_ns,
+            fingerprints,
+            &|index| {
+                unsettled.borrow_mut().push(index);
+                true
+            },
+        )?;
+        let kept_read_started_ns = cache.read_started_ns;
+        let kept_modules = Arc::clone(&cache.modules);
+        drop(guard);
+        changed.extend(unsettled.into_inner().into_iter().filter(|&index| {
+            !self.files().get(index).is_some_and(|file| {
+                crate::session_reuse::module_matches_source(&kept_modules, file.id, &file.path)
+            })
+        }));
+        changed.sort_unstable();
+        Some((changed, kept_read_started_ns, kept_modules))
+    }
+
     /// Parse only the files whose fingerprint changed since the cached parse,
-    /// and keep the other cached modules.
+    /// and keep the other cached modules. When no file changed, return the
+    /// cached modules as they are.
     ///
     /// Returns `None` when the cache cannot serve the request: no cached
     /// parse, a cache without the requested complexity, a different file set,
@@ -1191,15 +1242,40 @@ impl AnalysisSession {
         &self,
         need_complexity: bool,
         fingerprints: &[SourceFingerprint],
+        read_started_ns: u64,
         cancellation: Option<&AtomicBool>,
     ) -> Option<SharedParsedModules> {
+        let (changed, kept_read_started_ns, kept_modules) =
+            self.changed_since_kept_parse(need_complexity, fingerprints)?;
         let mut guard = self.parsed_cache.lock().ok()?;
         let cache = guard.as_mut()?;
-        if need_complexity && !cache.need_complexity {
+        // A concurrent cache change during the reads falls back to a full
+        // parse. This is rare and accepted.
+        if !Arc::ptr_eq(&cache.modules, &kept_modules)
+            || cache.read_started_ns != kept_read_started_ns
+        {
             return None;
         }
-        let changed = changed_file_indices(&cache.fingerprints, fingerprints)?;
-        if changed.is_empty() || changed.len() > MAX_INCREMENTAL_REPARSE_FILES {
+        // Release the extra reference, so the merge below can update the
+        // modules in place.
+        drop(kept_modules);
+        if changed.is_empty() {
+            // Each recent file had the kept content, and the content was read
+            // after `read_started_ns`, so the fingerprints now prove it from
+            // that time on.
+            cache.read_started_ns = read_started_ns;
+            let modules = Arc::clone(&cache.modules);
+            drop(guard);
+            self.parse_counts.record(SessionParseCounts {
+                modules_reused: modules.len(),
+                ..SessionParseCounts::default()
+            });
+            return Some(SharedParsedModules {
+                modules,
+                metrics: reused_parse_metrics(),
+            });
+        }
+        if changed.len() > MAX_INCREMENTAL_REPARSE_FILES {
             return None;
         }
         let files: Vec<DiscoveredFile> = changed
@@ -1230,6 +1306,7 @@ impl AnalysisSession {
         let reparsed: Vec<_> = files.iter().map(|file| file.id).collect();
         merge_reparsed_modules(&mut cache.modules, &reparsed, fresh);
         cache.fingerprints = fingerprints.to_vec();
+        cache.read_started_ns = read_started_ns;
         cache
             .read_failures
             .retain(|failure| !reparsed.contains(&failure.file_id));
@@ -1268,22 +1345,6 @@ impl AnalysisSession {
                 parse_cache_load_ms: 0.0,
             },
         })
-    }
-
-    fn cached_modules(
-        &self,
-        need_complexity: bool,
-        fingerprints: &[SourceFingerprint],
-    ) -> Option<Arc<[ModuleInfo]>> {
-        let Ok(cache) = self.parsed_cache.lock() else {
-            return None;
-        };
-        let cache = cache.as_ref()?;
-        let complexity_mode_satisfies_request = cache.need_complexity || !need_complexity;
-        if complexity_mode_satisfies_request && cache.fingerprints == fingerprints {
-            return Some(Arc::clone(&cache.modules));
-        }
-        None
     }
 }
 
@@ -1350,6 +1411,7 @@ fn parse_files_with_config(
             }
         }
     };
+    let read_started_ns = now_ns();
     let parse_result = crate::source::parse_all_files(
         files,
         cache.as_ref(),
@@ -1370,7 +1432,18 @@ fn parse_files_with_config(
     let cache_ms = if token_is_set(cancellation) {
         0.0
     } else {
-        update_parse_cache_if_enabled(config, &mut cache, &modules, files, need_complexity)
+        update_parse_cache_if_enabled(
+            config,
+            &mut cache,
+            &ParseCacheWrite {
+                modules: &modules,
+                files,
+                need_complexity,
+                fingerprint_of: &|file: &DiscoveredFile| {
+                    source_fingerprint(&file.path).for_content_read_at(read_started_ns)
+                },
+            },
+        )
     };
     let metrics = core_backend::ParseMetrics {
         parse_ms,
@@ -1440,21 +1513,10 @@ fn source_fingerprints_for_files(files: &[DiscoveredFile]) -> Option<Vec<SourceF
 fn update_parse_cache_if_enabled(
     config: &ResolvedConfig,
     cache: &mut Option<fallow_extract::cache::CacheStore>,
-    modules: &[ModuleInfo],
-    files: &[DiscoveredFile],
-    need_complexity: bool,
+    write: &ParseCacheWrite<'_>,
 ) -> f64 {
     let start = Instant::now();
-    write_parse_cache(
-        config,
-        cache,
-        &ParseCacheWrite {
-            modules,
-            files,
-            need_complexity,
-            fingerprint_of: &|file: &DiscoveredFile| source_fingerprint(&file.path),
-        },
-    );
+    write_parse_cache(config, cache, write);
     start.elapsed().as_secs_f64() * 1000.0
 }
 
@@ -1862,6 +1924,96 @@ mod tests {
             session.parsed_cache.lock().expect("parse cache").is_none(),
             "the next run parses through the persisted cache, which checks the content"
         );
+    }
+
+    /// A flush writes the kept modules to the persisted cache. A fingerprint
+    /// that did not settle before the kept parse read the file must lose its
+    /// ctime there, or the next run takes the metadata fast path on it.
+    #[cfg(unix)]
+    #[test]
+    fn a_flush_stores_an_unsettled_fingerprint_without_its_ctime() {
+        let (project, mut session) = session_with_source("export const kept = 1;\n");
+        drop(session.parse_modules(false, None));
+        let path = project.path().join("src/index.ts");
+        let stored_ctime = |session: &AnalysisSession| {
+            let _ = std::fs::remove_dir_all(&session.config.cache_dir);
+            session.disk_cache_stale.store(true, Ordering::SeqCst);
+            session.flush_parse_cache();
+            let store = fallow_extract::cache::CacheStore::load(
+                &session.config.cache_dir,
+                &session.config.root,
+                session.config.cache_config_hash,
+                crate::project_config::resolve_cache_max_size_bytes(&session.config),
+            )
+            .expect("flush writes the parse cache");
+            store
+                .get_by_path_only(&path)
+                .expect("flushed module")
+                .ctime_ns
+        };
+
+        // Set the read start relative to the file's own ctime, so the test
+        // does not depend on how much time passed since the write.
+        let set_read_started = |session: &mut AnalysisSession, offset: u64| {
+            if let Some(cache) = session
+                .parsed_cache
+                .get_mut()
+                .expect("parse cache")
+                .as_mut()
+            {
+                let ctime = cache.fingerprints[0].ctime_ns;
+                assert!(ctime > 0, "the platform reports a ctime");
+                cache.read_started_ns = ctime.saturating_add(offset);
+            }
+        };
+
+        set_read_started(&mut session, 0);
+        assert_eq!(
+            stored_ctime(&session),
+            0,
+            "a fingerprint inside the window is not settled"
+        );
+
+        set_read_started(
+            &mut session,
+            fallow_types::source_fingerprint::TIMESTAMP_SETTLE_WINDOW_NS,
+        );
+        assert!(
+            stored_ctime(&session) > 0,
+            "a settled fingerprint keeps its ctime"
+        );
+    }
+
+    /// A same-length write in the same timestamp tick as the previous write
+    /// keeps mtime, ctime and size. The kept modules must not stand in for
+    /// the new content when the fingerprint is that recent.
+    #[cfg(unix)]
+    #[test]
+    fn a_same_tick_rewrite_does_not_reuse_the_kept_module() {
+        let (project, mut session) = session_with_source("export const alpha = 1;\n");
+        drop(session.parse_modules(false, None));
+
+        let path = project.path().join("src/index.ts");
+        std::fs::write(&path, "export const bravo = 1;\n").expect("rewrite source");
+        let same_tick = SourceFingerprint::from_metadata(
+            &std::fs::metadata(&path).expect("metadata after rewrite"),
+        );
+        if let Some(cache) = session
+            .parsed_cache
+            .get_mut()
+            .expect("parse cache")
+            .as_mut()
+        {
+            cache.fingerprints = vec![same_tick];
+        }
+
+        let modules = session.parse_modules(false, None).modules;
+        let exports: Vec<String> = modules
+            .iter()
+            .flat_map(|module| module.exports.iter())
+            .map(|export| export.name.to_string())
+            .collect();
+        assert_eq!(exports, vec!["bravo".to_string()]);
     }
 
     /// A session over `root` that never reads or writes the on-disk parse

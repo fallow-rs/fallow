@@ -3354,6 +3354,40 @@ else
     bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
   assert_contains "$(cat "$FASTPATH_SUMMARY")" "# Fallow Analysis" "summary.sh native fastpath writes the native heading"
 
+  # (c2) the architecture envelope has its own kind, and the native report
+  # renders it. The fastpath output equals `report --from` and is not empty.
+  FASTPATH_ARCH_ENVELOPE="$FIXTURES/architecture.json"
+  FASTPATH_ARCH_EXPECTED=$("$FASTPATH_BIN" report --from "$FASTPATH_ARCH_ENVELOPE" --format github-annotations | head -n 999)
+  FASTPATH_ARCH_ACTUAL=$(
+    HAS_NATIVE_REPORT=true \
+      FALLOW_BIN="$FASTPATH_BIN" \
+      FALLOW_COMMAND="architecture" \
+      MAX_ANNOTATIONS="999" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      FALLOW_RESULTS_FILE="$FASTPATH_ARCH_ENVELOPE" \
+      bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
+  )
+  if [ -n "$FASTPATH_ARCH_EXPECTED" ] && [ "$FASTPATH_ARCH_ACTUAL" = "$FASTPATH_ARCH_EXPECTED" ]; then
+    pass "annotate.sh native fastpath renders the architecture envelope like report --from"
+  else
+    fail "annotate.sh native fastpath renders the architecture envelope like report --from" "expected: $FASTPATH_ARCH_EXPECTED actual: $FASTPATH_ARCH_ACTUAL"
+  fi
+  assert_contains "$FASTPATH_ARCH_ACTUAL" "title=Circular dependency" "annotate.sh native fastpath annotates the architecture cycle"
+  FASTPATH_ARCH_SUMMARY="$FASTPATH_WORK/architecture-summary.md"
+  HAS_NATIVE_REPORT=true \
+    FALLOW_BIN="$FASTPATH_BIN" \
+    FALLOW_COMMAND="architecture" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    GITHUB_STEP_SUMMARY="$FASTPATH_ARCH_SUMMARY" \
+    FALLOW_RESULTS_FILE="$FASTPATH_ARCH_ENVELOPE" \
+    bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
+  FASTPATH_ARCH_SUMMARY_EXPECTED=$("$FASTPATH_BIN" report --from "$FASTPATH_ARCH_ENVELOPE" --format github-summary)
+  if [ -n "$FASTPATH_ARCH_SUMMARY_EXPECTED" ] && grep -qF "$(printf '%s\n' "$FASTPATH_ARCH_SUMMARY_EXPECTED" | head -n 1)" "$FASTPATH_ARCH_SUMMARY"; then
+    pass "summary.sh native fastpath renders the architecture envelope"
+  else
+    fail "summary.sh native fastpath renders the architecture envelope" "$(cat "$FASTPATH_ARCH_SUMMARY" 2>/dev/null)"
+  fi
+
   # (d) fix has no report kind: the fastpath is bypassed for the jq summary.
   FASTPATH_FIX_SUMMARY="$FASTPATH_WORK/fix-summary.md"
   FASTPATH_FIX_LOG=$(
@@ -5034,6 +5068,162 @@ assert_contains "$(cat "$BROKER_ENV")" "FALLOW_TOKEN_FALLBACK_REASON=branded tok
   "broker: an opt-out records the fallback cause"
 
 rm -rf "$BROKER_WORK"
+
+# --- Architecture command (issue #3271) ---
+#
+# `fallow architecture` runs the dead-code analysis with only the cycle,
+# boundary and policy issue types. Its JSON has `kind: "architecture"` and the
+# dead-code body. The action accepts the command, counts `total_issues`, and
+# names the command in its own gate lines. The fixture is real `fallow architecture --format json`
+# output for a project with one cycle and one boundary violation.
+
+echo ""
+echo "=== Architecture command ==="
+
+ARCH_WORK=$(mktemp -d)
+ARCH_BIN="$ARCH_WORK/bin"
+mkdir -p "$ARCH_BIN"
+cat > "$ARCH_BIN/fallow" <<'ARCH_MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${MOCK_ANALYSIS_LOG:-/dev/null}"
+case "$*" in
+  --version) echo "fallow 3.3.0"; exit 0 ;;
+  *--help*) echo "--sarif-file --format json"; exit 0 ;;
+  report*) exit 0 ;;
+esac
+cat "$MOCK_ARCH_ENVELOPE"
+exit "${MOCK_ARCH_EXIT:-0}"
+ARCH_MOCK
+chmod +x "$ARCH_BIN/fallow"
+
+# run_architecture_analyze <envelope file> <env assignments...>
+run_architecture_analyze() {
+  local envelope=$1; shift
+  local run_dir
+  run_dir=$(mktemp -d "$ARCH_WORK/run.XXXXXX")
+  : > "$run_dir/github_output"
+  : > "$run_dir/analysis.log"
+  ARCH_STDOUT=$(
+    cd "$run_dir" \
+      && PATH="$ARCH_BIN:$PATH" \
+      MOCK_ARCH_ENVELOPE="$envelope" \
+      MOCK_ANALYSIS_LOG="$run_dir/analysis.log" \
+      GITHUB_OUTPUT="$run_dir/github_output" \
+      GITHUB_ENV="$run_dir/github_env" \
+      GITHUB_STEP_SUMMARY="$run_dir/step_summary" \
+      INPUT_ROOT="." \
+      INPUT_FORMAT="json" \
+      INPUT_AUTO_CHANGED_SINCE="false" \
+      INPUT_ARTIFACTS_DIR="." \
+      INPUT_COMMAND="architecture" \
+      env "$@" bash "$SCRIPTS_DIR/analyze.sh" 2>&1
+  ) && ARCH_EXIT=0 || ARCH_EXIT=$?
+  ARCH_OUTPUTS=$(cat "$run_dir/github_output")
+  ARCH_ARGV=$(cat "$run_dir/analysis.log")
+}
+
+ARCH_FIXTURE="$FIXTURES/architecture.json"
+ARCH_TOTAL=$(jq -r '.total_issues' "$ARCH_FIXTURE")
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_FAIL_ON_ISSUES="false"
+if [ "$ARCH_EXIT" -eq 0 ]; then
+  pass "architecture: the command is accepted"
+else
+  fail "architecture: the command is accepted" "exit $ARCH_EXIT: $ARCH_STDOUT"
+fi
+if grep -qE '^architecture --root \. ' <<< "$ARCH_ARGV"; then
+  pass "architecture: the analysis runs fallow architecture"
+else
+  fail "architecture: the analysis runs fallow architecture" "argv: $ARCH_ARGV"
+fi
+assert_contains "$ARCH_OUTPUTS" "command=architecture" "architecture: the command output names the command"
+assert_contains "$ARCH_OUTPUTS" "issues=${ARCH_TOTAL}" "architecture: the issue count is total_issues"
+assert_contains "$ARCH_STDOUT" "::warning::Fallow found ${ARCH_TOTAL} architecture issues" \
+  "architecture: the advisory line names architecture issues"
+assert_not_contains "$ARCH_STDOUT" "unused code issues" \
+  "architecture: the advisory line does not say unused code"
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$ARCH_STDOUT" "::error::Fallow found ${ARCH_TOTAL} architecture issues." \
+  "architecture: fail-on-issues names architecture issues"
+if [ "$ARCH_EXIT" -eq 1 ]; then
+  pass "architecture: fail-on-issues exits 1"
+else
+  fail "architecture: fail-on-issues exits 1" "exit $ARCH_EXIT: $ARCH_STDOUT"
+fi
+
+run_architecture_analyze "$FIXTURES/check-clean.json" INPUT_FAIL_ON_ISSUES="true"
+if [ "$ARCH_EXIT" -eq 0 ]; then
+  pass "architecture: a clean run passes fail-on-issues"
+else
+  fail "architecture: a clean run passes fail-on-issues" "exit $ARCH_EXIT: $ARCH_STDOUT"
+fi
+assert_contains "$ARCH_OUTPUTS" "issues=0" "architecture: a clean run counts zero"
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_ISSUE_TYPES="cycles, boundaries"
+assert_contains "$ARCH_ARGV" "--cycles --boundaries" \
+  "architecture: issue-types forwards the architecture filter flags"
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_ISSUE_TYPES="cycles, unused-exports"
+if [ "$ARCH_EXIT" -eq 2 ]; then
+  pass "architecture: an unknown issue-types value exits 2"
+else
+  fail "architecture: an unknown issue-types value exits 2" "exit $ARCH_EXIT: $ARCH_STDOUT"
+fi
+assert_contains "$ARCH_STDOUT" "::error::Invalid issue-types value for the architecture command: 'unused-exports'. Valid values: cycles, boundaries, policy." \
+  "architecture: the issue-types error names the valid values"
+assert_not_contains "$ARCH_ARGV" "--unused-exports" \
+  "architecture: an unknown issue-types value does not run the analysis"
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_ISSUE_TYPES="policy"
+assert_contains "$ARCH_ARGV" "--policy" \
+  "architecture: issue-types accepts policy"
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_FORMAT="sarif"
+assert_contains "$ARCH_ARGV" "--sarif-file" \
+  "architecture: format sarif writes the SARIF file in the same run"
+
+run_architecture_analyze "$ARCH_FIXTURE" INPUT_COMMAND="architectural"
+if [ "$ARCH_EXIT" -eq 2 ]; then
+  pass "architecture: a misspelled command exits 2"
+else
+  fail "architecture: a misspelled command exits 2" "exit $ARCH_EXIT"
+fi
+assert_contains "$ARCH_STDOUT" "Must be dead-code, architecture, dupes, health, audit, security, fix, or empty (runs all)." \
+  "architecture: the invalid-command error lists architecture"
+
+# Legacy jq renderers: the envelope is dead-code, so the dead-code renderers
+# serve it.
+ARCH_SUMMARY="$ARCH_WORK/summary.md"
+: > "$ARCH_SUMMARY"
+ARCH_OUT=$(env GITHUB_STEP_SUMMARY="$ARCH_SUMMARY" \
+  FALLOW_COMMAND="architecture" \
+  ACTION_JQ_DIR="$JQ_DIR" \
+  FALLOW_RESULTS_FILE="$ARCH_FIXTURE" \
+  HAS_NATIVE_REPORT=false \
+  FALLOW_BIN="$ARCH_BIN/fallow" \
+  bash "$SCRIPTS_DIR/summary.sh" 2>&1) || true
+assert_not_contains "$ARCH_OUT" "Unexpected command" "architecture: summary.sh accepts the command"
+assert_contains "$(cat "$ARCH_SUMMARY")" "| [Circular dependencies](" \
+  "architecture: the legacy summary renders the dead-code table"
+
+ARCH_OUT=$(env FALLOW_COMMAND="architecture" \
+  MAX_ANNOTATIONS="50" \
+  ACTION_JQ_DIR="$JQ_DIR" \
+  FALLOW_RESULTS_FILE="$ARCH_FIXTURE" \
+  HAS_NATIVE_REPORT=false \
+  FALLOW_BIN="$ARCH_BIN/fallow" \
+  bash "$SCRIPTS_DIR/annotate.sh" 2>/dev/null) || true
+assert_contains "$ARCH_OUT" "title=Circular dependency::" \
+  "architecture: the legacy annotations render cycles"
+assert_contains "$ARCH_OUT" "title=Boundary violation::" \
+  "architecture: the legacy annotations render boundary violations"
+
+# The input docs name the command, so a user can find it.
+assert_contains "$(grep -A1 '^  command:' "$DIR/../../action.yml")" "architecture (import cycles, boundaries and policy rules)" \
+  "architecture: action.yml documents the command input value"
+
+rm -rf "$ARCH_WORK"
 
 # --- Summary ---
 

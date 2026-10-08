@@ -336,6 +336,13 @@ impl ParseFileResult {
 /// file's unused exports with an auto-fixable `remove-export` action. A file
 /// whose ctime moved falls through to step 4 and still hits on the content
 /// hash, so the cost of the stricter gate is one read, not a reparse.
+///
+/// Step 3 also needs a stored fingerprint that settled before the run that
+/// wrote it read the file. A same-length write in the same timestamp tick as
+/// the previous write keeps mtime, ctime and size, so the cache writer stores
+/// a recent fingerprint without its ctime
+/// (`SourceFingerprint::for_content_read_at`). Such an entry never matches at
+/// step 3, and the next run compares the content hash.
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,

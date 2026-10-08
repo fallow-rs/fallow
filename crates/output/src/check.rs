@@ -25,6 +25,75 @@ pub const CHECK_SCHEMA_VERSION: u32 = 10;
 #[schemars(extend("const" = CHECK_SCHEMA_VERSION))]
 struct CheckSchemaVersion(u32);
 
+/// Current schema version for the `fallow architecture` JSON envelope.
+///
+/// The architecture body is the dead-code body, so a change to that shared
+/// body bumps this version and [`CHECK_SCHEMA_VERSION`] together.
+pub const ARCHITECTURE_SCHEMA_VERSION: u32 = 1;
+
+/// Schema projection for the architecture envelope's exact version.
+///
+/// The schema emitter registers this type by name and points the
+/// `ArchitectureOutput` and `ArchitectureGroupedOutput` definitions at it.
+#[cfg(feature = "schema")]
+#[allow(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = ARCHITECTURE_SCHEMA_VERSION))]
+pub struct ArchitectureSchemaVersion(u32);
+
+/// The commands that share the dead-code JSON body.
+///
+/// `fallow dead-code` and `fallow architecture` serialize the same
+/// [`CheckOutput`] and [`CheckGroupedOutput`] structs. Only the root `kind`
+/// and `schema_version` are different. A closed enum keeps an unknown kind
+/// string off the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CheckEnvelope {
+    /// `fallow dead-code`, and every embedded `check` section.
+    #[default]
+    DeadCode,
+    /// `fallow architecture`.
+    Architecture,
+}
+
+impl CheckEnvelope {
+    /// The root `kind` of the flat envelope.
+    #[must_use]
+    pub const fn kind(self) -> &'static str {
+        match self {
+            Self::DeadCode => "dead-code",
+            Self::Architecture => "architecture",
+        }
+    }
+
+    /// The root `kind` of the `--group-by` envelope.
+    #[must_use]
+    pub const fn grouped_kind(self) -> &'static str {
+        match self {
+            Self::DeadCode => "dead-code-grouped",
+            Self::Architecture => "architecture-grouped",
+        }
+    }
+
+    /// The `schema_version` that the envelope reports.
+    #[must_use]
+    pub const fn schema_version(self) -> u32 {
+        match self {
+            Self::DeadCode => CHECK_SCHEMA_VERSION,
+            Self::Architecture => ARCHITECTURE_SCHEMA_VERSION,
+        }
+    }
+
+    /// The subcommand that writes the envelope.
+    #[must_use]
+    pub const fn command(self) -> &'static str {
+        match self {
+            Self::DeadCode => "dead-code",
+            Self::Architecture => "architecture",
+        }
+    }
+}
+
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).
 ///
@@ -380,6 +449,37 @@ pub fn serialize_check_grouped_json_output(
     analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     serialize_check_family_json_output(output, "dead-code-grouped", analysis_run_id)
+}
+
+/// Serialize `fallow architecture --format json`.
+///
+/// The body is the dead-code body. The caller sets `schema_version` to
+/// [`ARCHITECTURE_SCHEMA_VERSION`].
+///
+/// # Errors
+///
+/// Returns a serde error when the output cannot be converted to JSON.
+pub fn serialize_architecture_json_output(
+    output: CheckOutput,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_check_family_json_output(output, CheckEnvelope::Architecture.kind(), analysis_run_id)
+}
+
+/// Serialize `fallow architecture --group-by ... --format json`.
+///
+/// # Errors
+///
+/// Returns a serde error when the grouped output cannot be converted to JSON.
+pub fn serialize_architecture_grouped_json_output(
+    output: CheckGroupedOutput,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_check_family_json_output(
+        output,
+        CheckEnvelope::Architecture.grouped_kind(),
+        analysis_run_id,
+    )
 }
 
 /// Mark every duplicate-export finding as fixable through a config edit when
@@ -1298,6 +1398,49 @@ mod tests {
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-check");
     }
 
+    #[test]
+    fn architecture_json_output_has_architecture_kind_and_version() {
+        let envelope = CheckEnvelope::Architecture;
+        let output = build_check_output(CheckOutputInput {
+            schema_version: envelope.schema_version(),
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(1),
+            results: AnalysisResults::default(),
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+        });
+
+        let value = serialize_architecture_json_output(output, Some("run-arch"))
+            .expect("architecture output should serialize");
+
+        assert_eq!(value["kind"], "architecture");
+        assert_eq!(value["schema_version"], ARCHITECTURE_SCHEMA_VERSION);
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-arch");
+    }
+
+    #[test]
+    fn check_envelope_names_each_family_member() {
+        assert_eq!(CheckEnvelope::DeadCode.kind(), "dead-code");
+        assert_eq!(CheckEnvelope::DeadCode.grouped_kind(), "dead-code-grouped");
+        assert_eq!(
+            CheckEnvelope::DeadCode.schema_version(),
+            CHECK_SCHEMA_VERSION
+        );
+        assert_eq!(CheckEnvelope::DeadCode.command(), "dead-code");
+        assert_eq!(CheckEnvelope::Architecture.kind(), "architecture");
+        assert_eq!(
+            CheckEnvelope::Architecture.grouped_kind(),
+            "architecture-grouped"
+        );
+        assert_eq!(
+            CheckEnvelope::Architecture.schema_version(),
+            ARCHITECTURE_SCHEMA_VERSION
+        );
+        assert_eq!(CheckEnvelope::Architecture.command(), "architecture");
+    }
+
     /// The degraded-parse caveat has to travel WITH the finding it can distort,
     /// because a reader looking at a `delete-file` action never sees the
     /// diagnostic at the other end of the envelope. It is advisory about the
@@ -1417,6 +1560,31 @@ mod tests {
             value["workspace_diagnostics"][0]["kind"],
             "source-read-failure"
         );
+    }
+
+    #[test]
+    fn architecture_grouped_json_output_has_grouped_kind() {
+        let output = CheckGroupedOutput {
+            gate_outcomes: None,
+            request_outcomes: None,
+            package_baselines: Vec::new(),
+            baseline_staleness: None,
+            finding_id_query: None,
+            schema_version: SchemaVersion(ARCHITECTURE_SCHEMA_VERSION),
+            version: ToolVersion("0.0.0".to_string()),
+            elapsed_ms: ElapsedMs(1),
+            grouped_by: GroupByMode::Directory,
+            total_issues: 0,
+            groups: Vec::new(),
+            unused_load_data_keys_global_abstain: false,
+            meta: None,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+        };
+        let grouped = serialize_architecture_grouped_json_output(output, None)
+            .expect("grouped architecture output should serialize");
+        assert_eq!(grouped["kind"], "architecture-grouped");
+        assert_eq!(grouped["schema_version"], ARCHITECTURE_SCHEMA_VERSION);
     }
 
     #[test]

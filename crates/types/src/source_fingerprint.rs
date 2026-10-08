@@ -86,6 +86,73 @@ impl SourceFingerprint {
     pub const fn is_trustworthy_without_content(self) -> bool {
         self.mtime_ns > 0 && self.ctime_ns > 0
     }
+
+    /// Returns true when both timestamps are older than `read_started_ns` by
+    /// at least [`TIMESTAMP_SETTLE_WINDOW_NS`].
+    ///
+    /// `read_started_ns` is a wall-clock time that the caller took before it
+    /// read the file content that it stores beside this fingerprint. A write
+    /// after that read gets a ctime of `read_started_ns` or later, so it
+    /// cannot keep a ctime that is a full window older. A write in the same
+    /// filesystem timestamp tick as the previous write can keep both
+    /// timestamps, so a fingerprint inside the window does not prove the
+    /// content.
+    ///
+    /// An mtime in the future never settles. That is safe: the file only
+    /// costs a content read on each run until the clock passes it.
+    #[must_use]
+    pub const fn is_settled_before(self, read_started_ns: u64) -> bool {
+        let newest = if self.mtime_ns > self.ctime_ns {
+            self.mtime_ns
+        } else {
+            self.ctime_ns
+        };
+        self.is_trustworthy_without_content()
+            && newest.saturating_add(TIMESTAMP_SETTLE_WINDOW_NS) <= read_started_ns
+    }
+
+    /// The fingerprint that a cache may store beside content read at or after
+    /// `read_started_ns`.
+    ///
+    /// A fingerprint that is not [settled](Self::is_settled_before) loses its
+    /// ctime, so it is never trustworthy without content. A later run then
+    /// compares the content hash, and stores the full fingerprint once the
+    /// timestamps are old enough.
+    #[must_use]
+    pub const fn for_content_read_at(self, read_started_ns: u64) -> Self {
+        if self.is_settled_before(read_started_ns) {
+            self
+        } else {
+            Self {
+                ctime_ns: 0,
+                ..self
+            }
+        }
+    }
+}
+
+/// The age that a file timestamp must have before a cache trusts it without
+/// a content check.
+///
+/// The window is larger than the coarsest timestamp resolution in use (two
+/// seconds on FAT, one second on HFS+ and ext3) and the lag of a coarse kernel
+/// clock behind the wall clock. It assumes that the clock that stamps the
+/// files is within the window of the local clock. A network filesystem whose
+/// server clock is further behind can still hide a same-tick write.
+pub const TIMESTAMP_SETTLE_WINDOW_NS: u64 = 3_000_000_000;
+
+/// The current wall-clock time in nanoseconds since the Unix epoch, or `0`
+/// when the clock is before the epoch.
+///
+/// Take this time before the content read whose fingerprint a cache stores.
+/// A `0` makes each fingerprint unsettled, which is the safe direction.
+#[must_use]
+pub fn now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+        .unwrap_or(0)
 }
 
 #[expect(
@@ -149,6 +216,41 @@ mod tests {
         let fingerprint = SourceFingerprint::with_ctime(123, 789, 456);
         assert_eq!(fingerprint.ctime_ns, 789);
         assert!(fingerprint.is_trustworthy_without_content());
+    }
+
+    #[test]
+    fn a_fingerprint_inside_the_settle_window_is_not_settled() {
+        let fingerprint = SourceFingerprint::with_ctime(1_000, 2_000, 456);
+        let read_started = 2_000 + TIMESTAMP_SETTLE_WINDOW_NS - 1;
+
+        assert!(!fingerprint.is_settled_before(read_started));
+        let stored = fingerprint.for_content_read_at(read_started);
+        assert_eq!(stored.ctime_ns, 0);
+        assert_eq!(stored.mtime_ns, 1_000);
+        assert!(!stored.is_trustworthy_without_content());
+    }
+
+    #[test]
+    fn a_fingerprint_older_than_the_settle_window_is_kept() {
+        let fingerprint = SourceFingerprint::with_ctime(1_000, 2_000, 456);
+        let read_started = 2_000 + TIMESTAMP_SETTLE_WINDOW_NS;
+
+        assert!(fingerprint.is_settled_before(read_started));
+        assert_eq!(fingerprint.for_content_read_at(read_started), fingerprint);
+    }
+
+    #[test]
+    fn a_future_mtime_is_not_settled() {
+        let fingerprint = SourceFingerprint::with_ctime(u64::MAX - 1, 2_000, 456);
+
+        assert!(!fingerprint.is_settled_before(2_000 + TIMESTAMP_SETTLE_WINDOW_NS));
+    }
+
+    #[test]
+    fn a_fingerprint_without_ctime_is_never_settled() {
+        let fingerprint = SourceFingerprint::new(1_000, 456);
+
+        assert!(!fingerprint.is_settled_before(u64::MAX));
     }
 
     #[test]

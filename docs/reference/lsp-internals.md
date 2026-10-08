@@ -128,7 +128,10 @@ lifecycle behavior.
   before its parse, so a later edit misses the cache. When a cached
   fingerprint has no ctime (Windows), `refresh_discovery` drops the modules,
   and the run parses through the persisted cache, which compares content
-  hashes. `FALLOW_LSP_REUSE_SESSION=0` turns reuse off.
+  hashes. A cached fingerprint that is not three seconds older than the read
+  of its parse can belong to a same-length write in the same timestamp tick.
+  The next run reads that file and compares its content hash with the kept
+  module. `FALLOW_LSP_REUSE_SESSION=0` turns reuse off.
 - `initializationOptions.prewarm` (off by default) parses the project at
   `initialized` into the kept sessions, so the first run parses nothing. It
   runs only when sessions are kept and the workspace root has a

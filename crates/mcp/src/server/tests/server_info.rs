@@ -40,6 +40,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"code_execute".to_string()));
     assert!(names.contains(&"analyze".to_string()));
     assert!(names.contains(&"check_changed".to_string()));
+    assert!(names.contains(&"check_architecture".to_string()));
     assert!(names.contains(&"security_candidates".to_string()));
     assert!(names.contains(&"find_similar_code".to_string()));
     assert!(names.contains(&"inspect_similar_code".to_string()));
@@ -77,7 +78,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"recommend".to_string()));
     assert!(names.contains(&"trace_import_path".to_string()));
     assert!(names.contains(&"trace_error".to_string()));
-    assert_eq!(tools.len(), 40);
+    assert_eq!(tools.len(), 41);
 }
 
 #[test]
@@ -86,6 +87,7 @@ fn read_only_tools_have_annotations() {
     let tools = server.tool_router.list_all();
     let read_only = [
         "code_execute",
+        "check_architecture",
         "security_candidates",
         "find_similar_code",
         "inspect_similar_code",
@@ -227,6 +229,7 @@ fn open_world_hint_on_analysis_tools() {
         "decision_surface",
         "list_boundaries",
         "feature_flags",
+        "check_architecture",
         "list_suppressions",
         "check_runtime_coverage",
         "impact_all",
@@ -679,6 +682,26 @@ const TOOL_SCHEMA_EXPECTATIONS: &[(&str, &[&str], &[&str])] = &[
             "production",
             "workspace",
             "top",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "check_architecture",
+        &[
+            "root",
+            "config",
+            "allow_remote_extends",
+            "production",
+            "workspace",
+            "changed_since",
+            "cycles",
+            "boundaries",
+            "policy",
+            "baseline",
+            "group_by",
+            "file",
             "no_cache",
             "threads",
         ],

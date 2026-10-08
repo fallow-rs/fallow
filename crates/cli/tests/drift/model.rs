@@ -589,10 +589,41 @@ pub fn git(root: &Path, args: &[&str]) -> String {
         .expect("run git");
     assert!(
         output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "git {args:?} failed: {}{}",
+        String::from_utf8_lossy(&output.stderr),
+        repository_state(root)
     );
     String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// Which parts of the fixture repository still exist. CI sometimes reports
+/// "unable to create temporary file" during the fixture setup, which means a
+/// directory went away while git wrote to it. This line shows which one.
+fn repository_state(root: &Path) -> String {
+    let mut out = String::from("repository state:");
+    for relative in ["", ".git", ".git/objects", ".git/refs/heads/main"] {
+        let path = root.join(relative);
+        let state = if path.exists() { "present" } else { "missing" };
+        let _ = write!(
+            out,
+            " {}={state}",
+            if relative.is_empty() {
+                "root"
+            } else {
+                relative
+            }
+        );
+    }
+    if let Ok(entries) = std::fs::read_dir(root.join(".git/objects")) {
+        let _ = write!(out, " objects-entries={}", entries.count());
+    }
+    let parent = root.parent().is_some_and(Path::exists);
+    let _ = write!(
+        out,
+        " case-dir={}",
+        if parent { "present" } else { "missing" }
+    );
+    out
 }
 
 /// Describe the files of the head commit, for a failure report.

@@ -77,6 +77,7 @@ const hoverState = (
   const hoverCanvas = fakeCanvas(hover.ctx, 1, 1);
   const state = {
     view: "map",
+    lens: "overview",
     hoveredCell: 0,
     layout: cells,
     canvas: fakeCanvas(base.ctx, 800, 600),

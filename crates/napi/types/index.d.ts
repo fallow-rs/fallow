@@ -46,6 +46,23 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   findingIds?: string[];
 }
 
+/**
+ * Options for `detectArchitecture`. No selector reports every kind; each
+ * selector keeps one kind, as `fallow architecture --cycles`, `--boundaries`
+ * and `--policy` do.
+ */
+export interface ArchitectureOptions extends AnalysisOptions {
+  /** Ignore the per-package refs of `workspaces.changedSince` for this call. */
+  noPackageBaselines?: boolean;
+  /** Report only import cycles: circular dependencies, re-export cycles and package cycles. */
+  cycles?: boolean;
+  /** Report only boundary violations, boundary coverage and forbidden calls. */
+  boundaries?: boolean;
+  /** Report only rule-pack policy violations. */
+  policy?: boolean;
+  files?: string[];
+}
+
 export type DuplicationMode = 'strict' | 'mild' | 'weak' | 'semantic';
 
 export interface DuplicationOptions extends AnalysisOptions {
@@ -353,6 +370,14 @@ export interface DeadCodeReport {
   boundary_violations: BoundaryViolationFinding[];
   stale_suppressions: StaleSuppressionFinding[];
   _meta?: Record<string, unknown>;
+}
+
+/**
+ * The `detectArchitecture` report: the dead-code body with
+ * `kind: 'architecture'` and its own `schema_version`.
+ */
+export interface ArchitectureReport extends DeadCodeReport {
+  kind: 'architecture';
 }
 
 export interface CloneInstance {
@@ -678,6 +703,7 @@ export type FallowNodeError = Error & FallowNodeErrorShape;
 export function detectDeadCode(options?: DeadCodeOptions): Promise<DeadCodeReport>;
 export function detectCircularDependencies(options?: DeadCodeOptions): Promise<DeadCodeReport>;
 export function detectBoundaryViolations(options?: DeadCodeOptions): Promise<DeadCodeReport>;
+export function detectArchitecture(options?: ArchitectureOptions): Promise<ArchitectureReport>;
 export function detectDuplication(options?: DuplicationOptions): Promise<DuplicationReport>;
 export function detectSimilarCode(options?: SimilarCodeOptions): Promise<SimilarCodeReport>;
 export function detectFeatureFlags(options?: FeatureFlagsOptions): Promise<FeatureFlagsReport>;

@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow viz` no longer stops drawing the graph on a narrow stage.** On a
+  stage narrower than 200 px, the camera fit gave a negative zoom, and the
+  canvas threw an error for each negative ring radius. The fit now keeps a
+  minimum usable width.
+- **The agent gate audits the tree of the session, also in a nested git
+  worktree.** The hook process can start in a directory that is not the
+  session directory. For example, a session in a worktree below the main
+  checkout can get a hook process in the main checkout. The gate then audited
+  the main checkout: findings there blocked a clean commit in the worktree, and
+  findings in the worktree did not block. Now the generated `fallow-gate.sh`
+  reads the session directory from the `cwd` field of the hook input. It walks
+  up from there to the nearest directory that holds the gate script and stops
+  at the first `.git` entry, the same rule as the handler. When it finds no
+  script, for example with the user-scope gate in `$HOME`, it keeps the
+  directory of the hook process when that directory is in the git work tree of
+  the session, as before. Else it audits the git top level of the session
+  directory, or the session directory outside git. It never audits `$HOME`.
+  When the hook input has no usable `cwd`, the gate audits the directory of the
+  hook process, as before. Run `fallow hooks install --target agent` again to
+  update an installed gate script. Run it in the checkout where the hook
+  process starts (for a nested worktree, the main checkout), and in each
+  worktree that tracks its own copy.
+- **`fallow dupes --baseline` now matches each clone group by its own
+  content.** A clone can stop inside a block, so its code does not parse on
+  its own. Before, all such groups got the same fingerprint with a `-rN`
+  suffix in report order. A new clone group could then take the baseline entry
+  of an old group, and an unchanged group could show as new. Now these groups
+  get a fingerprint from their tokens, without whitespace and comments. A
+  baseline that still has the old shared keys prints a note, and its JSON
+  `baseline_staleness.format` is `"legacy"`. Run `fallow dupes
+  --save-baseline` once to rewrite it. An `ignoredClones` entry with the old
+  shared handle no longer hides a group: review the group and copy its new
+  handle. (#3290, reported by @aleksik)
+- **A warm run no longer reuses the analysis of the previous content of a
+  file.** The parse cache, the duplication token cache and the kept modules of
+  a long-lived session trusted a file when its modification time, change time
+  and size matched. A same-length save in the same filesystem timestamp tick
+  keeps all three values. A save while a run parsed the file gave the cached
+  analysis the metadata of the new content. In both cases the next run
+  reported findings for the old content. Now a cache trusts the metadata only
+  when both timestamps are at least three seconds older than the read of the
+  cached content. For a more recent file, the next run reads the file and
+  compares the content hash. The parse cache version and the duplication cache
+  version change, so the first run after the upgrade parses all files again.
+- `fallow dead-code --summary` now lists the rule-pack "Policy violations"
+  row. The total already counted these findings.
+- The human status line of `fallow dead-code` now counts policy violations,
+  boundary coverage violations and boundary call violations. Boundary
+  violations show as "boundary violation" instead of "violation". Before, a run
+  with only policy violations printed a status line with no count.
+- The `Failed:` line of bare `fallow` now says "1 issue" and "1 clone group"
+  in the singular.
+- The published JSON schema now lists the `similar-code-status` and
+  `similar-code-cache-clear` kinds in the root `FallowOutput` union. Before,
+  a validator that used the schema rejected the valid output of
+  `fallow similar-code status --format json` and
+  `fallow similar-code cache clear --format json`.
 - **A JavaScript array in a CI `run:` block no longer becomes an entry
   pattern.** A heredoc such as `node <<'NODE'` that holds
   `['packages/apps/public']` produced the token `[packages/apps/public]`. That
@@ -31,7 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chain.** With `Child extends Mid extends Base`, a call to `Base.start` through
   `new Child().start()` was reported as an unused class member. Fallow moved an
   access one level for each pass over an unordered map. It now repeats the pass
-  until nothing changes.
+  until nothing changes. An access through one child still does not reach a
+  sibling class.
 - **GraphQL Codegen configs with other names or `.cjs` now count.** Fallow reads
   `codegen*.{ts,js,cjs,mjs}` and uses the `documents` globs of each config as
   entry points. The codegen run reads those files, so no import reaches them.
@@ -55,6 +113,177 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--workspace` and `--changed-workspaces` also use them in `check`, `dupes`
   and `health`. `flags`, `security`, `suppressions`, `--group-by package`, and
   `coverage` still read the manifest globs only.
+
+
+### Added
+
+- **`fallow architecture`** reports import cycles, boundary violations and
+  rule-pack policy violations in one command. Use `--cycles`, `--boundaries`
+  or `--policy` to select one kind. The command takes the same scope and
+  output flags as `fallow dead-code`. Run `fallow guard <files>` before an
+  edit and `fallow architecture` after it. Bare `fallow` shows these findings
+  in an "Architecture" category after the other dead-code categories, with and
+  without `--quiet`, and also with `--group-by` and `--summary`. With
+  `--group-by`, `fallow architecture` shows one "Architecture" heading per
+  group.
+- `fallow architecture --format json` writes `kind: "architecture"` with its
+  own `schema_version` (1). With `--group-by`, the kind is
+  `architecture-grouped`. The arrays, finding ids, actions, exit codes, gate
+  outcomes and severities are the same as on `fallow dead-code`. `next_steps`
+  names `fallow architecture`, and with `--explain`, `_meta.docs` points to
+  the architecture page and `_meta.rules` lists only the architecture rules.
+  `--save-baseline` writes a dead-code baseline (`kind: "dead-code"`), so
+  `fallow architecture` and `fallow dead-code` read each other's baselines.
+  The JSON schema and the generated TypeScript types have the
+  `ArchitectureOutput` and `ArchitectureGroupedOutput` envelopes.
+- `fallow report --from` renders a saved `architecture` or
+  `architecture-grouped` envelope in every format, the same as the direct
+  run. PR comments and reviews of `fallow architecture` have the title
+  "Fallow architecture report".
+- The MCP server has a `check_architecture` tool, and Code Mode exposes it as
+  `checkArchitecture`. The Node bindings have `detectArchitecture`, and
+  `fallow_api` has `run_architecture`. Each returns the `architecture`
+  envelope. `detectCircularDependencies`, `detectBoundaryViolations` and the
+  MCP `analyze` tool keep the `dead-code` envelope.
+- Bare `fallow` accepts `architecture` in `--only` and `--skip`.
+  `--only architecture` runs the dead-code analysis and reports only the
+  architecture findings, and its `Failed:` line names `architecture`.
+  `--skip architecture` removes them from the dead-code
+  section. The health score and the `--save-baseline` file do not change.
+- Telemetry records `fallow architecture` runs as the `architecture` workflow.
+- The GitHub Action accepts `command: architecture` and the GitLab template
+  accepts `FALLOW_COMMAND: architecture`. `issue-types` and
+  `FALLOW_ISSUE_TYPES` take `cycles`, `boundaries` and `policy` for this
+  command. Another value stops the job with exit code 2 and an error that
+  names the valid values.
+
+### Deprecated
+
+- The `fallow dead-code` flags `--circular-deps`, `--re-export-cycles`,
+  `--package-cycles`, `--boundary-violations` and `--policy-violations` are
+  aliases of `fallow architecture --cycles`, `--boundaries` and `--policy`.
+  They keep working in v3. `fallow dead-code` keeps reporting these findings
+  until the next major version, and its human output points to
+  `fallow architecture` when it reports one.
+
+- **The npm launcher no longer cuts short the output of the binary under
+  Bun.** When Bun ran the `fallow` launcher with stdout on a pipe, the JSON
+  output stopped after approximately 64 to 150 KB, and the exit code was 0.
+  The VS Code extension then failed to parse the JSON. The cause was the first
+  use of `process.stdout` or `process.stderr` in the launcher. Under Bun, this
+  sets the shared pipe to non-blocking mode, and the binary inherits that
+  mode. A large write from the binary then failed. Now the launcher does not
+  use these streams before the binary exits, and it writes the verification
+  warnings directly to the stderr descriptor. Thanks to
+  [@codingthat](https://github.com/codingthat) for the report and the
+  reproduction (Closes
+  [#3276](https://github.com/fallow-rs/fallow/issues/3276)).
+
+- **`fallow audit --gate new-only` compares complexity values with the base.**
+  Before, the gate matched complexity findings by path, function name and
+  exceeded category, and did not compare the values. A function that got
+  worse above the limit stayed inherited and passed. A function that improved
+  from `both` to `cyclomatic` counted as introduced and failed. Now a finding
+  matches its base finding by path and function name. It is introduced when
+  no base finding matches, or when a metric that it exceeds has a higher
+  value than in the base finding. Unchanged and decreased values stay
+  inherited. Line shifts and renamed files keep the match. Same-named findings
+  in one file, for example class methods, now count separately in
+  `complexity_introduced` and `complexity_inherited`. The audit base snapshot
+  cache version changes, so the first audit after the upgrade analyzes the
+  base again. Thanks to [@rodrigouroz](https://github.com/rodrigouroz) for the
+  report and the reproduction
+  ([#3277](https://github.com/fallow-rs/fallow/issues/3277)).
+- **The report on stdout is now complete when the parent process makes the
+  stdout pipe non-blocking.** Bun sets `O_NONBLOCK` on a pipe that it shares
+  with a child process. A large report write then failed with `EAGAIN`, and
+  fallow stopped the output at the size of the pipe buffer and exited with the
+  normal exit code. Now fallow waits until stdout accepts more bytes and writes
+  the remaining part of the report. The `list`, `schema`, `config`, `fix` and
+  text `viz` output use the same writer. A closed reader, for example
+  `fallow | head`, still stops the output without an error. Any other stdout
+  write error now prints a message on stderr and gives exit code 2. See
+  [#3276](https://github.com/fallow-rs/fallow/issues/3276). Thanks
+  @codingthat for the report.
+
+### Changed
+
+- **`fallow viz` now shows where to start.** The Overview panel opens with
+  the health grade and one card per lens: the number of files, the number
+  of high findings, and the worst file with its reason. The Overview map colors files
+  that have findings in any lens. Folder labels show how many of their
+  files have findings.
+- **Lens lists say what is wrong.** Each lens opens with a short summary and
+  a severity split. Rows are grouped into high, medium, and low. The full
+  file name comes first, and a plain reason follows, for example "File path
+  built from input" instead of `path-traversal`, or "High complexity, no
+  test coverage" instead of a CRAP score.
+  Security lists each file once with all of its candidates.
+- **Findings are no longer hidden on the map.** Folders with no imports to
+  or from other folders now show when the active lens has findings in them,
+  for example unused files. Health colors only files above the review
+  threshold, so high-risk files stand out. Folders without findings fade.
+- **The file panel says what is wrong first.** The Overview tab opens with
+  a list of the lenses that have findings in the file, each with its reason.
+  The Health tab shows maintainability, change risk, and importers, then
+  each function to fix with its branches, lines, test coverage, and next
+  step. The selected file is ringed and named on the treemap.
+- **Clearer graph navigation.** Folder and import-group labels have two
+  lines (name, then size and findings), stay over their cluster, and keep
+  clear of the controls and the legend. Import groups that span folders read
+  as `site/src + 5 more` instead of `(mixed)`. The status line shows the
+  grouping or the path of the file in focus. Disabled controls are hidden.
+- **Imports between folders.** Clicking a line between two folders lists the
+  target files in use, then every import, forbidden and cyclic ones first.
+- **Plain tooltips and search legend.** Hover tooltips use the same plain
+  reasons as the panel. During a search the legend explains the match and
+  importer rings.
+- **`fallow viz` works on narrow screens.** Below 700 px the panel docks
+  under the map as a sheet, so the map stays visible at full width. The
+  legend becomes one line, crowded labels drop, and the file focus view
+  fits both columns.
+- **The map uses the fallow.tools look.** `fallow viz` now follows the
+  design of fallow.tools and fallow.cloud: paper and ink, Barlow type, hairline
+  rules, square panels and flat controls. Day paper is the default, and the
+  night theme follows the system or the stored choice. The fonts are embedded,
+  so the report looks the same offline. The graph uses the census map
+  geometry: folders are octagons and the imports between them run at 0, 45
+  and 90 degrees, and flagged files carry an interchange ring. Hovering an
+  import line picks the line under the pointer, gives it a pale blue halo
+  and fades the others, and lines hidden at the current zoom no longer react.
+  Hovering a file draws its imports the same way, on census routes in ink.
+- **Step through findings.** With a file open, the panel shows its place
+  in the active lens ("3 of 61 in Security") with previous and next
+  buttons, and `j` and `k` do the same.
+- **Small findings stay visible.** High findings, sparse medium findings,
+  and the copies of an open duplicated block get a halo on the graph.
+- **Architecture lists folders in an import loop.** The panel names the
+  folders the map outlines, and says why the loop matters.
+- **Folder labels follow the findings.** Folders with high findings get a
+  label first, labels no longer cover the dots of high findings, and a
+  label that had to move away from its folder points back to it.
+- **Treemap folder headers count findings.** In a finding lens, each
+  folder header shows how many of its files the lens flags.
+- **Counts agree.** The Overview card for Security shows the files and
+  the candidate count of the tab, and the map legend keys each level once.
+  The Architecture tab counts every finding, import cycles included, not
+  only boundary violations. When a card and its tab count the same unit, the
+  card shows its count as a part of the tab count, for example "528 of 6,135
+  files".
+- **The map shows its progress while it loads.** On a large project the
+  first graph layout takes many seconds. A loading screen now shows a
+  progress bar and the current step, in place of an empty stage.
+- **The theme choice is kept.** The light or dark choice applies again
+  the next time a report opens.
+- **Back and forward keep the map in step.** A lens change through the
+  browser history opens or closes the strip of unconnected folders, as a
+  tab click does.
+- **Security candidate cards lead with the risk.** A card shows the plain
+  label, severity, the source-to-sink flow, and what to check. The rule id,
+  trace, and other evidence move into a collapsed section.
+- **Clearer motion in `fallow viz`.** A treemap drill flies one camera into
+  the folder and back out. A lens switch sweeps the new colors across the
+  map. With reduced motion, movement stops and changes fade.
 
 ## [3.32.0] - 2026-10-06
 

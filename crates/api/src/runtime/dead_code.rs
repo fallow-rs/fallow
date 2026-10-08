@@ -9,7 +9,7 @@ use fallow_engine::{
     session::AnalysisSession,
 };
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutputInput, DeadCodeNextStepsInput, build_check_output,
+    CheckEnvelope, CheckOutputInput, DeadCodeNextStepsInput, architecture_meta, build_check_output,
     build_dead_code_next_steps, check_meta,
 };
 use fallow_types::output_format::OutputFormat;
@@ -18,8 +18,9 @@ use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
 use crate::{
-    AnalysisOptions, BoundaryViolationsProgrammaticOutput, CircularDependenciesProgrammaticOutput,
-    DeadCodeFilters, DeadCodeOptions, DeadCodeProgrammaticOutput, ProgrammaticError,
+    AnalysisOptions, ArchitectureOptions, ArchitectureProgrammaticOutput,
+    BoundaryViolationsProgrammaticOutput, CircularDependenciesProgrammaticOutput, DeadCodeFilters,
+    DeadCodeOptions, DeadCodeProgrammaticOutput, ProgrammaticError,
     analysis_context::{
         ProgrammaticAnalysisContext, changed_files_for_run,
         resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
@@ -126,6 +127,7 @@ pub(super) fn run_dead_code_in_context(
                 package_baselines,
             },
             start,
+            CheckEnvelope::DeadCode,
         );
         output.output.finding_id_query = finding_id_query;
         Ok(output)
@@ -243,6 +245,43 @@ pub fn run_circular_dependencies(
     })
 }
 
+/// Run the analysis of `fallow architecture` and return typed API output
+/// before JSON: import cycles, boundary violations and rule-pack policy
+/// violations.
+///
+/// The selectors keep one kind each, and no selector keeps all of them, as on
+/// the CLI. The output is the dead-code envelope with the `architecture`
+/// schema version, the architecture `_meta` and next steps that name
+/// `fallow architecture`.
+///
+/// # Errors
+///
+/// Returns the same structured errors as [`run_dead_code`].
+pub fn run_architecture(
+    options: &ArchitectureOptions,
+) -> ProgrammaticResult<ArchitectureProgrammaticOutput> {
+    let dead_code = options.dead_code_options();
+    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&dead_code.analysis)?;
+    resolved.install(|| {
+        let start = Instant::now();
+        resolved.ensure_not_cancelled("config load and file discovery")?;
+        let session = load_dead_code_session(&dead_code, &resolved)?;
+        resolve_package_map_before_analysis(&resolved, &session)?;
+        run_dead_code_with_changed_files(
+            &dead_code,
+            &resolved,
+            &session,
+            SessionRun {
+                changed_files: None,
+                start,
+                envelope: CheckEnvelope::Architecture,
+            },
+            |_| {},
+        )
+        .map(Into::into)
+    })
+}
+
 /// Run boundary-family analysis and return typed API output before JSON.
 ///
 /// # Errors
@@ -278,6 +317,41 @@ pub(super) fn run_dead_code_with_session(
     post_filter: impl FnOnce(&mut AnalysisResults),
     start: Instant,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    run_dead_code_with_changed_files(
+        options,
+        resolved,
+        session,
+        SessionRun {
+            changed_files,
+            start,
+            envelope: CheckEnvelope::DeadCode,
+        },
+        post_filter,
+    )
+}
+
+/// The run facts of one session run that are not options: the changed-file
+/// set, the start time, and the member of the dead-code family that writes
+/// the output.
+#[derive(Clone, Copy)]
+struct SessionRun<'a> {
+    changed_files: Option<&'a FxHashSet<std::path::PathBuf>>,
+    start: Instant,
+    envelope: CheckEnvelope,
+}
+
+fn run_dead_code_with_changed_files(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    run: SessionRun<'_>,
+    post_filter: impl FnOnce(&mut AnalysisResults),
+) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
+    let SessionRun {
+        changed_files,
+        start,
+        envelope,
+    } = run;
     resolved.ensure_not_cancelled("dead-code analysis")?;
     let mut results = analyze_session_dead_code(session)?;
     let unfiltered_unused_files = results.unused_files.clone();
@@ -299,6 +373,7 @@ pub(super) fn run_dead_code_with_session(
         session,
         finished.into_report(results),
         start,
+        envelope,
     ))
 }
 
@@ -595,6 +670,7 @@ fn build_dead_code_run_with_artifacts(
         session,
         finished.into_report(artifacts.results.clone()),
         start,
+        CheckEnvelope::DeadCode,
     );
     DeadCodeProgrammaticRunWithArtifacts { output, artifacts }
 }
@@ -605,6 +681,7 @@ fn build_dead_code_programmatic_output(
     session: &AnalysisSession,
     report: DeadCodeReport,
     start: Instant,
+    envelope: CheckEnvelope,
 ) -> DeadCodeProgrammaticOutput {
     let DeadCodeReport {
         results,
@@ -624,10 +701,14 @@ fn build_dead_code_programmatic_output(
         // The programmatic runtime loads no baseline, so there is never one to
         // re-check.
         baseline_recheck: None,
+        command: envelope.command(),
     });
     let config_fixable =
         fallow_config::is_config_fixable(&resolved.root, resolved.config_path.as_ref());
-    let mut meta = options.analysis.explain.then(check_meta);
+    let mut meta = options.analysis.explain.then(|| match envelope {
+        CheckEnvelope::DeadCode => check_meta(),
+        CheckEnvelope::Architecture => architecture_meta(),
+    });
     if let Some(type_aware) = type_aware_meta {
         meta.get_or_insert_with(Default::default).type_aware = Some(type_aware);
     }
@@ -643,7 +724,7 @@ fn build_dead_code_programmatic_output(
         ),
     );
     let mut output = build_check_output(CheckOutputInput {
-        schema_version: CHECK_SCHEMA_VERSION,
+        schema_version: envelope.schema_version(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: start.elapsed(),
         results,

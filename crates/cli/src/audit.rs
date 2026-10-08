@@ -1558,9 +1558,10 @@ fn compute_graph_snapshot_hash(
     let snapshot = AuditKeySnapshot::from_view(&analyses_view(check, dupes, health));
     let mut bytes: Vec<u8> = Vec::new();
     // Sorted key sets, each length-prefixed, so the byte stream is unambiguous.
+    let health = keys::complexity_baseline_keys(&snapshot.health);
     for set in [
         &snapshot.dead_code,
-        &snapshot.health,
+        &health,
         &snapshot.dupes,
         &snapshot.boundary_edges,
         &snapshot.cycles,
@@ -2200,6 +2201,7 @@ fn run_audit_check<'a>(
         defer_performance: false,
         analysis_snapshot,
         explain_skipped: opts.explain_skipped,
+        surface: crate::check::CheckSurface::DeadCode,
     }) {
         Ok(mut result) => {
             if let Some(changed_files) = changed_files {

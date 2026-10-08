@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -3561,7 +3561,7 @@
             "boolean",
             "null"
           ],
-          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot."
+          "description": "Audit-mode flag indicating whether the finding is new versus the base\nsnapshot. A complexity finding is new when no base finding has the same\npath and function name, or when a metric that it exceeds has a higher\nvalue than in that base finding."
         }
       },
       "required": [
@@ -9544,6 +9544,26 @@
           ]
         },
         {
+          "description": "`fallow architecture --format json --group-by <mode>`. The grouped\ndead-code body with its own `schema_version`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArchitectureGroupedOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "architecture-grouped"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
           "description": "Project-wide change impact or exact TypeScript symbol impact.",
           "allOf": [
             {
@@ -9669,6 +9689,26 @@
                 "kind": {
                   "type": "string",
                   "const": "dead-code"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow architecture --format json`. The dead-code body with its own\n`schema_version`: import cycles, boundary violations and rule-pack policy\nviolations.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArchitectureOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "architecture"
                 }
               },
               "required": [
@@ -9909,6 +9949,46 @@
                 "kind": {
                   "type": "string",
                   "const": "similar-code-review"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow similar-code status --format json` and successful setup output.\nLocal-provider and pinned-model readiness.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SimilarCodeStatusOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "similar-code-status"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow similar-code cache clear --format json`. Project-local vector-cache\nclear result.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SimilarCodeCacheClearOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "similar-code-cache-clear"
                 }
               },
               "required": [
@@ -27708,7 +27788,7 @@
         },
         "format": {
           "type": "string",
-          "description": "`legacy` when the loaded dead-code baseline has no `identity`, so its\nentries use the old key forms and some of them hold a line. The run\nstill applies the file. `--save-baseline` rewrites it with line-free\nkeys. Absent for a current baseline and on `dupes` and `health`. The\nvalue set is OPEN."
+          "description": "`legacy` when the loaded baseline uses an old key form. For dead-code,\nthe file has no `identity`, so some entries hold a line. For `dupes`,\nsome entries use the clone key that older versions shared between\nunrelated groups whose code did not parse on its own. The run still\napplies the file. `--save-baseline` rewrites it with current keys.\nAbsent for a current baseline and on `health`. The value set is OPEN."
         },
         "scope_reasons": {
           "type": "array",
@@ -29756,6 +29836,641 @@
         "col"
       ],
       "description": "One inspected reachable component invocation."
+    },
+    "ArchitectureSchemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema projection for the architecture envelope's exact version.\n\nThe schema emitter registers this type by name and points the\n`ArchitectureOutput` and `ArchitectureGroupedOutput` definitions at it."
+    },
+    "ArchitectureGroupedOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Architecture output schema version; currently [`ARCHITECTURE_SCHEMA_VERSION`]. A change to the shared dead-code body bumps this version and the dead-code version together.",
+          "$ref": "#/definitions/ArchitectureSchemaVersion"
+        },
+        "version": {
+          "description": "Fallow CLI version that produced this output.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "grouped_by": {
+          "description": "Resolver the issues were grouped by.",
+          "$ref": "#/definitions/GroupByMode"
+        },
+        "total_issues": {
+          "type": "integer",
+          "description": "Total findings across all groups."
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CheckGroupedEntry"
+          },
+          "description": "One bucket per resolver key."
+        },
+        "unused_load_data_keys_global_abstain": {
+          "type": "boolean",
+          "description": "`true` when the `unused-load-data-key` detector abstained for the whole\nproject. The abstain has no file, so it is on the root and not in a\ngroup. An empty `unused_load_data_keys` with this flag set does not\nmean the project is clean: the rule could not run safely. Serialized\nonly when `true`, like the flat `CheckOutput` field."
+        },
+        "baseline_staleness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BaselineStaleness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
+        },
+        "finding_id_query": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FindingIdQuery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The answer to `--finding-id`, present only when the run received one\nor more `--finding-id` values. The report then holds only the\nrequested findings. Read `missing` as resolved only when `conclusive`\nis true; a scope, a baseline or a filter can hide a finding that still\nexists. See [`crate::FindingIdQuery`]."
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
+        },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied package Git refs, omitted outside package-baseline runs."
+        },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Diagnostics collected for the full analysis before issue grouping.\nSee [`CheckOutput::workspace_diagnostics`] for the contract."
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands computed from the full (ungrouped) findings.\nSee [`CheckOutput::next_steps`] for the contract."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "elapsed_ms",
+        "grouped_by",
+        "total_issues",
+        "groups"
+      ],
+      "title": "fallow architecture --group-by <owner|directory|package|section> --format json",
+      "description": "Envelope emitted by `fallow architecture --group-by ... --format json`.\n\nThe body is the `CheckGroupedOutput` body of `fallow dead-code`: issues are partitioned into resolver buckets (CODEOWNERS team, directory prefix, workspace package, or GitLab CODEOWNERS section), and each bucket carries the same issue-array shape as `ArchitectureOutput`, plus per-group `key` / `owners` / `total_issues`."
+    },
+    "ArchitectureOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Architecture output schema version; currently [`ARCHITECTURE_SCHEMA_VERSION`]. A change to the shared dead-code body bumps this version and the dead-code version together.",
+          "$ref": "#/definitions/ArchitectureSchemaVersion"
+        },
+        "version": {
+          "description": "Fallow CLI version that produced this output.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "Wall-clock analysis duration in milliseconds.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "total_issues": {
+          "type": "integer",
+          "description": "Total findings across all issue arrays; excludes `next_steps`."
+        },
+        "entry_points": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EntryPoints"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Entry-point totals per source, when the analysis recorded them."
+        },
+        "summary": {
+          "description": "Per-category finding counts.",
+          "$ref": "#/definitions/CheckSummary"
+        },
+        "unused_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedFileFinding"
+          },
+          "description": "Files not reachable from any entry point. Wrapped in\n[`UnusedFileFinding`] so each entry carries a typed `actions` array\nnatively, replacing the pre-2.76 post-pass injection."
+        },
+        "unused_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedExportFinding"
+          },
+          "description": "Exports never imported by other modules. Wrapped in\n[`UnusedExportFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "unused_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTypeFinding"
+          },
+          "description": "Type exports never imported by other modules. Wrapped in\n[`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared\nwith `unused_exports` but the wrapper emits a type-targeted fix\ndescription."
+        },
+        "private_type_leaks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PrivateTypeLeakFinding"
+          },
+          "description": "Exported symbols whose public signature references same-file private\ntypes. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a\ntyped `actions` array natively."
+        },
+        "deprecated_exports_in_use": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DeprecatedExportInUseFinding"
+          },
+          "description": "Exports marked `@deprecated` that still have at least one consumer in\na reachable file. Wrapped in [`DeprecatedExportInUseFinding`]. Opt-in: the\n`deprecated-exports-in-use` rule defaults to `off`."
+        },
+        "unused_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedDependencyFinding"
+          },
+          "description": "Dependencies listed in package.json but never imported. Wrapped in\n[`UnusedDependencyFinding`] so each entry carries a typed `actions`\narray natively. The fix action swaps from `remove-dependency` to\n`move-dependency` when `used_in_workspaces` is non-empty."
+        },
+        "unused_dev_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedDevDependencyFinding"
+          },
+          "description": "Dev dependencies listed in package.json but never imported. Wrapped\nin [`UnusedDevDependencyFinding`]: same bare struct as\n`unused_dependencies` with a `devDependencies`-targeted fix\ndescription."
+        },
+        "unused_optional_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedOptionalDependencyFinding"
+          },
+          "description": "Optional dependencies listed in package.json but never imported.\nWrapped in [`UnusedOptionalDependencyFinding`] with an\n`optionalDependencies`-targeted fix description."
+        },
+        "unused_enum_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEnumMemberFinding"
+          },
+          "description": "Enum members never accessed. Wrapped in\n[`UnusedEnumMemberFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "unused_class_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedClassMemberFinding"
+          },
+          "description": "Class members never accessed. Wrapped in\n[`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as\n`unused_enum_members`, with a class-targeted fix description and the\n`auto_fixable: false` default to reflect dependency-injection\npatterns."
+        },
+        "unused_store_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedStoreMemberFinding"
+          },
+          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`, with a\nstore-targeted fix description. Cross-graph: the store binding is\nimported (the module is reachable) yet a specific member is dead."
+        },
+        "unresolved_imports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnresolvedImportFinding"
+          },
+          "description": "Import specifiers that could not be resolved. Wrapped in\n[`UnresolvedImportFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "unlisted_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnlistedDependencyFinding"
+          },
+          "description": "Dependencies used in code but not listed in package.json. Wrapped in\n[`UnlistedDependencyFinding`]."
+        },
+        "duplicate_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicateExportFinding"
+          },
+          "description": "Exports with the same name across multiple modules. Wrapped in\n[`DuplicateExportFinding`] so each entry carries a typed `actions`\narray natively, with the position-0 `add-to-config` `ignoreExports`\nsnippet wired in at wrapper construction."
+        },
+        "type_only_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TypeOnlyDependencyFinding"
+          },
+          "description": "Production dependencies only used via type-only imports (could be\ndevDependencies). Only populated in production mode. Wrapped in\n[`TypeOnlyDependencyFinding`]."
+        },
+        "test_only_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TestOnlyDependencyFinding"
+          },
+          "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
+        },
+        "dev_dependencies_in_production": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DevDependencyInProductionFinding"
+          },
+          "description": "devDependencies imported by production (non-test, non-config) source code\nvia a runtime/value import; they should be promoted to dependencies.\nThe promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in\n[`DevDependencyInProductionFinding`]."
+        },
+        "circular_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CircularDependencyFinding"
+          },
+          "description": "Circular dependency chains detected in the module graph. Wrapped in\n[`CircularDependencyFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "re_export_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReExportCycleFinding"
+          },
+          "description": "Cycles or self-loops in the re-export edge subgraph (barrel files\nre-exporting from each other in a loop). Wrapped in\n[`ReExportCycleFinding`] so each entry carries a typed `actions`\narray natively (a `refactor-re-export-cycle` informational primary\nplus a `suppress-file` secondary; cycles are file-scoped so a single\nsuppression breaks the cycle)."
+        },
+        "package_cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageCycleFinding"
+          },
+          "description": "Dependency cycles between workspace packages, built from resolved\ncross-package imports. Wrapped in [`PackageCycleFinding`] so each\nentry carries a typed `actions` array natively."
+        },
+        "boundary_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryViolationFinding"
+          },
+          "description": "Imports that cross architecture boundary rules. Wrapped in\n[`BoundaryViolationFinding`] so each entry carries a typed `actions`\narray natively."
+        },
+        "boundary_coverage_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCoverageViolationFinding"
+          },
+          "description": "Files that matched no architecture boundary zone while\n`boundaries.coverage.requireAllFiles` was enabled."
+        },
+        "boundary_call_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BoundaryCallViolationFinding"
+          },
+          "description": "Calls from zoned files to callees forbidden for that zone via\n`boundaries.calls.forbidden`. Wrapped in\n[`BoundaryCallViolationFinding`] so each entry carries a typed\n`actions` array natively."
+        },
+        "policy_violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PolicyViolationFinding"
+          },
+          "description": "Banned calls, imports, and catalogue-derived effects matched by\ndeclarative rule packs\n(`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each\nentry carries a typed `actions` array natively. Each finding carries\nits effective per-rule severity."
+        },
+        "stale_suppressions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StaleSuppression"
+          },
+          "description": "Suppression comments or JSDoc tags that no longer match any issue."
+        },
+        "unused_catalog_entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedCatalogEntryFinding"
+          },
+          "description": "Entries in package manager catalog sections not referenced by any\nworkspace package via the catalog: protocol. Supports\n`pnpm-workspace.yaml` catalogs and Bun root `package.json` catalogs.\nWrapped in [`UnusedCatalogEntryFinding`] so each entry carries a typed\n`actions` array natively, with per-instance `auto_fixable` derived\nfrom `hardcoded_consumers` and the catalog source file."
+        },
+        "empty_catalog_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EmptyCatalogGroupFinding"
+          },
+          "description": "Named groups under package manager catalogs sections that declare no\npackage entries. The top-level catalog: map is not reported. Wrapped in\n[`EmptyCatalogGroupFinding`]."
+        },
+        "unresolved_catalog_references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnresolvedCatalogReferenceFinding"
+          },
+          "description": "Workspace package.json references to catalogs (`catalog:` or\n`catalog:<name>`) that do not declare the consumed package. The package\nmanager install will error until the named catalog grows to include the\npackage or the reference is switched / removed. Wrapped in\n[`UnresolvedCatalogReferenceFinding`] with the discriminated\n`add-catalog-entry` / `update-catalog-reference` primary at position 0."
+        },
+        "unused_dependency_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedDependencyOverrideFinding"
+          },
+          "description": "Entries in pnpm-workspace.yaml's overrides section, package.json's\npnpm.overrides block, npm or Bun's top-level overrides object, or Bun's\ntop-level resolutions object,\nwhose target package is not declared by any workspace package and is\nnot present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,\nor bun.lock. Default severity is warn because projects without a\nreadable lockfile fall back to manifest-only checks; the hint field\nflags those conservative cases. When the only lockfile is bun's binary\nbun.lockb, resolution cannot be read and the check emits nothing.\nWrapped in [`UnusedDependencyOverrideFinding`]."
+        },
+        "misconfigured_dependency_overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MisconfiguredDependencyOverrideFinding"
+          },
+          "description": "Package-manager override or resolution entries whose key or value does\nnot parse in the declaration source's grammar (empty key, empty value,\nmalformed selector, unbalanced parent matcher). The package manager may\nreject or ignore these at install time. Default severity is error. Wrapped in\n[`MisconfiguredDependencyOverrideFinding`]."
+        },
+        "invalid_client_exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InvalidClientExportFinding"
+          },
+          "description": "`\"use client\"` files that export a Next.js server-only / route-segment\nconfig name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this\nat build time. Wrapped in [`InvalidClientExportFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "mixed_client_server_barrels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MixedClientServerBarrelFinding"
+          },
+          "description": "Barrel files that re-export BOTH a `\"use client\"` origin module AND a\nserver-only origin module (the Next.js App Router footgun). Wrapped in\n[`MixedClientServerBarrelFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
+        "misplaced_directives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MisplacedDirectiveFinding"
+          },
+          "description": "`\"use client\"` / `\"use server\"` directives written as expression\nstatements after a non-directive statement, so the RSC bundler parses\nthem as ordinary strings and silently ignores them. Wrapped in\n[`MisplacedDirectiveFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "unprovided_injects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnprovidedInjectFinding"
+          },
+          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is\nprovided nowhere in the project (the injected-never-provided dead-half).\nWrapped in [`UnprovidedInjectFinding`] so each entry carries a typed\n`actions` array natively. Default severity is `warn`."
+        },
+        "unrendered_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnrenderedComponentFinding"
+          },
+          "description": "Vue/Svelte single-file components that are reachable but rendered nowhere\n(the imported-but-never-rendered dead-half). Wrapped in\n[`UnrenderedComponentFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "route_collisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RouteCollisionFinding"
+          },
+          "description": "Next.js App Router route files that resolve to the same URL within one\napp-root (a guaranteed `next build` failure). Wrapped in\n[`RouteCollisionFinding`] so each entry carries a typed `actions` array\nnatively. One finding per colliding file. Default severity is `warn`."
+        },
+        "dynamic_segment_name_conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DynamicSegmentNameConflictFinding"
+          },
+          "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (a dev / runtime error; `next build` does NOT\ncatch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "unused_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedComponentPropFinding"
+          },
+          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props\nreferenced nowhere in their own component. Wrapped in\n[`UnusedComponentPropFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "absent_component_props": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AbsentComponentPropFinding"
+          },
+          "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
+        },
+        "unused_component_emits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedComponentEmitFinding"
+          },
+          "description": "Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC\n(no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so\neach entry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_component_inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedComponentInputFinding"
+          },
+          "description": "Angular `@Input()` / signal `input()` / `model()` inputs read nowhere in\ntheir own component (neither the template nor the class body). Wrapped in\n[`UnusedComponentInputFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "unused_component_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedComponentOutputFinding"
+          },
+          "description": "Angular `@Output()` / signal `output()` outputs emitted nowhere in their\nown component (no `this.<output>.emit(...)`). Wrapped in\n[`UnusedComponentOutputFinding`] so each entry carries a typed `actions`\narray natively. Default severity is `warn`."
+        },
+        "unused_svelte_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedSvelteEventFinding"
+          },
+          "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_server_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedServerActionFinding"
+          },
+          "description": "Next.js Server Actions (exports of `\"use server\"` files) that no code in\nthe project references. Reclassified out of `unused_exports` for\n`\"use server\"` files. Wrapped in [`UnusedServerActionFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_load_data_keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedLoadDataKeyFinding"
+          },
+          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys\nread by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry\ncarries a typed `actions` array natively. Default severity is `warn`."
+        },
+        "unused_load_data_keys_global_abstain": {
+          "type": "boolean",
+          "description": "`true` when the `unused-load-data-key` detector abstained project-wide\nbecause a whole-object use of `page.data` / `$page.data` was seen\nsomewhere (S1 observability: an empty `unused_load_data_keys` with this\nflag set is NOT a clean bill, it means the rule could not run safely).\nSerialized only when `true` so the default JSON contract is unchanged."
+        },
+        "prop_drilling_chains": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PropDrillingChainFinding"
+          },
+          "description": "React/Preact props forwarded unchanged through `>= N` intermediate\npass-through components until a consumer (located per-chain records).\nWrapped in [`PropDrillingChainFinding`] so each entry carries a typed\n`actions` array natively. Health signal: the rule defaults to `off`\n(opt-in), so this is dormant and populated ONLY when the user enables it."
+        },
+        "thin_wrappers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThinWrapperFinding"
+          },
+          "description": "React/Preact components whose entire body is a single spread-forwarded\nchild render (`return <Child {...props}/>`): pure structural indirection,\na candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]\nso each entry carries a typed `actions` array natively. Health signal: the\nrule defaults to `off` (opt-in), so this is dormant and populated ONLY\nwhen the user enables it."
+        },
+        "duplicate_prop_shapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DuplicatePropShapeFinding"
+          },
+          "description": "React/Preact components that participate in a duplicate-prop-shape group:\nthree or more components across two or more files whose statically-known\nprop NAME set is identical after stripping ubiquitous DOM / passthrough\nnames (a missing shared `Props` type / base component). Wrapped in\n[`DuplicatePropShapeFinding`] so each entry carries a typed `actions`\narray and its sibling roster natively. Health signal: the rule defaults to\n`off` (opt-in), so this is dormant and populated ONLY when the user\nenables it."
+        },
+        "baseline_deltas": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BaselineDeltas"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Count deltas against the matched baseline, in baseline runs."
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BaselineMatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which baseline snapshot was matched, in baseline runs."
+        },
+        "baseline_staleness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BaselineStaleness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "This run's view of the loaded baseline, present only in baseline runs.\nCarries the staleness counts, the advisory verdict and `gate_trips`, the\nsame boolean `--fail-on-stale-baseline` exits on, so a CI integration\nreads one field instead of restating the rule. Read `change_scoped`\nbefore dividing `matched_entries` by `baseline_entries`: a narrowed run\ncan report `matched_entries: 0` on a healthy baseline."
+        },
+        "finding_id_query": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FindingIdQuery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The answer to `--finding-id`, present only when the run received one\nor more `--finding-id` values. The report then holds only the\nrequested findings. Read `missing` as resolved only when `conclusive`\nis true; a scope, a baseline or a filter can hide a finding that still\nexists. See [`crate::FindingIdQuery`]."
+        },
+        "regression": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RegressionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Regression verdict against the baseline, in `--fail-on-regression` runs."
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The verdict of every gate this run evaluated, keyed by name. The CLI\nalways emits it, with the command's default exit rule in it also when\nno flag armed a gate, so a CI integration reads the verdict instead of\nguessing from a process status it usually cannot see. A gate fails the\nbuild when `status` is `fail` AND `enforced` is true. The typed\nprogrammatic API runs no CLI gate and leaves it absent. See\n[`crate::GateOutcomes`]."
+        },
+        "request_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied Git refs for exact workspace packages. Absent when no package\nbaselines were selected, including runs with a global changed-since ref."
+        },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`_meta` block with docs and rule definitions, when `--explain` was\npassed."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `excluded-by-default-ignore`, `source-read-failure`,\n  `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`;\n- framework plugins, while they read their own build configs:\n  `plugin-config-unreadable`, `plugin-effect-not-modeled`;\n- the dead-code result, for config patterns that matched nothing:\n  `ignore-dependencies-glob-unmatched`,\n  `ignore-findings-pattern-unmatched`.\n\nAnalysis-stage and plugin-stage kinds therefore reach only the envelopes\nwhose run includes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands.\n\n`excluded-by-default-ignore` is the one source-discovery kind that\nreports unseen files WITHOUT raising a caveat. It names a built-in\nignore pattern (`**/dist/**`, `**/build/**`, `**/coverage/**`, or one\nof the four minified-bundle globs) that removed candidate source files\nfrom the walk, which is designed behavior on generated output rather\nthan a degraded run, so it is advisory only and no finding inherits it.\nOne entry per pattern, never per file, so the array stays bounded on a\nproject of any size. Gitignored trees are pruned before the walk sees\nthem and count zero, and `**/node_modules/**` is never reported:\ninstalled dependencies are not the first-party source the kind is\nabout."
+        },
+        "next_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NextStep"
+          },
+          "description": "Read-only follow-up commands computed from this run's findings, emitted\nat the JSON root so an agent acting on the output is pointed at fallow's\nadjacent verification capabilities (trace, complexity breakdown, audit,\nworkspace scoping). Each command is runnable as-is and never mutating;\nsee [`NextStep`] for both contracts. Omitted when empty or when\n`FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "elapsed_ms",
+        "total_issues",
+        "summary",
+        "unused_files",
+        "unused_exports",
+        "unused_types",
+        "private_type_leaks",
+        "unused_dependencies",
+        "unused_dev_dependencies",
+        "unused_optional_dependencies",
+        "unused_enum_members",
+        "unused_class_members",
+        "unresolved_imports",
+        "unlisted_dependencies",
+        "duplicate_exports",
+        "type_only_dependencies",
+        "circular_dependencies"
+      ],
+      "description": "Envelope emitted by `fallow architecture --format json`.\n\nThe body is the `CheckOutput` body of `fallow dead-code`: the same issue arrays, `summary`, `entry_points`, actions and `gate_outcomes`. The architecture arrays (`circular_dependencies`, `re_export_cycles`, `package_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`) carry the findings. The combined and audit envelopes do not use this envelope; their `check` block stays `CheckOutput`.",
+      "title": "fallow architecture --format json"
     }
   }
 }

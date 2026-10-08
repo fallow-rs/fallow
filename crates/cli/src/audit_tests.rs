@@ -2346,7 +2346,16 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         dead_code: ["dead:a".to_string(), "dead:b".to_string()]
             .into_iter()
             .collect(),
-        health: std::iter::once("health:a".to_string()).collect(),
+        health: std::iter::once((
+            "complexity:src/a.ts:f".to_string(),
+            vec![fallow_api::audit_keys::ComplexityMetrics {
+                line: 3,
+                cyclomatic: 17,
+                cognitive: 16,
+                crap: Some(42.5),
+            }],
+        ))
+        .collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),
         dupes: ["dupe:a".to_string(), "dupe:b".to_string()]
             .into_iter()
@@ -2523,7 +2532,16 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         type_aware_gap_signature: Vec::new(),
         syntactic_dead_code: None,
         dead_code: std::iter::once("dead:a".to_string()).collect(),
-        health: std::iter::once("health:a".to_string()).collect(),
+        health: std::iter::once((
+            "complexity:src/a.ts:f".to_string(),
+            vec![fallow_api::audit_keys::ComplexityMetrics {
+                line: 3,
+                cyclomatic: 17,
+                cognitive: 16,
+                crap: Some(42.5),
+            }],
+        ))
+        .collect(),
         styling: std::iter::once("styling:a".to_string()).collect(),
         dupes: std::iter::once("dupe:a".to_string()).collect(),
         boundary_edges: FxHashSet::default(),

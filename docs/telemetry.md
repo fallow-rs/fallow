@@ -111,7 +111,7 @@ Field purposes:
 
 | Field | Purpose |
 | --- | --- |
-| `workflow` | Prioritize the audit, dead-code, health, duplication, CI, runtime-coverage setup, impact, security, fix, explain, project-inventory, setup, and license workflows. Project-inventory, setup, and license are coarse buckets and do not expose raw commands, config values, repository identifiers, or license identifiers. |
+| `workflow` | Prioritize the audit, dead-code, architecture, health, duplication, CI, runtime-coverage setup, impact, security, fix, explain, project-inventory, setup, and license workflows. Project-inventory, setup, and license are coarse buckets and do not expose raw commands, config values, repository identifiers, or license identifiers. |
 | `integration_surface` | Understand whether Fallow is used through human CLI, CLI JSON, MCP, CI, editor, or programmatic surfaces. |
 | `invocation_context` | Separate human, CI, editor, and agent-driven use without uploading detection evidence. |
 | `agent_source` | Improve compatibility with specific agent integrations using a documented allowlist. |
@@ -126,7 +126,7 @@ Field purposes:
 | `file_count_bucket` | Segment slow runs by coarse analyzed-file scale (`0-99`, `100-499`, `500-1999`, `2000+`, or `unknown`) without uploading exact counts. Combined and audit workflows keep the largest bucket reported by their sub-analyses. |
 | `function_count_bucket` | Segment slow runs by coarse analyzed-function scale (`0-999`, `1000-9999`, `10000+`, or `unknown`) without uploading exact counts. The field is omitted when no cheap function count is available. |
 | `avg_fan_out_bucket` | Segment slow runs by coarse average fan-out (`0`, `<1`, `1-2`, `3+`, or `unknown`) when a workflow already retained a module graph. The bucket is derived from existing module and edge counts only, with no dependency traversal, graph diameter, depth, or coupling analysis added for telemetry. |
-| `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable on the standalone `dead_code`, `dupes`, `health`, and `security` workflows. |
+| `findings_present` | Whether the analysis surfaced any findings, decoupled from the exit-code gate (so informational analyses like default-config `dupes`, which never exit non-zero, are still measurable). On the combined and audit workflows it is an OR across the sub-analyses; per-analysis find-rate is answerable on the standalone `dead_code`, `architecture`, `dupes`, `health`, and `security` workflows. |
 | `result_count_bucket` | Coarse result volume, one of `0`, `1-9`, `10-99`, `100+`, or `unknown`. Exact counts, paths, finding names, rule ids, and snippets are never uploaded. |
 | `report_truncated` / `truncation_reason` | Whether a report/comment output path was truncated and why. Reasons are `comment_limit`, `max_items`, `size_limit`, or `unknown`. |
 | `cache_state` | Segment combined code-quality review durations into cold, warm, partial, or unknown cache states without uploading cache paths, cache directories, raw counts, or exact timings. |

@@ -14,17 +14,22 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+#[path = "../common/http_stub.rs"]
+mod http_stub;
 #[path = "../common/sign.rs"]
 mod sign;
 
 mod absent_component_prop_tests;
 mod agent_tests;
+mod architecture_tests;
+mod audit_complexity_attribution_tests;
 mod audit_tests;
 mod baseline_growth_tests;
 mod caveat_surface_tests;
 mod changed_since_added_files_tests;
 mod changed_workspaces_tests;
 mod check_tests;
+mod ci_command_routing_tests;
 mod claude_code_hint_tests;
 mod codeowners_tests;
 mod combined_coverage_tests;
@@ -89,6 +94,7 @@ mod security_workflow_tests;
 mod signal_tests;
 mod snapshot_tests;
 mod stable_ci_fingerprint_tests;
+mod stdout_pipe_tests;
 mod summary_mark_tests;
 mod suppressions_tests;
 mod telemetry_tests;

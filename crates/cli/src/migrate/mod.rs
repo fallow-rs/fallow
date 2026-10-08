@@ -553,6 +553,9 @@ fn load_stylelint_js_config(path: &Path) -> Result<serde_json::Value, String> {
             allow_single_quoted_strings: true,
             allow_hexadecimal_numbers: false,
             allow_unary_plus_numbers: false,
+            allow_bare_decimal_point_numbers: false,
+            allow_extended_string_escapes: false,
+            allow_non_finite_numbers: false,
         },
     )
     .map_err(|e| format!("failed to parse {}: {e}", path.display()))

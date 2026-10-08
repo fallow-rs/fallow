@@ -4,7 +4,7 @@ use std::time::Instant;
 use fallow_config::{DuplicatesConfig, OutputFormat, ProductionAnalysis};
 use fallow_engine::project_config::ProductionFlags;
 
-use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
+use crate::check::{ArchitectureSelection, CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesOverrides, DupesResult};
 use crate::health::{HealthOptions, HealthResult};
 use crate::regression;
@@ -69,6 +69,9 @@ pub struct CombinedOptions<'a> {
     pub run_check: bool,
     pub run_dupes: bool,
     pub run_health: bool,
+    /// Which dead-code findings the run reports (`--only architecture`,
+    /// `--skip architecture`).
+    pub architecture: ArchitectureSelection,
     /// Global `--dupes-*` overrides of the `duplicates` config.
     pub dupes: DupesOverrides,
     pub score: bool,
@@ -91,10 +94,13 @@ pub struct CombinedOptions<'a> {
 
 /// Resolve which analyses to run based on --only/--skip flags.
 /// Precondition: only and skip must not both be non-empty (validated in main.rs).
+///
+/// `architecture` reports a part of the dead-code analysis, so `--only
+/// architecture` runs that analysis. See [`resolve_architecture_selection`].
 pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, bool, bool) {
     if !only.is_empty() {
         (
-            only.contains(&AnalysisKind::DeadCode),
+            only.contains(&AnalysisKind::DeadCode) || only.contains(&AnalysisKind::Architecture),
             only.contains(&AnalysisKind::Dupes),
             only.contains(&AnalysisKind::Health),
         )
@@ -106,6 +112,28 @@ pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, 
         )
     } else {
         (true, true, true)
+    }
+}
+
+/// Resolve which dead-code findings the bare run reports from `--only` and
+/// `--skip`.
+///
+/// `architecture` without `dead-code` narrows the dead-code section:
+/// `--only architecture` keeps only the architecture findings and `--skip
+/// architecture` drops them. With `dead-code` in the same list, the value has
+/// no extra effect.
+pub fn resolve_architecture_selection(
+    only: &[AnalysisKind],
+    skip: &[AnalysisKind],
+) -> ArchitectureSelection {
+    let list = if only.is_empty() { skip } else { only };
+    if !list.contains(&AnalysisKind::Architecture) || list.contains(&AnalysisKind::DeadCode) {
+        return ArchitectureSelection::All;
+    }
+    if only.is_empty() {
+        ArchitectureSelection::Exclude
+    } else {
+        ArchitectureSelection::Only
     }
 }
 
@@ -124,7 +152,10 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     let mut dupes_result: Option<DupesResult> = None;
     let mut health_result: Option<HealthResult> = None;
 
-    let filters = IssueFilters::default();
+    let filters = IssueFilters {
+        architecture_selection: opts.architecture,
+        ..IssueFilters::default()
+    };
     let trace_opts = TraceOptions {
         trace_export: None,
         trace_file: None,
@@ -222,6 +253,7 @@ fn build_combined_check_options<'a>(
         defer_performance: true,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         explain_skipped: opts.explain_skipped,
+        surface: crate::check::CheckSurface::DeadCode,
     })
 }
 
@@ -741,6 +773,43 @@ mod tests {
     }
 
     #[test]
+    fn architecture_value_runs_the_dead_code_analysis() {
+        use super::resolve_architecture_selection;
+        use crate::check::ArchitectureSelection;
+
+        assert_eq!(
+            resolve_analyses(&[AnalysisKind::Architecture], &[]),
+            (true, false, false)
+        );
+        assert_eq!(
+            resolve_analyses(&[], &[AnalysisKind::Architecture]),
+            (true, true, true)
+        );
+        let select = resolve_architecture_selection;
+        assert_eq!(select(&[], &[]), ArchitectureSelection::All);
+        assert_eq!(
+            select(&[AnalysisKind::DeadCode], &[]),
+            ArchitectureSelection::All
+        );
+        assert_eq!(
+            select(&[AnalysisKind::Architecture], &[]),
+            ArchitectureSelection::Only
+        );
+        assert_eq!(
+            select(&[AnalysisKind::Architecture, AnalysisKind::DeadCode], &[]),
+            ArchitectureSelection::All
+        );
+        assert_eq!(
+            select(&[], &[AnalysisKind::Architecture]),
+            ArchitectureSelection::Exclude
+        );
+        assert_eq!(
+            select(&[], &[AnalysisKind::Architecture, AnalysisKind::DeadCode]),
+            ArchitectureSelection::All
+        );
+    }
+
+    #[test]
     fn resolve_analyses_honors_skip_when_only_is_empty() {
         assert_eq!(
             resolve_analyses(&[], &[AnalysisKind::Dupes]),
@@ -868,6 +937,7 @@ mod tests {
             run_check: true,
             run_dupes: true,
             run_health: true,
+            architecture: crate::check::ArchitectureSelection::All,
             dupes: DupesOverrides::default(),
             score: false,
             trend: false,

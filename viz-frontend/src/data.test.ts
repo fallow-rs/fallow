@@ -345,7 +345,7 @@ describe("analysis contract adapters", () => {
             file: 0,
             path: "src/a.ts",
             maintainability_index: 51,
-            crap_max: 28,
+            crap_max: 34,
             complexity_density: 0.4,
             fan_in: 2,
             fan_out: 3,
@@ -354,7 +354,7 @@ describe("analysis contract adapters", () => {
         findings: [],
       },
     } as unknown as VizData;
-    expect(healthRiskForFile(d, 0)).toBe(28);
+    expect(healthRiskForFile(d, 0)).toBe(34);
     const index = buildIndex(d);
     expect(lensFindingLevel("health" as Lens, index, d.files[0], 0)).toBe(2);
     expect(lensFindingLevel("health" as Lens, index, d.files[1], 1)).toBe(0);
@@ -434,7 +434,7 @@ describe("lens coloring", () => {
     expect(lensFindingLevel("duplication", index, file(), 0)).toBe(0);
     // Health without retained file metrics stays neutral.
     expect(lensFindingLevel("health", index, file({ max_cyclomatic: 25 }), 0)).toBe(0);
-    // architecture: violation sources severe; overview always none.
+    // architecture: violation sources severe.
     const vIndex = buildIndex(
       data({
         violations: [{ from: 0, to: 2, from_zone: 0, to_zone: 1, line: 3, specifier: "x" }],
@@ -442,7 +442,9 @@ describe("lens coloring", () => {
     );
     expect(lensFindingLevel("architecture", vIndex, file(), 0)).toBe(2);
     expect(lensFindingLevel("architecture", vIndex, file(), 1)).toBe(0);
-    expect(lensFindingLevel("overview", vIndex, file({ status: "unused" }), 0)).toBe(0);
+    // overview combines every lens: an unused file is severe there too.
+    expect(lensFindingLevel("overview", vIndex, file({ status: "unused" }), 0)).toBe(2);
+    expect(lensFindingLevel("overview", vIndex, file(), 1)).toBe(0);
   });
 });
 

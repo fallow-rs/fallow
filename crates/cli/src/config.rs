@@ -90,7 +90,7 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
                     eprintln!("loaded config: {}", path.display());
                 }
                 match input.json_style.serialize(&config) {
-                    Ok(json) => println!("{json}"),
+                    Ok(json) => crate::report::sink::stdoutln!("{json}"),
                     Err(e) => {
                         return emit_error(&format!("failed to serialize config: {e}"), 2, output);
                     }
@@ -114,7 +114,7 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
             }
             match input.json_style.serialize(&FallowConfig::default()) {
                 Ok(json) => {
-                    println!("{json}");
+                    crate::report::sink::stdoutln!("{json}");
                     ExitCode::SUCCESS
                 }
                 Err(e) => emit_error(&format!("failed to serialize config: {e}"), 2, output),

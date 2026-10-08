@@ -64,6 +64,13 @@ const FAST_COMMANDS = [
     command: "npm",
     args: ["run", "check:conformance-fixtures"],
   },
+  {
+    // Fast, and it catches a Rust file with Windows-only code that no
+    // Windows CI job lints.
+    label: "Workflow policy",
+    command: "node",
+    args: ["--test", "scripts/workflow-policy.test.mjs"],
+  },
 ];
 
 const FULL_ONLY_COMMANDS = [

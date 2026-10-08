@@ -85,6 +85,95 @@ if [ "$GIT_WRITE" -eq 0 ]; then
   exit 0
 fi
 
+# The hook process can start in a directory that is not the session directory.
+# For example, a session in a nested git worktree can get a hook process in the
+# main checkout. The audit must run against the tree of the session. The hook
+# input gives the session directory in its `cwd` field. The audit root is:
+#   1. The nearest directory at or above the session directory that holds this
+#      script at the same relative location (.claude/hooks/fallow-gate.sh or
+#      .codex/hooks/fallow-gate.sh). The walk stops at the first .git entry,
+#      the same rule as the generated handler. The install root can be below
+#      the git root (`--root packages/app`), so this step comes first. The walk
+#      ignores $HOME, because a script there is the user-scope install.
+#   2. Else, when the session directory is in a git work tree: the directory of
+#      the hook process when it is in that work tree, as before. A package
+#      directory with its own fallow config thus stays the audit root. When the
+#      process directory is in another work tree (outside it, or a nested
+#      worktree or submodule below it), the audit root is the git top level. A git top level equal to $HOME does
+#      not count, so a home directory under git never becomes the audit root.
+#   3. Else the session directory.
+# All paths are physical (`pwd -P`), so a symlink cannot move the walk into the
+# parents of the link. When `cwd` is missing, empty or not a directory, the
+# audit runs in the directory of the process, as before.
+physical_dir() {
+  CDPATH='' cd "$1" 2>/dev/null && pwd -P
+}
+
+gate_relative_path() {
+  local script_dir harness_dir
+  script_dir="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 0
+  [ "$(basename "$script_dir")" = hooks ] || return 0
+  harness_dir="$(basename "$(dirname "$script_dir")")"
+  case "$harness_dir" in
+    .claude | .codex)
+      printf '%s\n' "$harness_dir/hooks/fallow-gate.sh"
+      ;;
+  esac
+}
+
+resolve_audit_root() {
+  local session_dir="$1" gate_rel="$2" process_dir="$3" home_dir="$4" dir parent top process_top
+  dir="$session_dir"
+  if [ -n "$gate_rel" ]; then
+    while :; do
+      if [ -f "$dir/$gate_rel" ] && [ "$dir" != "$home_dir" ]; then
+        printf '%s\n' "$dir"
+        return 0
+      fi
+      [ -e "$dir/.git" ] && break
+      parent="$(dirname "$dir")"
+      # A path that is its own parent is the file system root.
+      [ "$parent" = "$dir" ] && break
+      dir="$parent"
+    done
+  fi
+  if top="$(git -C "$session_dir" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ] &&
+    top="$(physical_dir "$top")" && [ "$top" != "$home_dir" ]; then
+    # A path under the top level is not enough: a nested worktree, submodule
+    # or nested repository below it is another work tree. Keep the process
+    # directory only when its own git top level is the same work tree.
+    process_top="$(git -C "$process_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$process_top" ] && process_top="$(physical_dir "$process_top")" &&
+      [ "$process_top" = "$top" ]; then
+      printf '%s\n' "$process_dir"
+    else
+      printf '%s\n' "$top"
+    fi
+    return 0
+  fi
+  printf '%s\n' "$session_dir"
+}
+
+SESSION_CWD="$(jq -r '.cwd // empty' <<<"$INPUT" 2>/dev/null || true)"
+if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
+  # `cd` and `pwd` give an absolute path, also for a Windows path in git-bash.
+  if SESSION_DIR="$(physical_dir "$SESSION_CWD")"; then
+    HOME_DIR=""
+    if [ -n "${HOME:-}" ]; then
+      HOME_DIR="$(physical_dir "$HOME" || true)"
+    fi
+    PROCESS_DIR="$(pwd -P 2>/dev/null || true)"
+    AUDIT_ROOT="$(resolve_audit_root "$SESSION_DIR" "$(gate_relative_path)" "$PROCESS_DIR" "$HOME_DIR")"
+    if cd "$AUDIT_ROOT" 2>/dev/null; then
+      if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
+        echo "fallow-gate: auditing $AUDIT_ROOT (session directory $SESSION_DIR)." >&2
+      fi
+    else
+      echo "fallow-gate: cannot enter $AUDIT_ROOT, auditing $(pwd) instead." >&2
+    fi
+  fi
+fi
+
 # A real installed Git hook keeps its caller's PATH and does not add
 # node_modules/.bin, so a project-local install is invisible to `command -v`.
 # The arms below cover the layouts a project-local install can take, in the

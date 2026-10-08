@@ -464,7 +464,7 @@ struct ListJsonInput<'a> {
 fn print_list_json(input: &ListJsonInput<'_>) -> Result<(), ExitCode> {
     match render_list_json(input) {
         Ok(json) => {
-            println!("{json}");
+            crate::report::sink::stdoutln!("{json}");
             Ok(())
         }
         Err(err) => {
@@ -690,14 +690,14 @@ fn print_list_human(input: &ListHumanInput<'_>) {
     {
         eprintln!("Discovered {} files", disc.len());
         for file in disc {
-            println!("{}", format_display_path(&file.path, opts.root));
+            crate::report::sink::stdoutln!("{}", format_display_path(&file.path, opts.root));
         }
     }
 
     if let Some(entries) = entry_points {
         eprintln!("Found {} entry points", entries.len());
         for ep in entries {
-            println!(
+            crate::report::sink::stdoutln!(
                 "{} ({})",
                 format_display_path(&ep.path, opts.root),
                 ep.source
@@ -730,8 +730,8 @@ fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
         }
     );
     for entry in &weight.entries {
-        println!("{} ({})", entry.path, entry.source);
-        println!(
+        crate::report::sink::stdoutln!("{} ({})", entry.path, entry.source);
+        crate::report::sink::stdoutln!(
             "  eager          {} {}, {}{}",
             entry.eager_modules,
             pluralize("module", entry.eager_modules),
@@ -742,13 +742,13 @@ fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
                 String::new()
             }
         );
-        println!(
+        crate::report::sink::stdoutln!(
             "  deferred       {} {}, {}",
             entry.deferred_modules,
             pluralize("module", entry.deferred_modules),
             format_bytes(entry.deferred_bytes)
         );
-        println!(
+        crate::report::sink::stdoutln!(
             "  out of thread  {} {}, {}",
             entry.out_of_thread_modules,
             pluralize("module", entry.out_of_thread_modules),
@@ -760,20 +760,20 @@ fn print_entry_weight_human(weight: &fallow_output::EntryWeightListing) {
                 .iter()
                 .map(|package| package.name.as_str())
                 .collect();
-            println!(
+            crate::report::sink::stdoutln!(
                 "  eager packages {}: {}",
                 entry.eager_package_count,
                 names.join(", ")
             );
         }
         if !entry.dominating_imports.is_empty() {
-            println!("  imports that keep the most bytes eager:");
+            crate::report::sink::stdoutln!("  imports that keep the most bytes eager:");
             for import in &entry.dominating_imports {
                 let location = import.line.map_or_else(
                     || import.importer.clone(),
                     |line| format!("{}:{line}", import.importer),
                 );
-                println!(
+                crate::report::sink::stdoutln!(
                     "    {location} -> {}  {}, {} {}",
                     import.target,
                     format_bytes(import.exclusive_bytes),
@@ -876,7 +876,7 @@ fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explic
             } else {
                 ""
             };
-            println!("  {} -> {path_str}{suffix}", w.name);
+            crate::report::sink::stdoutln!("  {} -> {path_str}{suffix}", w.name);
         }
     }
     if !ws.diagnostics.is_empty() {

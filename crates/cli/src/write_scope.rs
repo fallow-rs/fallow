@@ -106,7 +106,12 @@ pub fn default_cache_dir_note(cli: &Cli, root: &Path) -> Option<String> {
 fn write_targets(cli: &Cli, root: &Path) -> Vec<(&'static str, PathBuf, WriteTarget)> {
     let mut targets = if matches!(
         cli.command,
-        None | Some(Command::Check { .. } | Command::Dupes { .. } | Command::Health { .. })
+        None | Some(
+            Command::Check { .. }
+                | Command::Architecture { .. }
+                | Command::Dupes { .. }
+                | Command::Health { .. }
+        )
     ) {
         save_targets(cli, root)
     } else {
@@ -119,6 +124,7 @@ fn write_targets(cli: &Cli, root: &Path) -> Vec<(&'static str, PathBuf, WriteTar
         cli.command,
         None | Some(
             Command::Check { .. }
+                | Command::Architecture { .. }
                 | Command::Security {
                     subcommand: None,
                     ..

@@ -62,6 +62,7 @@ An MCP result goes through the normalizer of the envelope in its text content.
 | I11 | A finding-id query gives the same findings and the same answer on every surface | Checked by the harness |
 | I12 | Every security finding has a `finding_id` that is unique in the run and equal on every surface | Checked by the harness |
 | I13 | A `--group` selector and a `--trend-from` baseline give the same groups and group trend status on every surface | Checked by the harness |
+| I14 | `architecture` reports the findings of `dead-code` with the five structure flags, under its own `kind` | Checked by the harness |
 
 ### I1: `check` is an alias of `dead-code`
 
@@ -79,7 +80,10 @@ An MCP result goes through the normalizer of the envelope in its text content.
   CLI-fallback path) and on `fallow_api` in-process.
 - **Surfaces**: CLI `dead-code`, `dupes` and `health`; MCP `analyze`,
   `find_dupes` and `check_health`; `fallow_api::run_dead_code`,
-  `run_duplication` and `run_health`.
+  `run_duplication` and `run_health`. A separate case compares CLI
+  `architecture`, MCP `check_architecture` (typed path, and the CLI path
+  through a `baseline` with no entries) and `fallow_api::run_architecture`,
+  and also compares their finding ids.
 - **Comparison**: finding keys.
 - **Designed exceptions**: health compares only `findings`. The other health
   sections (file scores, hotspots, targets) are not finding sets.
@@ -192,9 +196,10 @@ An MCP result goes through the normalizer of the envelope in its text content.
 - **Statement**: every machine envelope carries a verdict in `gate_outcomes`,
   and that verdict equals the verdict of the human run. The exit code follows
   the documented rule for each command.
-- **Surfaces**: CLI `dead-code`, `dupes`, `health`, `security`, `audit` and
-  bare `fallow`, in JSON and in the human format. `dead-code`, `dupes`,
-  `health` and bare `fallow` also in grouped JSON (`--group-by directory`).
+- **Surfaces**: CLI `dead-code`, `architecture`, `dupes`, `health`,
+  `security`, `audit` and bare `fallow`, in JSON and in the human format.
+  `dead-code`, `architecture`, `dupes`, `health` and bare `fallow` also in
+  grouped JSON (`--group-by directory`).
   MCP `analyze`, `find_dupes` and `check_health` on the CLI-fallback path.
   Each case also arms gates beyond the default rules:
   - `security --gate new --changed-since` against the base commit,
@@ -396,6 +401,22 @@ An MCP result goes through the normalizer of the envelope in its text content.
   check.
 - **Status**: checked by the harness.
 
+### I14: `architecture` selects the dead-code structure findings
+
+- **Statement**: `fallow architecture` and `fallow dead-code --circular-deps
+  --re-export-cycles --package-cycles --boundary-violations
+  --policy-violations` give the same exit code, finding keys, finding ids,
+  `gate_outcomes` and report body. The root `kind` is `architecture` on one
+  side and `dead-code` on the other, and the same holds with `--group-by
+  directory` (`architecture-grouped` and `dead-code-grouped`).
+- **Surfaces**: CLI, flat and grouped JSON.
+- **Comparison**: the full JSON report, after the volatile fields and the
+  root members that name the command (`kind`, `schema_version`, `_meta`,
+  `next_steps`) are removed. The root `kind` of each side is asserted.
+- **Designed exceptions**: the volatile fields and the members that name the
+  command.
+- **Status**: checked by the harness.
+
 ## How the harness works
 
 The generator (`crates/cli/tests/drift/model.rs`) is a proptest strategy for a
@@ -471,6 +492,49 @@ files, and the difference between the two key sets.
 3. Proptest writes the failing case to
    `crates/cli/tests/drift/drift.proptest-regressions`. Commit that line with
    the fix. The harness replays each saved case before it generates new cases.
+
+## Add a command
+
+An analysis subcommand reaches many surfaces. The table in
+`crates/types/src/command_surfaces.rs` is the list of them, and tests read it
+on each surface, so a new command that misses one fails a test:
+
+1. Add a `COMMAND_ENVELOPES` row with the JSON `kind`, the grouped kind, the
+   `report --from` status, the MCP tool (or the reason there is none), whether
+   the drift harness compares its verdict, and whether the CI integrations run
+   it. A visible subcommand that
+   writes no analysis report goes in `COMMANDS_WITHOUT_ANALYSIS_ENVELOPE` with
+   its reason. `every_visible_subcommand_is_classified_for_its_machine_contract`
+   in `crates/cli/src/lib.rs` fails until the command is in one list.
+2. Add the `FallowOutput` variant and the `FALLOW_OUTPUT_VARIANTS` row, then
+   run `npm run generate:contracts`.
+   `every_command_envelope_kind_is_a_schema_kind` and
+   `fallow_output_tags_match_the_kind_table` in `schema_emit.rs` check both.
+3. For a row that renders, route the kind in `cli_report.rs` and in every
+   saved renderer, and add a parity case to `PARITY_CASES` in
+   `report_parity_tests.rs`. `report_from_follows_the_command_envelope_table`
+   and `every_report_from_command_has_a_parity_case` check both. The parity
+   test that `PARITY_CASES` names must run `fallow <command>`.
+4. Add the MCP tool and its `MCP_TOOLS` row. `every_row_has_an_mcp_tool_or_a_reason`
+   checks that the tool names `fallow <command>` as its CLI analogue.
+5. Add a live `run_and_validate` case for each kind to
+   `cli_json_documents_conform_to_output_schema` in `schema_conformance.rs`.
+   The test records each validated kind and fails when a row kind has no
+   case. `CONFORMANCE_EXEMPT_KINDS` names the kinds the suite cannot produce.
+6. For a row with a verdict, add a `VERDICT_COMMANDS` entry in
+   `crates/cli/tests/drift/main.rs`. `every_verdict_command_row_has_an_i7_case`
+   checks it.
+7. For a row with `CiIntegration::Routed`, add the command to the
+   valid-command list in `action/scripts/analyze.sh`, `ci/gitlab-ci.yml` and
+   `crates/cli/templates/ci/gitlab-ci.yml`, and route it in
+   `action/scripts/summary.sh`, `annotate.sh` and the GitLab scripts.
+   `ci_command_lists_follow_the_command_table` checks the valid-command lists
+   and the summary routing. A command that CI does not run gets
+   `CiIntegration::Omitted` with a reason.
+
+The table does not cover the human output, the docs, the annotation and
+comment routing of the CI scripts, or the companion repositories. Check those
+by hand.
 
 ## Add an invariant
 

@@ -75,6 +75,33 @@ pub struct DeadCodeOptions {
     pub finding_ids: Option<Vec<String>>,
 }
 
+/// Options for `detectArchitecture`: import cycles, boundary violations and
+/// rule-pack policy violations. No selector reports every kind.
+#[napi(object)]
+#[derive(Default)]
+pub struct ArchitectureOptions {
+    pub root: Option<String>,
+    pub config_path: Option<String>,
+    pub allow_remote_extends: Option<bool>,
+    pub no_cache: Option<bool>,
+    pub threads: Option<u32>,
+    pub diff_file: Option<String>,
+    pub production: Option<bool>,
+    pub changed_since: Option<String>,
+    /// Ignore the per-package refs of `workspaces.changedSince` for this call.
+    pub no_package_baselines: Option<bool>,
+    pub workspace: Option<Vec<String>>,
+    pub changed_workspaces: Option<String>,
+    pub explain: Option<bool>,
+    /// Report only import cycles.
+    pub cycles: Option<bool>,
+    /// Report only boundary violations, boundary coverage and forbidden calls.
+    pub boundaries: Option<bool>,
+    /// Report only rule-pack policy violations.
+    pub policy: Option<bool>,
+    pub files: Option<Vec<String>>,
+}
+
 #[napi(object)]
 #[derive(Default)]
 pub struct DuplicationOptions {
@@ -432,6 +459,39 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
     }
 }
 
+impl TryFrom<ArchitectureOptions> for api::ArchitectureOptions {
+    type Error = napi::Error;
+
+    fn try_from(value: ArchitectureOptions) -> Result<Self, Self::Error> {
+        Ok(Self {
+            analysis: map_common_options(CommonOptionsInput {
+                root: value.root,
+                config_path: value.config_path,
+                allow_remote_extends: value.allow_remote_extends,
+                no_cache: value.no_cache,
+                threads: value.threads,
+                diff_file: value.diff_file,
+                production: value.production,
+                changed_since: value.changed_since,
+                no_package_baselines: value.no_package_baselines,
+                workspace: value.workspace,
+                changed_workspaces: value.changed_workspaces,
+                explain: value.explain,
+                type_aware: None,
+            })?,
+            files: value
+                .files
+                .unwrap_or_default()
+                .into_iter()
+                .map(std::path::PathBuf::from)
+                .collect(),
+            cycles: value.cycles.unwrap_or(false),
+            boundaries: value.boundaries.unwrap_or(false),
+            policy: value.policy.unwrap_or(false),
+        })
+    }
+}
+
 impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
     type Error = napi::Error;
 
@@ -653,6 +713,7 @@ pub enum ProgrammaticOutput {
     DeadCode(Box<api::DeadCodeProgrammaticOutput>),
     CircularDependencies(Box<api::CircularDependenciesProgrammaticOutput>),
     BoundaryViolations(Box<api::BoundaryViolationsProgrammaticOutput>),
+    Architecture(Box<api::ArchitectureProgrammaticOutput>),
     Duplication(Box<api::DuplicationProgrammaticOutput>),
     FeatureFlags(Box<api::FeatureFlagsProgrammaticOutput>),
     Health(Box<api::HealthProgrammaticOutput>),
@@ -669,6 +730,7 @@ impl ProgrammaticOutput {
             Self::BoundaryViolations(output) => {
                 api::serialize_boundary_violations_programmatic_json(*output)
             }
+            Self::Architecture(output) => api::serialize_architecture_programmatic_json(*output),
             Self::Duplication(output) => api::serialize_duplication_programmatic_json(*output),
             Self::FeatureFlags(output) => api::serialize_feature_flags_programmatic_json(*output),
             Self::Health(output) => api::serialize_health_programmatic_json(*output),
@@ -796,6 +858,18 @@ pub fn detect_boundary_violations(
         api::run_boundary_violations(&options)
             .map(Box::new)
             .map(ProgrammaticOutput::BoundaryViolations)
+    })))
+}
+
+#[napi(js_name = "detectArchitecture")]
+pub fn detect_architecture(
+    options: Option<ArchitectureOptions>,
+) -> napi::Result<AsyncTask<ProgrammaticTask>> {
+    let options = api::ArchitectureOptions::try_from(options.unwrap_or_default())?;
+    Ok(AsyncTask::new(ProgrammaticTask::new(move || {
+        api::run_architecture(&options)
+            .map(Box::new)
+            .map(ProgrammaticOutput::Architecture)
     })))
 }
 
@@ -1427,12 +1501,9 @@ mod tests {
     /// (`fallow_types::mcp_manifest::CAPABILITY_PARITY`). A new export that is
     /// not recorded in the table, or a stale table entry, fails here. Mirrors
     /// the include_str source-scan the schemars-alias guards use.
-    #[test]
-    fn napi_exports_match_capability_parity_table() {
-        use std::collections::BTreeSet;
-
+    fn scanned_function_exports() -> std::collections::BTreeSet<String> {
         let source = include_str!("lib.rs");
-        let mut scanned: BTreeSet<String> = BTreeSet::new();
+        let mut scanned = std::collections::BTreeSet::new();
         let mut lines = source.lines();
         while let Some(line) = lines.next() {
             let trimmed = line.trim_start();
@@ -1444,10 +1515,41 @@ mod tests {
                 }
             }
         }
+        scanned
+    }
+
+    /// Drift guard: the root README and the package README name every
+    /// `#[napi(js_name = ...)]` function export.
+    #[test]
+    fn readmes_list_every_napi_export() {
+        let manifest_dir = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        );
+        for relative in ["README.md", "../../README.md"] {
+            let path = manifest_dir.join(relative);
+            let readme = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            let missing: Vec<String> = scanned_function_exports()
+                .into_iter()
+                .filter(|name| !readme.contains(&format!("`{name}")))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "{} does not name these Node exports: {missing:?}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn napi_exports_match_capability_parity_table() {
+        use std::collections::BTreeSet;
+
+        let scanned: BTreeSet<String> = scanned_function_exports();
         assert_eq!(
             scanned.len(),
-            8,
-            "expected eight #[napi(js_name = ...)] function exports, scanned {scanned:?}"
+            9,
+            "expected nine #[napi(js_name = ...)] function exports, scanned {scanned:?}"
         );
 
         let table: BTreeSet<String> = fallow_types::mcp_manifest::CAPABILITY_PARITY

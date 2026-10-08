@@ -3271,3 +3271,8 @@ mod tests {
         assert!(body.contains("fallow audit --format json --quiet --explain --gate-marker agent"));
     }
 }
+
+// Tests for the audit root of the generated gate script.
+#[cfg(all(test, unix))]
+#[path = "setup_hooks_gate_tests.rs"]
+mod gate_audit_root_tests;
