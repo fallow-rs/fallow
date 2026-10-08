@@ -28,6 +28,9 @@ serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }
 rustc-hash = { workspace = true }
 
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = { workspace = true }

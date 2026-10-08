@@ -27,3 +27,10 @@ rustflags = ["-C", "link-arg=/STACK:16777216"]
 # hosts it is a harmless lazy virtual reserve.
 [env]
 RUST_MIN_STACK = "16777216"
+
+# mimalloc (musl binaries only) commits arena memory eagerly by default on
+# Linux. That raised peak RSS by about 150% in a measurement; with eager
+# commit off the RSS cost is about 30% and the speed is the same. cc reads
+# CFLAGS_<target>. An env var that is already set wins over these values.
+CFLAGS_x86_64_unknown_linux_musl = "-DMI_DEFAULT_ARENA_EAGER_COMMIT=0"
+CFLAGS_aarch64_unknown_linux_musl = "-DMI_DEFAULT_ARENA_EAGER_COMMIT=0"

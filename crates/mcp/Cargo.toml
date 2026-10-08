@@ -35,6 +35,9 @@ tempfile.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { workspace = true }
+
 [dev-dependencies]
 regex.workspace = true
 

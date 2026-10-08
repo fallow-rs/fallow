@@ -234,6 +234,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Linux musl binaries are about 4 times faster.** musl's own `malloc`
+  is slow when many threads allocate, and fallow analyzes files in
+  parallel. The musl builds (the `linux-x64-musl` and `linux-arm64-musl` npm
+  packages, Alpine, and the musl release assets) now use mimalloc. On a
+  10-core aarch64 Alpine container, `check`, `dupes` and `health` took 77%
+  less time over 15 fixture cases, with identical output. Peak memory is
+  about a third higher. Glibc, macOS and Windows builds do not change. A
+  `cargo install fallow-cli` on a musl host now needs a C compiler.
+
 - **`fallow viz` now shows where to start.** The Overview panel opens with
   the health grade and one card per lens: the number of files, the number
   of high findings, and the worst file with its reason. The Overview map colors files

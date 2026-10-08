@@ -1,5 +1,11 @@
 use std::process::ExitCode;
 
+// musl malloc is slow when many threads allocate. mimalloc makes the
+// parallel analysis several times faster on musl. Only binaries set this.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// Multicall entry for the packaged `fallow` binary.
 ///
 /// The npm platform packages and the VS Code extension ship a single binary

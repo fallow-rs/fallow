@@ -73,6 +73,9 @@ ignore = "0.4"
 glob = "0.3"
 globset = { version = "0.4", features = ["serde1"] }
 rustix = { version = "1", features = ["event", "fs", "process"] }
+
+# Allocator for the musl binaries (musl malloc is slow under threads)
+mimalloc = { version = "0.1.52", default-features = false }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
 
 # Hashing

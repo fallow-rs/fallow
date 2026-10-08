@@ -8,7 +8,8 @@ repository.workspace = true
 description = "Multicall fallow binary bundling the CLI, LSP, and MCP servers into one engine for npm and VS Code distribution"
 # Never published to crates.io. This crate exists only to produce the packaged
 # `fallow` binary for the npm platform packages and the VS Code extension; the
-# published CLI stays `fallow-cli` (pure Rust, no QuickJS/tower-lsp), so
+# published CLI stays `fallow-cli` (no QuickJS/tower-lsp; on musl targets it
+# compiles the C mimalloc allocator), so
 # `cargo install fallow-cli` is unchanged. Keeping this `publish = false` also
 # keeps the release.yml crates.io publish list (and its drift test) untouched.
 publish = false
@@ -21,6 +22,9 @@ path = "src/main.rs"
 fallow-cli = { version = "3.32.0", path = "../cli" }
 fallow-lsp = { version = "3.32.0", path = "../lsp" }
 fallow-mcp = { version = "3.32.0", path = "../mcp" }
+
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { workspace = true }
 
 [lints]
 workspace = true
