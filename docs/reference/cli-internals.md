@@ -238,6 +238,9 @@ after every gate set the exit code.
     hidden finding counts as matched in `baseline_staleness`, and
     `baselines prune` keeps it. A baseline saved while findings are hidden
     does not contain them.
+  - A regression baseline (`--save-regression-baseline`) saved by an older
+    version counts the hidden findings. After the upgrade it has more
+    headroom, so users must save it again.
   - `fallow_engine::health::shared_parse_data_from_artifacts` restores the
     hidden findings before the health pipeline reads the dead-code results.
     The vital signs, the file scores and the score therefore count them in
