@@ -1398,6 +1398,12 @@ pub(crate) fn print_dependency_trace(
     }
 }
 
+/// Print `fallow trace --dependency` as human output: the dependency trace,
+/// then the usage by imported name.
+pub(crate) fn print_dependency_usage_trace_human(trace: &DependencyTrace, quiet: bool) {
+    human::print_dependency_usage_trace_human(trace, quiet);
+}
+
 /// Print clone trace results.
 pub(crate) fn print_clone_trace(
     trace: &CloneTrace,

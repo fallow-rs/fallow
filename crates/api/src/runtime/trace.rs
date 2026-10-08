@@ -3,7 +3,7 @@ use fallow_types::duplicates::DuplicationReport;
 use rustc_hash::FxHashSet;
 
 use crate::{
-    ProgrammaticAnalysisContext, ProgrammaticError, TraceCloneOptions,
+    DependencyUsageQuery, ProgrammaticAnalysisContext, ProgrammaticError, TraceCloneOptions,
     TraceCloneProgrammaticOutput, TraceCloneTarget, TraceDependencyOptions,
     TraceDependencyProgrammaticOutput, TraceErrorOptions, TraceErrorProgrammaticOutput,
     TraceExportOptions, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOptions,
@@ -235,31 +235,53 @@ pub fn run_trace_dependency(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
+        if let Some(query) = &options.usage {
+            return trace_dependency_usage(&session, &options.package_name, query);
+        }
         let artifacts = trace_artifacts(&session)?;
         let workspace_roots: Vec<&std::path::Path> = session
             .workspaces()
             .iter()
             .map(|ws| ws.root.as_path())
             .collect();
-        let mut output = fallow_engine::trace::trace_dependency(
-            &artifacts.graph,
-            session.root(),
-            &workspace_roots,
-            &session.config().ignore_patterns,
+        let output = fallow_engine::trace::build_dependency_trace(
+            &fallow_engine::trace::DependencyTraceInputs {
+                graph: &artifacts.graph,
+                root: session.root(),
+                workspace_roots: &workspace_roots,
+                ignore_patterns: &session.config().ignore_patterns,
+                script_used_packages: &artifacts.script_used_packages,
+                provenance: &artifacts.trace_provenance,
+                results: &artifacts.results,
+            },
             &options.package_name,
-            &artifacts.script_used_packages,
         );
-        output.sources = artifacts
-            .trace_provenance
-            .dependency_sources(&options.package_name);
-        output.apply_tooling_credit(
-            artifacts
-                .trace_provenance
-                .tooling_credit(&options.package_name),
-        );
-        output.apply_unused_declarations(&artifacts.results, session.root());
         Ok(TraceDependencyProgrammaticOutput { output })
     })
+}
+
+/// Trace a dependency with its per-specifier usage.
+fn trace_dependency_usage(
+    session: &AnalysisSession,
+    package_name: &str,
+    query: &DependencyUsageQuery,
+) -> ProgrammaticResult<TraceDependencyProgrammaticOutput> {
+    let result = fallow_engine::trace::trace_dependency_with_session(session, package_name, query)
+        .map_err(|err| {
+            super::dead_code::map_engine_error(
+                &err,
+                "trace analysis failed",
+                "FALLOW_TRACE_FAILED",
+                "trace",
+            )
+        })?;
+    result
+        .map(|output| TraceDependencyProgrammaticOutput { output })
+        .map_err(|err| {
+            ProgrammaticError::new(err.to_string(), 2)
+                .with_code("FALLOW_TRACE_INVALID_CURSOR")
+                .with_context("cursor")
+        })
 }
 
 /// Trace duplicate-code groups by location or stable fingerprint.

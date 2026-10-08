@@ -60,6 +60,7 @@ fn trace_file_and_trace_dependency_carry_the_federation_sources() {
     let dependency = run_trace_dependency(&TraceDependencyOptions {
         analysis: analysis(&dir),
         package_name: "checkout".to_string(),
+        ..Default::default()
     })
     .expect("trace dependency");
     assert_eq!(

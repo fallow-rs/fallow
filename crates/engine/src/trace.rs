@@ -9,6 +9,11 @@ use crate::module_graph::RetainedModuleGraph;
 
 #[path = "trace_impl.rs"]
 pub(crate) mod trace_impl;
+#[path = "trace_usage_impl.rs"]
+mod trace_usage_impl;
+
+pub use fallow_types::trace_usage::{DependencyUsage, DependencyUsageQuery, SitePageRequest};
+pub use trace_usage_impl::UsageError;
 
 pub use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
@@ -129,6 +134,103 @@ pub fn trace_dependency(
         package_name,
         script_used_packages,
     )
+}
+
+/// The analysis facts that a dependency trace reads.
+pub struct DependencyTraceInputs<'a> {
+    /// The retained module graph.
+    pub graph: &'a RetainedModuleGraph,
+    /// The project root.
+    pub root: &'a Path,
+    /// The roots of the workspaces, for the peer-dependency credit.
+    pub workspace_roots: &'a [&'a Path],
+    /// The configured `ignorePatterns`.
+    pub ignore_patterns: &'a fallow_config::IgnorePatternSet,
+    /// Packages invoked from package.json scripts, CI configs and git hooks.
+    pub script_used_packages: &'a FxHashSet<String>,
+    /// Which configs name which files and dependency names.
+    pub provenance: &'a TraceProvenance,
+    /// The findings of the analysis, which name the manifests that the
+    /// unused-dependency check flags.
+    pub results: &'a fallow_types::results::AnalysisResults,
+}
+
+/// Build the complete dependency trace: the importers, the config sources,
+/// the tooling credit and the flagged manifests.
+///
+/// `fallow dead-code --trace-dependency`, `fallow trace --dependency` and the
+/// programmatic API share this builder, so the base fields agree on every
+/// surface.
+#[must_use]
+pub fn build_dependency_trace(
+    inputs: &DependencyTraceInputs<'_>,
+    package_name: &str,
+) -> DependencyTrace {
+    let mut trace = trace_dependency(
+        inputs.graph,
+        inputs.root,
+        inputs.workspace_roots,
+        inputs.ignore_patterns,
+        package_name,
+        inputs.script_used_packages,
+    );
+    trace.sources = inputs.provenance.dependency_sources(package_name);
+    trace.apply_tooling_credit(inputs.provenance.tooling_credit(package_name));
+    trace.apply_unused_declarations(inputs.results, inputs.root);
+    trace
+}
+
+/// Trace a dependency with its per-specifier usage through an existing
+/// analysis session.
+///
+/// The inner `Result` carries a query error, such as a cursor that belongs
+/// to another query.
+///
+/// # Errors
+///
+/// Returns an error if parsing, graph construction, or analysis fails.
+pub fn trace_dependency_with_session(
+    session: &crate::session::AnalysisSession,
+    package_name: &str,
+    query: &DependencyUsageQuery,
+) -> crate::EngineResult<Result<DependencyTrace, UsageError>> {
+    // Keep the parsed modules: the usage walk reads their import facts.
+    let output = session.analyze_dead_code_with_shared_artifacts(true, true)?;
+    let graph = output.graph.as_ref().ok_or_else(|| {
+        crate::EngineError::new("trace --dependency requires a retained module graph")
+    })?;
+    let modules = output.modules.as_deref().unwrap_or(&[]);
+    let workspace_roots: Vec<&Path> = session
+        .workspaces()
+        .iter()
+        .map(|workspace| workspace.root.as_path())
+        .collect();
+    let mut trace = build_dependency_trace(
+        &DependencyTraceInputs {
+            graph,
+            root: session.root(),
+            workspace_roots: &workspace_roots,
+            ignore_patterns: &session.config().ignore_patterns,
+            script_used_packages: &output.script_used_packages,
+            provenance: &output.trace_provenance,
+            results: &output.results,
+        },
+        package_name,
+    );
+    match trace_usage_impl::dependency_usage(
+        graph.as_graph(),
+        modules,
+        session.root(),
+        package_name,
+        &trace.imported_by,
+        query,
+    ) {
+        Ok(usage) => {
+            trace.usage = Some(usage);
+            Ok(Ok(trace))
+        }
+        Err(err) => Ok(Err(err)),
+    }
 }
 
 /// Trace duplicate-code groups that contain a source location.

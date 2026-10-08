@@ -8,6 +8,9 @@ use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ReExportChain, TraceSource, TracedCloneGroup,
 };
+use fallow_types::trace_usage::{
+    DependencyUsage, FileLevelUnresolved, SpecifierUnresolved, UsageSitePage, WrapperShape,
+};
 
 use crate::report::{human_status_line, semantic_status};
 
@@ -27,6 +30,18 @@ pub(in crate::report) fn print_file_trace_human(trace: &FileTrace) {
 
 pub(in crate::report) fn print_dependency_trace_human(trace: &DependencyTrace) {
     print_lines(&build_dependency_trace_human_lines(trace));
+}
+
+/// Print `fallow trace --dependency` on stdout: the dependency block, then
+/// the usage block.
+pub(in crate::report) fn print_dependency_usage_trace_human(trace: &DependencyTrace, quiet: bool) {
+    let mut lines = build_dependency_trace_human_lines(trace);
+    if let Some(usage) = &trace.usage {
+        lines.extend(build_dependency_usage_human_lines(usage, quiet));
+    }
+    for line in lines {
+        crate::report::sink::outln!("{line}");
+    }
 }
 
 pub(in crate::report) fn print_clone_trace_human(trace: &CloneTrace, root: &Path) {
@@ -447,6 +462,150 @@ fn push_trace_sources(lines: &mut Vec<String>, sources: &[TraceSource]) {
             source.key,
             source.config.display()
         ));
+    }
+}
+
+/// The non-zero reasons of a specifier, as `reason N` pairs.
+fn specifier_unresolved_parts(unresolved: &SpecifierUnresolved) -> Vec<String> {
+    [
+        ("value_alias", unresolved.value_alias),
+        ("non_call_reference", unresolved.non_call_reference),
+        ("jsx_element", unresolved.jsx_element),
+        ("re_export", unresolved.re_export),
+        ("nested_wrapper", unresolved.nested_wrapper),
+        ("binding_without_site", unresolved.binding_without_site),
+    ]
+    .into_iter()
+    .filter(|(_, count)| *count > 0)
+    .map(|(reason, count)| format!("{reason} {count}"))
+    .collect()
+}
+
+fn file_level_unresolved_parts(unresolved: &FileLevelUnresolved) -> Vec<String> {
+    [
+        ("dynamic_import", unresolved.dynamic_import),
+        ("require", unresolved.require),
+        ("side_effect_import", unresolved.side_effect_import),
+        ("star_re_export", unresolved.star_re_export),
+        ("unattributed_file", unresolved.unattributed_file),
+    ]
+    .into_iter()
+    .filter(|(_, count)| *count > 0)
+    .map(|(reason, count)| format!("{reason} {count}"))
+    .collect()
+}
+
+fn build_dependency_usage_human_lines(usage: &DependencyUsage, quiet: bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push("  Usage by imported name (syntactic):".to_string());
+    if usage.specifiers.is_empty() {
+        lines.push(format!("    {}", "No imported name.".dimmed()));
+    }
+    let width = usage
+        .specifiers
+        .iter()
+        .map(|entry| entry.name.len())
+        .max()
+        .unwrap_or(0)
+        .max("NAME".len());
+    if !usage.specifiers.is_empty() {
+        lines.push(format!(
+            "    {:<width$}  {:>5}  {:>9}  {:>5}  UNRESOLVED",
+            "NAME", "FILES", "TYPE-ONLY", "CALLS"
+        ));
+    }
+    for entry in &usage.specifiers {
+        let unresolved = specifier_unresolved_parts(&entry.unresolved);
+        let unresolved = if unresolved.is_empty() {
+            "-".to_string()
+        } else {
+            unresolved.join(", ")
+        };
+        lines.push(format!(
+            "    {:<width$}  {:>5}  {:>9}  {:>5}  {unresolved}",
+            entry.name, entry.file_count, entry.type_only_file_count, entry.call_site_count
+        ));
+        for wrapper in &entry.wrappers {
+            let shape = match wrapper.shape {
+                WrapperShape::Call => "call",
+                WrapperShape::Alias => "alias",
+            };
+            lines.push(format!(
+                "      {} {} via {}:{} ({shape}): {} call(s) in {} file(s)",
+                "wrapper".dimmed(),
+                wrapper.export.bold(),
+                wrapper.file,
+                wrapper.line,
+                wrapper.call_site_count,
+                wrapper.consumer_file_count
+            ));
+        }
+    }
+    let file_level = file_level_unresolved_parts(&usage.unresolved);
+    if !file_level.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("  File-level uses: {}", file_level.join(", ")));
+    }
+    if let Some(page) = &usage.sites {
+        push_usage_site_lines(&mut lines, page);
+    }
+    if let Some(closure) = &usage.closure {
+        lines.push(String::new());
+        lines.push(format!(
+            "  Files that import the users (depth {}, {} file(s)):",
+            closure.depth, closure.file_count
+        ));
+        for file in &closure.files {
+            lines.push(format!("    [{}] {}", file.depth, file.file));
+        }
+        if closure.truncated {
+            lines.push(format!(
+                "    {}",
+                "More importers exist past this depth. Raise --depth to see them.".dimmed()
+            ));
+        }
+    }
+    if !quiet {
+        lines.push(String::new());
+        lines.push(format!(
+            "  {}",
+            "Counts come from import bindings and call sites, without types. An unresolved use is counted, not followed."
+                .dimmed()
+        ));
+    }
+    lines.push(String::new());
+    lines
+}
+
+fn push_usage_site_lines(lines: &mut Vec<String>, page: &UsageSitePage) {
+    lines.push(String::new());
+    lines.push(format!(
+        "  Sites ({} on this page, {} in total):",
+        page.items.len(),
+        page.total
+    ));
+    for site in &page.items {
+        let mut detail = String::new();
+        if let Some(specifier) = &site.specifier {
+            detail.push_str(specifier);
+            detail.push(' ');
+        }
+        detail.push_str(site.kind.as_str());
+        if let Some(member) = &site.member {
+            detail.push_str(" .");
+            detail.push_str(member);
+        }
+        if let Some(via) = &site.via {
+            detail.push_str(" via ");
+            detail.push_str(via);
+        }
+        lines.push(format!(
+            "    {}:{}:{}  {detail}",
+            site.file, site.line, site.col
+        ));
+    }
+    if let Some(cursor) = &page.next_cursor {
+        lines.push(format!("  Next page: --cursor {cursor}"));
     }
 }
 
@@ -986,6 +1145,7 @@ mod tests {
             sources: Vec::new(),
             tooling_credit: None,
             unused_in: Vec::new(),
+            usage: None,
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));
@@ -1012,6 +1172,7 @@ mod tests {
             sources: Vec::new(),
             tooling_credit: None,
             unused_in: Vec::new(),
+            usage: None,
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));
@@ -1035,6 +1196,7 @@ mod tests {
             sources: Vec::new(),
             tooling_credit: None,
             unused_in: Vec::new(),
+            usage: None,
         };
         trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "plugin-reference".to_string(),
@@ -1061,6 +1223,7 @@ mod tests {
             sources: Vec::new(),
             tooling_credit: None,
             unused_in: Vec::new(),
+            usage: None,
         };
         config_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "plugin-config".to_string(),
@@ -1082,6 +1245,7 @@ mod tests {
             sources: Vec::new(),
             tooling_credit: None,
             unused_in: Vec::new(),
+            usage: None,
         };
         types_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "types-target".to_string(),
@@ -1105,6 +1269,7 @@ mod tests {
             sources: Vec::new(),
             tooling_credit: None,
             unused_in: Vec::new(),
+            usage: None,
         };
         cli_trace.apply_tooling_credit(Some(fallow_types::trace::ToolingCredit {
             reason: "known-tooling-config".to_string(),
@@ -1137,6 +1302,7 @@ mod tests {
             }],
             tooling_credit: None,
             unused_in: Vec::new(),
+            usage: None,
         };
 
         let rendered = plain(&build_dependency_trace_human_lines(&trace));

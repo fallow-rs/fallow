@@ -74,6 +74,14 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         probe: &["dead-code", "--trace-dependency", "lodash"],
     },
     TaskRow {
+        task: "migrate a dependency",
+        command: "fallow trace --dependency <name> --sites",
+        note: Some(
+            "Counts each imported name, follows one hop through project wrappers, and counts each use that it cannot resolve.",
+        ),
+        probe: &["trace", "--dependency", "lodash", "--sites"],
+    },
+    TaskRow {
         task: "commit or open a PR",
         command: "fallow audit --base <ref>",
         note: None,

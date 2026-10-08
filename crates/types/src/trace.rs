@@ -393,6 +393,13 @@ pub struct DependencyTrace {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub unused_in: Vec<PathBuf>,
+    /// How the code uses each imported name of the dependency. Present on
+    /// `fallow trace --dependency`, and on the MCP `trace_dependency` tool
+    /// when a usage parameter is set. Absent on
+    /// `fallow dead-code --trace-dependency`. The object has its own
+    /// `schema_version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::trace_usage::DependencyUsage>,
 }
 
 impl DependencyTrace {

@@ -378,6 +378,35 @@ fn trace_dependency_params_require_package_name() {
     let params: TraceDependencyParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.package_name, "react");
     assert_eq!(params.root.as_deref(), Some("/repo"));
+    assert!(params.usage.is_none());
+    assert!(params.specifiers.is_none());
+    assert!(params.closure_depth.is_none());
+}
+
+#[test]
+fn trace_dependency_params_accept_usage_fields() {
+    let json = r#"{"package_name":"react-redux","usage":true,"specifiers":["useSelector"],
+        "sites":true,"limit":5,"cursor":"v1.00","closure_depth":2}"#;
+    let params: TraceDependencyParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.usage, Some(true));
+    assert_eq!(
+        params.specifiers.as_deref(),
+        Some(["useSelector".to_string()].as_slice())
+    );
+    assert_eq!(params.sites, Some(true));
+    assert_eq!(params.limit, Some(5));
+    assert_eq!(params.cursor.as_deref(), Some("v1.00"));
+    assert_eq!(params.closure_depth, Some(2));
+}
+
+#[test]
+fn trace_dependency_params_schema_declares_the_ranges() {
+    let schema = serde_json::to_value(schemars::schema_for!(TraceDependencyParams)).unwrap();
+    let properties = &schema["properties"];
+    assert_eq!(properties["limit"]["minimum"], 1);
+    assert_eq!(properties["limit"]["maximum"], 500);
+    assert_eq!(properties["closure_depth"]["minimum"], 1);
+    assert_eq!(properties["closure_depth"]["maximum"], 10);
 }
 
 #[test]

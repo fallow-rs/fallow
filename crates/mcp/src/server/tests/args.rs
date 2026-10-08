@@ -1201,6 +1201,7 @@ fn trace_dependency_args_minimal() {
         workspace: None,
         no_cache: None,
         threads: None,
+        ..Default::default()
     })
     .unwrap();
     assert_eq!(
@@ -1214,6 +1215,115 @@ fn trace_dependency_args_minimal() {
             "react",
         ]
     );
+}
+
+#[test]
+fn trace_dependency_args_without_usage_fields_keep_the_dead_code_trace() {
+    let args = build_trace_dependency_args(&TraceDependencyParams {
+        package_name: "react".to_string(),
+        production: Some(true),
+        workspace: Some("app".to_string()),
+        usage: Some(false),
+        sites: Some(false),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        args,
+        [
+            "dead-code",
+            "--format",
+            "json",
+            "--quiet",
+            "--production",
+            "--workspace",
+            "app",
+            "--trace-dependency",
+            "react",
+        ]
+    );
+}
+
+#[test]
+fn trace_dependency_args_with_usage_fields_use_the_trace_command() {
+    let args = build_trace_dependency_args(&TraceDependencyParams {
+        package_name: "react-redux".to_string(),
+        production: Some(true),
+        workspace: Some("app".to_string()),
+        specifiers: Some(vec!["useSelector".to_string(), "connect".to_string()]),
+        limit: Some(5),
+        cursor: Some("v1.00".to_string()),
+        closure_depth: Some(2),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        args,
+        [
+            "trace",
+            "--format",
+            "json",
+            "--quiet",
+            "--production",
+            "--workspace",
+            "app",
+            "--dependency",
+            "react-redux",
+            "--specifier",
+            "useSelector",
+            "--specifier",
+            "connect",
+            "--sites",
+            "--limit",
+            "5",
+            "--cursor",
+            "v1.00",
+            "--callers",
+            "--depth",
+            "2",
+        ]
+    );
+    let counts_only = build_trace_dependency_args(&TraceDependencyParams {
+        package_name: "react-redux".to_string(),
+        usage: Some(true),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        counts_only,
+        [
+            "trace",
+            "--format",
+            "json",
+            "--quiet",
+            "--dependency",
+            "react-redux"
+        ]
+    );
+}
+
+#[test]
+fn trace_dependency_args_reject_usage_values_out_of_range() {
+    for params in [
+        TraceDependencyParams {
+            package_name: "react-redux".to_string(),
+            limit: Some(0),
+            ..Default::default()
+        },
+        TraceDependencyParams {
+            package_name: "react-redux".to_string(),
+            limit: Some(501),
+            ..Default::default()
+        },
+        TraceDependencyParams {
+            package_name: "react-redux".to_string(),
+            closure_depth: Some(11),
+            ..Default::default()
+        },
+    ] {
+        let err = build_trace_dependency_args(&params).unwrap_err();
+        assert!(err.contains("\"exit_code\":2"), "{err}");
+    }
 }
 
 #[test]
@@ -1462,6 +1572,7 @@ fn trace_args_reject_blank_required_values() {
         workspace: None,
         no_cache: None,
         threads: None,
+        ..Default::default()
     })
     .unwrap_err();
     assert_eq!(
@@ -2351,6 +2462,7 @@ fn trace_tools_do_not_include_explain() {
         workspace: None,
         no_cache: None,
         threads: None,
+        ..Default::default()
     })
     .unwrap();
     let clone = build_trace_clone_args(&TraceCloneParams {

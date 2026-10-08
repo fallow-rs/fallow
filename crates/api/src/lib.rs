@@ -137,6 +137,9 @@ pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
     TracedCloneGroup, TracedExport, TracedReExport,
 };
+pub use fallow_types::trace_usage::{
+    DependencyUsage, DependencyUsageQuery, SitePageRequest, UsageQueryError,
+};
 pub use grouped_output::{
     ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,
     health_signal_header_part, largest_clone_group_owner_with,
@@ -906,6 +909,9 @@ pub struct TraceDependencyOptions {
     pub analysis: AnalysisOptions,
     /// Package whose importers are traced.
     pub package_name: String,
+    /// The per-specifier usage to report. `None` keeps the output equal to
+    /// `fallow dead-code --trace-dependency`, with no `usage` object.
+    pub usage: Option<DependencyUsageQuery>,
 }
 
 /// Duplicate-code trace target.

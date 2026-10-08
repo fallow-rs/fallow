@@ -99,6 +99,7 @@ mod suppressions;
 mod task_matrix;
 mod telemetry;
 mod trace_chain;
+mod trace_dependency;
 mod trace_error;
 mod trace_path;
 mod type_aware_degrade;
@@ -162,6 +163,7 @@ When the agent is about to...
   prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
   find how one module reaches another      fallow trace --path <from> <to>
   delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
+  migrate a dependency                     fallow trace --dependency <name> --sites
   commit or open a PR                      fallow audit --base <ref>
   read a diff before approving it          fallow review --base <ref> --brief
   prioritize refactoring                   fallow health --hotspots --targets
@@ -1152,9 +1154,54 @@ enum Command {
     /// instead of an error.
     Trace {
         /// Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate).
-        /// Omitted when `--path` is used.
-        #[arg(value_name = "FILE:SYMBOL", required_unless_present = "path")]
+        /// Omitted when `--path` or `--dependency` is used.
+        #[arg(
+            value_name = "FILE:SYMBOL",
+            required_unless_present_any = ["path", "dependency"]
+        )]
         symbol: Option<String>,
+
+        /// How the code uses each imported name of a package: file and call
+        /// counts, one hop through project wrappers, and a count of each use
+        /// that the trace cannot resolve
+        ///
+        /// `--sites`, `--specifier`, `--limit` and `--cursor` page the usage
+        /// sites. `--callers --depth N` adds the files that import the users.
+        #[arg(
+            long,
+            value_name = "PACKAGE",
+            conflicts_with_all = ["symbol", "path", "callees"]
+        )]
+        dependency: Option<String>,
+
+        /// With `--dependency`, report only these imported names
+        /// (repeatable or comma-separated). Turns on the site page.
+        #[arg(
+            long,
+            value_name = "NAME",
+            value_delimiter = ',',
+            requires = "dependency"
+        )]
+        specifier: Vec<String>,
+
+        /// With `--dependency`, list the usage sites with file, line and column
+        #[arg(long, requires = "dependency")]
+        sites: bool,
+
+        /// With `--dependency`, the largest number of sites on a page
+        /// (1 to 500, default 50). Turns on the site page.
+        #[arg(
+            long,
+            value_name = "N",
+            requires = "dependency",
+            value_parser = clap::value_parser!(u16).range(1..=500)
+        )]
+        limit: Option<u16>,
+
+        /// With `--dependency`, the `next_cursor` of the previous page. Turns
+        /// on the site page.
+        #[arg(long, value_name = "TOKEN", requires = "dependency")]
+        cursor: Option<String>,
 
         /// Shortest import path between two modules, as two file paths
         /// (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the
@@ -4330,22 +4377,43 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         } => dispatch_inspect_command(dispatch, file, symbol, symbol_chain, churn),
         Command::Trace {
             symbol,
+            dependency,
+            specifier,
+            sites,
+            limit,
+            cursor,
             path,
             eager_only,
             callers,
             callees,
             depth,
-        } => dispatch_trace_command(
-            dispatch,
-            symbol,
-            &path,
-            eager_only,
-            TraceChainFlags {
-                callers,
-                callees,
-                depth,
-            },
-        ),
+        } => {
+            if let Some(package_name) = dependency {
+                return dispatch_trace_dependency(
+                    dispatch,
+                    trace_dependency::TraceDependencyTarget {
+                        package_name,
+                        specifiers: specifier,
+                        sites,
+                        limit,
+                        cursor,
+                        callers,
+                        depth,
+                    },
+                );
+            }
+            dispatch_trace_command(
+                dispatch,
+                symbol,
+                &path,
+                eager_only,
+                TraceChainFlags {
+                    callers,
+                    callees,
+                    depth,
+                },
+            )
+        }
         Command::TraceError { trace_file } => {
             trace_error::run_trace_error(&trace_error::TraceErrorOptions {
                 root: dispatch.root,
@@ -4909,6 +4977,30 @@ struct TraceChainFlags {
     callers: bool,
     callees: bool,
     depth: Option<u32>,
+}
+
+fn dispatch_trace_dependency(
+    dispatch: &DispatchContext<'_>,
+    target: trace_dependency::TraceDependencyTarget,
+) -> ExitCode {
+    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
+        Ok(production) => production,
+        Err(code) => return code,
+    };
+    trace_dependency::run_trace_dependency(&trace_dependency::TraceDependencyOptions {
+        root: dispatch.root,
+        config_path: &dispatch.cli.config,
+        output: dispatch.output,
+        json_style: dispatch.json_style,
+        no_cache: dispatch.cli.no_cache,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
+        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        production,
+        workspace: dispatch.cli.workspace.as_deref(),
+        changed_workspaces: dispatch.cli.changed_workspaces.as_deref(),
+        target,
+    })
 }
 
 fn dispatch_trace_command(

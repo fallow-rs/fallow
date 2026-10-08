@@ -624,6 +624,7 @@ async fn e2e_trace_dependency_returns_json() {
         workspace: None,
         no_cache: None,
         threads: None,
+        ..Default::default()
     })
     .unwrap();
     let result = run_tool(&bin, "analyze", &args).await.unwrap();
@@ -635,6 +636,95 @@ async fn e2e_trace_dependency_returns_json() {
         .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
     assert_eq!(json["package_name"].as_str(), Some("react"));
     assert!(json["imported_by"].is_array());
+}
+
+/// Drop the run metadata, which changes on each run.
+fn without_meta(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(object) = value.as_object_mut() {
+        object.remove("_meta");
+    }
+    value
+}
+
+async fn trace_dependency_json(params: crate::params::TraceDependencyParams) -> serde_json::Value {
+    let bin = fallow_binary();
+    let args = build_trace_dependency_args(&params).unwrap();
+    let result = run_tool(&bin, "trace_dependency", &args).await.unwrap();
+    assert_eq!(result.is_error, Some(false), "{}", extract_text(&result));
+    let text = extract_text(&result);
+    without_meta(
+        serde_json::from_str(text)
+            .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}")),
+    )
+}
+
+#[tokio::test]
+async fn e2e_trace_dependency_usage_fields_add_the_usage_object() {
+    let root = fixture_path("trace-dependency-usage")
+        .to_string_lossy()
+        .to_string();
+    let plain = trace_dependency_json(crate::params::TraceDependencyParams {
+        package_name: "react-redux".to_string(),
+        root: Some(root.clone()),
+        no_cache: Some(true),
+        ..Default::default()
+    })
+    .await;
+    assert!(plain.get("usage").is_none(), "{plain:#}");
+
+    let mut usage = trace_dependency_json(crate::params::TraceDependencyParams {
+        package_name: "react-redux".to_string(),
+        root: Some(root),
+        no_cache: Some(true),
+        specifiers: Some(vec!["useSelector".to_string()]),
+        limit: Some(5),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(usage["usage"]["specifiers"][0]["name"], "useSelector");
+    assert_eq!(usage["usage"]["sites"]["total"], 11);
+    assert_eq!(
+        usage["usage"]["sites"]["items"].as_array().map(Vec::len),
+        Some(5)
+    );
+    usage.as_object_mut().unwrap().remove("usage");
+    assert_eq!(usage, plain);
+}
+
+#[test]
+fn e2e_code_execute_trace_dependency_accepts_usage_fields() {
+    let bin = fallow_binary();
+    let root = fixture_path("trace-dependency-usage");
+    let output = execute_code_mode(
+        bin,
+        crate::params::CodeExecuteParams {
+            code: r#"
+            const plain = fallow.traceDependency({ package_name: "react-redux", no_cache: true });
+            const usage = fallow.traceDependency({
+                package_name: "react-redux",
+                no_cache: true,
+                specifiers: ["useSelector"],
+                sites: true
+            });
+            return {
+                plainHasUsage: "usage" in plain,
+                name: usage.usage.specifiers[0].name,
+                total: usage.usage.sites.total
+            };
+            "#
+            .to_string(),
+            root: Some(root.to_string_lossy().to_string()),
+            timeout_ms: Some(30_000),
+            max_output_bytes: Some(1_000_000),
+        },
+    )
+    .unwrap_or_else(|err| panic!("code mode should succeed: {err}"));
+    let json: serde_json::Value = serde_json::from_str(&output)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {output}"));
+    assert_eq!(json["ok"].as_bool(), Some(true), "{json:#}");
+    assert_eq!(json["result"]["plainHasUsage"], false);
+    assert_eq!(json["result"]["name"], "useSelector");
+    assert_eq!(json["result"]["total"], 11);
 }
 
 #[tokio::test]

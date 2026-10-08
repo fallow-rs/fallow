@@ -7,10 +7,10 @@ use crate::params::{
 };
 
 use fallow_api::{
-    AnalysisOptions, DuplicationOptions, TraceCloneOptions, TraceCloneTarget,
-    TraceDependencyOptions, TraceErrorOptions, TraceExportOptions, TraceFileOptions,
-    TraceImportPathOptions, run_trace_clone, run_trace_dependency, run_trace_error,
-    run_trace_export, run_trace_file, run_trace_import_path,
+    AnalysisOptions, DependencyUsageQuery, DuplicationOptions, SitePageRequest, TraceCloneOptions,
+    TraceCloneTarget, TraceDependencyOptions, TraceErrorOptions, TraceExportOptions,
+    TraceFileOptions, TraceImportPathOptions, run_trace_clone, run_trace_dependency,
+    run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
     serialize_trace_clone_programmatic_json, serialize_trace_dependency_programmatic_json,
     serialize_trace_error_programmatic_json, serialize_trace_export_programmatic_json,
     serialize_trace_file_programmatic_json, serialize_trace_import_path_programmatic_json,
@@ -230,9 +230,15 @@ pub fn build_trace_file_args(params: &TraceFileParams) -> Result<Vec<String>, St
 /// Build CLI arguments for the `trace_dependency` tool.
 pub fn build_trace_dependency_args(params: &TraceDependencyParams) -> Result<Vec<String>, String> {
     require_non_empty("package_name", &params.package_name).map_err(validation_error_body)?;
+    let usage = dependency_usage_query(params)?;
+    let command = if usage.is_some() {
+        "trace"
+    } else {
+        "dead-code"
+    };
 
     let mut args = vec![
-        "dead-code".to_string(),
+        command.to_string(),
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
@@ -247,11 +253,43 @@ pub fn build_trace_dependency_args(params: &TraceDependencyParams) -> Result<Vec
     );
     push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
-    args.extend([
-        "--trace-dependency".to_string(),
-        params.package_name.clone(),
-    ]);
+    match usage {
+        Some(query) => push_dependency_usage_args(&mut args, &params.package_name, &query),
+        None => args.extend([
+            "--trace-dependency".to_string(),
+            params.package_name.clone(),
+        ]),
+    }
     Ok(args)
+}
+
+/// Push the `fallow trace --dependency` target and its usage flags.
+fn push_dependency_usage_args(
+    args: &mut Vec<String>,
+    package_name: &str,
+    query: &DependencyUsageQuery,
+) {
+    args.extend(["--dependency".to_string(), package_name.to_string()]);
+    for name in &query.specifiers {
+        args.extend(["--specifier".to_string(), name.clone()]);
+    }
+    if let Some(page) = &query.sites {
+        args.extend([
+            "--sites".to_string(),
+            "--limit".to_string(),
+            page.limit.to_string(),
+        ]);
+        if let Some(cursor) = &page.cursor {
+            args.extend(["--cursor".to_string(), cursor.clone()]);
+        }
+    }
+    if let Some(depth) = query.closure_depth {
+        args.extend([
+            "--callers".to_string(),
+            "--depth".to_string(),
+            depth.to_string(),
+        ]);
+    }
 }
 
 /// Build CLI arguments for the `trace_clone` tool.
@@ -490,7 +528,44 @@ fn trace_dependency_options_from_params(
             threads: params.threads,
         }),
         package_name: params.package_name.clone(),
+        usage: dependency_usage_query(params)?,
     })
+}
+
+/// Whether the call asks for a page of usage sites.
+fn sites_requested(params: &TraceDependencyParams) -> bool {
+    params.specifiers.is_some()
+        || params.sites == Some(true)
+        || params.limit.is_some()
+        || params.cursor.is_some()
+}
+
+/// Whether the call asks for the `usage` object.
+fn usage_requested(params: &TraceDependencyParams) -> bool {
+    params.usage == Some(true) || params.closure_depth.is_some() || sites_requested(params)
+}
+
+/// The validated usage query, or `None` when no usage parameter is set. The
+/// API constructor checks the ranges that the JSON schema declares.
+fn dependency_usage_query(
+    params: &TraceDependencyParams,
+) -> Result<Option<DependencyUsageQuery>, String> {
+    if !usage_requested(params) {
+        return Ok(None);
+    }
+    let sites = sites_requested(params).then(|| SitePageRequest {
+        limit: params
+            .limit
+            .unwrap_or(fallow_types::trace_usage::DEFAULT_USAGE_SITE_LIMIT),
+        cursor: params.cursor.clone(),
+    });
+    DependencyUsageQuery::new(
+        params.specifiers.clone().unwrap_or_default(),
+        sites,
+        params.closure_depth,
+    )
+    .map(Some)
+    .map_err(|err| validation_error_body(err.to_string()))
 }
 
 fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceCloneOptions, String> {

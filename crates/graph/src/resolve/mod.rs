@@ -39,6 +39,7 @@ pub use inline_loaders::InlineLoaderRequest;
 pub use output_entry::{directory_index_entry, output_entry_to_source_path};
 pub use path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
+    normalize_npm_specifier,
 };
 pub use react_native::{PlatformFamilyKey, has_react_native_plugin, platform_family_key};
 pub use types::{

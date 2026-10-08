@@ -111,6 +111,8 @@ pub mod trace;
 pub mod trace_chain;
 /// Stack-trace frame resolution output contracts (`fallow trace-error`).
 pub mod trace_error;
+/// Per-specifier dependency usage contracts (`fallow trace --dependency`).
+pub mod trace_usage;
 /// Workspace and source-discovery diagnostic data types
 /// (`WorkspaceDiagnostic`, `WorkspaceDiagnosticKind`). Re-exported by
 /// `fallow-config` for back-compat; embedded directly by `fallow-output` so

@@ -945,6 +945,7 @@ pub fn trace_dependency(
         sources: Vec::new(),
         tooling_credit: None,
         unused_in: Vec::new(),
+        usage: None,
     };
     trace.apply_tooling_credit(imported_types_target_credit(graph, package_name));
     trace

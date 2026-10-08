@@ -303,17 +303,18 @@ fn handle_trace_dependency(request: &TraceRequest<'_>, facts: &TraceFacts<'_>) -
         .iter()
         .map(|ws| ws.root.as_path())
         .collect();
-    let mut trace = fallow_engine::trace::trace_dependency(
-        request.graph,
-        request.root,
-        &workspace_roots,
-        facts.ignore_patterns,
+    let trace = fallow_engine::trace::build_dependency_trace(
+        &fallow_engine::trace::DependencyTraceInputs {
+            graph: request.graph,
+            root: request.root,
+            workspace_roots: &workspace_roots,
+            ignore_patterns: facts.ignore_patterns,
+            script_used_packages: facts.script_used_packages,
+            provenance: facts.provenance,
+            results: facts.results,
+        },
         pkg_name,
-        facts.script_used_packages,
     );
-    trace.sources = facts.provenance.dependency_sources(pkg_name);
-    trace.apply_tooling_credit(facts.provenance.tooling_credit(pkg_name));
-    trace.apply_unused_declarations(facts.results, request.root);
     report::print_dependency_trace(&trace, request.output, request.json_style);
     Some(ExitCode::SUCCESS)
 }

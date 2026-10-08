@@ -2501,6 +2501,23 @@ mod tests {
     }
 
     #[test]
+    fn build_tool_args_trace_dependency_with_specifiers_uses_the_usage_trace() {
+        let params = serde_json::json!({
+            "package_name": "react-redux",
+            "specifiers": ["useSelector"],
+            "sites": true
+        });
+        let args = build_tool_args(CodeModeTool::TraceDependency, params)
+            .expect("trace_dependency args should build");
+        assert_eq!(args.first().map(String::as_str), Some("trace"));
+        assert!(args.contains(&"--dependency".to_string()));
+        assert!(args.contains(&"--specifier".to_string()));
+        assert!(args.contains(&"useSelector".to_string()));
+        assert!(args.contains(&"--sites".to_string()));
+        assert!(!args.contains(&"--trace-dependency".to_string()));
+    }
+
+    #[test]
     fn build_tool_args_trace_clone_with_fingerprint_includes_trace_flag() {
         let params = serde_json::json!({ "fingerprint": "dup:abcd1234" });
         let args = build_tool_args(CodeModeTool::TraceClone, params)

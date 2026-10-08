@@ -1134,7 +1134,7 @@ pub struct ImpactClosureParams {
     pub max_output_bytes: Option<usize>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct TraceDependencyParams {
     /// Name of the npm package to trace usage for.
     #[schemars(length(min = 1))]
@@ -1162,6 +1162,26 @@ pub struct TraceDependencyParams {
 
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Add the per-name `usage` counts.
+    pub usage: Option<bool>,
+
+    /// Imported names to report. Implies `sites`.
+    pub specifiers: Option<Vec<String>>,
+
+    /// Add one page of usage sites. Implies `usage`.
+    pub sites: Option<bool>,
+
+    /// Sites per page (default 50). Implies `sites`.
+    #[schemars(range(min = 1, max = 500))]
+    pub limit: Option<u16>,
+
+    /// `usage.sites.next_cursor` of the previous page.
+    pub cursor: Option<String>,
+
+    /// Add importers of the users, up to this depth. Implies `usage`.
+    #[schemars(range(min = 1, max = 10))]
+    pub closure_depth: Option<u32>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]

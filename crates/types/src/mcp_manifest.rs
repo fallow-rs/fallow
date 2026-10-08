@@ -627,9 +627,9 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "trace_dependency",
         kind: "trace",
-        description: "Trace where a dependency is imported and whether scripts or CI use it",
+        description: "Trace where a dependency is imported, whether scripts or CI use it, and how the code uses each imported name",
         cli_command: Some("fallow dead-code --trace-dependency <package> --format json --quiet"),
-        key_params: &["package_name"],
+        key_params: &["package_name", "specifiers", "sites", "limit", "cursor"],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
