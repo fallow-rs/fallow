@@ -225,6 +225,11 @@ after every gate set the exit code.
     findings in the scoped files, because the scope runs before the filter.
   - The removed findings move to `CascadeState::hidden`, and
     `AnalysisResults::cascade_hidden` counts them.
+  - SARIF writes the count as `cascadeHidden` in the run `properties`
+    (`fallow_output::dead_code_sarif`), and markdown adds one note line
+    (`fallow_api::build_markdown`). Both are absent when the count is zero.
+    CodeClimate, compact, GitHub annotations and grouped markdown do not
+    carry the count.
   - The grouped envelope copies `cascade_hidden` to its root, as it does
     with `unused_load_data_keys_global_abstain`. The groups are new result
     sets, so no group carries the count.

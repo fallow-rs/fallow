@@ -1256,7 +1256,32 @@ pub fn build_dead_code_sarif(
     push_catalog_sarif_results(&mut sarif_results, &ctx, &mut snippets);
 
     let sarif_rules = build_sarif_rules(rules, rule_builder);
-    sarif_document(&sarif_results, &sarif_rules)
+    let mut sarif = sarif_document(&sarif_results, &sarif_rules);
+    annotate_cascade_hidden(&mut sarif, results.cascade_hidden);
+    sarif
+}
+
+/// Record the number of findings that the cascade filter hid in the run
+/// `properties`, as `cascadeHidden`. SARIF has no result for a hidden
+/// finding, so this property is the only sign of them. Absent when zero.
+fn annotate_cascade_hidden(sarif: &mut serde_json::Value, hidden: usize) {
+    if hidden == 0 {
+        return;
+    }
+    let Some(run) = sarif
+        .get_mut("runs")
+        .and_then(serde_json::Value::as_array_mut)
+        .and_then(|runs| runs.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let properties = run
+        .entry("properties")
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(properties) = properties.as_object_mut() {
+        properties.insert("cascadeHidden".to_owned(), serde_json::json!(hidden));
+    }
 }
 
 fn push_primary_dead_code_sarif_results(

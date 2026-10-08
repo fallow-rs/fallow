@@ -75,6 +75,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     if total == 0 {
         out.push_str("## Fallow: no issues found\n");
         if health_signal_count(results) == 0 {
+            push_cascade_note(&mut out, results.cascade_hidden);
             return out;
         }
         out.push('\n');
@@ -83,7 +84,25 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     }
 
     push_markdown_sections(&mut out, results, root);
+    push_cascade_note(&mut out, results.cascade_hidden);
     out
+}
+
+/// One line that names the findings the cascade filter hid. Markdown has no
+/// entry for a hidden finding, so this line is the only sign of them.
+fn push_cascade_note(out: &mut String, hidden: usize) {
+    if hidden == 0 {
+        return;
+    }
+    if !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    let verb = if hidden == 1 { "is" } else { "are" };
+    let _ = writeln!(
+        out,
+        "_{hidden} finding{} in unused files {verb} hidden; use `--show-cascade` to list them._",
+        plural(hidden)
+    );
 }
 
 /// The number of opt-in component health signals in `results`. These do not

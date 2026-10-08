@@ -235,6 +235,42 @@ fn sarif_lists_only_the_reported_findings() {
     }));
 }
 
+/// SARIF has no result for a hidden finding, so the run `properties` carry
+/// the count. The property is absent when nothing is hidden.
+#[test]
+fn sarif_run_properties_carry_the_hidden_count() {
+    let root = super::common::fixture_path(FIXTURE);
+    let sarif = |extra: &[&str]| -> serde_json::Value {
+        let mut args = vec!["--format", "sarif", "--quiet"];
+        args.extend_from_slice(extra);
+        let output = run_fallow_in_root("dead-code", &root, &args);
+        serde_json::from_str(&output.stdout).expect("sarif json")
+    };
+
+    assert_eq!(sarif(&[])["runs"][0]["properties"]["cascadeHidden"], 4);
+    let shown = sarif(&["--show-cascade"]);
+    assert!(
+        shown["runs"][0]["properties"]
+            .get("cascadeHidden")
+            .is_none()
+    );
+}
+
+/// Markdown has no entry for a hidden finding, so one line names the count.
+#[test]
+fn markdown_names_the_hidden_count() {
+    let root = super::common::fixture_path(FIXTURE);
+    let markdown = |extra: &[&str]| -> String {
+        let mut args = vec!["--format", "markdown", "--quiet"];
+        args.extend_from_slice(extra);
+        run_fallow_in_root("dead-code", &root, &args).stdout
+    };
+    let note = "_4 findings in unused files are hidden; use `--show-cascade` to list them._";
+
+    assert!(markdown(&[]).contains(note), "{}", markdown(&[]));
+    assert!(!markdown(&["--show-cascade"]).contains("--show-cascade"));
+}
+
 /// The vital signs measure the code, so they count the hidden findings. The
 /// combined run reuses the dead-code results and must give the value of the
 /// standalone `health` command.
