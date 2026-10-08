@@ -1971,3 +1971,15 @@ test("every workflow that runs tests turns off git automatic maintenance", () =>
     }
   }
 });
+
+// A job-level or step-level `GIT_CONFIG_COUNT` replaces the top-level one, and
+// the jobs below it then run without the maintenance setting.
+test("only the top-level env of a workflow sets GIT_CONFIG variables", () => {
+  for (const name of readdirSync(".github/workflows").filter((file) => /\.ya?ml$/.test(file))) {
+    const source = readWorkflow(join(".github/workflows", name));
+    const nested = source
+      .split("\n")
+      .filter((line) => /^\s{4,}GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+):/.test(line));
+    assert.deepEqual(nested, [], `${name} sets GIT_CONFIG variables below the top-level env`);
+  }
+});
