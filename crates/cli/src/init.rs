@@ -891,18 +891,29 @@ fn lefthook_hint(fallback_base_ref: &str, prune_baselines: bool) -> String {
 /// The hook lines that prune the configured baselines before the audit.
 ///
 /// The prune reads the working tree, while the commit carries the index. So the
-/// step runs only when the working tree has no unstaged change. Then the files
-/// that `git add -u` stages are exactly the files that the prune wrote. A
-/// failed prune, or an older fallow without the command, never blocks the
-/// commit: the audit stays the gate.
+/// step runs only when the working tree matches the index: no unstaged change
+/// and no untracked file. Then the files that `git add -u` stages are exactly
+/// the files that the prune wrote. A commit with paths (`git commit <path>`,
+/// `--only`) builds a temporary `next-index-*` index, and a file staged there
+/// does not reach the real index, so the step skips it. A failed prune, or an
+/// older fallow without the command, never blocks the commit: the audit stays
+/// the gate.
 fn prune_baselines_block(run: &str) -> String {
     format!(
-        r#"if git diff --quiet; then
-  {run} baselines prune --quiet || echo "fallow: baselines prune failed; the commit continues" >&2
-  git add -u
-else
-  echo "fallow: skipped baselines prune: the working tree has unstaged changes" >&2
-fi
+        r#"case "${{GIT_INDEX_FILE:-}}" in
+  *next-index-*)
+    echo "fallow: skipped baselines prune: a commit with paths uses a temporary index" >&2
+    ;;
+  *)
+    if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+      echo "fallow: skipped baselines prune: the working tree has unstaged or untracked changes" >&2
+    elif {run} baselines prune --quiet; then
+      git add -u
+    else
+      echo "fallow: baselines prune did not finish; the commit continues" >&2
+    fi
+    ;;
+esac
 "#
     )
 }
@@ -1004,7 +1015,8 @@ pub fn run_git_hooks_install(opts: &GitHooksInstallOptions<'_>) -> ExitCode {
     if opts.prune_baselines {
         eprintln!(
             "Before the audit, the hook runs `fallow baselines prune` and stages the pruned \
-             baseline files. It skips the prune when the working tree has unstaged changes."
+             baseline files. It skips the prune when the working tree has unstaged or \
+             untracked changes, and for a commit with paths."
         );
     }
     eprintln!("To skip the hook on a single commit: git commit --no-verify");
@@ -1744,8 +1756,9 @@ mod tests {
             .find("fallow audit --base")
             .expect("the hook runs the audit");
         assert!(prune < audit, "{content}");
-        assert!(content.contains("if git diff --quiet; then"));
-        assert!(content.contains("git add -u"));
+        assert!(content.contains("*next-index-*)"));
+        assert!(content.contains("git ls-files --others --exclude-standard"));
+        assert!(content.contains("elif fallow baselines prune --quiet; then\n      git add -u"));
         assert!(!build_pre_commit_hook_content("main", false).contains("baselines prune"));
     }
 
@@ -1753,12 +1766,12 @@ mod tests {
     fn prune_baselines_hints_carry_the_prune_block() {
         let hint = existing_hook_hint(".git/hooks/pre-commit", "main", true);
         assert!(
-            hint.contains("\n    fallow baselines prune --quiet"),
+            hint.contains("\n      elif fallow baselines prune --quiet; then"),
             "{hint}"
         );
         let lefthook = lefthook_hint("main", true);
         assert!(
-            lefthook.contains("\n            run_fallow baselines prune --quiet"),
+            lefthook.contains("\n              elif run_fallow baselines prune --quiet; then"),
             "{lefthook}"
         );
         assert!(!lefthook_hint("main", false).contains("baselines prune"));

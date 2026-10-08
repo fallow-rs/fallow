@@ -50,8 +50,8 @@ pub enum HooksCli {
 
         /// For `--target git`: run `fallow baselines prune` before the audit
         /// and stage the pruned baseline files. The hook skips the prune when
-        /// the working tree has unstaged changes, and a failed prune never
-        /// blocks the commit. The prune analyzes the whole project, so it adds
+        /// the working tree has unstaged or untracked changes and for a commit
+        /// with paths. A failed prune never blocks the commit. The prune analyzes the whole project, so it adds
         /// the time of a full run to each commit.
         #[arg(long)]
         prune_baselines: bool,

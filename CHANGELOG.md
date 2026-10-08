@@ -124,10 +124,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow hooks install --target git --prune-baselines`** adds a
   `fallow baselines prune` step before the audit in the pre-commit hook, and
-  stages the baseline files that the prune wrote. The hook skips the prune
-  when the working tree has unstaged changes, because the prune reads the
-  working tree and the commit carries the index. A failed prune never blocks
-  the commit. The hints for Lefthook and for an existing hook include the
+  stages the baseline files that the prune wrote. The prune reads the working
+  tree and the commit carries the index, so the hook skips the prune when the
+  working tree has unstaged or untracked changes, and for a commit with paths
+  (`git commit <path>`). A failed prune never blocks the commit. The hints for Lefthook and for an existing hook include the
   same step. (#3281)
 - **`fallow baselines prune` removes the baseline entries of fixed
   findings.** It reads the files that `audit.deadCodeBaseline`,
