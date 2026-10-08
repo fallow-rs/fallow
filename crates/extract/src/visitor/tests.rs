@@ -13706,3 +13706,84 @@ fn import_binding_references_remap_and_rebase_in_vue_scripts() {
     );
     assert_eq!(rows.len(), 2, "{rows:?}");
 }
+
+#[test]
+fn import_binding_references_skip_local_export_specifiers() {
+    // `ReExportInfo` records `export { x }` of an imported binding, so a
+    // binding reference here would count the same use twice.
+    let source = "import { useSelector } from 'pkg';\n\
+        export { useSelector };\n\
+        export { useSelector as select };\n";
+    let info = parse(source);
+    assert_eq!(binding_references(&info), vec![]);
+    assert_eq!(info.re_exports.len(), 2);
+}
+
+type ThroughReferenceRow<'a> = (
+    &'a str,
+    &'a str,
+    fallow_types::extract::ImportBindingReferenceKind,
+    &'a str,
+    Option<&'a str>,
+);
+
+/// Each reference through a wrapper as (wrapper, member path, kind, source
+/// text at the offset, declared name).
+fn through_references<'a>(info: &'a ModuleInfo, source: &'a str) -> Vec<ThroughReferenceRow<'a>> {
+    info.import_binding_references
+        .iter()
+        .filter_map(|reference| {
+            let through = reference.through.as_deref()?;
+            let offset = reference.span_start as usize;
+            Some((
+                through,
+                &*reference.member_path,
+                reference.kind,
+                &source[offset..offset + 6],
+                reference.declared_name.as_deref(),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn import_binding_references_record_uses_of_an_exported_wrapper_in_its_module() {
+    use fallow_types::extract::ImportBindingReferenceKind::{
+        Call, InitializerCall, Other, ValueAlias,
+    };
+    let source = "import { useSelector } from 'pkg';\n\
+        export const useApp = useSelector.withTypes();\n\
+        export const useCount = () => useApp((s) => s.c);\n\
+        const alias = useApp;\n\
+        export const again = useApp;\n\
+        export const value = useApp(1);\n\
+        useApp.member();\n\
+        useApp?.(2);\n\
+        const typedPick = useSelector;\n\
+        export default typedPick;\n\
+        export { typedPick as usePick };\n\
+        typedPick(3);\n\
+        const local = useSelector;\n\
+        local(4);\n";
+    let info = parse(source);
+    assert_eq!(
+        through_references(&info, source),
+        vec![
+            ("useApp", "", Call, "useApp", None),
+            ("useApp", "", ValueAlias, "useApp", Some("alias")),
+            ("useApp", "", ValueAlias, "useApp", Some("again")),
+            ("useApp", "", InitializerCall, "useApp", Some("value")),
+            ("useApp", "member", Call, "useApp", None),
+            ("useApp", "", Other, "useApp", None),
+            ("typedPick", "", Call, "typedP", None),
+        ]
+    );
+    // The direct references keep their rows: the two wrapper definitions and
+    // the alias that the module does not export.
+    let direct = info
+        .import_binding_references
+        .iter()
+        .filter(|reference| reference.through.is_none())
+        .count();
+    assert_eq!(direct, 3);
+}

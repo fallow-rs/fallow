@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_graph::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+use fallow_graph::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use fallow_types::trace_usage::{SitePageRequest, UsageSite};
 
@@ -59,6 +59,14 @@ impl Project {
                     .imports
                     .iter()
                     .map(|info| ResolvedImport {
+                        info: info.clone(),
+                        target: resolve(&info.source),
+                    })
+                    .collect(),
+                re_exports: module
+                    .re_exports
+                    .iter()
+                    .map(|info| ResolvedReExport {
                         info: info.clone(),
                         target: resolve(&info.source),
                     })
@@ -214,10 +222,12 @@ fn site_kinds_add_up_to_the_total() {
         )
         .unwrap();
     let page = usage.sites.as_ref().unwrap();
-    let wrapper_definitions = page
+    // An alias wrapper definition is no call. A call wrapper definition is a
+    // call and counts in `call_site_count`.
+    let alias_definitions = page
         .items
         .iter()
-        .filter(|site| site.kind == UsageSiteKind::WrapperDefinition)
+        .filter(|site| site.kind == UsageSiteKind::WrapperDefinition && site.member.is_none())
         .count();
     let counted: usize = usage
         .specifiers
@@ -237,7 +247,7 @@ fn site_kinds_add_up_to_the_total() {
                 + unresolved.nested_wrapper
         })
         .sum();
-    assert_eq!(counted + wrapper_definitions, page.total, "{usage:#?}");
+    assert_eq!(counted + alias_definitions, page.total, "{usage:#?}");
     assert_eq!(page.total, page.items.len());
 }
 
@@ -254,7 +264,8 @@ fn a_wrapper_definition_replaces_the_call_at_the_same_offset() {
     assert_eq!(sites[0].member.as_deref(), Some("withTypes"));
     let usage = project.usage(&counts_only()).unwrap();
     let entry = specifier(&usage, "useSelector");
-    assert_eq!(entry.call_site_count, 0);
+    // The definition is a real call of `useSelector.withTypes`.
+    assert_eq!(entry.call_site_count, 1);
     assert_eq!(entry.wrappers.len(), 1);
     assert_eq!(entry.wrappers[0].shape, WrapperShape::Call);
     assert_eq!(entry.wrappers[0].line, 2);
@@ -542,4 +553,281 @@ fn a_closure_cut_at_its_depth_is_truncated() {
     );
     assert_eq!(deep.file_count, 3);
     assert!(!deep.truncated);
+}
+
+/// (export, consumer file count, call site count) of each wrapper of a name.
+fn wrapper_rows(usage: &DependencyUsage, name: &str) -> Vec<(String, usize, usize)> {
+    specifier(usage, name)
+        .wrappers
+        .iter()
+        .map(|wrapper| {
+            (
+                wrapper.export.clone(),
+                wrapper.consumer_file_count,
+                wrapper.call_site_count,
+            )
+        })
+        .collect()
+}
+
+type SiteRow = (String, u32, String, UsageSiteKind, String, String);
+
+/// (file, line, specifier, kind, via, member) of each site.
+fn site_rows(sites: &[UsageSite]) -> Vec<SiteRow> {
+    sites
+        .iter()
+        .map(|site| {
+            (
+                site.file.clone(),
+                site.line,
+                site.specifier.clone().unwrap_or_default(),
+                site.kind,
+                site.via.clone().unwrap_or_default(),
+                site.member.clone().unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_call_wrapper_counts_only_calls_of_the_wrapper_itself() {
+    // Redux Toolkit: `configureStore` and `createSlice` return objects. A
+    // method call on the object is no call of the package export.
+    let project = Project::new(&[
+        (
+            "src/app.ts",
+            "import { store, slice } from './store';\n\
+             store.dispatch(slice.actions.inc());\n\
+             export const v = store.getState();\n",
+        ),
+        (
+            "src/store.ts",
+            "import { configureStore, createSlice } from 'pkg';\n\
+             export const slice = createSlice({ name: 'c' });\n\
+             export const store = configureStore({ reducer: slice.reducer });\n",
+        ),
+    ]);
+    let usage = project.usage(&counts_only()).unwrap();
+    for name in ["configureStore", "createSlice"] {
+        let entry = specifier(&usage, name);
+        assert_eq!(entry.call_site_count, 1, "{entry:#?}");
+        assert_eq!(entry.unresolved.non_call_reference, 2, "{entry:#?}");
+        assert_eq!(entry.unresolved.nested_wrapper, 0, "{entry:#?}");
+        assert_eq!(entry.wrappers[0].call_site_count, 0, "{entry:#?}");
+    }
+    let sites = project.sites(&["configureStore"]);
+    let via = "src/store.ts:store".to_owned();
+    assert_eq!(
+        site_rows(&sites),
+        vec![
+            (
+                "src/app.ts".to_owned(),
+                2,
+                "configureStore".to_owned(),
+                UsageSiteKind::NonCallReference,
+                via.clone(),
+                "dispatch".to_owned()
+            ),
+            (
+                "src/app.ts".to_owned(),
+                3,
+                "configureStore".to_owned(),
+                UsageSiteKind::NonCallReference,
+                via,
+                "getState".to_owned()
+            ),
+            (
+                "src/store.ts".to_owned(),
+                3,
+                "configureStore".to_owned(),
+                UsageSiteKind::WrapperDefinition,
+                String::new(),
+                String::new()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_default_exported_wrapper_has_its_consumers() {
+    let project = Project::new(&[
+        (
+            "src/app.ts",
+            "import typedDispatch from './hooks';\ntypedDispatch();\n",
+        ),
+        (
+            "src/hooks.ts",
+            "import { useDispatch } from 'pkg';\n\
+             const typedDispatch = useDispatch.withTypes();\n\
+             export default typedDispatch;\n",
+        ),
+    ]);
+    let usage = project.usage(&counts_only()).unwrap();
+    assert_eq!(
+        wrapper_rows(&usage, "useDispatch"),
+        vec![("default".to_owned(), 1, 1)]
+    );
+}
+
+#[test]
+fn each_export_name_of_a_wrapper_has_its_consumers() {
+    let project = Project::new(&[
+        (
+            "src/app.ts",
+            "import { useAppSelector, useSel2 } from './hooks';\n\
+             useAppSelector(1);\n\
+             useSel2(2);\n\
+             useSel2(3);\n",
+        ),
+        (
+            "src/hooks.ts",
+            "import { useSelector } from 'pkg';\n\
+             export const useAppSelector = useSelector;\n\
+             export { useAppSelector as useSel2 };\n",
+        ),
+    ]);
+    let usage = project.usage(&counts_only()).unwrap();
+    assert_eq!(
+        wrapper_rows(&usage, "useSelector"),
+        vec![
+            ("useAppSelector".to_owned(), 1, 1),
+            ("useSel2".to_owned(), 1, 2)
+        ]
+    );
+    // One definition site, not one per export name.
+    let definitions = project
+        .sites(&["useSelector"])
+        .iter()
+        .filter(|site| site.kind == UsageSiteKind::WrapperDefinition)
+        .count();
+    assert_eq!(definitions, 1);
+}
+
+#[test]
+fn a_namespace_alias_wrapper_names_the_member_as_the_specifier() {
+    let project = Project::new(&[
+        (
+            "src/app.ts",
+            "import { AllRR } from './hooks';\nAllRR.useSelector(1);\n",
+        ),
+        (
+            "src/hooks.ts",
+            "import * as RR from 'pkg';\nexport const AllRR = RR;\n",
+        ),
+    ]);
+    let sites = project.sites(&["useSelector"]);
+    assert_eq!(
+        site_rows(&sites),
+        vec![(
+            "src/app.ts".to_owned(),
+            2,
+            "useSelector".to_owned(),
+            UsageSiteKind::Call,
+            "src/hooks.ts:AllRR".to_owned(),
+            String::new()
+        )]
+    );
+}
+
+#[test]
+fn a_local_re_export_of_an_import_is_one_site() {
+    let project = Project::new(&[(
+        "src/index.ts",
+        "import { useSelector } from 'pkg';\nexport { useSelector };\n",
+    )]);
+    let sites = project.sites(&[]);
+    let kinds: Vec<_> = sites.iter().map(|site| site.kind).collect();
+    assert_eq!(kinds, vec![UsageSiteKind::ReExport], "{sites:#?}");
+    let usage = project.usage(&counts_only()).unwrap();
+    let entry = specifier(&usage, "useSelector");
+    assert_eq!(entry.unresolved.re_export, 1);
+    assert_eq!(entry.unresolved.non_call_reference, 0);
+}
+
+#[test]
+fn a_wrapper_used_in_its_own_module_is_counted() {
+    let project = Project::new(&[(
+        "src/hooks.ts",
+        "import { useSelector } from 'pkg';\n\
+         export const useAppSelector = useSelector.withTypes();\n\
+         export const useCount = () => useAppSelector((s) => s.c);\n\
+         export const all = [useAppSelector];\n",
+    )]);
+    let usage = project.usage(&counts_only()).unwrap();
+    assert_eq!(
+        wrapper_rows(&usage, "useSelector"),
+        vec![("useAppSelector".to_owned(), 1, 1)]
+    );
+    let entry = specifier(&usage, "useSelector");
+    assert_eq!(entry.unresolved.non_call_reference, 1, "{entry:#?}");
+    let via: Vec<_> = project
+        .sites(&[])
+        .iter()
+        .filter_map(|site| site.via.clone().map(|via| (site.line, site.kind, via)))
+        .collect();
+    assert_eq!(
+        via,
+        vec![
+            (
+                3,
+                UsageSiteKind::Call,
+                "src/hooks.ts:useAppSelector".to_owned()
+            ),
+            (
+                4,
+                UsageSiteKind::NonCallReference,
+                "src/hooks.ts:useAppSelector".to_owned()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_barrel_re_export_of_a_wrapper_is_counted() {
+    let project = Project::new(&[
+        (
+            "src/app.ts",
+            "import { useAppSelector } from './barrel';\nuseAppSelector(1);\n",
+        ),
+        (
+            "src/barrel.ts",
+            "export { useAppSelector } from './hooks';\n",
+        ),
+        ("src/star.ts", "export * from './hooks';\n"),
+        (
+            "src/hooks.ts",
+            "import { useSelector } from 'pkg';\n\
+             export const useAppSelector = useSelector.withTypes();\n",
+        ),
+    ]);
+    let usage = project.usage(&counts_only()).unwrap();
+    let entry = specifier(&usage, "useSelector");
+    assert_eq!(entry.unresolved.re_export, 2, "{entry:#?}");
+    let re_exports: Vec<_> = project
+        .sites(&[])
+        .iter()
+        .filter(|site| site.kind == UsageSiteKind::ReExport)
+        .map(|site| (site.file.clone(), site.via.clone()))
+        .collect();
+    let via = Some("src/hooks.ts:useAppSelector".to_owned());
+    assert_eq!(
+        re_exports,
+        vec![
+            ("src/barrel.ts".to_owned(), via.clone()),
+            ("src/star.ts".to_owned(), via)
+        ]
+    );
+}
+
+#[test]
+fn a_namespace_import_read_only_as_a_type_is_type_only() {
+    let project = Project::new(&[(
+        "src/types.ts",
+        "import * as RR from 'pkg';\nexport type P = RR.ProviderProps;\n",
+    )]);
+    let usage = project.usage(&counts_only()).unwrap();
+    let entry = specifier(&usage, "*");
+    assert_eq!(entry.file_count, 1);
+    assert_eq!(entry.type_only_file_count, 1);
+    assert_eq!(entry.unresolved.binding_without_site, 0, "{entry:#?}");
 }

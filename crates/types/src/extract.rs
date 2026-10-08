@@ -3326,6 +3326,12 @@ pub struct ImportBindingReference {
     pub span_start: u32,
     /// Name of the top-level declarator that this reference initializes.
     pub declared_name: Option<Box<str>>,
+    /// The exported top-level declarator that the reference reads, when the
+    /// reference names that declarator and not the import binding. The
+    /// declarator is initialized by a reference to the import binding at
+    /// `import_index`, so the reference is a use of the binding through a
+    /// project wrapper in its own module. `None` for a direct reference.
+    pub through: Option<Box<str>>,
 }
 
 /// How the code uses an [`ImportBindingReference`].
@@ -3342,6 +3348,9 @@ pub enum ImportBindingReferenceKind {
     /// Any other value use that is not an admitted call, for example an
     /// argument, an array element or an optional call.
     Other,
+    /// A direct call of a wrapper declarator in its own module. Only a
+    /// reference with `through` set has this kind.
+    Call,
 }
 
 /// A `"use client"` / `"use server"` directive string written as an expression
@@ -3813,7 +3822,7 @@ const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1456);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 48);
+const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 

@@ -73,8 +73,8 @@ fn site_rows(trace: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The 22 sites of the fixture, in order.
-const ALL_SITES: [&str; 22] = [
+/// The 24 sites of the fixture, in order.
+const ALL_SITES: [&str; 24] = [
     "src/components/Alias.tsx:4:17 useStore useStore value_alias",
     "src/components/Alias.tsx:5:27 Provider Provider jsx_element",
     "src/components/Badge.tsx:3:31 useSelector useAppSelector call src/store/hooks.ts:useAppSelector",
@@ -89,8 +89,10 @@ const ALL_SITES: [&str; 22] = [
     "src/legacy.js:1:20   require",
     "src/legacy.js:2:26   dynamic_import",
     "src/main.tsx:11:84 useSelector usePick non_call_reference src/store/local.ts:usePick",
+    "src/store/barrel.ts:1:9 useSelector useAppSelector re_export src/store/hooks.ts:useAppSelector",
     "src/store/hooks.ts:4:30 useSelector useSelector wrapper_definition  withTypes",
     "src/store/hooks.ts:5:49 useDispatch useDispatch wrapper_definition",
+    "src/store/hooks.ts:6:35 useSelector useAppSelector call src/store/hooks.ts:useAppSelector",
     "src/store/local.ts:3:20 useSelector pick call  withTypes",
     "src/store/local.ts:4:18 useSelector pick wrapper_definition",
     "src/store/local.ts:7:27 useSelector pick non_call_reference",
@@ -164,12 +166,16 @@ fn counts_each_imported_name() {
                 "useSelector",
                 4,
                 0,
-                3,
-                &[("non_call_reference", 2), ("nested_wrapper", 1)],
+                4,
+                &[
+                    ("non_call_reference", 2),
+                    ("re_export", 1),
+                    ("nested_wrapper", 1)
+                ],
                 json!([
                     {
                         "file": "src/store/hooks.ts", "export": "useAppSelector", "shape": "call",
-                        "line": 4, "consumer_file_count": 2, "call_site_count": 3
+                        "line": 4, "consumer_file_count": 3, "call_site_count": 4
                     },
                     {
                         "file": "src/store/local.ts", "export": "usePick", "shape": "alias",
@@ -201,7 +207,7 @@ fn counts_each_imported_name() {
 fn lists_every_site_in_order() {
     let trace = usage_trace(&["--sites"]);
     let page = &trace["usage"]["sites"];
-    assert_eq!(page["total"], 22, "{page:#}");
+    assert_eq!(page["total"], 24, "{page:#}");
     assert_eq!(page["limit"], 50);
     assert!(page.get("next_cursor").is_none(), "{page:#}");
     assert_eq!(site_rows(&trace), ALL_SITES);
@@ -219,7 +225,7 @@ fn a_cursor_pages_through_the_sites() {
         }
         let trace = usage_trace(&extra);
         let page = &trace["usage"]["sites"];
-        assert_eq!(page["total"], 22);
+        assert_eq!(page["total"], 24);
         let page_rows = site_rows(&trace);
         sizes.push(page_rows.len());
         rows.extend(page_rows);
@@ -228,7 +234,7 @@ fn a_cursor_pages_through_the_sites() {
             None => break,
         }
     }
-    assert_eq!(sizes, vec![5, 5, 5, 5, 2]);
+    assert_eq!(sizes, vec![5, 5, 5, 5, 4]);
     assert_eq!(rows, ALL_SITES);
 }
 
@@ -267,12 +273,12 @@ fn a_specifier_selects_its_sites_and_keeps_file_level_counts() {
         .map(|entry| entry["name"].clone())
         .collect();
     assert_eq!(names, vec![json!("useSelector")]);
-    let expected: Vec<&str> = [3, 4, 5, 6, 10, 14, 15, 17, 18, 19, 20]
+    let expected: Vec<&str> = [3, 4, 5, 6, 10, 14, 15, 16, 18, 19, 20, 21, 22]
         .iter()
         .map(|row| ALL_SITES[row - 1])
         .collect();
     assert_eq!(site_rows(&trace), expected);
-    assert_eq!(usage["sites"]["total"], 11);
+    assert_eq!(usage["sites"]["total"], 13);
     assert_eq!(usage["unresolved"]["require"], 1);
     assert_eq!(usage["unresolved"]["dynamic_import"], 1);
     assert_eq!(usage["unresolved"]["star_re_export"], 1);
@@ -295,20 +301,77 @@ fn callers_add_the_files_that_import_the_users() {
         trace["usage"]["closure"],
         json!({
             "depth": 1,
-            "file_count": 3,
+            "file_count": 4,
             "files": [
                 {"file": "src/components/Badge.tsx", "depth": 1},
                 {"file": "src/main.tsx", "depth": 1},
+                {"file": "src/store/barrel.ts", "depth": 1},
                 {"file": "src/store/nested.ts", "depth": 1}
             ],
-            "truncated": false
+            "truncated": true
         })
     );
-    // The users of `useSelector` already include every importer of them.
+    // The users of `useSelector` include the barrel. Its importer is the only
+    // file that the walk adds.
     let selected = usage_trace(&["--specifier", "useSelector", "--callers", "--depth", "1"]);
     assert_eq!(
         selected["usage"]["closure"],
-        json!({"depth": 1, "file_count": 0, "files": [], "truncated": false})
+        json!({
+            "depth": 1,
+            "file_count": 1,
+            "files": [{"file": "src/components/Total.tsx", "depth": 1}],
+            "truncated": false
+        })
+    );
+}
+
+#[test]
+fn a_call_wrapper_counts_method_calls_on_its_result_as_references() {
+    // Redux Toolkit: `store.dispatch()` calls a method of the store, not
+    // `configureStore`.
+    let trace = without_meta(parse_json(&run_fallow(
+        "trace",
+        FIXTURE,
+        &[
+            "--dependency",
+            "@reduxjs/toolkit",
+            "--sites",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    )));
+    let calls: Vec<_> = trace["usage"]["specifiers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            (
+                entry["name"].clone(),
+                entry["call_site_count"].clone(),
+                entry["unresolved"]["non_call_reference"].clone(),
+                entry["wrappers"][0]["call_site_count"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        vec![
+            (json!("configureStore"), json!(1), json!(2), json!(0)),
+            (json!("createSlice"), json!(1), json!(2), json!(0)),
+        ]
+    );
+    assert_eq!(
+        site_rows(&trace),
+        vec![
+            "src/rtk/app.ts:3:0 configureStore store non_call_reference src/rtk/store.ts:store dispatch",
+            "src/rtk/app.ts:3:15 createSlice slice non_call_reference src/rtk/store.ts:slice actions.inc",
+            "src/rtk/app.ts:4:21 configureStore store non_call_reference src/rtk/store.ts:store getState",
+            "src/rtk/store.ts:3:21 createSlice createSlice wrapper_definition",
+            "src/rtk/store.ts:4:21 configureStore configureStore wrapper_definition",
+            "src/rtk/store.ts:4:47 createSlice slice non_call_reference src/rtk/store.ts:slice reducer",
+        ]
     );
 }
 

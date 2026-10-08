@@ -2,11 +2,15 @@
 //!
 //! The semantic pass records each value use of an admitted import binding that
 //! is not an admitted call site. It also records an admitted call that is the
-//! whole initializer of a top-level declarator. `fallow trace --dependency`
+//! whole initializer of a top-level declarator. When the module exports that
+//! declarator as a value, the pass also records each use of the declarator in
+//! the same module, with `through` set. `fallow trace --dependency`
 //! reads these facts to count the uses of an imported name that it cannot
 //! resolve, and to find one-hop project wrappers of a package export.
 
-use fallow_types::extract::{ImportBindingReference, ImportBindingReferenceKind, ImportInfo};
+use fallow_types::extract::{
+    ExportInfo, ImportBindingReference, ImportBindingReferenceKind, ImportInfo,
+};
 use oxc_ast::AstKind;
 use oxc_semantic::{AstNodes, NodeId, Semantic, SymbolId};
 use oxc_span::{GetSpan, Span};
@@ -44,9 +48,13 @@ pub fn admitted_import_symbol(semantic: &Semantic<'_>, import: &ImportInfo) -> O
 /// `admitted_calls` holds the root identifier spans of the admitted imported
 /// call sites. Such a reference is a call site, not a binding reference,
 /// unless the call is the whole initializer of a top-level declarator.
+///
+/// When such a declarator is exported as a value, the uses of the declarator
+/// in the same module are recorded too, with `through` set to its name.
 pub fn collect(
     semantic: &Semantic<'_>,
     imports: &[ImportInfo],
+    exports: &[ExportInfo],
     admitted_calls: &FxHashSet<Span>,
 ) -> Vec<ImportBindingReference> {
     let scoping = semantic.scoping();
@@ -75,12 +83,135 @@ pub fn collect(
                     kind: classified.kind,
                     span_start: classified.span_start,
                     declared_name: classified.declared_name,
+                    through: None,
                 });
             }
         }
     }
+    let through = collect_through_wrappers(semantic, exports, &references);
+    references.extend(through);
     references.sort_by_key(|reference| reference.span_start);
     references
+}
+
+/// Whether the module exports the top-level declarator `name` as a value.
+fn exports_value(exports: &[ExportInfo], name: &str) -> bool {
+    exports.iter().any(|export| {
+        !export.is_type_only
+            && match &export.local_name {
+                Some(local) => local == name,
+                None => export.name.matches_str(name),
+            }
+    })
+}
+
+/// The uses of each exported top-level declarator that a direct reference
+/// initializes, in the module that declares it.
+fn collect_through_wrappers(
+    semantic: &Semantic<'_>,
+    exports: &[ExportInfo],
+    direct: &[ImportBindingReference],
+) -> Vec<ImportBindingReference> {
+    let scoping = semantic.scoping();
+    let nodes = semantic.nodes();
+    let mut references = Vec::new();
+    let mut seen: FxHashSet<&str> = FxHashSet::default();
+    for wrapper in direct {
+        if !matches!(
+            wrapper.kind,
+            ImportBindingReferenceKind::InitializerCall | ImportBindingReferenceKind::ValueAlias
+        ) {
+            continue;
+        }
+        let Some(name) = wrapper.declared_name.as_deref() else {
+            continue;
+        };
+        if !exports_value(exports, name) || !seen.insert(name) {
+            continue;
+        }
+        let Some(symbol) = scoping.get_binding(scoping.root_scope_id(), oxc_str::Ident::from(name))
+        else {
+            continue;
+        };
+        for reference in scoping.get_resolved_references(symbol) {
+            if !reference.is_value() {
+                continue;
+            }
+            let node_id = reference.node_id();
+            let AstKind::IdentifierReference(identifier) = nodes.kind(node_id) else {
+                continue;
+            };
+            if let Some(classified) = classify_through(nodes, node_id, identifier.span) {
+                references.push(ImportBindingReference {
+                    import_index: wrapper.import_index,
+                    member_path: classified.member_path.into_boxed_str(),
+                    kind: classified.kind,
+                    span_start: classified.span_start,
+                    declared_name: classified.declared_name,
+                    through: Some(name.into()),
+                });
+            }
+        }
+    }
+    references
+}
+
+/// Classify a use of a wrapper declarator in its own module. A direct call is
+/// [`ImportBindingReferenceKind::Call`], or `InitializerCall` when it is the
+/// whole initializer of a top-level declarator. The `export default` of the
+/// wrapper is its export, not a use.
+fn classify_through(
+    nodes: &AstNodes<'_>,
+    node_id: NodeId,
+    identifier_span: Span,
+) -> Option<Classified> {
+    let chain = member_chain(nodes, node_id, identifier_span);
+    if matches!(
+        nodes.parent_kind(chain.node),
+        AstKind::ExportDefaultDeclaration(_)
+    ) {
+        return None;
+    }
+    if let Some((call_id, call_span)) = direct_call(nodes, &chain) {
+        let (outer, outer_span) = unwrap_upward(nodes, call_id, call_span);
+        let declared_name = initialized_declarator(nodes, outer, outer_span)
+            .and_then(|declarator| top_level_declared_name(nodes, declarator));
+        let kind = if declared_name.is_some() {
+            ImportBindingReferenceKind::InitializerCall
+        } else {
+            ImportBindingReferenceKind::Call
+        };
+        return Some(Classified {
+            kind,
+            member_path: chain.path,
+            span_start: call_span.start,
+            declared_name,
+        });
+    }
+    classify(nodes, node_id, identifier_span, false)
+}
+
+/// The call whose callee is the member chain, when the call is not optional.
+fn direct_call(nodes: &AstNodes<'_>, chain: &MemberChain) -> Option<(NodeId, Span)> {
+    let mut callee = chain.node;
+    let mut callee_span = chain.span;
+    loop {
+        let parent = nodes.parent_id(callee);
+        if parent == callee {
+            return None;
+        }
+        match nodes.kind(parent) {
+            AstKind::ParenthesizedExpression(paren) => {
+                callee = parent;
+                callee_span = paren.span;
+            }
+            AstKind::CallExpression(call) if call.callee.span() == callee_span => {
+                let in_chain = matches!(nodes.parent_kind(parent), AstKind::ChainExpression(_));
+                return (!call.optional && !in_chain).then_some((parent, call.span));
+            }
+            _ => return None,
+        }
+    }
 }
 
 struct Classified {
@@ -110,7 +241,11 @@ fn classify(
     let parent = nodes.parent_kind(chain.node);
     let kind = match parent {
         AstKind::JSXOpeningElement(_) => ImportBindingReferenceKind::JsxElement,
-        AstKind::JSXClosingElement(_) | AstKind::TSTypeQuery(_) | AstKind::TSQualifiedName(_) => {
+        // `ReExportInfo` records `export { x }` of an import binding.
+        AstKind::JSXClosingElement(_)
+        | AstKind::TSTypeQuery(_)
+        | AstKind::TSQualifiedName(_)
+        | AstKind::ExportSpecifier(_) => {
             return None;
         }
         _ => {

@@ -224,6 +224,12 @@ struct Wrapper {
     file_id: FileId,
     file: String,
     export: String,
+    /// The local name of the declarator in its own module.
+    declared: String,
+    /// Whether this entry owns the uses of the declarator in its own module.
+    /// A declarator with more than one export name has one owner, so a use
+    /// counts once.
+    owns_module_uses: bool,
     specifier: String,
     shape: WrapperShape,
     line: u32,
@@ -231,10 +237,36 @@ struct Wrapper {
     call_site_count: usize,
 }
 
+impl Wrapper {
+    fn via(&self) -> String {
+        format!("{}:{}", self.file, self.export)
+    }
+}
+
 /// One site with the file that holds it.
 struct RawSite {
     file_id: FileId,
     site: UsageSite,
+    /// A call wrapper definition is a real call of the package export, so it
+    /// counts in `call_site_count`.
+    counts_as_call: bool,
+}
+
+/// A site that goes through a wrapper.
+struct ViaSite<'a> {
+    kind: UsageSiteKind,
+    offset: u32,
+    local_name: &'a str,
+    member: Option<String>,
+}
+
+/// One use of a wrapper in a consumer module or in its own module.
+#[derive(Clone, Copy)]
+enum WrapperUse {
+    /// An admitted call of the wrapper binding.
+    Call,
+    /// A binding reference of this kind.
+    Reference(ImportBindingReferenceKind),
 }
 
 #[derive(Default)]
@@ -276,6 +308,7 @@ struct SiteSpec {
     member: Option<String>,
     kind: UsageSiteKind,
     via: Option<String>,
+    counts_as_call: bool,
 }
 
 impl Scan {
@@ -286,6 +319,7 @@ impl Scan {
         }
         self.sites.push(RawSite {
             file_id: scan.module.file_id,
+            counts_as_call: spec.counts_as_call,
             site: UsageSite {
                 file: scan.file.clone(),
                 line,
@@ -309,6 +343,7 @@ impl Scan {
                 member: None,
                 kind,
                 via: None,
+                counts_as_call: false,
             },
         );
     }
@@ -338,7 +373,9 @@ impl Scan {
         };
         self.scan_imports(ctx, &mut scan);
         self.scan_calls(&scan);
+        let first_wrapper = self.wrappers.len();
         self.scan_binding_references(&scan);
+        self.scan_module_wrapper_uses(&scan, first_wrapper);
         self.scan_file_level_forms(ctx, &scan);
         self.close_namespace_bindings(&scan);
     }
@@ -368,7 +405,10 @@ impl Scan {
                         || is_type_position_only(scan.module, &import.local_name);
                     self.note_binding(file_id, specifier, type_only);
                 }
-                BindingName::Namespace if import.is_type_only => {
+                BindingName::Namespace
+                    if import.is_type_only
+                        || is_type_position_only(scan.module, &import.local_name) =>
+                {
                     self.note_binding(file_id, NAMESPACE_SPECIFIER, true);
                 }
                 BindingName::Namespace => {}
@@ -408,6 +448,7 @@ impl Scan {
                     member,
                     kind: UsageSiteKind::Call,
                     via: None,
+                    counts_as_call: false,
                 },
             );
         }
@@ -422,7 +463,7 @@ impl Scan {
     }
 
     fn scan_binding_references(&mut self, scan: &ModuleScan<'_>) {
-        for reference in scan.module.import_binding_references.iter() {
+        for reference in direct_references(scan.module) {
             let Some(binding) = scan.bindings.get(&reference.import_index) else {
                 continue;
             };
@@ -430,28 +471,38 @@ impl Scan {
                 continue;
             };
             let (specifier, member) = binding.split(&reference.member_path);
-            let wrapper = wrapper_shape(reference, member.as_deref())
-                .and_then(|shape| Some((shape, wrapper_export(scan.module, reference)?)));
+            let wrapper = wrapper_shape(reference, member.as_deref()).and_then(|shape| {
+                let exports = wrapper_exports(scan.module, reference);
+                (!exports.is_empty()).then_some((shape, exports))
+            });
             let kind = match (reference.kind, &wrapper) {
                 (_, Some(_)) => UsageSiteKind::WrapperDefinition,
                 // A call site covers an initializer call that is no wrapper.
                 (ImportBindingReferenceKind::InitializerCall, None) => continue,
                 (ImportBindingReferenceKind::ValueAlias, None) => UsageSiteKind::ValueAlias,
                 (ImportBindingReferenceKind::JsxElement, None) => UsageSiteKind::JsxElement,
-                (ImportBindingReferenceKind::Other, None) => UsageSiteKind::NonCallReference,
+                (ImportBindingReferenceKind::Other | ImportBindingReferenceKind::Call, None) => {
+                    UsageSiteKind::NonCallReference
+                }
             };
-            if let Some((shape, export)) = wrapper {
+            let counts_as_call = matches!(&wrapper, Some((WrapperShape::Call, _)));
+            if let Some((shape, exports)) = wrapper {
                 let (line, _) = scan.position(reference.span_start);
-                self.wrappers.push(Wrapper {
-                    file_id: scan.module.file_id,
-                    file: scan.file.clone(),
-                    export,
-                    specifier: specifier.clone(),
-                    shape,
-                    line,
-                    consumer_files: FxHashSet::default(),
-                    call_site_count: 0,
-                });
+                let declared = reference.declared_name.as_deref().unwrap_or_default();
+                for (index, export) in exports.into_iter().enumerate() {
+                    self.wrappers.push(Wrapper {
+                        file_id: scan.module.file_id,
+                        file: scan.file.clone(),
+                        export,
+                        declared: declared.to_owned(),
+                        owns_module_uses: index == 0,
+                        specifier: specifier.clone(),
+                        shape,
+                        line,
+                        consumer_files: FxHashSet::default(),
+                        call_site_count: 0,
+                    });
+                }
             }
             self.note_namespace_use(scan, binding, &specifier);
             self.push_site(
@@ -463,9 +514,82 @@ impl Scan {
                     member,
                     kind,
                     via: None,
+                    counts_as_call,
                 },
             );
         }
+    }
+
+    /// Count the uses of each wrapper in the module that declares it.
+    fn scan_module_wrapper_uses(&mut self, scan: &ModuleScan<'_>, first_wrapper: usize) {
+        let mut wrappers = self.wrappers.split_off(first_wrapper);
+        for wrapper in wrappers
+            .iter_mut()
+            .filter(|wrapper| wrapper.owns_module_uses)
+        {
+            let declared = wrapper.declared.clone();
+            let uses = scan
+                .module
+                .import_binding_references
+                .iter()
+                .filter(|reference| reference.through.as_deref() == Some(declared.as_str()));
+            for reference in uses {
+                let member = non_empty(&reference.member_path);
+                let Some(kind) = via_site_kind(
+                    wrapper.shape,
+                    WrapperUse::Reference(reference.kind),
+                    member.as_deref(),
+                    exports_declared_value(scan.module, reference),
+                    false,
+                ) else {
+                    continue;
+                };
+                self.push_via_site(
+                    scan,
+                    wrapper,
+                    ViaSite {
+                        kind,
+                        offset: reference.span_start,
+                        local_name: &declared,
+                        member,
+                    },
+                );
+            }
+        }
+        self.wrappers.append(&mut wrappers);
+    }
+
+    /// Push a site that goes through `wrapper`. A call of the wrapper counts
+    /// toward the wrapper.
+    fn push_via_site(&mut self, scan: &ModuleScan<'_>, wrapper: &mut Wrapper, site: ViaSite<'_>) {
+        let ViaSite {
+            kind,
+            offset,
+            local_name,
+            member,
+        } = site;
+        // A wrapper of a whole namespace takes its specifier from the member.
+        let (specifier, member) = if wrapper.specifier == NAMESPACE_SPECIFIER {
+            BindingName::Namespace.split(member.as_deref().unwrap_or_default())
+        } else {
+            (wrapper.specifier.clone(), member)
+        };
+        if kind == UsageSiteKind::Call {
+            wrapper.call_site_count += 1;
+            wrapper.consumer_files.insert(scan.module.file_id);
+        }
+        self.push_site(
+            scan,
+            SiteSpec {
+                offset,
+                specifier: Some(specifier),
+                local_name: Some(local_name.to_owned()),
+                member,
+                kind,
+                via: Some(wrapper.via()),
+                counts_as_call: false,
+            },
+        );
     }
 
     fn scan_file_level_forms(&mut self, ctx: &UsageContext<'_>, scan: &ModuleScan<'_>) {
@@ -492,6 +616,7 @@ impl Scan {
                     member: None,
                     kind: UsageSiteKind::ReExport,
                     via: None,
+                    counts_as_call: false,
                 },
             );
         }
@@ -522,6 +647,9 @@ impl Scan {
             let Some(import) = scan.module.imports.get(*index as usize) else {
                 continue;
             };
+            if is_type_position_only(scan.module, &import.local_name) {
+                continue;
+            }
             let used = self
                 .sites
                 .get(scan.first_site..)
@@ -554,8 +682,60 @@ impl Scan {
                 };
                 self.scan_consumer(&scan, wrapper, &local_name, prefix.as_deref());
             }
+            self.scan_barrels(ctx, wrapper);
         }
         self.wrappers = wrappers;
+    }
+
+    /// A project re-export of a wrapper is one `re_export` site through the
+    /// wrapper. The consumers of the barrel are not followed.
+    fn scan_barrels(&mut self, ctx: &UsageContext<'_>, wrapper: &Wrapper) {
+        let mut importers: Vec<FileId> = ctx.graph.importers_of(wrapper.file_id).to_vec();
+        importers.sort_unstable_by_key(|id| id.0);
+        importers.dedup();
+        for importer in importers {
+            let (Some(node), Some(module), Some(file)) = (
+                ctx.graph.modules.get(importer.0 as usize),
+                ctx.modules_by_id.get(&importer),
+                ctx.file_path(importer),
+            ) else {
+                continue;
+            };
+            let scan = ModuleScan {
+                module,
+                file,
+                bindings: FxHashMap::default(),
+                locals: FxHashMap::default(),
+                first_site: self.sites.len(),
+            };
+            for re_export in &node.re_exports {
+                let names_wrapper = re_export.imported_name == wrapper.export
+                    || (re_export.imported_name == NAMESPACE_SPECIFIER
+                        && wrapper.export != DEFAULT_SPECIFIER);
+                // The graph adds re-exports with an empty span for `export *`
+                // chains. Only a written re-export is a site.
+                let written = !(re_export.span.start == 0 && re_export.span.end == 0);
+                if re_export.source_file != wrapper.file_id
+                    || re_export.is_type_only
+                    || !names_wrapper
+                    || !written
+                {
+                    continue;
+                }
+                self.push_site(
+                    &scan,
+                    SiteSpec {
+                        offset: re_export.span.start,
+                        specifier: Some(wrapper.specifier.clone()),
+                        local_name: Some(wrapper.export.clone()),
+                        member: None,
+                        kind: UsageSiteKind::ReExport,
+                        via: Some(wrapper.via()),
+                        counts_as_call: false,
+                    },
+                );
+            }
+        }
     }
 
     fn scan_consumer(
@@ -565,7 +745,6 @@ impl Scan {
         local_name: &str,
         prefix: Option<&str>,
     ) {
-        let via = format!("{}:{}", wrapper.file, wrapper.export);
         let indexes: FxHashSet<u32> = scan
             .module
             .imports
@@ -574,66 +753,78 @@ impl Scan {
             .filter(|(_, import)| import.local_name == local_name && !import.is_type_only)
             .filter_map(|(index, _)| u32::try_from(index).ok())
             .collect();
-        let nested_calls: FxHashSet<u32> = scan
-            .module
-            .import_binding_references
+        let references: Vec<(&ImportBindingReference, Option<String>)> =
+            direct_references(scan.module)
+                .filter(|reference| indexes.contains(&reference.import_index))
+                .filter_map(
+                    |reference| match match_member_prefix(&reference.member_path, prefix) {
+                        PrefixMatch::Member(member) => Some((reference, member)),
+                        PrefixMatch::Outside => None,
+                    },
+                )
+                .collect();
+        // The binding reference owns the offset of an initializer call that
+        // it reports itself.
+        let owned_calls: FxHashSet<u32> = references
             .iter()
-            .filter(|reference| {
-                indexes.contains(&reference.import_index)
-                    && reference.kind == ImportBindingReferenceKind::InitializerCall
-                    && exports_declared_value(scan.module, reference)
+            .filter(|(reference, member)| {
+                reference.kind == ImportBindingReferenceKind::InitializerCall
+                    && via_site_kind(
+                        wrapper.shape,
+                        WrapperUse::Reference(reference.kind),
+                        member.as_deref(),
+                        exports_declared_value(scan.module, reference),
+                        true,
+                    )
+                    .is_some()
             })
-            .map(|reference| reference.span_start)
+            .map(|(reference, _)| reference.span_start)
             .collect();
         for call in scan.module.imported_call_sites.iter() {
-            if call.local_name != local_name || nested_calls.contains(&call.span_start) {
+            if call.local_name != local_name || owned_calls.contains(&call.span_start) {
                 continue;
             }
             let PrefixMatch::Member(member) = match_member_prefix(&call.member_path, prefix) else {
                 continue;
             };
-            wrapper.call_site_count += 1;
-            wrapper.consumer_files.insert(scan.module.file_id);
-            self.push_site(
+            let Some(kind) = via_site_kind(
+                wrapper.shape,
+                WrapperUse::Call,
+                member.as_deref(),
+                false,
+                true,
+            ) else {
+                continue;
+            };
+            self.push_via_site(
                 scan,
-                SiteSpec {
+                wrapper,
+                ViaSite {
+                    kind,
                     offset: call.span_start,
-                    specifier: Some(wrapper.specifier.clone()),
-                    local_name: Some(local_name.to_owned()),
+                    local_name,
                     member,
-                    kind: UsageSiteKind::Call,
-                    via: Some(via.clone()),
                 },
             );
         }
-        for reference in scan.module.import_binding_references.iter() {
-            if !indexes.contains(&reference.import_index) {
-                continue;
-            }
-            let PrefixMatch::Member(member) = match_member_prefix(&reference.member_path, prefix)
-            else {
+        for (reference, member) in references {
+            let Some(kind) = via_site_kind(
+                wrapper.shape,
+                WrapperUse::Reference(reference.kind),
+                member.as_deref(),
+                exports_declared_value(scan.module, reference),
+                true,
+            ) else {
                 continue;
             };
-            let exported = exports_declared_value(scan.module, reference);
-            let kind = match reference.kind {
-                ImportBindingReferenceKind::InitializerCall if exported => {
-                    UsageSiteKind::NestedWrapper
-                }
-                ImportBindingReferenceKind::InitializerCall => continue,
-                ImportBindingReferenceKind::ValueAlias if exported => UsageSiteKind::NestedWrapper,
-                ImportBindingReferenceKind::ValueAlias => UsageSiteKind::ValueAlias,
-                ImportBindingReferenceKind::JsxElement => UsageSiteKind::JsxElement,
-                ImportBindingReferenceKind::Other => UsageSiteKind::NonCallReference,
-            };
-            self.push_site(
+            self.push_via_site(
                 scan,
-                SiteSpec {
-                    offset: reference.span_start,
-                    specifier: Some(wrapper.specifier.clone()),
-                    local_name: Some(local_name.to_owned()),
-                    member,
+                wrapper,
+                ViaSite {
                     kind,
-                    via: Some(via.clone()),
+                    offset: reference.span_start,
+                    local_name,
+                    member,
                 },
             );
         }
@@ -692,7 +883,7 @@ impl Scan {
             }
             entry(&mut usages, name);
             if let Some(usage) = usages.get_mut(name) {
-                count_site(usage, &raw.site);
+                count_site(usage, raw);
             }
         }
         for wrapper in &self.wrappers {
@@ -739,10 +930,12 @@ fn empty_specifier_usage(name: &str) -> SpecifierUsage {
     }
 }
 
-fn count_site(usage: &mut SpecifierUsage, site: &UsageSite) {
+fn count_site(usage: &mut SpecifierUsage, raw: &RawSite) {
+    let site = &raw.site;
     let unresolved = &mut usage.unresolved;
     match site.kind {
         UsageSiteKind::Call if site.via.is_none() => usage.call_site_count += 1,
+        UsageSiteKind::WrapperDefinition if raw.counts_as_call => usage.call_site_count += 1,
         UsageSiteKind::ValueAlias => unresolved.value_alias += 1,
         UsageSiteKind::NonCallReference => unresolved.non_call_reference += 1,
         UsageSiteKind::JsxElement => unresolved.jsx_element += 1,
@@ -754,13 +947,11 @@ fn count_site(usage: &mut SpecifierUsage, site: &UsageSite) {
 
 /// The start offsets of the initializer calls that define a wrapper.
 fn wrapper_initializer_calls(scan: &ModuleScan<'_>) -> FxHashSet<u32> {
-    scan.module
-        .import_binding_references
-        .iter()
+    direct_references(scan.module)
         .filter(|reference| {
             reference.kind == ImportBindingReferenceKind::InitializerCall
                 && scan.bindings.contains_key(&reference.import_index)
-                && wrapper_export(scan.module, reference).is_some()
+                && exports_declared_value(scan.module, reference)
         })
         .map(|reference| reference.span_start)
         .collect()
@@ -779,14 +970,26 @@ const fn wrapper_shape(
     }
 }
 
-/// The exported name of the top-level declarator that `reference`
-/// initializes, when the module exports it as a value.
-fn wrapper_export(module: &ModuleInfo, reference: &ImportBindingReference) -> Option<String> {
-    let declared = reference.declared_name.as_deref()?;
+/// The references to an import binding itself, without the uses of a
+/// wrapper in its own module.
+fn direct_references(module: &ModuleInfo) -> impl Iterator<Item = &ImportBindingReference> {
+    module
+        .import_binding_references
+        .iter()
+        .filter(|reference| reference.through.is_none())
+}
+
+/// The exported names of the top-level declarator that `reference`
+/// initializes, when the module exports it as a value. One declarator can
+/// have more than one export name: `export { x as a, x as b }`.
+fn wrapper_exports(module: &ModuleInfo, reference: &ImportBindingReference) -> Vec<String> {
+    let Some(declared) = reference.declared_name.as_deref() else {
+        return Vec::new();
+    };
     module
         .exports
         .iter()
-        .find(|export| {
+        .filter(|export| {
             !export.is_type_only
                 && match &export.local_name {
                     Some(local) => local == declared,
@@ -797,10 +1000,55 @@ fn wrapper_export(module: &ModuleInfo, reference: &ImportBindingReference) -> Op
             ExportName::Named(name) => name.clone(),
             ExportName::Default => DEFAULT_SPECIFIER.to_owned(),
         })
+        .collect()
 }
 
 fn exports_declared_value(module: &ModuleInfo, reference: &ImportBindingReference) -> bool {
-    wrapper_export(module, reference).is_some()
+    !wrapper_exports(module, reference).is_empty()
+}
+
+/// The site kind of one use of a wrapper, or `None` when another record owns
+/// the use.
+///
+/// `member` is the static member after the wrapper. A call wrapper returns a
+/// value, so a use of a member of that value (`store.dispatch()`) is no call
+/// of the package export. `has_call_entry` is true in a consumer module,
+/// where an admitted call site records each call of the binding.
+fn via_site_kind(
+    shape: WrapperShape,
+    wrapper_use: WrapperUse,
+    member: Option<&str>,
+    exported: bool,
+    has_call_entry: bool,
+) -> Option<UsageSiteKind> {
+    let reads_result_member = shape == WrapperShape::Call && member.is_some();
+    let call_kind = if reads_result_member {
+        UsageSiteKind::NonCallReference
+    } else {
+        UsageSiteKind::Call
+    };
+    let kind = match wrapper_use {
+        WrapperUse::Call | WrapperUse::Reference(ImportBindingReferenceKind::Call) => call_kind,
+        WrapperUse::Reference(ImportBindingReferenceKind::InitializerCall) => {
+            if exported && !reads_result_member {
+                UsageSiteKind::NestedWrapper
+            } else if has_call_entry {
+                return None;
+            } else {
+                call_kind
+            }
+        }
+        WrapperUse::Reference(ImportBindingReferenceKind::ValueAlias) => {
+            if exported && !reads_result_member {
+                UsageSiteKind::NestedWrapper
+            } else {
+                UsageSiteKind::ValueAlias
+            }
+        }
+        WrapperUse::Reference(ImportBindingReferenceKind::JsxElement) => UsageSiteKind::JsxElement,
+        WrapperUse::Reference(ImportBindingReferenceKind::Other) => UsageSiteKind::NonCallReference,
+    };
+    Some(kind)
 }
 
 /// How a member path relates to a required namespace prefix.
@@ -846,6 +1094,7 @@ fn wrapper_consumers(
                 }
                 let prefix = match &symbol.imported_name {
                     ImportedName::Named(name) if *name == wrapper.export => None,
+                    ImportedName::Default if wrapper.export == DEFAULT_SPECIFIER => None,
                     ImportedName::Namespace => Some(wrapper.export.clone()),
                     _ => continue,
                 };

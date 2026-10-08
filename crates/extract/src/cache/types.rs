@@ -71,7 +71,7 @@ assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
 assert_cached_type_size!(fallow_types::extract::ImportedCallSite, 80);
-assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 48);
+assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 64);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);

@@ -1145,13 +1145,6 @@ export type UsageConfidence = "syntactic"
  */
 export type WrapperShape = ("call" | "alias")
 /**
- * How the code uses the dependency at a site.
- *
- * The set is open: read an unknown kind as an unresolved site. The order of
- * the variants is the sort order of sites at the same position.
- */
-export type UsageSiteKind = ("call" | "wrapper_definition" | "value_alias" | "non_call_reference" | "jsx_element" | "re_export" | "nested_wrapper" | "dynamic_import" | "require" | "side_effect_import" | "star_re_export")
-/**
  * Wire-version discriminator for [`ImportPathTrace`]. Independent from the
  * global `SchemaVersion`: the import-path payload versions on its own cadence,
  * like the other independently-versioned envelopes. Serializes as a string
@@ -11840,7 +11833,9 @@ file_count: number
  */
 type_only_file_count: number
 /**
- * Direct calls of the name, not through a project wrapper.
+ * Direct calls of the name, not through a project wrapper. The
+ * initializer of a call wrapper (`useSelector.withTypes()`) is a direct
+ * call and counts here.
  */
 call_site_count: number
 unresolved: SpecifierUnresolved
@@ -11869,8 +11864,9 @@ non_call_reference: number
  */
 jsx_element: number
 /**
- * The file re-exports the name from the package. The trace does not
- * follow the consumers of the re-export.
+ * The file re-exports the name from the package, or re-exports a
+ * project wrapper of the name. The trace does not follow the consumers
+ * of the re-export.
  */
 re_export: number
 /**
@@ -11903,11 +11899,13 @@ shape: WrapperShape
  */
 line: number
 /**
- * Distinct files with a call of the wrapper.
+ * Distinct files with a call of the wrapper, the file of the wrapper
+ * included.
  */
 consumer_file_count: number
 /**
- * Calls of the wrapper.
+ * Calls of the wrapper itself. A call of a member of the value that a
+ * call wrapper returns (`store.dispatch()`) is a `non_call_reference`.
  */
 call_site_count: number
 }
@@ -11988,7 +11986,14 @@ local_name?: (string | null)
  * The static member after the imported name, for example `withTypes`.
  */
 member?: (string | null)
-kind: UsageSiteKind
+/**
+ * How the code uses the dependency at this site. The known values are
+ * `call`, `wrapper_definition`, `value_alias`, `non_call_reference`,
+ * `jsx_element`, `re_export`, `nested_wrapper`, `dynamic_import`,
+ * `require`, `side_effect_import` and `star_re_export`. The set is open:
+ * read an unknown kind as an unresolved site.
+ */
+kind: string
 /**
  * The wrapper that the site goes through, as `FILE:EXPORT`.
  */

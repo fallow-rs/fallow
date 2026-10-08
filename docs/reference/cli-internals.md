@@ -773,6 +773,20 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   `analyze_dead_code_with_shared_artifacts(true, true)`.
 - Only `json` and `human` are supported. Human output goes to stdout through
   `outln!`; `fallow dead-code --trace-dependency` keeps its stderr block.
+- A wrapper is an exported top-level declarator whose initializer is a
+  runtime binding of the package (`alias` shape) or a call on one (`call`
+  shape). The walk follows one hop from each export name of the wrapper:
+  named, default and namespace imports of the wrapper module. It also counts
+  the uses of the wrapper in its own module (`through` references from
+  extraction) and each project re-export of the wrapper as a `re_export` site
+  with `via`. It does not follow the consumers of that re-export.
+- A call wrapper returns a value. A call of a member of that value
+  (`store.dispatch()` for `export const store = configureStore()`) is a
+  `non_call_reference`, not a call of the package export. The call that
+  defines a call wrapper counts in `call_site_count`.
+- A wrapper of a whole namespace (`export const R = RR`) takes the specifier
+  of each consumer site from the first member (`R.useSelector()` gives
+  `useSelector`).
 
 ## Verification
 

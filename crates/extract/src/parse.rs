@@ -1707,8 +1707,12 @@ fn compute_semantic_usage_with_candidates(
 
     let imported_call_reference_spans =
         imported_call_reference_spans(&semantic, imports, candidates.imported_calls);
-    let import_binding_references =
-        crate::binding_references::collect(&semantic, imports, &imported_call_reference_spans);
+    let import_binding_references = crate::binding_references::collect(
+        &semantic,
+        imports,
+        exports,
+        &imported_call_reference_spans,
+    );
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
             unused,

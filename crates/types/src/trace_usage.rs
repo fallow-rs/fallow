@@ -69,7 +69,9 @@ pub struct SpecifierUsage {
     /// an `import type`, or a value import that the file reads only in type
     /// positions.
     pub type_only_file_count: usize,
-    /// Direct calls of the name, not through a project wrapper.
+    /// Direct calls of the name, not through a project wrapper. The
+    /// initializer of a call wrapper (`useSelector.withTypes()`) is a direct
+    /// call and counts here.
     pub call_site_count: usize,
     /// Uses of the name that the trace cannot resolve to a call.
     pub unresolved: SpecifierUnresolved,
@@ -90,8 +92,9 @@ pub struct SpecifierUnresolved {
     pub non_call_reference: usize,
     /// The name is a JSX element: `<Provider>`.
     pub jsx_element: usize,
-    /// The file re-exports the name from the package. The trace does not
-    /// follow the consumers of the re-export.
+    /// The file re-exports the name from the package, or re-exports a
+    /// project wrapper of the name. The trace does not follow the consumers
+    /// of the re-export.
     pub re_export: usize,
     /// A wrapper consumer that exports the wrapper again. The trace does not
     /// follow the second hop.
@@ -144,9 +147,11 @@ pub struct UsageWrapper {
     pub shape: WrapperShape,
     /// 1-based line of the wrapper initializer.
     pub line: u32,
-    /// Distinct files with a call of the wrapper.
+    /// Distinct files with a call of the wrapper, the file of the wrapper
+    /// included.
     pub consumer_file_count: usize,
-    /// Calls of the wrapper.
+    /// Calls of the wrapper itself. A call of a member of the value that a
+    /// call wrapper returns (`store.dispatch()`) is a `non_call_reference`.
     pub call_site_count: usize,
 }
 
@@ -185,7 +190,12 @@ pub struct UsageSite {
     /// The static member after the imported name, for example `withTypes`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member: Option<String>,
-    /// How the code uses the dependency at this site.
+    /// How the code uses the dependency at this site. The known values are
+    /// `call`, `wrapper_definition`, `value_alias`, `non_call_reference`,
+    /// `jsx_element`, `re_export`, `nested_wrapper`, `dynamic_import`,
+    /// `require`, `side_effect_import` and `star_re_export`. The set is open:
+    /// read an unknown kind as an unresolved site.
+    #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub kind: UsageSiteKind,
     /// The wrapper that the site goes through, as `FILE:EXPORT`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -194,10 +204,10 @@ pub struct UsageSite {
 
 /// How the code uses the dependency at a site.
 ///
-/// The set is open: read an unknown kind as an unresolved site. The order of
-/// the variants is the sort order of sites at the same position.
+/// The set is open: read an unknown kind as an unresolved site. The JSON
+/// schema types the field as a plain string for this reason. The order of the
+/// variants is the sort order of sites at the same position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum UsageSiteKind {
     /// A call of the name, directly or through a wrapper.
@@ -210,7 +220,8 @@ pub enum UsageSiteKind {
     NonCallReference,
     /// A JSX element.
     JsxElement,
-    /// A named re-export from the package.
+    /// A named re-export from the package, or a re-export of a project
+    /// wrapper.
     ReExport,
     /// A wrapper consumer that exports the wrapper again.
     NestedWrapper,

@@ -682,7 +682,7 @@ async fn e2e_trace_dependency_usage_fields_add_the_usage_object() {
     })
     .await;
     assert_eq!(usage["usage"]["specifiers"][0]["name"], "useSelector");
-    assert_eq!(usage["usage"]["sites"]["total"], 11);
+    assert_eq!(usage["usage"]["sites"]["total"], 13);
     assert_eq!(
         usage["usage"]["sites"]["items"].as_array().map(Vec::len),
         Some(5)
@@ -724,7 +724,7 @@ fn e2e_code_execute_trace_dependency_accepts_usage_fields() {
     assert_eq!(json["ok"].as_bool(), Some(true), "{json:#}");
     assert_eq!(json["result"]["plainHasUsage"], false);
     assert_eq!(json["result"]["name"], "useSelector");
-    assert_eq!(json["result"]["total"], 11);
+    assert_eq!(json["result"]["total"], 13);
 }
 
 #[tokio::test]
