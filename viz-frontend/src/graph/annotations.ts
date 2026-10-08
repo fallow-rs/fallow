@@ -231,7 +231,9 @@ export const drawHoverLabels = (
   // on its own at the far side of the canvas.
   const dockedRight = tipRect.x > hs.x;
   const anchorX = dockedRight ? tipRect.x : tipRect.x + tipRect.w;
-  const anchorY = Math.min(Math.max(hs.y, tipRect.y + 12), tipRect.y + tipRect.h - 12);
+  // Keep the anchor in the card's top band: the real card can be shorter
+  // than the estimated height, but never shorter than its name and stats.
+  const anchorY = Math.min(Math.max(hs.y, tipRect.y + 12), tipRect.y + TIP_ANCHOR_BAND);
   const lr = hoveredNode.radius * gvs.transform.k;
   const ldx = anchorX - hs.x;
   const ldy = anchorY - hs.y;
@@ -478,6 +480,9 @@ const labelObstacles = (state: AppState): Array<{ x: number; y: number; w: numbe
   });
   return rects;
 };
+
+/** Lowest point, below the card top, where the tooltip leader may land. */
+const TIP_ANCHOR_BAND = 48;
 
 /** Gap between a chip and its hull above which a leader line is drawn. */
 const LEADER_GAP = 10;

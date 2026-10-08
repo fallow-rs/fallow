@@ -205,6 +205,9 @@ export const showFileTooltip = (
   // No generic "click for details" line: the pointer cursor already says
   // the node is clickable, and the severity/lens lines carry the substance.
 
+  // The docked card takes the exact width the canvas leader aims at, so
+  // the leader always ends on its edge.
+  tip.style.width = dock ? `${TIP_W}px` : "";
   if (dock) {
     tip.style.display = "block";
     const rect = fileTipCanvasRect(dock.nodeX, dock.nodeY, dock.usableW, dock.canvas.height);
@@ -274,6 +277,7 @@ export const showDirTooltip = (
 };
 
 const position = (tip: HTMLDivElement, mouseX: number, mouseY: number): void => {
+  tip.style.width = "";
   tip.style.display = "block";
   const rect = tip.getBoundingClientRect();
   let left = mouseX + 14;
