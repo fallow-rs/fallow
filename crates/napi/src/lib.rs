@@ -1501,12 +1501,9 @@ mod tests {
     /// (`fallow_types::mcp_manifest::CAPABILITY_PARITY`). A new export that is
     /// not recorded in the table, or a stale table entry, fails here. Mirrors
     /// the include_str source-scan the schemars-alias guards use.
-    #[test]
-    fn napi_exports_match_capability_parity_table() {
-        use std::collections::BTreeSet;
-
+    fn scanned_function_exports() -> std::collections::BTreeSet<String> {
         let source = include_str!("lib.rs");
-        let mut scanned: BTreeSet<String> = BTreeSet::new();
+        let mut scanned = std::collections::BTreeSet::new();
         let mut lines = source.lines();
         while let Some(line) = lines.next() {
             let trimmed = line.trim_start();
@@ -1518,6 +1515,35 @@ mod tests {
                 }
             }
         }
+        scanned
+    }
+
+    /// Drift guard: the root README and the package README name every
+    /// `#[napi(js_name = ...)]` function export.
+    #[test]
+    fn readmes_list_every_napi_export() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for relative in ["README.md", "../../README.md"] {
+            let path = manifest_dir.join(relative);
+            let readme = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            let missing: Vec<String> = scanned_function_exports()
+                .into_iter()
+                .filter(|name| !readme.contains(&format!("`{name}")))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "{} does not name these Node exports: {missing:?}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn napi_exports_match_capability_parity_table() {
+        use std::collections::BTreeSet;
+
+        let scanned: BTreeSet<String> = scanned_function_exports();
         assert_eq!(
             scanned.len(),
             9,

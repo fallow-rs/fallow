@@ -225,7 +225,7 @@ With `--format json`, an error arrives on stdout as `{"error": true, "message": 
 
 - The [VS Code extension](https://fallow.tools/docs/integrations/vscode/) shows findings in the editor.
 - `fallow-lsp` gives diagnostics, hover, code actions, and code lenses in any LSP editor. [`editors/`](editors/) has setups for Zed and [Neovim](https://fallow.tools/docs/integrations/neovim/).
-- The Node API [`@fallow-cli/fallow-node`](https://fallow.tools/docs/integrations/node-bindings/) exports `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. The [package API reference](crates/napi/README.md) has the options and return types.
+- The Node API [`@fallow-cli/fallow-node`](https://fallow.tools/docs/integrations/node-bindings/) exports `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectArchitecture`, `detectDuplication`, `detectSimilarCode`, `detectFeatureFlags`, `computeComplexity`, and `computeHealth`. The [package API reference](crates/napi/README.md) has the options and return types.
 - `fallow health --format badge > badge.svg` writes a [health badge](https://fallow.tools/docs/integrations/badges/) for your README.
 
 ## With coding agents
