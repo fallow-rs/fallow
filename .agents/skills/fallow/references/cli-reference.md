@@ -1498,6 +1498,11 @@ Each `--path` hop carries `type_only` and `dynamic`. A `dynamic` hop loads its t
 <!-- generated:flags:trace:start -->
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `--dependency` | `string` | - | How the code uses each imported name of a package: file and call counts, one hop through project wrappers, and a count of each use that the trace cannot resolve |
+| `--specifier` | `string` | - | With `--dependency`, report only these imported names (repeatable or comma-separated). Turns on the site page |
+| `--sites` | `bool` | `false` | With `--dependency`, list the usage sites with file, line and column |
+| `--limit` | `string` | - | With `--dependency`, the largest number of sites on a page (1 to 500, default 50). Turns on the site page |
+| `--cursor` | `string` | - | With `--dependency`, the `next_cursor` of the previous page. Turns on the site page |
 | `--path` | `string` | - | Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags |
 | `--eager-only` | `bool` | `false` | With `--path`, follow only static value imports, so the route explains why TO loads before FROM runs. `import()`, lazy globs, worker loads and `import type` do not qualify |
 | `--callers` | `bool` | `false` | Walk UP to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked |

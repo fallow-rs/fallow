@@ -474,7 +474,7 @@
       "section": "commands",
       "row": "trace",
       "column": "Key Flags",
-      "seed": "`symbol`, `--path`, `--eager-only`, `--callers`, `--callees`, `--depth`"
+      "seed": "`symbol`, `--dependency`, `--specifier`, `--sites`, `--limit`, `--cursor`, `--path`, `--eager-only`"
     },
     {
       "section": "commands",
@@ -1984,6 +1984,18 @@
     },
     {
       "section": "flags:trace",
+      "row": "--cursor",
+      "column": "Description",
+      "seed": "With `--dependency`, the `next_cursor` of the previous page. Turns on the site page"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--dependency",
+      "column": "Description",
+      "seed": "How the code uses each imported name of a package: file and call counts, one hop through project wrappers, and a count of each use that the trace cannot resolve"
+    },
+    {
+      "section": "flags:trace",
       "row": "--depth",
       "column": "Description",
       "seed": "Chain depth bound for both directions (default 2). Symbol-level is best-effort, so a shallow bound keeps the trace legible"
@@ -1996,9 +2008,27 @@
     },
     {
       "section": "flags:trace",
+      "row": "--limit",
+      "column": "Description",
+      "seed": "With `--dependency`, the largest number of sites on a page (1 to 500, default 50). Turns on the site page"
+    },
+    {
+      "section": "flags:trace",
       "row": "--path",
       "column": "Description",
       "seed": "Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--sites",
+      "column": "Description",
+      "seed": "With `--dependency`, list the usage sites with file, line and column"
+    },
+    {
+      "section": "flags:trace",
+      "row": "--specifier",
+      "column": "Description",
+      "seed": "With `--dependency`, report only these imported names (repeatable or comma-separated). Turns on the site page"
     },
     {
       "section": "issue-types",
@@ -2676,7 +2706,7 @@
       "section": "mcp-tools",
       "row": "trace_dependency",
       "column": "Description",
-      "seed": "Trace where a dependency is imported and whether scripts or CI use it"
+      "seed": "Trace where a dependency is imported, whether scripts or CI use it, and how the code uses each imported name"
     },
     {
       "section": "mcp-tools",

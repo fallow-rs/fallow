@@ -175,6 +175,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again. The stale-baseline warning
   and gate message now name the prune command. (#3281, requested by
   @BenMcGit)
+||||||| parent of d674b53 (docs(trace): document the dependency usage trace)
+- **`fallow trace --dependency <package>`** reports how the code uses each
+  imported name of a package. It gives file and call counts, sites with line
+  and column, one hop through project wrappers such as
+  `useSelector.withTypes()`, and a count of each use that it cannot resolve.
+  `--sites`, `--specifier`, `--limit` and `--cursor` page the sites.
+  `--callers --depth N` adds the files that import the users. The MCP tool
+  `trace_dependency` accepts the same options. The parse cache version
+  changes, so the first run after the upgrade parses all files again.
 - **`fallow architecture`** reports import cycles, boundary violations and
   rule-pack policy violations in one command. Use `--cycles`, `--boundaries`
   or `--policy` to select one kind. The command takes the same scope and

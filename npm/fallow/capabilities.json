@@ -1197,7 +1197,41 @@
           "name": "symbol",
           "type": "string",
           "required": false,
-          "description": "Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate). Omitted when `--path` is used"
+          "description": "Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate). Omitted when `--path` or `--dependency` is used"
+        },
+        {
+          "name": "--dependency",
+          "type": "string",
+          "required": false,
+          "description": "How the code uses each imported name of a package: file and call counts, one hop through project wrappers, and a count of each use that the trace cannot resolve"
+        },
+        {
+          "name": "--specifier",
+          "type": "string",
+          "required": false,
+          "description": "With `--dependency`, report only these imported names (repeatable or comma-separated). Turns on the site page"
+        },
+        {
+          "name": "--sites",
+          "type": "bool",
+          "required": false,
+          "description": "With `--dependency`, list the usage sites with file, line and column",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--limit",
+          "type": "string",
+          "required": false,
+          "description": "With `--dependency`, the largest number of sites on a page (1 to 500, default 50). Turns on the site page"
+        },
+        {
+          "name": "--cursor",
+          "type": "string",
+          "required": false,
+          "description": "With `--dependency`, the `next_cursor` of the previous page. Turns on the site page"
         },
         {
           "name": "--path",
@@ -7647,10 +7681,14 @@
       {
         "name": "trace_dependency",
         "kind": "trace",
-        "description": "Trace where a dependency is imported and whether scripts or CI use it",
+        "description": "Trace where a dependency is imported, whether scripts or CI use it, and how the code uses each imported name",
         "cli_command": "fallow dead-code --trace-dependency <package> --format json --quiet",
         "key_params": [
-          "package_name"
+          "package_name",
+          "specifiers",
+          "sites",
+          "limit",
+          "cursor"
         ],
         "license": "free",
         "license_note": null,
@@ -7922,6 +7960,11 @@
       "task": "delete an \"unused\" dependency",
       "command": "fallow dead-code --trace-dependency <name>",
       "note": null
+    },
+    {
+      "task": "migrate a dependency",
+      "command": "fallow trace --dependency <name> --sites",
+      "note": "Counts each imported name, follows one hop through project wrappers, and counts each use that it cannot resolve."
     },
     {
       "task": "commit or open a PR",

@@ -311,6 +311,26 @@ Contract rules:
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.
 
+## Dependency usage parameters
+
+- `trace_dependency` accepts `usage`, `specifiers`, `sites`, `limit`, `cursor`
+  and `closure_depth`. `specifiers`, `limit` and `cursor` imply `sites`;
+  `sites` and `closure_depth` imply `usage`. `usage: false` or
+  `sites: false` alone sets nothing.
+- With no usage parameter, the typed path leaves
+  `TraceDependencyOptions.usage` as `None` and the CLI fallback keeps
+  `dead-code --trace-dependency <pkg>`. The response is byte-identical to the
+  response before these parameters existed.
+- With a usage parameter, `dependency_usage_query` builds the query with
+  `DependencyUsageQuery::new`, which checks `limit` 1 to 500 and
+  `closure_depth` 1 to 10 at run time. The CLI fallback
+  (`build_trace_dependency_args`) then emits
+  `trace --dependency <pkg> [--specifier NAME]... [--sites --limit N
+  [--cursor TOKEN]] [--callers --depth N]` plus the same `push_scope` flags.
+- Code Mode deserializes `TraceDependencyParams` on the in-process route, so
+  `traceDependency({ package_name, specifiers, sites })` needs no binding
+  change. One page is one call inside the host-call cap.
+
 ## Finding-id queries
 
 - `analyze` accepts `finding_ids`. The typed path passes them to

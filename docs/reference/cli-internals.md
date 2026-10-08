@@ -749,6 +749,31 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   checked-out snapshot whose `.gitignore` would otherwise hide
   `node_modules`, the bulk of the measurement.
 
+## Trace targets
+
+- `fallow trace` has three targets. `dispatch_trace_command`
+  (`crates/cli/src/lib.rs`) runs `trace_path::run_trace_path` for `--path`
+  and `trace_chain::run_trace` for a `FILE:SYMBOL`. `--dependency` goes to
+  `dispatch_trace_dependency` and `trace_dependency::run_trace_dependency`.
+- `fallow trace --dependency` and `fallow dead-code --trace-dependency` build
+  the base `DependencyTrace` with one engine function,
+  `fallow_engine::trace::build_dependency_trace`. The programmatic API uses
+  it too. Do not add a fourth copy of the source, credit and manifest steps.
+- The dependency runner honors `--production`, `--no-production` and
+  `--workspace` as `fallow dead-code` does: the production mode goes into
+  `load_config_for_analysis` through
+  `ProductionFlags::single_analysis_override`, and the workspace scope is
+  validated with `check::resolve_workspace_scope`. The scope does not narrow
+  the trace. The `--path` and symbol runners pass `production_override: None`.
+- The usage walk (`crates/engine/src/trace_usage_impl.rs`) reads
+  `ModuleInfo.import_binding_references`, `imported_call_sites`, imports,
+  re-exports, dynamic imports and `require` calls. It needs modules that
+  `release_resolution_payload` did not release, so
+  `trace_dependency_with_session` calls
+  `analyze_dead_code_with_shared_artifacts(true, true)`.
+- Only `json` and `human` are supported. Human output goes to stdout through
+  `outln!`; `fallow dead-code --trace-dependency` keeps its stderr block.
+
 ## Verification
 
 Start with focused CLI tests for the changed command. For output or schema

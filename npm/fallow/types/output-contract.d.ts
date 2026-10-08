@@ -1130,6 +1130,28 @@ export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
  */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Wire-shape version of the [`DependencyUsage`] object.
+ *
+ * The object has its own version, because it is an optional part of the
+ * `DependencyTrace` envelope.
+ */
+export type DependencyUsageSchemaVersion = "1"
+/**
+ * How the usage was found.
+ */
+export type UsageConfidence = "syntactic"
+/**
+ * The shape of a project wrapper.
+ */
+export type WrapperShape = ("call" | "alias")
+/**
+ * How the code uses the dependency at a site.
+ *
+ * The set is open: read an unknown kind as an unresolved site. The order of
+ * the variants is the sort order of sites at the same position.
+ */
+export type UsageSiteKind = ("call" | "wrapper_definition" | "value_alias" | "non_call_reference" | "jsx_element" | "re_export" | "nested_wrapper" | "dynamic_import" | "require" | "side_effect_import" | "star_re_export")
+/**
  * Wire-version discriminator for [`ImportPathTrace`]. Independent from the
  * global `SchemaVersion`: the import-path payload versions on its own cadence,
  * like the other independently-versioned envelopes. Serializes as a string
@@ -11728,6 +11750,14 @@ tooling_credit?: (ToolingCredit | null)
  * manifest is flagged.
  */
 unused_in?: string[]
+/**
+ * How the code uses each imported name of the dependency. Present on
+ * `fallow trace --dependency`, and on the MCP `trace_dependency` tool
+ * when a usage parameter is set. Absent on
+ * `fallow dead-code --trace-dependency`. The object has its own
+ * `schema_version`.
+ */
+usage?: (DependencyUsage | null)
 }
 /**
  * Why the unused devDependency check counts a dependency as used tooling
@@ -11765,6 +11795,241 @@ config?: (string | null)
  * for `types-target`.
  */
 reference?: (string | null)
+}
+/**
+ * How the code uses each imported name of a dependency.
+ */
+export interface DependencyUsage {
+schema_version: DependencyUsageSchemaVersion
+confidence: UsageConfidence
+/**
+ * One entry per imported name, sorted by `name` in byte order. With a
+ * specifier filter, only the selected names, each present even when no
+ * file imports it.
+ */
+specifiers: SpecifierUsage[]
+unresolved: FileLevelUnresolved
+/**
+ * One page of usage sites. Absent unless sites were requested.
+ */
+sites?: (UsageSitePage | null)
+/**
+ * The files that import the users of the dependency. Absent unless a
+ * closure depth was requested.
+ */
+closure?: (ConsumerClosure | null)
+}
+/**
+ * The usage of one imported name.
+ */
+export interface SpecifierUsage {
+/**
+ * The imported name: `default` for a default import, the first member for
+ * a namespace member, and `*` for a bare namespace use.
+ */
+name: string
+/**
+ * Files with a static import binding of the name, a namespace member use
+ * of it, or a re-export of it from the package.
+ */
+file_count: number
+/**
+ * The files in `file_count` where every binding of the name is type-only:
+ * an `import type`, or a value import that the file reads only in type
+ * positions.
+ */
+type_only_file_count: number
+/**
+ * Direct calls of the name, not through a project wrapper.
+ */
+call_site_count: number
+unresolved: SpecifierUnresolved
+/**
+ * Project wrappers of the name, sorted by `file`, then `export`.
+ */
+wrappers: UsageWrapper[]
+}
+/**
+ * Uses of one imported name that the trace cannot resolve to a call. The key
+ * set is closed in schema version 1.
+ */
+export interface SpecifierUnresolved {
+/**
+ * The name is the whole initializer of a declarator that is not a
+ * wrapper: `const s = useSelector`.
+ */
+value_alias: number
+/**
+ * Any other value use that is not a call: an argument, an array
+ * element, a property value or an optional call.
+ */
+non_call_reference: number
+/**
+ * The name is a JSX element: `<Provider>`.
+ */
+jsx_element: number
+/**
+ * The file re-exports the name from the package. The trace does not
+ * follow the consumers of the re-export.
+ */
+re_export: number
+/**
+ * A wrapper consumer that exports the wrapper again. The trace does not
+ * follow the second hop.
+ */
+nested_wrapper: number
+/**
+ * Files with a runtime binding of the name and no usage site, for
+ * example a use in a Vue, Svelte or Astro template.
+ */
+binding_without_site: number
+}
+/**
+ * A top-level exported declarator that wraps an imported name. The trace
+ * follows one hop from the wrapper to its consumers.
+ */
+export interface UsageWrapper {
+/**
+ * The file that declares the wrapper, root-relative.
+ */
+file: string
+/**
+ * The exported name of the wrapper.
+ */
+export: string
+shape: WrapperShape
+/**
+ * 1-based line of the wrapper initializer.
+ */
+line: number
+/**
+ * Distinct files with a call of the wrapper.
+ */
+consumer_file_count: number
+/**
+ * Calls of the wrapper.
+ */
+call_site_count: number
+}
+/**
+ * Uses that hide which names a file reads. The key set is closed in schema
+ * version 1.
+ */
+export interface FileLevelUnresolved {
+/**
+ * `import("package")` expressions.
+ */
+dynamic_import: number
+/**
+ * `require("package")` calls.
+ */
+require: number
+/**
+ * `import "package"` statements.
+ */
+side_effect_import: number
+/**
+ * `export * from "package"` statements.
+ */
+star_re_export: number
+/**
+ * Files that import the package through a specifier that does not name
+ * the package, for example a path alias.
+ */
+unattributed_file: number
+}
+/**
+ * One page of usage sites.
+ */
+export interface UsageSitePage {
+/**
+ * The sites on this page, sorted by `file`, `line`, `col`, kind,
+ * `specifier`, then `via`.
+ */
+items: UsageSite[]
+/**
+ * The number of sites on all pages.
+ */
+total: number
+/**
+ * The largest number of items on a page.
+ */
+limit: number
+/**
+ * An opaque token for the next page. Absent on the last page.
+ */
+next_cursor?: (string | null)
+}
+/**
+ * One use of the dependency in the code.
+ */
+export interface UsageSite {
+/**
+ * The file, root-relative.
+ */
+file: string
+/**
+ * 1-based line.
+ */
+line: number
+/**
+ * 0-based byte column.
+ */
+col: number
+/**
+ * The imported name. Absent on file-level kinds.
+ */
+specifier?: (string | null)
+/**
+ * The local binding that the code uses. Absent on file-level kinds.
+ */
+local_name?: (string | null)
+/**
+ * The static member after the imported name, for example `withTypes`.
+ */
+member?: (string | null)
+kind: UsageSiteKind
+/**
+ * The wrapper that the site goes through, as `FILE:EXPORT`.
+ */
+via?: (string | null)
+}
+/**
+ * The files that import the users of the dependency, found by a reverse walk
+ * of the import graph.
+ */
+export interface ConsumerClosure {
+/**
+ * The largest depth of the walk.
+ */
+depth: number
+/**
+ * The number of files in `files`.
+ */
+file_count: number
+/**
+ * The files, sorted by `depth`, then `file`. The seed files are not
+ * listed.
+ */
+files: ClosureFile[]
+/**
+ * Whether a file at the largest depth has an importer that the walk did
+ * not visit.
+ */
+truncated: boolean
+}
+/**
+ * One file of a [`ConsumerClosure`].
+ */
+export interface ClosureFile {
+/**
+ * The file, root-relative.
+ */
+file: string
+/**
+ * The number of import edges from the nearest seed file.
+ */
+depth: number
 }
 /**
  * Result of tracing a clone: all groups containing the code at a source
