@@ -14,7 +14,10 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::common::{CommandOutput, parse_json, run_fallow_raw, run_fallow_raw_with_env};
+use crate::common::{
+    CommandOutput, commit_all, fallow_bin, git, git_capture, git_command, parse_json,
+    run_fallow_raw, run_fallow_raw_with_env,
+};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -364,4 +367,78 @@ fn prune_rejects_a_diff_from_the_environment() {
         "{}",
         output.stdout
     );
+}
+
+/// A committed project with saved baselines and the pruning pre-commit hook,
+/// on a feature branch off `main`.
+fn project_with_prune_hook() -> TempDir {
+    let dir = project();
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    save_all(&dir);
+    commit_all(dir.path(), "baselines");
+    git(dir.path(), &["checkout", "-q", "-b", "feature"]);
+    let install = run_fallow_raw(&[
+        "hooks",
+        "install",
+        "--target",
+        "git",
+        "--prune-baselines",
+        "--root",
+        root_arg(&dir),
+    ]);
+    assert_eq!(install.code, 0, "{}", install.stderr);
+    dir
+}
+
+/// Commit through the installed hook, with this build of fallow on `PATH`.
+fn commit_through_hook(dir: &TempDir, message: &str) -> std::process::Output {
+    let bin_dir = fallow_bin().parent().unwrap().to_path_buf();
+    let path = std::env::join_paths(
+        std::iter::once(bin_dir).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    git_command(dir.path())
+        .env("PATH", path)
+        .args(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message])
+        .output()
+        .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn the_pre_commit_hook_prunes_and_stages_the_baselines() {
+    let dir = project_with_prune_hook();
+    std::fs::remove_file(dir.path().join("src/dead.ts")).unwrap();
+    git(dir.path(), &["add", "-A"]);
+
+    let commit = commit_through_hook(&dir, "remove dead.ts");
+    assert!(
+        commit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&commit.stderr)
+    );
+    let changed = git_capture(dir.path(), &["show", "--name-only", "--format=", "HEAD"]);
+    assert!(changed.contains("baselines/dead-code.json"), "{changed}");
+    assert_eq!(git_capture(dir.path(), &["status", "--porcelain"]), "");
+    let committed = git_capture(dir.path(), &["show", "HEAD:baselines/dead-code.json"]);
+    assert!(!committed.contains("src/dead.ts"), "{committed}");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_pre_commit_hook_skips_the_prune_with_unstaged_changes() {
+    let dir = project_with_prune_hook();
+    std::fs::remove_file(dir.path().join("src/dead.ts")).unwrap();
+    git(dir.path(), &["add", "-A"]);
+    write(dir.path(), "src/old.ts", "export const old = 10;\n");
+
+    let commit = commit_through_hook(&dir, "remove dead.ts");
+    assert!(commit.status.success());
+    assert!(
+        String::from_utf8_lossy(&commit.stderr).contains("skipped baselines prune"),
+        "{}",
+        String::from_utf8_lossy(&commit.stderr)
+    );
+    let changed = git_capture(dir.path(), &["show", "--name-only", "--format=", "HEAD"]);
+    assert!(!changed.contains("baselines/"), "{changed}");
 }
