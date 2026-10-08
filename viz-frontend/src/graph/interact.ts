@@ -18,6 +18,7 @@ import {
   easeOut,
   fitTransform,
   getGVS,
+  lensFlagsStandalone,
   markIntroSeen,
   nodeHitTest,
   roadHitTest,
@@ -30,7 +31,7 @@ import { initGraphNodes } from "./build";
 export const getClusterMode = (state: AppState): ClusterMode => getGVS(state).clusterMode;
 
 /** Camera glide duration for programmatic moves (0-key, search, center). */
-const CAMERA_MS = 450;
+const CAMERA_MS = 520;
 
 /**
  * Apply a zoom transform, gliding there over `duration` ms unless
@@ -63,7 +64,6 @@ export const setClusterMode = (state: AppState, mode: ClusterMode): void => {
 };
 /** Seed the graph node lens-color crossfade with the pre-switch colors. */
 export const startGraphLensFade = (state: AppState, prev: Map<number, string>): void => {
-  if (state.reducedMotion) return;
   const gvs = getGVS(state);
   gvs.lensPrev = prev;
   gvs.lensFadeAt = performance.now();
@@ -387,4 +387,17 @@ export const centerOnFile = (state: AppState, fileIndex: number): void => {
     .translate(width / 2 - node.x * scale, height / 2 - node.y * scale)
     .scale(scale);
   tweenCamera(state, target, CAMERA_MS);
+};
+
+/**
+ * Open the standalone strip when the new lens flags files in it, close it
+ * again when it does not, and refit so the change stays in view.
+ */
+export const syncStandaloneForLens = (state: AppState): void => {
+  const gvs = getGVS(state);
+  if (!gvs.initialized || !gvs.clusters.some((cluster) => !cluster.isolated)) return;
+  const flagged = lensFlagsStandalone(state, gvs.clusters);
+  if (flagged === gvs.standaloneOpen) return;
+  gvs.standaloneOpen = flagged;
+  resetGraphView(state);
 };

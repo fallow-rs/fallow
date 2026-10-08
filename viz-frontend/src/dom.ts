@@ -61,14 +61,6 @@ export const copyButton = (
   return buttonEl;
 };
 
-/** The panel's dismiss button, aria-labelled and wired to a handler. */
-export const closeButton = (onClose: () => void): HTMLButtonElement => {
-  const buttonEl = button("icon-btn close", "×");
-  buttonEl.setAttribute("aria-label", "Close details");
-  buttonEl.addEventListener("click", onClose);
-  return buttonEl;
-};
-
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 const svgIcon = (paths: readonly { tag: string; attrs: Record<string, string> }[]): SVGElement => {
@@ -104,6 +96,22 @@ const copyIcon = (): SVGElement =>
 
 const checkIcon = (): SVGElement =>
   svgIcon([{ tag: "path", attrs: { d: "M3 8.5 6.5 12 13 4.5" } }]);
+
+// Drawn, not typed: the × glyph sits off center in its line box.
+const crossIcon = (): SVGElement =>
+  svgIcon([{ tag: "path", attrs: { d: "M3.5 3.5 12.5 12.5M12.5 3.5 3.5 12.5" } }]);
+
+/** A dismiss button, aria-labelled and wired to a handler. */
+export const closeButton = (
+  onClose: () => void,
+  ariaLabel = "Close details",
+): HTMLButtonElement => {
+  const buttonEl = button("icon-btn close", "");
+  buttonEl.setAttribute("aria-label", ariaLabel);
+  buttonEl.appendChild(crossIcon());
+  buttonEl.addEventListener("click", onClose);
+  return buttonEl;
+};
 
 /**
  * An icon copy-to-clipboard button, styled like the close button. Swaps to a

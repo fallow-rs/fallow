@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow viz` no longer stops drawing the graph on a narrow stage.** On a
+  stage narrower than 200 px, the camera fit gave a negative zoom, and the
+  canvas threw an error for each negative ring radius. The fit now keeps a
+  minimum usable width.
 - **The agent gate audits the tree of the session, also in a nested git
   worktree.** The hook process can start in a directory that is not the
   session directory. For example, a session in a worktree below the main
@@ -142,6 +146,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write error now prints a message on stderr and gives exit code 2. See
   [#3276](https://github.com/fallow-rs/fallow/issues/3276). Thanks
   @codingthat for the report.
+
+### Changed
+
+- **`fallow viz` now shows where to start.** The Overview panel opens with
+  the health grade and one card per lens: the number of files, the number
+  of high findings, and the worst file with its reason. The Overview map colors files
+  that have findings in any lens. Folder labels show how many of their
+  files have findings.
+- **Lens lists say what is wrong.** Each lens opens with a short summary and
+  a severity split. Rows are grouped into high, medium, and low. The full
+  file name comes first, and a plain reason follows, for example "File path
+  built from input" instead of `path-traversal`, or "High complexity, no
+  test coverage" instead of a CRAP score.
+  Security lists each file once with all of its candidates.
+- **Findings are no longer hidden on the map.** Folders with no imports to
+  or from other folders now show when the active lens has findings in them,
+  for example unused files. Health colors only files above the review
+  threshold, so high-risk files stand out. Folders without findings fade.
+- **The file panel says what is wrong first.** The Overview tab opens with
+  a list of the lenses that have findings in the file, each with its reason.
+  The Health tab shows maintainability, change risk, and importers, then
+  each function to fix with its branches, lines, test coverage, and next
+  step. The selected file is ringed and named on the treemap.
+- **Clearer graph navigation.** Folder and import-group labels have two
+  lines (name, then size and findings), stay over their cluster, and keep
+  clear of the controls and the legend. Import groups that span folders read
+  as `site/src + 5 more` instead of `(mixed)`. The status line shows the
+  grouping or the path of the file in focus. Disabled controls are hidden.
+- **Imports between folders.** Clicking a line between two folders lists the
+  target files in use, then every import, forbidden and cyclic ones first.
+- **Plain tooltips and search legend.** Hover tooltips use the same plain
+  reasons as the panel. During a search the legend explains the match and
+  importer rings.
+- **`fallow viz` works on narrow screens.** Below 700 px the panel docks
+  under the map as a sheet, so the map stays visible at full width. The
+  legend becomes one line, crowded labels drop, and the file focus view
+  fits both columns.
+- **The map uses the fallow.tools look.** `fallow viz` now follows the
+  design of fallow.tools and fallow.cloud: paper and ink, Barlow type, hairline
+  rules, square panels and flat controls. Day paper is the default, and the
+  night theme follows the system or the stored choice. The fonts are embedded,
+  so the report looks the same offline. The graph uses the census map
+  geometry: folders are octagons and the imports between them run at 0, 45
+  and 90 degrees, and flagged files carry an interchange ring. Hovering an
+  import line picks the line under the pointer, gives it a pale blue halo
+  and fades the others, and lines hidden at the current zoom no longer react.
+  Hovering a file draws its imports the same way, on census routes in ink.
+- **Step through findings.** With a file open, the panel shows its place
+  in the active lens ("3 of 61 in Security") with previous and next
+  buttons, and `j` and `k` do the same.
+- **Small findings stay visible.** High findings, sparse medium findings,
+  and the copies of an open duplicated block get a halo on the graph.
+- **Architecture lists folders in an import loop.** The panel names the
+  folders the map outlines, and says why the loop matters.
+- **Folder labels follow the findings.** Folders with high findings get a
+  label first, labels no longer cover the dots of high findings, and a
+  label that had to move away from its folder points back to it.
+- **Treemap folder headers count findings.** In a finding lens, each
+  folder header shows how many of its files the lens flags.
+- **Counts agree.** The Overview card for Security shows the files and
+  the candidate count of the tab, and the map legend keys each level once.
+  The Architecture tab counts every finding, import cycles included, not
+  only boundary violations. When a card and its tab count the same unit, the
+  card shows its count as a part of the tab count, for example "528 of 6,135
+  files".
+- **The map shows its progress while it loads.** On a large project the
+  first graph layout takes many seconds. A loading screen now shows a
+  progress bar and the current step, in place of an empty stage.
+- **The theme choice is kept.** The light or dark choice applies again
+  the next time a report opens.
+- **Back and forward keep the map in step.** A lens change through the
+  browser history opens or closes the strip of unconnected folders, as a
+  tab click does.
+- **Security candidate cards lead with the risk.** A card shows the plain
+  label, severity, the source-to-sink flow, and what to check. The rule id,
+  trace, and other evidence move into a collapsed section.
+- **Clearer motion in `fallow viz`.** A treemap drill flies one camera into
+  the folder and back out. A lens switch sweeps the new colors across the
+  map. With reduced motion, movement stops and changes fade.
 
 ## [3.32.0] - 2026-10-06
 

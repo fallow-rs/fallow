@@ -12,6 +12,7 @@ import {
   type GraphViewState,
   type Pt,
   PANEL_WIDTH,
+  panelDocksBelow,
   clusterBounds,
   easeOut,
   getGVS,
@@ -39,7 +40,8 @@ const minimapFrameAt = (
 ): MinimapFrame | null => {
   if (gvs.clusters.length < 2) return null;
   // Keep clear of the detail panel when a road drill-down is open.
-  const panelW = state.selectedRoad !== null ? Math.min(PANEL_WIDTH, width * 0.9) : 0;
+  const panelW =
+    state.selectedRoad !== null && !panelDocksBelow() ? Math.min(PANEL_WIDTH, width * 0.9) : 0;
   const { minX, minY, maxX, maxY } = clusterBounds(gvs.clusters, () => true);
   const worldW = Math.max(1, maxX - minX);
   const worldH = Math.max(1, maxY - minY);

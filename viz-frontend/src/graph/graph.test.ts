@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSpatialGrid,
   clusterBounds,
-  cubicPoint,
+  routePoint,
   fitTransform,
   getGVS,
   gridQuery,
@@ -97,13 +97,19 @@ describe("road and cluster helpers", () => {
     expect(Number.isFinite(fit.k)).toBe(true);
   });
 
-  it("interpolates a cubic bezier between its endpoints", () => {
-    const p = { x: 0, y: 0 };
-    const q = { x: 30, y: 0 };
-    const mid = cubicPoint(p, { x: 10, y: 0 }, { x: 20, y: 0 }, q, 0.5);
-    expect(mid.x).toBeCloseTo(15);
-    expect(cubicPoint(p, p, q, q, 0).x).toBe(0);
-    expect(cubicPoint(p, p, q, q, 1).x).toBe(30);
+  it("keeps a positive scale on a stage narrower than the label margin", () => {
+    const fit = fitTransform(120, 1000, { minX: 0, minY: 0, maxX: 700, maxY: 300 });
+    expect(fit.k).toBeGreaterThan(0);
+  });
+
+  it("walks a census route by length through its bend", () => {
+    const start = { x: 0, y: 0 };
+    const bend = { x: 30, y: 0 };
+    const end = { x: 30, y: 30 };
+    expect(routePoint(start, bend, bend, end, 0)).toEqual(start);
+    expect(routePoint(start, bend, bend, end, 0.5)).toEqual(bend);
+    expect(routePoint(start, bend, bend, end, 0.75).y).toBeCloseTo(15);
+    expect(routePoint(start, bend, bend, end, 1)).toEqual(end);
   });
 });
 

@@ -6,10 +6,12 @@
  * and paints over the finished scene; none touches the Scene render context.
  */
 import type { AppState } from "../state";
-import { basename, formatCount } from "../data";
-import { dupRamp, heatRamp, zoneColor } from "../theme";
+import { basename, formatCount, lensFindingLevel, overviewMildColor } from "../data";
+import { DISPLAY_FACE, dupRamp, heatRamp, mix, zoneColor } from "../theme";
 import { fileTipCanvasRect } from "../tooltip";
 import {
+  CONTROL_RADIUS,
+  type ClusterInfo,
   type FileNode,
   type GraphViewState,
   FONT_CARD,
@@ -18,12 +20,13 @@ import {
   FONT_MICRO,
   FONT_SMALL,
   chipRect,
-  cubicPoint,
   getGVS,
   markIntroSeen,
   middleTruncate,
   roadGeometry,
+  routePoint,
   tailTruncate,
+  panelDocksBelow,
   usableStageWidth,
   worldToScreen,
 } from "./shared";
@@ -35,6 +38,53 @@ const rectsOverlap = (
 ): boolean => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
 /** Greedy screen-space labels for the highest-degree files in view. */
+/** Screen position and count of a hub dot that is on or near the stage. */
+const hubOnScreen = (
+  state: AppState,
+  gvs: GraphViewState,
+  node: FileNode | undefined,
+  width: number,
+  height: number,
+): { sx: number; sy: number; count: number } | null => {
+  if (!node || node.x == null || node.y == null) return null;
+  const count = state.data.files[node.fileIndex].importer_count;
+  if (count < gvs.hubFloor) return null;
+  const sx = node.x * gvs.transform.k + gvs.transform.x;
+  const sy = node.y * gvs.transform.k + gvs.transform.y;
+  const margin = 40;
+  const inside = sx > -margin && sx < width + margin && sy > -margin && sy < height + margin;
+  return inside ? { sx, sy, count } : null;
+};
+
+/**
+ * Screen rects of the hub counts (`×N`) that `drawNodes` writes beside a
+ * hub dot at this zoom. The count is drawn in world space, so it grows
+ * with the zoom.
+ */
+const hubBadgeRects = (
+  state: AppState,
+  gvs: GraphViewState,
+  width: number,
+  height: number,
+): Array<{ x: number; y: number; w: number; h: number }> => {
+  const { ctx } = state;
+  const { transform } = gvs;
+  if (transform.k / gvs.fitK < 1.5) return [];
+  const font = ctx.font;
+  ctx.font = FONT_MICRO;
+  const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+  for (const node of gvs.fileNodes) {
+    const spot = hubOnScreen(state, gvs, node, width, height);
+    if (!spot) continue;
+    const { sx, sy, count } = spot;
+    const w = ctx.measureText(`×${formatCount(count)}`).width * transform.k;
+    const h = 16 * transform.k;
+    rects.push({ x: sx + node.radius * transform.k + 4, y: sy - h / 2, w: w + 4, h });
+  }
+  ctx.font = font;
+  return rects;
+};
+
 export const drawZoomLabels = (
   state: AppState,
   gvs: GraphViewState,
@@ -57,7 +107,12 @@ export const drawZoomLabels = (
   ctx.font = FONT_SMALL;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  // File names keep clear of the hub counts beside the dots and of the
+  // road counts drawn over them later.
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [
+    ...hubBadgeRects(state, gvs, width, height),
+    ...roadLabelSpots(state, gvs),
+  ];
   let drawn = 0;
   for (const { node } of ordered) {
     if (drawn >= 40) break;
@@ -76,8 +131,8 @@ export const drawZoomLabels = (
     drawn++;
     // Draw in world space (crisper under the active transform); halo
     // instead of a knockout slab, matching the hover labels.
-    const worldFont = 12 / transform.k;
-    ctx.font = `${worldFont}px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace`;
+    const worldFont = 13 / transform.k;
+    ctx.font = `600 ${worldFont}px ${DISPLAY_FACE}`;
     ctx.strokeStyle = theme.bg;
     ctx.lineWidth = 3 / transform.k;
     ctx.lineJoin = "round";
@@ -99,7 +154,7 @@ export const drawIntroCaptions = (state: AppState, gvs: GraphViewState, width: n
   const captions: Array<[number, number, string]> = [
     [0, 2600, "Dots are files, shapes are folders"],
     [2600, 5200, "Lines are imports, thick end points at the importer"],
-    [5200, 8600, "Click any dot to open its story"],
+    [5200, 8600, "Click a dot to open the file details"],
   ];
   const total = captions[captions.length - 1][1];
   if (elapsed >= total) {
@@ -119,10 +174,24 @@ export const drawIntroCaptions = (state: AppState, gvs: GraphViewState, width: n
     // Center on the stage the viewer actually sees: the panel is open on
     // first paint, so full-canvas w/2 would drift under it.
     const cx = usableStageWidth(state, width) / 2;
+    // Each caption rises a few pixels as it fades in and sinks as it
+    // leaves, so the three beats read as a sequence, not a flicker.
+    const drift = local < 0.5 ? (1 - Math.min(1, alpha)) * 6 : -(1 - Math.min(1, alpha)) * 4;
     // Backed chip so the caption reads over cluster labels behind it.
-    chipRect(ctx, cx - textW / 2 - 16, 12, textW + 32, 32, theme.bg, 1, theme.borderSubtle);
-    ctx.fillStyle = theme.textHigh;
-    ctx.fillText(text, cx, 28.5);
+    // The census readout: an ink plate with paper text.
+    chipRect(
+      ctx,
+      cx - textW / 2 - 16,
+      12 + drift,
+      textW + 32,
+      32,
+      theme.textHigh,
+      1,
+      null,
+      CONTROL_RADIUS,
+    );
+    ctx.fillStyle = theme.bg;
+    ctx.fillText(text, cx, 28.5 + drift);
     ctx.globalAlpha = 1;
   }
 };
@@ -208,36 +277,6 @@ export const drawHoverLabels = (
   const hs = worldToScreen(gvs, { x: hoveredNode.x, y: hoveredNode.y });
   const tipRect = fileTipCanvasRect(hs.x, hs.y, usableStageWidth(state, width), height);
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [tipRect];
-
-  // Faint leader from the hovered node to the docked tooltip's near edge, so
-  // the edge-docked card reads as tied to this node instead of floating off
-  // on its own at the far side of the canvas.
-  const dockedRight = tipRect.x > hs.x;
-  const anchorX = dockedRight ? tipRect.x : tipRect.x + tipRect.w;
-  const anchorY = Math.min(Math.max(hs.y, tipRect.y + 12), tipRect.y + tipRect.h - 12);
-  const lr = hoveredNode.radius * gvs.transform.k;
-  const ldx = anchorX - hs.x;
-  const ldy = anchorY - hs.y;
-  const llen = Math.hypot(ldx, ldy) || 1;
-  const lsx = hs.x + (ldx / llen) * (lr + 3);
-  const lsy = hs.y + (ldy / llen) * (lr + 3);
-  ctx.beginPath();
-  ctx.moveTo(lsx, lsy);
-  ctx.lineTo(anchorX, anchorY);
-  ctx.strokeStyle = theme.textLow;
-  ctx.globalAlpha = 0.34;
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2, 3]);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  // A small dot where the leader meets the card anchors the connection so
-  // the card reads as pinned to this node rather than floating beside it.
-  ctx.beginPath();
-  ctx.arc(anchorX, anchorY, 2, 0, Math.PI * 2);
-  ctx.fillStyle = theme.textLow;
-  ctx.globalAlpha = 0.5;
-  ctx.fill();
-  ctx.globalAlpha = 1;
 
   ctx.font = FONT_SMALL;
   ctx.textBaseline = "middle";
@@ -371,36 +410,80 @@ export const drawPathTrace = (
     28,
   );
 };
+/** A road count chip: its road, its text and its screen rect. */
+interface RoadLabel {
+  road: number;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Road count chips that fit, busiest roads first. A chip that would cover
+ * another one is dropped, and the deep-zoom file names keep clear of the
+ * rest. Focused roads always show their count.
+ */
+const roadLabelSpots = (state: AppState, gvs: GraphViewState): RoadLabel[] => {
+  const { ctx } = state;
+  const kRel = gvs.transform.k / gvs.fitK;
+  const focusedRoad = (ri: number): boolean => gvs.hoveredRoad === ri || gvs.selectedRoad === ri;
+  const order = gvs.roads
+    .map((road, ri) => ({ road, ri }))
+    .filter(({ road, ri }) => focusedRoad(ri) || (kRel >= 1.5 && road.count >= 2))
+    .toSorted(
+      (left, right) =>
+        Number(focusedRoad(right.ri)) - Number(focusedRoad(left.ri)) ||
+        right.road.count - left.road.count,
+    );
+  const font = ctx.font;
+  ctx.font = FONT_MICRO;
+  const spots: RoadLabel[] = [];
+  for (const { road, ri } of order) {
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
+    const mid = worldToScreen(gvs, routePoint(p0, p1, p2, p3, 0.5));
+    const label = formatCount(road.count);
+    const w = ctx.measureText(label).width + 8;
+    const spot = { road: ri, label, x: mid.x - w / 2, y: mid.y - 8, w, h: 16 };
+    if (!focusedRoad(ri) && spots.some((other) => rectsOverlap(spot, other))) continue;
+    spots.push(spot);
+  }
+  ctx.font = font;
+  return spots;
+};
+
+/** Text colour of a road count: red or ochre when architecture flags it. */
+const roadLabelColor = (state: AppState, road: GraphViewState["roads"][number]): string => {
+  const { theme } = state;
+  if (state.lens !== "architecture") return theme.textLow;
+  if (road.violations > 0) return theme.redText;
+  return road.bidi && road.cycleEdges > 0 ? theme.amberText : theme.textLow;
+};
+
 export const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme } = state;
   ctx.font = FONT_MICRO;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const kRel = gvs.transform.k / gvs.fitK;
-  for (let ri = 0; ri < gvs.roads.length; ri++) {
-    const road = gvs.roads[ri];
-    const focused = gvs.hoveredRoad === ri || gvs.selectedRoad === ri;
-    // Quiet by default: numbers appear on zoom or on intent (hover/click).
-    if (!focused && kRel < 1.5) continue;
-    if (road.count < 2 && !focused) continue;
-    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
-    const mid = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, 0.5));
-    const label = formatCount(road.count);
-    const textW = ctx.measureText(label).width;
+  for (const spot of roadLabelSpots(state, gvs)) {
+    const cx = spot.x + spot.w / 2;
+    const cy = spot.y + spot.h / 2;
+    const textW = spot.w - 8;
     ctx.fillStyle = theme.bg;
     ctx.globalAlpha = 0.92;
-    ctx.fillRect(mid.x - textW / 2 - 3, mid.y - 7, textW + 6, 14);
+    ctx.fillRect(cx - textW / 2 - 3, cy - 7, textW + 6, 14);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = theme.borderSubtle;
     ctx.lineWidth = 1;
-    ctx.strokeRect(mid.x - textW / 2 - 3.5, mid.y - 7.5, textW + 7, 15);
-    if (state.lens === "architecture" && road.violations > 0) ctx.fillStyle = theme.redText;
-    else if (state.lens === "architecture" && road.bidi && road.cycleEdges > 0)
-      ctx.fillStyle = theme.amberText;
-    else ctx.fillStyle = theme.textLow;
-    ctx.fillText(label, mid.x, mid.y + 0.5);
+    ctx.strokeRect(cx - textW / 2 - 3.5, cy - 7.5, textW + 7, 15);
+    ctx.fillStyle = roadLabelColor(state, gvs.roads[spot.road]);
+    ctx.fillText(spot.label, cx, cy + 0.5);
   }
 };
+
+/** Height of the standalone-strip toggle, a compact census control. */
+const TOGGLE_H = 30;
 
 /**
  * Fixed standalone-strip toggle chip, docked above the canvas legend so
@@ -414,59 +497,188 @@ const drawStandaloneChip = (state: AppState, gvs: GraphViewState): void => {
   if (isolated.length === 0) return;
   const canvasHeight = state.canvas.clientHeight;
   const fileCount = isolated.reduce((sum, cluster) => sum + cluster.indices.length, 0);
-  ctx.font = FONT_MICRO;
+  ctx.font = FONT_LEGEND;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const label = gvs.standaloneOpen
-    ? "Hide standalone files"
-    : `${formatCount(fileCount)} standalone files, nothing imports them`;
+    ? "Hide folders that are not connected"
+    : `Show ${formatCount(fileCount)} files in folders that are not connected`;
   const textW = ctx.measureText(label).width;
   const cx0 = 12;
   // Dock just above the legend box (which sits at the bottom-left and grows
   // taller with more keys), so the two never overlap.
-  const cy0 = canvasHeight - 12 - legendBoxHeight(state) - 8 - 22;
-  chipRect(ctx, cx0, cy0, textW + 16, 22, theme.bg, 0.9, theme.borderSubtle);
-  ctx.fillStyle = theme.textMuted;
-  ctx.fillText(label, cx0 + 8, cy0 + 11.5);
-  gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 16, h: 22 };
-  if (gvs.standaloneOpen) {
-    const minX = Math.min(...isolated.map((cluster) => cluster.cx - cluster.r));
-    const minY = Math.min(...isolated.map((cluster) => cluster.cy - cluster.r));
-    const screen = worldToScreen(gvs, { x: minX, y: minY });
-    ctx.fillStyle = theme.textMuted;
-    ctx.globalAlpha = 0.7;
-    ctx.fillText("STANDALONE: configs and CI that nothing imports", screen.x, screen.y - 26);
-    ctx.globalAlpha = 1;
-  }
+  // A census secondary control: paper fill and a 1px ink frame.
+  const cy0 = canvasHeight - 12 - legendBoxHeight(state) - 8 - TOGGLE_H;
+  chipRect(ctx, cx0, cy0, textW + 24, TOGGLE_H, theme.bg, 1, theme.borderStrong, CONTROL_RADIUS);
+  ctx.fillStyle = theme.textHigh;
+  ctx.fillText(label, cx0 + 12, cy0 + TOGGLE_H / 2 + 0.5);
+  gvs.standaloneChip = { x: cx0, y: cy0, w: textW + 24, h: TOGGLE_H };
 };
+
+/**
+ * Screen areas labels must not cover: the floating arrange control at the
+ * top right and the legend at the bottom left.
+ */
+const labelObstacles = (state: AppState): Array<{ x: number; y: number; w: number; h: number }> => {
+  const canvasRect = state.canvas.getBoundingClientRect();
+  const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+  const arrange = state.canvas.parentElement?.querySelector<HTMLElement>(".arrange");
+  if (arrange && arrange.offsetParent !== null) {
+    const box = arrange.getBoundingClientRect();
+    rects.push({
+      x: box.left - canvasRect.left - 6,
+      y: box.top - canvasRect.top - 6,
+      w: box.width + 12,
+      h: box.height + 12,
+    });
+  }
+  const legendH = legendBoxHeight(state);
+  rects.push({
+    x: 0,
+    y: state.canvas.clientHeight - legendH - 48,
+    w: panelDocksBelow() ? state.canvas.clientWidth : 400,
+    h: legendH + 48,
+  });
+  return rects;
+};
+
+/** Gap between a chip and its hull above which a leader line is drawn. */
+const LEADER_GAP = 10;
+
+/**
+ * A thin line from a displaced chip to its folder. Without it, a chip
+ * that had to move away from a crowded hull reads as the name of
+ * whichever folder sits closest to it.
+ */
+const drawLeader = (
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  chip: { x: number; y: number; w: number; h: number },
+  hull: { minX: number; maxX: number; minY: number; maxY: number },
+): void => {
+  const clamp = (value: number, low: number, high: number): number =>
+    Math.min(Math.max(value, low), high);
+  // Nearest point pair between the two rectangles.
+  const hullX = clamp(chip.x + chip.w / 2, hull.minX, hull.maxX);
+  const hullY = clamp(chip.y + chip.h / 2, hull.minY, hull.maxY);
+  const chipX = clamp(hullX, chip.x, chip.x + chip.w);
+  const chipY = clamp(hullY, chip.y, chip.y + chip.h);
+  if (Math.hypot(hullX - chipX, hullY - chipY) <= LEADER_GAP) return;
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(chipX, chipY);
+  ctx.lineTo(hullX, hullY);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(hullX, hullY, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+};
+
+/**
+ * Screen rects of the nodes with a high finding in the active lens. A
+ * folder label must not cover the very dots the lens is about.
+ */
+const severeNodeRects = (
+  state: AppState,
+  gvs: GraphViewState,
+): Array<{ x: number; y: number; w: number; h: number }> => {
+  if (state.lens === "overview") return [];
+  const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+  for (const node of gvs.fileNodes) {
+    if (node.x === undefined || node.y === undefined) continue;
+    const file = state.data.files[node.fileIndex];
+    if (lensFindingLevel(state.lens, state.index, file, node.fileIndex) !== 2) continue;
+    const center = worldToScreen(gvs, { x: node.x, y: node.y });
+    const r = node.radius * gvs.transform.k + 4;
+    rects.push({ x: center.x - r, y: center.y - r, w: r * 2, h: r * 2 });
+  }
+  return rects;
+};
+
+/** How many of the largest folders keep a label even when crowded. */
+const ALWAYS_LABELED = 6;
 
 export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme } = state;
   ctx.font = FONT_CHIP;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [
+    ...labelObstacles(state),
+    ...severeNodeRects(state, gvs),
+  ];
   gvs.clusterLabels = [];
-  // Bigger clusters claim their spot first; smaller ones move below on overlap.
-  const ordered = gvs.clusters.toSorted(
+  // Folder labels placed so far; even a forced label never covers one.
+  const chips: Array<{ x: number; y: number; w: number; h: number }> = [];
+  // How much of each folder the active lens flags: the label answers
+  // "where are the problems" before anyone hovers a dot.
+  const counts = new Map<ClusterInfo, { flagged: number; severe: number }>();
+  for (const cluster of gvs.clusters) {
+    let flagged = 0;
+    let severe = 0;
+    if (cluster.indices.length > 1) {
+      for (const fileIdx of cluster.indices) {
+        const level = lensFindingLevel(state.lens, state.index, state.data.files[fileIdx], fileIdx);
+        if (level > 0) flagged += 1;
+        if (level === 2) severe += 1;
+      }
+    }
+    counts.set(cluster, { flagged, severe });
+  }
+  // The largest folders claim their spot first so the map keeps its
+  // landmarks. After them, folders with findings come before clean ones,
+  // so a crowded map drops the labels that have nothing to report.
+  const bySize = gvs.clusters.toSorted(
     (left, right) => right.indices.length - left.indices.length || (left.key < right.key ? -1 : 1),
   );
+  const severe = (cluster: ClusterInfo): number => counts.get(cluster)?.severe ?? 0;
+  const flagged = (cluster: ClusterInfo): number => counts.get(cluster)?.flagged ?? 0;
+  // Folders with high findings come first of all: on a small screen only
+  // a few labels fit, and those are the ones the reader looks for.
+  const urgent = bySize
+    .filter((cluster) => severe(cluster) > 0)
+    .toSorted((left, right) => severe(right) - severe(left));
+  const landmarks = bySize.slice(0, ALWAYS_LABELED).filter((cluster) => severe(cluster) === 0);
+  const rest = bySize
+    .slice(ALWAYS_LABELED)
+    .filter((cluster) => severe(cluster) === 0)
+    .toSorted((left, right) => flagged(right) - flagged(left));
+  const ordered = [...urgent, ...landmarks, ...rest];
   const kRel = gvs.transform.k / gvs.fitK;
-  for (const cluster of ordered) {
+  // Small multi-file clusters wait for mid zoom (their chips only add
+  // collisions at fit); singletons keep their quiet borderless label
+  // so no connected dot floats unexplained. On small maps every
+  // cluster fits comfortably, so nothing is culled.
+  const manyClusters = gvs.clusters.filter((otherCluster) => !otherCluster.isolated).length > 10;
+  for (const [rank, cluster] of ordered.entries()) {
     if (cluster.isolated && !getGVS(state).standaloneOpen) continue;
-    // Small multi-file clusters wait for mid zoom (their chips only add
-    // collisions at fit); singletons keep their quiet borderless label
-    // so no connected dot floats unexplained. On small maps every
-    // cluster fits comfortably, so nothing is culled.
-    const manyClusters = gvs.clusters.filter((otherCluster) => !otherCluster.isolated).length > 10;
     if (manyClusters && cluster.indices.length >= 2 && cluster.indices.length < 6 && kRel < 1.5) {
       continue;
     }
-    let topLeft = cluster.hull[0] ?? { x: cluster.cx, y: cluster.cy };
-    for (const point of cluster.hull) {
-      if (point.y < topLeft.y || (point.y === topLeft.y && point.x < topLeft.x)) topLeft = point;
+    // Screen bounds of the hull: labels center over it, or under it when
+    // the space above is taken.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const point of cluster.hull.length > 0
+      ? cluster.hull
+      : [{ x: cluster.cx, y: cluster.cy }]) {
+      const screenPoint = worldToScreen(gvs, point);
+      minX = Math.min(minX, screenPoint.x);
+      maxX = Math.max(maxX, screenPoint.x);
+      minY = Math.min(minY, screenPoint.y);
+      maxY = Math.max(maxY, screenPoint.y);
     }
-    const screen = worldToScreen(gvs, topLeft);
+    // A folder outside the stage gets no label: clamping it to the edge
+    // stacked the labels of every folder scrolled off that side.
+    const stageW = usableStageWidth(state, state.canvas.clientWidth);
+    if (maxX < 0 || minX > stageW || maxY < 0 || minY > state.canvas.clientHeight) continue;
     // Single-file clusters: just the filename, borderless dim text. The
     // full path lives in the tooltip; quiet labels collide far less.
     const single = cluster.indices.length === 1;
@@ -486,57 +698,109 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
       }
     }
     const sub = single ? "" : `${formatCount(cluster.indices.length)} files`;
+    const flaggedCount = counts.get(cluster)?.flagged ?? 0;
+    const severeCount = counts.get(cluster)?.severe ?? 0;
+    const flag =
+      flaggedCount === 0
+        ? ""
+        : severeCount > 0
+          ? `${formatCount(severeCount)} high`
+          : `${formatCount(flaggedCount)} flagged`;
+    // Two lines: the name, then its size and findings. Half the width of a
+    // one-line chip, so labels collide less and stay over their cluster.
+    ctx.font = FONT_CHIP;
     const labelW = ctx.measureText(label).width;
-    const subW = sub ? ctx.measureText(sub).width : -8;
-    const boxW = labelW + subW + 17;
+    ctx.font = FONT_MICRO;
+    const subW = sub ? ctx.measureText(sub).width : 0;
+    const flagW = flag ? ctx.measureText(flag).width : 0;
+    const metaW = subW + (sub && flag ? 18 : 0) + flagW;
+    const twoLine = metaW > 0;
+    const boxW = Math.max(labelW, metaW) + 14;
+    const boxH = twoLine ? 36 : 20;
     // Clamp inside the viewport so edge clusters keep readable chips.
-    const x = Math.min(
-      Math.max(6, screen.x - 4),
-      usableStageWidth(state, state.canvas.clientWidth) - boxW - 8,
-    );
-    let y = screen.y - 12;
-    for (let tries = 0; tries < 6; tries++) {
-      const overlaps = placed.some(
-        (placedRect) =>
-          x < placedRect.x + placedRect.w &&
-          x + boxW > placedRect.x &&
-          y - 9 < placedRect.y + placedRect.h &&
-          y + 9 > placedRect.y,
-      );
-      if (!overlaps) break;
-      y += 19;
-    }
-    placed.push({ x: x - 4, y: y - 10, w: boxW + 3, h: 20 });
+    const maxLeft = stageW - boxW - 8;
+    const clampX = (left: number): number => Math.min(Math.max(6, left), maxLeft);
+    const centerX = clampX((minX + maxX) / 2 - boxW / 2);
+    // Candidate chip tops in order of preference: centered above the hull,
+    // centered below it, nudged sideways above it, then inside its top edge.
+    const candidates: Array<{ x: number; y: number }> = [
+      { x: centerX, y: minY - boxH - 4 },
+      { x: centerX, y: maxY + 4 },
+      { x: clampX(minX - boxW + 12), y: minY - boxH - 4 },
+      { x: clampX(maxX - 12), y: minY - boxH - 4 },
+      { x: centerX, y: minY + 4 },
+    ];
+    const canvasH = state.canvas.clientHeight;
+    const hits =
+      (rects: ReadonlyArray<{ x: number; y: number; w: number; h: number }>) =>
+      (spot: { x: number; y: number }): boolean =>
+        rects.some(
+          (rect) =>
+            spot.x < rect.x + rect.w &&
+            spot.x + boxW > rect.x &&
+            spot.y < rect.y + rect.h &&
+            spot.y + boxH > rect.y,
+        );
+    const overlaps = (spot: { x: number; y: number }): boolean =>
+      spot.y < 4 || spot.y + boxH > canvasH - 4 || hits(placed)(spot);
+    const free = candidates.find((spot) => !overlaps(spot));
+    // A label that cannot find room stays off rather than stacking on a
+    // neighbour; its folder still names itself in the tooltip. The largest
+    // folders may sit over dots and roads, but never over another folder
+    // label. A small stage has no room to force labels; crowded ones drop.
+    const forced = rank < (panelDocksBelow() ? 0 : ALWAYS_LABELED);
+    if (!free && (!forced || hits(chips)(candidates[0]))) continue;
+    const { x, y } = free ?? candidates[0];
+    placed.push({ x: x - 3, y: y - 3, w: boxW + 6, h: boxH + 6 });
+    chips.push({ x: x - 3, y: y - 3, w: boxW + 6, h: boxH + 6 });
     // Record the chip rect so a label hover can light up the cluster's roads.
     if (!cluster.isolated) {
-      gvs.clusterLabels.push({
-        cluster: gvs.clusters.indexOf(cluster),
-        x: x - 4,
-        y: y - 10,
-        w: labelW + subW + 18,
-        h: 20,
-      });
+      gvs.clusterLabels.push({ cluster: gvs.clusters.indexOf(cluster), x, y, w: boxW, h: boxH });
     }
+    drawLeader(ctx, theme.textMuted, { x, y, w: boxW, h: boxH }, { minX, maxX, minY, maxY });
     if (state.search.trim() !== "") ctx.globalAlpha = 0.35;
+    // In a finding lens, folders with nothing to report step back so the
+    // flagged ones lead.
+    else if (
+      state.lens !== "overview" &&
+      !single &&
+      flaggedCount === 0 &&
+      !(state.lens === "architecture" && cluster.tangle)
+    ) {
+      ctx.globalAlpha = 0.45;
+    }
+    // Square, like every other paper knockout behind map text: the map
+    // has square corners, and only plates and controls are rounded.
     chipRect(
       ctx,
-      x - 4,
-      y - 10,
-      labelW + subW + 18,
-      20,
+      x,
+      y,
+      boxW,
+      boxH,
       theme.bg,
-      single ? 0.75 : 0.92,
-      single
-        ? null
-        : cluster.tangle && state.lens === "architecture"
-          ? theme.amber
-          : theme.borderSubtle,
+      1,
+      !single && cluster.tangle && state.lens === "architecture" ? theme.amber : null,
+      0,
     );
-    ctx.fillStyle = cluster.isolated || single ? theme.textMuted : theme.textLow;
-    ctx.fillText(label, x + 2, y + 0.5);
-    if (sub) {
-      ctx.fillStyle = theme.textMuted;
-      ctx.fillText(sub, x + labelW + 8, y + 0.5);
+    ctx.textBaseline = "middle";
+    ctx.font = FONT_CHIP;
+    ctx.fillStyle =
+      (cluster.isolated || single) && flaggedCount === 0 ? theme.textMuted : theme.textHigh;
+    ctx.fillText(label, x + 7, y + 10.5);
+    if (twoLine) {
+      ctx.font = FONT_MICRO;
+      if (sub) {
+        ctx.fillStyle = theme.textMuted;
+        ctx.fillText(sub, x + 7, y + 26.5);
+      }
+      if (flag) {
+        ctx.fillStyle = severeCount > 0 ? theme.redText : theme.amberText;
+        ctx.fillText(flag, x + 7 + subW + (sub ? 18 : 0), y + 26.5);
+        if (sub) {
+          ctx.fillStyle = theme.textMuted;
+          ctx.fillText("·", x + 7 + subW + 6, y + 26.5);
+        }
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -546,7 +810,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
 
 /** One key on the legend: a visual mark plus the word it means. */
 type LegendMark =
-  | { kind: "dot"; color: string }
+  | { kind: "dot"; color: string; ring?: { color: string; dash: boolean } }
   | { kind: "ring"; color: string; dash?: boolean }
   | { kind: "ramp"; from: string; to: string }
   | { kind: "line"; color: string };
@@ -556,7 +820,7 @@ interface LegendEntry {
   label: string;
 }
 
-const LEGEND_ROW_H = 19;
+const LEGEND_ROW_H = 22;
 const LEGEND_PAD_Y = 8;
 /** Max zones listed before the boundaries key folds the rest into "+N". */
 const MAX_ZONE_LEGEND = 8;
@@ -570,24 +834,35 @@ const legendEntries = (state: AppState): LegendEntry[] => {
   // as two rows so both outlines are shown, not just described.
   const outlineMild: LegendEntry = {
     mark: { kind: "ring", color: theme.textHigh, dash: true },
-    label: "milder finding",
+    label: "medium finding",
   };
   const outlineSevere: LegendEntry = {
     mark: { kind: "ring", color: theme.textHigh },
-    label: "severe finding",
+    label: "high finding",
   };
+  // Where a color already names the level, the ring goes around its dot
+  // as one key instead of two rows that say the same thing.
+  const mildRing = { color: theme.textHigh, dash: true };
+  const severeRing = { color: theme.textHigh, dash: false };
+  // While a search is active the rings mean matches, not findings.
+  if (state.search.trim() !== "") {
+    return [
+      { mark: { kind: "ring", color: theme.amber }, label: "matches the search" },
+      { mark: { kind: "ring", color: theme.blue }, label: "imports a match" },
+    ];
+  }
   switch (state.lens) {
     case "overview":
       return [
-        { mark: { kind: "line", color: theme.textMuted }, label: "import (thick = importer)" },
+        { mark: { kind: "dot", color: theme.red }, label: "high, or findings in 3+ lenses" },
+        { mark: { kind: "dot", color: overviewMildColor(theme) }, label: "one or more findings" },
         { mark: { kind: "dot", color: theme.cellEntry }, label: "entry point" },
+        { mark: { kind: "line", color: theme.textMuted }, label: "import (thick = importer)" },
       ];
     case "unused":
       return [
-        { mark: { kind: "dot", color: theme.red }, label: "unused file" },
-        { mark: { kind: "dot", color: theme.amber }, label: "unused export" },
-        outlineMild,
-        outlineSevere,
+        { mark: { kind: "dot", color: theme.red, ring: severeRing }, label: "unused file" },
+        { mark: { kind: "dot", color: theme.amber, ring: mildRing }, label: "unused export" },
       ];
     case "duplication":
       return [
@@ -638,20 +913,99 @@ const legendEntries = (state: AppState): LegendEntry[] => {
       ];
     case "security":
       return [
-        { mark: { kind: "dot", color: theme.red }, label: "high-priority candidate" },
-        { mark: { kind: "dot", color: theme.amber }, label: "review candidate" },
-        outlineMild,
-        outlineSevere,
+        {
+          mark: { kind: "dot", color: theme.red, ring: severeRing },
+          label: "high-priority candidate",
+        },
+        { mark: { kind: "dot", color: theme.amber, ring: mildRing }, label: "review candidate" },
       ];
     default:
       return [];
   }
 };
 
+/** Row height and gaps of the one-line legend used on narrow screens. */
+const COMPACT_ROW_H = 22;
+const COMPACT_GAP = 14;
+
+/**
+ * Narrow-screen legend: color keys only, laid out in rows that wrap to the
+ * stage width. The ring keys repeat what the colors say, so they drop.
+ */
+const compactLegendRows = (state: AppState, width: number): LegendEntry[][] => {
+  const { ctx } = state;
+  // Measuring must not leak a font change into the caller's drawing.
+  ctx.save();
+  ctx.font = FONT_LEGEND;
+  const rows: LegendEntry[][] = [[]];
+  let used = 0;
+  for (const entry of legendEntries(state)) {
+    if (entry.mark.kind === "ring" && state.search.trim() === "") continue;
+    const entryW = 16 + ctx.measureText(entry.label).width + COMPACT_GAP;
+    if (used > 0 && used + entryW > width - 32) {
+      rows.push([]);
+      used = 0;
+    }
+    rows[rows.length - 1].push(entry);
+    used += entryW;
+  }
+  ctx.restore();
+  return rows.filter((row) => row.length > 0);
+};
+
 /** Pixel height of the legend box, so the standalone chip can dock above it. */
 const legendBoxHeight = (state: AppState): number => {
+  if (panelDocksBelow()) {
+    const rows = compactLegendRows(state, state.canvas.clientWidth).length;
+    return rows === 0 ? 0 : rows * COMPACT_ROW_H + 8;
+  }
   const count = legendEntries(state).length;
   return count === 0 ? 0 : LEGEND_PAD_Y * 2 + count * LEGEND_ROW_H;
+};
+
+const drawCompactLegend = (state: AppState, width: number, height: number): void => {
+  const rows = compactLegendRows(state, width);
+  if (rows.length === 0) return;
+  const { ctx, theme } = state;
+  const boxH = legendBoxHeight(state);
+  const boxY = height - 8 - boxH;
+  // Flat census key: an opaque paper band under the map, no translucency.
+  ctx.fillStyle = theme.bg;
+  ctx.fillRect(8, boxY, width - 16, boxH);
+  ctx.font = FONT_LEGEND;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  rows.forEach((row, rowIndex) => {
+    const cy = boxY + 4 + COMPACT_ROW_H * rowIndex + COMPACT_ROW_H / 2;
+    let x = 16;
+    for (const entry of row) {
+      drawLegendMark(ctx, entry.mark, x - 4, cy, 16);
+      ctx.fillStyle = theme.textLow;
+      ctx.fillText(entry.label, x + 14, cy);
+      x += 16 + ctx.measureText(entry.label).width + COMPACT_GAP;
+    }
+  });
+};
+
+/** A legend dot, with its finding ring when the mark has one. */
+const drawDotMark = (
+  ctx: CanvasRenderingContext2D,
+  mark: Extract<LegendMark, { kind: "dot" }>,
+  cx: number,
+  cy: number,
+): void => {
+  ctx.fillStyle = mark.color;
+  ctx.beginPath();
+  ctx.arc(cx, cy, mark.ring ? 4 : 5, 0, Math.PI * 2);
+  ctx.fill();
+  if (!mark.ring) return;
+  ctx.strokeStyle = mark.ring.color;
+  ctx.lineWidth = 1.2;
+  if (mark.ring.dash) ctx.setLineDash([2, 2]);
+  ctx.beginPath();
+  ctx.arc(cx, cy, 6.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
 };
 
 /** Draw one legend mark centered at `cy`, spanning `[x, x + width]`. */
@@ -665,10 +1019,7 @@ const drawLegendMark = (
   const cx = x + width / 2;
   switch (mark.kind) {
     case "dot":
-      ctx.fillStyle = mark.color;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.fill();
+      drawDotMark(ctx, mark, cx, cy);
       break;
     case "ring":
       ctx.strokeStyle = mark.color;
@@ -680,11 +1031,13 @@ const drawLegendMark = (
       ctx.setLineDash([]);
       break;
     case "ramp": {
-      const gradient = ctx.createLinearGradient(x, cy, x + width, cy);
-      gradient.addColorStop(0, mark.from);
-      gradient.addColorStop(1, mark.to);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x, cy - 4, width, 8);
+      // Census swatches are flat: the ramp shows as solid steps, no gradient.
+      const steps = 4;
+      const stepW = width / steps;
+      for (let step = 0; step < steps; step++) {
+        ctx.fillStyle = mix(mark.from, mark.to, step / (steps - 1));
+        ctx.fillRect(x + step * stepW, cy - 4, stepW - 1, 8);
+      }
       break;
     }
     case "line":
@@ -702,6 +1055,10 @@ const drawLegendMark = (
 };
 
 export const drawCanvasLegend = (state: AppState, width: number, height: number): void => {
+  if (panelDocksBelow()) {
+    drawCompactLegend(state, width, height);
+    return;
+  }
   const entries = legendEntries(state);
   if (entries.length === 0) return;
   const { ctx, theme } = state;
@@ -719,11 +1076,10 @@ export const drawCanvasLegend = (state: AppState, width: number, height: number)
   const boxHeight = legendBoxHeight(state);
   const boxX = 10;
   const boxY = height - 12 - boxHeight;
+  // The map key is a panel printed on the map: paper fill, 1px ink frame.
   ctx.fillStyle = theme.bg;
-  ctx.globalAlpha = 0.88;
   ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = theme.borderSubtle;
+  ctx.strokeStyle = theme.borderStrong;
   ctx.lineWidth = 1;
   ctx.strokeRect(boxX + 0.5, boxY + 0.5, boxWidth - 1, boxHeight - 1);
   entries.forEach((entry, index) => {

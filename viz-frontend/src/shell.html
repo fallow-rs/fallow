@@ -10,7 +10,15 @@
   </header>
   <nav id="toolbar"></nav>
   <div id="lens-summary" class="visible"></div>
-  <main id="stage"></main>
+  <main id="stage">
+    <div class="map-loading" role="status">
+      <div class="map-loading-card">
+        <p class="map-loading-title">Building the map</p>
+        <div class="map-loading-track indeterminate"><div class="map-loading-fill"></div></div>
+        <p class="map-loading-step">Reading the data</p>
+      </div>
+    </div>
+  </main>
   <footer id="statusline">
     <div id="crumbs"><span class="current">&nbsp;</span></div>
     <span id="hints"
