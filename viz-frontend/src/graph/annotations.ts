@@ -804,6 +804,8 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
     ) {
       ctx.globalAlpha = 0.45;
     }
+    // Square, like every other paper knockout behind map text: the map
+    // has square corners, and only plates and controls are rounded.
     chipRect(
       ctx,
       x,
@@ -813,6 +815,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
       theme.bg,
       1,
       !single && cluster.tangle && state.lens === "architecture" ? theme.amber : null,
+      0,
     );
     ctx.textBaseline = "middle";
     ctx.font = FONT_CHIP;
