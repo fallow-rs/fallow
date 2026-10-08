@@ -278,38 +278,6 @@ export const drawHoverLabels = (
   const tipRect = fileTipCanvasRect(hs.x, hs.y, usableStageWidth(state, width), height);
   const placed: Array<{ x: number; y: number; w: number; h: number }> = [tipRect];
 
-  // Faint leader from the hovered node to the docked tooltip's near edge, so
-  // the edge-docked card reads as tied to this node instead of floating off
-  // on its own at the far side of the canvas.
-  const dockedRight = tipRect.x > hs.x;
-  const anchorX = dockedRight ? tipRect.x : tipRect.x + tipRect.w;
-  // Keep the anchor in the card's top band: the real card can be shorter
-  // than the estimated height, but never shorter than its name and stats.
-  const anchorY = Math.min(Math.max(hs.y, tipRect.y + 12), tipRect.y + TIP_ANCHOR_BAND);
-  const lr = hoveredNode.radius * gvs.transform.k;
-  const ldx = anchorX - hs.x;
-  const ldy = anchorY - hs.y;
-  const llen = Math.hypot(ldx, ldy) || 1;
-  const lsx = hs.x + (ldx / llen) * (lr + 3);
-  const lsy = hs.y + (ldy / llen) * (lr + 3);
-  ctx.beginPath();
-  ctx.moveTo(lsx, lsy);
-  ctx.lineTo(anchorX, anchorY);
-  // Solid and quiet: dashes on this map mean "imported by the hovered
-  // file", and a dashed leader read as one more import.
-  ctx.strokeStyle = theme.textMuted;
-  ctx.globalAlpha = 0.5;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  // A small dot where the leader meets the card anchors the connection so
-  // the card reads as pinned to this node rather than floating beside it.
-  ctx.beginPath();
-  ctx.arc(anchorX, anchorY, 2, 0, Math.PI * 2);
-  ctx.fillStyle = theme.textLow;
-  ctx.globalAlpha = 0.5;
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
   ctx.font = FONT_SMALL;
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
@@ -573,9 +541,6 @@ const labelObstacles = (state: AppState): Array<{ x: number; y: number; w: numbe
   });
   return rects;
 };
-
-/** Lowest point, below the card top, where the tooltip leader may land. */
-const TIP_ANCHOR_BAND = 48;
 
 /** Gap between a chip and its hull above which a leader line is drawn. */
 const LEADER_GAP = 10;

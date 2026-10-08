@@ -205,8 +205,8 @@ export const showFileTooltip = (
   // No generic "click for details" line: the pointer cursor already says
   // the node is clickable, and the severity/lens lines carry the substance.
 
-  // The docked card takes the exact width the canvas leader aims at, so
-  // the leader always ends on its edge.
+  // The docked card takes the width the canvas reserves for it, so the
+  // hover labels keep clear of the whole card.
   tip.style.width = dock ? `${TIP_W}px` : "";
   if (dock) {
     tip.style.display = "block";
