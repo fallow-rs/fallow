@@ -430,7 +430,7 @@ rustup component add llvm-tools
 node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
 triple="$(rustc -vV | sed -n 's/^host: //p')"
 mkdir -p target/pgo
-printf "[target.%s]\nrustflags = ['-Cprofile-generate=%s']\n" \
+printf "[target.%s]\nrustflags = ['-Cprofile-generate=%s', '-Clto=off', '-Clinker-plugin-lto=no']\n" \
  "$triple" "$PWD/target/pgo-raw" > target/pgo/generate.toml
 cargo build --release --locked --target "$triple" -p fallow-multicall \
  --target-dir target/pgo-instr --config target/pgo/generate.toml
