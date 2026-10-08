@@ -584,7 +584,7 @@ struct Cli {
     /// default branch. A baseline that the base ref does not have is a new
     /// baseline and passes with a note. A base ref that git cannot resolve
     /// (for example in a shallow clone) exits 2. Applies to `dead-code`,
-    /// `dupes`, `health`, `audit` and the bare run, and reaches a machine
+    /// `architecture`, `dupes`, `health`, `audit` and the bare run, and reaches a machine
     /// consumer as `gate_outcomes["baseline-growth"]`.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_baseline_growth: bool,

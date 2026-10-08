@@ -105,6 +105,8 @@ pub fn envelope_codeclimate_issues_with_config(
     match saved_native_codeclimate_issues(kind, envelope, root, config_path, resolver) {
         Ok(issues) => Ok(issues),
         Err(native_error)
+            // `architecture` has no legacy schema: it first shipped with its
+            // own envelope, so a saved architecture file is never legacy.
             if matches!(
                 kind,
                 EnvelopeKind::DeadCode

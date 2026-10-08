@@ -236,7 +236,8 @@ build_command_args() {
       [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
       ;;
     architecture)
-      # Same analysis and envelope as dead-code. The issue-types values are the
+      # Same analysis as dead-code, with its own `architecture` envelope. The
+      # issue-types values are the
       # architecture filters (cycles, boundaries, policy). The command has no
       # unused-export filter, so include-entry-exports does not apply.
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
