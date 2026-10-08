@@ -190,6 +190,9 @@ fn push_audit_coverage_flags(args: &mut Vec<String>, params: &AuditParams) {
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
     }
+    if params.show_cascade == Some(true) {
+        args.push("--show-cascade".to_string());
+    }
     push_str_flag(
         args,
         "--runtime-coverage",
@@ -253,6 +256,7 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
         coverage: non_empty_path(params.coverage.as_deref()),
         coverage_root: non_empty_path(params.coverage_root.as_deref()),
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
+        show_cascade: params.show_cascade.unwrap_or(false),
         runtime_coverage: non_empty_path(params.runtime_coverage.as_deref()),
         min_invocations_hot: params.min_invocations_hot.unwrap_or(100),
     })

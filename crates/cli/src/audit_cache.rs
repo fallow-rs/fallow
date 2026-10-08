@@ -424,6 +424,7 @@ pub(super) fn audit_base_snapshot_cache_key(
         opts.group_by.map(|g| format!("{g:?}")),
         opts.include_entry_exports,
     )
+    .show_cascade(opts.show_cascade)
     .health(
         opts.max_crap,
         coverage_file,

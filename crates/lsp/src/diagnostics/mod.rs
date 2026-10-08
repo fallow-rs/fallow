@@ -571,6 +571,9 @@ mod severity_gate {
             security_unresolved_callee_sites: _,
             security_unresolved_callee_diagnostics: _,
             // Suppression bookkeeping: counts, not diagnostics.
+            // Cascade bookkeeping: the hidden findings get no diagnostic.
+            cascade_hidden: _,
+            cascade: _,
             suppression_count: _,
             unused_component_props_exempted: _,
             active_suppressions: _,

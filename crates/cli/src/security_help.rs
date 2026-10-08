@@ -33,6 +33,7 @@ pub const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
     "dupes-ignore-imports",
     "dupes-no-ignore-imports",
     "include-entry-exports",
+    "show-cascade",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -172,6 +172,8 @@ impl DeadCodeAuditLedger {
             unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
             route_collisions,
             dynamic_segment_name_conflicts,
+            cascade_hidden: _cascade_hidden,
+            cascade: _cascade,
             suppression_count: _suppression_count,
             unused_component_props_exempted: _unused_component_props_exempted,
             active_suppressions: _active_suppressions,
@@ -616,6 +618,8 @@ impl DeadCodeKeyCollector<'_> {
             route_collisions,
             dynamic_segment_name_conflicts,
             // Non-finding fields: counts and metadata, not attributable to a key.
+            cascade_hidden: _cascade_hidden,
+            cascade: _cascade,
             suppression_count: _suppression_count,
             unused_component_props_exempted: _unused_component_props_exempted,
             active_suppressions: _active_suppressions,
@@ -1581,6 +1585,8 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         dynamic_segment_name_conflicts: _dynamic_segment_name_conflicts,
         // Non-finding fields: counts and metadata, not subject to base-keyed
         // filtering.
+        cascade_hidden: _cascade_hidden,
+        cascade: _cascade,
         suppression_count: _suppression_count,
         unused_component_props_exempted: _unused_component_props_exempted,
         active_suppressions: _active_suppressions,

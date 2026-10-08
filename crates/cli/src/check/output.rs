@@ -633,6 +633,7 @@ mod tests {
             fix: fallow_config::FixConfig::default(),
             resolve: fallow_config::ResolveConfig::default(),
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache_max_size_mb: None,

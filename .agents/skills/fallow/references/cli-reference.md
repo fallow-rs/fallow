@@ -2005,6 +2005,7 @@ Available on all commands:
 | `--dupes-baseline` | `string` | - | Compare duplication clone groups against a saved baseline in combined mode (produced by `fallow dupes --save-baseline`) |
 | `--health-baseline` | `string` | - | Compare health findings against a saved baseline in combined mode (produced by `fallow health --save-baseline`) |
 | `--include-entry-exports` | `bool` | `false` | Report unused exports in entry files instead of auto-marking them as used |
+| `--show-cascade` | `bool` | `false` | Also report the unused exports, types, class members and enum members of unused files. By default the report hides them, because deleting the file removes them, and counts them in `cascade_hidden` |
 | `--type-aware` | `bool` | `false` | Opt in to TypeScript semantic analysis for project-wide symbol evidence. This does not emit compiler diagnostics or typed lint findings |
 | `--no-type-aware` | `bool` | `false` | Disable TypeScript semantic analysis even when `typeAware.enabled` or `FALLOW_TYPE_AWARE` opts in, keeping this run fully syntactic |
 | `--type-aware-project` | `string` | - | TypeScript project config to use for type-aware analysis (repeatable) |

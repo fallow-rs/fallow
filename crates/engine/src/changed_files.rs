@@ -761,6 +761,8 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         prop_drilling_chains: _prop_drilling_chains,
         thin_wrappers: _thin_wrappers,
         duplicate_prop_shapes: _duplicate_prop_shapes,
+        cascade_hidden: _cascade_hidden,
+        cascade: _cascade,
         suppression_count: _suppression_count,
         unused_component_props_exempted: _unused_component_props_exempted,
         active_suppressions: _active_suppressions,

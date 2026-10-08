@@ -590,6 +590,8 @@ pub struct DeadCodeOptions {
     pub files: Vec<PathBuf>,
     /// Also report unused exports declared in entry-point files.
     pub include_entry_exports: bool,
+    /// Keep the export and member findings of unused files (`--show-cascade`).
+    pub show_cascade: bool,
     /// Report only the findings with these `finding_id` values. The filter
     /// runs last, after the baseline, and the output then carries
     /// `finding_id_query`. Empty reports every finding. Only
@@ -640,6 +642,7 @@ impl ArchitectureOptions {
             filters: self.dead_code_filters(),
             files: self.files.clone(),
             include_entry_exports: false,
+            show_cascade: false,
             finding_ids: Vec::new(),
         }
     }
@@ -676,6 +679,8 @@ pub struct AuditOptions {
     pub coverage_root: Option<PathBuf>,
     /// Also report unused exports declared in entry-point files.
     pub include_entry_exports: bool,
+    /// Keep the export and member findings of unused files (`--show-cascade`).
+    pub show_cascade: bool,
     /// Runtime coverage capture merged into the audit.
     pub runtime_coverage: Option<PathBuf>,
     /// Minimum recorded invocations for a code path to count as hot.
@@ -695,6 +700,8 @@ pub struct CombinedOptions {
     pub health: bool,
     /// Also report unused exports declared in entry-point files.
     pub include_entry_exports: bool,
+    /// Keep the export and member findings of unused files (`--show-cascade`).
+    pub show_cascade: bool,
     /// Options for the duplication domain.
     pub duplication_options: DuplicationOptions,
     /// Options for the health domain.
@@ -709,6 +716,7 @@ impl Default for CombinedOptions {
             duplication: true,
             health: true,
             include_entry_exports: false,
+            show_cascade: false,
             duplication_options: DuplicationOptions::default(),
             health_options: ComplexityOptions::default(),
         }

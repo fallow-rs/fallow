@@ -190,6 +190,7 @@ fn unsupported_universal_analysis_option(
         (cli.dupes_baseline.is_some(), "--dupes-baseline"),
         (cli.health_baseline.is_some(), "--health-baseline"),
         (cli.include_entry_exports, "--include-entry-exports"),
+        (cli.show_cascade, "--show-cascade"),
         (cli.type_aware, "--type-aware"),
         (cli.no_type_aware, "--no-type-aware"),
         (!cli.type_aware_project.is_empty(), "--type-aware-project"),

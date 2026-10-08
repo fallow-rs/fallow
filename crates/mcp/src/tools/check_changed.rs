@@ -97,6 +97,9 @@ pub fn build_check_changed_args(params: CheckChangedParams) -> Vec<String> {
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
     }
+    if params.show_cascade == Some(true) {
+        args.push("--show-cascade".to_string());
+    }
 
     args
 }
@@ -131,6 +134,7 @@ fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOpt
         filters: DeadCodeFilters::default(),
         files: Vec::new(),
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
+        show_cascade: params.show_cascade.unwrap_or(false),
     }
 }
 
@@ -236,6 +240,7 @@ mod tests {
             regression_baseline: None,
             save_regression_baseline: None,
             include_entry_exports: None,
+            show_cascade: None,
             no_cache: None,
             threads: None,
         }

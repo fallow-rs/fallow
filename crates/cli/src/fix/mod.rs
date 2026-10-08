@@ -134,6 +134,9 @@ pub struct FixOptions<'a> {
     /// the analysis itself still runs whole-project so fixability stays sound.
     /// `None` means whole-project scope.
     pub scope: Option<PathBuf>,
+    /// `--show-cascade`: also fix the export and member findings of unused
+    /// files. By default `fix` skips them, as the report hides them.
+    pub show_cascade: bool,
 }
 
 pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
@@ -179,12 +182,18 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         return code;
     }
 
+    if opts.show_cascade {
+        config.show_cascade = true;
+    }
+
     let (results, file_hashes) = match run_analyze(&config, opts.output, opts.quiet) {
         Ok(r) => r,
         Err(code) => return code,
     };
 
     let mut results = results;
+    // The report hides these findings, so `fix` offers no fix for them.
+    fallow_engine::dead_code::hide_cascade_findings(&mut results, &config);
     if let Some(scope) = opts.scope.as_ref() {
         fallow_engine::dead_code::filter_to_workspaces(&mut results, std::slice::from_ref(scope));
     }

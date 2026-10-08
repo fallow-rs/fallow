@@ -39,6 +39,9 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
         "tsconfig.json",
         r#"{"compilerOptions":{"strict":true,"module":"esnext","moduleResolution":"bundler","target":"es2022"},"include":["src"]}"#,
     );
+    // `src/lonely.ts` is an unused file, so the rule pass hides its export by
+    // default. The test reads the type-aware decision for that export.
+    write(&root, ".fallowrc.json", r#"{"showCascade":true}"#);
     write(
         &root,
         "src/index.ts",

@@ -3122,6 +3122,16 @@ thin_wrappers?: ThinWrapperFinding[]
  */
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
 /**
+ * Number of `unused_exports`, `unused_types`, `unused_class_members` and
+ * `unused_enum_members` findings that this run did not report because
+ * their file is an unused file. Deleting the file removes them, so they
+ * add no information. `--show-cascade` or the `showCascade` config key
+ * keeps them in the report, and then this count is zero. The count is
+ * taken after the scope and the rules and before a baseline. Serialized
+ * only when not zero, so a run without such findings keeps its JSON.
+ */
+cascade_hidden?: number
+/**
  * Count deltas against the matched baseline, in baseline runs.
  */
 baseline_deltas?: (BaselineDeltas | null)
@@ -13752,6 +13762,16 @@ thin_wrappers?: ThinWrapperFinding[]
  * enables it.
  */
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
+/**
+ * Number of `unused_exports`, `unused_types`, `unused_class_members` and
+ * `unused_enum_members` findings that this run did not report because
+ * their file is an unused file. Deleting the file removes them, so they
+ * add no information. `--show-cascade` or the `showCascade` config key
+ * keeps them in the report, and then this count is zero. The count is
+ * taken after the scope and the rules and before a baseline. Serialized
+ * only when not zero, so a run without such findings keeps its JSON.
+ */
+cascade_hidden?: number
 }
 /**
  * Envelope emitted by `fallow architecture --group-by ... --format json`.
@@ -15446,6 +15466,16 @@ thin_wrappers?: ThinWrapperFinding[]
  * enables it.
  */
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
+/**
+ * Number of `unused_exports`, `unused_types`, `unused_class_members` and
+ * `unused_enum_members` findings that this run did not report because
+ * their file is an unused file. Deleting the file removes them, so they
+ * add no information. `--show-cascade` or the `showCascade` config key
+ * keeps them in the report, and then this count is zero. The count is
+ * taken after the scope and the rules and before a baseline. Serialized
+ * only when not zero, so a run without such findings keeps its JSON.
+ */
+cascade_hidden?: number
 /**
  * Count deltas against the matched baseline, in baseline runs.
  */

@@ -2318,16 +2318,36 @@ pub fn apply_dead_code_baseline(
         return Err(DeadCodeBaselineError::IncompatibleIdentity(incompatible));
     }
     let before = results.total_issues();
+    let hidden_matched = cascade_hidden_matches(results, &baseline, root);
     *results = filter_new_issues(std::mem::take(results), &baseline, root);
     Ok(DeadCodeBaselineOutcome::Applied {
         staleness: BaselineStaleness {
             entries: baseline.total_entries(),
-            matched: before.saturating_sub(results.total_issues()),
+            matched: before.saturating_sub(results.total_issues()) + hidden_matched,
             current_findings: before,
             change_scoped,
         },
         legacy_keys: baseline.identity.is_none(),
     })
+}
+
+/// Baseline entries that match a finding of the unused-file cascade filter.
+///
+/// Such a finding still exists: the report hides it because its file is an
+/// unused file. Its baseline entry therefore still describes the project and
+/// must not count as stale. The hidden findings sit in unused files and the
+/// reported ones do not, so no entry can match both.
+fn cascade_hidden_matches(
+    results: &crate::results::AnalysisResults,
+    baseline: &BaselineData,
+    root: &Path,
+) -> usize {
+    if results.cascade.hidden.is_empty() {
+        return 0;
+    }
+    let hidden = results.cascade.hidden.to_results();
+    let before = hidden.total_issues();
+    before.saturating_sub(filter_new_issues(hidden, baseline, root).total_issues())
 }
 
 /// Baseline data for duplication comparison.

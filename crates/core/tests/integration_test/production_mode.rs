@@ -43,6 +43,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        show_cascade: false,
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),

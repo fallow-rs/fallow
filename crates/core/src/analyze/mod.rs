@@ -120,7 +120,7 @@ use unused_exports::{
     collect_export_usages, find_private_type_leaks, find_unused_exports,
     suppress_signature_backing_types,
 };
-use unused_files::find_unused_files;
+use unused_files::find_unused_file_scan;
 use unused_load_data_key::find_unused_load_data_keys;
 use unused_overrides::{
     find_misconfigured_dependency_overrides, find_unused_dependency_overrides,
@@ -1828,6 +1828,7 @@ struct DeadCodeDetectorInput<'a> {
 
 struct ParallelDeadCodeDetectorResults {
     unused_files: Vec<UnusedFileFinding>,
+    unused_file_candidates: Vec<std::path::PathBuf>,
     export_results: AnalysisResults,
     member_results: AnalysisResults,
     dependency_results: AnalysisResults,
@@ -1872,6 +1873,10 @@ impl ParallelDeadCodeDetectorResults {
             re_export_cycles: self.re_export_cycles,
             package_cycles: self.package_cycles,
             export_usages: self.export_usages,
+            cascade: fallow_types::results::CascadeState {
+                unused_file_candidates: self.unused_file_candidates,
+                ..fallow_types::results::CascadeState::default()
+            },
             ..AnalysisResults::default()
         }
     }
@@ -1885,7 +1890,7 @@ fn collect_parallel_dead_code_detector_results(
     input: DeadCodeDetectorInput<'_>,
 ) -> ParallelDeadCodeDetectorResults {
     let (
-        (unused_files, export_results),
+        ((unused_files, unused_file_candidates), export_results),
         (
             (member_results, dependency_results),
             (
@@ -1919,6 +1924,7 @@ fn collect_parallel_dead_code_detector_results(
 
     ParallelDeadCodeDetectorResults {
         unused_files,
+        unused_file_candidates,
         export_results,
         member_results,
         dependency_results,
@@ -1937,7 +1943,10 @@ fn collect_parallel_dead_code_detector_results(
 
 fn run_file_and_export_detectors(
     input: DeadCodeDetectorInput<'_>,
-) -> (Vec<UnusedFileFinding>, AnalysisResults) {
+) -> (
+    (Vec<UnusedFileFinding>, Vec<std::path::PathBuf>),
+    AnalysisResults,
+) {
     rayon::join(
         || run_unused_file_detector(input.graph, input.config, input.suppressions),
         || {
@@ -2376,14 +2385,17 @@ fn run_unused_file_detector(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     suppressions: &crate::suppress::SuppressionContext<'_>,
-) -> Vec<UnusedFileFinding> {
+) -> (Vec<UnusedFileFinding>, Vec<std::path::PathBuf>) {
     if config.rules.unused_files == Severity::Off {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
-    find_unused_files(graph, suppressions)
+    let scan = find_unused_file_scan(graph, suppressions);
+    let findings = scan
+        .files
         .into_iter()
         .map(UnusedFileFinding::with_actions)
-        .collect()
+        .collect();
+    (findings, scan.candidates)
 }
 
 fn run_export_detectors(

@@ -519,6 +519,21 @@ pub struct AnalysisResults {
     /// enables it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub duplicate_prop_shapes: Vec<DuplicatePropShapeFinding>,
+    /// Number of `unused_exports`, `unused_types`, `unused_class_members` and
+    /// `unused_enum_members` findings that this run did not report because
+    /// their file is an unused file. Deleting the file removes them, so they
+    /// add no information. `--show-cascade` or the `showCascade` config key
+    /// keeps them in the report, and then this count is zero. The count is
+    /// taken after the scope and the rules and before a baseline. Serialized
+    /// only when not zero, so a run without such findings keeps its JSON.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cascade_hidden: usize,
+    /// In-process state of the unused-file cascade filter: the unused-file
+    /// candidates of the detector and the findings that the filter removed.
+    /// Skipped in machine output; [`Self::cascade_hidden`] is the public count.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub cascade: CascadeState,
     /// Number of suppression entries that matched an issue during analysis.
     /// Human output uses this for the suppression footer; it is skipped in
     /// machine output to avoid changing the public JSON issue contract.
@@ -607,6 +622,94 @@ pub struct AnalysisResults {
     pub semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde `skip_serializing_if` passes the field by reference"
+)]
+const fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+/// In-process state of the unused-file cascade filter.
+///
+/// An unused file makes every export and member finding in it redundant:
+/// deleting the file removes them. The filter needs the files and keeps the
+/// findings that it removed, because a baseline entry for such a finding still
+/// describes the project and must not count as stale.
+#[derive(Debug, Default, Clone)]
+pub struct CascadeState {
+    /// Files that the unused-files detector found, including files whose
+    /// finding an inline `fallow-ignore-file unused-file` comment suppressed.
+    /// The suppressed files are in the set, so a suppression comment never
+    /// makes a hidden finding visible again.
+    pub unused_file_candidates: Vec<PathBuf>,
+    /// The findings that the filter removed from the report.
+    pub hidden: CascadeHiddenFindings,
+}
+
+/// Findings that the unused-file cascade filter removed from the report.
+#[derive(Debug, Default, Clone)]
+pub struct CascadeHiddenFindings {
+    /// Hidden `unused_exports` findings.
+    pub unused_exports: Vec<UnusedExportFinding>,
+    /// Hidden `unused_types` findings.
+    pub unused_types: Vec<UnusedTypeFinding>,
+    /// Hidden `unused_enum_members` findings.
+    pub unused_enum_members: Vec<UnusedEnumMemberFinding>,
+    /// Hidden `unused_class_members` findings.
+    pub unused_class_members: Vec<UnusedClassMemberFinding>,
+}
+
+impl CascadeHiddenFindings {
+    /// Number of hidden findings.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.unused_exports.len()
+            + self.unused_types.len()
+            + self.unused_enum_members.len()
+            + self.unused_class_members.len()
+    }
+
+    /// Whether the filter removed no finding.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The hidden findings as a result set, for a baseline comparison.
+    #[must_use]
+    pub fn to_results(&self) -> AnalysisResults {
+        AnalysisResults {
+            unused_exports: self.unused_exports.clone(),
+            unused_types: self.unused_types.clone(),
+            unused_enum_members: self.unused_enum_members.clone(),
+            unused_class_members: self.unused_class_members.clone(),
+            ..AnalysisResults::default()
+        }
+    }
+
+    fn extend(&mut self, other: Self) {
+        self.unused_exports.extend(other.unused_exports);
+        self.unused_types.extend(other.unused_types);
+        self.unused_enum_members.extend(other.unused_enum_members);
+        self.unused_class_members.extend(other.unused_class_members);
+    }
+}
+
+/// Move each finding that `covered` selects from `findings` to `hidden`.
+fn move_covered<T>(
+    findings: &mut Vec<T>,
+    hidden: &mut Vec<T>,
+    path_of: impl Fn(&T) -> &Path,
+    covered: &dyn Fn(&Path) -> bool,
+) {
+    let (moved, kept): (Vec<T>, Vec<T>) = std::mem::take(findings)
+        .into_iter()
+        .partition(|finding| covered(path_of(finding)));
+    *findings = kept;
+    hidden.extend(moved);
+}
+
 struct AnalysisResultsCoreMergeParts {
     unused_files: Vec<UnusedFileFinding>,
     unused_exports: Vec<UnusedExportFinding>,
@@ -669,6 +772,8 @@ struct AnalysisResultsFrameworkMergeParts {
 }
 
 struct AnalysisResultsMetadataMergeParts {
+    cascade_hidden: usize,
+    cascade: CascadeState,
     suppression_count: usize,
     unused_component_props_exempted: usize,
     active_suppressions: Vec<ActiveSuppression>,
@@ -753,6 +858,8 @@ fn split_merge_parts(
         prop_drilling_chains,
         thin_wrappers,
         duplicate_prop_shapes,
+        cascade_hidden,
+        cascade,
         suppression_count,
         unused_component_props_exempted,
         active_suppressions,
@@ -827,6 +934,8 @@ fn split_merge_parts(
             duplicate_prop_shapes,
         },
         AnalysisResultsMetadataMergeParts {
+            cascade_hidden,
+            cascade,
             suppression_count,
             unused_component_props_exempted,
             active_suppressions,
@@ -1146,6 +1255,8 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
         // Not findings: counters, metadata, and descriptive carriers.
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
+        cascade_hidden: _cascade_hidden,
+        cascade: _cascade,
         suppression_count: _suppression_count,
         unused_component_props_exempted: _unused_component_props_exempted,
         active_suppressions: _active_suppressions,
@@ -1159,6 +1270,43 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
 }
 
 impl AnalysisResults {
+    /// Remove the export and member findings whose file `covered` selects.
+    ///
+    /// Only `unused_exports`, `unused_types`, `unused_enum_members` and
+    /// `unused_class_members` change. A removed finding moves to
+    /// [`CascadeState::hidden`] and [`Self::cascade_hidden`] counts it. A second
+    /// call removes only findings that a later stage added, so the pass is
+    /// idempotent.
+    pub fn hide_cascade_findings(&mut self, covered: &dyn Fn(&Path) -> bool) {
+        let mut hidden = CascadeHiddenFindings::default();
+        move_covered(
+            &mut self.unused_exports,
+            &mut hidden.unused_exports,
+            |finding| finding.export.path.as_path(),
+            covered,
+        );
+        move_covered(
+            &mut self.unused_types,
+            &mut hidden.unused_types,
+            |finding| finding.export.path.as_path(),
+            covered,
+        );
+        move_covered(
+            &mut self.unused_enum_members,
+            &mut hidden.unused_enum_members,
+            |finding| finding.member.path.as_path(),
+            covered,
+        );
+        move_covered(
+            &mut self.unused_class_members,
+            &mut hidden.unused_class_members,
+            |finding| finding.member.path.as_path(),
+            covered,
+        );
+        self.cascade_hidden += hidden.len();
+        self.cascade.hidden.extend(hidden);
+    }
+
     /// Remove dead-code findings whose complete, non-empty source-owner set
     /// matches `is_ignored`.
     ///
@@ -1337,6 +1485,11 @@ impl AnalysisResults {
         self.export_usages.extend(parts.export_usages);
         self.active_suppressions.extend(parts.active_suppressions);
         self.suppression_count += parts.suppression_count;
+        self.cascade_hidden += parts.cascade_hidden;
+        self.cascade
+            .unused_file_candidates
+            .extend(parts.cascade.unused_file_candidates);
+        self.cascade.hidden.extend(parts.cascade.hidden);
         self.unused_component_props_exempted += parts.unused_component_props_exempted;
         if self.entry_point_summary.is_none() {
             self.entry_point_summary = parts.entry_point_summary;

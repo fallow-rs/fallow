@@ -597,6 +597,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
     Ok(CombinedOptions {
         analysis,
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
+        show_cascade: params.show_cascade.unwrap_or(false),
         duplication_options: DuplicationOptions {
             mode: combined_duplication_mode(params.dupes_mode.as_deref())?,
             near: params.dupes_near,
@@ -667,6 +668,9 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
     );
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
+    }
+    if params.show_cascade == Some(true) {
+        args.push("--show-cascade".to_string());
     }
     push_combined_duplication_args(&mut args, params);
     if params.score == Some(true) {

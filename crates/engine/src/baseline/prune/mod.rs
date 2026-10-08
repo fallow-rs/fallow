@@ -240,15 +240,21 @@ pub fn prune_dead_code_baseline(
 
     let entries_before = baseline.total_entries();
     let paths = IdentityPaths::new(root);
+    // A finding that the cascade filter hid still exists, so its entry stays.
+    let hidden = results.cascade.hidden.to_results();
     let mut removed = Vec::new();
     macro_rules! prune {
         ($($field:ident),* $(,)?) => {
-            $(retain_matched(
-                &mut baseline.$field,
-                &canonical_keys(&results.$field, &paths),
-                stringify!($field),
-                &mut removed,
-            );)*
+            $({
+                let mut current = canonical_keys(&results.$field, &paths);
+                current.extend(canonical_keys(&hidden.$field, &paths));
+                retain_matched(
+                    &mut baseline.$field,
+                    &current,
+                    stringify!($field),
+                    &mut removed,
+                );
+            })*
         };
     }
     with_baseline_fields!(prune);

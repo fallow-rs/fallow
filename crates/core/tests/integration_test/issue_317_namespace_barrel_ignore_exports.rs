@@ -51,6 +51,7 @@ fn make_config(
         resolve: fallow_config::ResolveConfig::default(),
         sealed: false,
         include_entry_exports: false,
+        show_cascade: false,
         auto_imports: false,
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),

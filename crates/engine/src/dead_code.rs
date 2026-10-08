@@ -269,7 +269,7 @@ const MAX_EXTENDS_DEPTH: usize = 8;
 /// - the detection config digest (merged user config after `extends`,
 ///   external plugins, rule packs);
 /// - the settings that a surface changes after resolution: production mode,
-///   `includeEntryExports`, the effective rules, the type-aware mode,
+///   `includeEntryExports`, `showCascade`, the effective rules, the type-aware mode,
 ///   requirement and project list, the file size limit;
 /// - the root-relative path and content of the repository ignore files, the
 ///   `package.json` files, the `tsconfig*.json` and `jsconfig*.json` files and
@@ -318,6 +318,11 @@ pub fn analysis_fingerprint_for_version(config: &ResolvedConfig, version: &str) 
             "entry-exports"
         } else {
             "no-entry-exports"
+        },
+        if config.show_cascade {
+            "cascade-shown"
+        } else {
+            "cascade-hidden"
         },
         &rules,
         &type_aware,
@@ -859,7 +864,36 @@ pub fn apply_rule_severities(results: &mut AnalysisResults, config: &ResolvedCon
     }
 
     apply_base_collection_rules(results, rules);
+    hide_cascade_findings(results, config);
     apply_effective_severities(results, config);
+}
+
+/// Hide the export and member findings of unused files.
+///
+/// Deleting an unused file removes every unused export, unused type, unused
+/// class member and unused enum member in it, so these findings add no
+/// information to the report. The pass runs inside the rule pass, so every
+/// surface that reports findings hides the same set. It reads the unused-file
+/// candidates of the detector, not the reported files: a scope, an issue-type
+/// filter, an `ignoreFindings` pattern, a baseline or an inline suppression of
+/// the unused-file finding never makes a hidden finding visible again. A file
+/// whose `unused-files` rule is `off` is not a candidate, because the report
+/// does not tell the user to delete it. `showCascade` keeps every finding.
+pub fn hide_cascade_findings(results: &mut AnalysisResults, config: &ResolvedConfig) {
+    if config.show_cascade || results.cascade.unused_file_candidates.is_empty() {
+        return;
+    }
+    let covered: FxHashSet<PathBuf> = results
+        .cascade
+        .unused_file_candidates
+        .iter()
+        .filter(|path| config.resolve_rules_for_path(path).unused_files != Severity::Off)
+        .cloned()
+        .collect();
+    if covered.is_empty() {
+        return;
+    }
+    results.hide_cascade_findings(&|path| covered.contains(path));
 }
 
 fn apply_base_collection_rules(results: &mut AnalysisResults, rules: &RulesConfig) {
@@ -1257,11 +1291,13 @@ mod tests {
 
     use super::*;
     use fallow_types::output_dead_code::{
-        BoundaryViolationFinding, CircularDependencyFinding, PrivateTypeLeakFinding,
-        UnusedExportFinding, UnusedFileFinding,
+        BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
+        PrivateTypeLeakFinding, UnlistedDependencyFinding, UnusedClassMemberFinding,
+        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
     use fallow_types::results::{
-        BoundaryViolation, CircularDependency, PrivateTypeLeak, UnusedExport, UnusedFile,
+        BoundaryViolation, CircularDependency, DuplicateExport, DuplicateLocation, ImportSite,
+        PrivateTypeLeak, UnlistedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
 
     #[test]
@@ -1778,5 +1814,237 @@ mod tests {
 
         assert!(results.unused_exports.is_empty());
         assert_eq!(results.private_type_leaks.len(), 2);
+    }
+
+    const DEAD_FILE: &str = "/project/src/dead.ts";
+    const LIVE_FILE: &str = "/project/src/live.ts";
+
+    fn resolve(config: fallow_config::FallowConfig) -> ResolvedConfig {
+        config.resolve(
+            PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
+    fn member(path: &str, kind: fallow_types::extract::MemberKind) -> UnusedMember {
+        UnusedMember {
+            path: PathBuf::from(path),
+            parent_name: "Parent".to_string(),
+            member_name: "member".to_string(),
+            kind,
+            line: 2,
+            col: 0,
+        }
+    }
+
+    fn unused_type(path: &str) -> UnusedTypeFinding {
+        let mut export = unused_export(path).export;
+        export.is_type_only = true;
+        UnusedTypeFinding::with_actions(export)
+    }
+
+    /// One finding of each cascade kind in `DEAD_FILE` and in `LIVE_FILE`,
+    /// plus findings of other kinds that touch `DEAD_FILE`.
+    fn cascade_fixture() -> AnalysisResults {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from(DEAD_FILE),
+            }));
+        results.cascade.unused_file_candidates = vec![PathBuf::from(DEAD_FILE)];
+        for path in [DEAD_FILE, LIVE_FILE] {
+            results.unused_exports.push(unused_export(path));
+            results.unused_types.push(unused_type(path));
+            results
+                .unused_enum_members
+                .push(UnusedEnumMemberFinding::with_actions(member(
+                    path,
+                    fallow_types::extract::MemberKind::EnumMember,
+                )));
+            results
+                .unused_class_members
+                .push(UnusedClassMemberFinding::with_actions(member(
+                    path,
+                    fallow_types::extract::MemberKind::ClassMethod,
+                )));
+        }
+        results
+            .duplicate_exports
+            .push(DuplicateExportFinding::with_actions(DuplicateExport {
+                export_name: "Shared".to_string(),
+                locations: [DEAD_FILE, LIVE_FILE]
+                    .iter()
+                    .map(|path| DuplicateLocation {
+                        path: PathBuf::from(path),
+                        line: 1,
+                        col: 0,
+                    })
+                    .collect(),
+            }));
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![PathBuf::from(DEAD_FILE), PathBuf::from(LIVE_FILE)],
+                    length: 2,
+                    line: 1,
+                    col: 0,
+                    edges: Vec::new(),
+                    is_cross_package: false,
+                },
+            ));
+        results
+            .unlisted_dependencies
+            .push(UnlistedDependencyFinding::with_actions(
+                UnlistedDependency {
+                    package_name: "left-pad".to_string(),
+                    imported_from: vec![ImportSite {
+                        path: PathBuf::from(DEAD_FILE),
+                        line: 1,
+                        col: 0,
+                    }],
+                },
+            ));
+        results
+            .boundary_violations
+            .push(BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: PathBuf::from(DEAD_FILE),
+                to_path: PathBuf::from(LIVE_FILE),
+                from_zone: "ui".to_string(),
+                to_zone: "data".to_string(),
+                import_specifier: "./live".to_string(),
+                line: 1,
+                col: 0,
+                via_path: None,
+            }));
+        results
+    }
+
+    fn cascade_paths(results: &AnalysisResults) -> Vec<Vec<PathBuf>> {
+        vec![
+            results
+                .unused_exports
+                .iter()
+                .map(|f| f.export.path.clone())
+                .collect(),
+            results
+                .unused_types
+                .iter()
+                .map(|f| f.export.path.clone())
+                .collect(),
+            results
+                .unused_enum_members
+                .iter()
+                .map(|f| f.member.path.clone())
+                .collect(),
+            results
+                .unused_class_members
+                .iter()
+                .map(|f| f.member.path.clone())
+                .collect(),
+        ]
+    }
+
+    #[test]
+    fn rule_pass_hides_the_cascade_kinds_of_unused_files() {
+        let config = resolve(fallow_config::FallowConfig::default());
+        let mut results = cascade_fixture();
+
+        apply_rule_severities(&mut results, &config);
+
+        let live = vec![PathBuf::from(LIVE_FILE)];
+        assert_eq!(cascade_paths(&results), vec![live; 4]);
+        assert_eq!(results.cascade_hidden, 4);
+        assert_eq!(results.cascade.hidden.len(), 4);
+        assert_eq!(results.unused_files.len(), 1, "the unused file stays");
+    }
+
+    #[test]
+    fn rule_pass_keeps_other_kinds_in_unused_files() {
+        let config = resolve(fallow_config::FallowConfig::default());
+        let mut results = cascade_fixture();
+
+        apply_rule_severities(&mut results, &config);
+
+        assert_eq!(results.duplicate_exports.len(), 1);
+        assert_eq!(results.circular_dependencies.len(), 1);
+        assert_eq!(results.unlisted_dependencies.len(), 1);
+        assert_eq!(results.boundary_violations.len(), 1);
+    }
+
+    #[test]
+    fn show_cascade_keeps_every_finding() {
+        let config = resolve(fallow_config::FallowConfig {
+            show_cascade: true,
+            ..fallow_config::FallowConfig::default()
+        });
+        let mut results = cascade_fixture();
+
+        apply_rule_severities(&mut results, &config);
+
+        let both = vec![PathBuf::from(DEAD_FILE), PathBuf::from(LIVE_FILE)];
+        assert_eq!(cascade_paths(&results), vec![both; 4]);
+        assert_eq!(results.cascade_hidden, 0);
+    }
+
+    #[test]
+    fn unused_files_rule_off_for_the_file_keeps_its_findings() {
+        let config = config_with_override("src/dead.ts", |rules| {
+            rules.unused_files = Some(Severity::Off);
+        });
+        let mut results = cascade_fixture();
+
+        apply_rule_severities(&mut results, &config);
+
+        assert!(results.unused_files.is_empty());
+        let both = vec![PathBuf::from(DEAD_FILE), PathBuf::from(LIVE_FILE)];
+        assert_eq!(cascade_paths(&results), vec![both; 4]);
+        assert_eq!(results.cascade_hidden, 0);
+    }
+
+    #[test]
+    fn a_suppressed_unused_file_still_hides_its_findings() {
+        // An inline `fallow-ignore-file unused-file` comment removes the file
+        // from `unused_files`, and the file stays a candidate.
+        let config = resolve(fallow_config::FallowConfig::default());
+        let mut results = cascade_fixture();
+        results.unused_files.clear();
+
+        apply_rule_severities(&mut results, &config);
+
+        let live = vec![PathBuf::from(LIVE_FILE)];
+        assert_eq!(cascade_paths(&results), vec![live; 4]);
+        assert_eq!(results.cascade_hidden, 4);
+    }
+
+    #[test]
+    fn cascade_hiding_is_idempotent() {
+        let config = resolve(fallow_config::FallowConfig::default());
+        let mut results = cascade_fixture();
+
+        apply_rule_severities(&mut results, &config);
+        apply_rule_severities(&mut results, &config);
+
+        assert_eq!(results.cascade_hidden, 4);
+        assert_eq!(results.cascade.hidden.len(), 4);
+    }
+
+    #[test]
+    fn cascade_hidden_serializes_only_when_not_zero() {
+        let config = resolve(fallow_config::FallowConfig::default());
+        let mut results = cascade_fixture();
+        let before = serde_json::to_value(&results).expect("serializes");
+        assert!(before.get("cascade_hidden").is_none());
+
+        apply_rule_severities(&mut results, &config);
+
+        let after = serde_json::to_value(&results).expect("serializes");
+        assert_eq!(after["cascade_hidden"], 4);
+        assert!(after.get("cascade").is_none());
     }
 }

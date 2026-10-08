@@ -757,6 +757,12 @@ struct Cli {
     #[arg(hide_short_help = true, long, global = true)]
     include_entry_exports: bool,
 
+    /// Also report the unused exports, types, class members and enum members
+    /// of unused files. By default the report hides them, because deleting the
+    /// file removes them, and counts them in `cascade_hidden`.
+    #[arg(hide_short_help = true, long, global = true)]
+    show_cascade: bool,
+
     /// Opt in to TypeScript semantic analysis for project-wide symbol evidence.
     /// This does not emit compiler diagnostics or typed lint findings.
     #[arg(hide_short_help = true, long, global = true)]
@@ -3298,6 +3304,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some(flag)
     } else if cli.include_entry_exports {
         Some("--include-entry-exports")
+    } else if cli.show_cascade {
+        Some("--show-cascade")
     } else {
         None
     }
@@ -3636,6 +3644,7 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
         type_aware_projects: &[],
         type_aware_require: None,
         scope: None,
+        show_cascade: false,
     })
 }
 
@@ -4055,6 +4064,7 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.dupes_baseline.is_some(), "--dupes-baseline"),
         (cli.health_baseline.is_some(), "--health-baseline"),
         (cli.include_entry_exports, "--include-entry-exports"),
+        (cli.show_cascade, "--show-cascade"),
         (cli.type_aware, "--type-aware"),
         (cli.no_type_aware, "--no-type-aware"),
         (!cli.type_aware_project.is_empty(), "--type-aware-project"),
@@ -4244,6 +4254,7 @@ fn run_combined_scoped(
         coverage: coverage_inputs.coverage.as_deref(),
         coverage_root: coverage_inputs.coverage_root.as_deref(),
         include_entry_exports: cli.include_entry_exports,
+        show_cascade: cli.show_cascade,
         fail_on_parse_error: cli.fail_on_parse_error,
         scope,
         regression_opts: dispatch.regression_opts(
@@ -6363,6 +6374,7 @@ fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
         clear_screen: !no_clear,
         explain: cli.explain,
         include_entry_exports: cli.include_entry_exports,
+        show_cascade: cli.show_cascade,
         type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
         type_aware_require: cli.type_aware_require.map(Into::into),
@@ -6400,6 +6412,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
         type_aware_projects: &cli.type_aware_project,
         type_aware_require: cli.type_aware_require.map(Into::into),
         scope: args.scope.clone(),
+        show_cascade: cli.show_cascade,
     })
 }
 
@@ -6519,6 +6532,7 @@ fn dispatch_check_run(
         scope: args.scope.clone(),
         finding_ids: args.finding_ids.as_ref(),
         include_entry_exports: cli.include_entry_exports,
+        show_cascade: cli.show_cascade,
         fail_on_parse_error: cli.fail_on_parse_error,
         summary: cli.summary,
         regression_opts: dispatch.regression_opts(
@@ -6901,6 +6915,7 @@ fn run_resolved_audit(
             coverage_root: inputs.coverage_root.as_deref(),
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
             include_entry_exports: cli.include_entry_exports,
+            show_cascade: cli.show_cascade,
             fail_on_parse_error: cli.fail_on_parse_error,
             // Styling analytics, including deep cross-file reachability, is on
             // by default in `fallow audit`; both layers remain verdict-neutral
@@ -7031,6 +7046,7 @@ fn decision_surface_audit_options<'a>(
         coverage_root: None,
         gate: inputs.audit_cfg.gate,
         include_entry_exports: cli.include_entry_exports,
+        show_cascade: cli.show_cascade,
         fail_on_parse_error: false,
         // Decision-surface (brief apex) does not render styling; keep it lean.
         css: false,

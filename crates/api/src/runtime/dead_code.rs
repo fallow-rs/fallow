@@ -841,6 +841,7 @@ pub(super) fn default_dead_code_options_for_context(
         filters: DeadCodeFilters::default(),
         files: Vec::new(),
         include_entry_exports: false,
+        show_cascade: false,
     }
 }
 
@@ -850,6 +851,9 @@ fn configure_project_for_dead_code(
 ) -> ProjectConfig {
     if options.include_entry_exports {
         project_config.config.include_entry_exports = true;
+    }
+    if options.show_cascade {
+        project_config.config.show_cascade = true;
     }
     activate_explicit_dead_code_opt_ins(&options.filters, &mut project_config.config.rules);
     project_config

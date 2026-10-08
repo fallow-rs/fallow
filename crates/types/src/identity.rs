@@ -494,6 +494,10 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics: _,
         unused_load_data_keys_global_abstain: _,
+        // The cascade filter runs after the ids are stamped, so a hidden
+        // finding keeps the id it had in the report.
+        cascade_hidden: _,
+        cascade: _,
         suppression_count: _,
         unused_component_props_exempted: _,
         active_suppressions: _,

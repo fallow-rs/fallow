@@ -131,6 +131,8 @@ pub struct AuditOptions<'a> {
     pub gate: AuditGate,
     /// Report unused exports in entry files (forwarded to the dead-code sub-pass).
     pub include_entry_exports: bool,
+    /// Keep the export and member findings of unused files (`--show-cascade`).
+    pub show_cascade: bool,
     /// `--fail-on-parse-error`, forwarded to the dead-code and health
     /// sub-passes. The audit applies the `parse-error` gate once over both.
     pub fail_on_parse_error: bool,
@@ -306,6 +308,7 @@ fn build_base_audit_options<'a>(
         coverage_root: base_coverage.coverage_root.as_deref(),
         gate: AuditGate::All,
         include_entry_exports: opts.include_entry_exports,
+        show_cascade: opts.show_cascade,
         fail_on_parse_error: false,
         // Base styling keys keep opt-in `rules.css-* = error` gated on
         // introduced findings only; the base snapshot is cached.
@@ -1179,6 +1182,7 @@ fn audit_review_benchmark_options<'a>(
         coverage_root: None,
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
+        show_cascade: false,
         fail_on_parse_error: false,
         css: false,
         css_deep: false,
@@ -2186,6 +2190,7 @@ fn run_audit_check<'a>(
         scope: None,
         finding_ids: None,
         include_entry_exports: opts.include_entry_exports,
+        show_cascade: opts.show_cascade,
         fail_on_parse_error: opts.fail_on_parse_error,
         summary: false,
         regression_opts: crate::regression::RegressionOpts {

@@ -71,6 +71,7 @@ fn check_changed(since: &str) -> CheckChangedParams {
         regression_baseline: None,
         save_regression_baseline: None,
         include_entry_exports: None,
+        show_cascade: None,
         no_cache: None,
         threads: None,
     }
@@ -146,6 +147,7 @@ fn analyze_args_with_all_options() {
         file: None,
         finding_ids: None,
         include_entry_exports: None,
+        show_cascade: None,
         no_cache: Some(true),
         threads: Some(4),
         type_aware: None,
@@ -306,6 +308,7 @@ fn check_changed_args_with_all_options() {
         regression_baseline: Some("reg.json".to_string()),
         save_regression_baseline: Some("new-reg.json".to_string()),
         include_entry_exports: None,
+        show_cascade: None,
         no_cache: Some(true),
         threads: Some(2),
     };
@@ -2406,6 +2409,7 @@ fn no_cache_false_is_omitted_across_all_tools() {
         regression_baseline: None,
         save_regression_baseline: None,
         include_entry_exports: None,
+        show_cascade: None,
         threads: None,
     });
     assert!(!check_changed.contains(&"--no-cache".to_string()));
@@ -2508,6 +2512,7 @@ fn audit_args_with_all_options() {
         coverage: Some("coverage/coverage-final.json".to_string()),
         coverage_root: Some("/ci/build".to_string()),
         include_entry_exports: None,
+        show_cascade: None,
         runtime_coverage: Some(".fallow/runtime.json".to_string()),
         min_invocations_hot: Some(250),
     })

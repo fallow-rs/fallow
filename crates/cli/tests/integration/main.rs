@@ -26,6 +26,7 @@ mod audit_complexity_attribution_tests;
 mod audit_tests;
 mod baseline_growth_tests;
 mod baselines_prune_tests;
+mod cascade_tests;
 mod caveat_surface_tests;
 mod changed_since_added_files_tests;
 mod changed_workspaces_tests;

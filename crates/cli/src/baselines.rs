@@ -190,6 +190,7 @@ fn combined_options<'a>(opts: &'a BaselinesPruneOptions<'a>) -> CombinedOptions<
         coverage: opts.coverage,
         coverage_root: opts.coverage_root,
         include_entry_exports: false,
+        show_cascade: false,
         fail_on_parse_error: false,
         scope: None,
         regression_opts: crate::regression::RegressionOpts {

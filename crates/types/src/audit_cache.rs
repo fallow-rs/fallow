@@ -114,6 +114,8 @@ pub struct AuditCacheKeyPayload {
     pub group_by: Option<String>,
     /// Whether entry exports are analyzed.
     pub include_entry_exports: bool,
+    /// Keep the export and member findings of unused files (`--show-cascade`).
+    pub show_cascade: bool,
     /// CRAP threshold override.
     pub max_crap: Option<f64>,
     /// Coverage input fingerprint.
@@ -165,6 +167,7 @@ impl AuditCacheKeyBuilder {
                 changed_workspaces: None,
                 group_by: None,
                 include_entry_exports: false,
+                show_cascade: false,
                 max_crap: None,
                 coverage: None,
                 coverage_root: None,
@@ -206,6 +209,14 @@ impl AuditCacheKeyBuilder {
         self.payload.changed_workspaces = changed_workspaces;
         self.payload.group_by = group_by;
         self.payload.include_entry_exports = include_entry_exports;
+        self
+    }
+
+    /// Set whether the export and member findings of unused files stay in
+    /// the report.
+    #[must_use]
+    pub const fn show_cascade(mut self, show_cascade: bool) -> Self {
+        self.payload.show_cascade = show_cascade;
         self
     }
 

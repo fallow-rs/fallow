@@ -75,6 +75,47 @@ fn dead_code_prune_removes_a_fixed_finding_and_hides_the_same_findings() {
     assert_eq!(staleness.stale_entries(), 0, "{staleness:?}");
 }
 
+/// The saved results, with every export and member finding moved to the
+/// cascade state, as the rule pass does for the findings of an unused file.
+fn results_with_cascade_hidden() -> crate::results::AnalysisResults {
+    let mut current = make_results();
+    current.hide_cascade_findings(&|_| true);
+    assert!(current.cascade_hidden > 0, "the fixture must hide findings");
+    current
+}
+
+#[test]
+fn dead_code_prune_keeps_entries_of_cascade_hidden_findings() {
+    let content = dead_code_content(&make_results());
+
+    let pruned = prune_dead_code(&content, &results_with_cascade_hidden()).unwrap();
+
+    assert!(pruned.removed.is_empty(), "{:?}", pruned.removed);
+    assert_eq!(pruned.content, None);
+}
+
+#[test]
+fn cascade_hidden_findings_keep_their_baseline_entries_fresh() {
+    let content = dead_code_content(&make_results());
+    let mut current = results_with_cascade_hidden();
+
+    let outcome = apply_dead_code_baseline(
+        &mut current,
+        &content,
+        Path::new(ROOT),
+        &SemanticAnalysisIdentity::syntactic(),
+        false,
+    )
+    .unwrap();
+
+    let DeadCodeBaselineOutcome::Applied { staleness, .. } = outcome else {
+        panic!("a saved dead-code baseline stays a dead-code baseline");
+    };
+    assert_eq!(staleness.stale_entries(), 0, "{staleness:?}");
+    assert!(!staleness.trips_gate(), "{staleness:?}");
+    assert_eq!(current.total_issues(), 0);
+}
+
 #[test]
 fn dead_code_prune_never_adds_a_new_finding() {
     let saved = make_results();

@@ -203,6 +203,25 @@ after every gate set the exit code.
     A change to
     the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
     `crates/cli/src/audit_cache.rs`.
+- The unused-file cascade filter is
+  `fallow_engine::dead_code::hide_cascade_findings`. It runs inside
+  `apply_rule_severities`, so the CLI, the programmatic API, MCP, the Node
+  bindings and the editor diagnostics hide the same set. `fix` calls it
+  directly, because `fix` runs no rule pass. The filter removes
+  `unused_exports`, `unused_types`, `unused_class_members` and
+  `unused_enum_members` findings whose file is an unused-file candidate of
+  the detector (`CascadeState::unused_file_candidates`), unless the
+  `unused-files` rule of that file is `off`. The candidate set includes files
+  whose unused-file finding an inline `fallow-ignore-file unused-file` comment
+  suppressed, so a suppression comment never adds a finding (drift invariant
+  I6). Other finding kinds in an unused file stay. The removed findings move
+  to `CascadeState::hidden`, and `AnalysisResults::cascade_hidden` counts
+  them. The CLI runs the issue-type filters before the rule pass, as the
+  programmatic runtime does, so the count covers the same kinds on every
+  surface. A baseline entry that matches a hidden finding counts as matched in
+  `baseline_staleness`, and `baselines prune` keeps it. `--save-baseline`
+  writes only the reported findings. `--show-cascade`, the `showCascade`
+  config key and the MCP and Node `show_cascade` option turn the filter off.
 - `dead-code --finding-id <id>` (repeatable or comma-separated) reports only
   the requested findings. `fallow_engine::dead_code::FindingIdFilter` owns the
   syntax check and the filter; `FindingIdTrace` owns the evidence. The CLI
@@ -237,7 +256,7 @@ after every gate set the exit code.
   after `extends` without the keys in `NON_DETECTION_CONFIG_KEYS`, plus the
   loaded external plugins and rule packs, all as canonical JSON with sorted
   keys), the settings a surface changes after resolution (production mode,
-  `includeEntryExports`, the effective rules, type-aware mode and requirement,
+  `includeEntryExports`, `showCascade`, the effective rules, type-aware mode and requirement,
   type-aware project list, the file size limit) and the root-relative path and
   normalized content (CRLF to LF, trailing newlines removed) of these files:
   - every `.gitignore` and `.ignore` the walk reaches, and

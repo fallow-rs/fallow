@@ -1964,11 +1964,15 @@ fn type_aware_trace_proves_typeof_read_through_type_only_import() {
 fn filtered_type_aware_dead_code_keeps_unreachable_only_export_evidence() {
     let root = fixture_path("issue-2390-trace-consistency");
     let root_arg = root.to_string_lossy();
+    // `src/lonely.ts` is an unused file, so the default report hides its
+    // export. `--show-cascade` keeps it, so the test still reads the
+    // type-aware decision for it.
     let output = run_fallow_raw_with_type_aware_sidecar(&[
         "dead-code",
         "--root",
         &root_arg,
         "--type-aware",
+        "--show-cascade",
         "--unused-exports",
         "--format",
         "json",

@@ -114,6 +114,9 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
     }
+    if params.show_cascade == Some(true) {
+        args.push("--show-cascade".to_string());
+    }
 
     Ok(args)
 }
@@ -197,6 +200,7 @@ fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptio
             .map(PathBuf::from)
             .collect(),
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
+        show_cascade: params.show_cascade.unwrap_or(false),
     })
 }
 

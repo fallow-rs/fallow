@@ -264,6 +264,27 @@ fn print_human_footer(input: &PrintHumanInput<'_>, total: usize) {
         )
     );
     print_suppression_footer(input.results);
+    if let Some(line) = cascade_footer(input.results) {
+        eprintln!("  {}", line.dimmed());
+    }
+}
+
+/// The footer line for the findings that the cascade filter hid, or `None`
+/// when it hid nothing.
+fn cascade_footer(results: &AnalysisResults) -> Option<String> {
+    let hidden = results.cascade_hidden;
+    if hidden == 0 {
+        return None;
+    }
+    let (verb, pronoun) = if hidden == 1 {
+        ("is", "it")
+    } else {
+        ("are", "them")
+    };
+    Some(format!(
+        "{hidden} finding{} in unused files {verb} hidden \u{00b7} --show-cascade shows {pronoun}",
+        plural(hidden)
+    ))
 }
 
 fn print_suppression_footer(results: &AnalysisResults) {
@@ -4585,6 +4606,24 @@ mod tests {
     /// Build sample results including optional deps (extends the shared helper).
     fn sample_results(root: &Path) -> AnalysisResults {
         crate::report::test_helpers::sample_results(root)
+    }
+
+    #[test]
+    fn cascade_footer_names_the_hidden_count_and_the_flag() {
+        let mut results = AnalysisResults::default();
+        assert_eq!(cascade_footer(&results), None);
+
+        results.cascade_hidden = 1;
+        assert_eq!(
+            cascade_footer(&results).as_deref(),
+            Some("1 finding in unused files is hidden \u{00b7} --show-cascade shows it")
+        );
+
+        results.cascade_hidden = 7;
+        assert_eq!(
+            cascade_footer(&results).as_deref(),
+            Some("7 findings in unused files are hidden \u{00b7} --show-cascade shows them")
+        );
     }
 
     #[test]

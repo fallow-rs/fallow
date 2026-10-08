@@ -350,6 +350,9 @@ pub struct ResolvedConfig {
     /// When true, entry-point exports are subject to `unused-export`
     /// detection instead of being auto-credited as used.
     pub include_entry_exports: bool,
+    /// When true, the report keeps the export and member findings of an
+    /// unused file. When false, the rule pass hides them.
+    pub show_cascade: bool,
     /// When true, drop Nuxt convention entry-pattern fallbacks that
     /// `nuxt.config` does not explicitly declare; auto-import graph edges are
     /// synthesized regardless.
@@ -1074,6 +1077,7 @@ impl FallowConfig {
             fix: self.fix,
             resolve: self.resolve,
             include_entry_exports: self.include_entry_exports,
+            show_cascade: self.show_cascade,
             auto_imports: self.auto_imports,
             fail_on_parse_error: self.fail_on_parse_error,
             max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
@@ -1295,6 +1299,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
@@ -1360,6 +1365,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
@@ -1439,6 +1445,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
@@ -1509,6 +1516,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
@@ -1638,6 +1646,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),
@@ -1701,6 +1710,7 @@ mod tests {
             resolve: ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache: CacheConfig::default(),

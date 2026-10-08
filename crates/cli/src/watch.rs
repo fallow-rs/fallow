@@ -33,6 +33,8 @@ pub struct WatchOptions<'a> {
     pub explain: bool,
     /// Mirror of the global `--include-entry-exports` flag.
     pub include_entry_exports: bool,
+    /// Keep the export and member findings of unused files (`--show-cascade`).
+    pub show_cascade: bool,
     pub type_aware: Option<bool>,
     pub type_aware_projects: &'a [PathBuf],
     pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
@@ -487,6 +489,9 @@ fn reload_config_or_keep_previous(
             if opts.include_entry_exports {
                 reloaded.include_entry_exports = true;
             }
+            if opts.show_cascade {
+                reloaded.show_cascade = true;
+            }
             *config = reloaded;
         }
         Err(_) => {
@@ -658,6 +663,9 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedC
     )?;
     if opts.include_entry_exports {
         config.include_entry_exports = true;
+    }
+    if opts.show_cascade {
+        config.show_cascade = true;
     }
     crate::check::apply_type_aware_overrides_from(
         opts.output,
@@ -1227,6 +1235,7 @@ mod tests {
             resolve: fallow_config::ResolveConfig::default(),
             sealed: false,
             include_entry_exports: false,
+            show_cascade: false,
             auto_imports: false,
             fail_on_parse_error: false,
             cache: fallow_config::CacheConfig::default(),
@@ -1253,6 +1262,7 @@ mod tests {
             clear_screen: false,
             explain: false,
             include_entry_exports: false,
+            show_cascade: false,
             type_aware: None,
             type_aware_projects: &[],
             type_aware_require: None,

@@ -415,6 +415,7 @@ fn combined_dead_code_options(options: &CombinedOptions, production: bool) -> De
         filters: DeadCodeFilters::default(),
         files: Vec::new(),
         include_entry_exports: options.include_entry_exports,
+        show_cascade: options.show_cascade,
     }
 }
 

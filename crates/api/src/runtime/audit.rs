@@ -419,6 +419,7 @@ fn audit_subanalysis_options(
             filters: DeadCodeFilters::default(),
             files: Vec::new(),
             include_entry_exports: options.include_entry_exports,
+            show_cascade: options.show_cascade,
         },
         duplication: DuplicationOptions {
             analysis: analysis_with_production(analysis, options.production_dupes),

@@ -82,6 +82,8 @@ pub struct CombinedOptions<'a> {
     pub coverage: Option<&'a std::path::Path>,
     pub coverage_root: Option<&'a std::path::Path>,
     pub include_entry_exports: bool,
+    /// Keep the export and member findings of unused files (`--show-cascade`).
+    pub show_cascade: bool,
     /// `--fail-on-parse-error`. The combined run applies the `parse-error`
     /// gate once over the dead-code and health sections, in every format.
     pub fail_on_parse_error: bool,
@@ -289,6 +291,7 @@ fn build_combined_check_options<'a>(
         scope: opts.scope.clone(),
         finding_ids: None,
         include_entry_exports: opts.include_entry_exports,
+        show_cascade: opts.show_cascade,
         fail_on_parse_error: opts.fail_on_parse_error,
         summary: opts.summary,
         regression_opts: opts.regression_opts,
@@ -989,6 +992,7 @@ mod tests {
             coverage: None,
             coverage_root: None,
             include_entry_exports: false,
+            show_cascade: false,
             fail_on_parse_error: false,
             scope: None,
             regression_opts: RegressionOpts {

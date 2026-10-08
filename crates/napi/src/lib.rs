@@ -72,6 +72,7 @@ pub struct DeadCodeOptions {
     pub misconfigured_dependency_overrides: Option<bool>,
     pub files: Option<Vec<String>>,
     pub include_entry_exports: Option<bool>,
+    pub show_cascade: Option<bool>,
     pub finding_ids: Option<Vec<String>>,
 }
 
@@ -455,6 +456,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 .map(std::path::PathBuf::from)
                 .collect(),
             include_entry_exports: value.include_entry_exports.unwrap_or(false),
+            show_cascade: value.show_cascade.unwrap_or(false),
         })
     }
 }
@@ -1041,6 +1043,7 @@ mod tests {
             misconfigured_dependency_overrides: Some(true),
             files: Some(vec!["src/app.ts".to_string(), "src/lib.ts".to_string()]),
             include_entry_exports: Some(true),
+            show_cascade: Some(true),
             finding_ids: None,
         })
         .expect("options should map");
@@ -1072,6 +1075,7 @@ mod tests {
             vec![Path::new("src/app.ts"), Path::new("src/lib.ts")]
         );
         assert!(options.include_entry_exports);
+        assert!(options.show_cascade);
     }
 
     #[test]

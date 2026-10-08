@@ -1283,6 +1283,8 @@ pub(crate) mod tests {
         assert_eq!(target.security_unresolved_edge_files, 2);
         assert_eq!(target.security_unresolved_callee_diagnostics.len(), 1);
         assert_eq!(target.suppression_count, 1);
+        assert_eq!(target.cascade_hidden, 1);
+        assert_eq!(target.cascade.unused_file_candidates.len(), 1);
         assert!(target.entry_point_summary.is_some());
         assert_eq!(
             target
@@ -1949,6 +1951,11 @@ pub(crate) mod tests {
                     },
                 ),
             ],
+            cascade_hidden: 1,
+            cascade: fallow_types::results::CascadeState {
+                unused_file_candidates: vec!["/f.ts".into()],
+                ..fallow_types::results::CascadeState::default()
+            },
             suppression_count: 1,
             unused_component_props_exempted: 1,
             active_suppressions: vec![super::editor_results::ActiveSuppression {

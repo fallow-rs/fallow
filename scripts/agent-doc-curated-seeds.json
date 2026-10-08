@@ -1594,6 +1594,12 @@
     },
     {
       "section": "flags:global",
+      "row": "--show-cascade",
+      "column": "Description",
+      "seed": "Also report the unused exports, types, class members and enum members of unused files. By default the report hides them, because deleting the file removes them, and counts them in `cascade_hidden`"
+    },
+    {
+      "section": "flags:global",
       "row": "--skip",
       "column": "Description",
       "seed": "Skip specific analyses when no subcommand is given"

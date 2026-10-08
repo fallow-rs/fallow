@@ -43,6 +43,7 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   staleSuppressions?: boolean;
   files?: string[];
   includeEntryExports?: boolean;
+  showCascade?: boolean;
   findingIds?: string[];
 }
 
