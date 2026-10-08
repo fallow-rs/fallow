@@ -16,7 +16,6 @@ const RUN_COMMANDS_EXECUTORS: &[&str] = &[
     "nx:run-commands",
     "@nx/workspace:run-commands",
     "@nrwl/workspace:run-commands",
-    "nx:run-script",
 ];
 
 /// Longest chain of targets that call each other.
@@ -122,24 +121,25 @@ fn runs_in_project(cwd: Option<&str>, project_root: &str) -> bool {
     let Some(cwd) = cwd else {
         return project_root.is_empty();
     };
-    let cwd = cwd.replace("{projectRoot}", project_root);
-    let normalize = |path: &str| {
-        path.trim_start_matches("./")
-            .trim_end_matches('/')
-            .trim_matches('.')
-            .to_string()
-    };
-    normalize(&cwd) == normalize(project_root)
+    let cwd = cwd
+        .replace("{projectRoot}", project_root)
+        .replace("{workspaceRoot}", "");
+    normalize_dir(&cwd) == normalize_dir(project_root)
 }
 
-/// Replace the Nx path tokens. `{workspaceRoot}` becomes the way up from the
-/// project directory, because a command runs from the project directory.
+/// A directory path without empty or `.` parts. A `..` part stays, so a path
+/// that leaves the directory never equals the directory.
+fn normalize_dir(path: &str) -> String {
+    path.split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Replace the Nx path tokens. A command runs from the project directory, so
+/// `{projectRoot}` is `.` and `{workspaceRoot}` is the way up to the workspace
+/// root.
 fn expand_tokens(command: &str, project_root: &str) -> String {
-    let project = if project_root.is_empty() {
-        "."
-    } else {
-        project_root
-    };
     let up = if project_root.is_empty() {
         ".".to_string()
     } else {
@@ -153,7 +153,7 @@ fn expand_tokens(command: &str, project_root: &str) -> String {
         .join("/")
     };
     command
-        .replace("{projectRoot}", project)
+        .replace("{projectRoot}", ".")
         .replace("{workspaceRoot}", &up)
 }
 
@@ -272,7 +272,7 @@ mod tests {
             scripts(json, "packages/app"),
             vec![(
                 "gen".to_string(),
-                "tsx ../../tools/gen.ts packages/app/schema.json".to_string()
+                "tsx ../../tools/gen.ts ./schema.json".to_string()
             )]
         );
     }
@@ -337,6 +337,29 @@ mod tests {
             total < 4 * 1024 * 1024,
             "inlined commands must stay bounded, got {total} bytes"
         );
+    }
+
+    #[test]
+    fn a_parent_directory_is_not_the_project_root() {
+        let json = r#"{"targets":{"up":{"executor":"nx:run-commands","options":{"cwd":"..","command":"tsx x.ts"}}}}"#;
+        assert!(scripts(json, "").is_empty(), "`..` leaves the root project");
+        assert!(scripts(json, "packages/app").is_empty());
+    }
+
+    #[test]
+    fn a_root_project_may_name_the_workspace_root_as_its_cwd() {
+        let json = r#"{"targets":{"seed":{"executor":"nx:run-commands","options":{"cwd":"{workspaceRoot}","command":"tsx seed.ts"}}}}"#;
+        assert_eq!(
+            scripts(json, ""),
+            vec![("seed".to_string(), "tsx seed.ts".to_string())]
+        );
+        assert!(scripts(json, "packages/app").is_empty());
+    }
+
+    #[test]
+    fn run_script_targets_are_not_commands() {
+        let json = r#"{"targets":{"s":{"executor":"nx:run-script","options":{"script":"build"}}}}"#;
+        assert!(scripts(json, "").is_empty());
     }
 
     #[test]
