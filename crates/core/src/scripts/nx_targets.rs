@@ -22,6 +22,11 @@ const RUN_COMMANDS_EXECUTORS: &[&str] = &[
 /// Longest chain of targets that call each other.
 const MAX_INLINE_DEPTH: usize = 4;
 
+/// Most bytes of target text that one `project.json` may inline. Targets that
+/// each call many others grow with every level, and a repository that fallow
+/// reads is not trusted, so the growth needs a hard bound.
+const INLINE_BYTE_BUDGET: usize = 256 * 1024;
+
 /// The commands that the `run-commands` targets of a `project.json` run, keyed
 /// by target name. A configuration that sets its own command adds
 /// `target:configuration`.
@@ -63,9 +68,15 @@ pub fn run_commands_scripts(project_json: &str, project_root: &str) -> FxHashMap
     }
 
     let targets = commands.clone();
-    commands
+    let mut budget = INLINE_BYTE_BUDGET;
+    let mut names: Vec<String> = commands.keys().cloned().collect();
+    names.sort();
+    names
         .into_iter()
-        .map(|(name, command)| (name, inline_targets(&command, &targets, MAX_INLINE_DEPTH)))
+        .map(|name| {
+            let command = inline_targets(&commands[&name], &targets, MAX_INLINE_DEPTH, &mut budget);
+            (name, command)
+        })
         .collect()
 }
 
@@ -148,18 +159,28 @@ fn expand_tokens(command: &str, project_root: &str) -> String {
 
 /// Replace each `nx <target>` call to a target of the same project with the
 /// command of that target and the arguments of the call.
-fn inline_targets(command: &str, targets: &FxHashMap<String, String>, depth: usize) -> String {
+fn inline_targets(
+    command: &str,
+    targets: &FxHashMap<String, String>,
+    depth: usize,
+    budget: &mut usize,
+) -> String {
     if depth == 0 {
         return command.to_string();
     }
     shell::split_shell_operators(command)
         .into_iter()
-        .map(|segment| inline_segment(segment, targets, depth))
+        .map(|segment| inline_segment(segment, targets, depth, budget))
         .collect::<Vec<_>>()
         .join(" && ")
 }
 
-fn inline_segment(segment: &str, targets: &FxHashMap<String, String>, depth: usize) -> String {
+fn inline_segment(
+    segment: &str,
+    targets: &FxHashMap<String, String>,
+    depth: usize,
+    budget: &mut usize,
+) -> String {
     let words = shell::split_words(segment);
     let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
     let Some(first) = shell::skip_initial_wrappers(&tokens, 0) else {
@@ -184,7 +205,12 @@ fn inline_segment(segment: &str, targets: &FxHashMap<String, String>, depth: usi
     let head = &segment[..words[first].start];
     let runner = &segment[words[first].start..words[nx_at].start];
     let tail = words.get(rest_at).map_or("", |word| &segment[word.start..]);
-    let inlined = inline_targets(&targets[*target], targets, depth - 1);
+    let body = &targets[*target];
+    if body.len() > *budget {
+        return segment.trim().to_string();
+    }
+    *budget -= body.len();
+    let inlined = inline_targets(body, targets, depth - 1, budget);
     format!("{head}{runner}{inlined} {tail}").trim().to_string()
 }
 
@@ -287,6 +313,30 @@ mod tests {
         let json = r#"{"targets":{"a":{"executor":"nx:run-commands","options":{"cwd":"{projectRoot}","command":"nx b"}},
             "b":{"executor":"nx:run-commands","options":{"cwd":"{projectRoot}","command":"nx a"}}}}"#;
         let _ = scripts(json, "packages/app");
+    }
+
+    #[test]
+    fn a_fan_out_of_target_calls_stays_bounded() {
+        let fan = |next: &str| vec![format!("nx {next}"); 60].join(" && ");
+        let json = format!(
+            r#"{{"targets":{{
+                "a":{{"executor":"nx:run-commands","options":{{"cwd":"{{projectRoot}}","command":"{}"}}}},
+                "b":{{"executor":"nx:run-commands","options":{{"cwd":"{{projectRoot}}","command":"{}"}}}},
+                "c":{{"executor":"nx:run-commands","options":{{"cwd":"{{projectRoot}}","command":"{}"}}}},
+                "d":{{"executor":"nx:run-commands","options":{{"cwd":"{{projectRoot}}","command":"{}"}}}},
+                "e":{{"executor":"nx:run-commands","options":{{"cwd":"{{projectRoot}}","command":"tsx x.ts"}}}}
+            }}}}"#,
+            fan("b"),
+            fan("c"),
+            fan("d"),
+            fan("e"),
+        );
+        let found = run_commands_scripts(&json, "packages/app");
+        let total: usize = found.values().map(String::len).sum();
+        assert!(
+            total < 4 * 1024 * 1024,
+            "inlined commands must stay bounded, got {total} bytes"
+        );
     }
 
     #[test]
