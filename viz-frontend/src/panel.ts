@@ -34,7 +34,7 @@ import type {
 } from "./data";
 import { closeButton, copyButton, copyIconButton, el } from "./dom";
 import { confidenceLabel, healthReason, securityCategoryLabel, severityRank } from "./explain";
-import { LENSES } from "./lenses";
+import { LENSES, type LensCount } from "./lenses";
 import { getGVS } from "./graph/shared";
 
 /** Called when the user clicks through to another file. */
@@ -2225,17 +2225,25 @@ const triageScore = (grade: string | undefined, value: number): HTMLElement => {
 };
 
 /**
- * The unit after a triage count. The tab counts findings; this card counts
- * files. When the two differ (several security candidates in one file),
- * say both so the numbers do not seem to disagree.
+ * The text after a triage count. The card counts its rows; the tab can count
+ * something else. When the two differ, say both so the numbers do not seem to
+ * disagree: "61 files, 128 candidates". When both count the same unit (Health
+ * rows are the files with a finding, the tab also counts coverage gaps and
+ * hotspots), the row count is a part of the tab count: "528 of 6,135 files".
  */
-const triageUnit = (state: AppState, lens: LensDef, rowCount: number): string => {
-  const [one, many] = ROW_NOUN[lens.id] ?? ["file", "files"];
-  const tabCount = lens.count(state);
-  const unit = rowCount === 1 ? one : many;
+export const triageUnitText = (
+  nouns: readonly [string, string],
+  rowCount: number,
+  tabCount: LensCount | null,
+): string => {
+  const unit = rowCount === 1 ? nouns[0] : nouns[1];
   if (!tabCount || tabCount.value === rowCount) return unit;
+  if (tabCount.unit === nouns[1]) return `of ${formatCount(tabCount.value)} ${tabCount.unit}`;
   return `${unit}, ${formatCount(tabCount.value)} ${tabCount.unit}`;
 };
+
+const triageUnit = (state: AppState, lens: LensDef, rowCount: number): string =>
+  triageUnitText(ROW_NOUN[lens.id] ?? ["file", "files"], rowCount, lens.count(state));
 
 /** The headline figure of a triage card: off, clean, or the counts. */
 const triageFigure = (

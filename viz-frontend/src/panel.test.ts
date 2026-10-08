@@ -6,6 +6,7 @@ import {
   rankRowsFor,
   rankRowsForRender,
   searchPanelModel,
+  triageUnitText,
 } from "./panel";
 import { buildIndex } from "./data";
 import { getTheme } from "./theme";
@@ -556,5 +557,23 @@ describe("searchPanelModel", () => {
     expect(model.query).toBe("none");
     expect(model.matches).toEqual([]);
     expect(model.affected).toEqual([]);
+  });
+});
+
+describe("triageUnitText", () => {
+  const files = ["file", "files"] as const;
+
+  it("shows only the unit when the tab and the card agree", () => {
+    expect(triageUnitText(files, 12, { value: 12, unit: "files" })).toBe("files");
+  });
+
+  it("names both counts when the tab counts another unit", () => {
+    expect(triageUnitText(files, 61, { value: 128, unit: "candidates" })).toBe(
+      "files, 128 candidates",
+    );
+  });
+
+  it("shows the rows as a part of the tab count when both count files", () => {
+    expect(triageUnitText(files, 528, { value: 6135, unit: "files" })).toBe("of 6,135 files");
   });
 });
