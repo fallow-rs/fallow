@@ -3,10 +3,11 @@ use std::sync::LazyLock;
 use std::sync::atomic::AtomicBool;
 
 use crate::params::{
-    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CombinedParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams, ImpactClosureParams,
-    ImpactParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
-    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    AnalyzeParams, ArchitectureParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams,
+    CombinedParams, ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams,
+    ImpactClosureParams, ImpactParams, ListBoundariesParams, ProjectInfoParams,
+    SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
+    TraceFileParams,
 };
 
 use fallow_api::{
@@ -21,7 +22,7 @@ use super::super::{
         env_changed_since, env_diff_file, non_empty_path, non_empty_string,
         programmatic_error_body, resolve_typed_coverage_inputs, workspace_patterns_from_param,
     },
-    build_analyze_args, build_audit_args, build_check_changed_args,
+    build_analyze_args, build_architecture_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
     build_find_dupes_args, build_get_blast_radius_args, build_get_cleanup_candidates_args,
     build_get_hot_paths_args, build_get_importance_args, build_health_args, build_impact_args,
@@ -63,6 +64,7 @@ pub(super) enum CodeModeTool {
     GetBlastRadius,
     GetImportance,
     GetCleanupCandidates,
+    CheckArchitecture,
 }
 
 impl CodeModeTool {
@@ -93,6 +95,7 @@ impl CodeModeTool {
         Self::GetBlastRadius,
         Self::GetImportance,
         Self::GetCleanupCandidates,
+        Self::CheckArchitecture,
     ];
 
     /// Position of the variant in [`Self::ALL`]. A new variant makes this
@@ -123,6 +126,7 @@ impl CodeModeTool {
             Self::GetBlastRadius => 19,
             Self::GetImportance => 20,
             Self::GetCleanupCandidates => 21,
+            Self::CheckArchitecture => 22,
         }
     }
 
@@ -171,6 +175,7 @@ impl CodeModeTool {
             "get_blast_radius" => Ok(Self::GetBlastRadius),
             "get_importance" => Ok(Self::GetImportance),
             "get_cleanup_candidates" => Ok(Self::GetCleanupCandidates),
+            "check_architecture" => Ok(Self::CheckArchitecture),
             "fix_preview" | "fix_apply" => Err(
                 "code mode does not expose fix tools; use standalone MCP tools for previews"
                     .to_string(),
@@ -203,6 +208,7 @@ impl CodeModeTool {
             Self::GetBlastRadius => "get_blast_radius",
             Self::GetImportance => "get_importance",
             Self::GetCleanupCandidates => "get_cleanup_candidates",
+            Self::CheckArchitecture => "check_architecture",
         }
     }
 
@@ -303,7 +309,8 @@ fn api_route(tool: CodeModeTool) -> Option<ApiRoute> {
             let params: ListBoundariesParams = parse_params(params)?;
             run_list_boundaries_api_value(&params, cancellation)
         }),
-        // `fallow-api` can run the first four (their standalone MCP tools do).
+        // `fallow-api` can run the first four and `check_architecture` (their
+        // standalone MCP tools do).
         // They stay on the subprocess because killing the child is the only
         // stop with an upper bound: cooperative cancellation unwinds at the
         // next stage boundary, and a detector or graph pass on a large
@@ -313,6 +320,7 @@ fn api_route(tool: CodeModeTool) -> Option<ApiRoute> {
         // cleanup under cancellation is unexamined. The rest have no
         // `fallow-api` route at all.
         CodeModeTool::Analyze
+        | CodeModeTool::CheckArchitecture
         | CodeModeTool::FindDupes
         | CodeModeTool::CheckHealth
         | CodeModeTool::Audit
@@ -394,6 +402,7 @@ pub(super) fn build_tool_args(
 ) -> Result<Vec<String>, String> {
     match tool {
         CodeModeTool::Analyze
+        | CodeModeTool::CheckArchitecture
         | CodeModeTool::Combined
         | CodeModeTool::CheckChanged
         | CodeModeTool::SecurityCandidates
@@ -426,6 +435,10 @@ fn build_project_tool_args(
         CodeModeTool::Analyze => {
             let params: AnalyzeParams = parse_params(params)?;
             build_analyze_args(&params)
+        }
+        CodeModeTool::CheckArchitecture => {
+            let params: ArchitectureParams = parse_params(params)?;
+            Ok(build_architecture_args(&params))
         }
         CodeModeTool::Combined => {
             let params: CombinedParams = parse_params(params)?;
@@ -841,6 +854,7 @@ mod tests {
             [
                 "analyze",
                 "audit",
+                "checkArchitecture",
                 "checkHealth",
                 "checkRuntimeCoverage",
                 "findDupes",
@@ -886,6 +900,7 @@ mod tests {
     fn whole_project_analyses_keep_the_killable_subprocess_path() {
         for tool in [
             CodeModeTool::Analyze,
+            CodeModeTool::CheckArchitecture,
             CodeModeTool::FindDupes,
             CodeModeTool::CheckHealth,
             CodeModeTool::Audit,

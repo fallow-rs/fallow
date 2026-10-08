@@ -165,6 +165,24 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         code_mode_alias: Some("checkChanged"),
     },
     McpToolInfo {
+        name: "check_architecture",
+        kind: "analysis",
+        description: "Architecture check: import cycles, boundary violations, and rule-pack policy violations in the `architecture` envelope, each with a stable finding_id",
+        cli_command: Some("fallow architecture --format json --quiet"),
+        key_params: &[
+            "cycles",
+            "boundaries",
+            "policy",
+            "baseline",
+            "group_by",
+            "file",
+        ],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+        code_mode_alias: Some("checkArchitecture"),
+    },
+    McpToolInfo {
         name: "security_candidates",
         kind: "analysis",
         description: "Unverified local security candidates (tainted sinks) for downstream agent verification",
@@ -816,9 +834,9 @@ pub struct CapabilityParityRow {
 /// (api runner / napi export / MCP tool) exposes each fallow capability, and why
 /// a surface is deliberately absent.
 ///
-/// Four capabilities are first-class on all three surfaces (dead-code,
-/// duplication, similar-code, and feature-flags). The napi addon ships a
-/// deliberately narrow set of eight whole-project analysis primitives and has NO
+/// Five capabilities are first-class on all three surfaces (dead-code,
+/// duplication, similar-code, feature-flags, and architecture). The napi addon
+/// ships a deliberately narrow set of nine whole-project analysis primitives and has NO
 /// fix, trace, impact, audit, or introspection surface; the MCP server is the
 /// broad agent surface and folds several api/napi primitives (circular deps,
 /// boundary violations, complexity, health-runner) into `analyze` / `check_health`
@@ -851,6 +869,13 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         api_runner: Some("run_feature_flags"),
         napi_export: Some("detectFeatureFlags"),
         mcp_tool: Some("feature_flags"),
+        omission_note: None,
+    },
+    CapabilityParityRow {
+        capability: "architecture (cycles, boundaries, policy)",
+        api_runner: Some("run_architecture"),
+        napi_export: Some("detectArchitecture"),
+        mcp_tool: Some("check_architecture"),
         omission_note: None,
     },
     // -- api + napi, folded into a broader MCP tool (no dedicated MCP tool). --
@@ -890,7 +915,7 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
             "Runner-injected health entry point that napi's computeHealth binds. The MCP surface for health is `check_health`, which uses the run_health convenience wrapper; same capability, different entry point.",
         ),
     },
-    // -- MCP tool + api runner, no napi export (addon ships only the eight
+    // -- MCP tool + api runner, no napi export (addon ships only the nine
     //    whole-project primitives). --
     CapabilityParityRow {
         capability: "health / hotspots",
@@ -1587,7 +1612,8 @@ mod tests {
                 "dead-code analysis",
                 "code duplication",
                 "semantic similar-code discovery",
-                "feature-flag detection"
+                "feature-flag detection",
+                "architecture (cycles, boundaries, policy)"
             ],
             "the set of capabilities exposed on all three surfaces changed; update the parity \
              narrative and confirm the new alignment is intended"

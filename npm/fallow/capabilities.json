@@ -7094,6 +7094,24 @@
         "code_mode_alias": "checkChanged"
       },
       {
+        "name": "check_architecture",
+        "kind": "analysis",
+        "description": "Architecture check: import cycles, boundary violations, and rule-pack policy violations in the `architecture` envelope, each with a stable finding_id",
+        "cli_command": "fallow architecture --format json --quiet",
+        "key_params": [
+          "cycles",
+          "boundaries",
+          "policy",
+          "baseline",
+          "group_by",
+          "file"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true,
+        "code_mode_alias": "checkArchitecture"
+      },
+      {
         "name": "security_candidates",
         "kind": "analysis",
         "description": "Unverified local security candidates (tainted sinks) for downstream agent verification",

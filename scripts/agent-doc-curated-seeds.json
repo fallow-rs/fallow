@@ -2458,6 +2458,12 @@
     },
     {
       "section": "mcp-tools",
+      "row": "check_architecture",
+      "column": "Description",
+      "seed": "Architecture check: import cycles, boundary violations, and rule-pack policy violations in the `architecture` envelope, each with a stable finding_id"
+    },
+    {
+      "section": "mcp-tools",
       "row": "check_changed",
       "column": "Description",
       "seed": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review); findings keep their finding_id"

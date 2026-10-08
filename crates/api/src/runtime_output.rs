@@ -29,6 +29,9 @@ pub type CircularDependenciesOutput = CheckOutput;
 /// Concrete boundary-family output contract returned by typed runs.
 pub type BoundaryViolationsOutput = CheckOutput;
 
+/// Concrete `fallow architecture` output contract returned by typed runs.
+pub type ArchitectureOutput = CheckOutput;
+
 /// Concrete duplication output contract returned by typed programmatic runs.
 pub type DuplicationOutput = DupesOutput<DupesReportPayload, DuplicationGroup>;
 
@@ -194,6 +197,38 @@ impl CircularDependenciesProgrammaticOutput {
 }
 
 impl From<DeadCodeProgrammaticOutput> for CircularDependenciesProgrammaticOutput {
+    fn from(value: DeadCodeProgrammaticOutput) -> Self {
+        Self {
+            output: value.output,
+            root: value.root,
+            telemetry_analysis_run_id: value.telemetry_analysis_run_id,
+        }
+    }
+}
+
+/// Typed programmatic `fallow architecture` output before JSON serialization.
+///
+/// The body is the dead-code body. The JSON envelope has
+/// `kind: "architecture"` and its own `schema_version`.
+#[derive(Debug, Clone)]
+pub struct ArchitectureProgrammaticOutput {
+    /// Typed check envelope scoped to the architecture findings.
+    pub output: ArchitectureOutput,
+    /// Project root used when serializing stable JSON paths.
+    pub root: PathBuf,
+    /// Analysis run id stamped into telemetry metadata when present.
+    pub telemetry_analysis_run_id: Option<String>,
+}
+
+impl ArchitectureProgrammaticOutput {
+    /// Full typed issue arrays retained by this run.
+    #[must_use]
+    pub fn results(&self) -> &AnalysisResults {
+        &self.output.results
+    }
+}
+
+impl From<DeadCodeProgrammaticOutput> for ArchitectureProgrammaticOutput {
     fn from(value: DeadCodeProgrammaticOutput) -> Self {
         Self {
             output: value.output,

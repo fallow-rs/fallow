@@ -170,11 +170,11 @@ pub use output_contracts::{
     SimilarCodeOutput, TraceOutput, WorkspacesOutput,
 };
 pub use runtime::{
-    AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
-    BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
-    CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput, DeadCodeOutput,
-    DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput, DuplicationOutput,
-    DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
+    ArchitectureOutput, ArchitectureProgrammaticOutput, AuditProgrammaticKeySnapshot,
+    AuditProgrammaticOutput, BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput,
+    CircularDependenciesOutput, CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput,
+    DeadCodeOutput, DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
+    DuplicationOutput, DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
     FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
     ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
     ProgrammaticHealthRunner, TraceClassMemberOutput, TraceCloneBenchmarkResult, TraceCloneOutput,
@@ -184,15 +184,16 @@ pub use runtime::{
     TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
     benchmark_trace_clone_compact_json, benchmark_trace_graph_family_compact_json,
     inspect_similar_code, load_health_config, parse_similar_code_candidate_snapshot,
-    review_similar_code, run_audit, run_boundary_violations, run_circular_dependencies,
-    run_combined, run_complexity_with_runner, run_dead_code, run_dead_code_with_baseline,
-    run_decision_surface, run_duplication, run_feature_flags, run_health, run_health_with_runner,
-    run_similar_code, run_trace_clone, run_trace_dependency, run_trace_error, run_trace_export,
-    run_trace_file, run_trace_import_path, select_similar_code_candidate_snapshot,
-    serialize_health_report_json,
+    review_similar_code, run_architecture, run_audit, run_boundary_violations,
+    run_circular_dependencies, run_combined, run_complexity_with_runner, run_dead_code,
+    run_dead_code_with_baseline, run_decision_surface, run_duplication, run_feature_flags,
+    run_health, run_health_with_runner, run_similar_code, run_trace_clone, run_trace_dependency,
+    run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
+    select_similar_code_candidate_snapshot, serialize_health_report_json,
 };
 pub use runtime_json::{
-    serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,
+    serialize_architecture_programmatic_json, serialize_audit_programmatic_json,
+    serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_combined_programmatic_json,
     serialize_dead_code_programmatic_json, serialize_decision_surface_programmatic_json,
     serialize_duplication_programmatic_json, serialize_feature_flags_programmatic_json,
@@ -370,6 +371,7 @@ pub struct AnalysisOptions {
     /// - Cancelled at the entry, on both sides of the per-file parse loop, and
     ///   at each pipeline stage boundary: [`run_dead_code`],
     ///   [`run_circular_dependencies`], [`run_boundary_violations`],
+    ///   [`run_architecture`],
     ///   [`run_combined`], [`run_duplication`], [`run_feature_flags`], and the
     ///   four trace routes.
     /// - Cancelled only at the boundaries around config load and file
@@ -593,6 +595,54 @@ pub struct DeadCodeOptions {
     /// `finding_id_query`. Empty reports every finding. Only
     /// [`run_dead_code`] and [`run_dead_code_with_baseline`] accept it.
     pub finding_ids: Vec<String>,
+}
+
+/// Options for the analysis of `fallow architecture`: import cycles, boundary
+/// violations and rule-pack policy violations.
+///
+/// No selector reports every architecture issue type. Each selector keeps one
+/// kind, as `--cycles`, `--boundaries` and `--policy` do on the CLI.
+#[derive(Debug, Clone, Default)]
+pub struct ArchitectureOptions {
+    /// Shared analysis options.
+    pub analysis: AnalysisOptions,
+    /// Restrict findings to these files when non-empty.
+    pub files: Vec<PathBuf>,
+    /// Import cycles: circular dependencies, re-export cycles and workspace
+    /// package cycles.
+    pub cycles: bool,
+    /// Boundary violations, boundary coverage and forbidden calls.
+    pub boundaries: bool,
+    /// Rule-pack policy violations.
+    pub policy: bool,
+}
+
+impl ArchitectureOptions {
+    /// The dead-code issue-type filters that the selectors stand for.
+    #[must_use]
+    pub fn dead_code_filters(&self) -> DeadCodeFilters {
+        let all = !(self.cycles || self.boundaries || self.policy);
+        DeadCodeFilters {
+            circular_deps: self.cycles || all,
+            re_export_cycles: self.cycles || all,
+            package_cycles: self.cycles || all,
+            boundary_violations: self.boundaries || all,
+            policy_violations: self.policy || all,
+            ..DeadCodeFilters::default()
+        }
+    }
+
+    /// The dead-code options that run this analysis.
+    #[must_use]
+    pub fn dead_code_options(&self) -> DeadCodeOptions {
+        DeadCodeOptions {
+            analysis: self.analysis.clone(),
+            filters: self.dead_code_filters(),
+            files: self.files.clone(),
+            include_entry_exports: false,
+            finding_ids: Vec::new(),
+        }
+    }
 }
 
 /// Options for changed-code audit analysis.

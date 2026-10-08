@@ -7,9 +7,9 @@
 use crate::{
     ProgrammaticError,
     runtime::{
-        AuditProgrammaticOutput, BoundaryViolationsProgrammaticOutput,
-        CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput,
-        DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
+        ArchitectureProgrammaticOutput, AuditProgrammaticOutput,
+        BoundaryViolationsProgrammaticOutput, CircularDependenciesProgrammaticOutput,
+        CombinedProgrammaticOutput, DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
         DuplicationProgrammaticOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
         HealthProgrammaticOutput, TraceCloneProgrammaticOutput, TraceDependencyProgrammaticOutput,
         TraceErrorProgrammaticOutput, TraceExportProgrammaticOutput, TraceFileProgrammaticOutput,
@@ -18,8 +18,9 @@ use crate::{
 };
 use fallow_output::{
     AUDIT_SCHEMA_VERSION, CheckOutput, GroupByMode, build_decision_surface_output,
-    serialize_check_json_output, serialize_decision_surface_json_output,
-    serialize_dupes_json_output, serialize_feature_flags_json_output, strip_root_prefix,
+    serialize_architecture_json_output, serialize_check_json_output,
+    serialize_decision_surface_json_output, serialize_dupes_json_output,
+    serialize_feature_flags_json_output, strip_root_prefix,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::workspace::{WorkspaceDiagnostic, merge_workspace_diagnostics};
@@ -366,6 +367,31 @@ pub fn serialize_circular_dependencies_programmatic_json(
         "circular-dependencies",
         "FALLOW_SERIALIZE_CIRCULAR_DEPENDENCIES_REPORT",
     )
+}
+
+/// Serialize typed `fallow architecture` output into its JSON contract:
+/// `kind: "architecture"` with its own `schema_version`.
+///
+/// # Errors
+///
+/// Returns a structured error if the output contract cannot be serialized.
+pub fn serialize_architecture_programmatic_json(
+    output: ArchitectureProgrammaticOutput,
+) -> ProgrammaticResult<serde_json::Value> {
+    let ArchitectureProgrammaticOutput {
+        output,
+        root,
+        telemetry_analysis_run_id,
+    } = output;
+    let mut json = serialize_architecture_json_output(output, telemetry_analysis_run_id.as_deref())
+        .map_err(|err| {
+            ProgrammaticError::new(format!("failed to serialize architecture report: {err}"), 2)
+                .with_code("FALLOW_SERIALIZE_ARCHITECTURE_REPORT")
+                .with_context("architecture")
+        })?;
+    let root_prefix = format!("{}/", root.display());
+    strip_root_prefix(&mut json, &root_prefix);
+    Ok(json)
 }
 
 /// Serialize typed boundary-family output into the JSON compatibility contract.

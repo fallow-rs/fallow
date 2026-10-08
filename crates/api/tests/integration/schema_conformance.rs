@@ -40,10 +40,11 @@
 use std::path::{Path, PathBuf};
 
 use fallow_api::{
-    AnalysisOptions, CombinedOptions, ComplexityOptions, DeadCodeFilters, DeadCodeOptions,
-    DuplicationOptions, FeatureFlagsOptions, TraceExportOptions, run_boundary_violations,
-    run_circular_dependencies, run_combined, run_dead_code, run_duplication, run_feature_flags,
-    run_health, run_trace_export, serialize_boundary_violations_programmatic_json,
+    AnalysisOptions, ArchitectureOptions, CombinedOptions, ComplexityOptions, DeadCodeFilters,
+    DeadCodeOptions, DuplicationOptions, FeatureFlagsOptions, TraceExportOptions, run_architecture,
+    run_boundary_violations, run_circular_dependencies, run_combined, run_dead_code,
+    run_duplication, run_feature_flags, run_health, run_trace_export,
+    serialize_architecture_programmatic_json, serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_combined_programmatic_json,
     serialize_dead_code_programmatic_json, serialize_duplication_programmatic_json,
     serialize_feature_flags_programmatic_json, serialize_health_programmatic_json,
@@ -381,6 +382,21 @@ fn boundary_violations_document_conforms_as_dead_code() {
     let json = serialize_boundary_violations_programmatic_json(run)
         .expect("serialize boundary violations");
     EnvelopeSchema::load().assert_conforms("dead-code", &json);
+}
+
+#[test]
+fn architecture_document_conforms_as_architecture() {
+    let project = small_project();
+    let run = run_architecture(&ArchitectureOptions {
+        analysis: AnalysisOptions {
+            explain: true,
+            ..analysis_at(project.path())
+        },
+        ..ArchitectureOptions::default()
+    })
+    .expect("architecture runs");
+    let json = serialize_architecture_programmatic_json(run).expect("serialize architecture");
+    EnvelopeSchema::load().assert_conforms("architecture", &json);
 }
 
 /// The programmatic trace serializers are a separate, un-enveloped contract:

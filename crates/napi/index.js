@@ -589,6 +589,7 @@ if (!nativeBinding) {
 module.exports = nativeBinding
 module.exports.computeComplexity = nativeBinding.computeComplexity
 module.exports.computeHealth = nativeBinding.computeHealth
+module.exports.detectArchitecture = nativeBinding.detectArchitecture
 module.exports.detectBoundaryViolations = nativeBinding.detectBoundaryViolations
 module.exports.detectCircularDependencies = nativeBinding.detectCircularDependencies
 module.exports.detectDeadCode = nativeBinding.detectDeadCode

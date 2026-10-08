@@ -260,6 +260,53 @@ pub struct CombinedParams {
     pub coverage_root: Option<String>,
 }
 
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct ArchitectureParams {
+    /// Project root; defaults to the working directory.
+    pub root: Option<String>,
+
+    /// Path to a fallow config file.
+    pub config: Option<String>,
+
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
+    /// Production mode: exclude test, story, and dev files, only start/build
+    /// scripts, and report type-only dependencies.
+    pub production: Option<bool>,
+
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
+    pub workspace: Option<String>,
+
+    /// Report only findings in files changed since this git ref.
+    pub changed_since: Option<String>,
+
+    /// Only import cycles.
+    pub cycles: Option<bool>,
+
+    /// Only boundary violations, coverage and forbidden calls.
+    pub boundaries: Option<bool>,
+
+    /// Only rule-pack policy violations.
+    pub policy: Option<bool>,
+
+    /// Saved dead-code baseline file; only new findings are reported.
+    pub baseline: Option<String>,
+
+    /// "owner", "directory", "package", or "section".
+    pub group_by: Option<String>,
+
+    /// Project-relative files to scope the report to.
+    pub file: Option<Vec<String>>,
+
+    /// Disable the incremental parse cache.
+    pub no_cache: Option<bool>,
+
+    /// Parser thread count; defaults to CPU cores.
+    pub threads: Option<usize>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct CheckChangedParams {
     /// Project root; defaults to the working directory.
