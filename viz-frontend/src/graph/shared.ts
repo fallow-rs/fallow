@@ -688,6 +688,8 @@ const FIT_PAD = 70;
  */
 /** Bottom band the camera fit leaves free for the legend. */
 const LEGEND_RESERVE = 110;
+/** Smallest width or height the camera fit works with. */
+const MIN_FIT_SPAN = 120;
 
 export const fitTransform = (
   width: number,
@@ -701,8 +703,11 @@ export const fitTransform = (
   const bboxH = bounds.maxY - bounds.minY + FIT_PAD * 2;
   // The legend and the standalone chip own the bottom-left corner; fit
   // above them so the bottom row of clusters never hides underneath.
-  const usableH = Math.max(120, height - (panelDocksBelow() ? 64 : LEGEND_RESERVE));
-  const scale = Math.min((width - 200) / bboxW, (usableH - 40) / bboxH, 1.4);
+  const usableH = Math.max(MIN_FIT_SPAN, height - (panelDocksBelow() ? 64 : LEGEND_RESERVE));
+  // A stage narrower than the label margin would give a negative scale, and
+  // every radius divided by it would then throw in the canvas arc call.
+  const usableW = Math.max(MIN_FIT_SPAN, width - 200);
+  const scale = Math.min(usableW / bboxW, (usableH - 40) / bboxH, 1.4);
   return {
     x: (width - bboxW * scale) / 2 - bounds.minX * scale + FIT_PAD * scale,
     y: (usableH - bboxH * scale) / 2 - bounds.minY * scale + FIT_PAD * scale,

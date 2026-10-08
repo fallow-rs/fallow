@@ -97,6 +97,11 @@ describe("road and cluster helpers", () => {
     expect(Number.isFinite(fit.k)).toBe(true);
   });
 
+  it("keeps a positive scale on a stage narrower than the label margin", () => {
+    const fit = fitTransform(120, 1000, { minX: 0, minY: 0, maxX: 700, maxY: 300 });
+    expect(fit.k).toBeGreaterThan(0);
+  });
+
   it("walks a census route by length through its bend", () => {
     const start = { x: 0, y: 0 };
     const bend = { x: 30, y: 0 };
