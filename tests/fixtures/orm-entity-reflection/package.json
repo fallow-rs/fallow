@@ -1,0 +1,10 @@
+{
+  "name": "orm-entity-reflection-fixture",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@nestjs/core": "*",
+    "@nestjs/graphql": "*",
+    "nest-commander": "*",
+    "typeorm": "*"
+  }
+}
