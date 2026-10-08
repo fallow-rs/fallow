@@ -307,7 +307,8 @@ pub fn telemetry_workflow_for_command(
             | Command::TypeAware { .. }
             | Command::Doctor
             | Command::SetupHooks { .. }
-            | Command::AuditCache { .. },
+            | Command::AuditCache { .. }
+            | Command::Baselines { .. },
         ) => telemetry::Workflow::Setup,
     }
 }

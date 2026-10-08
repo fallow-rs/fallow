@@ -28,6 +28,7 @@ mod audit_decision_surface;
 mod audit_focus;
 mod audit_walkthrough;
 mod base_worktree;
+mod baselines;
 /// Re-exported for integration tests so they hash reusable-cache roots through
 /// the exact production path (`dunce` canonicalization + platform path-identity
 /// bytes) rather than an approximation that diverges on Windows.
@@ -216,6 +217,7 @@ Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
   agent             Wire fallow into Claude Code, Codex, or Cursor in one pass
   audit-cache       Maintain reusable audit base-snapshot caches
+  baselines         Prune committed baselines to the findings that remain
   recommend         Recommend a project-tailored config for an agent to author
   migrate           Migrate knip, jscpd, or stylelint config to fallow
   config            Show the resolved config and loaded config file
@@ -2002,6 +2004,12 @@ enum Command {
         subcommand: AuditCacheCli,
     },
 
+    /// Maintain the committed baseline files that the config points at.
+    Baselines {
+        #[command(subcommand)]
+        subcommand: BaselinesCli,
+    },
+
     /// Surface the consequential structural DECISIONS a change embeds (the apex
     /// of the review brief), each framed as a judgment question with the routed
     /// expert to ask.
@@ -2279,6 +2287,40 @@ enum SecuritySubcommand {
         /// Scope diagnostics to selected files.
         #[arg(long, value_name = "PATH")]
         file: Vec<PathBuf>,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum BaselinesCli {
+    /// Remove the baseline entries that match no current finding.
+    ///
+    /// Reads the files that `audit.deadCodeBaseline`, `audit.healthBaseline`
+    /// and `audit.dupesBaseline` name, runs one whole-project analysis, and
+    /// removes each entry that `--baseline` would no longer match. Prune never
+    /// adds an entry: a new finding stays outside the baseline, and the normal
+    /// gates report it. To record new findings on purpose, use
+    /// `fallow <dead-code|health|dupes> --save-baseline`.
+    ///
+    /// Exit codes: 0 when the files are pruned or have nothing to prune, 1 with
+    /// `--check` when an entry can be pruned, and 2 when a file cannot be read
+    /// or pruned. A file with an older key form is skipped with the command
+    /// that saves it again.
+    Prune {
+        /// Report the entries that a prune would remove, and write nothing.
+        #[arg(long)]
+        check: bool,
+
+        /// The dead-code baseline to prune. Overrides `audit.deadCodeBaseline`.
+        #[arg(long, value_name = "PATH")]
+        dead_code_baseline: Option<PathBuf>,
+
+        /// The health baseline to prune. Overrides `audit.healthBaseline`.
+        #[arg(long, value_name = "PATH")]
+        health_baseline: Option<PathBuf>,
+
+        /// The duplication baseline to prune. Overrides `audit.dupesBaseline`.
+        #[arg(long, value_name = "PATH")]
+        dupes_baseline: Option<PathBuf>,
     },
 }
 
@@ -4356,6 +4398,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         }
         audit @ Command::Audit { .. } => dispatch_audit_command(audit, dispatch),
         Command::AuditCache { subcommand } => dispatch_audit_cache_command(dispatch, &subcommand),
+        Command::Baselines { subcommand } => dispatch_baselines_command(dispatch, &subcommand),
         Command::DecisionSurface { max_decisions } => {
             dispatch_decision_surface(dispatch, max_decisions)
         }
@@ -5602,6 +5645,111 @@ fn dispatch_audit_cache_command(
             quiet: dispatch.quiet,
         }),
     }
+}
+
+fn dispatch_baselines_command(
+    dispatch: &DispatchContext<'_>,
+    subcommand: &BaselinesCli,
+) -> ExitCode {
+    let BaselinesCli::Prune {
+        check,
+        dead_code_baseline,
+        health_baseline,
+        dupes_baseline,
+    } = subcommand;
+    let cli = dispatch.cli;
+    let root = dispatch.root;
+    let output = dispatch.output;
+    if let Some(flag) = baselines_prune_rejected_flag(cli) {
+        return emit_error(
+            &format!(
+                "`fallow baselines prune` always analyzes the whole project, so it does not accept `{flag}`. A narrowed run would remove valid entries."
+            ),
+            2,
+            output,
+        );
+    }
+    let config = match load_config(
+        root,
+        &cli.config,
+        LoadConfigArgs {
+            output,
+            no_cache: cli.no_cache,
+            threads: dispatch.threads,
+            production: false,
+            quiet: dispatch.quiet,
+            allow_remote_extends: cli.allow_remote_extends,
+        },
+    ) {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let targets = baselines::BaselineTargets {
+        dead_code: resolve_audit_baseline_path(
+            root,
+            dead_code_baseline.as_deref(),
+            config.audit.dead_code_baseline.as_deref(),
+        ),
+        health: resolve_audit_baseline_path(
+            root,
+            health_baseline.as_deref(),
+            config.audit.health_baseline.as_deref(),
+        ),
+        dupes: resolve_audit_baseline_path(
+            root,
+            dupes_baseline.as_deref(),
+            config.audit.dupes_baseline.as_deref(),
+        ),
+    };
+    if targets.dead_code.is_none() && targets.health.is_none() && targets.dupes.is_none() {
+        return emit_error(
+            "no baseline to prune. Set `audit.deadCodeBaseline`, `audit.healthBaseline` or `audit.dupesBaseline` in the config, or pass --dead-code-baseline, --health-baseline or --dupes-baseline",
+            2,
+            output,
+        );
+    }
+    let production = match resolve_production_modes(cli, root, output, false, false, false) {
+        Ok(production) => production,
+        Err(code) => return code,
+    };
+    let coverage_inputs = match resolve_coverage_inputs(None, None, output, || Ok(config.health)) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
+    baselines::run_baselines_prune(&baselines::BaselinesPruneOptions {
+        root,
+        config_path: &cli.config,
+        output,
+        json_style: dispatch.json_style,
+        no_cache: cli.no_cache,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
+        allow_remote_extends: cli.allow_remote_extends,
+        check: *check,
+        targets,
+        production,
+        coverage: coverage_inputs.coverage.as_deref(),
+        coverage_root: coverage_inputs.coverage_root.as_deref(),
+        regression_opts: dispatch.regression_opts(true),
+    })
+}
+
+/// The first flag on the command line that would narrow the prune run or that
+/// names another baseline.
+fn baselines_prune_rejected_flag(cli: &Cli) -> Option<&'static str> {
+    [
+        (cli.changed_since.is_some(), "--changed-since"),
+        (cli.workspace.is_some(), "--workspace"),
+        (cli.changed_workspaces.is_some(), "--changed-workspaces"),
+        (cli.diff_file.is_some(), "--diff-file"),
+        (cli.production, "--production"),
+        (cli.baseline.is_some(), "--baseline"),
+        (cli.save_baseline.is_some(), "--save-baseline"),
+        (cli.fail_on_baseline_growth, "--fail-on-baseline-growth"),
+        (cli.baseline_base.is_some(), "--baseline-base"),
+    ]
+    .into_iter()
+    .find_map(|(present, flag)| present.then_some(flag))
 }
 
 fn dispatch_flags_command(

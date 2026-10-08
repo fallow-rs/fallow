@@ -641,6 +641,7 @@ pub fn command_without_global_baseline(command: &Command) -> Option<&'static str
         | Command::Audit { .. }
         | Command::Security { .. }
         | Command::Doctor
+        | Command::Baselines { .. }
         | Command::SimilarCode { .. } => None,
         Command::Watch { .. } => Some("watch"),
         Command::TypeAware { .. } => Some("type-aware"),

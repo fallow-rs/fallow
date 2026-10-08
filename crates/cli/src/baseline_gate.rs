@@ -309,8 +309,9 @@ fn report_gate(report: &GateReport<'_>) -> bool {
     let stale = entries.saturating_sub(matched);
     eprintln!(
         "Baseline gate failed: {stale} of {entries} entries in {} matched no current {noun}. \
-         Re-save with: --save-baseline {}",
+         Remove only the stale entries with: {}, or re-save with: --save-baseline {}",
         path.display(),
+        expected.prune_command(path),
         path.display(),
     );
     true

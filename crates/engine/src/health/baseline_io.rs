@@ -241,8 +241,9 @@ fn warn_on_staleness(counts: &StalenessCounts, baseline_path: &std::path::Path) 
         BaselineStalenessWarning::Partial => eprintln!(
             "Warning: health baseline is partially stale: {stale_entries} of \
              {baseline_entries} entries matched no current finding, so the \
-             gate protects less than what was saved. Re-save with: \
-             --save-baseline {}",
+             gate protects less than what was saved. Remove only the stale \
+             entries with: {}, or re-save with: --save-baseline {}",
+            crate::baseline::BaselineKind::Health.prune_command(baseline_path),
             baseline_path.display(),
         ),
     }

@@ -2218,6 +2218,11 @@
       "flags": []
     },
     {
+      "name": "baselines",
+      "description": "Maintain the committed baseline files that the config points at",
+      "flags": []
+    },
+    {
       "name": "decision-surface",
       "description": "Surface the consequential structural DECISIONS a change embeds (the apex of the review brief), each framed as a judgment question with the routed expert to ask",
       "flags": [

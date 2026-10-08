@@ -174,6 +174,10 @@ pub const COMMANDS_WITHOUT_ANALYSIS_ENVELOPE: &[(&str, &str)] = &[
     ("init", "writes a config file"),
     ("agent", "wires fallow into agent tools"),
     ("audit-cache", "maintains audit base-snapshot caches"),
+    (
+        "baselines",
+        "maintains committed baseline files; writes a `baselines-prune` envelope",
+    ),
     ("recommend", "config recommendation for an agent"),
     ("migrate", "config migration"),
     ("config", "resolved config"),

@@ -799,8 +799,9 @@ fn warn_on_duplication_baseline_staleness(
         fallow_engine::baseline::BaselineStalenessWarning::Partial => eprintln!(
             "Warning: duplication baseline is partially stale: {stale_entries} \
              of {baseline_entries} entries matched no current clone group, so \
-             the gate protects less than what was saved. Re-save with: \
-             --save-baseline {}",
+             the gate protects less than what was saved. Remove only the stale \
+             entries with: {}, or re-save with: --save-baseline {}",
+            fallow_engine::baseline::BaselineKind::Dupes.prune_command(path),
             path.display(),
         ),
     }

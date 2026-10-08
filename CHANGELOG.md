@@ -69,6 +69,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow baselines prune` removes the baseline entries of fixed
+  findings.** It reads the files that `audit.deadCodeBaseline`,
+  `audit.healthBaseline` and `audit.dupesBaseline` name, runs one
+  whole-project analysis, and removes each entry that `--baseline` no longer
+  matches. It never adds an entry, so a new finding stays visible to the
+  gates. After a prune, `--fail-on-stale-baseline` passes, and the baseline
+  hides the same findings as before. `--check` writes nothing and exits 1 when
+  an entry can be pruned. `--dead-code-baseline`, `--health-baseline` and
+  `--dupes-baseline` override the config paths. A file with an older key form
+  is skipped with the command that saves it again. The stale-baseline warning
+  and gate message now name the prune command. (#3281, requested by
+  @BenMcGit)
 - **`fallow architecture`** reports import cycles, boundary violations and
   rule-pack policy violations in one command. Use `--cycles`, `--boundaries`
   or `--policy` to select one kind. The command takes the same scope and

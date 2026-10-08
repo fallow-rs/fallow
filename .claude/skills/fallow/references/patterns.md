@@ -334,13 +334,15 @@ git commit -m "chore: add fallow baseline"
 fallow dead-code --format json --quiet --baseline fallow-baselines/dead-code.json --fail-on-issues
 ```
 
-### Step 4: Gradually fix and update baseline
+### Step 4: Gradually fix and prune the baseline
 
-As you fix existing issues, regenerate the baseline:
+As you fix existing issues, remove their entries from the baseline. Prune removes only the entries that match no current finding, so a new finding stays visible:
 
 ```bash
-fallow dead-code --format json --quiet --save-baseline fallow-baselines/dead-code.json
+fallow baselines prune --dead-code-baseline fallow-baselines/dead-code.json --format json --quiet
 ```
+
+With `audit.deadCodeBaseline`, `audit.healthBaseline` and `audit.dupesBaseline` in the config, `fallow baselines prune` prunes all three files in one run. Use `--save-baseline` only to record new findings on purpose.
 
 ### Duplication baseline
 

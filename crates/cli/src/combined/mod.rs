@@ -203,6 +203,49 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     )
 }
 
+/// The unrendered results of the analyses a combined run selected.
+pub struct CombinedResults {
+    pub check: Option<CheckResult>,
+    pub dupes: Option<DupesResult>,
+    pub health: Option<HealthResult>,
+}
+
+/// Run the selected analyses as `run_combined` does, but print nothing and
+/// return the results. `fallow baselines prune` reads them.
+pub fn collect_combined_results(opts: &CombinedOptions<'_>) -> Result<CombinedResults, ExitCode> {
+    let filters = IssueFilters {
+        architecture_selection: opts.architecture,
+        ..IssueFilters::default()
+    };
+    let trace_opts = TraceOptions {
+        trace_export: None,
+        trace_file: None,
+        trace_dependency: None,
+        impact_closure: None,
+        symbol_impact: None,
+        performance: false,
+    };
+    let check_opts = build_combined_check_options(opts, &filters, &trace_opts);
+    let mut results = CombinedResults {
+        check: None,
+        dupes: None,
+        health: None,
+    };
+    run_combined_check_and_dupes(
+        opts,
+        check_opts.as_ref(),
+        &mut results.check,
+        &mut results.dupes,
+    )?;
+    run_combined_health(
+        opts,
+        &mut results.check,
+        &mut results.dupes,
+        &mut results.health,
+    )?;
+    Ok(results)
+}
+
 fn build_combined_check_options<'a>(
     opts: &'a CombinedOptions<'a>,
     filters: &'a IssueFilters,

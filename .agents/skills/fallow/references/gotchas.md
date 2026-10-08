@@ -213,7 +213,7 @@ fallow dead-code --format json --quiet --save-baseline fallow-baselines/dead-cod
 fallow dead-code --format json --quiet --baseline fallow-baselines/dead-code.json --fail-on-issues
 ```
 
-Commit the baseline file to your repo. Update it periodically as you fix existing issues.
+Commit the baseline file to your repo. When a fix removes a finding, its entry stays in the file until you prune it. `fallow baselines prune` removes the entries that match no current finding and never adds an entry, so it is safe to run after each fix. It reads the paths in `audit.deadCodeBaseline`, `audit.healthBaseline` and `audit.dupesBaseline`.
 
 ---
 

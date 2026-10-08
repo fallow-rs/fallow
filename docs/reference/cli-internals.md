@@ -186,7 +186,7 @@ after every gate set the exit code.
 - The canonical key of a dead-code finding (`IdentifiedFinding::canonical_key`
   in `fallow_types::identity`) is the readable input of its `finding_id`:
   `<rule>:<path>:<name>...`, never a line or a suppression reason. The
-  dead-code baseline (`crates/engine/src/baseline.rs`) and the audit new-only
+  dead-code baseline (`crates/engine/src/baseline/mod.rs`) and the audit new-only
   keys (`crates/api/src/audit_keys.rs`) use only this key, so the id, the
   baseline and the audit cannot drift. Do not build a dead-code key by hand.
   - A saved baseline carries `"identity": "dc1"`, stores the key once for

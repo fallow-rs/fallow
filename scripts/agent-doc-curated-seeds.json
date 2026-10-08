@@ -52,6 +52,18 @@
     },
     {
       "section": "commands",
+      "row": "baselines",
+      "column": "Key Flags",
+      "seed": ""
+    },
+    {
+      "section": "commands",
+      "row": "baselines",
+      "column": "Purpose",
+      "seed": "Maintain the committed baseline files that the config points at"
+    },
+    {
+      "section": "commands",
       "row": "ci",
       "column": "Key Flags",
       "seed": ""

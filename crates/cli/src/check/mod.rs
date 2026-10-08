@@ -2398,8 +2398,9 @@ fn warn_on_baseline_staleness(staleness: BaselineStaleness, baseline_path: &std:
         BaselineStalenessWarning::Partial => eprintln!(
             "Warning: baseline is partially stale: {stale_entries} of \
              {baseline_entries} entries matched no current issue, so the \
-             gate protects less than what was saved. Re-save with: \
-             --save-baseline {}",
+             gate protects less than what was saved. Remove only the stale \
+             entries with: {}, or re-save with: --save-baseline {}",
+            fallow_engine::baseline::BaselineKind::DeadCode.prune_command(baseline_path),
             baseline_path.display(),
         ),
     }
