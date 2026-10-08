@@ -18,9 +18,35 @@ fn repository_lookup_with_entity_argument_is_whole_use() {
 
 #[test]
 fn entity_manager_find_with_entity_argument_is_whole_use() {
-    let source = "import { User } from './user.entity';\n\
+    let source = "import { EntityManager } from 'typeorm';\n\
+                  import { User } from './user.entity';\n\
+                  declare const manager: EntityManager;\n\
                   await manager.findOneBy(User, { id: 1 });";
     assert!(has_whole_use(source, "User"));
+}
+
+#[test]
+fn find_with_mikro_orm_import_is_whole_use() {
+    let source = "import { EntityManager } from '@mikro-orm/core';\n\
+                  import { User } from './user.entity';\n\
+                  declare const em: EntityManager;\n\
+                  await em.find(User, {});";
+    assert!(has_whole_use(source, "User"));
+}
+
+#[test]
+fn find_without_orm_import_is_not_whole_use() {
+    let source = "import { Status } from './status';\n\
+                  const match = list.find(Status);\n\
+                  await manager.findOneBy(Status, { id: 1 });";
+    assert!(!has_whole_use(source, "Status"));
+}
+
+#[test]
+fn repository_lookup_without_orm_import_is_whole_use() {
+    let source = "import { Company } from './company.entity';\n\
+                  const repo = this.workspaceOrmManager.getRepository(Company);";
+    assert!(has_whole_use(source, "Company"));
 }
 
 #[test]

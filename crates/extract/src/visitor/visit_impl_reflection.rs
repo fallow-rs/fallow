@@ -14,15 +14,21 @@ use fallow_types::extract::ImportedName;
 
 use super::super::ModuleInfoExtractor;
 
-/// Member callees whose first value argument is an ORM entity class. The
-/// repository getters come from `DataSource` and `EntityManager`, the `find`
-/// family from `EntityManager` in TypeORM and MikroORM.
+/// Member callees whose first value argument is an ORM entity class. These
+/// names are specific to ORM code, so they need no import evidence. A project
+/// can wrap the ORM in its own manager class with the same method names.
 const ENTITY_ARGUMENT_METHODS: &[&str] = &[
     "getRepository",
     "getCustomRepository",
     "getTreeRepository",
     "getMongoRepository",
     "createQueryBuilder",
+];
+
+/// `EntityManager` methods in TypeORM and MikroORM whose first value argument
+/// is an entity class. Arrays and many other values have methods with these
+/// names, so the file must import from an ORM package.
+const ORM_FIND_METHODS: &[&str] = &[
     "find",
     "findBy",
     "findOne",
@@ -43,6 +49,12 @@ const ENTITY_TYPE_ARGUMENT_METHODS: &[&str] = &[
     "getMongoRepository",
 ];
 
+/// Packages whose import makes the `find` family an ORM call.
+const ORM_PACKAGES: &[&str] = &["typeorm", "@nestjs/typeorm"];
+
+/// Scope whose packages make the `find` family an ORM call.
+const ORM_PACKAGE_SCOPE: &str = "@mikro-orm/";
+
 /// Packages whose `registerEnumType` exposes every value of the enum.
 const REGISTER_ENUM_TYPE_SOURCES: &[&str] = &["@nestjs/graphql", "type-graphql"];
 
@@ -58,7 +70,7 @@ impl ModuleInfoExtractor {
 
     fn reflective_call_target(&self, expr: &CallExpression<'_>) -> Option<String> {
         match &expr.callee {
-            Expression::StaticMemberExpression(member) => orm_entity_target(expr, member),
+            Expression::StaticMemberExpression(member) => self.orm_entity_target(expr, member),
             Expression::Identifier(callee) if self.is_register_enum_type(callee.name.as_str()) => {
                 first_identifier_argument(expr)
             }
@@ -80,22 +92,33 @@ impl ModuleInfoExtractor {
                     )
             })
     }
-}
 
-fn orm_entity_target(
-    expr: &CallExpression<'_>,
-    member: &StaticMemberExpression<'_>,
-) -> Option<String> {
-    let method = member.property.name.as_str();
-    if ENTITY_TYPE_ARGUMENT_METHODS.contains(&method)
-        && let Some(name) = first_type_argument_name(expr)
-    {
-        return Some(name);
+    fn orm_entity_target(
+        &self,
+        expr: &CallExpression<'_>,
+        member: &StaticMemberExpression<'_>,
+    ) -> Option<String> {
+        let method = member.property.name.as_str();
+        if ENTITY_TYPE_ARGUMENT_METHODS.contains(&method)
+            && let Some(name) = first_type_argument_name(expr)
+        {
+            return Some(name);
+        }
+        let entity_method = ENTITY_ARGUMENT_METHODS.contains(&method)
+            || (ORM_FIND_METHODS.contains(&method) && self.imports_orm_package());
+        if entity_method {
+            return first_identifier_argument(expr);
+        }
+        None
     }
-    if ENTITY_ARGUMENT_METHODS.contains(&method) {
-        return first_identifier_argument(expr);
+
+    /// Whether the file imports from an ORM package before the current call.
+    fn imports_orm_package(&self) -> bool {
+        self.imports.iter().any(|import| {
+            let source = import.source.as_str();
+            ORM_PACKAGES.contains(&source) || source.starts_with(ORM_PACKAGE_SCOPE)
+        })
     }
-    None
 }
 
 fn first_identifier_argument(expr: &CallExpression<'_>) -> Option<String> {
