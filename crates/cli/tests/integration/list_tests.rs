@@ -1739,3 +1739,42 @@ fn entry_weight_list_rejects_an_invalid_tolerance() {
     let output = run_entry_weight(&["--tolerance", "lots"]);
     assert_eq!(output.code, 2, "stdout: {}", output.stdout);
 }
+
+#[test]
+fn configured_workspace_patterns_add_workspaces_to_the_listing() {
+    let output = run_fallow(
+        "list",
+        "workspaces-config-patterns",
+        &["--workspaces", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&output);
+    let mut names: Vec<&str> = json["workspaces"]
+        .as_array()
+        .expect("workspaces array")
+        .iter()
+        .filter_map(|workspace| workspace["name"].as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["@test/one", "@test/two"]);
+}
+
+#[test]
+fn workspace_selection_finds_a_workspace_declared_by_config_patterns() {
+    let output = run_fallow(
+        "check",
+        "workspaces-config-patterns",
+        &[
+            "--workspace",
+            "@test/one",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_ne!(
+        output.code, 2,
+        "--workspace must find the workspace that the config declares: {}",
+        output.stderr
+    );
+}

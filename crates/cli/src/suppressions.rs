@@ -135,6 +135,7 @@ fn apply_suppression_scopes(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
+        &[],
         opts.output,
     )?;
     if let Some(ref ws_roots) = ws_scope {

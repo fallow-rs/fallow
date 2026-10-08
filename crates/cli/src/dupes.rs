@@ -373,6 +373,7 @@ fn filter_dupes_report(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
+        &config.workspace_patterns,
         opts.output,
     )?;
     if let Some(scope) = opts.scope.as_ref() {
@@ -465,9 +466,10 @@ fn resolve_change_scope_for_pre_discovered_files(
     if !request.reads_package_baselines(config) || resolved_earlier {
         return resolve_change_scope(opts, config, request, &[]);
     }
-    let (workspaces, _) = fallow_engine::discover::discover_workspace_packages_with_diagnostics(
+    let (workspaces, _) = fallow_engine::discover::discover_workspace_packages_for_config(
         &config.root,
         &config.ignore_patterns,
+        &config.workspace_patterns,
     )
     .map_err(|err| emit_error(&format!("Workspace discovery error: {err}"), 2, opts.output))?;
     resolve_change_scope(opts, config, request, &workspaces)

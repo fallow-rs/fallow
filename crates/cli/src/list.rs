@@ -356,9 +356,10 @@ fn collect_list_workspace_data(
             diagnostics: workspace_diagnostics.unwrap_or(&[]).to_vec(),
         }));
     }
-    match fallow_engine::discover::discover_workspace_packages_with_diagnostics(
+    match fallow_engine::discover::discover_workspace_packages_for_config(
         opts.root,
         &config.ignore_patterns,
+        &config.workspace_patterns,
     ) {
         Ok((workspaces, mut diagnostics)) => {
             append_undeclared_workspace_diagnostics(

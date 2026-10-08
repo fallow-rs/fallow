@@ -623,6 +623,7 @@ mod tests {
             dynamically_loaded: vec![],
             overrides: vec![],
             workspace_changed_since: std::collections::BTreeMap::default(),
+            workspace_patterns: Vec::new(),
             regression: None,
             audit: fallow_config::AuditConfig::default(),
             codeowners: None,

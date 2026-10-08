@@ -99,9 +99,13 @@ pub fn resolve_workspace_scope(
     root: &Path,
     workspace: Option<&[String]>,
     changed_workspaces: Option<&str>,
+    workspace_patterns: &[String],
     output: OutputFormat,
 ) -> Result<Option<Vec<PathBuf>>, ExitCode> {
-    let workspaces = fallow_engine::discover::discover_workspace_packages(root);
+    let workspaces = fallow_engine::discover::discover_workspace_packages_with_patterns(
+        root,
+        workspace_patterns,
+    );
     fallow_engine::workspace_scope::resolve_workspace_scope_roots(
         root,
         workspace,
@@ -1318,7 +1322,7 @@ mod tests {
     #[test]
     fn resolve_workspace_scope_neither_flag_returns_none() {
         let root = Path::new("/project");
-        let got = resolve_workspace_scope(root, None, None, OutputFormat::Human).unwrap();
+        let got = resolve_workspace_scope(root, None, None, &[], OutputFormat::Human).unwrap();
         assert!(got.is_none());
     }
 
@@ -1326,7 +1330,13 @@ mod tests {
     fn resolve_workspace_scope_both_flags_is_error() {
         let root = Path::new("/project");
         let patterns = ["web".to_owned()];
-        let got = resolve_workspace_scope(root, Some(&patterns), Some("main"), OutputFormat::Human);
+        let got = resolve_workspace_scope(
+            root,
+            Some(&patterns),
+            Some("main"),
+            &[],
+            OutputFormat::Human,
+        );
         assert!(
             got.is_err(),
             "--workspace + --changed-workspaces must error out"

@@ -573,6 +573,7 @@ fn resolve_flag_scope(opts: &FlagsOptions<'_>) -> Result<FlagScope, ExitCode> {
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
+        &[],
         opts.output,
     )?;
     Ok(FlagScope {

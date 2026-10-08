@@ -118,7 +118,17 @@ pub fn workspace_is_public(name: &str, public_packages: &[String]) -> bool {
 /// access to the user's globset.
 #[must_use]
 pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
-    collect_workspaces_and_diagnostics(root, &crate::IgnorePatternSet::empty())
+    discover_workspaces_with_patterns(root, &[])
+}
+
+/// Like [`discover_workspaces`], with the `workspaces.patterns` of the fallow
+/// config added to the patterns that the manifests declare.
+#[must_use]
+pub fn discover_workspaces_with_patterns(
+    root: &Path,
+    extra_patterns: &[String],
+) -> Vec<WorkspaceInfo> {
+    collect_workspaces_and_diagnostics(root, &crate::IgnorePatternSet::empty(), extra_patterns)
         .map(|(workspaces, _)| workspaces)
         .unwrap_or_default()
 }
@@ -156,7 +166,23 @@ pub fn discover_workspaces_with_diagnostics(
     root: &Path,
     ignore_patterns: &crate::IgnorePatternSet,
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
-    let (workspaces, diagnostics) = collect_workspaces_and_diagnostics(root, ignore_patterns)?;
+    discover_workspaces_with_diagnostics_and_patterns(root, ignore_patterns, &[])
+}
+
+/// Like [`discover_workspaces_with_diagnostics`], with the `workspaces.patterns`
+/// of the fallow config added to the patterns that the manifests declare.
+///
+/// # Errors
+///
+/// Returns [`WorkspaceLoadError`] when the project root's `package.json`
+/// exists but is not valid JSON.
+pub fn discover_workspaces_with_diagnostics_and_patterns(
+    root: &Path,
+    ignore_patterns: &crate::IgnorePatternSet,
+    extra_patterns: &[String],
+) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
+    let (workspaces, diagnostics) =
+        collect_workspaces_and_diagnostics(root, ignore_patterns, extra_patterns)?;
 
     emit_diagnostics(root, &diagnostics);
 
@@ -187,9 +213,11 @@ pub fn discover_workspaces_with_diagnostics(
 fn collect_workspaces_and_diagnostics(
     root: &Path,
     ignore_patterns: &crate::IgnorePatternSet,
+    extra_patterns: &[String],
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
     let mut diagnostics = Vec::new();
-    let patterns = collect_workspace_patterns(root)?;
+    let manifest_declares_workspaces = !collect_workspace_patterns(root, &[])?.is_empty();
+    let patterns = collect_workspace_patterns(root, extra_patterns)?;
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut manifest_cache = ManifestCache::default();
 
@@ -208,7 +236,7 @@ fn collect_workspaces_and_diagnostics(
         &mut diagnostics,
         &mut manifest_cache,
     ));
-    if patterns.is_empty() {
+    if !manifest_declares_workspaces {
         workspaces.extend(collect_shallow_package_workspaces(
             root,
             &canonical_root,
@@ -268,6 +296,7 @@ pub fn link_only_workspace_dependencies(
     root: &Path,
     ignore_patterns: &crate::IgnorePatternSet,
     workspaces: &[WorkspaceInfo],
+    extra_patterns: &[String],
 ) -> rustc_hash::FxHashSet<String> {
     let Ok(root_pkg) = PackageJson::load(&root.join("package.json")) else {
         return rustc_hash::FxHashSet::default();
@@ -288,7 +317,7 @@ pub fn link_only_workspace_dependencies(
         return rustc_hash::FxHashSet::default();
     }
 
-    let patterns = collect_workspace_patterns(root).unwrap_or_default();
+    let patterns = collect_workspace_patterns(root, extra_patterns).unwrap_or_default();
     let declared: rustc_hash::FxHashSet<PathBuf> = collect_declared_workspaces(
         root,
         &patterns,
@@ -335,7 +364,7 @@ pub fn find_undeclared_workspaces_with_ignores(
     declared: &[WorkspaceInfo],
     ignore_patterns: &crate::IgnorePatternSet,
 ) -> Vec<WorkspaceDiagnostic> {
-    let patterns = collect_workspace_patterns(root).unwrap_or_default();
+    let patterns = collect_workspace_patterns(root, &[]).unwrap_or_default();
     if patterns.is_empty() {
         return Vec::new();
     }
@@ -452,8 +481,12 @@ fn check_undeclared(
 }
 
 /// Collect glob patterns from `package.json` `workspaces`, `pnpm-workspace.yaml`,
-/// and Deno `deno.json` / `deno.jsonc` `workspace`.
-fn collect_workspace_patterns(root: &Path) -> Result<Vec<String>, WorkspaceLoadError> {
+/// and Deno `deno.json` / `deno.jsonc` `workspace`, then the `workspaces.patterns`
+/// of the fallow config in `extra_patterns`.
+fn collect_workspace_patterns(
+    root: &Path,
+    extra_patterns: &[String],
+) -> Result<Vec<String>, WorkspaceLoadError> {
     let mut patterns = Vec::new();
 
     let pkg_path = root.join("package.json");
@@ -480,6 +513,12 @@ fn collect_workspace_patterns(root: &Path) -> Result<Vec<String>, WorkspaceLoadE
         .map_err(|(path, error)| WorkspaceLoadError::MalformedRootDenoConfig { path, error })?
     {
         patterns.extend(deno_patterns);
+    }
+
+    for pattern in extra_patterns {
+        if !patterns.contains(pattern) {
+            patterns.push(pattern.clone());
+        }
     }
 
     Ok(patterns)
@@ -1180,7 +1219,8 @@ mod tests {
         )
         .unwrap();
 
-        let patterns = collect_workspace_patterns(dir.path()).expect("valid root package.json");
+        let patterns =
+            collect_workspace_patterns(dir.path(), &[]).expect("valid root package.json");
         assert_eq!(patterns, vec!["packages/*", "apps/*"]);
     }
 
@@ -1193,7 +1233,7 @@ mod tests {
         )
         .unwrap();
 
-        let patterns = collect_workspace_patterns(dir.path()).expect("no root package.json");
+        let patterns = collect_workspace_patterns(dir.path(), &[]).expect("no root package.json");
         assert_eq!(patterns, vec!["packages/*", "libs/*"]);
     }
 
@@ -1211,7 +1251,8 @@ mod tests {
         )
         .unwrap();
 
-        let patterns = collect_workspace_patterns(dir.path()).expect("valid root package.json");
+        let patterns =
+            collect_workspace_patterns(dir.path(), &[]).expect("valid root package.json");
         assert!(patterns.contains(&"packages/*".to_string()));
         assert!(patterns.contains(&"apps/*".to_string()));
     }
@@ -1219,7 +1260,7 @@ mod tests {
     #[test]
     fn collect_patterns_empty_when_no_configs() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        let patterns = collect_workspace_patterns(dir.path()).expect("no root package.json");
+        let patterns = collect_workspace_patterns(dir.path(), &[]).expect("no root package.json");
         assert!(patterns.is_empty());
     }
 
@@ -1251,6 +1292,72 @@ mod tests {
 
         let ws_b = workspaces.iter().find(|ws| ws.name == "@test/b").unwrap();
         assert!(ws_b.is_internal_dependency, "b is depended on by a");
+    }
+
+    #[test]
+    fn configured_patterns_add_workspaces_beyond_the_manifest() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let app = dir.path().join("apps").join("deep").join("one");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"name": "root"}"#).unwrap();
+        std::fs::write(app.join("package.json"), r#"{"name": "@test/one"}"#).unwrap();
+
+        assert!(
+            discover_workspaces(dir.path()).is_empty(),
+            "the manifest declares no workspace"
+        );
+
+        let patterns = vec!["apps/deep/*".to_string()];
+        let workspaces = discover_workspaces_with_patterns(dir.path(), &patterns);
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].name, "@test/one");
+    }
+
+    #[test]
+    fn configured_patterns_and_manifest_patterns_add_up_without_duplicates() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        for name in ["a", "b"] {
+            let pkg = dir.path().join("packages").join(name);
+            std::fs::create_dir_all(&pkg).unwrap();
+            std::fs::write(
+                pkg.join("package.json"),
+                format!(r#"{{"name": "@test/{name}"}}"#),
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/a"]}"#,
+        )
+        .unwrap();
+
+        let patterns = vec!["packages/*".to_string()];
+        let workspaces = discover_workspaces_with_patterns(dir.path(), &patterns);
+        let mut names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["@test/a", "@test/b"]);
+    }
+
+    #[test]
+    fn configured_patterns_keep_the_shallow_package_fallback() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let shallow = dir.path().join("packages").join("a");
+        let deep = dir.path().join("apps").join("deep").join("one");
+        std::fs::create_dir_all(&shallow).unwrap();
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"name": "root"}"#).unwrap();
+        std::fs::write(shallow.join("package.json"), r#"{"name": "@test/a"}"#).unwrap();
+        std::fs::write(deep.join("package.json"), r#"{"name": "@test/one"}"#).unwrap();
+
+        let patterns = vec!["apps/deep/*".to_string()];
+        let workspaces = discover_workspaces_with_patterns(dir.path(), &patterns);
+        let mut names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec!["@test/a", "@test/one"],
+            "a package found without any manifest declaration stays found"
+        );
     }
 
     #[test]

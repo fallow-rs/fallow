@@ -435,8 +435,12 @@ pub(crate) fn collect_workspace_metadata(
 ) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64)> {
     let start = std::time::Instant::now();
     let (workspaces, diagnostics) =
-        fallow_config::discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
-            .map_err(|err| EngineError::new(err.to_string()))?;
+        fallow_config::discover_workspaces_with_diagnostics_and_patterns(
+            &config.root,
+            &config.ignore_patterns,
+            &config.workspace_patterns,
+        )
+        .map_err(|err| EngineError::new(err.to_string()))?;
     let diagnostics = with_undeclared_workspace_diagnostics(config, &workspaces, diagnostics);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok((workspaces, diagnostics, elapsed_ms))

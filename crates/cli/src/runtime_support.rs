@@ -461,9 +461,10 @@ fn report_workspace_diagnostics(
     resolved: &ResolvedConfig,
     options: &ConfigLoadOptions,
 ) -> Result<(), ExitCode> {
-    match fallow_engine::discover::discover_workspace_packages_with_diagnostics(
+    match fallow_engine::discover::discover_workspace_packages_for_config(
         root,
         &resolved.ignore_patterns,
+        &resolved.workspace_patterns,
     ) {
         Ok((_, diagnostics)) => {
             fallow_config::stash_workspace_diagnostics(root, diagnostics.clone());

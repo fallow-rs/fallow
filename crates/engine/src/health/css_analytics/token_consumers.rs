@@ -341,7 +341,8 @@ fn resolve_css_in_js_import_targets(
     modules: &[fallow_types::extract::ModuleInfo],
     config: &ResolvedConfig,
 ) -> ResolvedCssInJsImportTargets {
-    let workspaces = fallow_config::discover_workspaces(&config.root);
+    let workspaces =
+        fallow_config::discover_workspaces_with_patterns(&config.root, &config.workspace_patterns);
     let active_plugins: Vec<String> = Vec::new();
     let path_aliases: Vec<(String, String)> = Vec::new();
     let auto_imports: Vec<fallow_config::AutoImportRule> = Vec::new();

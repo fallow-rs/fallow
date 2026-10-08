@@ -1080,6 +1080,7 @@ fn apply_security_scopes(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
+        &[],
         opts.output,
     )?;
     if let Some(scope) = opts.scope.as_ref() {
@@ -1305,6 +1306,7 @@ fn scope_base_snapshot_to_workspaces(
         base_root,
         opts.workspace,
         None,
+        &[],
         opts.output,
     )? {
         crate::check::filtering::filter_to_workspaces(results, roots);

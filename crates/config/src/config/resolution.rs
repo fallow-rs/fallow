@@ -323,6 +323,9 @@ pub struct ResolvedConfig {
     /// Authored Git baseline refs keyed by workspace root; validated against
     /// discovered packages when an analysis requests package-scoped changes.
     pub workspace_changed_since: BTreeMap<String, String>,
+    /// Workspace package root globs from `workspaces.patterns`, added to the
+    /// patterns that the manifests declare.
+    pub workspace_patterns: Vec<String>,
     /// Saved regression baseline for `--fail-on-regression`, when embedded.
     pub regression: Option<super::RegressionConfig>,
     /// In-repo `fallow audit` defaults, passed through unchanged.
@@ -1014,9 +1017,9 @@ impl FallowConfig {
         ]);
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
-        let workspace_changed_since = self
+        let (workspace_patterns, workspace_changed_since) = self
             .workspaces
-            .map(|workspaces| workspaces.changed_since)
+            .map(|workspaces| (workspaces.patterns, workspaces.changed_since))
             .unwrap_or_default();
 
         let unused_component_props_ignore = compile_unused_component_props_ignore(
@@ -1061,6 +1064,7 @@ impl FallowConfig {
             dynamically_loaded: self.dynamically_loaded,
             overrides: path_policy.overrides,
             workspace_changed_since,
+            workspace_patterns,
             regression: self.regression,
             audit: self.audit,
             codeowners: self.codeowners,
@@ -1143,6 +1147,23 @@ mod tests {
     use crate::CacheConfig;
     use crate::config::boundaries::BoundaryConfig;
     use crate::config::health::HealthConfig;
+
+    #[test]
+    fn workspace_patterns_reach_resolved_config() {
+        let authored: FallowConfig =
+            serde_json::from_str(r#"{"workspaces":{"patterns":["apps/*/*"]}}"#)
+                .expect("workspace patterns deserialize");
+        let resolved = authored.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert_eq!(resolved.workspace_patterns, vec!["apps/*/*".to_string()]);
+    }
 
     #[test]
     fn workspace_changed_since_reaches_resolved_config() {

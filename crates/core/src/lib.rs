@@ -47,8 +47,7 @@ use std::time::Instant;
 
 use errors::FallowError;
 use fallow_config::{
-    EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces_with_diagnostics,
-    find_undeclared_workspaces_with_ignores,
+    EntryPointRole, PackageJson, ResolvedConfig, find_undeclared_workspaces_with_ignores,
 };
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::trace::{EntryPointSpans, PipelineCounters, PipelineTimings};
@@ -457,8 +456,12 @@ fn discover_analysis_workspaces(
 ) -> Result<(Vec<fallow_config::WorkspaceInfo>, f64), FallowError> {
     let t = Instant::now();
     let (workspaces, diagnostics) =
-        discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
-            .map_err(|error| FallowError::config(error.to_string()))?;
+        fallow_config::discover_workspaces_with_diagnostics_and_patterns(
+            &config.root,
+            &config.ignore_patterns,
+            &config.workspace_patterns,
+        )
+        .map_err(|error| FallowError::config(error.to_string()))?;
     fallow_config::stash_workspace_diagnostics(&config.root, diagnostics);
     let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
     if !workspaces.is_empty() {

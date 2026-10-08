@@ -84,6 +84,16 @@ pub fn discover_workspace_packages(root: &Path) -> Vec<WorkspaceInfo> {
     discover_workspaces(root)
 }
 
+/// Like [`discover_workspace_packages`], with the `workspaces.patterns` of the
+/// resolved config added to the manifest patterns.
+#[must_use]
+pub fn discover_workspace_packages_with_patterns(
+    root: &Path,
+    workspace_patterns: &[String],
+) -> Vec<WorkspaceInfo> {
+    fallow_config::discover_workspaces_with_patterns(root, workspace_patterns)
+}
+
 /// Discover workspace packages and diagnostics through the engine boundary.
 ///
 /// This is for CLI/API surfaces that need to render workspace diagnostics but
@@ -96,8 +106,26 @@ pub fn discover_workspace_packages_with_diagnostics(
     root: &Path,
     ignore_patterns: &fallow_config::IgnorePatternSet,
 ) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>)> {
-    fallow_config::discover_workspaces_with_diagnostics(root, ignore_patterns)
-        .map_err(|err| EngineError::new(err.to_string()))
+    discover_workspace_packages_for_config(root, ignore_patterns, &[])
+}
+
+/// Like [`discover_workspace_packages_with_diagnostics`], with the
+/// `workspaces.patterns` of the resolved config added to the manifest patterns.
+///
+/// # Errors
+///
+/// Returns an engine error when workspace manifest loading fails.
+pub fn discover_workspace_packages_for_config(
+    root: &Path,
+    ignore_patterns: &fallow_config::IgnorePatternSet,
+    workspace_patterns: &[String],
+) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>)> {
+    fallow_config::discover_workspaces_with_diagnostics_and_patterns(
+        root,
+        ignore_patterns,
+        workspace_patterns,
+    )
+    .map_err(|err| EngineError::new(err.to_string()))
 }
 
 /// How a [`HiddenDirScope`] matches a hidden directory during the walk.
@@ -232,7 +260,8 @@ impl AnalysisDiscovery {
 #[must_use]
 pub(crate) fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
     let workspaces_start = Instant::now();
-    let workspaces = discover_workspaces(&config.root);
+    let workspaces =
+        fallow_config::discover_workspaces_with_patterns(&config.root, &config.workspace_patterns);
     let workspaces_ms = workspaces_start.elapsed().as_secs_f64() * 1000.0;
     if !workspaces.is_empty() {
         tracing::info!(count = workspaces.len(), "workspaces discovered");

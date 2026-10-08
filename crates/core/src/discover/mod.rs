@@ -122,7 +122,8 @@ fn push_plugin_hidden_dir_scope(
 #[must_use]
 pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     let root_pkg = fallow_config::load_dir_package_json(&config.root);
-    let workspaces = fallow_config::discover_workspaces(&config.root);
+    let workspaces =
+        fallow_config::discover_workspaces_with_patterns(&config.root, &config.workspace_patterns);
     let scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces);
     discover_files_with_additional_hidden_dirs(config, &scopes)
 }

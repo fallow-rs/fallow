@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that runs from another directory is skipped, because its relative paths
   would point at the wrong files.
 
+- **`workspaces.patterns` in the config now adds workspace packages.** The key
+  was documented and parsed, but no code read it. A package outside the globs of
+  `package.json` or `pnpm-workspace.yaml` got no plugin, no entry points, and
+  no dependency check of its own. Fallow now adds these globs to the manifest
+  globs for analysis and for `fallow list --workspaces`. On a large Nx monorepo
+  with 22 undeclared app packages, this removed about 1,900 false unused files.
+  `--workspace` and `--changed-workspaces` also use them in `check`, `dupes`
+  and `health`. `flags`, `security`, `suppressions`, `--group-by package`, and
+  `coverage` still read the manifest globs only.
+
 ## [3.32.0] - 2026-10-06
 
 ### Added

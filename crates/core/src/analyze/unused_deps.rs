@@ -1288,6 +1288,7 @@ pub fn find_unused_dependencies(
         &config.root,
         &config.ignore_patterns,
         workspaces,
+        &config.workspace_patterns,
     );
     let (mut unused_deps, mut unused_dev_deps, mut unused_optional_deps) =
         collect_root_unused_dependencies(pkg, config, &shared, &scan.usage, &linked_workspaces);

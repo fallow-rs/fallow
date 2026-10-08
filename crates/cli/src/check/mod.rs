@@ -1126,6 +1126,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
+        &config.workspace_patterns,
         opts.output,
     )?;
     if let Some(scope) = opts.scope.as_ref() {
