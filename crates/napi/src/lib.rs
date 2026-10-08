@@ -1522,7 +1522,9 @@ mod tests {
     /// `#[napi(js_name = ...)]` function export.
     #[test]
     fn readmes_list_every_napi_export() {
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest_dir = std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        );
         for relative in ["README.md", "../../README.md"] {
             let path = manifest_dir.join(relative);
             let readme = std::fs::read_to_string(&path)

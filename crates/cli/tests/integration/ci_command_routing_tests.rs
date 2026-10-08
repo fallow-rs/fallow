@@ -14,9 +14,11 @@ use fallow_types::command_surfaces::{COMMAND_ENVELOPES, CiIntegration};
 const CI_COMMANDS_WITHOUT_ROW: &[&str] = &["", "check", "fix"];
 
 fn repo_file(relative: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(relative);
+    let path = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../..")
+    .join(relative);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
