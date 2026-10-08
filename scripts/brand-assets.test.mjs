@@ -28,8 +28,8 @@ test("standalone brand icons reserve a twelve-and-a-half percent transparent saf
 });
 
 const VIZ_BUNDLE = "crates/cli/viz-assets/viz.js";
-/** Share of the favicon side the mark must span, so the tab icon reads edge to edge. */
-const MIN_FAVICON_FILL = 0.8;
+/** Share of the favicon side the mark must span inside its ink tile. */
+const MIN_FAVICON_FILL = 0.6;
 const CENTER_TOLERANCE = 1;
 
 const parseViewBox = (value) => {
@@ -98,25 +98,47 @@ const assertCenteredSquareAround = (box, bounds, label) => {
   );
 };
 
-test("the report favicon fills its canvas without shrinking the in-product mark", () => {
+/** The value of a minified template constant, for example `Jp=\`...\``. */
+const bundleConstant = (bundle, name) =>
+  bundle.match(new RegExp(`[,;\\s]${name}=\`([^\`]+)\``, "u"))?.[1];
+
+test("the report favicon is a full ink tile with the mark centered on it", () => {
   const bundle = readFileSync(VIZ_BUNDLE, "utf8");
-  const favicon = bundle.match(/viewBox="([^"]+)"><style>path\{fill/u)?.[1];
-  const mark = bundle.match(/`mark`\),\w+\.setAttribute\(`viewBox`,`([^`]+)`\)/u)?.[1];
-  const path = bundle.match(/M9990 9649[^`"']*/u)?.[0];
-  assert.ok(favicon, "shipped bundle sets a favicon viewBox");
-  assert.ok(mark, "shipped bundle sets the in-product mark viewBox");
-  assert.ok(path, "shipped bundle inlines the mark path");
-
-  const bounds = markBounds(path);
-  const faviconBox = parseViewBox(favicon);
-  const markBox = parseViewBox(mark);
-  assertCenteredSquareAround(faviconBox, bounds, "favicon");
-  assertCenteredSquareAround(markBox, bounds, "mark");
-
-  const markWidth = bounds.maxX - bounds.minX;
-  assert.ok(
-    markWidth / faviconBox.width >= MIN_FAVICON_FILL,
-    `favicon mark spans ${(markWidth / faviconBox.width).toFixed(2)} of its canvas`,
+  const tile = bundle.match(
+    /viewBox="0 0 (\d+) \d+"><rect width="(\d+)" height="(\d+)"[^>]*\/><svg x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" viewBox="\$\{(\w+)\}"><g transform="\$\{(\w+)\}"[^>]*><path d="\$\{(\w+)\}"/u,
   );
-  assert.ok(markBox.width > faviconBox.width, "in-product mark keeps its wider safe area");
+  assert.ok(tile, "shipped bundle builds the favicon tile");
+  const [
+    ,
+    canvas,
+    rectW,
+    rectH,
+    innerX,
+    innerY,
+    innerW,
+    innerH,
+    viewBoxName,
+    transformName,
+    pathName,
+  ] = tile;
+  assert.equal(Number(rectW), Number(canvas), "tile fills the canvas width");
+  assert.equal(Number(rectH), Number(canvas), "tile fills the canvas height");
+  assert.equal(Number(innerX) + Number(innerW) / 2, Number(canvas) / 2, "mark centered on x");
+  assert.equal(Number(innerY) + Number(innerH) / 2, Number(canvas) / 2, "mark centered on y");
+  assert.equal(bundleConstant(bundle, transformName), "translate(0,1254) scale(0.1,-0.1)");
+
+  const path = bundleConstant(bundle, pathName);
+  const viewBox = bundleConstant(bundle, viewBoxName);
+  assert.ok(path?.startsWith("M9990 9649"), "shipped bundle inlines the mark path");
+  assert.ok(viewBox, "shipped bundle sets the mark viewBox");
+  const bounds = markBounds(path);
+  const leafBox = parseViewBox(viewBox);
+  assertCenteredSquareAround(leafBox, bounds, "mark");
+
+  const markShare =
+    ((bounds.maxX - bounds.minX) / leafBox.width) * (Number(innerW) / Number(canvas));
+  assert.ok(
+    markShare >= MIN_FAVICON_FILL,
+    `favicon mark spans ${markShare.toFixed(2)} of its canvas`,
+  );
 });
