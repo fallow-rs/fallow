@@ -145,6 +145,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/nx_project_json.rs"]
 mod nx_project_json;
+#[path = "integration_test/package_dist_to_src_entries.rs"]
+mod package_dist_to_src_entries;
 #[path = "integration_test/parse_degraded_diagnostic.rs"]
 mod parse_degraded_diagnostic;
 #[path = "integration_test/redwoodsdk.rs"]

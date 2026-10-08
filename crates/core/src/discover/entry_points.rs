@@ -304,13 +304,13 @@ fn resolve_entry_via_output_dir(
     mut skipped_entries: Option<&mut FxHashMap<String, usize>>,
     targets: EntryTargets<'_>,
 ) -> OutputDirEntry {
-    match targets
+    let resolution = targets
         .output_map
-        .resolve_source_for_entry(entry, SOURCE_EXTENSIONS)
-    {
+        .resolve_source_for_entry(entry, SOURCE_EXTENSIONS);
+    match &resolution {
         TsconfigOutputResolution::Resolved(source_path) => {
             return OutputDirEntry::ShortCircuit(validated_entry_point(
-                &source_path,
+                source_path,
                 canonical_root,
                 entry,
                 source,
@@ -318,7 +318,8 @@ fn resolve_entry_via_output_dir(
             ));
         }
         TsconfigOutputResolution::ConfiguredButUnresolved => return OutputDirEntry::Continue,
-        TsconfigOutputResolution::Unconfigured => {}
+        TsconfigOutputResolution::ConfiguredWithoutSource
+        | TsconfigOutputResolution::Unconfigured => {}
     }
 
     let is_discovered = |path: &Path| {
@@ -326,6 +327,25 @@ fn resolve_entry_via_output_dir(
             .discovered
             .is_none_or(|is_discovered| is_discovered(path))
     };
+    if matches!(
+        resolution,
+        TsconfigOutputResolution::ConfiguredWithoutSource
+    ) {
+        // The tsconfig claims the output but names no file, so a bundler can
+        // own it. Only an analyzed source file under `src/` counts.
+        return match output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
+            .filter(|source_path| is_discovered(source_path))
+        {
+            Some(source_path) => OutputDirEntry::ShortCircuit(validated_entry_point(
+                &source_path,
+                canonical_root,
+                entry,
+                source,
+                skipped_entries,
+            )),
+            None => OutputDirEntry::Continue,
+        };
+    }
     if let Some(source_path) =
         output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
     {
@@ -2672,6 +2692,47 @@ mod tests {
                 EntryPointSource::PackageJsonMain,
             );
             assert_eq!(result.map(|e| e.path), Some(mirror_index));
+        }
+
+        /// A tsconfig with `rootDir: "."` claims `dist/` but names no file. A
+        /// Nest build emits `dist/<path>.js` from `src/<path>.ts`.
+        #[test]
+        fn configured_output_without_source_maps_to_an_analyzed_src_file() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dunce::canonicalize(dir.path()).unwrap();
+            std::fs::write(
+                canonical.join("tsconfig.build.json"),
+                r#"{"compilerOptions":{"rootDir":".","outDir":"./dist"}}"#,
+            )
+            .unwrap();
+            std::fs::create_dir_all(canonical.join("src/scripts")).unwrap();
+            let script = canonical.join("src/scripts/setup.ts");
+            std::fs::write(&script, "export {};").unwrap();
+            let entry = "dist/scripts/setup.js";
+
+            let analyzed: &(dyn Fn(&Path) -> bool + Sync) = &|_| true;
+            let result = resolve_entry_path_with_discovered(
+                &canonical,
+                entry,
+                &canonical,
+                EntryPointSource::PackageJsonScript,
+                analyzed,
+            );
+            assert_eq!(result.map(|e| e.path), Some(script));
+
+            let not_analyzed: &(dyn Fn(&Path) -> bool + Sync) = &|_| false;
+            let result = resolve_entry_path_with_discovered(
+                &canonical,
+                entry,
+                &canonical,
+                EntryPointSource::PackageJsonScript,
+                not_analyzed,
+            );
+            assert_eq!(
+                result.map(|e| e.path),
+                None,
+                "a source file outside the analyzed files must not become an entry"
+            );
         }
 
         #[test]

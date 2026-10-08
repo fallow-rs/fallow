@@ -8,9 +8,14 @@ use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["rollup"];
 
-const CONFIG_PATTERNS: &[&str] = &["rollup.config.{js,ts,mjs,cjs}"];
+/// A package with one rollup build per target names each config
+/// `rollup.config.<target>.mjs`, such as `rollup.config.sdk-dts.mjs`.
+const CONFIG_PATTERNS: &[&str] = &[
+    "rollup.config.{js,ts,mjs,cjs}",
+    "rollup.config.*.{js,ts,mjs,cjs}",
+];
 
-const ALWAYS_USED: &[&str] = &["rollup.config.{js,ts,mjs,cjs}"];
+const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
 const TOOLING_DEPENDENCIES: &[&str] = &["rollup"];
 
@@ -24,7 +29,12 @@ define_plugin! {
         let mut result = PluginResult::default();
         super::add_import_referenced_dependencies(&mut result, source, config_path);
 
-        let inputs = config_parser::extract_config_string_or_array(source, config_path, &["input"]);
+        // A rollup config can export an array with one config per output.
+        let inputs = config_parser::extract_config_array_or_object_string_or_array(
+            source,
+            config_path,
+            &["input"],
+        );
         result.extend_entry_patterns_and_dependencies(inputs, root);
 
         let external =
@@ -138,6 +148,54 @@ mod tests {
         let result =
             plugin.resolve_config(Path::new("rollup.config.js"), source, Path::new("/project"));
         assert!(result.entry_patterns.is_empty());
+    }
+
+    /// A package with one rollup build per target names each config
+    /// `rollup.config.<target>.mjs` and runs it with `rollup -c`.
+    #[test]
+    fn named_rollup_config_variants_are_config_files() {
+        let plugin = RollupPlugin;
+        let matches = |patterns: &[&str], name: &str| {
+            patterns.iter().any(|pattern| {
+                globset::Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(name))
+            })
+        };
+        for name in [
+            "rollup.config.js",
+            "rollup.config.sdk-dts.mjs",
+            "rollup.config.browser.ts",
+            "rollup.config.node.cjs",
+        ] {
+            assert!(matches(plugin.config_patterns(), name), "{name}");
+            assert!(matches(plugin.always_used(), name), "{name}");
+        }
+        for name in ["rollup.configs.js", "rollup.config.node.json", "rollup.ts"] {
+            assert!(!matches(plugin.config_patterns(), name), "{name}");
+            assert!(!matches(plugin.always_used(), name), "{name}");
+        }
+    }
+
+    #[test]
+    fn resolve_config_reads_the_input_of_each_config_in_an_array() {
+        let source = r#"
+            export default [
+                { input: "src/sdk/define/index.ts", output: { file: "dist/define.d.ts" } },
+                { input: "src/sdk/billing/index.ts", output: { file: "dist/billing.d.ts" } }
+            ];
+        "#;
+        let result = RollupPlugin.resolve_config(
+            Path::new("rollup.config.sdk-dts.mjs"),
+            source,
+            Path::new("/project"),
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect();
+        for expected in ["src/sdk/define/index.ts", "src/sdk/billing/index.ts"] {
+            assert!(patterns.contains(&expected), "{expected}: got {patterns:?}");
+        }
     }
 
     /// A bare `input` value is either a module request or a path that rollup

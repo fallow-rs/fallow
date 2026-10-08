@@ -536,7 +536,7 @@ fn declaration_stem(file_name: &str) -> Option<&str> {
         .filter(|stem| !stem.is_empty())
 }
 
-fn is_declaration_file_name(file_name: &str) -> bool {
+pub(super) fn is_declaration_file_name(file_name: &str) -> bool {
     declaration_stem(file_name).is_some()
 }
 
@@ -545,7 +545,7 @@ fn is_declaration_file_name(file_name: &str) -> bool {
 /// The stem keeps every dot in the base name. `feature.port.d.ts` and
 /// `feature.port.js` both give `feature.port`. `Path::with_extension` removes
 /// only the last extension, so it keeps `.d` in a declaration file name.
-fn output_source_stem(file_name: &str) -> &str {
+pub(super) fn output_source_stem(file_name: &str) -> &str {
     if let Some(stem) = declaration_stem(file_name) {
         return stem;
     }

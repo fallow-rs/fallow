@@ -207,6 +207,16 @@ fn resolve_public_api_entry_path(
             return validated_entry_point(&source_path, canonical_root, source);
         }
         TsconfigOutputResolution::ConfiguredButUnresolved => {}
+        TsconfigOutputResolution::ConfiguredWithoutSource => {
+            // The tsconfig claims the output but names no file, so a bundler
+            // can own it. Only an analyzed source file under `src/` counts.
+            if let Some(source_path) =
+                output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
+                    .filter(|source_path| is_discovered(source_path))
+            {
+                return validated_entry_point(&source_path, canonical_root, source);
+            }
+        }
         TsconfigOutputResolution::Unconfigured => {
             if let Some(source_path) =
                 output_entry_to_source_path(base, entry, SOURCE_EXTENSIONS, is_discovered)
@@ -600,6 +610,42 @@ mod tests {
                 "a lib/ file on disk stays the public entry (with_lib={with_lib}), entries: {entries:?}"
             );
         }
+    }
+
+    /// A `noEmit` tsconfig claims `dist/` but maps no file. A bundler emits
+    /// `dist/core.mjs` from `src/core/index.ts`.
+    #[test]
+    fn configured_output_without_source_maps_public_entry_to_src() {
+        let directory = tempfile::tempdir().expect("temporary project directory");
+        let root = directory.path();
+        std::fs::create_dir_all(root.join("src/core")).expect("source directory");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"bundled-package","exports":{"./core":{"types":"./dist/core/index.d.ts","import":"./dist/core.mjs"}}}"#,
+        )
+        .expect("package manifest");
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"rootDir":"./src","outDir":"./dist","noEmit":true}}"#,
+        )
+        .expect("TypeScript config");
+        std::fs::write(root.join("src/core/index.ts"), "export const value = 1;\n")
+            .expect("source entry");
+        std::fs::write(root.join("src/internal.ts"), "export const value = 1;\n")
+            .expect("unrelated source file");
+
+        let session = AnalysisSession::load_with_config(root, None, |_| {}).expect("project loads");
+        let entries = public_entry_paths(&session);
+        assert!(
+            entries
+                .iter()
+                .any(|path| path.ends_with("src/core/index.ts")),
+            "the bundled output maps to its source directory index, entries: {entries:?}"
+        );
+        assert!(
+            !entries.iter().any(|path| path.ends_with("src/internal.ts")),
+            "an unrelated source file must not become a public entry, entries: {entries:?}"
+        );
     }
 
     #[test]

@@ -1,0 +1,5 @@
+{
+  "name": "package-dist-to-src-entries",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

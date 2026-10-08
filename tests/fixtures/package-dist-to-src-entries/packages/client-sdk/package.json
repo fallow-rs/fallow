@@ -1,0 +1,17 @@
+{
+  "name": "client-sdk",
+  "version": "1.0.0",
+  "exports": {
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core.mjs",
+      "require": "./dist/core.cjs"
+    },
+    "./metadata": {
+      "import": "./dist/metadata.mjs"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts"
+    }
+  }
+}

@@ -150,15 +150,25 @@ fn add_root_entry_patterns(
     );
 }
 
+/// Vite config file names. A package with one build per target names each
+/// config `vite.config.<target>.ts` and runs it with `vite build -c`.
+const CONFIG_PATTERNS: &[&str] = &[
+    "vite.config.{ts,js,mts,mjs}",
+    "vite.config.*.{ts,js,mts,mjs}",
+];
+
 define_plugin!(
     struct VitePlugin => "vite",
     enablers: &["vite", "rolldown-vite"],
     entry_patterns: ROOT_ENTRY_PATTERNS,
-    config_patterns: &["vite.config.{ts,js,mts,mjs}"],
-    always_used: &["vite.config.{ts,js,mts,mjs}"],
+    config_patterns: CONFIG_PATTERNS,
+    always_used: CONFIG_PATTERNS,
     tooling_dependencies: &["vite", "@vitejs/plugin-react", "@vitejs/plugin-vue"],
     virtual_module_prefixes: &["virtual:"],
-    used_exports: [("vite.config.{ts,js,mts,mjs}", CONFIG_EXPORTS)],
+    used_exports: [
+        ("vite.config.{ts,js,mts,mjs}", CONFIG_EXPORTS),
+        ("vite.config.*.{ts,js,mts,mjs}", CONFIG_EXPORTS)
+    ],
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
 
@@ -1096,6 +1106,50 @@ mod tests {
                 .any(|pattern| pattern.starts_with("src/lib.{")),
             "an extensionless lib entry resolves to the file, got {patterns:?}"
         );
+    }
+
+    fn any_pattern_matches(patterns: &[&str], name: &str) -> bool {
+        patterns.iter().any(|pattern| {
+            globset::Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(name))
+        })
+    }
+
+    /// A package with one vite build per target names each config
+    /// `vite.config.<target>.ts` and runs it with `vite build -c`.
+    #[test]
+    fn named_vite_config_variants_are_config_files() {
+        let plugin = VitePlugin;
+        let used_export_patterns: Vec<&str> = plugin
+            .used_exports()
+            .iter()
+            .map(|(pattern, _)| *pattern)
+            .collect();
+        for name in [
+            "vite.config.ts",
+            "vite.config.node.ts",
+            "vite.config.define.mts",
+            "vite.config.browser.js",
+            "vite.config.utils.mjs",
+        ] {
+            assert!(
+                any_pattern_matches(plugin.config_patterns(), name),
+                "{name}"
+            );
+            assert!(any_pattern_matches(plugin.always_used(), name), "{name}");
+            assert!(any_pattern_matches(&used_export_patterns, name), "{name}");
+        }
+        for name in [
+            "vitest.config.ts",
+            "vite.configs.ts",
+            "vite.config.node.json",
+            "vite-env.d.ts",
+        ] {
+            assert!(
+                !any_pattern_matches(plugin.config_patterns(), name),
+                "{name}"
+            );
+            assert!(!any_pattern_matches(plugin.always_used(), name), "{name}");
+        }
     }
 
     fn entry_patterns_for(source: &str) -> Vec<String> {

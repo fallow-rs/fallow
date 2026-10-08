@@ -5,14 +5,17 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use super::fallbacks::{is_declaration_file_name, output_source_stem};
 use super::types::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
 
 /// Map an output directory entry to its same-stem source file.
 ///
 /// Given `base=/project/packages/ui` and `entry=./dist/utils.js`, this tries
 /// `/project/packages/ui/src/utils.<ext>` for each extension in
-/// `source_extensions`. A path prefix between the package root and the output
-/// directory stays: `./modules/dist/utils.js` maps to `modules/src/utils.ts`.
+/// `source_extensions`, then `src/utils/index.<ext>`. A declaration output
+/// such as `dist/utils.d.ts` maps to `src/utils.<ext>`. A path prefix between
+/// the package root and the output directory stays: `./modules/dist/utils.js`
+/// maps to `modules/src/utils.ts`.
 ///
 /// `OUTPUT_DIRS` decide first. A `lib/` entry (`MISSING_ONLY_OUTPUT_DIRS`)
 /// maps only when the entry target is absent. The target is present when the
@@ -74,15 +77,28 @@ fn output_dir_to_source_path(
         .filter(|component| !matches!(component, Component::CurDir))
         .collect();
     let suffix: PathBuf = components[output_pos + 1..].iter().collect();
+    let file_name = suffix.file_name()?.to_str()?;
+    let stem = output_source_stem(file_name);
+    let source_dir = match suffix.parent() {
+        Some(parent) => base.join(&prefix).join("src").join(parent),
+        None => base.join(&prefix).join("src"),
+    };
 
-    source_extensions
+    let same_stem = source_extensions
         .iter()
-        .map(|ext| {
-            base.join(&prefix)
-                .join("src")
-                .join(suffix.with_extension(ext))
-        })
-        .find(|candidate| candidate.exists())
+        .map(|ext| source_dir.join(format!("{stem}.{ext}")));
+    // A copied hand-written declaration keeps its name in `src/`.
+    let declaration = is_declaration_file_name(file_name).then(|| source_dir.join(file_name));
+    // Bundlers that name an output after its source directory emit
+    // `dist/core.mjs` from `src/core/index.ts`.
+    let directory_index = source_extensions
+        .iter()
+        .map(|ext| source_dir.join(stem).join(format!("index.{ext}")));
+
+    same_stem
+        .chain(declaration)
+        .chain(directory_index)
+        .find(|candidate| candidate.is_file())
 }
 
 /// Return `true` when `path` ends in a missing-only output directory, such as
@@ -200,6 +216,87 @@ mod tests {
             output_entry_to_source_path(dir.path(), "./lib", EXTS, |_| false),
             None
         );
+    }
+
+    /// A bundler that names each output after its source directory emits
+    /// `dist/core.mjs` from `src/core/index.ts`.
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn output_file_maps_to_the_source_directory_index() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        write(&dir.path().join("src/core/index.ts"));
+
+        for entry in ["./dist/core.mjs", "./dist/core.cjs", "dist/core.js"] {
+            assert_eq!(
+                output_entry_to_source_path(dir.path(), entry, EXTS, |_| true),
+                Some(dir.path().join("src/core/index.ts")),
+                "{entry}"
+            );
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn same_stem_source_file_wins_over_the_directory_index() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        write(&dir.path().join("src/core.ts"));
+        write(&dir.path().join("src/core/index.ts"));
+
+        assert_eq!(
+            output_entry_to_source_path(dir.path(), "./dist/core.mjs", EXTS, |_| true),
+            Some(dir.path().join("src/core.ts"))
+        );
+    }
+
+    /// The compiler emits `dist/core/index.d.ts` from `src/core/index.ts`.
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn declaration_output_maps_to_the_source_without_the_declaration_suffix() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        write(&dir.path().join("src/core/index.ts"));
+        write(&dir.path().join("src/feature.port.ts"));
+
+        for (entry, expected) in [
+            ("./dist/core/index.d.ts", "src/core/index.ts"),
+            ("./dist/core/index.d.mts", "src/core/index.ts"),
+            ("./dist/core/index.d.cts", "src/core/index.ts"),
+            ("./dist/feature.port.d.ts", "src/feature.port.ts"),
+        ] {
+            assert_eq!(
+                output_entry_to_source_path(dir.path(), entry, EXTS, |_| true),
+                Some(dir.path().join(expected)),
+                "{entry}"
+            );
+        }
+    }
+
+    /// A package can copy a hand-written declaration file to the output
+    /// directory unchanged.
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn declaration_output_keeps_a_hand_written_source_declaration() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        write(&dir.path().join("src/types.d.ts"));
+
+        assert_eq!(
+            output_entry_to_source_path(dir.path(), "./dist/types.d.ts", EXTS, |_| true),
+            Some(dir.path().join("src/types.d.ts"))
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn output_entry_without_a_source_does_not_map() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        write(&dir.path().join("src/other/index.ts"));
+
+        for entry in ["./dist/core.mjs", "./dist/core/index.d.ts"] {
+            assert_eq!(
+                output_entry_to_source_path(dir.path(), entry, EXTS, |_| true),
+                None,
+                "{entry}"
+            );
+        }
     }
 
     #[cfg_attr(miri, ignore)]

@@ -19,8 +19,13 @@ struct CompilerOptions {
 pub enum TsconfigOutputResolution {
     /// No supported config declares this entry as an output.
     Unconfigured,
-    /// A config declares the output path, but no unique source mapping is available.
+    /// A config declares the output path, but the configs map it to two or
+    /// more source files.
     ConfiguredButUnresolved,
+    /// A config declares the output path, but no config maps it to an
+    /// existing source file. A `noEmit` config maps nothing. Another build
+    /// tool can own the output, so a caller may try its own source mapping.
+    ConfiguredWithoutSource,
     /// The configured output maps to one source file inside the project.
     Resolved(PathBuf),
 }
@@ -156,6 +161,9 @@ impl TsconfigOutputMap {
             }
         }
 
+        if candidates.is_empty() && configured {
+            return TsconfigOutputResolution::ConfiguredWithoutSource;
+        }
         if candidates.len() != 1 {
             return if configured {
                 TsconfigOutputResolution::ConfiguredButUnresolved
@@ -626,7 +634,8 @@ mod tests {
 
         assert_eq!(
             map(root, "./distribution/index.js", &["ts"]),
-            TsconfigOutputResolution::ConfiguredButUnresolved
+            TsconfigOutputResolution::ConfiguredWithoutSource,
+            "a noEmit config maps no output to a source file"
         );
         write(
             &root.join("tsconfig.test.json"),
@@ -635,6 +644,28 @@ mod tests {
         assert_eq!(
             map(root, "./distribution/index.js", &["ts"]),
             TsconfigOutputResolution::Resolved(root.join("source/index.ts"))
+        );
+    }
+
+    /// A Nest build can declare `rootDir: "."` while the scripts run
+    /// `dist/<path>.js` from `src/<path>.ts`. The config claims the output but
+    /// names no file, which differs from two candidate files.
+    #[test]
+    fn emitting_config_without_a_source_file_is_reported_apart_from_ambiguity() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(
+            &root.join("tsconfig.build.json"),
+            r#"{"compilerOptions":{"rootDir":".","outDir":"./dist"}}"#,
+        );
+        write(
+            &root.join("src/database/setup-db.ts"),
+            "export const value = 1;\n",
+        );
+
+        assert_eq!(
+            map(root, "./dist/database/setup-db.js", &["ts"]),
+            TsconfigOutputResolution::ConfiguredWithoutSource
         );
     }
 
@@ -692,7 +723,7 @@ mod tests {
         );
         assert_eq!(
             map(root, "./distribution/feature.test.mjs", &["ts"]),
-            TsconfigOutputResolution::ConfiguredButUnresolved,
+            TsconfigOutputResolution::ConfiguredWithoutSource,
             "an MJS output must not resolve to an unrelated TS source with the same basename"
         );
         assert_eq!(

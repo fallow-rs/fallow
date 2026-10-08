@@ -1,0 +1,1 @@
+export const orphanScript = (): void => {};
