@@ -412,12 +412,7 @@ button {
   outline-offset: var(--focus-ring-offset);
 }
 
-/* The × glyph reads smaller than its font size, so it is sized up to match
-   the copy icon's optical weight. Close is destructive, hence the red hover. */
-.icon-btn.close {
-  font-size: 22px;
-}
-
+/* Close is destructive, hence the red hover. */
 .icon-btn.close:hover {
   color: var(--red-text);
 }

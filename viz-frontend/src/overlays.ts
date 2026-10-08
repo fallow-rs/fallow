@@ -1,4 +1,4 @@
-import { button, el } from "./dom";
+import { closeButton, el } from "./dom";
 /**
  * HTML layers over the canvas. Currently the help overlay (how to read
  * the map); styled by the shared design tokens.
@@ -60,10 +60,7 @@ export const buildHelpOverlay = (handlers: OverlayHandlers): HTMLElement => {
   const box = el("div", "help-box");
   const head = el("div", "help-head");
   head.appendChild(el("h2", undefined, "How to read this map"));
-  const close = button("icon-btn close", "×");
-  close.setAttribute("aria-label", "Close help");
-  close.addEventListener("click", handlers.onHelpClose);
-  head.appendChild(close);
+  head.appendChild(closeButton(handlers.onHelpClose, "Close help"));
   box.appendChild(head);
 
   const grid = el("div", "help-grid");
