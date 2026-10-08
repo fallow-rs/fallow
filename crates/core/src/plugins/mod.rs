@@ -1779,6 +1779,7 @@ macro_rules! define_plugin {
         $(, generated_type_import_prefixes: $generated_type_prefixes:expr)?
         $(, provided_dependencies: $provided_dependencies:expr)?
         $(, package_json_config_key: $pkg_key:expr)?
+        $(, script_config_binaries: $script_binaries:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config($cp:ident, $src:ident, $root:ident) $body:block
         $(,)?
@@ -1816,6 +1817,8 @@ macro_rules! define_plugin {
                     vec![$( ($pat, $exports) ),*]
                 }
             )?
+
+            $( fn script_config_binaries(&self) -> &'static [&'static str] { $script_binaries } )?
 
             fn resolve_config(
                 &self,

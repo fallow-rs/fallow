@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token failed glob compilation and logged `invalid entry pattern` on every
   run. The scanner now rejects a bracket group that contains `/`. Route
   segments such as `[id]` and `[...slug]` still pass.
+- **Jest configs with a custom name or a `.integration-spec` suffix now count
+  as test entries.** A project with `jest-integration.config.ts` next to
+  `jest.config.mjs` had every integration test and helper reported as unused.
+  Fallow now reads `jest-*.config.*` and `jest.*.config.*` files. A `testRegex`
+  that is only a literal suffix, such as `\.integration-spec\.ts$`, now maps
+  to `**/*.integration-spec.ts`. A prefixed regex keeps its own suffix and no
+  longer falls back to `*.test`. The patterns of every jest config now add up.
+  Before, one config with its own pattern dropped the default test files of the
+  others. On a large Nx monorepo this removed about 1,450 false unused files.
+- **A `--config` file that a script passes to `jest` is read.** Before, only
+  `vitest` did this. A script config file is now also a used file when the path
+  starts with `./`.
 
 ## [3.32.0] - 2026-10-06
 

@@ -72,27 +72,49 @@ const JEST_CONFIG_FILENAMES: &[&str] = &[
 /// Filename whose top-level `"jest"` key holds an embedded Jest config.
 const PACKAGE_JSON_FILENAME: &str = "package.json";
 
+/// Test files that Jest runs when a config sets no `testMatch` or `testRegex`.
+const DEFAULT_TEST_ENTRY_PATTERNS: &[&str] = &[
+    "**/*.test.{ts,tsx,js,jsx}",
+    "**/*.spec.{ts,tsx,js,jsx}",
+    "**/__tests__/**/*.{ts,tsx,js,jsx}",
+    "**/__mocks__/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+];
+
 define_plugin!(
     struct JestPlugin => "jest",
     enablers: &["jest"],
-    entry_patterns: &[
-        "**/*.test.{ts,tsx,js,jsx}",
-        "**/*.spec.{ts,tsx,js,jsx}",
-        "**/__tests__/**/*.{ts,tsx,js,jsx}",
-        "**/__mocks__/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    entry_patterns: DEFAULT_TEST_ENTRY_PATTERNS,
+    config_patterns: &[
+        "jest.config.{ts,js,mjs,cjs}",
+        "jest.config.json",
+        "jest-*.config.{ts,js,mjs,cjs}",
+        "jest.*.config.{ts,js,mjs,cjs}",
     ],
-    config_patterns: &["jest.config.{ts,js,mjs,cjs}", "jest.config.json"],
-    always_used: &["jest.config.{ts,js,mjs,cjs}", "jest.setup.{ts,js,tsx,jsx}"],
+    always_used: &[
+        "jest.config.{ts,js,mjs,cjs}",
+        "jest-*.config.{ts,js,mjs,cjs}",
+        "jest.*.config.{ts,js,mjs,cjs}",
+        "jest.setup.{ts,js,tsx,jsx}",
+    ],
     tooling_dependencies: &["jest", "jest-environment-jsdom", "ts-jest", "babel-jest"],
     fixture_glob_patterns: &[
         "**/__fixtures__/**/*.{ts,tsx,js,jsx,json}",
         "**/fixtures/**/*.{ts,tsx,js,jsx,json}",
     ],
     package_json_config_key: "jest",
+    script_config_binaries: &["jest"],
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
         let mut visited = FxHashSet::default();
         extract_jest_config(config_path, source, root, &mut result, &mut visited, 0);
+        // Every config states which files it runs, so the configs of one
+        // project (unit, integration, e2e) add up instead of the last one
+        // replacing the defaults for all of them.
+        if result.entry_patterns.is_empty() {
+            result.extend_entry_patterns(DEFAULT_TEST_ENTRY_PATTERNS.iter().copied());
+        }
+        result.replace_entry_patterns = true;
+        result.accumulate_config_entry_patterns = true;
         result
     },
 );
@@ -603,9 +625,8 @@ fn extract_jest_setup_files(
     if result.entry_patterns.is_empty()
         && let Some(regex) =
             config_parser::extract_config_string(parse_source, parse_path, &["testRegex"])
-        && let Some(glob) = test_regex_to_glob(&regex)
+        && let Some(glob) = test_regex_to_glob(&regex).or_else(|| literal_suffix_glob(&regex))
     {
-        result.replace_entry_patterns = true;
         result.push_entry_pattern(glob);
     }
 }
@@ -624,6 +645,10 @@ fn test_regex_to_glob(regex: &str) -> Option<String> {
 
     if prefix.is_empty() || !prefix.contains('/') {
         return None;
+    }
+
+    if let Some(glob) = literal_suffix_glob(&regex[prefix_end..]) {
+        return Some(format!("{prefix}{glob}"));
     }
 
     let ext = if regex.contains("tsx?") {
@@ -647,6 +672,31 @@ fn test_regex_to_glob(regex: &str) -> Option<String> {
     };
 
     Some(format!("{prefix}**/{name_pattern}.{ext}"))
+}
+
+/// Glob for a `testRegex` that is only a literal file suffix such as
+/// `\\.integration-spec\\.ts$`, which maps to `**/*.integration-spec.ts`. Returns `None` for a suffix that the default
+/// `.test` and `.spec` entry patterns already match, and for any regex with
+/// other metacharacters.
+fn literal_suffix_glob(regex: &str) -> Option<String> {
+    let tail = regex
+        .strip_prefix(".*")
+        .unwrap_or(regex)
+        .strip_suffix('$')?;
+    let segments: Vec<&str> = tail.strip_prefix("\\.")?.split("\\.").collect();
+    let literal = |segment: &&str| {
+        !segment.is_empty()
+            && segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    };
+    if segments.len() < 2 || !segments.iter().all(literal) {
+        return None;
+    }
+    if matches!(segments[segments.len() - 2], "test" | "spec") {
+        return None;
+    }
+    Some(format!("**/*.{}", segments.join(".")))
 }
 
 /// Extract referenced dependencies from Jest config (transform, reporters, environment, etc.).
@@ -1056,6 +1106,46 @@ mod tests {
     }
 
     #[test]
+    fn test_regex_literal_suffix_outside_default_names() {
+        assert_eq!(
+            literal_suffix_glob(r".*\.integration-spec\.ts$"),
+            Some("**/*.integration-spec.ts".to_string())
+        );
+        assert_eq!(
+            literal_suffix_glob(r"\.e2e-spec\.ts$"),
+            Some("**/*.e2e-spec.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn test_regex_with_prefix_keeps_the_literal_suffix() {
+        assert_eq!(
+            test_regex_to_glob(r"test/integration/secure/.*\.integration-spec\.ts$"),
+            Some("test/integration/secure/**/*.integration-spec.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn test_regex_literal_suffix_covered_by_defaults_stays_default() {
+        assert_eq!(literal_suffix_glob(r".*\.spec\.ts$"), None);
+        assert_eq!(literal_suffix_glob(r".*\.(test|spec)\.tsx?$"), None);
+    }
+
+    #[test]
+    fn named_jest_config_variants_are_config_files() {
+        let plugin = JestPlugin;
+        let matches = |name: &str| {
+            plugin.config_patterns().iter().any(|pattern| {
+                globset::Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(name))
+            })
+        };
+        assert!(matches("jest-integration.config.ts"));
+        assert!(matches("jest.e2e.config.js"));
+        assert!(matches("jest.config.ts"));
+        assert!(!matches("jest-setup.ts"));
+    }
+
+    #[test]
     fn test_regex_tsx_extension() {
         assert_eq!(
             test_regex_to_glob(r"src/.*\.test\.tsx?$"),
@@ -1094,6 +1184,33 @@ mod tests {
             "testRegex with directory prefix should trigger replacement"
         );
         assert_eq!(result.entry_patterns, vec!["src/**/*.test.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_literal_suffix_test_regex_is_an_entry_pattern() {
+        let source = r#"{"testRegex": ".*\\.integration-spec\\.ts$"}"#;
+        let plugin = JestPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("jest-integration.config.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(result.replace_entry_patterns);
+        assert!(result.accumulate_config_entry_patterns);
+        assert_eq!(result.entry_patterns, vec!["**/*.integration-spec.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_without_test_settings_contributes_the_defaults() {
+        let plugin = JestPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("jest.config.json"),
+            r#"{"transform": {}}"#,
+            std::path::Path::new("/project"),
+        );
+        assert!(result.replace_entry_patterns);
+        assert!(result.accumulate_config_entry_patterns);
+        assert_eq!(result.entry_patterns, DEFAULT_TEST_ENTRY_PATTERNS);
     }
 
     #[test]
@@ -1288,9 +1405,9 @@ mod tests {
         let plugin = JestPlugin;
         let result = plugin.resolve_config(&parent_path, parent_source, root);
 
-        assert!(
-            !result.replace_entry_patterns,
-            "child's testMatch must NOT toggle replace_entry_patterns on the parent",
+        assert_eq!(
+            result.entry_patterns, DEFAULT_TEST_ENTRY_PATTERNS,
+            "the parent contributes only the defaults, not the child's testMatch",
         );
         assert!(
             !result
