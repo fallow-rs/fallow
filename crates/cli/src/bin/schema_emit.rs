@@ -645,17 +645,19 @@ fn derived_definitions() -> Map<String, Value> {
 }
 
 /// The architecture envelopes that share the dead-code body:
-/// `(architecture definition, dead-code definition, title)`.
-const ARCHITECTURE_ENVELOPE_DEFINITIONS: &[(&str, &str, &str)] = &[
+/// `(architecture definition, dead-code definition, title, description)`.
+const ARCHITECTURE_ENVELOPE_DEFINITIONS: &[(&str, &str, &str, &str)] = &[
     (
         "ArchitectureOutput",
         "CheckOutput",
         "fallow architecture --format json",
+        "Envelope emitted by `fallow architecture --format json`.\n\nThe body is the `CheckOutput` body of `fallow dead-code`: the same issue arrays, `summary`, `entry_points`, actions and `gate_outcomes`. The architecture arrays (`circular_dependencies`, `re_export_cycles`, `package_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`) carry the findings. The combined and audit envelopes do not use this envelope; their `check` block stays `CheckOutput`.",
     ),
     (
         "ArchitectureGroupedOutput",
         "CheckGroupedOutput",
         "fallow architecture --group-by <owner|directory|package|section> --format json",
+        "Envelope emitted by `fallow architecture --group-by ... --format json`.\n\nThe body is the `CheckGroupedOutput` body of `fallow dead-code`: issues are partitioned into resolver buckets (CODEOWNERS team, directory prefix, workspace package, or GitLab CODEOWNERS section), and each bucket carries the same issue-array shape as `ArchitectureOutput`, plus per-group `key` / `owners` / `total_issues`.",
     ),
 ];
 
@@ -664,16 +666,20 @@ const ARCHITECTURE_ENVELOPE_DEFINITIONS: &[(&str, &str, &str)] = &[
 ///
 /// `fallow architecture` serializes the same `CheckOutput` and
 /// `CheckGroupedOutput` structs, so a clone of the derived schema keeps the
-/// body equal by construction. Only the title and the `schema_version`
-/// reference change. Runs inside [`derived_definitions`], so the emitter and
+/// body equal by construction. Only the title, the description and the
+/// `schema_version` reference change. Runs inside [`derived_definitions`], so the emitter and
 /// every drift test see the same definitions.
 fn derive_architecture_envelope_definitions(definitions: &mut Map<String, Value>) {
-    for (architecture, dead_code, title) in ARCHITECTURE_ENVELOPE_DEFINITIONS {
+    for (architecture, dead_code, title, description) in ARCHITECTURE_ENVELOPE_DEFINITIONS {
         let Some(mut schema) = definitions.get(*dead_code).cloned() else {
             continue;
         };
         if let Some(object) = schema.as_object_mut() {
             object.insert("title".to_string(), Value::String((*title).to_string()));
+            object.insert(
+                "description".to_string(),
+                Value::String((*description).to_string()),
+            );
         }
         if let Some(version) = schema
             .pointer_mut("/properties/schema_version")
@@ -2042,10 +2048,19 @@ mod drift_tests {
     #[test]
     fn architecture_envelopes_share_the_dead_code_body() {
         let derived = derived_definitions_for_drift();
-        for (architecture, dead_code, _) in ARCHITECTURE_ENVELOPE_DEFINITIONS {
+        for (architecture, dead_code, _, _) in ARCHITECTURE_ENVELOPE_DEFINITIONS {
             let architecture_schema = derived
                 .get(*architecture)
                 .unwrap_or_else(|| panic!("missing derived {architecture}"));
+            let description = architecture_schema
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            assert!(
+                description.contains("`fallow architecture")
+                    && !description.contains("dead-code --"),
+                "{architecture} must describe the architecture command, not dead-code: {description}"
+            );
             let dead_code_schema = derived
                 .get(*dead_code)
                 .unwrap_or_else(|| panic!("missing derived {dead_code}"));

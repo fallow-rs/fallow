@@ -13753,12 +13753,9 @@ thin_wrappers?: ThinWrapperFinding[]
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
 }
 /**
- * Envelope emitted by `fallow dead-code --group-by ... --format json`.
+ * Envelope emitted by `fallow architecture --group-by ... --format json`.
  *
- * Issues are partitioned into resolver buckets (CODEOWNERS team, directory
- * prefix, workspace package, or GitLab CODEOWNERS section) instead of flat
- * arrays. Each bucket carries the same issue-array shape as the ungrouped
- * `CheckOutput` body, plus per-group `key` / `owners` / `total_issues`.
+ * The body is the `CheckGroupedOutput` body of `fallow dead-code`: issues are partitioned into resolver buckets (CODEOWNERS team, directory prefix, workspace package, or GitLab CODEOWNERS section), and each bucket carries the same issue-array shape as `ArchitectureOutput`, plus per-group `key` / `owners` / `total_issues`.
  */
 export interface ArchitectureGroupedOutput {
 schema_version: ArchitectureSchemaVersion
@@ -15085,15 +15082,9 @@ path: string
 sampled_count: number
 }
 /**
- * Envelope emitted by `fallow dead-code --format json` (plus the `check`
- * block inside the combined and audit envelopes).
+ * Envelope emitted by `fallow architecture --format json`.
  *
- * The body is the full `AnalysisResults` flattened into the envelope so
- * every issue array (`unused_files`, `unused_exports`, ...) lives at the
- * top level, matching the existing wire shape. `entry_points` lifts the
- * otherwise `#[serde(skip)]`'d `AnalysisResults::entry_point_summary` back
- * into the JSON output. `summary` carries the per-category counts the
- * JSON layer always emits.
+ * The body is the `CheckOutput` body of `fallow dead-code`: the same issue arrays, `summary`, `entry_points`, actions and `gate_outcomes`. The architecture arrays (`circular_dependencies`, `re_export_cycles`, `package_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`) carry the findings. The combined and audit envelopes do not use this envelope; their `check` block stays `CheckOutput`.
  */
 export interface ArchitectureOutput {
 schema_version: ArchitectureSchemaVersion

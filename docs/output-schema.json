@@ -29962,7 +29962,7 @@
         "groups"
       ],
       "title": "fallow architecture --group-by <owner|directory|package|section> --format json",
-      "description": "Envelope emitted by `fallow dead-code --group-by ... --format json`.\n\nIssues are partitioned into resolver buckets (CODEOWNERS team, directory\nprefix, workspace package, or GitLab CODEOWNERS section) instead of flat\narrays. Each bucket carries the same issue-array shape as the ungrouped\n`CheckOutput` body, plus per-group `key` / `owners` / `total_issues`."
+      "description": "Envelope emitted by `fallow architecture --group-by ... --format json`.\n\nThe body is the `CheckGroupedOutput` body of `fallow dead-code`: issues are partitioned into resolver buckets (CODEOWNERS team, directory prefix, workspace package, or GitLab CODEOWNERS section), and each bucket carries the same issue-array shape as `ArchitectureOutput`, plus per-group `key` / `owners` / `total_issues`."
     },
     "ArchitectureOutput": {
       "type": "object",
@@ -30469,7 +30469,7 @@
         "type_only_dependencies",
         "circular_dependencies"
       ],
-      "description": "Envelope emitted by `fallow dead-code --format json` (plus the `check`\nblock inside the combined and audit envelopes).\n\nThe body is the full `AnalysisResults` flattened into the envelope so\nevery issue array (`unused_files`, `unused_exports`, ...) lives at the\ntop level, matching the existing wire shape. `entry_points` lifts the\notherwise `#[serde(skip)]`'d `AnalysisResults::entry_point_summary` back\ninto the JSON output. `summary` carries the per-category counts the\nJSON layer always emits.",
+      "description": "Envelope emitted by `fallow architecture --format json`.\n\nThe body is the `CheckOutput` body of `fallow dead-code`: the same issue arrays, `summary`, `entry_points`, actions and `gate_outcomes`. The architecture arrays (`circular_dependencies`, `re_export_cycles`, `package_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`) carry the findings. The combined and audit envelopes do not use this envelope; their `check` block stays `CheckOutput`.",
       "title": "fallow architecture --format json"
     }
   }
