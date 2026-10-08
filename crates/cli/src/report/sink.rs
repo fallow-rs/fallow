@@ -188,6 +188,10 @@ fn wait_until_stdout_writable() -> io::Result<()> {
 /// A parent process on Windows does not give a non-blocking stdout pipe. If a
 /// write still returns `WouldBlock`, wait a short time before the next try.
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the signature matches the unix version, which can return a poll error"
+)]
 fn wait_until_stdout_writable() -> io::Result<()> {
     const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(1);
     std::thread::sleep(RETRY_DELAY);

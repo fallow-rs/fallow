@@ -173,6 +173,7 @@ jobs:
               - 'crates/cli/src/coverage/mod.rs'
               - 'crates/cli/src/coverage/upload_source_maps.rs'
               - 'crates/cli/src/health/coverage.rs'
+              - 'crates/cli/src/report/sink.rs'
               - 'crates/cli/src/impact.rs'
               - 'crates/cli/src/lib.rs'
               - 'crates/cli/src/license/mod.rs'
