@@ -275,11 +275,29 @@ fn every_report_from_command_has_a_parity_case() {
     );
     let source = include_str!("report_parity_tests.rs");
     for (command, test) in PARITY_CASES {
+        let body = test_body(source, test)
+            .unwrap_or_else(|| panic!("{command}: parity test `{test}` does not exist"));
+        // `check` is the hidden alias of `dead-code` that the older cases use.
+        let selectors: &[&str] = if *command == "dead-code" {
+            &["dead-code", "check"]
+        } else {
+            &[command]
+        };
         assert!(
-            source.contains(&format!("fn {test}()")),
-            "{command}: parity test `{test}` does not exist"
+            selectors
+                .iter()
+                .any(|selector| body.contains(&format!("Some(\"{selector}\")"))),
+            "{command}: parity test `{test}` does not run `fallow {command}`"
         );
     }
+}
+
+/// The source of `fn {name}()` up to the closing brace at column zero.
+fn test_body<'a>(source: &'a str, name: &str) -> Option<&'a str> {
+    let start = source.find(&format!("fn {name}()"))?;
+    let rest = &source[start..];
+    let end = rest.find("\n}\n").map_or(rest.len(), |offset| offset + 3);
+    Some(&rest[..end])
 }
 
 /// `fallow architecture` writes its own `kind`, so `fallow report --from` must

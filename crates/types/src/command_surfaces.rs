@@ -2,7 +2,8 @@
 //! that must know about it.
 //!
 //! A new analysis command must reach the root `FallowOutput` schema, `fallow
-//! report --from`, the MCP server and the drift harness. Each of those
+//! report --from`, the MCP server, the GitHub Action, the GitLab CI template
+//! and the drift harness. Each of those
 //! surfaces has a test that reads
 //! [`COMMAND_ENVELOPES`](crate::command_surfaces::COMMAND_ENVELOPES), so a
 //! command that is added to the CLI without a row, or a row without a
@@ -18,6 +19,16 @@ pub enum ReportFrom {
     Renders,
     /// `fallow report --from` refuses the saved envelope, for this reason.
     Refused(&'static str),
+}
+
+/// How the GitHub Action and the GitLab CI template treat a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CiIntegration {
+    /// The `command` input of the Action and `FALLOW_COMMAND` of the GitLab
+    /// template accept the command, and the job summary routes its envelope.
+    Routed,
+    /// The CI integrations do not run the command, for this reason.
+    Omitted(&'static str),
 }
 
 /// The machine contract of one analysis subcommand.
@@ -38,6 +49,8 @@ pub struct CommandEnvelope {
     /// Whether the drift harness compares the verdict of the JSON and human
     /// runs (invariant I7).
     pub verdict: bool,
+    /// How the GitHub Action and the GitLab CI template treat the command.
+    pub ci: CiIntegration,
 }
 
 /// Every analysis subcommand with its JSON kinds and surfaces.
@@ -50,6 +63,7 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("analyze"),
         mcp_omission: None,
         verdict: true,
+        ci: CiIntegration::Routed,
     },
     CommandEnvelope {
         command: "architecture",
@@ -59,6 +73,7 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("check_architecture"),
         mcp_omission: None,
         verdict: true,
+        ci: CiIntegration::Routed,
     },
     CommandEnvelope {
         command: "dupes",
@@ -68,6 +83,7 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("find_dupes"),
         mcp_omission: None,
         verdict: true,
+        ci: CiIntegration::Routed,
     },
     CommandEnvelope {
         command: "health",
@@ -77,6 +93,7 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("check_health"),
         mcp_omission: None,
         verdict: true,
+        ci: CiIntegration::Routed,
     },
     CommandEnvelope {
         command: "security",
@@ -86,6 +103,7 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("security_candidates"),
         mcp_omission: None,
         verdict: true,
+        ci: CiIntegration::Routed,
     },
     CommandEnvelope {
         command: "audit",
@@ -95,6 +113,7 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("audit"),
         mcp_omission: None,
         verdict: true,
+        ci: CiIntegration::Routed,
     },
     CommandEnvelope {
         command: "flags",
@@ -106,6 +125,7 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("feature_flags"),
         mcp_omission: None,
         verdict: false,
+        ci: CiIntegration::Omitted("feature flags are an inventory with no CI gate or annotation"),
     },
     CommandEnvelope {
         command: "similar-code",
@@ -117,6 +137,9 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         mcp_tool: Some("find_similar_code"),
         mcp_omission: None,
         verdict: false,
+        ci: CiIntegration::Omitted(
+            "similar-code candidates are unverified and never feed a CI surface",
+        ),
     },
 ];
 

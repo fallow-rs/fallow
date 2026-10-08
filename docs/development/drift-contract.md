@@ -500,8 +500,9 @@ An analysis subcommand reaches many surfaces. The table in
 on each surface, so a new command that misses one fails a test:
 
 1. Add a `COMMAND_ENVELOPES` row with the JSON `kind`, the grouped kind, the
-   `report --from` status, the MCP tool (or the reason there is none) and
-   whether the drift harness compares its verdict. A visible subcommand that
+   `report --from` status, the MCP tool (or the reason there is none), whether
+   the drift harness compares its verdict, and whether the CI integrations run
+   it. A visible subcommand that
    writes no analysis report goes in `COMMANDS_WITHOUT_ANALYSIS_ENVELOPE` with
    its reason. `every_visible_subcommand_is_classified_for_its_machine_contract`
    in `crates/cli/src/lib.rs` fails until the command is in one list.
@@ -512,16 +513,28 @@ on each surface, so a new command that misses one fails a test:
 3. For a row that renders, route the kind in `cli_report.rs` and in every
    saved renderer, and add a parity case to `PARITY_CASES` in
    `report_parity_tests.rs`. `report_from_follows_the_command_envelope_table`
-   and `every_report_from_command_has_a_parity_case` check both.
+   and `every_report_from_command_has_a_parity_case` check both. The parity
+   test that `PARITY_CASES` names must run `fallow <command>`.
 4. Add the MCP tool and its `MCP_TOOLS` row. `every_row_has_an_mcp_tool_or_a_reason`
    checks that the tool names `fallow <command>` as its CLI analogue.
-5. Add a live case to `CONFORMANCE_KINDS` in `schema_conformance.rs`.
+5. Add a live `run_and_validate` case for each kind to
+   `cli_json_documents_conform_to_output_schema` in `schema_conformance.rs`.
+   The test records each validated kind and fails when a row kind has no
+   case. `CONFORMANCE_EXEMPT_KINDS` names the kinds the suite cannot produce.
 6. For a row with a verdict, add a `VERDICT_COMMANDS` entry in
    `crates/cli/tests/drift/main.rs`. `every_verdict_command_row_has_an_i7_case`
    checks it.
+7. For a row with `CiIntegration::Routed`, add the command to the
+   valid-command list in `action/scripts/analyze.sh`, `ci/gitlab-ci.yml` and
+   `crates/cli/templates/ci/gitlab-ci.yml`, and route it in
+   `action/scripts/summary.sh`, `annotate.sh` and the GitLab scripts.
+   `ci_command_lists_follow_the_command_table` checks the valid-command lists
+   and the summary routing. A command that CI does not run gets
+   `CiIntegration::Omitted` with a reason.
 
-The table does not cover the human output, the docs or the companion
-repositories. Check those by hand.
+The table does not cover the human output, the docs, the annotation and
+comment routing of the CI scripts, or the companion repositories. Check those
+by hand.
 
 ## Add an invariant
 

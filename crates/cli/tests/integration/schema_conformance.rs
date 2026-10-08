@@ -172,22 +172,9 @@ fn run_and_validate_with(
         )
     });
     assert_conforms(schema, expected_kind, &value);
+    VALIDATED_KINDS.with(|kinds| kinds.borrow_mut().insert(expected_kind.to_string()));
     value
 }
-
-/// The command kinds that `cli_json_documents_conform_to_output_schema`
-/// validates. A new command row needs a case there and an entry here.
-const CONFORMANCE_KINDS: &[&str] = &[
-    "dead-code",
-    "dead-code-grouped",
-    "architecture",
-    "architecture-grouped",
-    "health",
-    "dupes",
-    "security",
-    "feature-flags",
-    "audit",
-];
 
 /// Command kinds that this suite cannot produce, with the reason.
 const CONFORMANCE_EXEMPT_KINDS: &[(&str, &str)] = &[(
@@ -195,8 +182,16 @@ const CONFORMANCE_EXEMPT_KINDS: &[(&str, &str)] = &[(
     "needs the local similar-code companion and model; the typed output is pinned by the schema drift tests",
 )];
 
-#[test]
-fn every_command_kind_has_a_conformance_case() {
+thread_local! {
+    /// The `kind` of every document that `run_and_validate_with` validated on
+    /// this thread.
+    static VALIDATED_KINDS: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Every kind and grouped kind of `COMMAND_ENVELOPES` must be in `validated`,
+/// unless `CONFORMANCE_EXEMPT_KINDS` names it with a reason.
+fn assert_every_command_kind_was_validated(validated: &std::collections::BTreeSet<String>) {
     for row in fallow_types::command_surfaces::COMMAND_ENVELOPES {
         for kind in std::iter::once(row.kind).chain(row.grouped_kind) {
             if CONFORMANCE_EXEMPT_KINDS
@@ -206,8 +201,8 @@ fn every_command_kind_has_a_conformance_case() {
                 continue;
             }
             assert!(
-                CONFORMANCE_KINDS.contains(&kind),
-                "`fallow {}` writes `{kind}`; add a live conformance case",
+                validated.contains(kind),
+                "`fallow {}` writes `{kind}`, but no live document of that kind was validated; add a case to cli_json_documents_conform_to_output_schema",
                 row.command
             );
         }
@@ -298,6 +293,8 @@ fn cli_json_documents_conform_to_output_schema() {
         &["type-aware", "status"],
         "type-aware-status",
     );
+
+    VALIDATED_KINDS.with(|kinds| assert_every_command_kind_was_validated(&kinds.borrow()));
 }
 
 /// The facts a run publishes about itself: `request_outcomes` and the
