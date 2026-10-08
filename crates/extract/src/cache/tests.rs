@@ -1837,6 +1837,10 @@ fn warm_cache_load_matches_cold_parse() {
     );
     assert_eq!(warm_module.semantic_facts, cold_module.semantic_facts);
     assert_eq!(
+        warm_module.import_binding_references,
+        cold_module.import_binding_references
+    );
+    assert_eq!(
         warm_module.public_signature_type_references,
         cold_module.public_signature_type_references
     );
@@ -1990,4 +1994,22 @@ make("CanRead"); make("CanWrite"); make(kind);"#;
         ]
     );
     assert_eq!(restored.imported_call_sites, module.imported_call_sites);
+}
+
+#[test]
+fn cache_roundtrip_preserves_import_binding_references() {
+    let source = "import { useSelector, useDispatch, Provider } from 'react-redux';\n\
+        export const useAppSelector = useSelector.withTypes<{ n: number }>();\n\
+        export const useAppDispatch = useDispatch;\n\
+        export const App = () => <Provider>{String(useSelector)}</Provider>;\n";
+    let module = parse_from_content(FileId(0), Path::new("src/hooks.tsx"), source);
+    assert_eq!(module.import_binding_references.len(), 4);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let decoded: CachedModule =
+        bitcode::decode(&bitcode::encode(&cached)).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+    assert_eq!(
+        restored.import_binding_references,
+        module.import_binding_references
+    );
 }

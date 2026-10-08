@@ -13474,3 +13474,235 @@ function shadow(make: (kind: string) => unknown) { make("Shadow"); }
         );
     }
 }
+
+type BindingReferenceRow<'a> = (
+    &'a str,
+    &'a str,
+    fallow_types::extract::ImportBindingReferenceKind,
+    usize,
+    Option<&'a str>,
+);
+
+/// Each import binding reference as (local name, member path, kind, offset,
+/// declared name).
+fn binding_references(info: &ModuleInfo) -> Vec<BindingReferenceRow<'_>> {
+    info.import_binding_references
+        .iter()
+        .map(|reference| {
+            (
+                info.imports[reference.import_index as usize]
+                    .local_name
+                    .as_str(),
+                &*reference.member_path,
+                reference.kind,
+                reference.span_start as usize,
+                reference.declared_name.as_deref(),
+            )
+        })
+        .collect()
+}
+
+fn offset_of(source: &str, needle: &str) -> usize {
+    source
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle} is in the source"))
+}
+
+#[test]
+fn import_binding_references_record_value_aliases_at_top_level_and_nested() {
+    use fallow_types::extract::ImportBindingReferenceKind::ValueAlias;
+    let source = "import { useDispatch, useSelector } from 'pkg';\n\
+        const top = useDispatch;\n\
+        export const exported: () => void = useDispatch;\n\
+        function f() { const inner = useSelector; return inner; }\n";
+    let info = parse(source);
+    assert_eq!(
+        binding_references(&info),
+        vec![
+            (
+                "useDispatch",
+                "",
+                ValueAlias,
+                offset_of(source, "useDispatch;\nexport"),
+                Some("top")
+            ),
+            (
+                "useDispatch",
+                "",
+                ValueAlias,
+                offset_of(source, "useDispatch;\nfunction"),
+                Some("exported")
+            ),
+            (
+                "useSelector",
+                "",
+                ValueAlias,
+                offset_of(source, "useSelector; return"),
+                None
+            ),
+        ]
+    );
+}
+
+#[test]
+fn import_binding_references_see_through_typescript_wrappers() {
+    use fallow_types::extract::ImportBindingReferenceKind::{InitializerCall, ValueAlias};
+    let source = "import { a } from 'pkg';\n\
+        export const w1 = a as unknown;\n\
+        export const w2 = a satisfies unknown;\n\
+        export const w3 = a!;\n\
+        export const w4 = a<string>;\n\
+        export const w5 = (a);\n\
+        export const w6 = (a.b.withTypes<string>() as unknown);\n";
+    let info = parse(source);
+    let rows: Vec<_> = binding_references(&info)
+        .into_iter()
+        .map(|(local, member, kind, _, declared)| (local, member, kind, declared))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("a", "", ValueAlias, Some("w1")),
+            ("a", "", ValueAlias, Some("w2")),
+            ("a", "", ValueAlias, Some("w3")),
+            ("a", "", ValueAlias, Some("w4")),
+            ("a", "", ValueAlias, Some("w5")),
+            ("a", "b.withTypes", InitializerCall, Some("w6")),
+        ]
+    );
+}
+
+#[test]
+fn import_binding_references_record_jsx_opening_elements_only() {
+    use fallow_types::extract::ImportBindingReferenceKind::JsxElement;
+    let source = "import { Provider } from 'pkg';\n\
+        import * as RR from 'pkg';\n\
+        export const A = () => <Provider><RR.Provider.Inner /></Provider>;\n";
+    let info = crate::parse_from_content(FileId(0), Path::new("view.tsx"), source);
+    assert_eq!(
+        binding_references(&info),
+        vec![
+            (
+                "Provider",
+                "",
+                JsxElement,
+                offset_of(source, "Provider><RR"),
+                None
+            ),
+            (
+                "RR",
+                "Provider.Inner",
+                JsxElement,
+                offset_of(source, "RR.Provider.Inner"),
+                None
+            ),
+        ]
+    );
+}
+
+#[test]
+fn import_binding_references_record_namespace_member_chains_and_other_uses() {
+    use fallow_types::extract::ImportBindingReferenceKind::Other;
+    let source = "import * as RR from 'pkg';\n\
+        import { pick } from 'pkg';\n\
+        export const hooks = [RR.useDispatch, RR.a.b];\n\
+        consume(RR.useStore);\n\
+        export const maybe = () => pick?.(1);\n\
+        RR['useSelector']();\n";
+    let info = parse(source);
+    let rows: Vec<_> = binding_references(&info)
+        .into_iter()
+        .map(|(local, member, kind, offset, declared)| {
+            (local, member, kind, &source[offset..offset + 2], declared)
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("RR", "useDispatch", Other, "RR", None),
+            ("RR", "a.b", Other, "RR", None),
+            ("RR", "useStore", Other, "RR", None),
+            ("pick", "", Other, "pi", None),
+            ("RR", "", Other, "RR", None),
+        ]
+    );
+}
+
+#[test]
+fn import_binding_references_record_top_level_initializer_calls_only() {
+    use fallow_types::extract::ImportBindingReferenceKind::InitializerCall;
+    let source = "import { useSelector } from 'pkg';\n\
+        export const s = useSelector.withTypes<{ n: number }>();\n\
+        const local = useSelector.withTypes();\n\
+        function f() { const x = useSelector.withTypes(); return x; }\n\
+        export const t = useSelector.withTypes()(1);\n\
+        useSelector(1);\n";
+    let info = parse(source);
+    assert_eq!(
+        binding_references(&info),
+        vec![
+            (
+                "useSelector",
+                "withTypes",
+                InitializerCall,
+                offset_of(source, "useSelector.withTypes<"),
+                Some("s")
+            ),
+            (
+                "useSelector",
+                "withTypes",
+                InitializerCall,
+                offset_of(source, "useSelector.withTypes();\nfunction"),
+                Some("local")
+            ),
+        ]
+    );
+    // The admitted calls stay call sites.
+    assert_eq!(info.imported_call_sites.len(), 5);
+}
+
+#[test]
+fn import_binding_references_skip_type_queries_shadowed_and_type_only_bindings() {
+    let source = "import { useSelector } from 'pkg';\n\
+        import * as RR from 'pkg';\n\
+        import type { Hook } from 'pkg';\n\
+        import { type Other } from 'pkg';\n\
+        type T = typeof useSelector;\n\
+        let v: typeof RR.useStore;\n\
+        function f(useSelector: unknown) { return useSelector; }\n\
+        export const h = Hook;\n\
+        export const o = Other;\n";
+    let info = parse(source);
+    assert_eq!(binding_references(&info), vec![]);
+}
+
+#[test]
+fn import_binding_references_remap_and_rebase_in_vue_scripts() {
+    use fallow_types::extract::ImportBindingReferenceKind::ValueAlias;
+    let source = "<script lang=\"ts\">\nimport { a } from 'pkg';\nexport const q = a;\n</script>\n\
+        <script setup lang=\"ts\">\nimport { b } from 'pkg';\nconst c = b;\n</script>\n\
+        <template><p>{{ c }}</p></template>\n";
+    let info = crate::parse_from_content(FileId(0), Path::new("view.vue"), source);
+    let rows = binding_references(&info);
+    assert!(
+        rows.contains(&(
+            "a",
+            "",
+            ValueAlias,
+            offset_of(source, "a;\n</script>"),
+            Some("q")
+        )),
+        "{rows:?}"
+    );
+    assert!(
+        rows.contains(&(
+            "b",
+            "",
+            ValueAlias,
+            offset_of(source, "b;\n</script>"),
+            Some("c")
+        )),
+        "{rows:?}"
+    );
+    assert_eq!(rows.len(), 2, "{rows:?}");
+}

@@ -1538,6 +1538,9 @@ pub struct SemanticUsage {
     pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
     pub(crate) module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
     pub(crate) imported_call_reference_spans: rustc_hash::FxHashSet<Span>,
+    /// Value references to runtime ESM import bindings that are not admitted
+    /// call sites, plus admitted calls that initialize a top-level declarator.
+    pub(crate) import_binding_references: Vec<fallow_types::extract::ImportBindingReference>,
     /// Non-destructured `require()` bindings nothing in the file references.
     /// Moved into `import_binding_usage.unused` by
     /// [`compute_semantic_usage_for_extractor`], which is the layer that knows
@@ -1567,6 +1570,9 @@ pub fn compute_semantic_usage_for_extractor(
     );
     extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
     extractor.resolve_imported_call_sites(&semantic_usage.imported_call_reference_spans);
+    extractor.set_import_binding_references(std::mem::take(
+        &mut semantic_usage.import_binding_references,
+    ));
     report_unreferenced_import_equals_bindings(
         &mut semantic_usage,
         &extractor.exported_import_equals_names,
@@ -1699,6 +1705,10 @@ fn compute_semantic_usage_with_candidates(
         }
     }
 
+    let imported_call_reference_spans =
+        imported_call_reference_spans(&semantic, imports, candidates.imported_calls);
+    let import_binding_references =
+        crate::binding_references::collect(&semantic, imports, &imported_call_reference_spans);
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
             unused,
@@ -1709,11 +1719,8 @@ fn compute_semantic_usage_with_candidates(
         declaration_merges,
         mock_api_reference_spans,
         module_binding_reference_spans,
-        imported_call_reference_spans: imported_call_reference_spans(
-            &semantic,
-            imports,
-            candidates.imported_calls,
-        ),
+        imported_call_reference_spans,
+        import_binding_references,
         unreferenced_import_equals_bindings: import_equals.unreferenced,
         component_contracts: crate::component_contracts::collect(&semantic, imports, exports),
     }
@@ -1731,29 +1738,10 @@ fn imported_call_reference_spans(
     }
     let scoping = semantic.scoping();
     for import in imports {
-        if import.is_type_only || import.local_name.is_empty() {
-            continue;
-        }
-        let Some(symbol) = scoping.get_binding(
-            scoping.root_scope_id(),
-            oxc_str::Ident::from(import.local_name.as_str()),
-        ) else {
+        let Some(symbol) = crate::binding_references::admitted_import_symbol(semantic, import)
+        else {
             continue;
         };
-        let mut declarations = scoping.symbol_declarations(symbol);
-        let Some(declaration) = declarations.next() else {
-            continue;
-        };
-        if declarations.next().is_some()
-            || !matches!(
-                semantic.nodes().kind(declaration),
-                AstKind::ImportSpecifier(_)
-                    | AstKind::ImportDefaultSpecifier(_)
-                    | AstKind::ImportNamespaceSpecifier(_)
-            )
-        {
-            continue;
-        }
         spans.extend(
             scoping
                 .get_resolved_references(symbol)

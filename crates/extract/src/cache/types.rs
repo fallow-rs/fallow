@@ -54,7 +54,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1472);
+assert_cached_type_size!(CachedModule, 1496);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
@@ -71,6 +71,7 @@ assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
 assert_cached_type_size!(fallow_types::extract::ImportedCallSite, 80);
+assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 48);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
@@ -241,6 +242,9 @@ pub struct CachedModule {
     pub callee_uses: Vec<fallow_types::extract::CalleeUse>,
     /// Scope-resolved imported calls, preserving each occurrence and argument.
     pub imported_call_sites: Vec<fallow_types::extract::ImportedCallSite>,
+    /// Import binding references for `fallow trace --dependency`. Round-trips
+    /// so the dependency usage trace sees them on warm-cache loads.
+    pub import_binding_references: Vec<fallow_types::extract::ImportBindingReference>,
     /// Misplaced `"use client"` / `"use server"` directive sites.
     /// Round-trips so the `misplaced-directive` detector sees them on
     /// warm-cache loads.

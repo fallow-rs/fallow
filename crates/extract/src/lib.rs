@@ -17,6 +17,7 @@
 
 mod asset_url;
 pub mod astro;
+mod binding_references;
 pub mod cache;
 pub(crate) mod complexity;
 mod component_contracts;

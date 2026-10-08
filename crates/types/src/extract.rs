@@ -192,6 +192,10 @@ pub struct ModuleInfo {
     pub callee_uses: Vec<CalleeUse>,
     /// Per-call references to actual runtime ESM import bindings.
     pub imported_call_sites: Arc<[ImportedCallSite]>,
+    /// Value references to runtime ESM import bindings that are not admitted
+    /// call sites, plus admitted calls that initialize a top-level declarator.
+    /// Sorted by `span_start`. Read by `fallow trace --dependency`.
+    pub import_binding_references: Arc<[ImportBindingReference]>,
     /// `"use client"` / `"use server"` directive strings written as expression
     /// statements in `program.body` (misplaced, NOT in the leading
     /// prologue), so the RSC bundler silently ignores them. One entry per
@@ -464,6 +468,7 @@ impl ModuleInfo {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             imported_call_sites: Arc::default(),
+            import_binding_references: Arc::default(),
             misplaced_directives: Vec::new(),
             inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),
@@ -548,6 +553,7 @@ impl ModuleInfo {
         Self::release_boxed_slice(&mut self.type_package_references);
         Self::release_boxed_slice(&mut self.bin_path_references);
         Self::release_arc_slice(&mut self.whole_object_uses);
+        Self::release_arc_slice(&mut self.import_binding_references);
         Self::release_vec(&mut self.unused_import_bindings);
         Self::release_vec(&mut self.type_referenced_import_bindings);
         Self::release_vec(&mut self.value_referenced_import_bindings);
@@ -3299,6 +3305,45 @@ pub struct ImportedCallSite {
     pub span_start: u32,
 }
 
+/// A value reference to a runtime ESM import binding that is not an admitted
+/// call site, or that initializes a top-level declarator.
+///
+/// The admission rules are the same as for [`ImportedCallSite`]: the binding
+/// has one import declaration, it is not type-only, and the reference reads a
+/// value. `fallow trace --dependency` reads these facts to count each use of
+/// an imported name that it cannot resolve to a call, and to find project
+/// wrappers such as `export const useX = useSelector.withTypes()`.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct ImportBindingReference {
+    /// Index into `ModuleInfo.imports` of the root binding.
+    pub import_index: u32,
+    /// Static member suffix after the root, empty for a bare reference.
+    pub member_path: Box<str>,
+    /// How the code uses the reference.
+    pub kind: ImportBindingReferenceKind,
+    /// Start byte of the root identifier, or of the call for
+    /// [`ImportBindingReferenceKind::InitializerCall`].
+    pub span_start: u32,
+    /// Name of the top-level declarator that this reference initializes.
+    pub declared_name: Option<Box<str>>,
+}
+
+/// How the code uses an [`ImportBindingReference`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum ImportBindingReferenceKind {
+    /// An admitted call that is the whole initializer of a top-level
+    /// declarator: `const x = useSelector.withTypes<T>()`.
+    InitializerCall,
+    /// The reference is the whole initializer of a declarator:
+    /// `const x = useDispatch`.
+    ValueAlias,
+    /// The reference names a JSX opening element: `<Provider>`.
+    JsxElement,
+    /// Any other value use that is not an admitted call, for example an
+    /// argument, an array element or an optional call.
+    Other,
+}
+
 /// A `"use client"` / `"use server"` directive string written as an expression
 /// statement in `program.body` (NOT the leading prologue), so the RSC bundler
 /// silently ignores it. One entry per offending occurrence. Consumed by the
@@ -3766,7 +3811,9 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1440);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1456);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -4391,6 +4438,7 @@ mod tests {
             security_control_sites: Vec::new(),
             callee_uses: Vec::new(),
             imported_call_sites: Arc::default(),
+            import_binding_references: Arc::default(),
             misplaced_directives: Vec::new(),
             inline_server_action_exports: Vec::new(),
             di_key_sites: Vec::new(),

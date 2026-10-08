@@ -24,10 +24,10 @@ use crate::{
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
     ClassHeritageInfo, ComponentFunction, ComponentProp, DiKeySite, DispatchedEvent, HookUse,
-    ImportLoadKind, ImportLoadKindOverrideFact, ImportedCallSite, LocalTypeDeclaration,
-    MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge, SanitizedSinkArg,
-    SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite, SkippedSecurityCalleeSite,
-    TaintedBinding,
+    ImportBindingReference, ImportLoadKind, ImportLoadKindOverrideFact, ImportedCallSite,
+    LocalTypeDeclaration, MisplacedDirectiveSite, PublicSignatureTypeReference, RenderEdge,
+    SanitizedSinkArg, SanitizerScope, SecurityControlSite, SinkLiteralValue, SinkSite,
+    SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
@@ -714,6 +714,9 @@ pub(crate) struct ModuleInfoExtractor {
     runtime_import_locals: FxHashSet<String>,
     /// Imported calls admitted by semantic scope identity.
     imported_call_sites: Vec<ImportedCallSite>,
+    /// Value references to runtime ESM import bindings, set by the semantic
+    /// pass. `import_index` points into `imports`.
+    import_binding_references: Vec<ImportBindingReference>,
     /// Dedup guard for `callee_uses`. Working state only: not persisted and
     /// not merged across SFC script blocks (each block dedups independently;
     /// the detector matches per unique path, so cross-block duplicates only
@@ -993,6 +996,14 @@ impl ModuleInfoExtractor {
                 .filter(|(span, _)| references.contains(span))
                 .map(|(_, call)| call),
         );
+    }
+
+    /// Store the import binding references that the semantic pass found.
+    pub(crate) fn set_import_binding_references(
+        &mut self,
+        references: Vec<ImportBindingReference>,
+    ) {
+        self.import_binding_references = references;
     }
 
     /// Record the template that a `defineOgImage('Name')` or
@@ -1576,6 +1587,11 @@ impl ModuleInfoExtractor {
             // `remap` keeps the empty span at offset 0 unchanged, but a call is
             // never empty, so a one-byte span maps every call start.
             call.span_start = remap(Span::new(call.span_start, call.span_start + 1)).start;
+        }
+        for reference in &mut self.import_binding_references {
+            // Same one-byte span method as the call sites above.
+            reference.span_start =
+                remap(Span::new(reference.span_start, reference.span_start + 1)).start;
         }
     }
 
@@ -3085,6 +3101,7 @@ impl ModuleInfoExtractor {
             security_control_sites: self.security_control_sites,
             callee_uses: self.callee_uses,
             imported_call_sites: self.imported_call_sites.into(),
+            import_binding_references: self.import_binding_references.into(),
             misplaced_directives: self.misplaced_directives,
             inline_server_action_exports: self.inline_server_action_exports,
             di_key_sites: self.di_key_sites,
@@ -3161,6 +3178,7 @@ impl ModuleInfoExtractor {
         let mut exported_factory_return_object_shapes =
             self.collect_exported_factory_return_object_shapes();
         let mut type_member_types = self.collect_type_member_types();
+        self.merge_import_binding_references(info);
         info.imports.append(&mut self.imports);
         let mut exports = std::mem::take(&mut info.exports).to_vec();
         exports.append(&mut self.exports);
@@ -3236,6 +3254,27 @@ impl ModuleInfoExtractor {
             calls.append(&mut self.imported_call_sites);
             info.imported_call_sites = calls.into();
         }
+    }
+
+    /// Append this script's import binding references. Call it before the
+    /// imports are appended: each `import_index` moves by the number of
+    /// imports that `info` already holds.
+    fn merge_import_binding_references(&mut self, info: &mut ModuleInfo) {
+        if self.import_binding_references.is_empty() {
+            return;
+        }
+        let base = u32::try_from(info.imports.len()).unwrap_or(u32::MAX);
+        let mut references = std::mem::take(&mut info.import_binding_references).to_vec();
+        references.extend(
+            self.import_binding_references
+                .drain(..)
+                .map(|mut reference| {
+                    reference.import_index = reference.import_index.saturating_add(base);
+                    reference
+                }),
+        );
+        references.sort_by_key(|reference| reference.span_start);
+        info.import_binding_references = references.into();
     }
 
     fn merge_security_info(&mut self, info: &mut ModuleInfo) {
