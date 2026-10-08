@@ -1828,7 +1828,7 @@ struct DeadCodeDetectorInput<'a> {
 
 struct ParallelDeadCodeDetectorResults {
     unused_files: Vec<UnusedFileFinding>,
-    unused_file_candidates: Vec<std::path::PathBuf>,
+    suppressed_unused_files: Vec<std::path::PathBuf>,
     export_results: AnalysisResults,
     member_results: AnalysisResults,
     dependency_results: AnalysisResults,
@@ -1874,7 +1874,7 @@ impl ParallelDeadCodeDetectorResults {
             package_cycles: self.package_cycles,
             export_usages: self.export_usages,
             cascade: fallow_types::results::CascadeState {
-                unused_file_candidates: self.unused_file_candidates,
+                suppressed_unused_files: self.suppressed_unused_files,
                 ..fallow_types::results::CascadeState::default()
             },
             ..AnalysisResults::default()
@@ -1890,7 +1890,7 @@ fn collect_parallel_dead_code_detector_results(
     input: DeadCodeDetectorInput<'_>,
 ) -> ParallelDeadCodeDetectorResults {
     let (
-        ((unused_files, unused_file_candidates), export_results),
+        ((unused_files, suppressed_unused_files), export_results),
         (
             (member_results, dependency_results),
             (
@@ -1924,7 +1924,7 @@ fn collect_parallel_dead_code_detector_results(
 
     ParallelDeadCodeDetectorResults {
         unused_files,
-        unused_file_candidates,
+        suppressed_unused_files,
         export_results,
         member_results,
         dependency_results,
@@ -2395,7 +2395,7 @@ fn run_unused_file_detector(
         .into_iter()
         .map(UnusedFileFinding::with_actions)
         .collect();
-    (findings, scan.candidates)
+    (findings, scan.suppressed)
 }
 
 fn run_export_detectors(

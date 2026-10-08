@@ -632,17 +632,18 @@ const fn is_zero(count: &usize) -> bool {
 
 /// In-process state of the unused-file cascade filter.
 ///
-/// An unused file makes every export and member finding in it redundant:
-/// deleting the file removes them. The filter needs the files and keeps the
-/// findings that it removed, because a baseline entry for such a finding still
+/// An unused file in the report makes every export and member finding in it
+/// redundant: deleting the file removes them. The filter needs the files that
+/// a suppression comment removed from the report, and it keeps the findings
+/// that it removed, because a baseline entry for such a finding still
 /// describes the project and must not count as stale.
 #[derive(Debug, Default, Clone)]
 pub struct CascadeState {
-    /// Files that the unused-files detector found, including files whose
-    /// finding an inline `fallow-ignore-file unused-file` comment suppressed.
-    /// The suppressed files are in the set, so a suppression comment never
-    /// makes a hidden finding visible again.
-    pub unused_file_candidates: Vec<PathBuf>,
+    /// Unused files whose finding an inline `fallow-ignore-file unused-file`
+    /// comment suppressed. The cascade filter treats them as reported, so a
+    /// suppression comment never makes a hidden finding visible again. An
+    /// issue-type selection without unused files clears this list.
+    pub suppressed_unused_files: Vec<PathBuf>,
     /// The findings that the filter removed from the report.
     pub hidden: CascadeHiddenFindings,
 }
@@ -1487,8 +1488,8 @@ impl AnalysisResults {
         self.suppression_count += parts.suppression_count;
         self.cascade_hidden += parts.cascade_hidden;
         self.cascade
-            .unused_file_candidates
-            .extend(parts.cascade.unused_file_candidates);
+            .suppressed_unused_files
+            .extend(parts.cascade.suppressed_unused_files);
         self.cascade.hidden.extend(parts.cascade.hidden);
         self.unused_component_props_exempted += parts.unused_component_props_exempted;
         if self.entry_point_summary.is_none() {

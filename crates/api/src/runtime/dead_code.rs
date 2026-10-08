@@ -970,6 +970,7 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
 fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
     if !filters.unused_files {
         results.unused_files.clear();
+        results.cascade.suppressed_unused_files.clear();
     }
     if !filters.unused_exports {
         results.unused_exports.clear();

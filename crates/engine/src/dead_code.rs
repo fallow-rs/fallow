@@ -873,23 +873,28 @@ pub fn apply_rule_severities(results: &mut AnalysisResults, config: &ResolvedCon
 /// Deleting an unused file removes every unused export, unused type, unused
 /// class member and unused enum member in it, so these findings add no
 /// information to the report. The pass runs inside the rule pass, so every
-/// surface that reports findings hides the same set. It reads the unused-file
-/// candidates of the detector, not the reported files: a scope, an issue-type
-/// filter, an `ignoreFindings` pattern, a baseline or an inline suppression of
-/// the unused-file finding never makes a hidden finding visible again. A file
-/// whose `unused-files` rule is `off` is not a candidate, because the report
-/// does not tell the user to delete it. `showCascade` keeps every finding.
+/// surface that reports findings hides the same set.
+///
+/// A finding is hidden only when the report lists its file in
+/// `unused_files`, or when an inline `fallow-ignore-file unused-file` comment
+/// suppressed that file. A scope, an issue-type selection without unused
+/// files, an `ignoreFindings` pattern or an `off` rule that removes the file
+/// from the report therefore hides nothing in that file. The issue-type
+/// filters clear the suppressed files too, so they must run before this pass.
+/// The baseline runs after this pass, so a baseline entry for the unused file
+/// does not make its findings visible again. `showCascade` keeps every
+/// finding.
 pub fn hide_cascade_findings(results: &mut AnalysisResults, config: &ResolvedConfig) {
-    if config.show_cascade || results.cascade.unused_file_candidates.is_empty() {
+    if config.show_cascade {
         return;
     }
-    let covered: FxHashSet<PathBuf> = results
+    let reported = results.unused_files.iter().map(|f| &f.file.path);
+    let suppressed = results
         .cascade
-        .unused_file_candidates
+        .suppressed_unused_files
         .iter()
-        .filter(|path| config.resolve_rules_for_path(path).unused_files != Severity::Off)
-        .cloned()
-        .collect();
+        .filter(|path| config.resolve_rules_for_path(path).unused_files != Severity::Off);
+    let covered: FxHashSet<PathBuf> = reported.chain(suppressed).cloned().collect();
     if covered.is_empty() {
         return;
     }
@@ -1856,7 +1861,6 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: PathBuf::from(DEAD_FILE),
             }));
-        results.cascade.unused_file_candidates = vec![PathBuf::from(DEAD_FILE)];
         for path in [DEAD_FILE, LIVE_FILE] {
             results.unused_exports.push(unused_export(path));
             results.unused_types.push(unused_type(path));
@@ -2010,16 +2014,33 @@ mod tests {
     #[test]
     fn a_suppressed_unused_file_still_hides_its_findings() {
         // An inline `fallow-ignore-file unused-file` comment removes the file
-        // from `unused_files`, and the file stays a candidate.
+        // from `unused_files`, and the detector records it as suppressed.
         let config = resolve(fallow_config::FallowConfig::default());
         let mut results = cascade_fixture();
         results.unused_files.clear();
+        results.cascade.suppressed_unused_files = vec![PathBuf::from(DEAD_FILE)];
 
         apply_rule_severities(&mut results, &config);
 
         let live = vec![PathBuf::from(LIVE_FILE)];
         assert_eq!(cascade_paths(&results), vec![live; 4]);
         assert_eq!(results.cascade_hidden, 4);
+    }
+
+    #[test]
+    fn a_file_missing_from_the_report_hides_nothing() {
+        // An issue-type filter without `unused-files`, a scope or a rule can
+        // remove the unused file from the report. Its findings must then stay,
+        // or the report loses them without a pointer to the file.
+        let config = resolve(fallow_config::FallowConfig::default());
+        let mut results = cascade_fixture();
+        results.unused_files.clear();
+
+        apply_rule_severities(&mut results, &config);
+
+        let both = vec![PathBuf::from(DEAD_FILE), PathBuf::from(LIVE_FILE)];
+        assert_eq!(cascade_paths(&results), vec![both; 4]);
+        assert_eq!(results.cascade_hidden, 0);
     }
 
     #[test]

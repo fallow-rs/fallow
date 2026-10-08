@@ -234,3 +234,52 @@ fn sarif_lists_only_the_reported_findings() {
                 .is_some_and(|uri| uri.ends_with(DEAD_FILE))
     }));
 }
+
+/// An issue-type filter without unused files removes the file from the
+/// report, so the findings in it must stay.
+#[test]
+fn issue_type_filter_without_unused_files_hides_nothing() {
+    let root = super::common::fixture_path(FIXTURE);
+    let full = dead_code_json(&root, &["--show-cascade"]);
+
+    for flag in ["--unused-exports", "--unused-types"] {
+        let json = dead_code_json(&root, &[flag]);
+        let key = flag.trim_start_matches("--").replace('-', "_");
+        assert_eq!(json[&key], full[&key], "{flag}");
+        assert!(paths(&json, &key).contains(&DEAD_FILE.to_owned()), "{flag}");
+        assert!(json.get("cascade_hidden").is_none(), "{flag}");
+        assert_counts_agree(&json);
+    }
+
+    let json = dead_code_json(&root, &["--unused-files", "--unused-exports"]);
+    assert!(paths(&json, "unused_files").contains(&DEAD_FILE.to_owned()));
+    assert!(!paths(&json, "unused_exports").contains(&DEAD_FILE.to_owned()));
+    assert_eq!(json["cascade_hidden"], 3);
+}
+
+/// A changed-since scope that leaves the unused file out of the report hides
+/// nothing: the scope already removed the findings of that file.
+#[test]
+fn changed_since_scope_without_the_unused_file_hides_nothing() {
+    let dir = copy_fixture(FIXTURE);
+    let root = dir.path();
+    super::common::git(root, &["init", "-q", "-b", "main"]);
+    super::common::commit_all(root, "base");
+    std::fs::write(
+        root.join("src/used.ts"),
+        "export const used = 1;\nexport const liveUnused = 2;\nexport const added = 3;\n",
+    )
+    .unwrap();
+    super::common::commit_all(root, "change");
+
+    for extra in [&[][..], &["--unused-exports"][..]] {
+        let mut args = vec!["--changed-since", "HEAD~1"];
+        args.extend_from_slice(extra);
+        let json = dead_code_json(root, &args);
+
+        assert!(!paths(&json, "unused_files").contains(&DEAD_FILE.to_owned()));
+        assert_eq!(cascade_paths(&json), Vec::<String>::new(), "{extra:?}");
+        assert!(json.get("cascade_hidden").is_none(), "{extra:?}");
+        assert_counts_agree(&json);
+    }
+}

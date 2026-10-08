@@ -1191,6 +1191,18 @@ async fn typed_analyze_count(fixture: &str, issue_types: &[&str], field: &str) -
         .len()
 }
 
+/// The fixture has one unused file with three export findings and one true
+/// finding in a reachable file. Without `unused-files` in `issue_types`, the
+/// report does not list the file, so nothing is hidden.
+#[tokio::test]
+async fn typed_analyze_hides_cascade_findings_only_with_unused_files() {
+    let count = |types: &'static [&'static str]| {
+        typed_analyze_count("cascade-unused-file", types, "unused_exports")
+    };
+    assert_eq!(count(&["unused-exports"]).await, 4);
+    assert_eq!(count(&["unused-files", "unused-exports"]).await, 1);
+}
+
 #[tokio::test]
 async fn typed_analyze_keeps_cycle_findings_for_each_cycle_issue_type() {
     assert_eq!(

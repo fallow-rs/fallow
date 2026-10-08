@@ -18,11 +18,10 @@ pub fn find_unused_files(
 pub struct UnusedFileScan {
     /// The files that the report lists.
     pub files: Vec<UnusedFile>,
-    /// Every unused file, also the files whose finding an inline
-    /// `fallow-ignore-file unused-file` comment suppressed. The cascade filter
-    /// reads this set, so a suppression comment does not change which export
-    /// and member findings it hides.
-    pub candidates: Vec<std::path::PathBuf>,
+    /// The unused files whose finding an inline `fallow-ignore-file
+    /// unused-file` comment suppressed. The cascade filter treats them as
+    /// reported, so a suppression comment never adds a finding.
+    pub suppressed: Vec<std::path::PathBuf>,
 }
 
 /// Find files that are not reachable from any entry point.
@@ -44,12 +43,12 @@ pub struct UnusedFileScan {
 /// import directly from the source files rather than through the barrel.
 ///
 /// The scan also keeps the files that an inline suppression removed from the
-/// report, as cascade candidates.
+/// report, for the cascade filter.
 pub fn find_unused_file_scan(
     graph: &ModuleGraph,
     suppressions: &SuppressionContext<'_>,
 ) -> UnusedFileScan {
-    let candidates: Vec<_> = graph
+    let (suppressed, reported): (Vec<_>, Vec<_>) = graph
         .modules
         .iter()
         .filter(|m| !m.is_reachable() && !m.is_entry_point())
@@ -59,17 +58,15 @@ pub fn find_unused_file_scan(
         .filter(|m| !has_reachable_importer(m.file_id, graph))
         .filter(|m| !has_reachable_export_reference(m.file_id, graph))
         .filter(|m| m.path.exists())
-        .collect();
-    let files = candidates
-        .iter()
-        .filter(|m| !suppressions.is_file_suppressed(m.file_id, IssueKind::UnusedFile))
-        .map(|m| UnusedFile {
-            path: m.path.clone(),
-        })
-        .collect();
+        .partition(|m| suppressions.is_file_suppressed(m.file_id, IssueKind::UnusedFile));
     UnusedFileScan {
-        files,
-        candidates: candidates.iter().map(|m| m.path.clone()).collect(),
+        files: reported
+            .into_iter()
+            .map(|m| UnusedFile {
+                path: m.path.clone(),
+            })
+            .collect(),
+        suppressed: suppressed.into_iter().map(|m| m.path.clone()).collect(),
     }
 }
 
@@ -375,9 +372,9 @@ mod tests {
             scan.files.is_empty(),
             "suppressed file should not be flagged"
         );
-        // The suppressed file stays a cascade candidate, so the suppression
-        // comment does not make the findings in it visible again.
-        assert_eq!(scan.candidates, vec![dir.path().join("orphan.ts")]);
+        // The suppressed file stays known to the cascade filter, so the
+        // suppression comment does not make the findings in it visible again.
+        assert_eq!(scan.suppressed, vec![dir.path().join("orphan.ts")]);
     }
 
     #[test]

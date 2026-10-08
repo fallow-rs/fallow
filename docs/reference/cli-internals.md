@@ -209,19 +209,29 @@ after every gate set the exit code.
   bindings and the editor diagnostics hide the same set. `fix` calls it
   directly, because `fix` runs no rule pass. The filter removes
   `unused_exports`, `unused_types`, `unused_class_members` and
-  `unused_enum_members` findings whose file is an unused-file candidate of
-  the detector (`CascadeState::unused_file_candidates`), unless the
-  `unused-files` rule of that file is `off`. The candidate set includes files
-  whose unused-file finding an inline `fallow-ignore-file unused-file` comment
-  suppressed, so a suppression comment never adds a finding (drift invariant
-  I6). Other finding kinds in an unused file stay. The removed findings move
-  to `CascadeState::hidden`, and `AnalysisResults::cascade_hidden` counts
-  them. The CLI runs the issue-type filters before the rule pass, as the
-  programmatic runtime does, so the count covers the same kinds on every
-  surface. A baseline entry that matches a hidden finding counts as matched in
-  `baseline_staleness`, and `baselines prune` keeps it. `--save-baseline`
-  writes only the reported findings. `--show-cascade`, the `showCascade`
-  config key and the MCP and Node `show_cascade` option turn the filter off.
+  `unused_enum_members` findings only when the report lists their file in
+  `unused_files`. Other finding kinds in an unused file stay.
+  - An inline `fallow-ignore-file unused-file` comment removes the file from
+    the report, and the filter still hides the export and member findings of
+    that file. The detector records such files in
+    `CascadeState::suppressed_unused_files`. A suppression comment therefore
+    never adds a finding (drift invariant I6).
+  - An issue-type selection without unused files, a scope, an
+    `ignoreFindings` pattern or an `off` rule that removes the file from the
+    report hides nothing in that file. The issue-type filters clear
+    `suppressed_unused_files` too. The CLI therefore runs the issue-type
+    filters before the rule pass, as the programmatic runtime does.
+  - With `--changed-since` or `--workspace`, `cascade_hidden` counts only the
+    findings in the scoped files, because the scope runs before the filter.
+  - The removed findings move to `CascadeState::hidden`, and
+    `AnalysisResults::cascade_hidden` counts them.
+  - The baseline runs after the filter. A baseline entry for the unused file
+    does not make its findings visible again. A baseline entry that matches a
+    hidden finding counts as matched in `baseline_staleness`, and
+    `baselines prune` keeps it. A baseline saved while findings are hidden
+    does not contain them.
+  - `--show-cascade`, the `showCascade` config key and the MCP and Node
+    `show_cascade` option turn the filter off.
 - `dead-code --finding-id <id>` (repeatable or comma-separated) reports only
   the requested findings. `fallow_engine::dead_code::FindingIdFilter` owns the
   syntax check and the filter; `FindingIdTrace` owns the evidence. The CLI

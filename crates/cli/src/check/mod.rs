@@ -239,6 +239,7 @@ impl IssueFilters {
     fn apply_core_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
         if !self.unused_files {
             results.unused_files.clear();
+            results.cascade.suppressed_unused_files.clear();
         }
         if !self.unused_exports {
             results.unused_exports.clear();

@@ -1083,6 +1083,54 @@ fn run_dead_code_returns_typed_output_before_json() {
     assert_eq!(unused_export_names(&json), vec!["deadA", "deadB"]);
 }
 
+/// `src/dead.ts` is an unused file. `src/dead-user.ts`, also unused, imports
+/// `deadUsed`, so the export analysis reports `deadUnused` and `deadUsed`.
+fn cascade_project() -> tempfile::TempDir {
+    let project = tempfile::tempdir().expect("temp dir");
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).expect("src dir");
+    write_json(
+        root.join("package.json"),
+        r#"{"name":"api-cascade","main":"src/index.ts"}"#,
+    );
+    std::fs::write(root.join("src/index.ts"), "console.log(1);\n").expect("entry");
+    std::fs::write(
+        root.join("src/dead.ts"),
+        "export const deadUsed = 1;\nexport const deadUnused = 2;\n",
+    )
+    .expect("dead");
+    std::fs::write(
+        root.join("src/dead-user.ts"),
+        "import { deadUsed } from './dead';\nconsole.log(deadUsed);\n",
+    )
+    .expect("dead user");
+    project
+}
+
+#[test]
+fn run_dead_code_hides_cascade_findings_only_when_the_file_is_reported() {
+    let project = cascade_project();
+    let run = |filters: DeadCodeFilters| {
+        run_dead_code(&DeadCodeOptions {
+            analysis: analysis_at(project.path()),
+            filters,
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds")
+    };
+
+    let all = run(DeadCodeFilters::default());
+    assert!(all.results().unused_exports.is_empty());
+    assert_eq!(all.results().cascade_hidden, 2);
+
+    let exports_only = run(DeadCodeFilters {
+        unused_exports: true,
+        ..DeadCodeFilters::default()
+    });
+    assert_eq!(exports_only.results().unused_exports.len(), 2);
+    assert_eq!(exports_only.results().cascade_hidden, 0);
+}
+
 #[test]
 fn run_dead_code_honors_graph_preserving_finding_exclusions() {
     let project = finding_exclusion_project(&["src/hidden.ts"]);
