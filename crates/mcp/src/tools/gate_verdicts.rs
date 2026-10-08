@@ -195,7 +195,9 @@ const DIAGNOSTIC_SITES: &[&[&str]] = &[
 /// section's; the entry names the analysis separately.
 fn noun(root: &Map<String, Value>) -> &'static str {
     match root.get("kind").and_then(Value::as_str) {
-        Some("dead-code" | "architecture") => "issue",
+        Some("dead-code" | "dead-code-grouped" | "architecture" | "architecture-grouped") => {
+            "issue"
+        }
         Some("dupes") => "clone group",
         _ => "finding",
     }
@@ -639,6 +641,8 @@ mod tests {
         for (kind, expected) in [
             ("dead-code", "issue"),
             ("architecture", "issue"),
+            ("dead-code-grouped", "issue"),
+            ("architecture-grouped", "issue"),
             ("dupes", "clone group"),
             ("health", "finding"),
         ] {

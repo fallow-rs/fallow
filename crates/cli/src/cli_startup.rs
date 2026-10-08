@@ -117,7 +117,7 @@ fn validate_input_flags(
         }
     {
         return Err(validation_failure(&format!(
-            "--fail-on-parse-error is not valid with `fallow {command}`. Use it with dead-code, health, audit or the bare run."
+            "--fail-on-parse-error is not valid with `fallow {command}`. Use it with dead-code, architecture, health, audit or the bare run."
         )));
     }
 
@@ -605,7 +605,7 @@ fn sarif_file_without_sarif_error(cli: &Cli) -> Option<String> {
         Some(_) => return None,
     };
     Some(format!(
-        "`fallow {command}` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code` or `fallow security`."
+        "`fallow {command}` does not write a SARIF file, so `--sarif-file` has no effect. Use `--format sarif` with `--output-file`, or use `--sarif-file` with bare `fallow`, `fallow dead-code`, `fallow architecture` or `fallow security`."
     ))
 }
 
@@ -682,7 +682,7 @@ pub fn command_without_global_baseline(command: &Command) -> Option<&'static str
 
 pub fn global_baseline_subcommand_error_message(command: &str, flag: &str) -> String {
     format!(
-        "`fallow {command}` does not load or save a baseline, so `{flag}` has no effect. Use `{flag}` with bare `fallow`, `fallow dead-code`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
+        "`fallow {command}` does not load or save a baseline, so `{flag}` has no effect. Use `{flag}` with bare `fallow`, `fallow dead-code`, `fallow architecture`, `fallow dupes` or `fallow health`, or use `fallow audit --dead-code-baseline`, `--health-baseline` or `--dupes-baseline`."
     )
 }
 
@@ -802,6 +802,21 @@ fn init_cli_diff_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hint names every subcommand that loads and saves the global
+    /// baseline.
+    #[test]
+    fn global_baseline_hint_names_every_baseline_command() {
+        let message = global_baseline_subcommand_error_message("inspect", "--baseline");
+        for command in [
+            "`fallow dead-code`",
+            "`fallow architecture`",
+            "`fallow dupes`",
+            "`fallow health`",
+        ] {
+            assert!(message.contains(command), "{command}: {message}");
+        }
+    }
 
     #[test]
     fn legacy_check_alias_detection_ignores_option_values() {

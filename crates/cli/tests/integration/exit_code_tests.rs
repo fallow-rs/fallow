@@ -2176,8 +2176,38 @@ fn dupes_and_health_reject_the_sarif_file_flag() {
             message.contains("--sarif-file") && message.contains(command),
             "{command}: {message}"
         );
+        for writer in [
+            "`fallow dead-code`",
+            "`fallow architecture`",
+            "`fallow security`",
+        ] {
+            assert!(
+                message.contains(writer),
+                "{command} names {writer}: {message}"
+            );
+        }
         assert!(!root.join("report.sarif").exists(), "{command}");
     }
+}
+
+/// `fallow architecture` writes the SARIF file, as the rejection hint says.
+#[test]
+fn architecture_writes_the_sarif_file() {
+    let (dir, root) = write_confinement_project();
+    let output = run_fallow_from(
+        dir.path(),
+        &root,
+        &[
+            "architecture",
+            "--sarif-file",
+            "report.sarif",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(output.code, 2, "{}", output.stdout);
+    assert!(root.join("report.sarif").exists(), "{}", output.stderr);
 }
 
 /// A bare run writes SARIF only from the dead-code analysis. When `--only`

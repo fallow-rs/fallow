@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a validator that used the schema rejected the valid output of
   `fallow similar-code status --format json` and
   `fallow similar-code cache clear --format json`.
+
 ### Added
 
 - **`fallow architecture`** reports import cycles, boundary violations and
