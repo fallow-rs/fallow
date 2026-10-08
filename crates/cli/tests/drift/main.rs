@@ -41,10 +41,11 @@ use crate::keys::{
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
     Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_envelope_with_baseline,
-    api_envelope, api_finding_id_query, api_keys, api_security, cli_analysis_envelope, cli_audit,
-    cli_combined, cli_envelope, cli_finding_id_query, cli_human_verdict_code, cli_keys,
-    cli_save_baseline, cli_security, cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope,
-    mcp_finding_id_query, mcp_security, mcp_supports, run_cli, run_cli_format,
+    api_envelope, api_finding_id_query, api_keys, api_security, architecture_envelopes,
+    architecture_keys, cli_analysis_envelope, cli_audit, cli_combined, cli_envelope,
+    cli_finding_id_query, cli_human_verdict_code, cli_keys, cli_save_baseline, cli_security,
+    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_security,
+    mcp_supports, run_cli, run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -388,6 +389,44 @@ fn i2_finding_sets_agree_across_surfaces() {
         }
         Ok(())
     });
+}
+
+/// I2 for `fallow architecture`: the CLI, `fallow_api::run_architecture` and
+/// both paths of the MCP `check_architecture` tool report the same findings
+/// with the same finding ids, all under `kind: "architecture"`.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i2_architecture_finding_sets_agree_across_surfaces() {
+    run_invariant("I2", |model| {
+        let project = Project::new(model, true);
+        let empty_baseline = empty_dead_code_baseline(&project);
+        let envelopes =
+            with_server(|server| architecture_envelopes(server, &project.root, &empty_baseline));
+        project.explain(invariants::surfaces_agree(
+            "architecture finding sets differ",
+            &architecture_keys(&envelopes),
+        ))?;
+        project.explain(ids_sound_and_equal(
+            "architecture",
+            &surface_ids(&envelopes),
+        ))
+    });
+}
+
+/// A dead-code baseline with no entries, saved from an empty project in the
+/// scratch directory. It hides nothing, so a run that loads it reports the
+/// same findings as a run without it.
+fn empty_dead_code_baseline(project: &Project) -> PathBuf {
+    let target = project.scratch.join("empty-dead-code-baseline.json");
+    if target.is_file() {
+        return target;
+    }
+    let empty = project.scratch.join("empty-project");
+    std::fs::create_dir_all(&empty).expect("create empty project");
+    std::fs::write(empty.join("package.json"), r#"{"name":"empty"}"#)
+        .expect("write empty manifest");
+    cli_save_baseline(Analysis::DeadCode, &empty, &target);
+    target
 }
 
 /// The group fields that a `--group` selector and a `--trend-from` baseline
@@ -1687,6 +1726,25 @@ const VERDICT_COMMANDS: &[VerdictCommand] = &[
         arm: Arm::Regression,
     },
 ];
+
+/// Every command row that states a verdict has an I7 case, so a new analysis
+/// command cannot skip the JSON-versus-human verdict comparison.
+#[test]
+fn every_verdict_command_row_has_an_i7_case() {
+    for row in fallow_types::command_surfaces::COMMAND_ENVELOPES {
+        let covered = VERDICT_COMMANDS
+            .iter()
+            .any(|command| command.args.first() == Some(&row.command));
+        assert_eq!(
+            covered,
+            row.verdict,
+            "`fallow {}`: COMMAND_ENVELOPES says verdict={} but VERDICT_COMMANDS {} it",
+            row.command,
+            row.verdict,
+            if covered { "lists" } else { "lacks" }
+        );
+    }
+}
 
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]

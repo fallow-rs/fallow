@@ -3354,6 +3354,40 @@ else
     bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
   assert_contains "$(cat "$FASTPATH_SUMMARY")" "# Fallow Analysis" "summary.sh native fastpath writes the native heading"
 
+  # (c2) the architecture envelope has its own kind, and the native report
+  # renders it. The fastpath output equals `report --from` and is not empty.
+  FASTPATH_ARCH_ENVELOPE="$FIXTURES/architecture.json"
+  FASTPATH_ARCH_EXPECTED=$("$FASTPATH_BIN" report --from "$FASTPATH_ARCH_ENVELOPE" --format github-annotations | head -n 999)
+  FASTPATH_ARCH_ACTUAL=$(
+    HAS_NATIVE_REPORT=true \
+      FALLOW_BIN="$FASTPATH_BIN" \
+      FALLOW_COMMAND="architecture" \
+      MAX_ANNOTATIONS="999" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      FALLOW_RESULTS_FILE="$FASTPATH_ARCH_ENVELOPE" \
+      bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
+  )
+  if [ -n "$FASTPATH_ARCH_EXPECTED" ] && [ "$FASTPATH_ARCH_ACTUAL" = "$FASTPATH_ARCH_EXPECTED" ]; then
+    pass "annotate.sh native fastpath renders the architecture envelope like report --from"
+  else
+    fail "annotate.sh native fastpath renders the architecture envelope like report --from" "expected: $FASTPATH_ARCH_EXPECTED actual: $FASTPATH_ARCH_ACTUAL"
+  fi
+  assert_contains "$FASTPATH_ARCH_ACTUAL" "title=Circular dependency" "annotate.sh native fastpath annotates the architecture cycle"
+  FASTPATH_ARCH_SUMMARY="$FASTPATH_WORK/architecture-summary.md"
+  HAS_NATIVE_REPORT=true \
+    FALLOW_BIN="$FASTPATH_BIN" \
+    FALLOW_COMMAND="architecture" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    GITHUB_STEP_SUMMARY="$FASTPATH_ARCH_SUMMARY" \
+    FALLOW_RESULTS_FILE="$FASTPATH_ARCH_ENVELOPE" \
+    bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
+  FASTPATH_ARCH_SUMMARY_EXPECTED=$("$FASTPATH_BIN" report --from "$FASTPATH_ARCH_ENVELOPE" --format github-summary)
+  if [ -n "$FASTPATH_ARCH_SUMMARY_EXPECTED" ] && grep -qF "$(printf '%s\n' "$FASTPATH_ARCH_SUMMARY_EXPECTED" | head -n 1)" "$FASTPATH_ARCH_SUMMARY"; then
+    pass "summary.sh native fastpath renders the architecture envelope"
+  else
+    fail "summary.sh native fastpath renders the architecture envelope" "$(cat "$FASTPATH_ARCH_SUMMARY" 2>/dev/null)"
+  fi
+
   # (d) fix has no report kind: the fastpath is bypassed for the jq summary.
   FASTPATH_FIX_SUMMARY="$FASTPATH_WORK/fix-summary.md"
   FASTPATH_FIX_LOG=$(
@@ -5038,9 +5072,9 @@ rm -rf "$BROKER_WORK"
 # --- Architecture command (issue #3271) ---
 #
 # `fallow architecture` runs the dead-code analysis with only the cycle,
-# boundary and policy issue types, and its JSON is the dead-code envelope. The
-# action accepts the command, counts `total_issues`, and names the command in
-# its own gate lines. The fixture is real `fallow architecture --format json`
+# boundary and policy issue types. Its JSON has `kind: "architecture"` and the
+# dead-code body. The action accepts the command, counts `total_issues`, and
+# names the command in its own gate lines. The fixture is real `fallow architecture --format json`
 # output for a project with one cycle and one boundary violation.
 
 echo ""

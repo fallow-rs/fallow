@@ -7350,6 +7350,50 @@ mod tests {
         }
     }
 
+    /// A new visible subcommand must say whether it writes an analysis report.
+    /// A row in `COMMAND_ENVELOPES` binds it to the schema, `report --from`,
+    /// MCP and drift tests; the other list records why it has no row.
+    #[test]
+    fn every_visible_subcommand_is_classified_for_its_machine_contract() {
+        use clap::CommandFactory;
+        use fallow_types::command_surfaces::{
+            COMMAND_ENVELOPES, COMMANDS_WITHOUT_ANALYSIS_ENVELOPE,
+        };
+
+        let visible: Vec<String> = Cli::command()
+            .get_subcommands()
+            .filter(|sub| !sub.is_hide_set() && sub.get_name() != "help")
+            .map(|sub| sub.get_name().to_string())
+            .collect();
+        for name in &visible {
+            let rows = COMMAND_ENVELOPES
+                .iter()
+                .filter(|row| row.command == name)
+                .count();
+            let others = COMMANDS_WITHOUT_ANALYSIS_ENVELOPE
+                .iter()
+                .filter(|(command, _)| command == name)
+                .count();
+            assert_eq!(
+                rows + others,
+                1,
+                "subcommand `{name}` must be in exactly one of COMMAND_ENVELOPES and \
+                 COMMANDS_WITHOUT_ANALYSIS_ENVELOPE (crates/types/src/command_surfaces.rs)"
+            );
+        }
+        let listed = COMMAND_ENVELOPES.iter().map(|row| row.command).chain(
+            COMMANDS_WITHOUT_ANALYSIS_ENVELOPE
+                .iter()
+                .map(|(command, _)| *command),
+        );
+        for command in listed {
+            assert!(
+                visible.iter().any(|name| name == command),
+                "`{command}` is listed in command_surfaces.rs but is not a visible subcommand"
+            );
+        }
+    }
+
     /// `fallow architecture` selects the same issue types as the deprecated
     /// `dead-code` structure flags, so the two produce the same report.
     #[test]

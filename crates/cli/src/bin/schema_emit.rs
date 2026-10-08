@@ -2017,6 +2017,25 @@ mod drift_tests {
         );
     }
 
+    /// Every analysis command kind, flat and grouped, is a branch of the
+    /// published root schema.
+    #[test]
+    fn every_command_envelope_kind_is_a_schema_kind() {
+        let table: std::collections::BTreeSet<&str> = FALLOW_OUTPUT_VARIANTS
+            .iter()
+            .map(|(kind, _, _)| *kind)
+            .collect();
+        for row in fallow_types::command_surfaces::COMMAND_ENVELOPES {
+            for kind in std::iter::once(row.kind).chain(row.grouped_kind) {
+                assert!(
+                    table.contains(kind),
+                    "`fallow {}` writes kind `{kind}`, which FALLOW_OUTPUT_VARIANTS lacks",
+                    row.command
+                );
+            }
+        }
+    }
+
     /// `fallow architecture` serializes the dead-code structs, so its schema
     /// definitions must keep the dead-code body: the same properties, the same
     /// required list, and the same property schemas except `schema_version`.

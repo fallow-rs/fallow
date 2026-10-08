@@ -231,6 +231,57 @@ fn saved_reports_preserve_native_health_duplication_and_combined_output() {
     );
 }
 
+/// The saved-report parity case of each command that `fallow report --from`
+/// renders, as `(command, test)`. A new command row that renders needs a case
+/// here and a test that compares its saved and direct output.
+const PARITY_CASES: &[(&str, &str)] = &[
+    (
+        "dead-code",
+        "saved_reports_preserve_native_health_duplication_and_combined_output",
+    ),
+    (
+        "architecture",
+        "saved_architecture_reports_match_direct_rendering",
+    ),
+    (
+        "dupes",
+        "saved_reports_preserve_native_health_duplication_and_combined_output",
+    ),
+    (
+        "health",
+        "saved_reports_preserve_native_health_duplication_and_combined_output",
+    ),
+    (
+        "security",
+        "saved_security_report_preserves_native_sarif_and_rejects_codeclimate",
+    ),
+    ("audit", "saved_audit_reports_preserve_all_native_sections"),
+];
+
+#[test]
+fn every_report_from_command_has_a_parity_case() {
+    use fallow_types::command_surfaces::{COMMAND_ENVELOPES, ReportFrom};
+
+    let renders: std::collections::BTreeSet<&str> = COMMAND_ENVELOPES
+        .iter()
+        .filter(|row| row.report_from == ReportFrom::Renders)
+        .map(|row| row.command)
+        .collect();
+    let cases: std::collections::BTreeSet<&str> =
+        PARITY_CASES.iter().map(|(command, _)| *command).collect();
+    assert_eq!(
+        renders, cases,
+        "every command that report --from renders needs a saved-report parity case"
+    );
+    let source = include_str!("report_parity_tests.rs");
+    for (command, test) in PARITY_CASES {
+        assert!(
+            source.contains(&format!("fn {test}()")),
+            "{command}: parity test `{test}` does not exist"
+        );
+    }
+}
+
 /// `fallow architecture` writes its own `kind`, so `fallow report --from` must
 /// accept it and render every target byte-identical to the direct run, flat and
 /// grouped.

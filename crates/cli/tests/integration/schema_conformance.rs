@@ -175,6 +175,45 @@ fn run_and_validate_with(
     value
 }
 
+/// The command kinds that `cli_json_documents_conform_to_output_schema`
+/// validates. A new command row needs a case there and an entry here.
+const CONFORMANCE_KINDS: &[&str] = &[
+    "dead-code",
+    "dead-code-grouped",
+    "architecture",
+    "architecture-grouped",
+    "health",
+    "dupes",
+    "security",
+    "feature-flags",
+    "audit",
+];
+
+/// Command kinds that this suite cannot produce, with the reason.
+const CONFORMANCE_EXEMPT_KINDS: &[(&str, &str)] = &[(
+    "similar-code",
+    "needs the local similar-code companion and model; the typed output is pinned by the schema drift tests",
+)];
+
+#[test]
+fn every_command_kind_has_a_conformance_case() {
+    for row in fallow_types::command_surfaces::COMMAND_ENVELOPES {
+        for kind in std::iter::once(row.kind).chain(row.grouped_kind) {
+            if CONFORMANCE_EXEMPT_KINDS
+                .iter()
+                .any(|(exempt, reason)| *exempt == kind && !reason.is_empty())
+            {
+                continue;
+            }
+            assert!(
+                CONFORMANCE_KINDS.contains(&kind),
+                "`fallow {}` writes `{kind}`; add a live conformance case",
+                row.command
+            );
+        }
+    }
+}
+
 #[test]
 fn cli_json_documents_conform_to_output_schema() {
     let fixture = git_fixture();
@@ -200,6 +239,7 @@ fn cli_json_documents_conform_to_output_schema() {
     );
     run_and_validate(&schema, root, &["health"], "health");
     run_and_validate(&schema, root, &["dupes"], "dupes");
+    run_and_validate(&schema, root, &["security"], "security");
     run_and_validate(&schema, root, &[], "combined");
     run_and_validate(&schema, root, &["suppressions"], "suppression-inventory");
     run_and_validate(&schema, root, &["flags"], "feature-flags");

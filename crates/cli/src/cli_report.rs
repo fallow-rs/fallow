@@ -1002,6 +1002,43 @@ mod tests {
         );
     }
 
+    /// Every command that `fallow report --from` renders parses, and its grouped
+    /// kind flattens to the flat kind. Every refused command stays refused.
+    #[test]
+    fn report_from_follows_the_command_envelope_table() {
+        use fallow_types::command_surfaces::{COMMAND_ENVELOPES, ReportFrom};
+
+        for row in COMMAND_ENVELOPES {
+            match row.report_from {
+                ReportFrom::Renders => {
+                    let kind = parse_envelope_kind(row.kind).unwrap_or_else(|| {
+                        panic!("report --from does not parse kind `{}`", row.kind)
+                    });
+                    assert_eq!(command_label(kind), row.command);
+                    if let Some(grouped) = row.grouped_kind {
+                        let normalized = normalize_saved_envelope(serde_json::json!({
+                            "kind": grouped,
+                            "grouped_by": "directory",
+                            "total_issues": 0,
+                            "groups": [],
+                        }))
+                        .unwrap_or_else(|err| panic!("{grouped} does not normalize: {err}"));
+                        assert_eq!(normalized.envelope["kind"], row.kind);
+                    }
+                }
+                ReportFrom::Refused(reason) => {
+                    assert!(!reason.is_empty(), "{}: empty reason", row.command);
+                    assert_eq!(
+                        parse_envelope_kind(row.kind),
+                        None,
+                        "report --from renders `{}`; mark the row Renders",
+                        row.kind
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn parse_envelope_kind_rejects_unknown_and_grouped_kinds() {
         assert_eq!(parse_envelope_kind("dead-code-grouped"), None);

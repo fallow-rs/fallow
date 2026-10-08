@@ -2365,9 +2365,9 @@ rm -rf "$GATE_WORK"
 # --- Architecture command (issue #3271) ---
 #
 # `fallow architecture` runs the dead-code analysis with only the cycle,
-# boundary and policy issue types, and its JSON is the dead-code envelope. The
-# fixture is real `fallow architecture --format json` output, shared with the
-# GitHub Action suite.
+# boundary and policy issue types. Its JSON has `kind: "architecture"` and the
+# dead-code body. The fixture is real `fallow architecture --format json`
+# output, shared with the GitHub Action suite.
 
 echo ""
 echo "Architecture command"
