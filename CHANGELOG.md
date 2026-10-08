@@ -110,10 +110,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no dependency check of its own. Fallow now adds these globs to the manifest
   globs for analysis and for `fallow list --workspaces`. On a large Nx monorepo
   with 22 undeclared app packages, this removed about 1,900 false unused files.
-  `--workspace` and `--changed-workspaces` also use them in `check`, `dupes`
-  and `health`. `flags`, `security`, `suppressions`, `--group-by package`, and
-  `coverage` still read the manifest globs only.
-
+  `--workspace` and `--changed-workspaces` use them in every command that has
+  a loaded config, and so does `--group-by package`. `fallow init`,
+  `coverage setup`, and the base checkout of `audit` still read the manifest
+  globs only.
+- **TypeORM migrations that a `DataSource` config loads by glob now count.**
+  Fallow reads the `migrations` globs of `data-source.ts`, `*.datasource.ts`
+  and `ormconfig` files. A conditional template such as
+  `${isJest ? 'src/' : 'dist/'}...` gives the `src/` branch. Entities and
+  subscribers stay out, because their files are not run as a whole. On a large
+  Nx monorepo this removed about 200 false unused files.
+- **A package entry that points to build output now maps to its source.**
+  `dist/define/index.mjs` finds `src/define/index.ts`, and a `.d.ts` type target
+  finds its source file. Fallow reads `vite.config.*.ts` and `rollup.config.*`
+  files, and it also tries the `src/` file when a tsconfig maps the output to no
+  existing file. On a large Nx monorepo this removed about 800 false unused
+  exports.
+- **Class members and enum values that a framework reads by reflection now
+  count.** An entity class that is passed to `getRepository`,
+  `createQueryBuilder` or a TypeORM `find` call (with a TypeORM or MikroORM
+  import) is a whole-object use. So is an enum that is passed to
+  `registerEnumType` from `@nestjs/graphql` or `type-graphql`. The `run` method
+  of a `CommandRunner` subclass counts when `nest-commander` is a dependency.
 
 ### Added
 
@@ -222,6 +240,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Findings in an unused file are hidden by default.** An unused export, type,
+  class member or enum member in a file that fallow reports as unused is no
+  longer listed, because deleting the file removes it. The JSON output has the
+  count in `cascade_hidden`. SARIF and markdown name the count too. Pass
+  `--show-cascade`, set `showCascade` in the config, or use the `show_cascade`
+  parameter of the MCP tools to list them. The health vital signs still count
+  them. When an issue-type filter leaves out `unused-files`, nothing is hidden.
+  A baseline saved before this change still matches. A baseline that you save
+  now does not contain the hidden findings, so save a regression baseline again.
 - **`fallow viz` now shows where to start.** The Overview panel opens with
   the health grade and one card per lens: the number of files, the number
   of high findings, and the worst file with its reason. The Overview map colors files
