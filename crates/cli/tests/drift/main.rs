@@ -327,6 +327,26 @@ fn ids_sound_and_equal(context: &str, results: &[(String, Vec<IdentifiedFinding>
 }
 
 #[test]
+fn a_failed_fixture_git_command_reports_the_missing_directory() {
+    let dir = tempfile::tempdir().expect("create case dir");
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(&root).expect("create project dir");
+    model::git(&root, &["init", "-q", "-b", "main"]);
+    std::fs::remove_dir_all(root.join(".git/objects")).expect("remove objects dir");
+    std::fs::write(root.join("a.ts"), "export const a = 1;\n").expect("write file");
+
+    let message = std::panic::catch_unwind(|| model::git(&root, &["add", "-A"]))
+        .expect_err("git add without an object directory fails");
+    let message = message
+        .downcast_ref::<String>()
+        .expect("the panic message is a string");
+    assert!(
+        message.contains(".git=present .git/objects=missing"),
+        "{message}"
+    );
+}
+
+#[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i1_check_output_equals_dead_code_output() {
     run_invariant("I1", |model| {
