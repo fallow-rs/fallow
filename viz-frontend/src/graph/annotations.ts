@@ -38,6 +38,53 @@ const rectsOverlap = (
 ): boolean => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
 /** Greedy screen-space labels for the highest-degree files in view. */
+/** Screen position and count of a hub dot that is on or near the stage. */
+const hubOnScreen = (
+  state: AppState,
+  gvs: GraphViewState,
+  node: FileNode | undefined,
+  width: number,
+  height: number,
+): { sx: number; sy: number; count: number } | null => {
+  if (!node || node.x == null || node.y == null) return null;
+  const count = state.data.files[node.fileIndex].importer_count;
+  if (count < gvs.hubFloor) return null;
+  const sx = node.x * gvs.transform.k + gvs.transform.x;
+  const sy = node.y * gvs.transform.k + gvs.transform.y;
+  const margin = 40;
+  const inside = sx > -margin && sx < width + margin && sy > -margin && sy < height + margin;
+  return inside ? { sx, sy, count } : null;
+};
+
+/**
+ * Screen rects of the hub counts (`×N`) that `drawNodes` writes beside a
+ * hub dot at this zoom. The count is drawn in world space, so it grows
+ * with the zoom.
+ */
+const hubBadgeRects = (
+  state: AppState,
+  gvs: GraphViewState,
+  width: number,
+  height: number,
+): Array<{ x: number; y: number; w: number; h: number }> => {
+  const { ctx } = state;
+  const { transform } = gvs;
+  if (transform.k / gvs.fitK < 1.5) return [];
+  const font = ctx.font;
+  ctx.font = FONT_MICRO;
+  const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
+  for (const node of gvs.fileNodes) {
+    const spot = hubOnScreen(state, gvs, node, width, height);
+    if (!spot) continue;
+    const { sx, sy, count } = spot;
+    const w = ctx.measureText(`×${formatCount(count)}`).width * transform.k;
+    const h = 16 * transform.k;
+    rects.push({ x: sx + node.radius * transform.k + 4, y: sy - h / 2, w: w + 4, h });
+  }
+  ctx.font = font;
+  return rects;
+};
+
 export const drawZoomLabels = (
   state: AppState,
   gvs: GraphViewState,
@@ -60,7 +107,12 @@ export const drawZoomLabels = (
   ctx.font = FONT_SMALL;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+  // File names keep clear of the hub counts beside the dots and of the
+  // road counts drawn over them later.
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [
+    ...hubBadgeRects(state, gvs, width, height),
+    ...roadLabelSpots(state, gvs),
+  ];
   let drawn = 0;
   for (const { node } of ordered) {
     if (drawn >= 40) break;
@@ -390,34 +442,75 @@ export const drawPathTrace = (
     28,
   );
 };
+/** A road count chip: its road, its text and its screen rect. */
+interface RoadLabel {
+  road: number;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Road count chips that fit, busiest roads first. A chip that would cover
+ * another one is dropped, and the deep-zoom file names keep clear of the
+ * rest. Focused roads always show their count.
+ */
+const roadLabelSpots = (state: AppState, gvs: GraphViewState): RoadLabel[] => {
+  const { ctx } = state;
+  const kRel = gvs.transform.k / gvs.fitK;
+  const focusedRoad = (ri: number): boolean => gvs.hoveredRoad === ri || gvs.selectedRoad === ri;
+  const order = gvs.roads
+    .map((road, ri) => ({ road, ri }))
+    .filter(({ road, ri }) => focusedRoad(ri) || (kRel >= 1.5 && road.count >= 2))
+    .toSorted(
+      (left, right) =>
+        Number(focusedRoad(right.ri)) - Number(focusedRoad(left.ri)) ||
+        right.road.count - left.road.count,
+    );
+  const font = ctx.font;
+  ctx.font = FONT_MICRO;
+  const spots: RoadLabel[] = [];
+  for (const { road, ri } of order) {
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
+    const mid = worldToScreen(gvs, routePoint(p0, p1, p2, p3, 0.5));
+    const label = formatCount(road.count);
+    const w = ctx.measureText(label).width + 8;
+    const spot = { road: ri, label, x: mid.x - w / 2, y: mid.y - 8, w, h: 16 };
+    if (!focusedRoad(ri) && spots.some((other) => rectsOverlap(spot, other))) continue;
+    spots.push(spot);
+  }
+  ctx.font = font;
+  return spots;
+};
+
+/** Text colour of a road count: red or ochre when architecture flags it. */
+const roadLabelColor = (state: AppState, road: GraphViewState["roads"][number]): string => {
+  const { theme } = state;
+  if (state.lens !== "architecture") return theme.textLow;
+  if (road.violations > 0) return theme.redText;
+  return road.bidi && road.cycleEdges > 0 ? theme.amberText : theme.textLow;
+};
+
 export const drawRoadLabels = (state: AppState, gvs: GraphViewState): void => {
   const { ctx, theme } = state;
   ctx.font = FONT_MICRO;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const kRel = gvs.transform.k / gvs.fitK;
-  for (let ri = 0; ri < gvs.roads.length; ri++) {
-    const road = gvs.roads[ri];
-    const focused = gvs.hoveredRoad === ri || gvs.selectedRoad === ri;
-    // Quiet by default: numbers appear on zoom or on intent (hover/click).
-    if (!focused && kRel < 1.5) continue;
-    if (road.count < 2 && !focused) continue;
-    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
-    const mid = worldToScreen(gvs, routePoint(p0, p1, p2, p3, 0.5));
-    const label = formatCount(road.count);
-    const textW = ctx.measureText(label).width;
+  for (const spot of roadLabelSpots(state, gvs)) {
+    const cx = spot.x + spot.w / 2;
+    const cy = spot.y + spot.h / 2;
+    const textW = spot.w - 8;
     ctx.fillStyle = theme.bg;
     ctx.globalAlpha = 0.92;
-    ctx.fillRect(mid.x - textW / 2 - 3, mid.y - 7, textW + 6, 14);
+    ctx.fillRect(cx - textW / 2 - 3, cy - 7, textW + 6, 14);
     ctx.globalAlpha = 1;
     ctx.strokeStyle = theme.borderSubtle;
     ctx.lineWidth = 1;
-    ctx.strokeRect(mid.x - textW / 2 - 3.5, mid.y - 7.5, textW + 7, 15);
-    if (state.lens === "architecture" && road.violations > 0) ctx.fillStyle = theme.redText;
-    else if (state.lens === "architecture" && road.bidi && road.cycleEdges > 0)
-      ctx.fillStyle = theme.amberText;
-    else ctx.fillStyle = theme.textLow;
-    ctx.fillText(label, mid.x, mid.y + 0.5);
+    ctx.strokeRect(cx - textW / 2 - 3.5, cy - 7.5, textW + 7, 15);
+    ctx.fillStyle = roadLabelColor(state, gvs.roads[spot.road]);
+    ctx.fillText(spot.label, cx, cy + 0.5);
   }
 };
 
@@ -555,6 +648,8 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
     ...severeNodeRects(state, gvs),
   ];
   gvs.clusterLabels = [];
+  // Folder labels placed so far; even a forced label never covers one.
+  const chips: Array<{ x: number; y: number; w: number; h: number }> = [];
   // How much of each folder the active lens flags: the label answers
   // "where are the problems" before anyone hovers a dot.
   const counts = new Map<ClusterInfo, { flagged: number; severe: number }>();
@@ -615,6 +710,10 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
       minY = Math.min(minY, screenPoint.y);
       maxY = Math.max(maxY, screenPoint.y);
     }
+    // A folder outside the stage gets no label: clamping it to the edge
+    // stacked the labels of every folder scrolled off that side.
+    const stageW = usableStageWidth(state, state.canvas.clientWidth);
+    if (maxX < 0 || minX > stageW || maxY < 0 || minY > state.canvas.clientHeight) continue;
     // Single-file clusters: just the filename, borderless dim text. The
     // full path lives in the tooltip; quiet labels collide far less.
     const single = cluster.indices.length === 1;
@@ -654,7 +753,7 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
     const boxW = Math.max(labelW, metaW) + 14;
     const boxH = twoLine ? 36 : 20;
     // Clamp inside the viewport so edge clusters keep readable chips.
-    const maxLeft = usableStageWidth(state, state.canvas.clientWidth) - boxW - 8;
+    const maxLeft = stageW - boxW - 8;
     const clampX = (left: number): number => Math.min(Math.max(6, left), maxLeft);
     const centerX = clampX((minX + maxX) / 2 - boxW / 2);
     // Candidate chip tops in order of preference: centered above the hull,
@@ -667,24 +766,28 @@ export const drawClusterLabels = (state: AppState, gvs: GraphViewState): void =>
       { x: centerX, y: minY + 4 },
     ];
     const canvasH = state.canvas.clientHeight;
+    const hits =
+      (rects: ReadonlyArray<{ x: number; y: number; w: number; h: number }>) =>
+      (spot: { x: number; y: number }): boolean =>
+        rects.some(
+          (rect) =>
+            spot.x < rect.x + rect.w &&
+            spot.x + boxW > rect.x &&
+            spot.y < rect.y + rect.h &&
+            spot.y + boxH > rect.y,
+        );
     const overlaps = (spot: { x: number; y: number }): boolean =>
-      spot.y < 4 ||
-      spot.y + boxH > canvasH - 4 ||
-      placed.some(
-        (rect) =>
-          spot.x < rect.x + rect.w &&
-          spot.x + boxW > rect.x &&
-          spot.y < rect.y + rect.h &&
-          spot.y + boxH > rect.y,
-      );
+      spot.y < 4 || spot.y + boxH > canvasH - 4 || hits(placed)(spot);
     const free = candidates.find((spot) => !overlaps(spot));
     // A label that cannot find room stays off rather than stacking on a
     // neighbour; its folder still names itself in the tooltip. The largest
-    // folders always label, so the map never loses its largest folders.
-    // A small stage has no room to force labels; crowded ones drop.
-    if (!free && rank >= (panelDocksBelow() ? 0 : ALWAYS_LABELED)) continue;
+    // folders may sit over dots and roads, but never over another folder
+    // label. A small stage has no room to force labels; crowded ones drop.
+    const forced = rank < (panelDocksBelow() ? 0 : ALWAYS_LABELED);
+    if (!free && (!forced || hits(chips)(candidates[0]))) continue;
     const { x, y } = free ?? candidates[0];
     placed.push({ x: x - 3, y: y - 3, w: boxW + 6, h: boxH + 6 });
+    chips.push({ x: x - 3, y: y - 3, w: boxW + 6, h: boxH + 6 });
     // Record the chip rect so a label hover can light up the cluster's roads.
     if (!cluster.isolated) {
       gvs.clusterLabels.push({ cluster: gvs.clusters.indexOf(cluster), x, y, w: boxW, h: boxH });
