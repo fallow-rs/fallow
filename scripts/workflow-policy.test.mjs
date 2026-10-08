@@ -1110,6 +1110,12 @@ test("mise.toml follows the tool versions that CI pins", () => {
 });
 
 const PGO_CONFIG_FLAG = "--config target/pgo-profile/pgo.toml";
+// The instrumented build skips LTO through rustflags only. Cargo hashes the
+// profile LTO value into the crate symbol names, so a profile override makes
+// the profile match almost no function.
+const PGO_GENERATE_RUSTFLAGS =
+  "rustflags = ['-Cprofile-generate=/tmp/pgo-raw', '-Clto=off', '-Clinker-plugin-lto=no']";
+const PROFILE_LTO_OVERRIDE = /profile\.release\.lto|CARGO_PROFILE_RELEASE_LTO/u;
 const PGO_RUST_BINARY_PACKAGES = ["fallow-cli", "fallow-lsp", "fallow-mcp", "fallow-multicall"];
 // A profile matches only a build for the same target on the same runner and
 // container, so each PGO target has a training leg that mirrors its build leg.
@@ -1182,6 +1188,15 @@ test("release trains one PGO profile per PGO target and can build without it", (
   assert.match(profileJob, /PGO_INPUT: \$\{\{ inputs\.pgo \}\}/u);
   assert.match(profileJob, /components: llvm-tools/u);
   assert.match(profileJob, /rustflags = \['-Cprofile-generate=/u);
+  assert.ok(
+    profileJob.includes(PGO_GENERATE_RUSTFLAGS),
+    "the instrumented build must skip LTO through rustflags",
+  );
+  assert.doesNotMatch(
+    profileJob,
+    PROFILE_LTO_OVERRIDE,
+    "a profile LTO override breaks the profile match",
+  );
   assert.match(profileJob, /-p fallow-multicall --config target\/pgo-generate\.toml/u);
   assert.match(profileJob, /scripts\/pgo-train\.sh/u);
   assert.match(profileJob, /download-fixtures\.mjs --only preact,fastify,zod,vue-core,svelte/u);
@@ -1326,6 +1341,12 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
   assert.match(workflow, /^permissions: \{\}$/mu);
   assert.match(train, /scripts\/pgo-train\.sh/u);
   assert.match(train, /components: llvm-tools/u);
+  assert.ok(train.includes(PGO_GENERATE_RUSTFLAGS), "the training build must equal release.yml");
+  assert.doesNotMatch(
+    train,
+    PROFILE_LTO_OVERRIDE,
+    "a profile LTO override breaks the profile match",
+  );
   assert.deepEqual(trainFixtures, ["preact", "fastify", "zod", "vue-core", "svelte"]);
   for (const heldOut of ["query", "vite", "astro"]) {
     assert.ok(!trainFixtures.includes(heldOut), `${heldOut} is a held-out fixture`);

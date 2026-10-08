@@ -373,7 +373,11 @@ The release workflow does these steps:
 2. The job builds an instrumented `fallow-multicall` and fetches the pinned
    training fixtures: preact, fastify, zod, vue-core, and svelte. An
    `actions/cache` entry keyed on the runner OS and
-   `benchmarks/download-fixtures.mjs` holds the fixtures.
+   `benchmarks/download-fixtures.mjs` holds the fixtures. The instrumented
+   build skips LTO through `-Clto=off` and `-Clinker-plugin-lto=no` in its
+   rustflags. Do not move this switch into `profile.release.lto`: Cargo hashes
+   the profile LTO value into the crate symbol names, and the profile then
+   matches almost no function.
 3. The job runs `scripts/pgo-train.sh`. The script runs `check`, `dupes`, and
    `health` on each fixture, plus one short `lsp-server` session and one short
    `mcp-server` session. It merges the raw profiles with the `llvm-profdata`

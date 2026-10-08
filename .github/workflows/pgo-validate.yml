@@ -90,6 +90,8 @@ jobs:
 
       # A per-target rustflags value in a `--config` file merges with
       # .cargo/config.toml. Never set a global RUSTFLAGS in this workflow.
+      # Skip LTO through rustflags only, as release.yml does. A profile LTO
+      # change gives new crate hashes and the profile matches almost no function.
       - name: Build instrumented multicall binary
         shell: bash
         env:
@@ -106,7 +108,7 @@ jobs:
               export "CXXFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-generate"
               ;;
           esac
-          printf "[target.%s]\nrustflags = ['-Cprofile-generate=/tmp/pgo-raw']\n" "$FALLOW_TARGET" > target/pgo-generate.toml
+          printf "[target.%s]\nrustflags = ['-Cprofile-generate=/tmp/pgo-raw', '-Clto=off', '-Clinker-plugin-lto=no']\n" "$FALLOW_TARGET" > target/pgo-generate.toml
           cargo build --release --locked --target "$FALLOW_TARGET" -p fallow-multicall --config target/pgo-generate.toml
 
       - name: Train PGO profile
