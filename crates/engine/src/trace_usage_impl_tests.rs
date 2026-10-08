@@ -797,7 +797,8 @@ fn a_barrel_re_export_of_a_wrapper_is_counted() {
         (
             "src/hooks.ts",
             "import { useSelector } from 'pkg';\n\
-             export const useAppSelector = useSelector.withTypes();\n",
+             export const useAppSelector = useSelector.withTypes();\n\
+             export { useAppSelector as useSel2 };\n",
         ),
     ]);
     let usage = project.usage(&counts_only()).unwrap();
@@ -817,6 +818,68 @@ fn a_barrel_re_export_of_a_wrapper_is_counted() {
             ("src/star.ts".to_owned(), via)
         ]
     );
+}
+
+/// The wrapper counts of a name agree with its `call` sites through a wrapper.
+fn assert_wrapper_counts_match_sites(project: &Project, name: &str) {
+    let usage = project.usage(&counts_only()).unwrap();
+    let entry = specifier(&usage, name);
+    let sites = project.sites(&[name]);
+    for wrapper in &entry.wrappers {
+        let via = format!("{}:{}", wrapper.file, wrapper.export);
+        let calls: Vec<&UsageSite> = sites
+            .iter()
+            .filter(|site| {
+                site.kind == UsageSiteKind::Call && site.via.as_deref() == Some(via.as_str())
+            })
+            .collect();
+        let mut files: Vec<&str> = calls.iter().map(|site| site.file.as_str()).collect();
+        files.sort_unstable();
+        files.dedup();
+        assert_eq!(wrapper.call_site_count, calls.len(), "{name}: {entry:#?}");
+        assert_eq!(
+            wrapper.consumer_file_count,
+            files.len(),
+            "{name}: {entry:#?}"
+        );
+    }
+    let via_calls = sites
+        .iter()
+        .filter(|site| site.kind == UsageSiteKind::Call && site.via.is_some())
+        .count();
+    let wrapper_calls: usize = entry.wrappers.iter().map(|w| w.call_site_count).sum();
+    assert_eq!(wrapper_calls, via_calls, "{name}: {entry:#?} {sites:#?}");
+}
+
+#[test]
+fn a_namespace_alias_wrapper_counts_under_each_member() {
+    let project = Project::new(&[
+        (
+            "src/main.ts",
+            "import * as H from './hooks';\nH.AllRR.useStore();\n",
+        ),
+        (
+            "src/app.ts",
+            "import { AllRR } from './hooks';\nAllRR.useStore();\nAllRR.useSelector(1);\n",
+        ),
+        (
+            "src/hooks.ts",
+            "import * as RR from 'pkg';\nexport const AllRR = RR;\n",
+        ),
+    ]);
+    let usage = project.usage(&counts_only()).unwrap();
+    assert_eq!(
+        wrapper_rows(&usage, "useStore"),
+        vec![("AllRR".to_owned(), 2, 2)]
+    );
+    assert_eq!(
+        wrapper_rows(&usage, "useSelector"),
+        vec![("AllRR".to_owned(), 1, 1)]
+    );
+    assert_eq!(wrapper_rows(&usage, "*"), vec![("AllRR".to_owned(), 0, 0)]);
+    for name in ["useStore", "useSelector", "*"] {
+        assert_wrapper_counts_match_sites(&project, name);
+    }
 }
 
 #[test]

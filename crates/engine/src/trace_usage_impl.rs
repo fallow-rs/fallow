@@ -219,7 +219,7 @@ struct FileSpecifier {
     type_binding: bool,
 }
 
-/// A wrapper found in the scan, with the totals of its consumer calls.
+/// A wrapper found in the scan. The counts of a wrapper come from its sites.
 struct Wrapper {
     file_id: FileId,
     file: String,
@@ -233,14 +233,20 @@ struct Wrapper {
     specifier: String,
     shape: WrapperShape,
     line: u32,
-    consumer_files: FxHashSet<FileId>,
-    call_site_count: usize,
 }
 
 impl Wrapper {
     fn via(&self) -> String {
         format!("{}:{}", self.file, self.export)
     }
+}
+
+/// The counts of one wrapper under one specifier.
+#[derive(Default)]
+struct WrapperCounts<'w> {
+    wrapper: Option<&'w Wrapper>,
+    calls: usize,
+    files: FxHashSet<FileId>,
 }
 
 /// One site with the file that holds it.
@@ -499,8 +505,6 @@ impl Scan {
                         specifier: specifier.clone(),
                         shape,
                         line,
-                        consumer_files: FxHashSet::default(),
-                        call_site_count: 0,
                     });
                 }
             }
@@ -522,11 +526,8 @@ impl Scan {
 
     /// Count the uses of each wrapper in the module that declares it.
     fn scan_module_wrapper_uses(&mut self, scan: &ModuleScan<'_>, first_wrapper: usize) {
-        let mut wrappers = self.wrappers.split_off(first_wrapper);
-        for wrapper in wrappers
-            .iter_mut()
-            .filter(|wrapper| wrapper.owns_module_uses)
-        {
+        let wrappers = self.wrappers.split_off(first_wrapper);
+        for wrapper in wrappers.iter().filter(|wrapper| wrapper.owns_module_uses) {
             let declared = wrapper.declared.clone();
             let uses = scan
                 .module
@@ -556,12 +557,11 @@ impl Scan {
                 );
             }
         }
-        self.wrappers.append(&mut wrappers);
+        self.wrappers.extend(wrappers);
     }
 
-    /// Push a site that goes through `wrapper`. A call of the wrapper counts
-    /// toward the wrapper.
-    fn push_via_site(&mut self, scan: &ModuleScan<'_>, wrapper: &mut Wrapper, site: ViaSite<'_>) {
+    /// Push a site that goes through `wrapper`.
+    fn push_via_site(&mut self, scan: &ModuleScan<'_>, wrapper: &Wrapper, site: ViaSite<'_>) {
         let ViaSite {
             kind,
             offset,
@@ -574,10 +574,6 @@ impl Scan {
         } else {
             (wrapper.specifier.clone(), member)
         };
-        if kind == UsageSiteKind::Call {
-            wrapper.call_site_count += 1;
-            wrapper.consumer_files.insert(scan.module.file_id);
-        }
         self.push_site(
             scan,
             SiteSpec {
@@ -664,8 +660,9 @@ impl Scan {
 
     /// Follow one hop from each wrapper to the files that import it.
     fn follow_wrappers(&mut self, ctx: &UsageContext<'_>) {
-        let mut wrappers = std::mem::take(&mut self.wrappers);
-        for wrapper in &mut wrappers {
+        let wrappers = std::mem::take(&mut self.wrappers);
+        let star_owners = star_re_export_owners(&wrappers);
+        for (index, wrapper) in wrappers.iter().enumerate() {
             for (consumer_id, local_name, prefix) in wrapper_consumers(ctx.graph, wrapper) {
                 let Some(consumer) = ctx.modules_by_id.get(&consumer_id) else {
                     continue;
@@ -682,14 +679,16 @@ impl Scan {
                 };
                 self.scan_consumer(&scan, wrapper, &local_name, prefix.as_deref());
             }
-            self.scan_barrels(ctx, wrapper);
+            self.scan_barrels(ctx, wrapper, star_owners.contains(&index));
         }
         self.wrappers = wrappers;
     }
 
     /// A project re-export of a wrapper is one `re_export` site through the
-    /// wrapper. The consumers of the barrel are not followed.
-    fn scan_barrels(&mut self, ctx: &UsageContext<'_>, wrapper: &Wrapper) {
+    /// wrapper. The consumers of the barrel are not followed. An `export *`
+    /// statement gives one site for each declarator, so only the entry that
+    /// `owns_star` emits it.
+    fn scan_barrels(&mut self, ctx: &UsageContext<'_>, wrapper: &Wrapper, owns_star: bool) {
         let mut importers: Vec<FileId> = ctx.graph.importers_of(wrapper.file_id).to_vec();
         importers.sort_unstable_by_key(|id| id.0);
         importers.dedup();
@@ -710,8 +709,7 @@ impl Scan {
             };
             for re_export in &node.re_exports {
                 let names_wrapper = re_export.imported_name == wrapper.export
-                    || (re_export.imported_name == NAMESPACE_SPECIFIER
-                        && wrapper.export != DEFAULT_SPECIFIER);
+                    || (re_export.imported_name == NAMESPACE_SPECIFIER && owns_star);
                 // The graph adds re-exports with an empty span for `export *`
                 // chains. Only a written re-export is a site.
                 let written = !(re_export.span.start == 0 && re_export.span.end == 0);
@@ -741,7 +739,7 @@ impl Scan {
     fn scan_consumer(
         &mut self,
         scan: &ModuleScan<'_>,
-        wrapper: &mut Wrapper,
+        wrapper: &Wrapper,
         local_name: &str,
         prefix: Option<&str>,
     ) {
@@ -830,6 +828,37 @@ impl Scan {
         }
     }
 
+    /// The counts of each wrapper per specifier, built from the sites. A
+    /// wrapper has an entry under its own specifier and under each specifier
+    /// that a site through it carries. Thus a wrapper of a whole namespace
+    /// shows under each member name that its consumers use.
+    fn wrapper_counts(&self) -> FxHashMap<(&str, String), WrapperCounts<'_>> {
+        let by_via: FxHashMap<String, &Wrapper> = self
+            .wrappers
+            .iter()
+            .map(|wrapper| (wrapper.via(), wrapper))
+            .collect();
+        let mut counts: FxHashMap<(&str, String), WrapperCounts<'_>> = FxHashMap::default();
+        for wrapper in &self.wrappers {
+            counts
+                .entry((wrapper.specifier.as_str(), wrapper.via()))
+                .or_default()
+                .wrapper = Some(wrapper);
+        }
+        for raw in &self.sites {
+            let (Some(name), Some(via)) = (raw.site.specifier.as_deref(), &raw.site.via) else {
+                continue;
+            };
+            let entry = counts.entry((name, via.clone())).or_default();
+            entry.wrapper = by_via.get(via).copied();
+            if raw.site.kind == UsageSiteKind::Call {
+                entry.calls += 1;
+                entry.files.insert(raw.file_id);
+            }
+        }
+        counts
+    }
+
     fn file_level_unresolved(&self) -> FileLevelUnresolved {
         let mut unresolved = FileLevelUnresolved::default();
         for raw in &self.sites {
@@ -886,17 +915,18 @@ impl Scan {
                 count_site(usage, raw);
             }
         }
-        for wrapper in &self.wrappers {
-            if let Some(usage) = usages.get_mut(&wrapper.specifier) {
-                usage.wrappers.push(UsageWrapper {
-                    file: wrapper.file.clone(),
-                    export: wrapper.export.clone(),
-                    shape: wrapper.shape,
-                    line: wrapper.line,
-                    consumer_file_count: wrapper.consumer_files.len(),
-                    call_site_count: wrapper.call_site_count,
-                });
-            }
+        for ((name, _), counts) in self.wrapper_counts() {
+            let (Some(usage), Some(wrapper)) = (usages.get_mut(name), counts.wrapper) else {
+                continue;
+            };
+            usage.wrappers.push(UsageWrapper {
+                file: wrapper.file.clone(),
+                export: wrapper.export.clone(),
+                shape: wrapper.shape,
+                line: wrapper.line,
+                consumer_file_count: counts.files.len(),
+                call_site_count: counts.calls,
+            });
         }
         let mut usages: Vec<SpecifierUsage> = usages.into_values().collect();
         for usage in &mut usages {
@@ -943,6 +973,20 @@ fn count_site(usage: &mut SpecifierUsage, raw: &RawSite) {
         UsageSiteKind::NestedWrapper => unresolved.nested_wrapper += 1,
         _ => {}
     }
+}
+
+/// The index of the wrapper entry that emits the site of an `export *`
+/// statement, one entry for each declarator. A default export is not part of
+/// `export *`, so the owner is the first entry with another export name.
+fn star_re_export_owners(wrappers: &[Wrapper]) -> FxHashSet<usize> {
+    let mut seen: FxHashSet<(FileId, &str)> = FxHashSet::default();
+    wrappers
+        .iter()
+        .enumerate()
+        .filter(|(_, wrapper)| wrapper.export != DEFAULT_SPECIFIER)
+        .filter(|(_, wrapper)| seen.insert((wrapper.file_id, wrapper.declared.as_str())))
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// The start offsets of the initializer calls that define a wrapper.
