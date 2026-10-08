@@ -269,6 +269,27 @@ test("check mode reports a hand edit to a mirrored fallow reference and leaves i
   assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), []);
 });
 
+test("refuses to overwrite an edit made only in the generated copy", () => {
+  const repoRoot = createRepo();
+  addReleasedSkill(repoRoot);
+  generateAgentAdapters({ repoRoot });
+  git(repoRoot, ["init", "--quiet"]);
+  git(repoRoot, ["add", "-f", "--", "."]);
+  git(repoRoot, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "init"]);
+  const mirrored = join(repoRoot, MAINTAINER_SKILL, "references", "gotchas.md");
+  writeFileSync(mirrored, "# Gotchas\n\nA fact only this copy has.\n");
+
+  assert.throws(
+    () => generateAgentAdapters({ repoRoot }),
+    /\.agents\/skills\/fallow\/references\/gotchas\.md -> edit npm\/fallow\/skills\/fallow\/references\/gotchas\.md/,
+  );
+  assert.equal(readFileSync(mirrored, "utf8"), "# Gotchas\n\nA fact only this copy has.\n");
+
+  writeFileSync(join(repoRoot, RELEASED_SKILL, "references", "gotchas.md"), "# Gotchas\n\nNew.\n");
+  generateAgentAdapters({ repoRoot });
+  assert.equal(readFileSync(mirrored, "utf8"), "# Gotchas\n\nNew.\n");
+});
+
 test("removes a fallow reference that only the .agents copy has", () => {
   const repoRoot = createRepo();
   addReleasedSkill(repoRoot);

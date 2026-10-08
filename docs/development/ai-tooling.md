@@ -60,6 +60,9 @@ such as `agents/openai.yaml` stay in the released tree.
 
 - Edit the released tree, then run `npm run generate:agent-adapters`. The run
   refreshes `.agents/skills/<name>/` and then its Claude adapter.
+- The generator stops, and writes nothing, when a maintainer copy has an
+  uncommitted edit that its released file does not have. It names the released
+  file that should take the edit.
 - A new released skill also needs an entry in `SKILLS` in
   `crates/cli/build.rs` and in `RELEASED_SKILLS` in
   `crates/cli/src/agent_install/skill.rs`. `scripts/repository-policy.test.mjs`

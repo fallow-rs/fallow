@@ -57,20 +57,43 @@ const renderAdapter = ({ body, frontmatter }, marker) =>
  * repository's top level, so a top-relative spelling would match nothing.
  */
 const trackedAdapterPaths = (repoRoot) => {
-  const env = { ...process.env };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  delete env.GIT_INDEX_FILE;
   const result = spawnSync("git", ["ls-files", "-z", "--", ".claude"], {
     cwd: repoRoot,
     encoding: "utf8",
-    env,
+    env: gitEnv(),
     maxBuffer: 8 * 1024 * 1024,
   });
   if (result.error || result.status !== 0) {
     return null;
   }
   return new Set(result.stdout.split("\0").filter((path) => path.length > 0));
+};
+
+/**
+ * The environment for a git child process. A git hook exports these variables,
+ * and they would point the child at the hook's repository instead of `repoRoot`.
+ */
+const gitEnv = () => {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  return env;
+};
+
+/**
+ * Whether `path` differs from `HEAD`. `null` when git cannot answer, for
+ * example outside a repository or before the first commit.
+ */
+const changedSinceHead = (repoRoot, path) => {
+  const result = spawnSync("git", ["diff", "--quiet", "HEAD", "--", repoPath(repoRoot, path)], {
+    cwd: repoRoot,
+    env: gitEnv(),
+  });
+  if (result.error || (result.status !== 0 && result.status !== 1)) {
+    return null;
+  }
+  return result.status === 1;
 };
 
 /** Repository-relative path in the forward-slash spelling git reports. */
@@ -227,6 +250,9 @@ const mirrorReleasedSkill = (repoRoot, name, check) => {
     ...companionFiles(skillDir, "references"),
   ];
   const expected = mirroredFiles(releasedDir);
+  if (!check) {
+    refuseMirrorHandEdits(repoRoot, releasedDir, maintainerDir, expected);
+  }
   const drifted = [];
   for (const file of expected) {
     const source = readFileSync(join(releasedDir, file), "utf8");
@@ -253,6 +279,34 @@ const mirrorReleasedSkill = (repoRoot, name, check) => {
     }
   }
   return drifted;
+};
+
+/**
+ * Stop before a regeneration discards an edit made in the generated copy.
+ *
+ * An edit in `.agents/skills/<name>` while the released file is unchanged is a
+ * change in the wrong tree: the mirror would overwrite it without a word.
+ */
+const refuseMirrorHandEdits = (repoRoot, releasedDir, maintainerDir, files) => {
+  const misplaced = files.filter((file) => {
+    const mirror = join(maintainerDir, file);
+    return (
+      existsSync(mirror) &&
+      readFileSync(mirror, "utf8") !== readFileSync(join(releasedDir, file), "utf8") &&
+      changedSinceHead(repoRoot, mirror) === true &&
+      changedSinceHead(repoRoot, join(releasedDir, file)) === false
+    );
+  });
+  if (misplaced.length === 0) {
+    return;
+  }
+  const lines = misplaced.map(
+    (file) =>
+      `  ${repoPath(repoRoot, join(maintainerDir, file))} -> edit ${repoPath(repoRoot, join(releasedDir, file))}`,
+  );
+  throw new Error(
+    `the generated skill copy has edits that its released source does not have. Move each edit to the released file, then run the generator again:\n${lines.join("\n")}`,
+  );
 };
 
 const canonicalAgents = (repoRoot = REPO_ROOT) => {
