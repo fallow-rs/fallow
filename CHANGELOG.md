@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow viz` no longer stops drawing the graph on a narrow stage.** On a
+  stage narrower than 200 px, the camera fit gave a negative zoom, and the
+  canvas threw an error for each negative ring radius. The fit now keeps a
+  minimum usable width.
 - **A warm run no longer reuses the analysis of the previous content of a
   file.** The parse cache, the duplication token cache and the kept modules of
   a long-lived session trusted a file when its modification time, change time
@@ -151,6 +155,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folder header shows how many of its files the lens flags.
 - **Counts agree.** The Overview card for Security shows the files and
   the candidate count of the tab, and the map legend keys each level once.
+  The Architecture tab counts every finding, import cycles included, not
+  only boundary violations. When a card and its tab count the same unit, the
+  card shows its count as a part of the tab count, for example "528 of 6,135
+  files".
+- **The map shows its progress while it loads.** On a large project the
+  first graph layout takes many seconds. A loading screen now shows a
+  progress bar and the current step, in place of an empty stage.
 - **The theme choice is kept.** The light or dark choice applies again
   the next time a report opens.
 - **Back and forward keep the map in step.** A lens change through the
