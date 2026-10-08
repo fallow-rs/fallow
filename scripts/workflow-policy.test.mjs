@@ -1937,3 +1937,37 @@ test("the Hawk workflow installs the toolchain that check-hawk.sh runs", () => {
     "check-hawk.sh must run Hawk on the toolchain that hawk.yml installs",
   );
 });
+
+// Git 2.55 starts a detached `git repack -d` after `git commit` when two loose
+// objects share `objects/17`. The repack removes empty object directories
+// while the next `git add` of a test fixture writes into them, and the test
+// fails with "unable to create temporary file". Fixture helpers set
+// `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM`, so only command-scope config
+// from the environment reaches every one of them.
+const TEST_COMMAND =
+  /cargo (?:test|nextest|llvm-cov)|node --test|npm (?:run )?test\b|npm run verify|vitest|scripts\/test-/;
+
+const GIT_MAINTENANCE_OFF = [
+  "GIT_CONFIG_COUNT: '2'",
+  "GIT_CONFIG_KEY_0: maintenance.auto",
+  "GIT_CONFIG_VALUE_0: 'false'",
+  "GIT_CONFIG_KEY_1: gc.auto",
+  "GIT_CONFIG_VALUE_1: '0'",
+];
+
+test("every workflow that runs tests turns off git automatic maintenance", () => {
+  const testWorkflows = readdirSync(".github/workflows")
+    .filter((name) => /\.ya?ml$/.test(name))
+    .filter((name) => TEST_COMMAND.test(readWorkflow(join(".github/workflows", name))));
+
+  assert.notEqual(testWorkflows.length, 0, "the test-command pattern must match a workflow");
+  for (const name of testWorkflows) {
+    const env = indentedBlock(readWorkflow(join(".github/workflows", name)), "env", 0);
+    for (const entry of GIT_MAINTENANCE_OFF) {
+      assert.ok(
+        env.split("\n").some((line) => line.trim() === entry),
+        `${name} runs tests, so its top-level env must set ${entry}`,
+      );
+    }
+  }
+});
