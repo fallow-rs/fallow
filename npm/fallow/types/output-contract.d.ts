@@ -13342,6 +13342,13 @@ groups: CheckGroupedEntry[]
  */
 unused_load_data_keys_global_abstain?: boolean
 /**
+ * Number of export and member findings that the run hid because their
+ * file is an unused file. The count covers the whole run, so it is on
+ * the root and not in a group. Serialized only when not zero, like the
+ * flat `CheckOutput` field.
+ */
+cascade_hidden?: number
+/**
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the
  * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
@@ -13799,6 +13806,13 @@ groups: CheckGroupedEntry[]
  * only when `true`, like the flat `CheckOutput` field.
  */
 unused_load_data_keys_global_abstain?: boolean
+/**
+ * Number of export and member findings that the run hid because their
+ * file is an unused file. The count covers the whole run, so it is on
+ * the root and not in a group. Serialized only when not zero, like the
+ * flat `CheckOutput` field.
+ */
+cascade_hidden?: number
 /**
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the

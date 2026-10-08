@@ -309,6 +309,7 @@ pub fn serialize_grouped_check_json(
         total_issues: input.original.total_issues(),
         groups: entries,
         unused_load_data_keys_global_abstain: input.original.unused_load_data_keys_global_abstain,
+        cascade_hidden: input.original.cascade_hidden,
         baseline_staleness: input.baseline_staleness,
         finding_id_query: input.finding_id_query,
         gate_outcomes: input.gate_outcomes,

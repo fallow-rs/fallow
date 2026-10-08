@@ -94,6 +94,14 @@ impl CheckEnvelope {
     }
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde `skip_serializing_if` passes the field by reference"
+)]
+const fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).
 ///
@@ -269,6 +277,12 @@ pub struct CheckGroupedOutput {
     /// only when `true`, like the flat `CheckOutput` field.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unused_load_data_keys_global_abstain: bool,
+    /// Number of export and member findings that the run hid because their
+    /// file is an unused file. The count covers the whole run, so it is on
+    /// the root and not in a group. Serialized only when not zero, like the
+    /// flat `CheckOutput` field.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cascade_hidden: usize,
     /// This run's view of the loaded baseline, present only in baseline runs.
     /// Carries the staleness counts, the advisory verdict and `gate_trips`, the
     /// same boolean `--fail-on-stale-baseline` exits on, so a CI integration
@@ -1536,6 +1550,7 @@ mod tests {
             total_issues: 0,
             groups: Vec::new(),
             unused_load_data_keys_global_abstain: false,
+            cascade_hidden: 0,
             meta: None,
             workspace_diagnostics: vec![WorkspaceDiagnostic::new(
                 root,
@@ -1577,6 +1592,7 @@ mod tests {
             total_issues: 0,
             groups: Vec::new(),
             unused_load_data_keys_global_abstain: false,
+            cascade_hidden: 0,
             meta: None,
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),

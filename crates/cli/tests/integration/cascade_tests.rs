@@ -319,3 +319,24 @@ fn changed_since_scope_without_the_unused_file_hides_nothing() {
         assert_counts_agree(&json);
     }
 }
+
+/// The grouped envelope carries the count at its root, as the flat envelope
+/// does, and no group carries it.
+#[test]
+fn grouped_output_carries_the_hidden_count_at_the_root() {
+    let dir = copy_fixture(FIXTURE);
+    std::fs::write(dir.path().join("CODEOWNERS"), "[Core]\n* @team\n").unwrap();
+    let flat = dead_code_json(dir.path(), &[]);
+
+    for mode in ["directory", "owner", "section"] {
+        let json = dead_code_json(dir.path(), &["--group-by", mode]);
+        assert_eq!(json["cascade_hidden"], flat["cascade_hidden"], "{mode}");
+        assert_eq!(json["total_issues"], flat["total_issues"], "{mode}");
+        for group in json["groups"].as_array().unwrap() {
+            assert!(group.get("cascade_hidden").is_none(), "{mode}: {group}");
+        }
+    }
+
+    let shown = dead_code_json(dir.path(), &["--group-by", "directory", "--show-cascade"]);
+    assert!(shown.get("cascade_hidden").is_none());
+}

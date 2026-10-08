@@ -225,6 +225,9 @@ after every gate set the exit code.
     findings in the scoped files, because the scope runs before the filter.
   - The removed findings move to `CascadeState::hidden`, and
     `AnalysisResults::cascade_hidden` counts them.
+  - The grouped envelope copies `cascade_hidden` to its root, as it does
+    with `unused_load_data_keys_global_abstain`. The groups are new result
+    sets, so no group carries the count.
   - The baseline runs after the filter. A baseline entry for the unused file
     does not make its findings visible again. A baseline entry that matches a
     hidden finding counts as matched in `baseline_staleness`, and
