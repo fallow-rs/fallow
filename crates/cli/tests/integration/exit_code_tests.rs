@@ -1356,7 +1356,7 @@ fn subcommands_without_a_baseline_reject_global_baseline_flags() {
 /// The subcommands that use the global baseline flags keep them.
 #[test]
 fn baseline_subcommands_keep_the_global_save_baseline_flag() {
-    for command in ["dead-code", "dupes", "health"] {
+    for command in ["dead-code", "architecture", "dupes", "health"] {
         let dir = tempfile::tempdir().expect("create temp dir");
         let root = dir.path();
         std::fs::write(root.join("package.json"), r#"{"name": "keeps-baseline"}"#).unwrap();

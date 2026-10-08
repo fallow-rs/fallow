@@ -399,8 +399,9 @@ impl TraceOptions {
 
 /// The command a standalone dead-code pipeline run reports for.
 ///
-/// Both commands run the same analysis. The surface changes only the human
-/// layout and the hint that points from `dead-code` to `architecture`.
+/// Both commands run the same analysis. The surface changes the human
+/// layout, the hint that points from `dead-code` to `architecture`, the JSON
+/// `kind` and `schema_version`, and the command that follow-up steps name.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CheckSurface {
     /// `fallow dead-code`.
@@ -408,6 +409,17 @@ pub enum CheckSurface {
     DeadCode,
     /// `fallow architecture`: cycles, boundaries and rule-pack policy rules.
     Architecture,
+}
+
+impl CheckSurface {
+    /// The subcommand that runs this surface, as `fallow <command>` spells it.
+    #[must_use]
+    pub const fn command(self) -> &'static str {
+        match self {
+            Self::DeadCode => "dead-code",
+            Self::Architecture => "architecture",
+        }
+    }
 }
 
 /// The stderr hint that `fallow dead-code` prints when it reports an
@@ -1049,6 +1061,7 @@ fn resolve_check_regression(
         &opts.regression_opts,
         config_baseline,
         analysis_identity,
+        opts.surface.command(),
     )
 }
 
@@ -1370,6 +1383,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             save_path: opts.save_baseline,
             load_path: opts.baseline,
             load_flag: opts.baseline_flag,
+            command: opts.surface.command(),
             root: &config.root,
             quiet: opts.quiet,
             output: opts.output,
@@ -2079,6 +2093,9 @@ struct BaselineIo<'a> {
     /// `--dead-code-baseline`, so a fixed `--baseline` would name an argument that
     /// run does not accept.
     load_flag: &'a str,
+    /// The subcommand that runs, for the `recheck-baseline` next step and the
+    /// regenerate hint. The baseline file format stays `dead-code`.
+    command: &'static str,
     root: &'a std::path::Path,
     quiet: bool,
     output: OutputFormat,
@@ -2299,8 +2316,9 @@ fn load_and_compare_baseline(
             };
             emit_error(
                 &format!(
-                    "baseline analysis identity is incompatible in: {}. Regenerate it with: fallow dead-code{type_aware_flag} --save-baseline {}",
+                    "baseline analysis identity is incompatible in: {}. Regenerate it with: fallow {}{type_aware_flag} --save-baseline {}",
                     fields.join(", "),
+                    io.command,
                     baseline_path.display(),
                 ),
                 2,
@@ -2342,7 +2360,7 @@ fn load_and_compare_baseline(
         );
     }
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
-        command: "dead-code",
+        command: io.command,
         path: baseline_path.display().to_string(),
         baseline_entries: staleness.entries,
         scope_reasons: io.scope_reasons,
@@ -2780,6 +2798,7 @@ mod tests {
                 save_path: Some(&baseline_path),
                 load_path: None,
                 load_flag: "--baseline",
+                command: "dead-code",
                 root: std::path::Path::new("/project"),
                 quiet: true,
                 output: OutputFormat::Json,

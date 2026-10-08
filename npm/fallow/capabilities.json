@@ -142,7 +142,7 @@
       "name": "--baseline",
       "type": "string",
       "required": false,
-      "description": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it"
+      "description": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it"
     },
     {
       "name": "--baseline-mode",
@@ -164,7 +164,7 @@
       "name": "--save-baseline",
       "type": "string",
       "required": false,
-      "description": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
+      "description": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
     },
     {
       "name": "--production",
@@ -311,7 +311,7 @@
       "name": "--sarif-file",
       "type": "string",
       "required": false,
-      "description": "Write SARIF output to a file (in addition to the primary --format output). Used by bare `fallow`, `dead-code` and `security`. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
+      "description": "Write SARIF output to a file (in addition to the primary --format output). Used by bare `fallow`, `dead-code`, `architecture` and `security`. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
     },
     {
       "name": "--output-file",
@@ -2324,7 +2324,7 @@
           "name": "--from",
           "type": "string",
           "required": true,
-          "description": "Path to a fallow JSON results file produced by `--format json` (dead-code, dupes, health, audit, security, or bare combined)"
+          "description": "Path to a fallow JSON results file produced by `--format json` (dead-code, architecture, dupes, health, audit, security, or bare combined)"
         }
       ]
     },

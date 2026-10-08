@@ -339,13 +339,19 @@ fn i1_check_output_equals_dead_code_output() {
 
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
-fn i14_architecture_output_equals_dead_code_structure_filters() {
+fn i14_architecture_findings_equal_dead_code_structure_filters() {
     run_invariant("I14", |model| {
         let project = Project::new(model, true);
-        let architecture = run_cli(&project.root, &["architecture".to_string()]);
-        let structure_flags = run_cli(
-            &project.root,
-            &[
+        for grouped in [false, true] {
+            let group_by: &[&str] = if grouped {
+                &["--group-by", "directory"]
+            } else {
+                &[]
+            };
+            let mut architecture_args = vec!["architecture".to_string()];
+            architecture_args.extend(group_by.iter().map(|arg| (*arg).to_string()));
+            let architecture = run_cli(&project.root, &architecture_args);
+            let mut structure_args: Vec<String> = [
                 "dead-code",
                 "--circular-deps",
                 "--re-export-cycles",
@@ -353,13 +359,18 @@ fn i14_architecture_output_equals_dead_code_structure_filters() {
                 "--boundary-violations",
                 "--policy-violations",
             ]
-            .map(str::to_string),
-        );
-        cli_envelope(&structure_flags);
-        project.explain(invariants::i14_architecture_identical(
-            &architecture,
-            &structure_flags,
-        ))
+            .map(str::to_string)
+            .to_vec();
+            structure_args.extend(group_by.iter().map(|arg| (*arg).to_string()));
+            let structure_flags = run_cli(&project.root, &structure_args);
+            cli_envelope(&structure_flags);
+            project.explain(invariants::i14_architecture_identical(
+                &architecture,
+                &structure_flags,
+                grouped,
+            ))?;
+        }
+        Ok(())
     });
 }
 
@@ -1598,6 +1609,13 @@ struct VerdictCommand {
 const VERDICT_COMMANDS: &[VerdictCommand] = &[
     VerdictCommand {
         args: &["dead-code"],
+        rule: ExitRule::Enforced,
+        requires_object: true,
+        grouped: true,
+        arm: Arm::Default,
+    },
+    VerdictCommand {
+        args: &["architecture"],
         rule: ExitRule::Enforced,
         requires_object: true,
         grouped: true,

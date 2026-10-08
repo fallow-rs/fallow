@@ -40,8 +40,9 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
-    /// The subcommand that ran: `dead-code` or `architecture`.
-    pub(super) command: &'static str,
+    /// The command that ran: sets the root `kind`, `schema_version`,
+    /// `_meta` and the command that `next_steps` names.
+    pub(super) envelope: fallow_output::CheckEnvelope,
 }
 
 pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
@@ -75,10 +76,10 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
         input.root,
         input.elapsed,
         input.config_fixable,
-        check_output_meta(input.explain, input.type_aware, input.command),
+        check_output_meta(input.explain, input.type_aware, input.envelope),
         extras,
         input.workspace_diagnostics,
-        input.command,
+        input.envelope,
     )?;
     input.json_style.serialize(&output)
 }
@@ -99,12 +100,14 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
-    /// The subcommand that ran: `dead-code` or `architecture`.
-    pub(super) command: &'static str,
+    /// The command that ran: sets the root `kind`, `schema_version`,
+    /// `_meta` and the command that `next_steps` names.
+    pub(super) envelope: fallow_output::CheckEnvelope,
 }
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
     let output = match fallow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+        envelope: input.envelope,
         package_baselines: input.package_baselines.to_vec(),
         gate_outcomes: input.gate_outcomes.clone(),
         request_outcomes: crate::requests::request_outcomes(),
@@ -116,14 +119,14 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
         baseline_staleness: input.baseline_staleness,
-        meta: check_output_meta(input.explain, input.type_aware, input.command),
+        meta: check_output_meta(input.explain, input.type_aware, input.envelope),
         workspace_diagnostics: input.workspace_diagnostics.to_vec(),
         next_steps: crate::report::suggestions::build_check_next_steps(
             input.original,
             input.root,
             crate::report::suggestions::setup_pointer_applicable(input.root),
             crate::report::suggestions::due_impact_digest(input.root),
-            input.command,
+            input.envelope.command(),
         ),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     }) {
@@ -140,18 +143,17 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
 fn check_output_meta(
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
-    command: &str,
+    envelope: fallow_output::CheckEnvelope,
 ) -> Option<fallow_types::envelope::Meta> {
     if !explain && type_aware.is_none() {
         return None;
     }
 
     let mut meta = if explain {
-        let mut meta = fallow_output::check_meta();
-        if command == super::ARCHITECTURE_COMMAND {
-            meta.docs = Some(fallow_output::ARCHITECTURE_DOCS.to_string());
+        match envelope {
+            fallow_output::CheckEnvelope::DeadCode => fallow_output::check_meta(),
+            fallow_output::CheckEnvelope::Architecture => fallow_output::architecture_meta(),
         }
-        meta
     } else {
         fallow_types::envelope::Meta::default()
     };
@@ -560,7 +562,7 @@ fn api_check_json_document_with_config_fixable_and_meta(
         meta,
         CheckJsonExtraOutputs::default(),
         &[],
-        "dead-code",
+        fallow_output::CheckEnvelope::DeadCode,
     )
 }
 
@@ -576,9 +578,10 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
     meta: Option<fallow_types::envelope::Meta>,
     extras: CheckJsonExtraOutputs,
     workspace_diagnostics: &[WorkspaceDiagnostic],
-    command: &str,
+    envelope: fallow_output::CheckEnvelope,
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_check_json(CheckJsonOutputInput {
+        envelope,
         results,
         root,
         elapsed,
@@ -591,7 +594,7 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
             root,
             crate::report::suggestions::setup_pointer_applicable(root),
             crate::report::suggestions::due_impact_digest(root),
-            command,
+            envelope.command(),
         ),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
@@ -1312,6 +1315,37 @@ mod tests {
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
+    }
+
+    #[test]
+    fn architecture_document_has_architecture_kind_and_version() {
+        let root = PathBuf::from("/project");
+        let results = AnalysisResults::default();
+        let envelope = fallow_output::CheckEnvelope::Architecture;
+        let output = api_check_json_document_with_config_fixable_meta_and_extras(
+            &results,
+            &root,
+            Duration::from_millis(1),
+            false,
+            check_output_meta(true, None, envelope),
+            CheckJsonExtraOutputs::default(),
+            &[],
+            envelope,
+        )
+        .expect("should serialize");
+
+        assert_eq!(output["kind"], "architecture");
+        assert_eq!(
+            output["schema_version"],
+            fallow_output::ARCHITECTURE_SCHEMA_VERSION
+        );
+        assert_eq!(output["_meta"]["docs"], fallow_output::ARCHITECTURE_DOCS);
+        assert!(output["_meta"]["rules"].get("unused-file").is_none());
+        assert!(
+            output["_meta"]["rules"]
+                .get("circular-dependency")
+                .is_some()
+        );
     }
 
     #[test]
@@ -2260,10 +2294,14 @@ mod tests {
             &root,
             Duration::default(),
             false,
-            check_output_meta(false, Some(&type_aware), "dead-code"),
+            check_output_meta(
+                false,
+                Some(&type_aware),
+                fallow_output::CheckEnvelope::DeadCode,
+            ),
             CheckJsonExtraOutputs::default(),
             &[],
-            "dead-code",
+            fallow_output::CheckEnvelope::DeadCode,
         )
         .expect("type-aware metadata should serialize");
 
@@ -2278,7 +2316,12 @@ mod tests {
     #[test]
     fn type_aware_explain_defines_semantic_metrics() {
         let type_aware = fallow_types::envelope::TypeAwareMeta::default();
-        let meta = check_output_meta(true, Some(&type_aware), "dead-code").expect("metadata");
+        let meta = check_output_meta(
+            true,
+            Some(&type_aware),
+            fallow_output::CheckEnvelope::DeadCode,
+        )
+        .expect("metadata");
 
         assert!(
             meta.field_definitions

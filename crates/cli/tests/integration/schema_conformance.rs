@@ -185,6 +185,19 @@ fn cli_json_documents_conform_to_output_schema() {
     // _meta.telemetry shape is exactly what the process boundary must emit
     // conformantly.
     run_and_validate(&schema, root, &["dead-code"], "dead-code");
+    run_and_validate(
+        &schema,
+        root,
+        &["dead-code", "--group-by", "directory"],
+        "dead-code-grouped",
+    );
+    run_and_validate(&schema, root, &["architecture"], "architecture");
+    run_and_validate(
+        &schema,
+        root,
+        &["architecture", "--group-by", "directory"],
+        "architecture-grouped",
+    );
     run_and_validate(&schema, root, &["health"], "health");
     run_and_validate(&schema, root, &["dupes"], "dupes");
     run_and_validate(&schema, root, &[], "combined");

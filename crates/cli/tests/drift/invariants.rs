@@ -55,17 +55,89 @@ pub fn i1_alias_identical(check: &CommandOutput, dead_code: &CommandOutput) -> V
     reports_identical(("dead-code", dead_code), ("check", check))
 }
 
-/// I14: `architecture` is byte-identical to `dead-code` with the five
-/// deprecated structure flags after the volatile fields are removed, and both
-/// runs exit with the same code.
+/// The root members that name the command instead of the findings. I14
+/// removes them before it compares the two report bodies.
+const COMMAND_NAMING_ROOT_KEYS: &[&str] = &["kind", "schema_version", "_meta", "next_steps"];
+
+/// I14: `architecture` reports the same body as `dead-code` with the five
+/// deprecated structure flags: the same exit code, finding keys, finding ids,
+/// gate outcomes and canonical report once the volatile fields and the members
+/// that name the command are removed. The root `kind` is `architecture` (or
+/// `architecture-grouped`) on one side and `dead-code` (or
+/// `dead-code-grouped`) on the other.
 pub fn i14_architecture_identical(
     architecture: &CommandOutput,
     structure_flags: &CommandOutput,
+    grouped: bool,
 ) -> Verdict {
-    reports_identical(
-        ("dead-code structure flags", structure_flags),
-        ("architecture", architecture),
-    )
+    let (architecture_kind, dead_code_kind) = if grouped {
+        ("architecture-grouped", "dead-code-grouped")
+    } else {
+        ("architecture", "dead-code")
+    };
+    root_kind_is(architecture, architecture_kind)?;
+    root_kind_is(structure_flags, dead_code_kind)?;
+    if architecture.code != structure_flags.code {
+        return Err(format!(
+            "exit codes differ: architecture {} != dead-code structure flags {}",
+            architecture.code, structure_flags.code
+        ));
+    }
+    let architecture_body = command_neutral_report(architecture);
+    let structure_body = command_neutral_report(structure_flags);
+    if !grouped {
+        keys_equal(
+            "dead-code structure flags",
+            &crate::keys::dead_code_keys(&structure_body),
+            "architecture",
+            &crate::keys::dead_code_keys(&architecture_body),
+        )?;
+    }
+    if architecture_body["gate_outcomes"] != structure_body["gate_outcomes"] {
+        return Err(format!(
+            "gate_outcomes differ: architecture {} != dead-code structure flags {}",
+            architecture_body["gate_outcomes"], structure_body["gate_outcomes"]
+        ));
+    }
+    let expected = pretty_value(&structure_body);
+    let actual = pretty_value(&architecture_body);
+    if actual == expected {
+        return Ok(());
+    }
+    let unified = TextDiff::from_lines(&expected, &actual)
+        .unified_diff()
+        .context_radius(2)
+        .header("dead-code structure flags", "architecture")
+        .to_string();
+    Err(format!(
+        "architecture body differs from dead-code structure flags body:\n{unified}"
+    ))
+}
+
+fn root_kind_is(output: &CommandOutput, expected: &str) -> Verdict {
+    let value = crate::common::parse_json(output);
+    if value["kind"] == expected {
+        return Ok(());
+    }
+    Err(format!(
+        "expected root kind `{expected}`, got {}",
+        value["kind"]
+    ))
+}
+
+fn command_neutral_report(output: &CommandOutput) -> serde_json::Value {
+    let mut value: serde_json::Value =
+        serde_json::from_str(&canonical_report(output)).expect("canonical report is JSON");
+    if let Some(root) = value.as_object_mut() {
+        for key in COMMAND_NAMING_ROOT_KEYS {
+            root.remove(*key);
+        }
+    }
+    value
+}
+
+fn pretty_value(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).expect("pretty-print report body")
 }
 
 /// The canonical reports and exit codes of two runs are equal. On a

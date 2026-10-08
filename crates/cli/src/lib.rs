@@ -391,7 +391,8 @@ struct Cli {
     max_file_size: Option<u32>,
 
     /// Compare against a previously saved baseline file. Used by bare
-    /// `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it
+    /// `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other
+    /// subcommands reject it
     #[arg(hide_short_help = true, long, global = true)]
     baseline: Option<PathBuf>,
 
@@ -426,8 +427,9 @@ struct Cli {
     parent_run: Option<String>,
 
     /// Save the current results as a baseline file. Used by bare `fallow`,
-    /// `dead-code`, `dupes` and `health`; other subcommands reject it. The path
-    /// must resolve inside the project root, its Git work tree, the CI workspace or a temp directory
+    /// `dead-code`, `architecture`, `dupes` and `health`; other subcommands
+    /// reject it. The path must resolve inside the project root, its Git work
+    /// tree, the CI workspace or a temp directory
     #[arg(hide_short_help = true, long, global = true)]
     save_baseline: Option<PathBuf>,
 
@@ -514,9 +516,9 @@ struct Cli {
     fail_on_issues: bool,
 
     /// Write SARIF output to a file (in addition to the primary --format output).
-    /// Used by bare `fallow`, `dead-code` and `security`. The path must resolve
-    /// inside the project root, its Git work tree, the CI workspace or a temp
-    /// directory
+    /// Used by bare `fallow`, `dead-code`, `architecture` and `security`. The
+    /// path must resolve inside the project root, its Git work tree, the CI
+    /// workspace or a temp directory
     #[arg(hide_short_help = true, long, global = true, value_name = "PATH")]
     sarif_file: Option<PathBuf>,
 
@@ -600,9 +602,9 @@ struct Cli {
     /// entry in `workspace_diagnostics[]` fails the run, and the gate entry in
     /// `gate_outcomes["parse-error"]` names each such file. Off by default,
     /// because the parser also rejects valid syntax that is newer than the
-    /// parser. Applies to `dead-code`, `health`, `audit` and the bare run, in
-    /// every output format. The `failOnParseError` config key arms the same
-    /// gate. `health --report-only` never fails a run.
+    /// parser. Applies to `dead-code`, `architecture`, `health`, `audit` and
+    /// the bare run, in every output format. The `failOnParseError` config key
+    /// arms the same gate. `health --report-only` never fails a run.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_parse_error: bool,
 
@@ -2124,7 +2126,8 @@ enum Command {
     /// SARIF, markdown, and GitHub/GitLab PR-comment and review formats.
     Report {
         /// Path to a fallow JSON results file produced by `--format json`
-        /// (dead-code, dupes, health, audit, security, or bare combined).
+        /// (dead-code, architecture, dupes, health, audit, security, or bare
+        /// combined).
         #[arg(long, value_name = "PATH")]
         from: PathBuf,
     },

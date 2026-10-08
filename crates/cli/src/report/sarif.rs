@@ -605,7 +605,7 @@ fn saved_dead_code_results(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
 ) -> Option<AnalysisResults> {
-    if kind != EnvelopeKind::DeadCode {
+    if !kind.is_dead_code_family() {
         return None;
     }
     let mut results = AnalysisResults::deserialize(envelope).ok()?;
@@ -634,10 +634,12 @@ pub fn note_saved_severity_fallback(
     config_path: Option<&Path>,
 ) {
     let section = match kind {
-        EnvelopeKind::DeadCode => Some(envelope),
+        EnvelopeKind::DeadCode | EnvelopeKind::Architecture => Some(envelope),
         EnvelopeKind::Audit => envelope.get("dead_code"),
         EnvelopeKind::Combined => envelope.get("check"),
-        _ => None,
+        EnvelopeKind::Dupes | EnvelopeKind::Health | EnvelopeKind::Security | EnvelopeKind::Fix => {
+            None
+        }
     };
     let Some(results) = section.and_then(|value| AnalysisResults::deserialize(value).ok()) else {
         return;
@@ -679,7 +681,9 @@ fn envelope_sarif_base_with_config(
 ) -> serde_json::Value {
     let rules = saved_report_rules(root, config_path);
     match kind {
-        EnvelopeKind::DeadCode => api_sarif_document(&AnalysisResults::default(), root, &rules),
+        EnvelopeKind::DeadCode | EnvelopeKind::Architecture => {
+            api_sarif_document(&AnalysisResults::default(), root, &rules)
+        }
         EnvelopeKind::Dupes => {
             fallow_api::build_duplication_sarif(&DuplicationReport::default(), root, &sarif_rule)
         }

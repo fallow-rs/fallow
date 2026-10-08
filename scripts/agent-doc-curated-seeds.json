@@ -1224,7 +1224,7 @@
       "section": "flags:global",
       "row": "--baseline",
       "column": "Description",
-      "seed": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it"
+      "seed": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it"
     },
     {
       "section": "flags:global",
@@ -1554,13 +1554,13 @@
       "section": "flags:global",
       "row": "--sarif-file",
       "column": "Description",
-      "seed": "Write SARIF output to a file (in addition to the primary --format output). Used by bare `fallow`, `dead-code` and `security`. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
+      "seed": "Write SARIF output to a file (in addition to the primary --format output). Used by bare `fallow`, `dead-code`, `architecture` and `security`. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
     },
     {
       "section": "flags:global",
       "row": "--save-baseline",
       "column": "Description",
-      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
+      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
     },
     {
       "section": "flags:global",

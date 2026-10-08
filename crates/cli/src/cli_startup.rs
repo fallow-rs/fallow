@@ -382,7 +382,7 @@ pub fn run_pre_dispatch_checks(
         && command_rejects_output_gate(cli.command.as_ref())
     {
         let code = emit_known_failure_with_style(
-            "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, dupes, health, security, or bare invocation",
+            "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, architecture, dupes, health, security, or bare invocation",
             2,
             output,
             json_style,
