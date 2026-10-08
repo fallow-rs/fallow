@@ -594,6 +594,9 @@ pub fn git(root: &Path, args: &[&str]) -> String {
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
+        // CI sets the same maintenance config in the environment. Without it
+        // here, `fixture_commit_starts_no_repack` proves only the helper flags.
+        .env_remove("GIT_CONFIG_COUNT")
         .env("GIT_CONFIG_GLOBAL", &global)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()

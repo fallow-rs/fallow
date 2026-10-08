@@ -140,6 +140,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow hooks install --target git --prune-baselines`** adds a
+  `fallow baselines prune` step before the audit in the pre-commit hook, and
+  stages the baseline files that the prune wrote. The prune reads the working
+  tree and the commit carries the index, so the hook skips the prune when the
+  working tree has unstaged or untracked changes, and for a commit with paths
+  (`git commit <path>`). A failed prune never blocks the commit. The hints for Lefthook and for an existing hook include the
+  same step. (#3281)
 - **`fallow baselines prune` removes the baseline entries of fixed
   findings.** It reads the files that `audit.deadCodeBaseline`,
   `audit.healthBaseline` and `audit.dupesBaseline` name, runs one
@@ -245,15 +252,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Findings in an unused file are hidden by default.** An unused export, type,
-  class member or enum member in a file that fallow reports as unused is no
-  longer listed, because deleting the file removes it. The JSON output has the
-  count in `cascade_hidden`. SARIF and markdown name the count too. Pass
-  `--show-cascade`, set `showCascade` in the config, or use the `show_cascade`
-  parameter of the MCP tools to list them. The health vital signs still count
-  them. When an issue-type filter leaves out `unused-files`, nothing is hidden.
-  A baseline saved before this change still matches. A baseline that you save
-  now does not contain the hidden findings, so save a regression baseline again.
+- **The Linux musl binaries are about 4 times faster.** musl's own `malloc`
+  is slow when many threads allocate, and fallow analyzes files in
+  parallel. The musl binaries (the `linux-x64-musl` and `linux-arm64-musl` npm
+  packages and the musl release assets) now use mimalloc. The Node addon
+  keeps the default allocator. On a
+  10-core aarch64 Alpine container, `check`, `dupes` and `health` took 77%
+  less time over 15 fixture cases, with identical output. Peak memory is
+  about a third higher. Glibc, macOS and Windows builds do not change. A
+  `cargo install fallow-cli` on a musl host now needs a C compiler.
 - **`fallow viz` now shows where to start.** The Overview panel opens with
   the health grade and one card per lens: the number of files, the number
   of high findings, and the worst file with its reason. The Overview map colors files
@@ -330,6 +337,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Clearer motion in `fallow viz`.** A treemap drill flies one camera into
   the folder and back out. A lens switch sweeps the new colors across the
   map. With reduced motion, movement stops and changes fade.
+- **Findings in an unused file are hidden by default.** An unused export, type,
+  class member or enum member in a file that fallow reports as unused is no
+  longer listed, because deleting the file removes it. The JSON output has the
+  count in `cascade_hidden`. SARIF and markdown name the count too. Pass
+  `--show-cascade`, set `showCascade` in the config, or use the `show_cascade`
+  parameter of the MCP tools to list them. The health vital signs still count
+  them. When an issue-type filter leaves out `unused-files`, nothing is hidden.
+  A baseline saved before this change still matches. A baseline that you save
+  now does not contain the hidden findings, so save a regression baseline again.
 
 ## [3.32.0] - 2026-10-06
 

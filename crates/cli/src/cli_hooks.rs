@@ -47,6 +47,14 @@ pub enum HooksCli {
         /// Append `.claude/` to the project's `.gitignore` for Claude agent hooks.
         #[arg(long)]
         gitignore_claude: bool,
+
+        /// For `--target git`: run `fallow baselines prune` before the audit
+        /// and stage the pruned baseline files. The hook skips the prune when
+        /// the working tree has unstaged or untracked changes and for a commit
+        /// with paths. A failed prune never blocks the commit. The prune analyzes the whole project, so it adds
+        /// the time of a full run to each commit.
+        #[arg(long)]
+        prune_baselines: bool,
     },
 
     /// Remove a fallow-managed hook.
@@ -100,6 +108,7 @@ fn run_hooks_install(
         force,
         user,
         gitignore_claude,
+        prune_baselines,
     } = install
     else {
         unreachable!("hooks install handler only handles install commands");
@@ -119,12 +128,13 @@ fn run_hooks_install(
                 branch: branch.as_deref(),
                 dry_run,
                 force,
+                prune_baselines,
             })
         }
         HooksTargetArg::Agent => {
-            if branch.is_some() {
+            if branch.is_some() || prune_baselines {
                 return emit_error(
-                    "--branch is only valid with `fallow hooks install --target git`",
+                    "--branch and --prune-baselines are only valid with `fallow hooks install --target git`",
                     2,
                     output,
                 );

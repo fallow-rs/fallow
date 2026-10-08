@@ -539,10 +539,11 @@ jobs:
           $apt_get update || echo "apt-get update reported errors on at least one source"
           $apt_get install -y gcc-aarch64-linux-gnu
 
-      # fallow-mcp pulls rquickjs (QuickJS, a C library). On aarch64-musl the
-      # glibc cross-gcc cannot link C objects into a musl binary, so the MCP
-      # build for this one target uses cargo-zigbuild (zig cc as a musl-capable
-      # C cross-compiler). Pinned to the pair validated locally against
+      # On musl, every binary compiles the mimalloc allocator (C), and
+      # fallow-mcp also pulls rquickjs (QuickJS, C). On aarch64-musl the glibc
+      # cross-gcc cannot link C objects into a musl binary, so all builds for
+      # this one target use cargo-zigbuild (zig cc as a musl-capable C
+      # cross-compiler). Pinned to the pair validated locally against
       # rquickjs-sys 0.12. cargo-zigbuild 0.23.0 or later is required: it drops
       # the `--fix-cortex-a53-843419` linker arg that rustc 1.98 passes for
       # this target and that zig rejects. x86_64-musl (native musl-gcc) and
@@ -654,20 +655,17 @@ jobs:
             --title "PGO profile match (${FALLOW_TARGET})" \
             --summary "$GITHUB_STEP_SUMMARY"
 
-      # The aarch64-musl leg gets no PGO profile. The multicall and MCP
-      # binaries link rquickjs (QuickJS, C), so they need cargo-zigbuild on
-      # this leg (the glibc cross-gcc cannot link C into a musl binary).
-      - name: Build CLI release binary (aarch64-musl)
+      # The aarch64-musl leg gets no PGO profile. Every binary on this leg
+      # compiles C: the mimalloc allocator (all four binaries) and rquickjs
+      # (QuickJS, in MCP and multicall). The glibc cross-gcc cannot link C into
+      # a musl binary, so all four builds use cargo-zigbuild.
+      - name: Build CLI release binary (aarch64-musl, mimalloc C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-cli --config target/pgo-profile/pgo.toml
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-cli --config target/pgo-profile/pgo.toml
 
-      - name: Build LSP release binary (aarch64-musl)
+      - name: Build LSP release binary (aarch64-musl, mimalloc C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo build --release --target ${{ matrix.target }} -p fallow-lsp --config target/pgo-profile/pgo.toml
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-lsp --config target/pgo-profile/pgo.toml
 
       - name: Build MCP release binary (aarch64-musl, QuickJS C via zig)
         if: matrix.target == 'aarch64-unknown-linux-musl'

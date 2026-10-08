@@ -342,7 +342,7 @@ As you fix existing issues, remove their entries from the baseline. Prune remove
 fallow baselines prune --dead-code-baseline fallow-baselines/dead-code.json --format json --quiet
 ```
 
-With `audit.deadCodeBaseline`, `audit.healthBaseline` and `audit.dupesBaseline` in the config, `fallow baselines prune` prunes all three files in one run. Use `--save-baseline` only to record new findings on purpose.
+With `audit.deadCodeBaseline`, `audit.healthBaseline` and `audit.dupesBaseline` in the config, `fallow baselines prune` prunes all three files in one run. Use `--save-baseline` only to record new findings on purpose. `fallow hooks install --target git --prune-baselines` runs the prune in the pre-commit hook and stages the pruned files.
 
 ### Duplication baseline
 
