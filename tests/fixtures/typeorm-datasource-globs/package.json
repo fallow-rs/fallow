@@ -1,0 +1,5 @@
+{
+  "name": "typeorm-datasource-globs",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

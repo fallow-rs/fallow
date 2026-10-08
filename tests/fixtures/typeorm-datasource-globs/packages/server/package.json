@@ -1,0 +1,8 @@
+{
+  "name": "server",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "typeorm": "^0.3.20"
+  }
+}
