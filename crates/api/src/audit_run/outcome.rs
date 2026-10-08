@@ -6,8 +6,9 @@ use fallow_config::{AuditGate, RulesConfig, Severity};
 
 use super::{AuditAnalysesView, AuditKeySnapshot};
 use crate::audit_keys::{
-    AuditComparison, AuditDomainLedger, DeadCodeAuditLedger, dead_code_audit_ledger,
-    dupe_group_key, health_finding_key, preexisting_dupe_group_keys, styling_finding_key,
+    AuditComparison, AuditDomainLedger, DeadCodeAuditLedger, classify_complexity_findings,
+    complexity_ledger_keys, dead_code_audit_ledger, dupe_group_key, preexisting_dupe_group_keys,
+    styling_finding_key,
 };
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 
@@ -86,16 +87,18 @@ pub fn compare(
                 }
                 ledger
             });
-    let health = AuditDomainLedger::compare(
-        view.health.iter().flat_map(|health| {
-            health
-                .report
-                .findings
-                .iter()
-                .map(|finding| health_finding_key(finding, health.root))
-        }),
-        base.map(|snapshot| &snapshot.health),
-    );
+    let health = view
+        .health
+        .as_ref()
+        .map_or_else(AuditDomainLedger::default, |health| {
+            let findings = &health.report.findings;
+            let keys = complexity_ledger_keys(findings, health.root);
+            let introduced = base.map_or_else(
+                || vec![false; findings.len()],
+                |snapshot| classify_complexity_findings(findings, health.root, &snapshot.health),
+            );
+            AuditDomainLedger::from_classified(keys.into_iter().zip(introduced), base.is_some())
+        });
     let dupes = AuditDomainLedger::compare(
         view.duplication.iter().flat_map(|duplication| {
             duplication

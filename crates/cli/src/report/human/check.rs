@@ -17,6 +17,7 @@ use super::{
     print_explain_tip_if_tty, push_section_footer_rollup, push_section_footer_with_count,
     push_section_footer_with_fixability,
 };
+use crate::report::ArchitectureLayout;
 use crate::report::grouping::OwnershipResolver;
 use crate::report::shared::NAMESPACE_BARREL_HINT;
 use crate::report::{
@@ -171,6 +172,8 @@ pub(in crate::report) struct PrintHumanInput<'a> {
     pub run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub failed_parse_files: usize,
+    /// Where the architecture findings render.
+    pub architecture_layout: ArchitectureLayout,
 }
 
 /// The final status line of a run with no finding.
@@ -208,13 +211,15 @@ pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
     let total = input.results.total_issues();
     print_explain_tip_if_tty(input.show_explain_tip && total > 0, input.quiet);
 
-    for line in build_human_lines_with_explain(
-        input.results,
-        input.root,
-        input.rules,
-        input.top,
-        input.explain,
-    ) {
+    let lines = build_layout_lines(&LayoutLinesInput {
+        results: input.results,
+        root: input.root,
+        rules: input.rules,
+        top: input.top,
+        explain: input.explain,
+        layout: input.architecture_layout,
+    });
+    for line in lines {
         outln!("{line}");
     }
 
@@ -300,6 +305,85 @@ fn build_human_lines_with_explain(
     top: Option<usize>,
     explain: bool,
 ) -> Vec<String> {
+    with_explain(
+        build_dead_code_lines(results, root, rules, top, true),
+        explain,
+    )
+}
+
+struct LayoutLinesInput<'a> {
+    results: &'a AnalysisResults,
+    root: &'a Path,
+    rules: &'a RulesConfig,
+    top: Option<usize>,
+    explain: bool,
+    layout: ArchitectureLayout,
+}
+
+/// Build the human lines for an [`ArchitectureLayout`]. `Embedded` returns the
+/// classic dead-code report. `Split` and `Only` move the architecture findings
+/// to one "Architecture" category: after the dead-code categories for bare
+/// `fallow`, first for `fallow architecture`.
+fn build_layout_lines(input: &LayoutLinesInput<'_>) -> Vec<String> {
+    let LayoutLinesInput {
+        results,
+        root,
+        rules,
+        top,
+        explain,
+        layout,
+    } = *input;
+    if layout == ArchitectureLayout::Embedded {
+        return build_human_lines_with_explain(results, root, rules, top, explain);
+    }
+    let dead_code = with_explain(
+        build_dead_code_lines(results, root, rules, top, false),
+        explain,
+    );
+    let architecture = with_explain(build_architecture_lines(results, root, rules), explain);
+    let (first, second) = if layout == ArchitectureLayout::Only {
+        (architecture, dead_code)
+    } else {
+        (dead_code, architecture)
+    };
+    first.into_iter().chain(second).collect()
+}
+
+fn with_explain(lines: Vec<String>, explain: bool) -> Vec<String> {
+    if explain {
+        inject_explain_blocks(lines)
+    } else {
+        lines
+    }
+}
+
+/// The "Architecture" category: import cycles, boundary violations and
+/// rule-pack policy violations. Empty when the results hold none.
+fn build_architecture_lines(
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    if !crate::report::has_architecture_findings(results) {
+        return lines;
+    }
+    push_category_header(&mut lines, "Architecture");
+    let total_issues = results.total_issues();
+    push_architecture_sections(&mut lines, results, root, rules, total_issues);
+    build_policy_violations_section(&mut lines, &results.policy_violations, root, total_issues);
+    lines
+}
+
+/// The dead-code report lines. With `include_architecture` false, the
+/// "Structure" and "Policy" categories leave out the architecture findings.
+fn build_dead_code_lines(
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    top: Option<usize>,
+    include_architecture: bool,
+) -> Vec<String> {
     let max_items = top.unwrap_or(MAX_FLAT_ITEMS);
     let max_grouped_files = top.unwrap_or(MAX_GROUPED_FILES);
     let total_issues = results.total_issues();
@@ -323,8 +407,15 @@ fn build_human_lines_with_explain(
         max_grouped_files,
         total_issues,
     });
-    build_structure_section(&mut lines, results, root, rules, total_issues);
-    build_policy_section(&mut lines, results, root, rules, total_issues);
+    let sections = SectionInput {
+        results,
+        root,
+        rules,
+        total_issues,
+        include_architecture,
+    };
+    build_structure_section(&mut lines, &sections);
+    build_policy_section(&mut lines, &sections);
     build_maintenance_section(
         &mut lines,
         results,
@@ -333,12 +424,17 @@ fn build_human_lines_with_explain(
         total_issues,
         max_grouped_files,
     );
+    lines
+}
 
-    if explain {
-        inject_explain_blocks(lines)
-    } else {
-        lines
-    }
+/// Shared input of the "Structure" and "Policy" category builders.
+struct SectionInput<'a> {
+    results: &'a AnalysisResults,
+    root: &'a Path,
+    rules: &'a RulesConfig,
+    total_issues: usize,
+    /// Render the architecture findings inside these categories.
+    include_architecture: bool,
 }
 
 fn inject_explain_blocks(lines: Vec<String>) -> Vec<String> {
@@ -1655,21 +1751,22 @@ fn push_misconfigured_dependency_overrides_section(
     );
 }
 
-fn build_structure_section(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-    total_issues: usize,
-) {
-    let has_structure = !results.duplicate_exports.is_empty()
-        || !results.circular_dependencies.is_empty()
-        || !results.re_export_cycles.is_empty()
-        || !results.package_cycles.is_empty()
-        || !results.boundary_violations.is_empty()
-        || !results.boundary_coverage_violations.is_empty()
-        || !results.boundary_call_violations.is_empty();
-    if !has_structure {
+fn build_structure_section(lines: &mut Vec<String>, input: &SectionInput<'_>) {
+    let SectionInput {
+        results,
+        root,
+        rules,
+        total_issues,
+        include_architecture,
+    } = *input;
+    let has_architecture = include_architecture
+        && (!results.circular_dependencies.is_empty()
+            || !results.re_export_cycles.is_empty()
+            || !results.package_cycles.is_empty()
+            || !results.boundary_violations.is_empty()
+            || !results.boundary_coverage_violations.is_empty()
+            || !results.boundary_call_violations.is_empty());
+    if results.duplicate_exports.is_empty() && !has_architecture {
         return;
     }
     push_category_header(lines, "Structure");
@@ -1681,6 +1778,20 @@ fn build_structure_section(
         root,
         total_issues,
     );
+    if include_architecture {
+        push_architecture_sections(lines, results, root, rules, total_issues);
+    }
+}
+
+/// The cycle and boundary sub-sections, in the order the "Structure" category
+/// has always printed them.
+fn push_architecture_sections(
+    lines: &mut Vec<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    total_issues: usize,
+) {
     build_circular_deps_section(
         lines,
         &results.circular_dependencies,
@@ -1773,14 +1884,15 @@ fn push_react_component_health_sections(
 
 /// Build the Policy category (rule-pack findings). Separate from Structure
 /// because policy is user-authored project rules, not architecture analysis.
-fn build_policy_section(
-    lines: &mut Vec<String>,
-    results: &AnalysisResults,
-    root: &Path,
-    rules: &RulesConfig,
-    total_issues: usize,
-) {
-    if results.policy_violations.is_empty()
+fn build_policy_section(lines: &mut Vec<String>, input: &SectionInput<'_>) {
+    let SectionInput {
+        results,
+        root,
+        rules,
+        total_issues,
+        include_architecture,
+    } = *input;
+    if (!include_architecture || results.policy_violations.is_empty())
         && results.invalid_client_exports.is_empty()
         && results.mixed_client_server_barrels.is_empty()
         && results.misplaced_directives.is_empty()
@@ -1803,7 +1915,9 @@ fn build_policy_section(
         return;
     }
     push_category_header(lines, "Policy");
-    build_policy_violations_section(lines, &results.policy_violations, root, total_issues);
+    if include_architecture {
+        build_policy_violations_section(lines, &results.policy_violations, root, total_issues);
+    }
     build_framework_policy_section(lines, results, root, rules);
     build_component_policy_section(lines, results, root, rules);
     build_route_policy_section(lines, results, root, rules);
@@ -2374,19 +2488,10 @@ fn build_policy_violations_section(
     root: &Path,
     total_issues: usize,
 ) {
-    use fallow_types::results::PolicyViolationSeverity;
-
     if items.is_empty() {
         return;
     }
-    let level = if items
-        .iter()
-        .any(|f| f.violation.severity == PolicyViolationSeverity::Error)
-    {
-        Level::Error
-    } else {
-        Level::Warn
-    };
+    let level = policy_violations_level(items);
     let title = "Policy violations";
     lines.push(build_section_header(title, items.len(), level));
 
@@ -3539,6 +3644,8 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub(in crate::report) failed_parse_files: usize,
+    /// Where each group renders the architecture findings.
+    pub(in crate::report) architecture_layout: ArchitectureLayout,
 }
 
 /// Whether the results carry an opt-in component health signal. These do not
@@ -3613,6 +3720,7 @@ fn emit_grouped_body(
     rules: &RulesConfig,
     seen_footers: &mut FxHashSet<String>,
     explain: bool,
+    layout: ArchitectureLayout,
 ) {
     if let Some(ref owners) = group.owners
         && !owners.is_empty()
@@ -3620,7 +3728,7 @@ fn emit_grouped_body(
         outln!("  {} {}", "owners:".dimmed(), owners.join(" ").dimmed());
     }
 
-    let lines = build_human_lines_with_explain(&group.results, root, rules, None, explain);
+    let lines = grouped_lines(&group.results, root, rules, explain, layout);
     for line in &lines {
         if line.contains("fallow.tools/docs/") && !seen_footers.insert(line.clone()) {
             continue;
@@ -3635,6 +3743,25 @@ fn emit_grouped_body(
         );
         eprintln!();
     }
+}
+
+/// The lines of one `--group-by` group, in the same layout as the ungrouped
+/// report.
+fn grouped_lines(
+    results: &AnalysisResults,
+    root: &Path,
+    rules: &RulesConfig,
+    explain: bool,
+    layout: ArchitectureLayout,
+) -> Vec<String> {
+    build_layout_lines(&LayoutLinesInput {
+        results,
+        root,
+        rules,
+        top: None,
+        explain,
+        layout,
+    })
 }
 
 fn emit_grouped_final_status(
@@ -3692,7 +3819,14 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
 
         let header_text = grouped_header_text(group, root, resolver, total);
         outln!("{}", header_text.cyan().bold());
-        emit_grouped_body(group, root, rules, &mut seen_footers, explain);
+        emit_grouped_body(
+            group,
+            root,
+            rules,
+            &mut seen_footers,
+            explain,
+            input.architecture_layout,
+        );
     }
 
     if !quiet {
@@ -3880,7 +4014,22 @@ fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) 
     );
     push_summary_part(parts, results.re_export_cycles.len(), "re-export cycles");
     push_summary_part(parts, results.package_cycles.len(), "package cycles");
-    push_summary_part(parts, results.boundary_violations.len(), "violations");
+    push_summary_part(
+        parts,
+        results.boundary_violations.len(),
+        "boundary violations",
+    );
+    push_summary_part(
+        parts,
+        results.boundary_coverage_violations.len(),
+        "boundary coverage violations",
+    );
+    push_summary_part(
+        parts,
+        results.boundary_call_violations.len(),
+        "boundary call violations",
+    );
+    push_summary_part(parts, results.policy_violations.len(), "policy violations");
 }
 
 /// Appends the framework-specific summary parts.
@@ -3958,6 +4107,15 @@ fn build_summary_footer(
     parts.join(" \u{00b7} ")
 }
 
+/// The layout of a `--summary` table.
+#[derive(Clone, Copy)]
+pub(in crate::report) struct SummaryStyle<'a> {
+    /// The bold heading above the rows, or `None` for no heading.
+    pub(in crate::report) heading: Option<&'a str>,
+    /// `Split` puts the architecture rows under their own label.
+    pub(in crate::report) layout: ArchitectureLayout,
+}
+
 /// The gate result that picks the final status line of a run.
 #[derive(Clone, Copy)]
 pub(in crate::report) struct RunStatus {
@@ -3973,9 +4131,10 @@ pub(in crate::report) fn print_check_summary(
     rules: &RulesConfig,
     elapsed: Duration,
     quiet: bool,
-    heading: bool,
+    style: SummaryStyle<'_>,
     status: RunStatus,
 ) {
+    let SummaryStyle { heading, layout } = style;
     let RunStatus {
         run_fails,
         failed_parse_files,
@@ -3988,11 +4147,18 @@ pub(in crate::report) fn print_check_summary(
         return;
     }
 
-    if heading {
-        print_check_summary_heading();
+    if let Some(heading) = heading {
+        print_check_summary_heading(heading);
     }
 
-    print_check_summary_rows(&check_summary_categories(results, rules));
+    if layout == ArchitectureLayout::Split {
+        let (dead_code, architecture) = split_summary_categories(results, rules);
+        print_check_summary_rows(&dead_code);
+        let has_dead_code_rows = dead_code.iter().any(|(_, count, _)| *count > 0);
+        print_architecture_summary_rows(&architecture, has_dead_code_rows);
+    } else {
+        print_check_summary_rows(&check_summary_categories(results, rules));
+    }
     print_check_summary_total(total);
     print_check_summary_caveat_note(results);
 
@@ -4095,8 +4261,8 @@ fn check_summary_caveat_note(results: &AnalysisResults) -> Option<String> {
     Some(format!("({caveated} of these carry a caveat: {labels})"))
 }
 
-fn print_check_summary_heading() {
-    outln!("{}", "Dead Code Summary".bold());
+fn print_check_summary_heading(heading: &str) {
+    outln!("{}", heading.bold());
     outln!();
 }
 
@@ -4245,7 +4411,29 @@ fn check_summary_dependency_categories(
             results.boundary_violations.len(),
             severity_to_level(rules.boundary_violation),
         ),
+        (
+            "Policy violations",
+            results.policy_violations.len(),
+            policy_violations_level(&results.policy_violations),
+        ),
     ]
+}
+
+/// The level of the rule-pack policy findings: error when any finding is an
+/// error, because a rule-level `severity` overrides the `policy-violation` rule.
+fn policy_violations_level(
+    items: &[fallow_types::output_dead_code::PolicyViolationFinding],
+) -> Level {
+    use fallow_types::results::PolicyViolationSeverity;
+
+    if items
+        .iter()
+        .any(|f| f.violation.severity == PolicyViolationSeverity::Error)
+    {
+        Level::Error
+    } else {
+        Level::Warn
+    }
 }
 
 fn check_summary_framework_categories(
@@ -4317,6 +4505,43 @@ fn print_check_summary_rows(categories: &[(&str, usize, Level)]) {
             outln!("  {}  {name}", colored_summary_count(*count, *level));
         }
     }
+}
+
+/// The rows of the architecture findings in a `--summary` table.
+const ARCHITECTURE_SUMMARY_ROWS: [&str; 5] = [
+    "Circular dependencies",
+    "Re-export cycles",
+    "Package cycles",
+    "Boundary violations",
+    "Policy violations",
+];
+
+/// One `--summary` row: the label, the count and the level of the count.
+type SummaryRow = (&'static str, usize, Level);
+
+/// Split the summary rows into the dead-code rows and the architecture rows,
+/// each in the order of [`check_summary_categories`].
+fn split_summary_categories(
+    results: &AnalysisResults,
+    rules: &RulesConfig,
+) -> (Vec<SummaryRow>, Vec<SummaryRow>) {
+    check_summary_categories(results, rules)
+        .into_iter()
+        .partition(|(name, _, _)| !ARCHITECTURE_SUMMARY_ROWS.contains(name))
+}
+
+/// Print the architecture rows under their own "Architecture" label, like the
+/// "Architecture" category of the bare `fallow` report. Prints nothing without
+/// a row. A blank line separates the label from dead-code rows above it.
+fn print_architecture_summary_rows(categories: &[(&str, usize, Level)], after_rows: bool) {
+    if categories.iter().all(|(_, count, _)| *count == 0) {
+        return;
+    }
+    if after_rows {
+        outln!();
+    }
+    outln!("  {}", "Architecture".bold());
+    print_check_summary_rows(categories);
 }
 
 fn colored_summary_count(count: usize, level: Level) -> String {
@@ -6319,6 +6544,177 @@ mod tests {
         assert!(
             text.contains("... and 3 more"),
             "Expected truncation hint, got:\n{text}"
+        );
+    }
+
+    fn architecture_sample(root: &Path) -> AnalysisResults {
+        let mut results = sample_results(root);
+        results
+            .policy_violations
+            .push(PolicyViolationFinding::with_actions(PolicyViolation {
+                path: root.join("src/app.ts"),
+                line: 7,
+                col: 2,
+                pack: "team-policy".to_string(),
+                rule_id: "no-moment".to_string(),
+                kind: fallow_types::results::PolicyRuleKind::BannedImport,
+                matched: "moment".to_string(),
+                severity: fallow_types::results::PolicyViolationSeverity::Warn,
+                message: None,
+            }));
+        results
+    }
+
+    fn layout_lines(
+        results: &AnalysisResults,
+        root: &Path,
+        layout: ArchitectureLayout,
+    ) -> Vec<String> {
+        build_layout_lines(&LayoutLinesInput {
+            results,
+            root,
+            rules: &RulesConfig::default(),
+            top: None,
+            explain: false,
+            layout,
+        })
+    }
+
+    #[test]
+    fn embedded_layout_is_the_classic_dead_code_report() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let lines = layout_lines(&results, &root, ArchitectureLayout::Embedded);
+        assert_eq!(
+            lines,
+            build_human_lines(&results, &root, &RulesConfig::default(), None)
+        );
+        let text = plain(&lines);
+        assert!(text.contains("Structure"));
+        assert!(!text.contains("\u{2500}\u{2500} Architecture"));
+        assert!(text.contains("Circular dependencies (1)"));
+        assert!(text.contains("Policy violations (1)"));
+    }
+
+    #[test]
+    fn split_layout_moves_architecture_findings_and_keeps_component_findings() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let text = plain(&layout_lines(&results, &root, ArchitectureLayout::Split));
+        let heading = text
+            .find("\u{2500}\u{2500} Architecture ")
+            .unwrap_or_else(|| panic!("architecture category: {text}"));
+        let (dead_code, architecture) = text.split_at(heading);
+
+        assert!(dead_code.contains("Duplicate exports"));
+        assert!(dead_code.contains("Unrendered components"));
+        assert!(!dead_code.contains("Circular dependencies"));
+        assert!(!dead_code.contains("Boundary violations"));
+        assert!(!dead_code.contains("Policy violations"));
+
+        assert!(architecture.contains("Circular dependencies (1)"));
+        assert!(architecture.contains("Boundary violations (1)"));
+        assert!(architecture.contains("Policy violations (1)"));
+        assert_eq!(
+            text.matches("\u{2500}\u{2500} Architecture").count(),
+            1,
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn split_layout_equals_the_grouped_layout() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let rules = RulesConfig::default();
+        assert_eq!(
+            layout_lines(&results, &root, ArchitectureLayout::Split),
+            grouped_lines(&results, &root, &rules, false, ArchitectureLayout::Split)
+        );
+    }
+
+    #[test]
+    fn only_layout_prints_one_architecture_category() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        let sample = architecture_sample(&root);
+        results.circular_dependencies = sample.circular_dependencies;
+        results.boundary_violations = sample.boundary_violations;
+        results.policy_violations = sample.policy_violations;
+
+        let text = plain(&layout_lines(&results, &root, ArchitectureLayout::Only));
+        assert!(text.starts_with("\u{2500}\u{2500} Architecture "), "{text}");
+        assert!(!text.contains("Structure"));
+        assert!(!text.contains("\u{2500}\u{2500} Policy"));
+        assert!(text.contains("Circular dependencies (1)"));
+        assert!(text.contains("Policy violations (1)"));
+    }
+
+    #[test]
+    fn split_layout_without_architecture_findings_has_no_architecture_lines() {
+        let root = PathBuf::from("/project");
+        let mut results = sample_results(&root);
+        results.circular_dependencies.clear();
+        results.boundary_violations.clear();
+        assert_eq!(
+            layout_lines(&results, &root, ArchitectureLayout::Split),
+            build_human_lines(&results, &root, &RulesConfig::default(), None)
+        );
+    }
+
+    #[test]
+    fn split_summary_moves_the_architecture_rows() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let (dead_code, architecture) = split_summary_categories(&results, &RulesConfig::default());
+        let names = |rows: &[(&str, usize, Level)]| -> Vec<String> {
+            rows.iter()
+                .map(|(name, _, _)| (*name).to_string())
+                .collect()
+        };
+        assert_eq!(
+            names(&architecture),
+            ARCHITECTURE_SUMMARY_ROWS.map(String::from)
+        );
+        assert!(names(&dead_code).contains(&"Duplicate exports".to_string()));
+        assert_eq!(
+            dead_code.len() + architecture.len(),
+            check_summary_categories(&results, &RulesConfig::default()).len()
+        );
+    }
+
+    #[test]
+    fn grouped_split_lines_use_one_architecture_category() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let rules = RulesConfig::default();
+        let text = plain(&grouped_lines(
+            &results,
+            &root,
+            &rules,
+            false,
+            ArchitectureLayout::Split,
+        ));
+        assert!(text.contains("\u{2500}\u{2500} Architecture "), "{text}");
+        assert_eq!(text.matches("Policy violations").count(), 1, "{text}");
+        let unused = text.find("Duplicate exports").expect("dead-code lines");
+        let architecture = text.find("\u{2500}\u{2500} Architecture ").expect("arch");
+        assert!(unused < architecture, "{text}");
+        assert_eq!(
+            grouped_lines(&results, &root, &rules, false, ArchitectureLayout::Embedded),
+            build_human_lines(&results, &root, &rules, None)
+        );
+    }
+
+    #[test]
+    fn summary_counts_policy_violations() {
+        let root = PathBuf::from("/project");
+        let results = architecture_sample(&root);
+        let categories = check_summary_categories(&results, &RulesConfig::default());
+        assert!(
+            categories
+                .iter()
+                .any(|(name, count, _)| *name == "Policy violations" && *count == 1)
         );
     }
 }

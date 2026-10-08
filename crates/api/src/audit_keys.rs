@@ -8,6 +8,11 @@ use fallow_config::{ResolvedConfig, Severity};
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::identity::{IdentifiedFinding, IdentityPaths, dead_code_occurrence_keys};
 
+pub use crate::audit_complexity::{
+    ComplexityBaseline, ComplexityMetrics, classify_complexity_findings, complexity_baseline,
+    complexity_baseline_keys, complexity_ledger_keys, remap_complexity_baseline_for_renames,
+};
+
 /// One dead-code finding classified for audit comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditFindingRecord {
@@ -299,6 +304,30 @@ impl AuditDomainLedger {
         }
     }
 
+    /// Build a ledger from keys that the caller already classified, in
+    /// typed output order. `has_base` is false when the run has no base
+    /// snapshot, so no finding counts as introduced or inherited.
+    #[must_use]
+    pub fn from_classified(
+        records: impl IntoIterator<Item = (String, bool)>,
+        has_base: bool,
+    ) -> Self {
+        let mut ledger = Self::default();
+        for (key, introduced) in records {
+            let introduced = has_base && introduced;
+            if has_base {
+                if introduced {
+                    ledger.introduced_keys.insert(key.clone());
+                } else {
+                    ledger.inherited_keys.insert(key.clone());
+                }
+            }
+            ledger.keys.insert(key.clone());
+            ledger.records.push((key, introduced));
+        }
+        ledger
+    }
+
     /// Stable current-run key set.
     #[must_use]
     pub const fn keys(&self) -> &FxHashSet<String> {
@@ -399,7 +428,7 @@ pub fn remap_keys_for_renames(
         .collect()
 }
 
-fn remap_key_for_renames(key: &str, renames: &FxHashMap<String, String>) -> String {
+pub(crate) fn remap_key_for_renames(key: &str, renames: &FxHashMap<String, String>) -> String {
     if !key
         .split([':', '|'])
         .any(|segment| renames.contains_key(segment))
@@ -1709,6 +1738,10 @@ pub fn annotate_stale_suppressions_json(
 /// Insert `"introduced": bool` into each `findings` and `styling_findings`
 /// object in serialized health JSON, matching entries to the typed report by
 /// array position.
+///
+/// A complexity finding keeps the typed `introduced` flag that the audit
+/// comparison set, because that flag compares metric values. Only a finding
+/// without the typed flag falls back to identity-key membership in `base`.
 #[expect(
     clippy::implicit_hasher,
     reason = "fallow standardizes on FxHashSet across audit attribution keys"
@@ -1727,10 +1760,9 @@ pub fn annotate_health_json(
             if let serde_json::Value::Object(map) = item {
                 map.insert(
                     "introduced".to_string(),
-                    serde_json::json!(issue_was_introduced(
-                        &health_finding_key(finding, root),
-                        base
-                    )),
+                    serde_json::json!(finding.introduced.unwrap_or_else(|| {
+                        issue_was_introduced(&health_finding_key(finding, root), base)
+                    })),
                 );
             }
         }
@@ -1822,15 +1854,17 @@ pub fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashS
         .collect()
 }
 
-/// Attribution key for one complexity finding:
-/// `complexity:<path>:<function>:<exceeded metric>`. Line numbers are
-/// deliberately excluded so a finding survives unrelated edits above it.
+/// Identity key for one complexity finding: `complexity:<path>:<function>`.
+///
+/// Line numbers are excluded, so a finding survives unrelated edits above it.
+/// The exceeded category is excluded, so a category change keeps the match.
+/// The new-only gate compares the metric values of matched findings, see
+/// [`classify_complexity_findings`].
 pub fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path) -> String {
     format!(
-        "complexity:{}:{}:{:?}",
+        "complexity:{}:{}",
         relative_key_path(Path::new(&finding.path), root),
         finding.name,
-        finding.exceeded
     )
 }
 
@@ -3029,16 +3063,16 @@ mod tests {
         let path = root.join("src/heavy.ts");
         let report = make_health_report(&[(&path, "processAll")]);
         let keys = health_keys(&report, &root);
-        assert!(keys.contains("complexity:src/heavy.ts:processAll:Cyclomatic"));
+        assert!(keys.contains("complexity:src/heavy.ts:processAll"));
     }
 
     #[test]
-    fn health_finding_key_uses_path_name_and_exceeded() {
+    fn health_finding_key_uses_path_and_name() {
         let root = root();
         let path = root.join("src/heavy.ts");
         let violation = make_violation(&path, "render");
         let key = health_finding_key(&violation, &root);
-        assert_eq!(key, "complexity:src/heavy.ts:render:Cyclomatic");
+        assert_eq!(key, "complexity:src/heavy.ts:render");
     }
 
     #[test]
@@ -3049,7 +3083,7 @@ mod tests {
         let report = make_health_report(&[(&path_a, "doWork"), (&path_b, "render")]);
 
         // Only path_b:render is in the base.
-        let base = FxHashSet::from_iter(["complexity:src/other.ts:render:Cyclomatic".to_string()]);
+        let base = FxHashSet::from_iter(["complexity:src/other.ts:render".to_string()]);
         let mut json_val = json!({
             "findings": [{}, {}],
         });
@@ -3058,6 +3092,21 @@ mod tests {
 
         assert_eq!(json_val["findings"][0]["introduced"], true);
         assert_eq!(json_val["findings"][1]["introduced"], false);
+    }
+
+    #[test]
+    fn annotate_health_json_keeps_the_typed_complexity_flag() {
+        let root = root();
+        let path = root.join("src/other.ts");
+        let mut report = make_health_report(&[(&path, "render")]);
+        // The metric comparison found a worse value for an inherited key.
+        report.findings[0].introduced = Some(true);
+        let base = FxHashSet::from_iter(["complexity:src/other.ts:render".to_string()]);
+        let mut json_val = json!({ "findings": [{}] });
+
+        annotate_health_json(&mut json_val, &report, &root, &base);
+
+        assert_eq!(json_val["findings"][0]["introduced"], true);
     }
 
     #[test]

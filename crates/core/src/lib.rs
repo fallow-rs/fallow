@@ -220,16 +220,24 @@ pub struct AnalysisParseMetrics {
 /// an earlier `health` run stored: `module.complexity` is empty on such a run
 /// by design, so copying it over would silently strip the entry and make every
 /// later `health` run reparse the file.
+///
+/// `read_started_ns` is the time before the parse read the sources. A
+/// fingerprint that is not older than that time by the settle window is stored
+/// without its ctime, so the next run compares content for that file. The
+/// metadata is read here, after the parse. A save between the parse read and
+/// this read gives a ctime newer than `read_started_ns`, so that fingerprint
+/// never settles and is stored without its ctime.
 fn update_cache(
     store: &mut cache::CacheStore,
     modules: &[extract::ModuleInfo],
     files: &[discover::DiscoveredFile],
     need_complexity: bool,
+    read_started_ns: u64,
 ) -> bool {
     let mut dirty = false;
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            let fingerprint = file_fingerprint(&file.path);
+            let fingerprint = file_fingerprint(&file.path).for_content_read_at(read_started_ns);
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
@@ -1626,6 +1634,7 @@ fn parse_analysis_modules(
         }
     };
 
+    let read_started_ns = fallow_types::source_fingerprint::now_ns();
     let parse_result = extract::parse_all_files_cancellable(
         files,
         cache_store.as_ref(),
@@ -1645,8 +1654,8 @@ fn parse_analysis_modules(
         &mut cache_store,
         &modules,
         files,
-        cache_max_size_bytes,
         need_complexity,
+        read_started_ns,
     );
 
     AnalysisParseOutput {
@@ -1701,13 +1710,14 @@ fn update_parse_cache_if_enabled(
     cache_store: &mut Option<cache::CacheStore>,
     modules: &[extract::ModuleInfo],
     files: &[discover::DiscoveredFile],
-    cache_max_size_bytes: usize,
     need_complexity: bool,
+    read_started_ns: u64,
 ) -> f64 {
     let t = Instant::now();
     if !config.no_cache {
+        let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
         let store = cache_store.get_or_insert_with(|| cache::CacheStore::new(&config.root));
-        if update_cache(store, modules, files, need_complexity)
+        if update_cache(store, modules, files, need_complexity, read_started_ns)
             && let Err(error) = store.save(
                 &config.cache_dir,
                 config.cache_config_hash,
@@ -4054,5 +4064,49 @@ mod tests {
             "warn_undeclared_workspaces must NOT re-flag a path that already \
              carries MalformedPackageJson; got duplicates: {diagnostics:?}"
         );
+    }
+
+    /// A same-length save that lands after the parse read the file, and before
+    /// the run stored the cache, gives the stored module the fingerprint of the
+    /// new content. A write in the same timestamp tick as the first write gives
+    /// the same result. The next run must still parse the new content.
+    #[test]
+    fn a_rewrite_after_the_parse_read_misses_the_next_run() {
+        use fallow_types::discover::{DiscoveredFile, FileId};
+
+        let project = tempfile::tempdir().expect("create project");
+        let path = project.path().join("api.ts");
+        let before = "export const alpha = 1;\n";
+        let after = "export const bravo = 1;\n";
+        assert_eq!(before.len(), after.len());
+        std::fs::write(&path, before).expect("write source");
+        let discovered = [DiscoveredFile {
+            id: FileId(0),
+            path: path.clone(),
+            size_bytes: u64::try_from(before.len()).expect("source length fits u64"),
+        }];
+
+        let read_started_ns = fallow_types::source_fingerprint::now_ns();
+        let first = super::extract::parse_all_files(&discovered, None, false);
+        std::fs::write(&path, after).expect("rewrite source with equal-length content");
+        let mut store = super::cache::CacheStore::new(project.path());
+        super::update_cache(
+            &mut store,
+            &first.modules,
+            &discovered,
+            false,
+            read_started_ns,
+        );
+
+        let second = super::extract::parse_all_files(&discovered, Some(&store), false);
+        let exports: Vec<String> = second
+            .modules
+            .first()
+            .expect("second parse produces module")
+            .exports
+            .iter()
+            .map(|export| export.name.to_string())
+            .collect();
+        assert_eq!(exports, vec!["bravo".to_string()]);
     }
 }

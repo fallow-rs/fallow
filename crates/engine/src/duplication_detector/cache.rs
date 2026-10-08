@@ -197,14 +197,20 @@ impl TokenCache {
         Some(entry.to_entry())
     }
 
+    /// Store the tokens of `path`. `read_started_ns` is the time before the
+    /// caller took `metadata` and read the source. A fingerprint inside the
+    /// settle window of that time is stored without its ctime, so the next
+    /// run compares content for the file.
     pub(super) fn insert(
         &mut self,
         path: &Path,
         metadata: &std::fs::Metadata,
+        read_started_ns: u64,
         mode: TokenCacheMode,
         payload: &TokenPayload<'_>,
     ) {
-        let fingerprint = SourceFingerprint::from_metadata(metadata);
+        let fingerprint =
+            SourceFingerprint::from_metadata(metadata).for_content_read_at(read_started_ns);
         self.store.entries.insert(
             cache_key(path),
             CachedTokenFile::from_tokens(
@@ -215,6 +221,30 @@ impl TokenCache {
                 payload.suppressions,
             ),
         );
+        self.dirty = true;
+    }
+
+    /// Store the current fingerprint of a cache hit, when it differs from the
+    /// stored one. A hit through the content check proves that the stored
+    /// tokens match the source read after `read_started_ns`, so a settled
+    /// fingerprint lets the next run skip that read.
+    pub(super) fn refresh_fingerprint(
+        &mut self,
+        path: &Path,
+        metadata: &std::fs::Metadata,
+        read_started_ns: u64,
+    ) {
+        let fingerprint =
+            SourceFingerprint::from_metadata(metadata).for_content_read_at(read_started_ns);
+        let Some(entry) = self.store.entries.get_mut(&cache_key(path)) else {
+            return;
+        };
+        if entry.source_fingerprint() == fingerprint {
+            return;
+        }
+        entry.mtime_ns = fingerprint.mtime_ns;
+        entry.ctime_ns = fingerprint.ctime_ns;
+        entry.file_size = fingerprint.file_size;
         self.dirty = true;
     }
 
@@ -462,6 +492,7 @@ mod tests {
         cache.insert(
             file,
             metadata,
+            u64::MAX,
             mode,
             &TokenPayload {
                 hashed_tokens: &entry.hashed_tokens,
@@ -812,5 +843,75 @@ mod tests {
                 .is_none(),
             "a size-preserving content change with a restored mtime must miss even without ctime"
         );
+    }
+
+    /// A same-length write in the same timestamp tick as the cached read keeps
+    /// mtime, ctime and size. The fingerprint that the run stores must then
+    /// not stand in for the content, or the next run replays the old tokens.
+    #[test]
+    fn a_same_tick_rewrite_misses_the_token_cache() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        let before = "const alpha = 1;\n";
+        let after = "const bravo = 1;\n";
+        let read_started_ns = fallow_types::source_fingerprint::now_ns();
+        std::fs::write(&file, before).expect("write source");
+        let entry = entry(before);
+        std::fs::write(&file, after).expect("rewrite source with equal-length content");
+        // The metadata of the rewrite stands in for the metadata of a write in
+        // the same tick as the read: all three values match the live file.
+        let same_tick = std::fs::metadata(&file).expect("metadata after rewrite");
+
+        let mut cache = TokenCache::load(dir.path());
+        cache.insert(
+            &file,
+            &same_tick,
+            read_started_ns,
+            mode(),
+            &TokenPayload {
+                hashed_tokens: &entry.hashed_tokens,
+                file_tokens: &entry.file_tokens,
+                suppressions: &entry.suppressions,
+            },
+        );
+
+        assert!(
+            cache.get(&file, &same_tick, mode()).is_none(),
+            "a fingerprint from inside the settle window must not replay the old tokens"
+        );
+    }
+
+    #[test]
+    fn a_content_hit_stores_the_settled_fingerprint() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        cache.insert(
+            &file,
+            &metadata,
+            0,
+            mode(),
+            &TokenPayload {
+                hashed_tokens: &entry.hashed_tokens,
+                file_tokens: &entry.file_tokens,
+                suppressions: &entry.suppressions,
+            },
+        );
+        let stored = |cache: &TokenCache| {
+            cache
+                .store
+                .entries
+                .get(&cache_key(&file))
+                .expect("cached token entry")
+                .source_fingerprint()
+        };
+        assert!(!stored(&cache).is_trustworthy_without_content());
+
+        cache.refresh_fingerprint(&file, &metadata, u64::MAX);
+
+        assert_eq!(stored(&cache), SourceFingerprint::from_metadata(&metadata));
     }
 }

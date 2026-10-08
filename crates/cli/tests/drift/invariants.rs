@@ -52,24 +52,46 @@ pub fn keys_subset(label_sub: &str, sub: &KeySet, label_sup: &str, sup: &KeySet)
 /// I1: `check` is byte-identical to `dead-code` after the volatile fields are
 /// removed, and both runs exit with the same code.
 pub fn i1_alias_identical(check: &CommandOutput, dead_code: &CommandOutput) -> Verdict {
-    let check_report = pretty(&canonical_report(check));
-    let dead_code_report = pretty(&canonical_report(dead_code));
-    if check.code != dead_code.code {
+    reports_identical(("dead-code", dead_code), ("check", check))
+}
+
+/// I14: `architecture` is byte-identical to `dead-code` with the five
+/// deprecated structure flags after the volatile fields are removed, and both
+/// runs exit with the same code.
+pub fn i14_architecture_identical(
+    architecture: &CommandOutput,
+    structure_flags: &CommandOutput,
+) -> Verdict {
+    reports_identical(
+        ("dead-code structure flags", structure_flags),
+        ("architecture", architecture),
+    )
+}
+
+/// The canonical reports and exit codes of two runs are equal. On a
+/// difference, the error holds a unified diff from `expected` to `actual`.
+fn reports_identical(
+    (expected_label, expected): (&str, &CommandOutput),
+    (actual_label, actual): (&str, &CommandOutput),
+) -> Verdict {
+    let actual_report = pretty(&canonical_report(actual));
+    let expected_report = pretty(&canonical_report(expected));
+    if actual.code != expected.code {
         return Err(format!(
-            "exit codes differ: check {} != dead-code {}",
-            check.code, dead_code.code
+            "exit codes differ: {actual_label} {} != {expected_label} {}",
+            actual.code, expected.code
         ));
     }
-    if check_report == dead_code_report {
+    if actual_report == expected_report {
         return Ok(());
     }
-    let unified = TextDiff::from_lines(&dead_code_report, &check_report)
+    let unified = TextDiff::from_lines(&expected_report, &actual_report)
         .unified_diff()
         .context_radius(2)
-        .header("dead-code", "check")
+        .header(expected_label, actual_label)
         .to_string();
     Err(format!(
-        "check output differs from dead-code output:\n{unified}"
+        "{actual_label} output differs from {expected_label} output:\n{unified}"
     ))
 }
 

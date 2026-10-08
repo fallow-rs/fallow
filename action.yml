@@ -8,7 +8,7 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), audit (changed-file quality gate), security (security candidates), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
+    description: 'Command to run: dead-code (unused code), architecture (import cycles, boundaries and policy rules), dupes (code duplication), health (complexity), audit (changed-file quality gate), security (security candidates), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
     required: false
     default: ''
   root:
@@ -54,10 +54,10 @@ inputs:
     required: false
     default: 'true'
   baseline:
-    description: 'Path to baseline file for comparison. Used by dead-code, dupes, health and the combined run. The fix, audit and security commands reject it with exit 2 (audit uses dead-code-baseline, health-baseline and dupes-baseline).'
+    description: 'Path to baseline file for comparison. Used by dead-code, architecture, dupes, health and the combined run. The fix, audit and security commands reject it with exit 2 (audit uses dead-code-baseline, health-baseline and dupes-baseline).'
     required: false
   save-baseline:
-    description: 'Save current results as a baseline file. Used by dead-code, dupes, health and the combined run. The fix, audit and security commands reject it with exit 2.'
+    description: 'Save current results as a baseline file. Used by dead-code, architecture, dupes, health and the combined run. The fix, audit and security commands reject it with exit 2.'
     required: false
   fail-on-stale-baseline:
     description: 'Fail the job when the loaded baseline has entries that match nothing this run. The staleness warning itself needs no input: any run that loads a baseline reports it, and a run scoped to changed files re-reads the baseline over the whole project first, because a scoped run cannot judge a whole-project baseline. This input only decides whether that verdict fails the job. When the run still cannot judge the baseline (`production`, `workspace`, `changed-workspaces`, or a positional path passed through `args`) it warns and stands down instead of passing silently. Independent of `fail-on-issues`.'
@@ -254,10 +254,10 @@ inputs:
     required: false
   # Check-specific inputs
   issue-types:
-    description: 'Comma-separated issue types to report (dead-code command). Valid: unused-files, unused-exports, unused-types, unused-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps'
+    description: 'Comma-separated issue types to report (dead-code and architecture commands). Valid for dead-code: unused-files, unused-exports, unused-types, unused-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps. Valid for architecture: cycles, boundaries, policy.'
     required: false
   include-entry-exports:
-    description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis; also configurable persistently via includeEntryExports in your fallow config.'
+    description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis (not applied to architecture); also configurable persistently via includeEntryExports in your fallow config.'
     required: false
     default: 'false'
   type-aware:
@@ -290,18 +290,18 @@ inputs:
     required: false
   # Regression detection
   fail-on-regression:
-    description: 'Exit with code 1 if issue counts regressed compared to baseline (dead-code command)'
+    description: 'Exit with code 1 if issue counts regressed compared to baseline (dead-code and architecture commands)'
     required: false
     default: 'false'
   tolerance:
-    description: 'Allowed regression tolerance before failing (e.g. "2%" or "5") (dead-code command)'
+    description: 'Allowed regression tolerance before failing (e.g. "2%" or "5") (dead-code and architecture commands)'
     required: false
     default: '0'
   regression-baseline:
-    description: 'Path to regression baseline file for comparison (dead-code command)'
+    description: 'Path to regression baseline file for comparison (dead-code and architecture commands)'
     required: false
   save-regression-baseline:
-    description: 'Save current results as a regression baseline file (dead-code command)'
+    description: 'Save current results as a regression baseline file (dead-code and architecture commands)'
     required: false
   # Fix-specific inputs
   dry-run:
@@ -318,10 +318,10 @@ inputs:
     required: false
   # Bare invocation selectors
   only:
-    description: 'Run only these analyses when no command is specified (comma-separated: dead-code,dupes,health)'
+    description: 'Run only these analyses when no command is specified (comma-separated: dead-code,architecture,dupes,health)'
     required: false
   skip:
-    description: 'Skip these analyses when no command is specified (comma-separated: dead-code,dupes,health)'
+    description: 'Skip these analyses when no command is specified (comma-separated: dead-code,architecture,dupes,health)'
     required: false
 
 outputs:
@@ -332,7 +332,7 @@ outputs:
     description: 'Path to SARIF results file'
     value: ${{ steps.analyze.outputs.sarif }}
   issues:
-    description: 'Number of issues (dead-code), clone groups (dupes), security candidates (security), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals. Security count is gate-aware when `security-gate` is set. For audit, prefer `outputs.verdict` for severity-aware gating.'
+    description: 'Number of issues (dead-code and architecture), clone groups (dupes), security candidates (security), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals. Security count is gate-aware when `security-gate` is set. For audit, prefer `outputs.verdict` for severity-aware gating.'
     value: ${{ steps.analyze.outputs.issues }}
   verdict:
     description: 'Audit verdict (pass/warn/fail). Empty when command is not audit. The threshold step gates on this for audit so warn-tier findings do not fail CI.'
@@ -365,7 +365,7 @@ outputs:
     description: 'true when the loaded file carries no key the running command writes into its own baselines, so it is a baseline another command saved or an object with nothing of that command in it. Empty when no baseline was loaded, when the baseline belongs to the command that read it, or when the fallow version predates the member. A baseline saved on a project with nothing to record is empty and is NOT reported here.'
     value: ${{ steps.analyze.outputs.baseline_unrecognised }}
   baseline-saved-by:
-    description: 'The command that saved the loaded baseline (dead-code, dupes or health), when baseline-unrecognised is true and the file names a writer that fallow knows. Empty otherwise, and when the fallow version predates the member. The value set is open: a later fallow can add a writer.'
+    description: 'The command that saved the loaded baseline (dead-code, dupes or health), when baseline-unrecognised is true and the file names a writer that fallow knows. A baseline that the architecture command saves is a dead-code baseline, so it reports dead-code. Empty otherwise, and when the fallow version predates the member. The value set is open: a later fallow can add a writer.'
     value: ${{ steps.analyze.outputs.baseline_saved_by }}
   baseline-gate-trips:
     description: 'true when the baseline has entries that match nothing and the run could judge it, or when the loaded file is not this command''s own baseline. That is what fail-on-stale-baseline exits on. Gate on this in a downstream step to report staleness without failing the job.'

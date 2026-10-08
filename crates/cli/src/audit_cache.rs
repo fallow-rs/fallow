@@ -9,18 +9,22 @@ use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
+use super::keys::{ComplexityBaseline, ComplexityMetrics};
 use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-/// Version 10: dead-code keys are line-free canonical keys with an occurrence
-/// suffix on repeated keys. A version-9 snapshot holds the old keys, some of
+/// Version 11: complexity keys hold path and function name only, and each
+/// complexity entry carries its metric values (#3277). A version-10 snapshot
+/// holds keys with the exceeded category and no metric values. Version 10:
+/// dead-code keys are line-free canonical keys with an occurrence suffix on
+/// repeated keys. A version-9 snapshot holds the old keys, some of
 /// which carry lines, so the head run must not compare against it. Version 9
 /// gave the per-file branching payload a field, version 8 introduced that
 /// payload, and version 7 rebased Istanbul coverage paths onto the base
 /// worktree (#2347), so snapshots computed by the coverage-blind base pass must
 /// not be reused.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 10;
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 11;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {
@@ -49,7 +53,8 @@ pub(super) struct CachedAuditKeySnapshot {
     /// syntactic sets on both sides even on a warm cache.
     pub(super) syntactic_dead_code: Option<Vec<String>>,
     pub(super) dead_code: Vec<String>,
-    pub(super) health: Vec<String>,
+    /// Base complexity findings, sorted by key and line.
+    pub(super) health: Vec<CachedComplexityFinding>,
     pub(super) styling: Vec<String>,
     pub(super) dupes: Vec<String>,
     pub(super) boundary_edges: Vec<String>,
@@ -58,6 +63,16 @@ pub(super) struct CachedAuditKeySnapshot {
     /// Branching totals per root-relative path, sorted by path so the encoded
     /// bytes are stable for identical input.
     pub(super) branching: Vec<CachedFileBranching>,
+}
+
+/// One base complexity finding in the cached snapshot.
+#[derive(bitcode::Encode, bitcode::Decode)]
+pub(super) struct CachedComplexityFinding {
+    pub(super) key: String,
+    pub(super) line: u32,
+    pub(super) cyclomatic: u16,
+    pub(super) cognitive: u16,
+    pub(super) crap: Option<f64>,
 }
 
 /// One file's branching totals in the cached snapshot. A named struct rather
@@ -90,7 +105,7 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
             .syntactic_dead_code
             .map(|keys| keys.into_iter().collect()),
         dead_code: cached.dead_code.into_iter().collect(),
-        health: cached.health.into_iter().collect(),
+        health: complexity_from_cached(cached.health),
         styling: cached.styling.into_iter().collect(),
         dupes: cached.dupes.into_iter().collect(),
         boundary_edges: cached.boundary_edges.into_iter().collect(),
@@ -125,7 +140,7 @@ pub(super) fn cached_from_snapshot(
         type_aware_gap_signature: snapshot.type_aware_gap_signature.clone(),
         syntactic_dead_code: snapshot.syntactic_dead_code.as_ref().map(sorted_keys),
         dead_code: sorted_keys(&snapshot.dead_code),
-        health: sorted_keys(&snapshot.health),
+        health: sorted_complexity(&snapshot.health),
         styling: sorted_keys(&snapshot.styling),
         dupes: sorted_keys(&snapshot.dupes),
         boundary_edges: sorted_keys(&snapshot.boundary_edges),
@@ -133,6 +148,39 @@ pub(super) fn cached_from_snapshot(
         public_api: sorted_keys(&snapshot.public_api),
         branching: sorted_branching(&snapshot.branching),
     })
+}
+
+fn sorted_complexity(baseline: &ComplexityBaseline) -> Vec<CachedComplexityFinding> {
+    let mut rows: Vec<CachedComplexityFinding> = baseline
+        .iter()
+        .flat_map(|(key, findings)| {
+            findings.iter().map(|metrics| CachedComplexityFinding {
+                key: key.clone(),
+                line: metrics.line,
+                cyclomatic: metrics.cyclomatic,
+                cognitive: metrics.cognitive,
+                crap: metrics.crap,
+            })
+        })
+        .collect();
+    rows.sort_unstable_by(|a, b| a.key.cmp(&b.key).then(a.line.cmp(&b.line)));
+    rows
+}
+
+fn complexity_from_cached(rows: Vec<CachedComplexityFinding>) -> ComplexityBaseline {
+    let mut baseline = ComplexityBaseline::default();
+    for row in rows {
+        baseline
+            .entry(row.key)
+            .or_default()
+            .push(ComplexityMetrics {
+                line: row.line,
+                cyclomatic: row.cyclomatic,
+                cognitive: row.cognitive,
+                crap: row.crap,
+            });
+    }
+    baseline
 }
 
 fn sorted_branching(

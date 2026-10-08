@@ -399,7 +399,8 @@
       "possible_values": [
         "dead-code",
         "dupes",
-        "health"
+        "health",
+        "architecture"
       ]
     },
     {
@@ -410,7 +411,8 @@
       "possible_values": [
         "dead-code",
         "dupes",
-        "health"
+        "health",
+        "architecture"
       ]
     },
     {
@@ -625,7 +627,7 @@
   "commands": [
     {
       "name": "dead-code",
-      "description": "Analyze project for unused code and circular dependencies",
+      "description": "Analyze project for unused code and dependency hygiene",
       "flags": [
         {
           "name": "--unused-files",
@@ -851,7 +853,7 @@
           "name": "--circular-deps",
           "type": "bool",
           "required": false,
-          "description": "Only report circular dependencies",
+          "description": "Only report circular dependencies. Deprecated alias: use `fallow architecture --cycles`",
           "possible_values": [
             "true",
             "false"
@@ -861,7 +863,7 @@
           "name": "--re-export-cycles",
           "type": "bool",
           "required": false,
-          "description": "Only report re-export cycles",
+          "description": "Only report re-export cycles. Deprecated alias: use `fallow architecture --cycles`",
           "possible_values": [
             "true",
             "false"
@@ -871,7 +873,7 @@
           "name": "--package-cycles",
           "type": "bool",
           "required": false,
-          "description": "Only report dependency cycles between workspace packages",
+          "description": "Only report dependency cycles between workspace packages. Deprecated alias: use `fallow architecture --cycles`",
           "possible_values": [
             "true",
             "false"
@@ -881,7 +883,7 @@
           "name": "--boundary-violations",
           "type": "bool",
           "required": false,
-          "description": "Only report boundary violations",
+          "description": "Only report boundary violations. Deprecated alias: use `fallow architecture --boundaries`",
           "possible_values": [
             "true",
             "false"
@@ -891,7 +893,7 @@
           "name": "--policy-violations",
           "type": "bool",
           "required": false,
-          "description": "Only report rule-pack policy violations",
+          "description": "Only report rule-pack policy violations. Deprecated alias: use `fallow architecture --policy`",
           "possible_values": [
             "true",
             "false"
@@ -1014,6 +1016,60 @@
           "type": "string",
           "required": false,
           "description": "Only report the findings with these `finding_id` values. Repeat the flag or pass a comma-separated list. Ids stay the same under every filter. The JSON output adds `finding_id_query`: a missing id means \"resolved\" only when `conclusive` is true"
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
+        }
+      ]
+    },
+    {
+      "name": "architecture",
+      "description": "Check import cycles, boundaries and policy rules after editing",
+      "flags": [
+        {
+          "name": "--cycles",
+          "type": "bool",
+          "required": false,
+          "description": "Only report import cycles: circular dependencies, re-export cycles and package cycles",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--boundaries",
+          "type": "bool",
+          "required": false,
+          "description": "Only report boundary violations, boundary coverage and forbidden calls",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--policy",
+          "type": "bool",
+          "required": false,
+          "description": "Only report rule-pack policy violations",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--file",
+          "type": "string",
+          "required": false,
+          "description": "Only report issues in the specified file(s). Accepts multiple values. The full project graph is still built, but only issues in matching files are reported"
+        },
+        {
+          "name": "--finding-id",
+          "type": "string",
+          "required": false,
+          "description": "Only report the findings with these `finding_id` values. Repeat the flag or pass a comma-separated list"
         },
         {
           "name": "path",
@@ -7871,6 +7927,11 @@
     {
       "task": "check which architecture rules apply to a file before changing it",
       "command": "fallow guard <files>",
+      "note": null
+    },
+    {
+      "task": "check import cycles, boundaries and policy rules after changing code",
+      "command": "fallow architecture",
       "note": null
     },
     {

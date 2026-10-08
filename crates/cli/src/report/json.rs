@@ -40,6 +40,8 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
+    /// The subcommand that ran: `dead-code` or `architecture`.
+    pub(super) command: &'static str,
 }
 
 pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
@@ -73,9 +75,10 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
         input.root,
         input.elapsed,
         input.config_fixable,
-        check_output_meta(input.explain, input.type_aware),
+        check_output_meta(input.explain, input.type_aware, input.command),
         extras,
         input.workspace_diagnostics,
+        input.command,
     )?;
     input.json_style.serialize(&output)
 }
@@ -96,6 +99,8 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
+    /// The subcommand that ran: `dead-code` or `architecture`.
+    pub(super) command: &'static str,
 }
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
@@ -111,13 +116,14 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
         baseline_staleness: input.baseline_staleness,
-        meta: check_output_meta(input.explain, input.type_aware),
+        meta: check_output_meta(input.explain, input.type_aware, input.command),
         workspace_diagnostics: input.workspace_diagnostics.to_vec(),
-        next_steps: crate::report::suggestions::build_dead_code_next_steps(
+        next_steps: crate::report::suggestions::build_check_next_steps(
             input.original,
             input.root,
             crate::report::suggestions::setup_pointer_applicable(input.root),
             crate::report::suggestions::due_impact_digest(input.root),
+            input.command,
         ),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     }) {
@@ -134,13 +140,18 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
 fn check_output_meta(
     explain: bool,
     type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    command: &str,
 ) -> Option<fallow_types::envelope::Meta> {
     if !explain && type_aware.is_none() {
         return None;
     }
 
     let mut meta = if explain {
-        fallow_output::check_meta()
+        let mut meta = fallow_output::check_meta();
+        if command == super::ARCHITECTURE_COMMAND {
+            meta.docs = Some(fallow_output::ARCHITECTURE_DOCS.to_string());
+        }
+        meta
     } else {
         fallow_types::envelope::Meta::default()
     };
@@ -549,6 +560,7 @@ fn api_check_json_document_with_config_fixable_and_meta(
         meta,
         CheckJsonExtraOutputs::default(),
         &[],
+        "dead-code",
     )
 }
 
@@ -564,6 +576,7 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
     meta: Option<fallow_types::envelope::Meta>,
     extras: CheckJsonExtraOutputs,
     workspace_diagnostics: &[WorkspaceDiagnostic],
+    command: &str,
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_check_json(CheckJsonOutputInput {
         results,
@@ -573,11 +586,12 @@ pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
         meta,
         extras,
         workspace_diagnostics: workspace_diagnostics.to_vec(),
-        next_steps: crate::report::suggestions::build_dead_code_next_steps(
+        next_steps: crate::report::suggestions::build_check_next_steps(
             results,
             root,
             crate::report::suggestions::setup_pointer_applicable(root),
             crate::report::suggestions::due_impact_digest(root),
+            command,
         ),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
@@ -2246,9 +2260,10 @@ mod tests {
             &root,
             Duration::default(),
             false,
-            check_output_meta(false, Some(&type_aware)),
+            check_output_meta(false, Some(&type_aware), "dead-code"),
             CheckJsonExtraOutputs::default(),
             &[],
+            "dead-code",
         )
         .expect("type-aware metadata should serialize");
 
@@ -2263,7 +2278,7 @@ mod tests {
     #[test]
     fn type_aware_explain_defines_semantic_metrics() {
         let type_aware = fallow_types::envelope::TypeAwareMeta::default();
-        let meta = check_output_meta(true, Some(&type_aware)).expect("metadata");
+        let meta = check_output_meta(true, Some(&type_aware), "dead-code").expect("metadata");
 
         assert!(
             meta.field_definitions

@@ -167,7 +167,7 @@ _FALLOW_TMPS+=("$ANNOTATIONS_FILE")
 : > "$ANNOTATIONS_FILE"
 
 case "$FALLOW_COMMAND" in
-  dead-code|check)
+  dead-code|check|architecture)
     jq -r -f "${ACTION_JQ_DIR}/annotations-check.jq" "$RESULTS_FILE" > "$ANNOTATIONS_FILE" 2>/dev/null || true ;;
   dupes)
     jq -r -f "${ACTION_JQ_DIR}/annotations-dupes.jq" "$RESULTS_FILE" > "$ANNOTATIONS_FILE" 2>/dev/null || true ;;

@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A warm run no longer reuses the analysis of the previous content of a
+  file.** The parse cache, the duplication token cache and the kept modules of
+  a long-lived session trusted a file when its modification time, change time
+  and size matched. A same-length save in the same filesystem timestamp tick
+  keeps all three values. A save while a run parsed the file gave the cached
+  analysis the metadata of the new content. In both cases the next run
+  reported findings for the old content. Now a cache trusts the metadata only
+  when both timestamps are at least three seconds older than the read of the
+  cached content. For a more recent file, the next run reads the file and
+  compares the content hash. The parse cache version and the duplication cache
+  version change, so the first run after the upgrade parses all files again.
+- `fallow dead-code --summary` now lists the rule-pack "Policy violations"
+  row. The total already counted these findings.
+- The human status line of `fallow dead-code` now counts policy violations,
+  boundary coverage violations and boundary call violations. Boundary
+  violations show as "boundary violation" instead of "violation". Before, a run
+  with only policy violations printed a status line with no count.
+- The `Failed:` line of bare `fallow` now says "1 issue" and "1 clone group"
+  in the singular.
+### Added
+
+- **`fallow architecture`** reports import cycles, boundary violations and
+  rule-pack policy violations in one command. Use `--cycles`, `--boundaries`
+  or `--policy` to select one kind. The command takes the same scope and
+  output flags as `fallow dead-code`, and its JSON output is the `dead-code`
+  envelope with the same arrays and finding ids. Run `fallow guard <files>`
+  before an edit and `fallow architecture` after it. Bare `fallow` shows these
+  findings in an "Architecture" category after the other dead-code categories,
+  with and without `--quiet`, and also with `--group-by` and `--summary`. With
+  `--group-by`, `fallow architecture` shows one "Architecture" heading per
+  group. In JSON, `fallow architecture` names itself in `next_steps` and
+  `_meta.docs` points to the architecture page.
+- Bare `fallow` accepts `architecture` in `--only` and `--skip`.
+  `--only architecture` runs the dead-code analysis and reports only the
+  architecture findings, and its `Failed:` line names `architecture`.
+  `--skip architecture` removes them from the dead-code
+  section. The health score and the `--save-baseline` file do not change.
+- Telemetry records `fallow architecture` runs as the `architecture` workflow.
+- The GitHub Action accepts `command: architecture` and the GitLab template
+  accepts `FALLOW_COMMAND: architecture`. `issue-types` and
+  `FALLOW_ISSUE_TYPES` take `cycles`, `boundaries` and `policy` for this
+  command. Another value stops the job with exit code 2 and an error that
+  names the valid values.
+
+### Deprecated
+
+- The `fallow dead-code` flags `--circular-deps`, `--re-export-cycles`,
+  `--package-cycles`, `--boundary-violations` and `--policy-violations` are
+  aliases of `fallow architecture --cycles`, `--boundaries` and `--policy`.
+  They keep working in v3. `fallow dead-code` keeps reporting these findings
+  until the next major version, and its human output points to
+  `fallow architecture` when it reports one.
+
+- **The npm launcher no longer cuts short the output of the binary under
+  Bun.** When Bun ran the `fallow` launcher with stdout on a pipe, the JSON
+  output stopped after approximately 64 to 150 KB, and the exit code was 0.
+  The VS Code extension then failed to parse the JSON. The cause was the first
+  use of `process.stdout` or `process.stderr` in the launcher. Under Bun, this
+  sets the shared pipe to non-blocking mode, and the binary inherits that
+  mode. A large write from the binary then failed. Now the launcher does not
+  use these streams before the binary exits, and it writes the verification
+  warnings directly to the stderr descriptor. Thanks to
+  [@codingthat](https://github.com/codingthat) for the report and the
+  reproduction (Closes
+  [#3276](https://github.com/fallow-rs/fallow/issues/3276)).
+
+- **`fallow audit --gate new-only` compares complexity values with the base.**
+  Before, the gate matched complexity findings by path, function name and
+  exceeded category, and did not compare the values. A function that got
+  worse above the limit stayed inherited and passed. A function that improved
+  from `both` to `cyclomatic` counted as introduced and failed. Now a finding
+  matches its base finding by path and function name. It is introduced when
+  no base finding matches, or when a metric that it exceeds has a higher
+  value than in the base finding. Unchanged and decreased values stay
+  inherited. Line shifts and renamed files keep the match. Same-named findings
+  in one file, for example class methods, now count separately in
+  `complexity_introduced` and `complexity_inherited`. The audit base snapshot
+  cache version changes, so the first audit after the upgrade analyzes the
+  base again. Thanks to [@rodrigouroz](https://github.com/rodrigouroz) for the
+  report and the reproduction
+  ([#3277](https://github.com/fallow-rs/fallow/issues/3277)).
+
 ### Changed
 
 - **`fallow viz` now shows where to start.** The Overview panel opens with

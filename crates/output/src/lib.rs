@@ -274,7 +274,7 @@ pub use inspect_envelopes::{
     serialize_inspect_json_output,
 };
 pub use issue_contract::{
-    ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, CHECK_DOCS,
+    ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, ARCHITECTURE_DOCS, CHECK_DOCS,
     CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, check_meta,
     issue_output_contract_by_code, issue_output_contracts, rule_docs_url,
 };

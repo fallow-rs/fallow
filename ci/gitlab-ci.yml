@@ -31,7 +31,7 @@
 #   - Automatic cleanup of previous fallow comments on re-runs
 #   - Auto --changed-since in MR context (scopes to changed files)
 #   - Incremental caching of parse results
-#   - All fallow commands: dead-code, dupes, health, audit, security, fix
+#   - All fallow commands: dead-code, architecture, dupes, health, audit, security, fix
 #   - Configurable failure thresholds
 #
 # Examples:
@@ -77,7 +77,7 @@ variables:
   # Core
   FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
   FALLOW_SKIP_INSTALL: ""        # "true" skips `npm install -g fallow` and uses the fallow already on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`). Fails fast if no fallow is found.
-  FALLOW_COMMAND: ""            # dead-code, dupes, health, audit, security, fix, or empty (runs all)
+  FALLOW_COMMAND: ""            # dead-code, architecture, dupes, health, audit, security, fix, or empty (runs all)
   FALLOW_ROOT: "."
   FALLOW_CONFIG: ""             # Path to .fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml
   FALLOW_PRODUCTION: ""                # "true"/"false" enables production for every analysis. Empty defers to config.
@@ -97,7 +97,7 @@ variables:
   # count it reports is zero because nothing was measured. Warns and passes by
   # default, because a scope that legitimately holds no source should not break.
   FALLOW_FAIL_ON_EMPTY_ANALYSIS: "false"
-  FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports
+  FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports (not applied to architecture)
   FALLOW_TYPE_AWARE: ""                  # true/false overrides repository typeAware.enabled; empty defers to config
   FALLOW_TYPE_AWARE_PROJECTS: ""         # Comma-separated tsconfig paths; empty uses automatic project discovery
   FALLOW_TYPE_AWARE_REQUIRE: ""           # best-effort or complete; empty defers to repository typeAware.require
@@ -136,7 +136,7 @@ variables:
   FALLOW_CHANGED_WORKSPACES: ""  # Git-derived monorepo scoping: set to a git ref (e.g. "origin/main") to scope analysis to workspaces containing any changed file. Requires full git history. Mutually exclusive with FALLOW_WORKSPACE.
 
   # Dead-code specific
-  FALLOW_ISSUE_TYPES: ""        # Comma-separated: unused-files,unused-exports,...
+  FALLOW_ISSUE_TYPES: ""        # Comma-separated. dead-code: unused-files,unused-exports,... architecture: cycles,boundaries,policy
   FALLOW_FAIL_ON_REGRESSION: "false"
   FALLOW_TOLERANCE: "0"
   FALLOW_REGRESSION_BASELINE: ""
@@ -190,7 +190,7 @@ variables:
   FALLOW_THREADS: ""
 
   # Bare invocation selectors
-  FALLOW_ONLY: ""               # Comma-separated: check,dupes,health
+  FALLOW_ONLY: ""               # Comma-separated: check,architecture,dupes,health
   FALLOW_SKIP: ""
 
   # Advanced: pin remote MR-integration scripts to a specific tag or commit.
@@ -415,8 +415,8 @@ variables:
 
       # ── Validate inputs ──────────────────────────────────────────────
       case "$FALLOW_COMMAND" in
-        ""|dead-code|check|dupes|health|audit|security|fix) ;;
-        *) echo "ERROR: Invalid command: ${FALLOW_COMMAND}"; exit 2 ;;
+        ""|dead-code|check|architecture|dupes|health|audit|security|fix) ;;
+        *) echo "ERROR: Invalid command: ${FALLOW_COMMAND}. Must be dead-code, architecture, dupes, health, audit, security, fix, or empty (runs all)."; exit 2 ;;
       esac
       if [ "$FALLOW_COMMAND" = "audit" ] && { [ -n "$FALLOW_BASELINE" ] || [ -n "$FALLOW_SAVE_BASELINE" ]; }; then
         echo "ERROR: The audit command does not support FALLOW_BASELINE/FALLOW_SAVE_BASELINE. Use FALLOW_AUDIT_DEAD_CODE_BASELINE, FALLOW_AUDIT_HEALTH_BASELINE, or FALLOW_AUDIT_DUPES_BASELINE instead."
@@ -589,6 +589,31 @@ variables:
             done
           fi
           [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
+          [ "$FALLOW_FAIL_ON_REGRESSION" = "true" ] && ARGS+=(--fail-on-regression)
+          [ -n "$FALLOW_TOLERANCE" ] && [ "$FALLOW_TOLERANCE" != "0" ] && ARGS+=(--tolerance "$FALLOW_TOLERANCE")
+          [ -n "$FALLOW_REGRESSION_BASELINE" ] && ARGS+=(--regression-baseline "$FALLOW_REGRESSION_BASELINE")
+          [ -n "$FALLOW_SAVE_REGRESSION_BASELINE" ] && ARGS+=(--save-regression-baseline "$FALLOW_SAVE_REGRESSION_BASELINE")
+          ;;
+        architecture)
+          # Same analysis and envelope as dead-code. FALLOW_ISSUE_TYPES takes
+          # the architecture filters (cycles, boundaries, policy). The command
+          # has no unused-export filter, so FALLOW_INCLUDE_ENTRY_EXPORTS does
+          # not apply.
+          if [ -n "$FALLOW_ISSUE_TYPES" ]; then
+            IFS=',' read -ra TYPES <<< "$FALLOW_ISSUE_TYPES"
+            for t in "${TYPES[@]}"; do
+              t="$(echo "$t" | xargs)"
+              case "$t" in
+                cycles|boundaries|policy) ;;
+                *)
+                  echo "ERROR: Invalid FALLOW_ISSUE_TYPES value for the architecture command: '${t}'. Valid values: cycles, boundaries, policy."
+                  exit 2
+                  ;;
+              esac
+              ARGS+=("--${t}")
+              ISSUE_TYPE_FLAGS+=("--${t}")
+            done
+          fi
           [ "$FALLOW_FAIL_ON_REGRESSION" = "true" ] && ARGS+=(--fail-on-regression)
           [ -n "$FALLOW_TOLERANCE" ] && [ "$FALLOW_TOLERANCE" != "0" ] && ARGS+=(--tolerance "$FALLOW_TOLERANCE")
           [ -n "$FALLOW_REGRESSION_BASELINE" ] && ARGS+=(--regression-baseline "$FALLOW_REGRESSION_BASELINE")
@@ -1139,7 +1164,7 @@ variables:
       fi
 
       case "$FALLOW_COMMAND" in
-        dead-code|check) ISSUES=$(jq -r '.total_issues // 0' fallow-results.json) ;;
+        dead-code|check|architecture) ISSUES=$(jq -r '.total_issues // 0' fallow-results.json) ;;
         dupes)           ISSUES=$(jq -r '.stats.clone_groups // 0' fallow-results.json) ;;
         health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
         audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' fallow-results.json) ;;
@@ -1574,6 +1599,7 @@ variables:
           # fail a run the CLI deliberately passed.
           case "$FALLOW_COMMAND" in
             dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues") ;;
+            architecture)    GATE_FAILURES+=("Fallow found ${ISSUES} architecture issues") ;;
             dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups") ;;
             health)          GATE_FAILURES+=("Fallow found ${ISSUES} health findings") ;;
             security)        GATE_FAILURES+=("Fallow found ${ISSUES} security candidates") ;;

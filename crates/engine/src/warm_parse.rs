@@ -13,8 +13,12 @@
 //! project root and the cache config hash, the ordered file list (the file ids
 //! follow from it), and one fingerprint per file. The store keeps a module
 //! only when each fingerprint can stand in for the file content without a
-//! content check, which needs a known ctime. On a platform with no ctime, such
-//! as Windows, each session parses through the persisted cache as before.
+//! content check, which needs a known ctime. On a platform with no ctime,
+//! such as Windows, each session parses through the persisted cache as
+//! before. A fingerprint that did not settle before the kept parse read the
+//! file can belong to a same-length write in the same timestamp tick, so a
+//! later session reads that file and compares its content hash with the kept
+//! module.
 //!
 //! The limit of the store is on the memory of the kept modules. The store
 //! cannot measure that memory, so it makes an estimate from the source size
@@ -98,6 +102,8 @@ struct WarmEntry {
     paths: Vec<PathBuf>,
     file_ids: Vec<FileId>,
     fingerprints: Vec<SourceFingerprint>,
+    /// The wall-clock time before the parse read `fingerprints`.
+    read_started_ns: u64,
     has_complexity: bool,
     retained_bytes: u64,
     parse: WarmParse,
@@ -111,11 +117,14 @@ pub(crate) struct WarmParseKey<'a> {
     pub(crate) cache_config_hash: u64,
     pub(crate) files: &'a [DiscoveredFile],
     pub(crate) fingerprints: &'a [SourceFingerprint],
+    /// The wall-clock time before the session read `fingerprints`.
+    pub(crate) read_started_ns: u64,
 }
 
 impl WarmParseKey<'_> {
     /// Whether the store may keep the modules of this parse. Each fingerprint
-    /// must stand in for the file content without a content check.
+    /// must be able to stand in for the file content, which needs a known
+    /// ctime.
     pub(crate) fn is_reusable(&self) -> bool {
         self.files.len() == self.fingerprints.len()
             && self
@@ -147,6 +156,25 @@ pub fn estimated_retained_bytes(fingerprints: &[SourceFingerprint]) -> u64 {
         .saturating_add(file_count.saturating_mul(module_bytes))
 }
 
+/// Whether each file of `key` whose fingerprint did not settle before
+/// `kept_read_started_ns` still has the content hash of its kept module.
+///
+/// A same-length write in the same timestamp tick keeps the fingerprint, so
+/// only the content can tell for such a file.
+fn unsettled_files_match(
+    key: &WarmParseKey<'_>,
+    kept_read_started_ns: u64,
+    modules: &[ModuleInfo],
+) -> bool {
+    key.fingerprints
+        .iter()
+        .zip(key.files)
+        .all(|(fingerprint, file)| {
+            fingerprint.is_settled_before(kept_read_started_ns)
+                || crate::session_reuse::module_matches_source(modules, file.id, &file.path)
+        })
+}
+
 /// The output of one parse that a later session can use again.
 #[derive(Debug, Clone)]
 pub(crate) struct WarmParse {
@@ -156,6 +184,9 @@ pub(crate) struct WarmParse {
 }
 
 impl WarmEntry {
+    /// Whether the entry is a parse of the same files with the same
+    /// fingerprints. The caller still checks the content of each file that
+    /// did not settle, see [`unsettled_files_match`].
     fn matches(&self, key: &WarmParseKey<'_>) -> bool {
         self.matches_files(key) && self.fingerprints == key.fingerprints
     }
@@ -220,13 +251,30 @@ impl WarmParseStore {
         if !key.is_reusable() {
             return None;
         }
-        let mut entries = self.lock();
-        let position = entries
+        let entries = self.lock();
+        let entry = entries
             .iter()
-            .position(|entry| entry.matches(key) && (entry.has_complexity || !need_complexity))?;
-        let entry = entries.remove(position);
+            .find(|entry| entry.matches(key) && (entry.has_complexity || !need_complexity))?;
+        let kept_read_started_ns = entry.read_started_ns;
         let parse = entry.parse.clone();
-        entries.push(entry);
+        drop(entries);
+        // Read the files outside the store lock, so another session does not
+        // wait on this disk work.
+        if !unsettled_files_match(key, kept_read_started_ns, &parse.modules) {
+            return None;
+        }
+        let mut entries = self.lock();
+        if let Some(position) = entries
+            .iter()
+            .position(|entry| Arc::ptr_eq(&entry.parse.modules, &parse.modules))
+        {
+            let mut entry = entries.remove(position);
+            // The content of each unsettled file was read after the read
+            // start of `key`, so the fingerprints prove the kept modules from
+            // that time on. A later hit then needs no read for these files.
+            entry.read_started_ns = entry.read_started_ns.max(key.read_started_ns);
+            entries.push(entry);
+        }
         drop(entries);
         self.modules_reused
             .fetch_add(parse.modules.len(), Ordering::Relaxed);
@@ -247,6 +295,7 @@ impl WarmParseStore {
             paths: key.files.iter().map(|file| file.path.clone()).collect(),
             file_ids: key.files.iter().map(|file| file.id).collect(),
             fingerprints: key.fingerprints.to_vec(),
+            read_started_ns: key.read_started_ns,
             has_complexity,
             retained_bytes,
             parse,
@@ -303,6 +352,7 @@ pub fn installed() -> Option<Arc<WarmParseStore>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_types::source_fingerprint::TIMESTAMP_SETTLE_WINDOW_NS;
 
     fn files(paths: &[&str]) -> Vec<DiscoveredFile> {
         paths
@@ -340,6 +390,7 @@ mod tests {
             cache_config_hash: 7,
             files,
             fingerprints,
+            read_started_ns: u64::MAX,
         }
     }
 
@@ -391,6 +442,104 @@ mod tests {
 
         assert!(store.is_empty());
         assert!(store.get(&key(root, &listed, &marks), false).is_none());
+    }
+
+    #[test]
+    fn a_fingerprint_inside_the_settle_window_needs_the_kept_content() {
+        let project = tempfile::tempdir().expect("project");
+        let source = project.path().join("a.ts");
+        std::fs::write(&source, "export const a = 1;\n").expect("write source");
+        let store = WarmParseStore::new(WarmParseLimits::default());
+        let listed = files(&[source.to_str().expect("utf-8 path")]);
+        let marks = [SourceFingerprint::with_ctime(10, 20, 5)];
+        let recent = WarmParseKey {
+            read_started_ns: 20,
+            ..key(project.path(), &listed, &marks)
+        };
+        store.put(&recent, true, parse());
+
+        assert_eq!(store.len(), 1);
+        assert!(
+            store.get(&recent, false).is_none(),
+            "a readable file without a matching kept module is not reused"
+        );
+        let settled = WarmParseKey {
+            read_started_ns: u64::MAX,
+            ..recent
+        };
+        store.put(&settled, true, parse());
+        assert!(
+            store.get(&settled, false).is_some(),
+            "a settled fingerprint needs no content check"
+        );
+    }
+
+    /// A real file and a parse of it, so the kept module has the content hash
+    /// of the file.
+    fn parsed_file(dir: &Path, source: &str) -> (Vec<DiscoveredFile>, WarmParse) {
+        let path = dir.join("a.ts");
+        std::fs::write(&path, source).expect("write source");
+        let listed = files(&[path.to_str().expect("utf-8 path")]);
+        let module = fallow_extract::parse_single_file(&listed[0]).expect("parse source");
+        let parse = WarmParse {
+            modules: Arc::from(vec![module]),
+            ..parse()
+        };
+        (listed, parse)
+    }
+
+    #[test]
+    fn an_unsettled_fingerprint_with_the_kept_content_is_reused() {
+        let project = tempfile::tempdir().expect("project");
+        let (listed, kept) = parsed_file(project.path(), "export const a = 1;\n");
+        let marks = [SourceFingerprint::with_ctime(10, 20, 5)];
+        let recent = WarmParseKey {
+            read_started_ns: 20,
+            ..key(project.path(), &listed, &marks)
+        };
+        let store = WarmParseStore::new(WarmParseLimits::default());
+        store.put(&recent, true, kept);
+
+        assert!(store.get(&recent, false).is_some());
+    }
+
+    /// A hit that checked the content of an unsettled file proves the
+    /// fingerprint from the read start of that hit on. The entry takes that
+    /// read start, so a later hit needs no content read.
+    #[test]
+    fn a_verified_hit_settles_the_entry() {
+        let project = tempfile::tempdir().expect("project");
+        let (listed, kept) = parsed_file(project.path(), "export const a = 1;\n");
+        let marks = [SourceFingerprint::with_ctime(10, 20, 5)];
+        let recent = WarmParseKey {
+            read_started_ns: 20,
+            ..key(project.path(), &listed, &marks)
+        };
+        let store = WarmParseStore::new(WarmParseLimits::default());
+        store.put(&recent, true, kept);
+
+        let later = WarmParseKey {
+            read_started_ns: 20 + TIMESTAMP_SETTLE_WINDOW_NS,
+            ..recent
+        };
+        assert!(
+            store.get(&later, false).is_some(),
+            "the kept content matches"
+        );
+        assert_eq!(
+            store.lock()[0].read_started_ns,
+            later.read_started_ns,
+            "the entry takes the read start of the verified hit"
+        );
+
+        // A different source with the same size and fingerprints. A settled
+        // entry does not read the file, so only the stored read start can
+        // explain a hit here.
+        std::fs::write(&listed[0].path, "export const b = 1;\n").expect("rewrite source");
+        assert!(
+            store.get(&later, false).is_some(),
+            "a settled entry needs no content read"
+        );
     }
 
     #[test]

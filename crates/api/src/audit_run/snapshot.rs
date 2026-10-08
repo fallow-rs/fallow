@@ -9,7 +9,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::AuditAnalysesView;
 use crate::AuditProgrammaticKeySnapshot;
 use crate::audit_keys::{
-    dead_code_keys, health_keys, relative_key_path, remap_keys_for_renames, styling_keys,
+    ComplexityBaseline, complexity_baseline, complexity_baseline_keys, dead_code_keys,
+    relative_key_path, remap_complexity_baseline_for_renames, remap_keys_for_renames, styling_keys,
 };
 use crate::review_deltas::{boundary_edge_keys, cycle_keys};
 
@@ -32,8 +33,9 @@ pub struct AuditKeySnapshot {
     pub syntactic_dead_code: Option<FxHashSet<String>>,
     /// Dead-code keys.
     pub dead_code: FxHashSet<String>,
-    /// Complexity keys.
-    pub health: FxHashSet<String>,
+    /// Complexity findings by identity key, with their metric values. The
+    /// new-only gate compares the metric values of matched findings.
+    pub health: ComplexityBaseline,
     /// Styling keys.
     pub styling: FxHashSet<String>,
     /// Clone-group keys.
@@ -70,7 +72,7 @@ impl AuditKeySnapshot {
             snapshot.public_api = dead_code.public_api.cloned().unwrap_or_default();
         }
         if let Some(health) = view.health.as_ref() {
-            snapshot.health = health_keys(health.report, health.root);
+            snapshot.health = complexity_baseline(health.report, health.root);
             snapshot.styling = styling_keys(health.report, health.root);
             snapshot.branching = health.branching.map_or_else(FxHashMap::default, |by_file| {
                 branching_keys(by_file, health.root)
@@ -106,7 +108,8 @@ impl AuditKeySnapshot {
             return;
         }
         self.dead_code = remap_keys_for_renames(&self.dead_code, &rename_map);
-        self.health = remap_keys_for_renames(&self.health, &rename_map);
+        self.health =
+            remap_complexity_baseline_for_renames(std::mem::take(&mut self.health), &rename_map);
         self.styling = remap_keys_for_renames(&self.styling, &rename_map);
         self.dupes = remap_keys_for_renames(&self.dupes, &rename_map);
         self.cycles = remap_keys_for_renames(&self.cycles, &rename_map);
@@ -127,7 +130,7 @@ impl AuditKeySnapshot {
     /// set also holds the styling keys.
     #[must_use]
     pub fn to_programmatic(&self) -> AuditProgrammaticKeySnapshot {
-        let mut health = self.health.clone();
+        let mut health = complexity_baseline_keys(&self.health);
         health.extend(self.styling.iter().cloned());
         AuditProgrammaticKeySnapshot {
             dead_code: self.dead_code.clone(),

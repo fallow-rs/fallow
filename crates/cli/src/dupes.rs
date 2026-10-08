@@ -1085,6 +1085,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         css_requested: false,
         json_style: input.json_style,
         include_fragments: result.include_fragments,
+        architecture_layout: report::ArchitectureLayout::Embedded,
     };
     print_default_ignore_note(result, input.quiet);
     print_min_occurrences_note(result, input.quiet, input.opt_out_scope);

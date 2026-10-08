@@ -165,6 +165,52 @@ pub(crate) struct ReportContext<'a> {
     /// source text. `false` is `fallow dupes --no-fragments`. Every other
     /// renderer and analysis ignores it.
     pub(crate) include_fragments: bool,
+    /// Human dead-code only: where the architecture findings render. Every
+    /// other renderer and format ignores it.
+    pub(crate) architecture_layout: ArchitectureLayout,
+}
+
+/// Where the human dead-code report renders the architecture findings
+/// (import cycles, boundary violations and rule-pack policy violations).
+///
+/// The layout changes the human lines. The findings, the totals and the
+/// footer stay the same. In JSON, `Only` changes the command that
+/// `next_steps` names and the `_meta.docs` URL; see [`ArchitectureLayout::command`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ArchitectureLayout {
+    /// Inside the dead-code "Structure" and "Policy" categories (`fallow dead-code`).
+    #[default]
+    Embedded,
+    /// In one "Architecture" category after the dead-code categories (bare `fallow`).
+    Split,
+    /// Under one "Architecture" category (`fallow architecture`).
+    Only,
+}
+
+/// The subcommand name of `fallow architecture`.
+pub(crate) const ARCHITECTURE_COMMAND: &str = "architecture";
+
+impl ArchitectureLayout {
+    /// The subcommand that a JSON report in this layout names in its
+    /// `next_steps` and `_meta.docs`: `architecture` for `Only`, else `dead-code`.
+    pub(crate) const fn command(self) -> &'static str {
+        match self {
+            Self::Only => ARCHITECTURE_COMMAND,
+            Self::Embedded | Self::Split => "dead-code",
+        }
+    }
+}
+
+/// Whether the results hold an architecture finding: an import cycle, a
+/// boundary violation or a rule-pack policy violation.
+pub(crate) fn has_architecture_findings(results: &fallow_types::results::AnalysisResults) -> bool {
+    !results.circular_dependencies.is_empty()
+        || !results.re_export_cycles.is_empty()
+        || !results.package_cycles.is_empty()
+        || !results.boundary_violations.is_empty()
+        || !results.boundary_coverage_violations.is_empty()
+        || !results.boundary_call_violations.is_empty()
+        || !results.policy_violations.is_empty()
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -296,6 +342,7 @@ pub(crate) fn render_check_json(
         config_fixable: input.config_fixable,
         workspace_diagnostics: input.workspace_diagnostics,
         json_style: input.json_style,
+        command: "dead-code",
     })
 }
 
@@ -400,7 +447,16 @@ pub(crate) fn print_results(
                     ctx.rules,
                     ctx.elapsed,
                     ctx.quiet,
-                    ctx.summary_heading,
+                    human::check::SummaryStyle {
+                        heading: ctx.summary_heading.then_some(
+                            if ctx.architecture_layout == ArchitectureLayout::Only {
+                                "Architecture Summary"
+                            } else {
+                                "Dead Code Summary"
+                            },
+                        ),
+                        layout: ctx.architecture_layout,
+                    },
                     human::check::RunStatus {
                         run_fails: run_fails(ctx),
                         failed_parse_files: ctx.failed_parse_files,
@@ -418,6 +474,7 @@ pub(crate) fn print_results(
                     explain: ctx.explain,
                     run_fails: run_fails(ctx),
                     failed_parse_files: ctx.failed_parse_files,
+                    architecture_layout: ctx.architecture_layout,
                 });
             }
             ExitCode::SUCCESS
@@ -437,6 +494,7 @@ pub(crate) fn print_results(
             config_fixable: ctx.config_fixable,
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
+            command: ctx.architecture_layout.command(),
         }),
         OutputFormat::Compact => {
             compact::print_compact(results, ctx.root);
@@ -517,6 +575,7 @@ fn print_check_github_format(
             ..Default::default()
         },
         ctx.workspace_diagnostics,
+        ctx.architecture_layout.command(),
     ) {
         Ok(envelope) => print_github_format(
             github_annotations::EnvelopeKind::DeadCode,
@@ -639,6 +698,7 @@ fn print_grouped_results(
                 explain: ctx.explain,
                 run_fails: run_fails(ctx),
                 failed_parse_files: ctx.failed_parse_files,
+                architecture_layout: ctx.architecture_layout,
             });
             ExitCode::SUCCESS
         }
@@ -657,6 +717,7 @@ fn print_grouped_results(
             gate_outcomes: ctx.gate_outcomes.clone(),
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
+            command: ctx.architecture_layout.command(),
         }),
         OutputFormat::Compact => {
             compact::print_grouped_compact(groups, ctx.root);
@@ -1530,6 +1591,7 @@ mod tests {
             css_requested: false,
             json_style: crate::json_style::JsonStyle::Compact,
             include_fragments: true,
+            architecture_layout: ArchitectureLayout::Embedded,
         }
     }
 

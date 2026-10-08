@@ -51,7 +51,7 @@ jq_debug() {
 is_dead_code_baseline_command() {
   [ -n "${INPUT_BASELINE:-}" ] || return 1
   case "${INPUT_COMMAND:-}" in
-    ""|dead-code|check) return 0 ;;
+    ""|dead-code|check|architecture) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -235,6 +235,33 @@ build_command_args() {
       [ -n "${INPUT_REGRESSION_BASELINE:-}" ] && ARGS+=(--regression-baseline "$INPUT_REGRESSION_BASELINE")
       [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
       ;;
+    architecture)
+      # Same analysis and envelope as dead-code. The issue-types values are the
+      # architecture filters (cycles, boundaries, policy). The command has no
+      # unused-export filter, so include-entry-exports does not apply.
+      if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
+        ARGS+=(--sarif-file "$SARIF_FILE")
+      fi
+      if [ -n "${INPUT_ISSUE_TYPES:-}" ]; then
+        IFS=',' read -ra TYPES <<< "$INPUT_ISSUE_TYPES"
+        for t in "${TYPES[@]}"; do
+          t="$(echo "$t" | xargs)"
+          case "$t" in
+            cycles|boundaries|policy) ;;
+            *)
+              printf '%s\n' "::error::Invalid issue-types value for the architecture command: '${t}'. Valid values: cycles, boundaries, policy."
+              exit 2
+              ;;
+          esac
+          ARGS+=("--${t}")
+          ISSUE_TYPE_FLAGS+=("--${t}")
+        done
+      fi
+      [ "${INPUT_FAIL_ON_REGRESSION:-}" = "true" ] && ARGS+=(--fail-on-regression)
+      [ -n "${INPUT_TOLERANCE:-}" ] && [ "${INPUT_TOLERANCE:-}" != "0" ] && ARGS+=(--tolerance "$INPUT_TOLERANCE")
+      [ -n "${INPUT_REGRESSION_BASELINE:-}" ] && ARGS+=(--regression-baseline "$INPUT_REGRESSION_BASELINE")
+      [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
+      ;;
     dupes)
       ARGS+=(--mode "${INPUT_DUPES_MODE:-mild}")
       [ -n "${INPUT_MIN_TOKENS:-}" ] && ARGS+=(--min-tokens "$INPUT_MIN_TOKENS")
@@ -382,8 +409,8 @@ validate_action_scalars() {
 validate_action_scalars
 
 case "$INPUT_COMMAND" in
-  ""|dead-code|check|dupes|health|audit|security|fix) ;;
-  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, security, fix, or empty (runs all)."; exit 2 ;;
+  ""|dead-code|check|architecture|dupes|health|audit|security|fix) ;;
+  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, architecture, dupes, health, audit, security, fix, or empty (runs all)."; exit 2 ;;
 esac
 
 if [ "$INPUT_COMMAND" = "audit" ] && { [ -n "${INPUT_BASELINE:-}" ] || [ -n "${INPUT_SAVE_BASELINE:-}" ]; }; then
@@ -522,7 +549,7 @@ fi
 # --- Check for --sarif-file support ---
 
 HAS_SARIF_FILE=false
-if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ] || [ -z "$INPUT_COMMAND" ]; }; then
+if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ] || [ "$INPUT_COMMAND" = "architecture" ] || [ -z "$INPUT_COMMAND" ]; }; then
   HELP_TMP=$(mktemp)
   HELP_ERR=$(mktemp)
   fallow dead-code --help > "$HELP_TMP" 2> "$HELP_ERR" || true
@@ -1801,7 +1828,7 @@ elif [ "$INPUT_COMMAND" = "security" ]; then
 fi
 
 case "$INPUT_COMMAND" in
-  dead-code|check) ISSUES=$(jq -r '.total_issues' "$RESULTS_FILE") ;;
+  dead-code|check|architecture) ISSUES=$(jq -r '.total_issues' "$RESULTS_FILE") ;;
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' "$RESULTS_FILE") ;;
   health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
   audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0) + ((.complexity.styling_findings // []) | length)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0) + (.attribution.styling_introduced // 0)) end' "$RESULTS_FILE") ;;
@@ -1871,6 +1898,7 @@ if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
     # deliberately passed, which is the inversion issue #2682 describes.
     case "$INPUT_COMMAND" in
       dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues.") ;;
+      architecture)    GATE_FAILURES+=("Fallow found ${ISSUES} architecture issues.") ;;
       dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups.") ;;
       health)          GATE_FAILURES+=("Fallow found ${ISSUES} health findings.") ;;
       security)        GATE_FAILURES+=("Fallow found ${ISSUES} security candidates.") ;;
@@ -1888,6 +1916,7 @@ fi
 if [ "$ISSUES" -gt 0 ] && [ ${#GATE_FAILURES[@]} -eq "$COUNT_FAILURES_BEFORE" ]; then
   case "$INPUT_COMMAND" in
     dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
+    architecture)    echo "::warning::Fallow found ${ISSUES} architecture issues" ;;
     dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
     health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
     audit)           echo "::warning::Fallow audit found ${ISSUES} introduced issues in changed files" ;;

@@ -55,7 +55,7 @@ set -euo pipefail
 
 select_summary_script() {
   case "$FALLOW_COMMAND" in
-    dead-code|check) echo "${ACTION_JQ_DIR}/summary-check.jq" ;;
+    dead-code|check|architecture) echo "${ACTION_JQ_DIR}/summary-check.jq" ;;
     dupes)           echo "${ACTION_JQ_DIR}/summary-dupes.jq" ;;
     health)          echo "${ACTION_JQ_DIR}/summary-health.jq" ;;
     audit)           echo "${ACTION_JQ_DIR}/summary-audit.jq" ;;

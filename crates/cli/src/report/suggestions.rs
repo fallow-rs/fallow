@@ -116,15 +116,18 @@ pub fn audit_changed_applicable(root: &Path) -> bool {
 // documented exception: a due `impact-report` digest may ride a clean run.
 // ---------------------------------------------------------------------------
 
-/// Next-steps for standalone `fallow dead-code`. `offer_setup` is the caller's
-/// [`setup_pointer_applicable`] result (threaded as a parameter so the builders
-/// stay free of env/filesystem probes and deterministic under test).
+/// Next-steps for standalone `fallow dead-code` and `fallow architecture`.
+/// `command` is the subcommand that ran; the `scope-workspaces` step names it.
+/// `offer_setup` is the caller's [`setup_pointer_applicable`] result (threaded
+/// as a parameter so the builders stay free of env/filesystem probes and
+/// deterministic under test).
 #[must_use]
-pub fn build_dead_code_next_steps(
+pub fn build_check_next_steps(
     results: &AnalysisResults,
     root: &Path,
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
+    command: &str,
 ) -> Vec<NextStep> {
     let workspace_ref = default_workspace_ref_for_next_step(root);
     let loaded_baseline = crate::output_runtime::loaded_baseline_for("dead-code");
@@ -138,6 +141,7 @@ pub fn build_dead_code_next_steps(
         audit_changed: audit_changed_applicable(root),
         has_external_plugins: has_external_plugins(root),
         baseline_recheck: loaded_baseline.as_ref().and_then(baseline_recheck_input),
+        command,
     })
 }
 
@@ -180,7 +184,7 @@ fn has_external_plugins(root: &Path) -> bool {
     !fallow_config::discover_external_plugins(root, &[]).is_empty()
 }
 
-/// Next-steps for standalone `fallow health`. See [`build_dead_code_next_steps`]
+/// Next-steps for standalone `fallow health`. See [`build_check_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
 pub fn health_next_steps_input<'a>(
@@ -207,7 +211,7 @@ pub fn loaded_health_baseline() -> Option<crate::output_runtime::LoadedBaselineR
     crate::output_runtime::loaded_baseline_for("health")
 }
 
-/// Next-steps for standalone `fallow dupes`. See [`build_dead_code_next_steps`]
+/// Next-steps for standalone `fallow dupes`. See [`build_check_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
 pub fn build_dupes_next_steps(
@@ -329,6 +333,15 @@ mod tests {
     use fallow_types::results::{AnalysisResults, UnusedExport};
 
     use super::*;
+
+    fn build_dead_code_next_steps(
+        results: &AnalysisResults,
+        root: &Path,
+        offer_setup: bool,
+        digest: Option<crate::impact::ImpactDigest>,
+    ) -> Vec<NextStep> {
+        build_check_next_steps(results, root, offer_setup, digest, "dead-code")
+    }
 
     fn loaded_baseline(
         reason: fallow_output::ScopeReason,

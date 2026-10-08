@@ -94,6 +94,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 | consolidate duplication | `fallow dupes --trace dup:<fingerprint>` |
 | find feature flags | `fallow flags` |
 | check which architecture rules apply to a file before changing it | `fallow guard <files>` |
+| check import cycles, boundaries and policy rules after changing code | `fallow architecture` |
 | surface security candidates | `fallow security` |
 | understand a finding | `fallow explain <issue-type>` |
 | scope a monorepo | `--workspace <glob> / --changed-workspaces <ref>`; global flags, prefix any command |
@@ -107,7 +108,9 @@ Full command catalogue, one row per command: **[references/cli-reference.md](ref
 
 ## Issue Types
 
-Dead-code filter flags select issue categories (`--unused-exports`, `--unused-types`, `--unused-deps`, `--circular-deps`, and so on). Some flags select related types together; `--unused-deps` covers several dependency types. Passing one or more narrows `fallow dead-code` to those categories. Passing none applies no issue-type filter.
+Dead-code filter flags select issue categories (`--unused-exports`, `--unused-types`, `--unused-deps`, `--unused-files`, and so on). Some flags select related types together; `--unused-deps` covers several dependency types. Passing one or more narrows `fallow dead-code` to those categories. Passing none applies no issue-type filter.
+
+`fallow architecture` reports the architecture findings: circular dependencies, re-export cycles, package cycles, boundary violations and rule-pack policy violations. Use `--cycles`, `--boundaries` or `--policy` to select one kind. The JSON output is the `dead-code` envelope with the same arrays and finding ids. `fallow dead-code` still reports these findings until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. Run `fallow guard <files>` before an edit and `fallow architecture` after it. In bare `fallow`, `--only architecture` reports only these findings and `--skip architecture` removes them.
 
 For suppressible findings, use the placement listed in the issue catalogue: `// fallow-ignore-next-line <issue-type>` above the finding, or `// fallow-ignore-file <issue-type>` at the top of the file. Some types support only file-level suppression; others have no suppression comment. A bare supported form without a type suppresses all matching findings at that placement.
 

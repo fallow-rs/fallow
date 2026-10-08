@@ -2362,6 +2362,100 @@ assert_contains "$ARGV" "--complexity" "gitlab gate: min-score adds --complexity
 
 rm -rf "$GATE_WORK"
 
+# --- Architecture command (issue #3271) ---
+#
+# `fallow architecture` runs the dead-code analysis with only the cycle,
+# boundary and policy issue types, and its JSON is the dead-code envelope. The
+# fixture is real `fallow architecture --format json` output, shared with the
+# GitHub Action suite.
+
+echo ""
+echo "Architecture command"
+
+ARCH_WORK="$RUNNER_TMP/architecture"
+mkdir -p "$ARCH_WORK"
+ARCH_FIXTURE="$DIR/../../action/tests/fixtures/architecture.json"
+ARCH_TOTAL=$(jq -r '.total_issues' "$ARCH_FIXTURE")
+FALLOW_TEST_LOG="$ARCH_WORK/argv.log"
+
+: > "$FALLOW_TEST_LOG"
+OUT=$(run_generated_gitlab_fixture "$ARCH_WORK" \
+  MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
+  FALLOW_TEST_LOG="$FALLOW_TEST_LOG" \
+  FALLOW_COMMAND=architecture \
+  FALLOW_FAIL_ON_ISSUES=false)
+ARCH_STATUS=$?
+if [ "$ARCH_STATUS" = "0" ]; then
+  pass "gitlab architecture: the command is accepted"
+else
+  fail "gitlab architecture: the command is accepted" "got $ARCH_STATUS: $OUT"
+fi
+if grep -qE '^fallow architecture ' "$FALLOW_TEST_LOG"; then
+  pass "gitlab architecture: the analysis runs fallow architecture"
+else
+  fail "gitlab architecture: the analysis runs fallow architecture" "argv: $(cat "$FALLOW_TEST_LOG")"
+fi
+assert_contains "$OUT" "Found ${ARCH_TOTAL} issues" "gitlab architecture: the issue count is total_issues"
+
+OUT=$(run_generated_gitlab_fixture "$ARCH_WORK" \
+  MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
+  FALLOW_COMMAND=architecture \
+  FALLOW_FAIL_ON_ISSUES=true)
+ARCH_STATUS=$?
+assert_contains "$OUT" "ERROR: Fallow found ${ARCH_TOTAL} architecture issues" \
+  "gitlab architecture: FALLOW_FAIL_ON_ISSUES names architecture issues"
+assert_not_contains "$OUT" "unused code issues" \
+  "gitlab architecture: the gate line does not say unused code"
+if [ "$ARCH_STATUS" = "1" ]; then
+  pass "gitlab architecture: FALLOW_FAIL_ON_ISSUES exits 1"
+else
+  fail "gitlab architecture: FALLOW_FAIL_ON_ISSUES exits 1" "got $ARCH_STATUS: $OUT"
+fi
+
+: > "$FALLOW_TEST_LOG"
+run_generated_gitlab_fixture "$ARCH_WORK" \
+  MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
+  FALLOW_TEST_LOG="$FALLOW_TEST_LOG" \
+  FALLOW_COMMAND=architecture \
+  FALLOW_ISSUE_TYPES="cycles, policy" > /dev/null 2>&1 || true
+assert_contains "$(grep '^fallow architecture ' "$FALLOW_TEST_LOG")" "--cycles --policy" \
+  "gitlab architecture: FALLOW_ISSUE_TYPES forwards the architecture filter flags"
+
+: > "$FALLOW_TEST_LOG"
+OUT=$(run_generated_gitlab_fixture "$ARCH_WORK" \
+  MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
+  FALLOW_TEST_LOG="$FALLOW_TEST_LOG" \
+  FALLOW_COMMAND=architecture \
+  FALLOW_ISSUE_TYPES="boundaries, circular-deps")
+ARCH_STATUS=$?
+if [ "$ARCH_STATUS" = "2" ]; then
+  pass "gitlab architecture: an unknown FALLOW_ISSUE_TYPES value exits 2"
+else
+  fail "gitlab architecture: an unknown FALLOW_ISSUE_TYPES value exits 2" "got $ARCH_STATUS: $OUT"
+fi
+assert_contains "$OUT" "ERROR: Invalid FALLOW_ISSUE_TYPES value for the architecture command: 'circular-deps'. Valid values: cycles, boundaries, policy." \
+  "gitlab architecture: the FALLOW_ISSUE_TYPES error names the valid values"
+assert_not_contains "$(cat "$FALLOW_TEST_LOG")" "fallow architecture " \
+  "gitlab architecture: an unknown FALLOW_ISSUE_TYPES value does not run the analysis"
+
+OUT=$(run_generated_gitlab_fixture "$ARCH_WORK" \
+  MOCK_GATE_ENVELOPE="$ARCH_FIXTURE" \
+  FALLOW_COMMAND=architectural)
+ARCH_STATUS=$?
+if [ "$ARCH_STATUS" = "2" ]; then
+  pass "gitlab architecture: a misspelled command exits 2"
+else
+  fail "gitlab architecture: a misspelled command exits 2" "got $ARCH_STATUS"
+fi
+assert_contains "$OUT" "Must be dead-code, architecture, dupes, health, audit, security, fix, or empty (runs all)." \
+  "gitlab architecture: the invalid-command error lists architecture"
+
+assert_contains "$(grep -E '^  FALLOW_COMMAND:' "$DIR/../gitlab-ci.yml")" "architecture" \
+  "gitlab architecture: the FALLOW_COMMAND variable documents the command"
+
+unset FALLOW_TEST_LOG
+rm -rf "$ARCH_WORK"
+
 # --- Summary ---
 
 echo ""

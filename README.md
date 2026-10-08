@@ -83,7 +83,7 @@ fallow runs in four places. All four read the same config file and use the same 
 |---|---|---|
 | Is this change safe to merge? | [Changed-file gate](https://fallow.tools/docs/cli/audit/) over complexity, duplication, unused code, and styling drift, with a pass, warn, or fail result | `fallow audit` |
 | Where is the code hard to change? | [Complexity hotspots, a 0 to 100 health score, and refactoring targets](https://fallow.tools/docs/explanations/health/), with git churn and ownership | `fallow health` |
-| Does the architecture hold? | [Boundary violations](https://fallow.tools/docs/analysis/boundaries/) with `bulletproof`, `layered`, `hexagonal`, and `feature-sliced` presets, and circular dependencies | `fallow dead-code --boundary-violations`, `fallow guard` |
+| Does the architecture hold? | [Boundary violations](https://fallow.tools/docs/analysis/boundaries/) with `bulletproof`, `layered`, `hexagonal`, and `feature-sliced` presets, and circular dependencies | `fallow architecture`, `fallow guard` |
 | What is copied? | [Code duplication](https://fallow.tools/docs/analysis/duplication/) in JS, TS, CSS, and Vue, Svelte, and Astro components | `fallow dupes` |
 | Does the UI follow the design system? | [Styling drift](https://fallow.tools/docs/analysis/css-analysis/) in CSS and CSS-in-JS | `fallow health --css` |
 | What does nothing use? | [Unused files, exports, types, class and enum members, and dependencies](https://fallow.tools/docs/analysis/dead-code/), with an [auto-fix](https://fallow.tools/docs/analysis/auto-fix/) and a dry-run preview | `fallow dead-code`, `fallow fix` |

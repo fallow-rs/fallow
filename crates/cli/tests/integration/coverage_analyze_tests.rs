@@ -4,12 +4,13 @@
     reason = "tests and benches use unwrap and expect to keep fixture setup concise"
 )]
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::common::{fallow_bin, fixture_path, parse_json};
+use crate::http_stub::read_request;
 
 fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
@@ -18,10 +19,7 @@ fn serve_once(body: &'static str) -> (String, Arc<Mutex<String>>, thread::JoinHa
     let captured = Arc::clone(&request);
     let handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept request");
-        let mut buf = [0_u8; 4096];
-        let read = stream.read(&mut buf).expect("read request");
-        *captured.lock().expect("capture lock") =
-            String::from_utf8_lossy(&buf[..read]).into_owned();
+        *captured.lock().expect("capture lock") = read_request(&mut stream);
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),

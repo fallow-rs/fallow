@@ -129,6 +129,9 @@ pub enum AnalysisKind {
     DeadCode,
     Dupes,
     Health,
+    /// The architecture findings of the dead-code analysis: import cycles,
+    /// boundary violations and rule-pack policy violations.
+    Architecture,
 }
 
 /// Grouping mode for `--group-by`.

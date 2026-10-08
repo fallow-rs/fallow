@@ -11,6 +11,9 @@ const DOCS_BASE: &str = "https://fallow.tools/docs";
 /// Docs URL for the dead-code/check command.
 pub const CHECK_DOCS: &str = "https://fallow.tools/docs/cli/dead-code/";
 
+/// Docs URL for the architecture command.
+pub const ARCHITECTURE_DOCS: &str = "https://fallow.tools/docs/cli/architecture/";
+
 /// `_meta` description for the per-finding `actions[]` array shared across
 /// JSON output.
 pub const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggestions. Each entry carries a `type` discriminant (kebab-case) plus a per-action `auto_fixable` bool. Consumers dispatch on `type` to choose the remediation and filter on `auto_fixable` of each individual entry.";

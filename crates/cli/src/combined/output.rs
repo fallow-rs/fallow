@@ -762,7 +762,10 @@ fn print_check_section(
     let Some(result) = check_result else {
         return 0;
     };
-    if show_headers {
+    // `--only architecture` reports no dead-code finding type, so the section
+    // has no "Dead Code" heading and starts at the "Architecture" category.
+    let only_architecture = opts.architecture == crate::check::ArchitectureSelection::Only;
+    if show_headers && !only_architecture {
         eprintln!();
         eprintln!("── Dead Code ──────────────────────────────────────");
     }
@@ -781,6 +784,12 @@ fn print_check_section(
             json_style: crate::json_style::JsonStyle::Compact,
             fail_on_parse_error: false,
             exit_reason: false,
+            // The same "Architecture" category with and without `--quiet`.
+            architecture_layout: if only_architecture {
+                report::ArchitectureLayout::Only
+            } else {
+                report::ArchitectureLayout::Split
+            },
         },
     );
     exit_code_to_u8(code)
@@ -961,18 +970,32 @@ pub(super) fn handle_regression_and_summary(
     }
 
     if *max_exit > 0 && !quiet {
-        print_failure_summary(opts.root, check_result, dupes_result, health_result);
+        // `--only architecture` reports no dead-code finding type, so the
+        // failure line names the section after the architecture findings.
+        let check_section = if opts.architecture == crate::check::ArchitectureSelection::Only {
+            "architecture"
+        } else {
+            "dead-code"
+        };
+        print_failure_summary(
+            opts.root,
+            check_section,
+            check_result,
+            dupes_result,
+            health_result,
+        );
     }
 }
 
 /// Print a summary line listing which analyses had failures.
 fn print_failure_summary(
     root: &Path,
+    check_section: &str,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
 ) {
-    let parts = failure_summary_parts(check_result, dupes_result, health_result);
+    let parts = failure_summary_parts(check_section, check_result, dupes_result, health_result);
     if parts.is_empty() {
         return;
     }
@@ -983,20 +1006,21 @@ fn print_failure_summary(
 }
 
 fn failure_summary_parts(
+    check_section: &str,
     check_result: Option<&CheckResult>,
     dupes_result: Option<&DupesResult>,
     health_result: Option<&HealthResult>,
 ) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(r) = check_result
-        && let Some(part) = check_failure_summary_part(r)
+        && let Some(part) = check_failure_summary_part(r, check_section)
     {
         parts.push(part);
     }
     if let Some(r) = dupes_result {
         let groups = r.report.clone_groups.len();
         if groups > 0 {
-            parts.push(format!("dupes ({groups} clone groups)"));
+            parts.push(dupes_failure_label(groups));
         }
     }
     if let Some(r) = health_result {
@@ -1008,21 +1032,34 @@ fn failure_summary_parts(
     parts
 }
 
-fn check_failure_summary_part(result: &CheckResult) -> Option<String> {
+fn check_failure_summary_part(result: &CheckResult, section: &str) -> Option<String> {
     let issues = result.results.total_issues();
     if issues == 0 {
         return None;
     }
+    let total_delta = result.baseline_deltas.as_ref().map(|d| d.total_delta);
+    Some(check_failure_label(section, issues, total_delta))
+}
 
-    let delta_suffix = result
-        .baseline_deltas
-        .as_ref()
-        .map_or_else(String::new, |d| match d.total_delta.cmp(&0) {
-            std::cmp::Ordering::Greater => format!(", +{} since baseline", d.total_delta),
-            std::cmp::Ordering::Less => format!(", {} since baseline", d.total_delta),
-            std::cmp::Ordering::Equal => ", \u{00b1}0 since baseline".to_string(),
-        });
-    Some(format!("dead-code ({issues} issues{delta_suffix})"))
+/// `<section> (<n> issue[s][, <delta> since baseline])` for the `Failed:` line.
+fn check_failure_label(section: &str, issues: usize, total_delta: Option<i64>) -> String {
+    let delta_suffix = total_delta.map_or_else(String::new, |delta| match delta.cmp(&0) {
+        std::cmp::Ordering::Greater => format!(", +{delta} since baseline"),
+        std::cmp::Ordering::Less => format!(", {delta} since baseline"),
+        std::cmp::Ordering::Equal => ", \u{00b1}0 since baseline".to_string(),
+    });
+    format!(
+        "{section} ({}{delta_suffix})",
+        count_label(issues, "issue", "issues")
+    )
+}
+
+/// `dupes (<n> clone group[s])` for the `Failed:` line.
+fn dupes_failure_label(groups: usize) -> String {
+    format!(
+        "dupes ({})",
+        count_label(groups, "clone group", "clone groups")
+    )
 }
 
 fn health_failure_nudge(root: &Path, health_result: Option<&HealthResult>) -> String {
@@ -1759,5 +1796,37 @@ mod tests {
             emit_combined_json_output(&combined, crate::json_style::JsonStyle::Compact),
             ExitCode::SUCCESS
         );
+    }
+
+    #[test]
+    fn check_failure_label_names_the_section_and_counts_in_the_right_number() {
+        use super::check_failure_label;
+        assert_eq!(
+            check_failure_label("dead-code", 1, None),
+            "dead-code (1 issue)"
+        );
+        assert_eq!(
+            check_failure_label("architecture", 3, None),
+            "architecture (3 issues)"
+        );
+        assert_eq!(
+            check_failure_label("dead-code", 2, Some(1)),
+            "dead-code (2 issues, +1 since baseline)"
+        );
+        assert_eq!(
+            check_failure_label("dead-code", 1, Some(0)),
+            "dead-code (1 issue, \u{00b1}0 since baseline)"
+        );
+        assert_eq!(
+            check_failure_label("dead-code", 4, Some(-2)),
+            "dead-code (4 issues, -2 since baseline)"
+        );
+    }
+
+    #[test]
+    fn dupes_failure_label_counts_in_the_right_number() {
+        use super::dupes_failure_label;
+        assert_eq!(dupes_failure_label(1), "dupes (1 clone group)");
+        assert_eq!(dupes_failure_label(2), "dupes (2 clone groups)");
     }
 }

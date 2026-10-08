@@ -624,6 +624,7 @@ fn build_dead_code_programmatic_output(
         // The programmatic runtime loads no baseline, so there is never one to
         // re-check.
         baseline_recheck: None,
+        command: "dead-code",
     });
     let config_fixable =
         fallow_config::is_config_fixable(&resolved.root, resolved.config_path.as_ref());

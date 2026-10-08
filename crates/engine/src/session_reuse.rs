@@ -72,9 +72,20 @@ impl ParseCountCells {
 
 /// The positions whose fingerprint changed. `None` when the two lists do not
 /// describe the same files, because then the positions do not line up.
+///
+/// `previous_read_started_ns` is the time before the session read `previous`.
+/// A same-length write in the same timestamp tick keeps the fingerprint, so a
+/// previous fingerprint that did not settle before that time proves nothing.
+/// For such a file, `content_matches` reads the source and compares it with
+/// the kept module. The file counts as changed when the content differs or
+/// cannot be read. A fingerprint without a ctime compares by equality, as
+/// before; the session drops such a parse on
+/// [`refresh_discovery`](crate::session::AnalysisSession::refresh_discovery).
 pub fn changed_file_indices(
     previous: &[SourceFingerprint],
+    previous_read_started_ns: u64,
     current: &[SourceFingerprint],
+    content_matches: &dyn Fn(usize) -> bool,
 ) -> Option<Vec<usize>> {
     if previous.len() != current.len() {
         return None;
@@ -84,9 +95,40 @@ pub fn changed_file_indices(
             .iter()
             .zip(current)
             .enumerate()
-            .filter_map(|(index, (before, after))| (before != after).then_some(index))
+            .filter_map(|(index, (before, after))| {
+                let changed = before != after
+                    || (before.is_trustworthy_without_content()
+                        && !before.is_settled_before(previous_read_started_ns)
+                        && !content_matches(index));
+                changed.then_some(index)
+            })
             .collect(),
     )
+}
+
+/// Whether the source at `path` has the content hash `expected`, with the
+/// same BOM handling as the parse. An unreadable file does not match.
+fn source_has_content_hash(path: &std::path::Path, expected: u64) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|source| {
+        let source = source.strip_prefix('\u{feff}').unwrap_or(&source);
+        xxhash_rust::xxh3::xxh3_64(source.as_bytes()) == expected
+    })
+}
+
+/// Whether the module of `file_id` in `modules` has the same content hash as
+/// the source at `path`. `modules` is in file order. A file without a module
+/// could not be read, so it matches while it still cannot be read.
+pub fn module_matches_source(
+    modules: &[ModuleInfo],
+    file_id: FileId,
+    path: &std::path::Path,
+) -> bool {
+    match modules.binary_search_by_key(&file_id.0, |module| module.file_id.0) {
+        Ok(position) => modules
+            .get(position)
+            .is_some_and(|module| source_has_content_hash(path, module.content_hash)),
+        Err(_) => std::fs::read_to_string(path).is_err(),
+    }
 }
 
 /// Put the modules of the parsed files in place of their old modules.
@@ -166,6 +208,7 @@ fn replace_in_place(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_types::source_fingerprint::TIMESTAMP_SETTLE_WINDOW_NS;
 
     fn module(file_id: u32, content_hash: u64) -> ModuleInfo {
         let mut module = fallow_extract::parse_source_to_module(
@@ -199,8 +242,39 @@ mod tests {
             SourceFingerprint::new(3, 30),
         ];
 
-        assert_eq!(changed_file_indices(&before, &after), Some(vec![1]));
-        assert_eq!(changed_file_indices(&before, &after[..2]), None);
+        assert_eq!(
+            changed_file_indices(&before, 0, &after, &|_| false),
+            Some(vec![1])
+        );
+        assert_eq!(
+            changed_file_indices(&before, 0, &after[..2], &|_| false),
+            None
+        );
+    }
+
+    #[test]
+    fn changed_file_indices_checks_the_content_of_a_recent_fingerprint() {
+        let settled = SourceFingerprint::with_ctime(1_000, 1_000, 10);
+        let recent = SourceFingerprint::with_ctime(5_000, 5_000, 20);
+        let read_started = 1_000 + TIMESTAMP_SETTLE_WINDOW_NS;
+        let fingerprints = [settled, recent];
+        let checked = std::cell::RefCell::new(Vec::new());
+        let differs = |index: usize| {
+            checked.borrow_mut().push(index);
+            false
+        };
+
+        assert_eq!(
+            changed_file_indices(&fingerprints, read_started, &fingerprints, &differs),
+            Some(vec![1]),
+            "an unchanged fingerprint inside the window can hide a same-tick write"
+        );
+        assert_eq!(*checked.borrow(), vec![1], "a settled file needs no read");
+        assert_eq!(
+            changed_file_indices(&fingerprints, read_started, &fingerprints, &|_| true),
+            Some(vec![]),
+            "a recent file with the same content keeps its module"
+        );
     }
 
     #[test]

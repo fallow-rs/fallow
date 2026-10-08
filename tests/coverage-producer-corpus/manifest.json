@@ -5,7 +5,7 @@
     "platform": "darwin-arm64",
     "coverage_root": "/fallow/corpus",
     "producers_lock_file": "producers/package-lock.json",
-    "producers_lock_sha256": "6118adc3375b711143ca6201391b7650b73b04d32c865aff48b7b2b068ce8d68"
+    "producers_lock_sha256": "c650f17ad4ae5262dd1f84d99299a96619d93b66b43c4b0b97fc44d69d3ea165"
   },
   "invariants": [
     {
@@ -88,7 +88,7 @@
     {
       "id": "oxc-coverage-instrument",
       "package": "oxc-coverage-instrument",
-      "version": "0.12.0",
+      "version": "0.13.0",
       "profile": "default",
       "driver": "producers/drivers/oxc-coverage-instrument.mjs",
       "consumers": "oxc-coverage-instrument vitest integration",
@@ -98,7 +98,7 @@
     {
       "id": "oxc-coverage-instrument-istanbul",
       "package": "oxc-coverage-instrument",
-      "version": "0.12.0",
+      "version": "0.13.0",
       "profile": "compat:istanbul",
       "driver": "producers/drivers/oxc-coverage-instrument-istanbul.mjs",
       "consumers": "oxc-coverage-instrument callers asking for Istanbul-shaped output",

@@ -50,7 +50,9 @@ pub struct HealthFinding {
     /// Machine-actionable fix and suppress hints.
     pub actions: Vec<HealthFindingAction>,
     /// Audit-mode flag indicating whether the finding is new versus the base
-    /// snapshot.
+    /// snapshot. A complexity finding is new when no base finding has the same
+    /// path and function name, or when a metric that it exceeds has a higher
+    /// value than in that base finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<bool>,
 }

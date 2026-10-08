@@ -16,6 +16,18 @@
     },
     {
       "section": "commands",
+      "row": "architecture",
+      "column": "Key Flags",
+      "seed": "`--cycles`, `--boundaries`, `--policy`, `--file`, `--finding-id`, `path`"
+    },
+    {
+      "section": "commands",
+      "row": "architecture",
+      "column": "Purpose",
+      "seed": "Check import cycles, boundaries and policy rules after editing"
+    },
+    {
+      "section": "commands",
       "row": "audit",
       "column": "Key Flags",
       "seed": "`--production-dead-code`, `--production-health`, `--production-dupes`, `--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`, `--max-crap`, `--coverage`"
@@ -108,7 +120,7 @@
       "section": "commands",
       "row": "dead-code",
       "column": "Purpose",
-      "seed": "Analyze project for unused code and circular dependencies"
+      "seed": "Analyze project for unused code and dependency hygiene"
     },
     {
       "section": "commands",

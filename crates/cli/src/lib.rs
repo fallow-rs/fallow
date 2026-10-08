@@ -168,6 +168,7 @@ When the agent is about to...
   consolidate duplication                  fallow dupes --trace dup:<fingerprint>
   find feature flags                       fallow flags
   check architecture rules before editing  fallow guard <files>
+  check cycles and boundaries after edits  fallow architecture
   surface security candidates              fallow security
   inspect a target before editing          fallow inspect --file <path>
   understand a finding                     fallow explain <issue-type>
@@ -179,7 +180,9 @@ macro_rules! top_level_core_command_groups {
     () => {
         "\
 Analysis:
-  dead-code      Analyze unused code, dependency hygiene, and architecture cycles
+  dead-code      Analyze unused code and dependency hygiene
+  guard          Show which architecture rules apply to files before editing
+  architecture   Check import cycles, boundaries and policy rules after editing
   dupes          Find copy-paste and structural code duplication
   health         Analyze complexity, maintainability, hotspots, and coverage gaps
   flags          Detect feature flag usage patterns
@@ -201,7 +204,6 @@ Project inspection:
   inspect           Inspect one file or exported symbol as a bundled evidence query
   trace             Trace a symbol's call chain (best-effort, syntactic)
   trace-error       Resolve a runtime stack trace's frames to project definitions
-  guard             Show which architecture rules apply to files before editing
   decision-surface  Surface the structural decisions a change embeds (advisory)
   workspaces        Show monorepo workspace discovery diagnostics
   explain           Explain one issue type without running analysis
@@ -819,7 +821,7 @@ enum TypeAwareCli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Analyze project for unused code and circular dependencies
+    /// Analyze project for unused code and dependency hygiene
     #[command(name = "dead-code", alias = "check")]
     Check {
         /// Only report unused files
@@ -910,23 +912,28 @@ enum Command {
         #[arg(long)]
         duplicate_exports: bool,
 
-        /// Only report circular dependencies
+        /// Only report circular dependencies.
+        /// Deprecated alias: use `fallow architecture --cycles`.
         #[arg(long)]
         circular_deps: bool,
 
-        /// Only report re-export cycles
+        /// Only report re-export cycles.
+        /// Deprecated alias: use `fallow architecture --cycles`.
         #[arg(long)]
         re_export_cycles: bool,
 
-        /// Only report dependency cycles between workspace packages
+        /// Only report dependency cycles between workspace packages.
+        /// Deprecated alias: use `fallow architecture --cycles`.
         #[arg(long)]
         package_cycles: bool,
 
-        /// Only report boundary violations
+        /// Only report boundary violations.
+        /// Deprecated alias: use `fallow architecture --boundaries`.
         #[arg(long)]
         boundary_violations: bool,
 
-        /// Only report rule-pack policy violations
+        /// Only report rule-pack policy violations.
+        /// Deprecated alias: use `fallow architecture --policy`.
         #[arg(long)]
         policy_violations: bool,
 
@@ -997,6 +1004,41 @@ enum Command {
         /// or pass a comma-separated list. Ids stay the same under every filter.
         /// The JSON output adds `finding_id_query`: a missing id means "resolved"
         /// only when `conclusive` is true.
+        #[arg(long = "finding-id", value_name = "ID", value_delimiter = ',')]
+        finding_id: Vec<String>,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<std::path::PathBuf>,
+    },
+
+    /// Check import cycles, boundaries and policy rules after editing
+    ///
+    /// Run `fallow guard <files>` before an edit to see the rules that apply to
+    /// those files.
+    Architecture {
+        /// Only report import cycles: circular dependencies, re-export cycles
+        /// and package cycles
+        #[arg(long)]
+        cycles: bool,
+
+        /// Only report boundary violations, boundary coverage and forbidden calls
+        #[arg(long)]
+        boundaries: bool,
+
+        /// Only report rule-pack policy violations
+        #[arg(long)]
+        policy: bool,
+
+        /// Only report issues in the specified file(s). Accepts multiple values.
+        /// The full project graph is still built, but only issues in matching files
+        /// are reported.
+        #[arg(long, value_name = "PATH")]
+        file: Vec<std::path::PathBuf>,
+
+        /// Only report the findings with these `finding_id` values. Repeat the flag
+        /// or pass a comma-separated list.
         #[arg(long = "finding-id", value_name = "ID", value_delimiter = ',')]
         finding_id: Vec<String>,
 
@@ -4090,6 +4132,9 @@ fn run_combined_scoped(
     let (output, quiet, fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let scoped_run = scope.is_some();
+    let architecture = combined::resolve_architecture_selection(&cli.only, &cli.skip);
+    // A narrowed dead-code section saves narrowed regression counts.
+    let narrowed_report = architecture != check::ArchitectureSelection::All;
     combined::run_combined(&combined::CombinedOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -4128,6 +4173,7 @@ fn run_combined_scoped(
         run_check: analyses.run_check,
         run_dupes: analyses.run_dupes,
         run_health: analyses.run_health,
+        architecture,
         dupes: cli.dupes_overrides(),
         score: cli.score || cli.trend || cli.trend_from.is_some(),
         trend: cli.trend || cli.trend_from.is_some(),
@@ -4142,7 +4188,8 @@ fn run_combined_scoped(
             cli.changed_since.is_some()
                 || cli.workspace.is_some()
                 || cli.changed_workspaces.is_some()
-                || scoped_run,
+                || scoped_run
+                || narrowed_report,
         ),
     })
 }
@@ -4158,6 +4205,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
     let quiet = dispatch.quiet;
     match command {
         check @ Command::Check { .. } => dispatch_check_command(check, dispatch),
+        architecture @ Command::Architecture { .. } => {
+            dispatch_architecture_command(architecture, dispatch)
+        }
         Command::Watch { no_clear } => dispatch_watch(dispatch, no_clear),
         Command::TypeAware { subcommand } => dispatch_type_aware_command(dispatch, subcommand),
         Command::Doctor => unreachable!("doctor bypasses the normal dispatch epilogue"),
@@ -4502,8 +4552,78 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             file,
             scope,
             finding_ids,
+            surface: check::CheckSurface::DeadCode,
         },
     )
+}
+
+/// Destructure the `Command::Architecture` arm and forward to `dispatch_check`
+/// with the architecture issue types selected. The analysis, the JSON envelope
+/// and the finding ids are the ones `dead-code` produces for the same filters.
+fn dispatch_architecture_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
+    let Command::Architecture {
+        cycles,
+        boundaries,
+        policy,
+        file,
+        finding_id,
+        path,
+    } = command
+    else {
+        unreachable!("architecture dispatcher only handles architecture commands");
+    };
+
+    let finding_ids = match fallow_engine::dead_code::FindingIdFilter::parse(&finding_id) {
+        Ok(filter) => filter,
+        Err(message) => return emit_error(&format!("--finding-id: {message}"), 2, dispatch.output),
+    };
+
+    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
+    {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
+    };
+
+    dispatch_check(
+        dispatch,
+        &CheckDispatchArgs {
+            filters: architecture_issue_filters(cycles, boundaries, policy),
+            trace_opts: TraceOptions {
+                trace_export: None,
+                trace_file: None,
+                trace_dependency: None,
+                impact_closure: None,
+                symbol_impact: None,
+                performance: dispatch.cli.performance,
+            },
+            include_dupes: false,
+            type_aware: dispatch.cli.type_aware_override(),
+            type_aware_project: dispatch.cli.type_aware_project.clone(),
+            type_aware_require: dispatch.cli.type_aware_require,
+            top: None,
+            file,
+            scope,
+            finding_ids,
+            surface: check::CheckSurface::Architecture,
+        },
+    )
+}
+
+/// Map the `fallow architecture` filter flags onto the `dead-code` filter flags
+/// they stand for. No flag selects every architecture issue type.
+fn architecture_issue_filters(cycles: bool, boundaries: bool, policy: bool) -> IssueFilters {
+    let all = !(cycles || boundaries || policy);
+    let mut filters = IssueFilters::default();
+    for (flag, active) in [
+        ("--circular-deps", cycles || all),
+        ("--re-export-cycles", cycles || all),
+        ("--package-cycles", cycles || all),
+        ("--boundary-violations", boundaries || all),
+        ("--policy-violations", policy || all),
+    ] {
+        enable_check_filter(&mut filters, flag, active);
+    }
+    filters
 }
 
 /// Map the `Command::Check` filter flags onto `IssueFilters`. Reads the flags by
@@ -5987,6 +6107,7 @@ struct CheckDispatchArgs {
     file: Vec<std::path::PathBuf>,
     scope: Option<std::path::PathBuf>,
     finding_ids: Option<fallow_engine::dead_code::FindingIdFilter>,
+    surface: check::CheckSurface,
 }
 
 #[derive(Clone)]
@@ -6227,6 +6348,7 @@ fn dispatch_check_run(
         defer_performance: true,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         explain_skipped: cli.explain_skipped,
+        surface: args.surface,
     })
 }
 
@@ -7218,6 +7340,60 @@ mod tests {
         }
     }
 
+    /// `fallow architecture` selects the same issue types as the deprecated
+    /// `dead-code` structure flags, so the two produce the same report.
+    #[test]
+    fn architecture_flags_map_to_the_dead_code_structure_filters() {
+        use clap::Parser;
+
+        let structure = |argv: &[&str]| {
+            let cli = Cli::try_parse_from(argv).expect("argv parses");
+            check_issue_filters(&cli.command.expect("subcommand"))
+        };
+        let architecture =
+            |cycles, boundaries, policy| architecture_issue_filters(cycles, boundaries, policy);
+        assert_eq!(
+            architecture(false, false, false),
+            structure(&[
+                "fallow",
+                "dead-code",
+                "--circular-deps",
+                "--re-export-cycles",
+                "--package-cycles",
+                "--boundary-violations",
+                "--policy-violations",
+            ])
+        );
+        assert_eq!(
+            architecture(true, false, false),
+            structure(&[
+                "fallow",
+                "dead-code",
+                "--circular-deps",
+                "--re-export-cycles",
+                "--package-cycles",
+            ])
+        );
+        assert_eq!(
+            architecture(false, true, false),
+            structure(&["fallow", "dead-code", "--boundary-violations"])
+        );
+        assert_eq!(
+            architecture(false, false, true),
+            structure(&["fallow", "dead-code", "--policy-violations"])
+        );
+        assert!(
+            Cli::try_parse_from([
+                "fallow",
+                "architecture",
+                "--cycles",
+                "--boundaries",
+                "--policy"
+            ])
+            .is_ok()
+        );
+    }
+
     /// `-h` is the progressive entry point: it must stay scannable (ecosystem
     /// norm is 40-80 lines) while leading with the task cheat sheet and
     /// closing with the pointer to the complete `--help` surface.
@@ -7297,6 +7473,10 @@ mod tests {
             (
                 vec!["fallow", "license", "status"],
                 telemetry::Workflow::License,
+            ),
+            (
+                vec!["fallow", "architecture", "--cycles"],
+                telemetry::Workflow::Architecture,
             ),
         ];
         for (argv, expected) in distinct {

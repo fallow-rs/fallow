@@ -27,7 +27,7 @@ pub mod rules;
 pub use filtering::resolve_workspace_scope;
 pub use filtering::try_get_changed_files;
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
     pub unused_files: bool,
     pub unused_exports: bool,
@@ -67,6 +67,53 @@ pub struct IssueFilters {
     pub misplaced_directives: bool,
     pub route_collisions: bool,
     pub dynamic_segment_name_conflicts: bool,
+    /// Bare `fallow --only architecture` / `--skip architecture`. The selection
+    /// applies after the baseline stage, so it narrows the report and leaves the
+    /// baseline file and the health input as a run without it has them.
+    pub architecture_selection: ArchitectureSelection,
+}
+
+/// Which dead-code findings a bare `fallow` run reports.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArchitectureSelection {
+    /// Every dead-code finding (the default).
+    #[default]
+    All,
+    /// Only the architecture findings (`--only architecture`).
+    Only,
+    /// Every finding except the architecture findings (`--skip architecture`).
+    Exclude,
+}
+
+impl ArchitectureSelection {
+    /// Remove the findings the selection leaves out of the report.
+    pub fn apply(self, results: &mut fallow_types::results::AnalysisResults) {
+        match self {
+            Self::All => {}
+            Self::Only => {
+                let mut only = IssueFilters::default();
+                for flag in [
+                    "--circular-deps",
+                    "--re-export-cycles",
+                    "--package-cycles",
+                    "--boundary-violations",
+                    "--policy-violations",
+                ] {
+                    only.enable_cli_filter_flag(flag);
+                }
+                only.apply(results);
+            }
+            Self::Exclude => {
+                results.circular_dependencies.clear();
+                results.re_export_cycles.clear();
+                results.package_cycles.clear();
+                results.boundary_violations.clear();
+                results.boundary_coverage_violations.clear();
+                results.boundary_call_violations.clear();
+                results.policy_violations.clear();
+            }
+        }
+    }
 }
 
 impl IssueFilters {
@@ -154,12 +201,14 @@ impl IssueFilters {
     }
 
     /// Whether the report keeps dependency findings: no filter is active, or
-    /// `--unused-deps` or `--unlisted-deps` is one of the active filters.
+    /// `--unused-deps` or `--unlisted-deps` is one of the active filters, and
+    /// the run does not report only the architecture findings.
     ///
     /// These are the issue types `ignoreDependencies` controls, so an
     /// unmatched `ignoreDependencies` glob is reported only when this is true.
-    pub const fn reports_dependency_findings(&self) -> bool {
-        !self.any_active() || self.unused_deps || self.unlisted_deps
+    pub fn reports_dependency_findings(&self) -> bool {
+        self.architecture_selection != ArchitectureSelection::Only
+            && (!self.any_active() || self.unused_deps || self.unlisted_deps)
     }
 
     /// Enable off-by-default issue types when explicitly requested as filters.
@@ -348,6 +397,23 @@ impl TraceOptions {
     }
 }
 
+/// The command a standalone dead-code pipeline run reports for.
+///
+/// Both commands run the same analysis. The surface changes only the human
+/// layout and the hint that points from `dead-code` to `architecture`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CheckSurface {
+    /// `fallow dead-code`.
+    #[default]
+    DeadCode,
+    /// `fallow architecture`: cycles, boundaries and rule-pack policy rules.
+    Architecture,
+}
+
+/// The stderr hint that `fallow dead-code` prints when it reports an
+/// architecture finding.
+pub const ARCHITECTURE_HINT: &str = "Tip: run `fallow architecture` for import cycles, boundaries and policy rules. A future major version removes them from `fallow dead-code`.";
+
 pub struct CheckOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
@@ -433,6 +499,8 @@ pub struct CheckOptions<'a> {
     /// which built-in discovery ignore patterns removed candidate source files
     /// (issue #2638). The typed diagnostics reach JSON either way.
     pub explain_skipped: bool,
+    /// The command this run reports for. Only the standalone print reads it.
+    pub surface: CheckSurface,
 }
 
 /// Result of executing check analysis without printing.
@@ -893,9 +961,9 @@ fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {
         return;
     }
     eprintln!(
-        "Warning: saving regression baseline with --changed-since, --workspace, or \
-         --changed-workspaces active. The baseline will reflect only scoped results, \
-         not the full project."
+        "Warning: saving regression baseline from a scoped run (--changed-since, \
+         --workspace, --changed-workspaces, a path, or --only/--skip architecture). \
+         The baseline will reflect only scoped results, not the full project."
     );
 }
 
@@ -996,6 +1064,8 @@ struct CheckCompletionInput<'a> {
     type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
     syntactic_dead_code_keys: Option<rustc_hash::FxHashSet<String>>,
     finding_id_query: Option<fallow_output::FindingIdQuery>,
+    /// The results before the architecture selection, when it narrowed them.
+    health_results: Option<AnalysisResults>,
 }
 
 fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
@@ -1011,6 +1081,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         type_coupling,
         syntactic_dead_code_keys,
         finding_id_query,
+        health_results,
     } = input;
     let baseline_matched = baseline_staleness
         .as_ref()
@@ -1055,7 +1126,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     };
 
     let shared_parse = build_shared_parse_data(
-        &results,
+        health_results.as_ref().unwrap_or(&results),
         trace_graph,
         retained_modules,
         retained_files,
@@ -1063,14 +1134,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         &script_used_packages,
     );
 
-    let (type_aware_meta, type_aware_warnings) = type_aware.map_or_else(
-        || (None, Vec::new()),
-        |outcome| {
-            let mut meta = outcome.meta;
-            meta.required_completeness = Some(config.type_aware.require.into());
-            (Some(meta), outcome.warnings)
-        },
-    );
+    let (type_aware_meta, type_aware_warnings) = split_type_aware_outcome(type_aware, &config);
 
     // Report result volume to telemetry from the real result, independent of
     // the exit-code gate. Exact counts are bucketed before serialization.
@@ -1314,6 +1378,10 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         },
     )?;
 
+    // The bare `--only architecture` / `--skip architecture` selection narrows
+    // the report only. Health keeps the findings a run without it would see.
+    let health_results = select_architecture_findings(opts.filters, &mut data.results);
+
     let regression_outcome =
         resolve_check_regression(opts, &config, &data.results, &analysis_identity)?;
 
@@ -1338,7 +1406,38 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         type_coupling,
         syntactic_dead_code_keys,
         finding_id_query,
+        health_results,
     }))
+}
+
+/// Split the type-aware outcome into the run metadata, with the required
+/// completeness of the config, and the warnings.
+fn split_type_aware_outcome(
+    type_aware: Option<fallow_api::TypeAwareOutcome>,
+    config: &ResolvedConfig,
+) -> (Option<fallow_types::envelope::TypeAwareMeta>, Vec<String>) {
+    type_aware.map_or_else(
+        || (None, Vec::new()),
+        |outcome| {
+            let mut meta = outcome.meta;
+            meta.required_completeness = Some(config.type_aware.require.into());
+            (Some(meta), outcome.warnings)
+        },
+    )
+}
+
+/// Apply the architecture selection of the run. Returns the results before the
+/// selection when it removed a finding type, for the health input.
+fn select_architecture_findings(
+    filters: &IssueFilters,
+    results: &mut AnalysisResults,
+) -> Option<AnalysisResults> {
+    if filters.architecture_selection == ArchitectureSelection::All {
+        return None;
+    }
+    let unselected = results.clone();
+    filters.architecture_selection.apply(results);
+    Some(unselected)
 }
 
 /// The options of this run that can hide a finding without a fix: every
@@ -1426,6 +1525,7 @@ pub fn benchmark_dead_code_json(
         defer_performance: false,
         analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
         explain_skipped: false,
+        surface: CheckSurface::DeadCode,
     })?;
     let rendered = report::render_check_json(&report::CheckJsonRenderInput {
         package_baselines: &result.package_baselines,
@@ -1492,6 +1592,8 @@ pub struct PrintCheckOptions {
     /// when the caller owns the exit code, as `audit` does, or prints one line
     /// for all its sections, as the bare run does.
     pub exit_reason: bool,
+    /// Where the human report renders the architecture findings.
+    pub architecture_layout: report::ArchitectureLayout,
 }
 
 struct PreparedPrintCheck<'a> {
@@ -1568,6 +1670,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             css_requested: false,
             json_style: opts.json_style,
             include_fragments: true,
+            architecture_layout: opts.architecture_layout,
         },
         regression_json: opts.regression_json,
         quiet: opts.quiet,
@@ -1859,6 +1962,21 @@ fn print_finding_id_query_note(result: &CheckResult, quiet: bool) {
     );
 }
 
+/// Point a human `fallow dead-code` run that reports an architecture finding at
+/// `fallow architecture`. The line goes to stderr, so stdout stays the same.
+fn print_architecture_hint(opts: &CheckOptions<'_>, results: &AnalysisResults) {
+    use colored::Colorize;
+
+    if opts.surface != CheckSurface::DeadCode
+        || opts.quiet
+        || !matches!(opts.output, OutputFormat::Human)
+        || !report::has_architecture_findings(results)
+    {
+        return;
+    }
+    eprintln!("{}", ARCHITECTURE_HINT.dimmed());
+}
+
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
         opts.save_baseline,
@@ -1915,8 +2033,13 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             json_style: opts.json_style,
             fail_on_parse_error: result.config.fail_on_parse_error,
             exit_reason: true,
+            architecture_layout: match opts.surface {
+                CheckSurface::DeadCode => report::ArchitectureLayout::Embedded,
+                CheckSurface::Architecture => report::ArchitectureLayout::Only,
+            },
         },
     );
+    print_architecture_hint(opts, &result.results);
 
     if opts.include_dupes && result.config.duplicates.enabled {
         let Some(files) = result.retained_files.as_deref() else {
@@ -2377,6 +2500,7 @@ mod tests {
             misplaced_directives: false,
             route_collisions: false,
             dynamic_segment_name_conflicts: false,
+            architecture_selection: ArchitectureSelection::All,
         }
     }
 
@@ -2976,6 +3100,7 @@ mod tests {
             misplaced_directives: true,
             route_collisions: true,
             dynamic_segment_name_conflicts: true,
+            architecture_selection: ArchitectureSelection::All,
         };
         let total_before = results.total_issues();
         f.apply(&mut results);
