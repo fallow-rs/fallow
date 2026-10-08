@@ -1,0 +1,1 @@
+{"name":"trace-dependency-usage","private":true,"main":"src/main.tsx","dependencies":{"react":"^18.0.0","react-redux":"^9.0.0"}}

@@ -1,0 +1,24 @@
+---
+source: crates/cli/tests/integration/trace_dependency_usage_tests.rs
+expression: "serde_json::to_string_pretty(&trace).unwrap()"
+---
+{
+  "kind": "trace",
+  "package_name": "react-redux",
+  "imported_by": [
+    "src/components/Alias.tsx",
+    "src/components/Counter.tsx",
+    "src/components/Namespace.tsx",
+    "src/legacy.js",
+    "src/store/hooks.ts",
+    "src/store/local.ts",
+    "src/store/reexports.ts",
+    "src/types-only.ts"
+  ],
+  "type_only_imported_by": [
+    "src/types-only.ts"
+  ],
+  "used_in_scripts": false,
+  "is_used": true,
+  "import_count": 8
+}

@@ -102,6 +102,7 @@ mod summary_mark_tests;
 mod suppressions_tests;
 mod telemetry_tests;
 mod trace_dependency_tests;
+mod trace_dependency_usage_tests;
 mod trace_error_tests;
 mod trace_federation_tests;
 mod trace_path_tests;
