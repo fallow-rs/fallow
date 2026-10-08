@@ -194,6 +194,9 @@ Focused integration checks:
 - `npm run check:conformance-fixtures` for dead-code detection changes: it
   scores the committed fixtures under `tests/conformance/fixtures/` against
   their `expected.json`. Runs in `verify:fast`.
+- `node --test scripts/workflow-policy.test.mjs` for workflow changes and for
+  Rust files with Windows-only code: each such file must start a Windows CI
+  job. Runs in `verify:fast`.
 - `npm run check:dupes-accuracy` for duplication changes: it re-runs the
   hand-written corpus in `tests/benchmark-corpus/` and exits non-zero below the
   committed floor in `results/accuracy-baseline.json`. Runs in `verify:full`.

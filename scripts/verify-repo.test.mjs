@@ -29,6 +29,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "check:miri-cfg"]],
   ["npm", ["run", "check:emitted-versions"]],
   ["npm", ["run", "check:conformance-fixtures"]],
+  ["node", ["--test", "scripts/workflow-policy.test.mjs"]],
 ];
 
 const FULL_ONLY_COMMANDS = [
