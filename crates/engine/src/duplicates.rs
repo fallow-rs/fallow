@@ -39,7 +39,7 @@ pub type RefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion
 
 pub use detector::{
     CloneFingerprintKey, CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint,
-    dominant_identifier, group_refactoring_suggestion,
+    dominant_identifier, group_refactoring_suggestion, is_unparsed_collision_key,
 };
 
 /// Refresh clone-family and mirrored-directory fields after clone groups change.

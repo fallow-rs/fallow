@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   update an installed gate script. Run it in the checkout where the hook
   process starts (for a nested worktree, the main checkout), and in each
   worktree that tracks its own copy.
+- **`fallow dupes --baseline` now matches each clone group by its own
+  content.** A clone can stop inside a block, so its code does not parse on
+  its own. Before, all such groups got the same fingerprint with a `-rN`
+  suffix in report order. A new clone group could then take the baseline entry
+  of an old group, and an unchanged group could show as new. Now these groups
+  get a fingerprint from their tokens, without whitespace and comments. A
+  baseline that still has the old shared keys prints a note, and its JSON
+  `baseline_staleness.format` is `"legacy"`. Run `fallow dupes
+  --save-baseline` once to rewrite it. An `ignoredClones` entry with the old
+  shared handle no longer hides a group: review the group and copy its new
+  handle. (#3290, reported by @aleksik)
 - **A warm run no longer reuses the analysis of the previous content of a
   file.** The parse cache, the duplication token cache and the kept modules of
   a long-lived session trusted a file when its modification time, change time

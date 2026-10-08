@@ -6745,11 +6745,12 @@ unrecognised_format?: boolean
  */
 saved_by?: string
 /**
- * `legacy` when the loaded dead-code baseline has no `identity`, so its
- * entries use the old key forms and some of them hold a line. The run
- * still applies the file. `--save-baseline` rewrites it with line-free
- * keys. Absent for a current baseline and on `dupes` and `health`. The
- * value set is OPEN.
+ * `legacy` when the loaded baseline uses an old key form. For dead-code,
+ * the file has no `identity`, so some entries hold a line. For `dupes`,
+ * some entries use the clone key that older versions shared between
+ * unrelated groups whose code did not parse on its own. The run still
+ * applies the file. `--save-baseline` rewrites it with current keys.
+ * Absent for a current baseline and on `health`. The value set is OPEN.
  */
 format?: string
 /**

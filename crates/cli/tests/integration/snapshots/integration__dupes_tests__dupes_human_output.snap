@@ -4,7 +4,7 @@ expression: redacted
 ---
 ● Duplicates (2 clone groups)
 
-     27 lines  2 instances  dup:6f87acd9
+     27 lines  2 instances  dup:4e50b434
     src/copy1.ts:1-27
     src/original.ts:1-27
 

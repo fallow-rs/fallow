@@ -27788,7 +27788,7 @@
         },
         "format": {
           "type": "string",
-          "description": "`legacy` when the loaded dead-code baseline has no `identity`, so its\nentries use the old key forms and some of them hold a line. The run\nstill applies the file. `--save-baseline` rewrites it with line-free\nkeys. Absent for a current baseline and on `dupes` and `health`. The\nvalue set is OPEN."
+          "description": "`legacy` when the loaded baseline uses an old key form. For dead-code,\nthe file has no `identity`, so some entries hold a line. For `dupes`,\nsome entries use the clone key that older versions shared between\nunrelated groups whose code did not parse on its own. The run still\napplies the file. `--save-baseline` rewrites it with current keys.\nAbsent for a current baseline and on `health`. The value set is OPEN."
         },
         "scope_reasons": {
           "type": "array",

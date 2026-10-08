@@ -31,7 +31,7 @@ use rustc_hash::FxHashSet;
 use cache::{TokenCache, TokenCacheEntry, TokenCacheMode};
 pub use deepdive::{
     CloneFingerprintKey, CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint,
-    dominant_identifier, group_refactoring_suggestion,
+    dominant_identifier, group_refactoring_suggestion, is_unparsed_collision_key,
 };
 use detect::CloneDetector;
 use normalize::normalize_and_hash_resolved;

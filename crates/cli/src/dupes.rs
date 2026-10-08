@@ -667,6 +667,7 @@ fn apply_duplication_baseline(
     let (baseline_data, saved_by, unrecognised_format) =
         read_duplication_baseline(path, opts.output)?;
     let baseline_entries = baseline_data.entry_count();
+    let legacy_keys = baseline_data.has_unparsed_collision_keys();
     let before = report.clone_groups.len();
     *report = filter_new_clone_groups(std::mem::take(report), &baseline_data, &config.root);
     let matched = before.saturating_sub(report.clone_groups.len());
@@ -679,6 +680,12 @@ fn apply_duplication_baseline(
     };
     if !opts.quiet {
         eprintln!("Comparing against duplication baseline: {}", path.display());
+        if legacy_keys && matches!(opts.output, OutputFormat::Human) {
+            eprintln!(
+                "Note: {} has clone keys that older versions shared between unrelated groups. Run --save-baseline to rewrite them.",
+                path.display()
+            );
+        }
         warn_on_duplication_baseline_staleness(staleness, path);
     }
     crate::baseline_gate::note_unrecognised_baseline(
@@ -701,7 +708,7 @@ fn apply_duplication_baseline(
         scope_reasons,
         unrecognised_format,
         saved_by,
-        legacy_keys: false,
+        legacy_keys,
     }))
 }
 

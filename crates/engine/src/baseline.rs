@@ -2359,6 +2359,15 @@ impl DuplicationBaselineData {
         }
     }
 
+    /// True when the baseline holds a key that older versions gave to every
+    /// clone group whose code did not parse on its own. A re-save replaces it.
+    #[must_use]
+    pub fn has_unparsed_collision_keys(&self) -> bool {
+        self.normalized_clone_fingerprints
+            .iter()
+            .any(|key| crate::duplicates::is_unparsed_collision_key(key))
+    }
+
     /// Number of baseline entries actually used for comparison.
     #[must_use]
     pub fn entry_count(&self) -> usize {

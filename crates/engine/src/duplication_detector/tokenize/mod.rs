@@ -36,6 +36,16 @@ pub fn tokenize_file(path: &Path, source: &str, skip_imports: bool) -> FileToken
     tokenize_file_inner(path, source, false, skip_imports)
 }
 
+/// Tokenize a fragment that the parser cannot read on its own.
+///
+/// The token stream serves content identity only. It ignores whitespace and
+/// comments, like the parser-based stream does. Identifiers are lowercase, so
+/// two fragments that differ only in identifier case share a fingerprint.
+#[must_use]
+pub(crate) fn tokenize_unparsed_fragment(fragment: &str) -> Vec<SourceToken> {
+    lexical::tokenize_lexical_region(fragment, 0, false)
+}
+
 /// Tokenize a source file with optional type stripping for cross-language detection.
 #[must_use]
 pub(crate) fn tokenize_file_cross_language(
