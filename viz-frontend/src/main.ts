@@ -325,6 +325,7 @@ const init = (): void => {
           (fileIndex) => selectFile(fileIndex, true),
           () => {
             state.selectedRoad = null;
+            clearGraphFocus(state);
             selectFile(null);
           },
           requestRender,
@@ -517,7 +518,7 @@ const init = (): void => {
     } else if (state.selectedClone !== null) {
       state.selectedClone = null;
       requestRender();
-    } else if (state.selectedRoad !== null || clearGraphFocus(state)) {
+    } else if (clearGraphFocus(state) || state.selectedRoad !== null) {
       state.selectedRoad = null;
       requestRender();
     } else if (state.search !== "" && refs) {

@@ -727,10 +727,14 @@ type LensColorFn = (theme: Theme, index: DataIndex, file: VizFile) => string;
 const fileIdxOf = (index: DataIndex, file: VizFile): number =>
   index.fileIndexByPath.get(file.path) ?? -1;
 
+/** The overview fill for a file with findings below "high"; the map key uses it too. */
+export const overviewMildColor = (theme: Theme): string =>
+  mix(theme.cellNeutral, theme.amber, 0.45);
+
 const overviewColor: LensColorFn = (theme, index, file) => {
   const level = overviewLevel(index, file, fileIdxOf(index, file));
   if (level === 2) return theme.red;
-  if (level === 1) return mix(theme.cellNeutral, theme.amber, 0.45);
+  if (level === 1) return overviewMildColor(theme);
   return file.status === "entryPoint" ? theme.cellEntry : theme.cellNeutral;
 };
 

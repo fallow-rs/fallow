@@ -150,9 +150,7 @@ const lensLine = (state: AppState, fileIndex: number): HTMLElement | null => {
       ([lens]) => lensFindingLevel(lens, state.index, file, fileIndex) > 0,
     ).map(([, name]) => name);
     if (flagged.length === 0) return null;
-    const high = OVERVIEW_LENSES.some(
-      ([lens]) => lensFindingLevel(lens, state.index, file, fileIndex) === 2,
-    );
+    const high = lensFindingLevel("overview", state.index, file, fileIndex) === 2;
     return line(`${high ? "sev-error" : "sev-warn"} tip-line`, `Findings: ${flagged.join(", ")}`);
   }
   if (state.lens === "architecture" && file.zone !== undefined) {

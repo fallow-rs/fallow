@@ -6,7 +6,7 @@
  * and paints over the finished scene; none touches the Scene render context.
  */
 import type { AppState } from "../state";
-import { basename, formatCount, lensFindingLevel } from "../data";
+import { basename, formatCount, lensFindingLevel, overviewMildColor } from "../data";
 import { DISPLAY_FACE, dupRamp, heatRamp, mix, zoneColor } from "../theme";
 import { fileTipCanvasRect } from "../tooltip";
 import {
@@ -779,7 +779,7 @@ const legendEntries = (state: AppState): LegendEntry[] => {
     case "overview":
       return [
         { mark: { kind: "dot", color: theme.red }, label: "high, or findings in 3+ lenses" },
-        { mark: { kind: "dot", color: theme.amber }, label: "one or more findings" },
+        { mark: { kind: "dot", color: overviewMildColor(theme) }, label: "one or more findings" },
         { mark: { kind: "dot", color: theme.cellEntry }, label: "entry point" },
         { mark: { kind: "line", color: theme.textMuted }, label: "import (thick = importer)" },
       ];
