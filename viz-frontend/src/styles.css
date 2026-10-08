@@ -883,6 +883,73 @@ button {
   inset: 0;
 }
 
+/* Loading screen: on screen from the static shell until the first frame. */
+.map-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-0);
+}
+
+.map-loading-card {
+  width: min(360px, calc(100% - 32px));
+}
+
+.map-loading-title {
+  margin: 0 0 12px;
+  color: var(--text-high);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.map-loading-track {
+  height: 4px;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+
+.map-loading-fill {
+  width: 0;
+  height: 100%;
+  background: var(--amber);
+  transition: width 120ms linear;
+}
+
+.map-loading-track.indeterminate .map-loading-fill {
+  width: 35%;
+  animation: map-loading-slide 1.2s ease-in-out infinite;
+}
+
+.map-loading-step {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes map-loading-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-loading-fill {
+    transition: none;
+  }
+  .map-loading-track.indeterminate .map-loading-fill {
+    width: 100%;
+    animation: none;
+  }
+}
+
 /* Holds only the treemap hover marks, stacked right over the map canvas. */
 .hover-layer {
   display: block;

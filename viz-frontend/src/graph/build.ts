@@ -623,39 +623,77 @@ export const partitionEdges = (
 };
 // ── Local per-cluster layouts (frozen, seeded) ──────────────────
 
-const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
+/** A point where the build can pause; `fraction` runs from 0 to 1 over the whole build. */
+export interface BuildProgress {
+  label: string;
+  fraction: number;
+}
+
+/** Share of the build before the per-folder layouts, and the share they take. */
+const PREPARE_SHARE = 0.06;
+const LAYOUT_SHARE = 0.86;
+/** Force-layout ticks between two pause points inside one large folder. */
+const LAYOUT_TICKS_PER_STEP = 10;
+
+const layoutProgress = (laidOut: number, total: number): BuildProgress => ({
+  label: `Laying out files (${Math.min(Math.round(laidOut), total).toLocaleString("en-US")} of ${total.toLocaleString("en-US")})`,
+  fraction: PREPARE_SHARE + LAYOUT_SHARE * Math.min(laidOut / total, 1),
+});
+
+/** Seed a folder's file nodes on a phyllotaxis spiral, sized by file size. */
+const seedClusterNodes = (
+  state: AppState,
+  cluster: ClusterInfo,
+  clusterIndex: number,
+  maxSize: number,
+): FileNode[] => {
+  const files = state.data.files;
+  return cluster.indices.map((fileIndex, memberIndex) => {
+    // Phyllotaxis init in path-sorted member order: deterministic.
+    const angle = memberIndex * 2.399963229728653;
+    const radius = 6 * Math.sqrt(memberIndex + 0.5);
+    const sizeRatio = Math.log(files[fileIndex].size + 1) / Math.log(maxSize + 1);
+    return {
+      fileIndex,
+      cluster: clusterIndex,
+      radius: NODE_R_MIN + sizeRatio * (NODE_R_MAX - NODE_R_MIN),
+      x: cluster.cx + Math.cos(angle) * radius,
+      y: cluster.cy + Math.sin(angle) * radius,
+    };
+  });
+};
+
+/** The imports between two different files of one folder, as layout links. */
+const clusterLinks = (
+  gvs: GraphViewState,
+  clusterIndex: number,
+  nodes: readonly FileNode[],
+): LocalLink[] => {
+  const inCluster = new Map<number, FileNode>();
+  for (const node of nodes) inCluster.set(node.fileIndex, node);
+  const links: LocalLink[] = [];
+  for (const [from, to] of gvs.linksByCluster[clusterIndex]) {
+    const sourceNode = inCluster.get(from);
+    const targetNode = inCluster.get(to);
+    if (sourceNode && targetNode && sourceNode !== targetNode)
+      links.push({ source: sourceNode, target: targetNode });
+  }
+  return links;
+};
+
+function* runLocalLayouts(state: AppState, gvs: GraphViewState): Generator<BuildProgress, void> {
   const files = state.data.files;
   const maxSize = files.reduce((max, file) => Math.max(max, file.size), 1);
+  const totalFiles = Math.max(files.length, 1);
+  let laidOut = 0;
 
   for (let clusterIndex = 0; clusterIndex < gvs.clusters.length; clusterIndex++) {
     const cluster = gvs.clusters[clusterIndex];
-    const rand = mulberry32(fnv1a(cluster.key));
-    const nodes: FileNode[] = cluster.indices.map((fileIndex, memberIndex) => {
-      // Phyllotaxis init in path-sorted member order: deterministic.
-      const angle = memberIndex * 2.399963229728653;
-      const radius = 6 * Math.sqrt(memberIndex + 0.5);
-      const sizeRatio = Math.log(files[fileIndex].size + 1) / Math.log(maxSize + 1);
-      return {
-        fileIndex,
-        cluster: clusterIndex,
-        radius: NODE_R_MIN + sizeRatio * (NODE_R_MAX - NODE_R_MIN),
-        x: cluster.cx + Math.cos(angle) * radius,
-        y: cluster.cy + Math.sin(angle) * radius,
-      };
-    });
-    const inCluster = new Map<number, FileNode>();
-    for (const node of nodes) inCluster.set(node.fileIndex, node);
-
-    const links: LocalLink[] = [];
-    for (const [from, to] of gvs.linksByCluster[clusterIndex]) {
-      const sourceNode = inCluster.get(from);
-      const targetNode = inCluster.get(to);
-      if (sourceNode && targetNode && sourceNode !== targetNode)
-        links.push({ source: sourceNode, target: targetNode });
-    }
+    const nodes = seedClusterNodes(state, cluster, clusterIndex, maxSize);
+    const links = clusterLinks(gvs, clusterIndex, nodes);
 
     const sim = forceSimulation(nodes)
-      .randomSource(rand)
+      .randomSource(mulberry32(fnv1a(cluster.key)))
       .force("link", forceLink<FileNode, LocalLink>(links).distance(24).strength(0.3))
       .force("charge", forceManyBody<FileNode>().strength(-30).theta(0.9).distanceMax(240))
       .force(
@@ -667,12 +705,20 @@ const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
       .alphaDecay(0.028)
       .stop();
     const ticks = Math.min(300, 120 + cluster.indices.length * 2);
-    for (let tick = 0; tick < ticks; tick++) sim.tick();
+    for (let tick = 0; tick < ticks; tick++) {
+      sim.tick();
+      if (tick % LAYOUT_TICKS_PER_STEP === LAYOUT_TICKS_PER_STEP - 1) {
+        const partial = (cluster.indices.length * tick) / ticks;
+        yield layoutProgress(laidOut + partial, totalFiles);
+      }
+    }
     sim.stop();
 
     for (const node of nodes) gvs.fileNodes[node.fileIndex] = node;
+    laidOut += cluster.indices.length;
+    yield layoutProgress(laidOut, totalFiles);
   }
-};
+}
 /** Clearance between a folder's outermost files and its outline. */
 const HULL_PAD = 20;
 
@@ -900,14 +946,17 @@ const startReveal = (state: AppState, gvs: GraphViewState): void => {
   gvs.hasRevealed = true;
 };
 
-export const initGraphNodes = (state: AppState): void => {
+/**
+ * Build the graph layout in steps. Each `yield` is a safe pause point with the
+ * progress so far. The sync `initGraphNodes` runs every step at once; the
+ * loading screen runs them between frames.
+ */
+export function* graphInitSteps(state: AppState): Generator<BuildProgress, void> {
   const { data } = state;
   const gvs = getGVS(state);
-  if (gvs.initialized) {
-    renderGraph(state);
-    return;
-  }
+  if (gvs.initialized) return;
 
+  yield { label: "Grouping files", fraction: 0 };
   const files = data.files;
   const groupMap =
     gvs.clusterMode === "imports" ? louvainCluster(files, data.edges) : directoryCluster(files);
@@ -922,6 +971,7 @@ export const initGraphNodes = (state: AppState): void => {
   gvs.interEdges = partitions.inter;
   gvs.linksByCluster = partitions.byCluster;
 
+  yield { label: "Placing folders", fraction: PREPARE_SHARE / 2 };
   const meta = buildMetaGraph(state, clusterOf, clusters.length);
   const sccOf = markTangles(clusters, meta);
   markIsolated(state, gvs, clusters, meta);
@@ -935,7 +985,8 @@ export const initGraphNodes = (state: AppState): void => {
   placeIsolated(clusters);
 
   gvs.fileNodes = new Array<FileNode>(files.length);
-  runLocalLayouts(state, gvs);
+  yield* runLocalLayouts(state, gvs);
+  yield { label: "Outlining folders", fraction: PREPARE_SHARE + LAYOUT_SHARE };
   buildHulls(gvs);
   // Positions are frozen from here on; index them for pointer hit-tests.
   gvs.grid = buildSpatialGrid(gvs.fileNodes);
@@ -950,5 +1001,11 @@ export const initGraphNodes = (state: AppState): void => {
 
   gvs.initialized = true;
   startReveal(state, gvs);
+}
+
+export const initGraphNodes = (state: AppState): void => {
+  for (const _step of graphInitSteps(state)) {
+    // Drain: the sync path has nowhere to show progress.
+  }
   renderGraph(state);
 };

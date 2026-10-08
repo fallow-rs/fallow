@@ -22,6 +22,7 @@ import {
   graphHandleClick,
   graphHoverTarget,
   graphPathTrace,
+  graphInitSteps,
   initGraphNodes,
   nodeScreenPos,
   refitOnResize,
@@ -50,6 +51,7 @@ import {
   securityCandidatesForFile,
 } from "./data";
 import { LENS_IDS } from "./lenses";
+import { createLoader, nextFrame, runSteps } from "./loading";
 import { readEmbeddedPayload } from "./payload";
 import { ROW_IDS, mountApp } from "./shell";
 
@@ -226,6 +228,10 @@ const init = (): void => {
   });
   stage.appendChild(panel);
   app.appendChild(stage);
+  const loader = createLoader(stage);
+  // The first graph build runs in steps behind the loading screen. Until it
+  // ends, a render would start a second, blocking build.
+  let booting = state.view === "graph";
   app.appendChild(statuslineOf(refs));
 
   // Floating [data-tip] hints: one body-level element, delegated globally so
@@ -308,7 +314,7 @@ const init = (): void => {
   // null forces the very first render to build the panel.
   let renderedPanelKey: string | null = null;
   const requestRender = (): void => {
-    if (renderQueued) return;
+    if (renderQueued || booting) return;
     renderQueued = true;
     requestAnimationFrame(() => {
       renderQueued = false;
@@ -618,7 +624,18 @@ const init = (): void => {
 
   // Initial paint, then again once the embedded census fonts are ready:
   // the canvas measures and draws text with whatever face is loaded.
-  requestRender();
+  const firstPaint = async (): Promise<void> => {
+    if (booting) {
+      await runSteps(graphInitSteps(state), loader);
+      loader.update({ label: "Drawing the map", fraction: 0.96 });
+      await nextFrame();
+      booting = false;
+    }
+    requestRender();
+    // The render frame is queued first, so the loading screen leaves after it.
+    requestAnimationFrame(() => requestAnimationFrame(loader.done));
+  };
+  void firstPaint();
   void document.fonts?.ready.then(() => requestRender());
 
   // Keep the cluster segment in sync with the actual mode at boot.

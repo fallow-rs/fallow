@@ -4,7 +4,7 @@
  * (pointer + camera).
  */
 export { usableStageWidth } from "./shared";
-export { initGraphNodes } from "./build";
+export { graphInitSteps, initGraphNodes } from "./build";
 export { renderGraph } from "./render";
 export { minimapHit, minimapPan } from "./minimap";
 export {
