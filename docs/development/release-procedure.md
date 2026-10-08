@@ -392,8 +392,9 @@ The release workflow does these steps:
    `fallow-multicall` with `--config target/pgo-profile/pgo.toml`. Cargo then
    resolves the features once, and the shared crates get the same hashes as
    in the `fallow-multicall` training build. The `aarch64-unknown-linux-musl`
-   leg keeps one build per package, because it needs `cargo zigbuild` for the
-   QuickJS C code.
+   leg keeps one build per package, all with `cargo zigbuild`, because every
+   binary compiles C on musl: the mimalloc allocator, plus QuickJS in MCP and
+   multicall.
 7. On the PGO legs, `.github/scripts/pgo-profile-match.mjs` counts the
    warnings for functions without a profile record. The leg fails when that
    count is more than 20% of the profile functions. A local

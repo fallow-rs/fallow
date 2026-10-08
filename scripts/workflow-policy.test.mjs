@@ -1148,6 +1148,22 @@ test("release builds every Rust binary with the PGO config and nothing else", ()
   const binaryRuns = runs.filter((run) => /-p fallow-(?:cli|lsp|mcp|multicall)\b/u.test(run));
   const otherRuns = runs.filter((run) => !binaryRuns.includes(run));
   const napiSteps = workflowSteps(build).filter((step) => /napi build/u.test(step));
+  // Every binary compiles C on musl (mimalloc, plus QuickJS in MCP and
+  // multicall). The glibc cross-gcc cannot link C into an aarch64 musl binary.
+  const aarch64MuslSteps = workflowSteps(build).filter(
+    (step) =>
+      /if: matrix\.target == 'aarch64-unknown-linux-musl'/u.test(step) &&
+      /-p fallow-(?:cli|lsp|mcp|multicall)\b/u.test(step),
+  );
+  assert.equal(aarch64MuslSteps.length, 4);
+  for (const step of aarch64MuslSteps) {
+    assert.match(step, /run: cargo zigbuild\b/u, "aarch64-musl C code needs zig");
+    assert.doesNotMatch(step, /CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER/u);
+  }
+  assert.deepEqual(
+    aarch64MuslSteps.map((step) => step.match(/-p (fallow-[a-z]+)/u)[1]).toSorted(),
+    PGO_RUST_BINARY_PACKAGES,
+  );
   const combined = binaryRuns.filter((run) => run.match(/-p fallow-/gu).length > 1);
 
   // One combined build per leg, plus four separate builds on aarch64-musl.

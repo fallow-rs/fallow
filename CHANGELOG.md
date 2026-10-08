@@ -236,8 +236,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The Linux musl binaries are about 4 times faster.** musl's own `malloc`
   is slow when many threads allocate, and fallow analyzes files in
-  parallel. The musl builds (the `linux-x64-musl` and `linux-arm64-musl` npm
-  packages, Alpine, and the musl release assets) now use mimalloc. On a
+  parallel. The musl binaries (the `linux-x64-musl` and `linux-arm64-musl` npm
+  packages and the musl release assets) now use mimalloc. The Node addon
+  keeps the default allocator. On a
   10-core aarch64 Alpine container, `check`, `dupes` and `health` took 77%
   less time over 15 fixture cases, with identical output. Peak memory is
   about a third higher. Glibc, macOS and Windows builds do not change. A
