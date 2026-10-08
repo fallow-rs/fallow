@@ -439,129 +439,127 @@ pub(super) fn build_parent_to_children(
     parent_to_children
 }
 
-/// Longest `extends` chain whose accesses reach every class. A class chain is
-/// rarely deeper than a handful of levels; the bound only stops a cyclic
-/// `extends` graph, which the type checker rejects.
+/// Most passes of one closure. A class chain is rarely deeper than a handful of
+/// levels; the bound only stops a cyclic `extends` graph, which the type checker
+/// rejects.
 const MAX_INHERITANCE_PASSES: usize = 64;
+
+type ClassAccesses = FxHashMap<ExportKey, FxHashSet<String>>;
+type FileAccesses = FxHashMap<FileId, FxHashSet<String>>;
 
 /// Propagate member accesses through `extends` chains in both directions.
 ///
-/// One pass moves an access one level. The map has no order, so the pass runs
-/// again until nothing changes: a member that the leaf of a three-level chain
-/// calls must reach the root, however the entries are ordered.
+/// An access through a child reaches every ancestor: `new Child().start()` uses
+/// `Base.start`. An access that a class makes on itself or through its own type
+/// reaches every descendant, which can override or inherit the member. The two
+/// directions are separate closures. One closure over both would carry an
+/// access from one child up to the parent and then down to a sibling, which
+/// hides a member that nothing calls.
 pub(super) fn propagate_class_inheritance(
     parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
-    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
-    self_accessed_members: &mut FxHashMap<FileId, FxHashSet<String>>,
+    accessed_members: &mut ClassAccesses,
+    self_accessed_members: &mut FileAccesses,
 ) {
     if parent_to_children.is_empty() {
         return;
     }
 
+    let mut downward_accessed = accessed_members.clone();
+    let mut downward_self = self_accessed_members.clone();
+
+    close_upward(parent_to_children, accessed_members, self_accessed_members);
+    close_downward(
+        parent_to_children,
+        &mut downward_accessed,
+        &mut downward_self,
+    );
+
+    for (key, members) in downward_accessed {
+        accessed_members.entry(key).or_default().extend(members);
+    }
+    for (file_id, members) in downward_self {
+        self_accessed_members
+            .entry(file_id)
+            .or_default()
+            .extend(members);
+    }
+}
+
+fn access_count(accessed: &ClassAccesses, self_accessed: &FileAccesses) -> usize {
+    accessed.values().map(FxHashSet::len).sum::<usize>()
+        + self_accessed.values().map(FxHashSet::len).sum::<usize>()
+}
+
+/// Add the accesses of every child to its parents, until nothing changes.
+fn close_upward(
+    parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
+    accessed: &mut ClassAccesses,
+    self_accessed: &mut FileAccesses,
+) {
     for _ in 0..MAX_INHERITANCE_PASSES {
-        let before = access_count(accessed_members, self_accessed_members);
-        propagate_class_inheritance_once(
-            parent_to_children,
-            accessed_members,
-            self_accessed_members,
-        );
-        if access_count(accessed_members, self_accessed_members) == before {
+        let before = access_count(accessed, self_accessed);
+        for (parent, children) in parent_to_children {
+            let mut from_children: FxHashSet<String> = FxHashSet::default();
+            let mut self_from_children: FxHashSet<String> = FxHashSet::default();
+            for child in children {
+                if let Some(members) = accessed.get(child) {
+                    from_children.extend(members.iter().cloned());
+                }
+                if let Some(members) = self_accessed.get(&child.file_id) {
+                    self_from_children.extend(members.iter().cloned());
+                }
+            }
+            if !from_children.is_empty() {
+                accessed
+                    .entry(parent.clone())
+                    .or_default()
+                    .extend(from_children);
+            }
+            if !self_from_children.is_empty() {
+                self_accessed
+                    .entry(parent.file_id)
+                    .or_default()
+                    .extend(self_from_children);
+            }
+        }
+        if access_count(accessed, self_accessed) == before {
             return;
         }
     }
 }
 
-fn access_count(
-    accessed_members: &FxHashMap<ExportKey, FxHashSet<String>>,
-    self_accessed_members: &FxHashMap<FileId, FxHashSet<String>>,
-) -> usize {
-    accessed_members.values().map(FxHashSet::len).sum::<usize>()
-        + self_accessed_members
-            .values()
-            .map(FxHashSet::len)
-            .sum::<usize>()
-}
-
-fn propagate_class_inheritance_once(
+/// Add the accesses of every parent to its children, until nothing changes.
+fn close_downward(
     parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
-    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
-    self_accessed_members: &mut FxHashMap<FileId, FxHashSet<String>>,
+    accessed: &mut ClassAccesses,
+    self_accessed: &mut FileAccesses,
 ) {
-    let mut propagations: Vec<(FileId, Vec<String>)> = Vec::new();
-
-    for (parent_key, children) in parent_to_children {
-        collect_self_access_inheritance_propagations(
-            parent_key,
-            children,
-            self_accessed_members,
-            &mut propagations,
-        );
-        propagate_member_accesses_through_inheritance(parent_key, children, accessed_members);
-    }
-
-    for (file_id, members) in propagations {
-        let entry = self_accessed_members.entry(file_id).or_default();
-        for member in members {
-            entry.insert(member);
+    for _ in 0..MAX_INHERITANCE_PASSES {
+        let before = access_count(accessed, self_accessed);
+        for (parent, children) in parent_to_children {
+            let from_parent = accessed.get(parent).cloned().unwrap_or_default();
+            let self_from_parent = self_accessed
+                .get(&parent.file_id)
+                .cloned()
+                .unwrap_or_default();
+            for child in children {
+                if !from_parent.is_empty() {
+                    accessed
+                        .entry(child.clone())
+                        .or_default()
+                        .extend(from_parent.iter().cloned());
+                }
+                if !self_from_parent.is_empty() {
+                    self_accessed
+                        .entry(child.file_id)
+                        .or_default()
+                        .extend(self_from_parent.iter().cloned());
+                }
+            }
         }
-    }
-}
-
-fn collect_self_access_inheritance_propagations(
-    parent_key: &ExportKey,
-    children: &[ExportKey],
-    self_accessed_members: &FxHashMap<FileId, FxHashSet<String>>,
-    propagations: &mut Vec<(FileId, Vec<String>)>,
-) {
-    if let Some(parent_self_accesses) = self_accessed_members.get(&parent_key.file_id) {
-        let accesses: Vec<String> = parent_self_accesses.iter().cloned().collect();
-        for child_key in children {
-            propagations.push((child_key.file_id, accesses.clone()));
+        if access_count(accessed, self_accessed) == before {
+            return;
         }
-    }
-
-    let mut child_self_accesses_for_parent: FxHashSet<String> = FxHashSet::default();
-    for child_key in children {
-        if let Some(child_self_accesses) = self_accessed_members.get(&child_key.file_id) {
-            child_self_accesses_for_parent.extend(child_self_accesses.iter().cloned());
-        }
-    }
-    if !child_self_accesses_for_parent.is_empty() {
-        propagations.push((
-            parent_key.file_id,
-            child_self_accesses_for_parent.into_iter().collect(),
-        ));
-    }
-}
-
-fn propagate_member_accesses_through_inheritance(
-    parent_key: &ExportKey,
-    children: &[ExportKey],
-    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
-) {
-    let parent_accesses = accessed_members.get(parent_key).cloned();
-    let mut child_accesses_to_propagate: FxHashSet<String> = FxHashSet::default();
-
-    for child_key in children {
-        if let Some(child_accesses) = accessed_members.get(child_key) {
-            child_accesses_to_propagate.extend(child_accesses.iter().cloned());
-        }
-    }
-
-    if let Some(ref parent_acc) = parent_accesses {
-        for child_key in children {
-            accessed_members
-                .entry(child_key.clone())
-                .or_default()
-                .extend(parent_acc.iter().cloned());
-        }
-    }
-
-    if !child_accesses_to_propagate.is_empty() {
-        accessed_members
-            .entry(parent_key.clone())
-            .or_default()
-            .extend(child_accesses_to_propagate);
     }
 }
 

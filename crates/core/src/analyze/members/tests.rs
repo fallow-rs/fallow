@@ -3345,3 +3345,41 @@ fn inheritance_propagates_self_access_down_a_long_extends_chain() {
         );
     }
 }
+
+#[test]
+fn inheritance_does_not_leak_an_access_to_a_sibling_class() {
+    let key = |file: u32| ExportKey::new(FileId(file), "Class");
+    let (parent, first, second) = (key(0), key(1), key(2));
+    let mut parent_to_children: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    parent_to_children.insert(parent.clone(), vec![first.clone(), second.clone()]);
+    let mut accessed: FxHashMap<ExportKey, FxHashSet<String>> = FxHashMap::default();
+    accessed.entry(first).or_default().insert("foo".to_string());
+    let mut self_accessed: FxHashMap<FileId, FxHashSet<String>> = FxHashMap::default();
+    self_accessed
+        .entry(FileId(1))
+        .or_default()
+        .insert("helper".to_string());
+
+    heritage::propagate_class_inheritance(&parent_to_children, &mut accessed, &mut self_accessed);
+
+    assert!(
+        accessed.get(&parent).is_some_and(|set| set.contains("foo")),
+        "the access reaches the parent"
+    );
+    assert!(
+        accessed.get(&second).is_none_or(|set| !set.contains("foo")),
+        "the access must not reach a sibling"
+    );
+    assert!(
+        self_accessed
+            .get(&FileId(0))
+            .is_some_and(|set| set.contains("helper")),
+        "a `this` access of a child reaches the parent"
+    );
+    assert!(
+        self_accessed
+            .get(&FileId(2))
+            .is_none_or(|set| !set.contains("helper")),
+        "a `this` access must not reach a sibling"
+    );
+}
