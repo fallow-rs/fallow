@@ -7,6 +7,8 @@ import type { SimulationLinkDatum, SimulationNodeDatum } from "d3-force";
 import type { ZoomBehavior } from "d3-zoom";
 import type { AppState } from "../state";
 import type { RoadSelection } from "../types";
+import { lensFindingLevel } from "../data";
+import { DISPLAY_FACE, TEXT_FACE } from "../theme";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -203,14 +205,18 @@ export interface GraphViewState {
   /** Graph lens-color crossfade: prior per-file colors, and its start time. */
   lensPrev: Map<number, string> | null;
   lensFadeAt: number;
+  /** File whose neighborhood the hover dim currently fades toward. */
+  hoverFadeFile: number | null;
+  /** When the hover dim started fading in (performance.now ms). */
+  hoverFadeAt: number;
 }
 
-export const FONT_SMALL = '12px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_MICRO = '11px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_CHIP = '13px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_LEGEND = '12px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
-export const FONT_CARD =
-  '700 15px "Martian Mono", "JetBrains Mono", ui-monospace, Menlo, monospace';
+/** Map labels name things in the condensed cut; meta lines explain in Barlow. */
+export const FONT_SMALL = `600 13px ${DISPLAY_FACE}`;
+export const FONT_MICRO = `500 13px ${TEXT_FACE}`;
+export const FONT_CHIP = `600 15px ${DISPLAY_FACE}`;
+export const FONT_LEGEND = `14px ${TEXT_FACE}`;
+export const FONT_CARD = `700 16px ${DISPLAY_FACE}`;
 
 export const NODE_R_MIN = 2.5;
 export const NODE_R_MAX = 10;
@@ -262,6 +268,8 @@ export const getGVS = (state: AppState): GraphViewState => {
       hasRevealed: false,
       lensPrev: null,
       lensFadeAt: 0,
+      hoverFadeFile: null,
+      hoverFadeAt: 0,
       standaloneOpen: false,
       standaloneChip: null,
       egoBackChip: null,
@@ -320,23 +328,32 @@ const gatePoint = (cluster: ClusterInfo, toward: Pt): Pt => {
   return from;
 };
 
-export const cubicPoint = (p0: Pt, p1: Pt, p2: Pt, p3: Pt, progress: number): Pt => {
-  const inverse = 1 - progress;
-  return {
-    x:
-      inverse * inverse * inverse * p0.x +
-      3 * inverse * inverse * progress * p1.x +
-      3 * inverse * progress * progress * p2.x +
-      progress * progress * progress * p3.x,
-    y:
-      inverse * inverse * inverse * p0.y +
-      3 * inverse * inverse * progress * p1.y +
-      3 * inverse * progress * progress * p2.y +
-      progress * progress * progress * p3.y,
-  };
+/**
+ * The point at `progress` (0 to 1, by length) along the census route
+ * p0 → p1 → p2 → p3. Roads are octilinear polylines, not curves.
+ */
+export const routePoint = (p0: Pt, p1: Pt, p2: Pt, p3: Pt, progress: number): Pt => {
+  const points = [p0, p1, p2, p3];
+  const lengths = [1, 2, 3].map((index) =>
+    Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y),
+  );
+  const total = lengths[0] + lengths[1] + lengths[2];
+  if (total === 0) return { x: p0.x, y: p0.y };
+  let remaining = Math.min(1, Math.max(0, progress)) * total;
+  for (let index = 0; index < 3; index++) {
+    const length = lengths[index];
+    if (remaining <= length || index === 2) {
+      const ratio = length === 0 ? 0 : Math.min(1, remaining / length);
+      const from = points[index];
+      const to = points[index + 1];
+      return { x: from.x + (to.x - from.x) * ratio, y: from.y + (to.y - from.y) * ratio };
+    }
+    remaining -= length;
+  }
+  return { x: p3.x, y: p3.y };
 };
 
-/** Trace a tapered ribbon polygon along a cubic bezier into the current path. */
+/** Trace a tapered ribbon polygon along a census route into the current path. */
 export const taperedRibbon = (
   ctx: CanvasRenderingContext2D,
   p0: Pt,
@@ -349,7 +366,7 @@ export const taperedRibbon = (
   const SAMPLES = 20;
   const centers: Pt[] = [];
   for (let sampleIndex = 0; sampleIndex <= SAMPLES; sampleIndex++)
-    centers.push(cubicPoint(p0, p1, p2, p3, sampleIndex / SAMPLES));
+    centers.push(routePoint(p0, p1, p2, p3, sampleIndex / SAMPLES));
   const left: Pt[] = [];
   const right: Pt[] = [];
   for (let sampleIndex = 0; sampleIndex <= SAMPLES; sampleIndex++) {
@@ -373,6 +390,19 @@ export const taperedRibbon = (
   ctx.closePath();
 };
 
+/**
+ * The single bend of a census route from `from` to `to`: a straight run
+ * along the longer axis, then one 45 degree run into the destination.
+ */
+export const octilinearBend = (from: Pt, to: Pt): Pt => {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const diagonal = Math.min(Math.abs(dx), Math.abs(dy));
+  return Math.abs(dx) >= Math.abs(dy)
+    ? { x: from.x + Math.sign(dx) * (Math.abs(dx) - diagonal), y: from.y }
+    : { x: from.x, y: from.y + Math.sign(dy) * (Math.abs(dy) - diagonal) };
+};
+
 export const roadGeometry = (
   gvs: GraphViewState,
   road: Road,
@@ -393,35 +423,20 @@ export const roadGeometry = (
     p3 = { x: p3.x + nx, y: p3.y + ny };
   }
 
-  const chord = Math.hypot(p3.x - p0.x, p3.y - p0.y) || 1;
-  const ux = (p3.x - p0.x) / chord;
-  const uy = (p3.y - p0.y) / chord;
-  // Perpendicular to the chord, biased to arc toward the top of the canvas.
-  let px = -uy;
-  let py = ux;
-  if (py > 0) {
-    px = -px;
-    py = -py;
-  }
-  let bow = 0;
-  if (road.back) {
-    bow = 0.18 * chord; // back-edges arc off the fabric
-  } else {
-    const span = Math.abs(gvs.clusters[road.dst].layer - gvs.clusters[road.src].layer);
-    // Long hops bow gently over intermediate layers instead of cutting
-    // through their hulls.
-    if (span >= 2) bow = 0.06 * chord;
-  }
-  // Handles run ALONG the chord so each road leaves its cluster pointing at
-  // the other (a natural radiating fan), then the perpendicular bow lifts
-  // long and back hops off the fabric.
-  const handle = chord * 0.4;
-  const p1 = { x: p0.x + ux * handle + px * bow, y: p0.y + uy * handle + py * bow };
-  const p2 = { x: p3.x - ux * handle + px * bow, y: p3.y - uy * handle + py * bow };
+  // Census map geometry: a straight run along the longer axis, then one
+  // 45 degree run into the destination. The bend is a single point, so the
+  // route is p0 → bend → p3 (p1 and p2 share the bend).
+  const bend = octilinearBend(p0, p3);
+  const p1 = bend;
+  const p2 = bend;
   return { p0, p1, p2, p3 };
 };
 
-/** Rounded chip backing: fill plus 1px border, radius 4. */
+/** Census radii on the canvas: label plates get 3px, controls 4px. */
+const PLATE_RADIUS = 3;
+export const CONTROL_RADIUS = 4;
+
+/** Chip backing: fill plus an optional 1px border. */
 export const chipRect = (
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -431,9 +446,10 @@ export const chipRect = (
   fill: string,
   fillAlpha: number,
   stroke: string | null,
+  radius: number = PLATE_RADIUS,
 ): void => {
   ctx.beginPath();
-  ctx.roundRect(x, y, width, height, 4);
+  ctx.roundRect(x, y, width, height, radius);
   ctx.fillStyle = fill;
   const prev = ctx.globalAlpha;
   ctx.globalAlpha = prev * fillAlpha;
@@ -462,38 +478,43 @@ const PANEL_CLEARANCE = 2;
 export const usableStageWidth = (state: AppState, stageW: number): number => {
   // A panel is always present now: a selection, a road/clone drill-down,
   // or the per-lens ranked list (overview included). Reserve its width plus a
-  // few px so tiles render up to it, edge visible, but never under it.
+  // few px so tiles render up to it, edge visible, but never under it. On a
+  // narrow screen the panel docks below the map instead, so the map keeps
+  // the full width.
   void state;
+  if (panelDocksBelow()) return stageW;
   return Math.max(PANEL_WIDTH, stageW - PANEL_WIDTH - PANEL_CLEARANCE);
 };
+
+/** Matches the CSS breakpoint where the panel becomes a bottom sheet. */
+export const panelDocksBelow = (): boolean =>
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(max-width: 700px)").matches;
 
 /** Folder keys whose imports carry little overview signal (test suites). */
 export const isTestCluster = (key: string): boolean =>
   /(^|\/)(tests?|__tests__|e2e|spec)($|\/)/.test(key);
 // ── Rendering ───────────────────────────────────────────────────
 
-export const easeOut = (progress: number): number => 1 - (1 - progress) * (1 - progress);
+/** Quartic ease-out: a fast, confident start that settles without bounce. */
+export const easeOut = (progress: number): number => 1 - (1 - progress) ** 4;
+/** Distance from a point to the segment a-b. */
+const segmentDistance = (point: Pt, a: Pt, b: Pt): number => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  const along =
+    lengthSq === 0
+      ? 0
+      : Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq));
+  return Math.hypot(point.x - (a.x + dx * along), point.y - (a.y + dy * along));
+};
+
+/** Census outlines are drawn, not rounded: straight edges only. */
 export const hullPath = (ctx: CanvasRenderingContext2D, hull: Pt[]): void => {
-  const pointCount = hull.length;
-  if (pointCount < 3) {
-    ctx.moveTo(hull[0].x, hull[0].y);
-    for (let index = 1; index < pointCount; index++) ctx.lineTo(hull[index].x, hull[index].y);
-    ctx.closePath();
-    return;
-  }
-  // Rounded corners: run each edge to its midpoint, then a quadratic through
-  // the vertex to the next edge's midpoint. The curve stays inside the convex
-  // hull, so a cluster reads as a smooth blob rather than a hard polygon.
-  const start = {
-    x: (hull[pointCount - 1].x + hull[0].x) / 2,
-    y: (hull[pointCount - 1].y + hull[0].y) / 2,
-  };
-  ctx.moveTo(start.x, start.y);
-  for (let index = 0; index < pointCount; index++) {
-    const curr = hull[index];
-    const next = hull[(index + 1) % pointCount];
-    ctx.quadraticCurveTo(curr.x, curr.y, (curr.x + next.x) / 2, (curr.y + next.y) / 2);
-  }
+  ctx.moveTo(hull[0].x, hull[0].y);
+  for (let index = 1; index < hull.length; index++) ctx.lineTo(hull[index].x, hull[index].y);
   ctx.closePath();
 };
 
@@ -573,6 +594,38 @@ export const nodeHitTest = (state: AppState, canvasX: number, canvasY: number): 
   return best;
 };
 
+/**
+ * The smallest import count a road needs to be drawn. With many clusters
+ * the pairwise roads become a mesh at fit zoom, so only the strongest show
+ * there and the rest appear as the user zooms in (fully by 1.6x fit, where
+ * individual edges begin). The more clusters, the harder the thinning: a
+ * 30-cluster map keeps about its top third of roads, a 90-cluster map its
+ * top sixth.
+ */
+export const roadDensityFloor = (gvs: GraphViewState): number => {
+  if (gvs.clusters.length <= 20 || gvs.roads.length === 0) return 0;
+  const kRel = gvs.transform.k / gvs.fitK;
+  const zoomRelax = Math.min(1, Math.max(0, (kRel - 1) / 0.6));
+  const basePct = Math.min(0.85, 0.4 + gvs.clusters.length / 150);
+  const floorPct = basePct * (1 - zoomRelax);
+  if (floorPct <= 0) return 0;
+  const counts = gvs.roads.map((road) => road.count).toSorted((left, right) => left - right);
+  return counts[Math.min(counts.length - 1, Math.floor(counts.length * floorPct))];
+};
+
+/**
+ * Whether the map draws a road: above the density floor, a severity road
+ * (always shown so the boundaries story is never hidden), or a road of the
+ * folder whose label is hovered. Hit-testing uses the same rule, so the
+ * pointer never finds a road that is not on screen.
+ */
+export const roadIsDrawn = (gvs: GraphViewState, road: Road, floor: number): boolean => {
+  if (road.count >= floor) return true;
+  if (road.violations > 0 || (road.bidi && road.cycleEdges > 0)) return true;
+  const lit = gvs.hoveredCluster;
+  return lit !== null && (road.src === lit || road.dst === lit);
+};
+
 export const roadHitTest = (state: AppState, x: number, y: number): number | null => {
   const gvs = getGVS(state);
   const threshold = 10;
@@ -582,21 +635,23 @@ export const roadHitTest = (state: AppState, x: number, y: number): number | nul
   const pad = threshold / transform.k;
   let best: number | null = null;
   let bestDist = threshold;
+  const floor = roadDensityFloor(gvs);
   for (let ri = 0; ri < gvs.roads.length; ri++) {
     const road = gvs.roads[ri];
+    if (!roadIsDrawn(gvs, road, floor)) continue;
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
-    // Coarse bounding-box prefilter over the bezier's control points (the
-    // curve stays within their hull), so the 17-point sampling is skipped
-    // only for roads the pointer truly cannot be on. An endpoint-circle
-    // prefilter would leave the middle of long roads unhittable.
+    // Coarse bounding-box prefilter over the route's points, so the exact
+    // segment test runs only for roads the pointer can be on.
     const minX = Math.min(p0.x, p1.x, p2.x, p3.x);
     const maxX = Math.max(p0.x, p1.x, p2.x, p3.x);
     const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
     const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
     if (gx < minX - pad || gx > maxX + pad || gy < minY - pad || gy > maxY + pad) continue;
-    for (let sampleIndex = 0; sampleIndex <= 16; sampleIndex++) {
-      const point = worldToScreen(gvs, cubicPoint(p0, p1, p2, p3, sampleIndex / 16));
-      const dist = Math.hypot(point.x - x, point.y - y);
+    // Exact distance to each straight run of the route, in screen pixels.
+    // Sampling points along the route missed the pointer between samples.
+    const route = [p0, p1, p2, p3].map((point) => worldToScreen(gvs, point));
+    for (let index = 1; index < route.length; index++) {
+      const dist = segmentDistance({ x, y }, route[index - 1], route[index]);
       if (dist < bestDist) {
         bestDist = dist;
         best = ri;
@@ -631,6 +686,9 @@ const FIT_PAD = 70;
  * Fit-to-view camera transform for a cluster bounding box, reserving
  * horizontal room for labels that stick out of hulls.
  */
+/** Bottom band the camera fit leaves free for the legend. */
+const LEGEND_RESERVE = 110;
+
 export const fitTransform = (
   width: number,
   height: number,
@@ -641,10 +699,13 @@ export const fitTransform = (
   if (!Number.isFinite(bounds.minX)) return { x: 0, y: 0, k: 1 };
   const bboxW = bounds.maxX - bounds.minX + FIT_PAD * 2;
   const bboxH = bounds.maxY - bounds.minY + FIT_PAD * 2;
-  const scale = Math.min((width - 200) / bboxW, (height - 60) / bboxH, 1.4);
+  // The legend and the standalone chip own the bottom-left corner; fit
+  // above them so the bottom row of clusters never hides underneath.
+  const usableH = Math.max(120, height - (panelDocksBelow() ? 64 : LEGEND_RESERVE));
+  const scale = Math.min((width - 200) / bboxW, (usableH - 40) / bboxH, 1.4);
   return {
     x: (width - bboxW * scale) / 2 - bounds.minX * scale + FIT_PAD * scale,
-    y: (height - bboxH * scale) / 2 - bounds.minY * scale + FIT_PAD * scale,
+    y: (usableH - bboxH * scale) / 2 - bounds.minY * scale + FIT_PAD * scale,
     k: scale,
   };
 };
@@ -657,3 +718,21 @@ export const stageSize = (state: AppState): { w: number; h: number } => {
     h: stageEl ? stageEl.clientHeight : window.innerHeight,
   };
 };
+
+/**
+ * Whether any standalone (import-free) cluster holds a file the active
+ * lens flags. Unused files are standalone by definition, so the strip
+ * must open for those lenses or their findings never reach the map.
+ */
+export const lensFlagsStandalone = (state: AppState, clusters: ClusterInfo[]): boolean =>
+  // Overview flags almost everything somewhere; its triage cards lead to
+  // the lens that needs the strip instead.
+  state.lens !== "overview" &&
+  clusters.some(
+    (cluster) =>
+      cluster.isolated &&
+      cluster.indices.some(
+        (fileIdx) =>
+          lensFindingLevel(state.lens, state.index, state.data.files[fileIdx], fileIdx) > 0,
+      ),
+  );

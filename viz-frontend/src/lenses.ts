@@ -97,7 +97,7 @@ export const LENSES: readonly LensDefinition[] = [
   {
     id: "overview",
     name: "Overview",
-    gloss: "Folders and imports",
+    gloss: "Findings from all lenses",
     shortcut: "1",
     severity: "neutral",
     count: () => null,
@@ -121,7 +121,7 @@ export const LENSES: readonly LensDefinition[] = [
     gloss: "Copy-pasted code",
     shortcut: "3",
     severity: "warn",
-    count: (state) => count(summaryCount(state, "clone_groups"), "clone groups"),
+    count: (state) => count(summaryCount(state, "clone_groups"), "duplicated blocks"),
   },
   {
     id: "architecture",

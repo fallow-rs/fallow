@@ -58,13 +58,12 @@ export interface ChromeHandlers {
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const MARK_VIEW_BOX = "173.11 97.47 1008.49 1008.49";
-const FAVICON_VIEW_BOX = "273.96 198.32 806.79 806.79";
+const LEAF_VIEW_BOX = "273.96 198.32 806.79 806.79";
+const LEAF_TRANSFORM = "translate(0,1254) scale(0.1,-0.1)";
 
 /**
- * The fallow f-wing mark, inlined so the single-file HTML report stays
- * self-contained (no external asset fetch). Drawn in currentColor so it
- * tracks the chrome's text colour in both themes.
+ * The fallow F mark path from the brand logo, inlined so the single-file
+ * HTML report stays self-contained (no external asset fetch).
  */
 const MARK_PATH =
   "M9990 9649 c-41 -10 -147 -29 -235 -41 -160 -22 -161 -22 -2055 -28 -1685 -6 -1906 -8 -1995" +
@@ -80,35 +79,54 @@ const MARK_PATH =
   " -998 -955 -1639 l-8 -109 154 6 c346 15 624 83 914 227 241 119 401 237 600 441 246 253 430" +
   " 547 578 924 46 116 125 373 151 488 l6 27 -212 -1 c-117 -1 -258 -7 -313 -14z";
 
+/**
+ * The census F mark: the paper leaf on an ink square with a 10/64 corner,
+ * as in the brand logo. The fills read the paper and ink tokens, so the
+ * mark inverts with the theme like every other census element.
+ */
 const brandMark = (): SVGSVGElement => {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("class", "mark");
-  svg.setAttribute("viewBox", MARK_VIEW_BOX);
+  svg.setAttribute("viewBox", "0 0 64 64");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
 
+  const ground = document.createElementNS(SVG_NS, "rect");
+  ground.setAttribute("class", "mark-ground");
+  ground.setAttribute("width", "64");
+  ground.setAttribute("height", "64");
+  ground.setAttribute("rx", "10");
+  svg.appendChild(ground);
+
+  const leaf = document.createElementNS(SVG_NS, "svg");
+  leaf.setAttribute("x", "6");
+  leaf.setAttribute("y", "6");
+  leaf.setAttribute("width", "52");
+  leaf.setAttribute("height", "52");
+  leaf.setAttribute("viewBox", LEAF_VIEW_BOX);
   const group = document.createElementNS(SVG_NS, "g");
-  group.setAttribute("transform", "translate(0,1254) scale(0.1,-0.1)");
-  group.setAttribute("fill", "currentColor");
+  group.setAttribute("class", "mark-leaf");
+  group.setAttribute("transform", LEAF_TRANSFORM);
   const path = document.createElementNS(SVG_NS, "path");
   path.setAttribute("d", MARK_PATH);
   group.appendChild(path);
-  svg.appendChild(group);
+  leaf.appendChild(group);
+  svg.appendChild(leaf);
 
   return svg;
 };
 
 /**
- * Set the browser-tab favicon to the fallow mark, reusing the same inlined
- * path so there is no second copy to drift. Theme-aware (dark ink on a light
- * tab bar, light ink on a dark one) via a prefers-color-scheme rule inside the
- * SVG, and a data URI so the single-file report stays self-contained.
+ * Set the browser-tab favicon to the census F mark (paper leaf on an ink
+ * square), reusing the same inlined path so there is no second copy to
+ * drift. A data URI keeps the single-file report self-contained.
  */
 const setFavicon = (): void => {
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${FAVICON_VIEW_BOX}">` +
-    `<style>path{fill:#21201c}@media(prefers-color-scheme:dark){path{fill:#eeeeec}}</style>` +
-    `<g transform="translate(0,1254) scale(0.1,-0.1)"><path d="${MARK_PATH}"/></g></svg>`;
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+    `<rect width="64" height="64" rx="10" fill="#1a1a1a"/>` +
+    `<svg x="6" y="6" width="52" height="52" viewBox="${LEAF_VIEW_BOX}">` +
+    `<g transform="${LEAF_TRANSFORM}" fill="#f7f7f4"><path d="${MARK_PATH}"/></g></svg></svg>`;
   const link = document.createElement("link");
   link.rel = "icon";
   link.type = "image/svg+xml";
@@ -433,6 +451,12 @@ export const buildChrome = (
   diffButtons.set("all", allFilesButton);
   diffGroup.appendChild(allFilesButton);
   summaryControls.appendChild(diffGroup);
+  // None of these controls can act on a static report yet (no filters, no
+  // entity graph, no diff metadata). Showing four disabled buttons on every
+  // screen is noise, so they stay in the DOM for state sync but out of view.
+  filtersButton.hidden = true;
+  entityGroup.hidden = true;
+  diffGroup.hidden = true;
   summaryLine.appendChild(summaryControls);
   // clusterGroup is not in the lens header: main.ts mounts it as a
   // top-right overlay on the map, since it only changes the map layout.
@@ -562,7 +586,7 @@ export const updateChrome = (state: AppState, refs: ChromeRefs): void => {
     if (badge) {
       badge.textContent =
         availability.state === "complete"
-          ? `${formatCount(availability.value)} ${availability.unit}`
+          ? countLabel(availability.value, availability.unit)
           : availability.state === "disabled"
             ? "disabled"
             : availability.state === "notApplicable"
@@ -616,9 +640,7 @@ const updateSummaryLine = (state: AppState, refs: ChromeRefs): void => {
   left.appendChild(el("span", "summary-gloss", definition.gloss));
   const lensCount = definition.count(state);
   if (lensCount !== null) {
-    left.appendChild(
-      el("span", "context-chip", `${formatCount(lensCount.value)} ${lensCount.unit}`),
-    );
+    left.appendChild(el("span", "context-chip", countLabel(lensCount.value, lensCount.unit)));
   }
 
   if (state.lens === "architecture" && state.data.summary.circular_deps > 0) {
@@ -665,7 +687,7 @@ const updateSecondarySummaryLine = (
   const availability = secondaryAvailabilityDetails(state, analysis);
   left.replaceChildren(
     el("span", "summary-gloss", definition.gloss),
-    el("span", "context-chip", `${formatCount(availability.value)} ${availability.unit}`),
+    el("span", "context-chip", countLabel(availability.value, availability.unit)),
   );
   if (availability.state !== "complete") {
     const label: Record<Exclude<typeof availability.state, "complete">, string> = {
@@ -689,36 +711,73 @@ const updateSecondarySummaryLine = (
   refs.summaryLine.classList.add("visible");
 };
 
-const updateCrumbs = (state: AppState, refs: ChromeRefs): void => {
-  refs.crumbs.replaceChildren();
-  if (state.view !== "map") {
-    refs.crumbs.appendChild(el("span", "current", "Import graph"));
+/** "1 duplicated block", "3 duplicated blocks": the unit agrees with the count. */
+const countLabel = (value: number, unit: string): string =>
+  `${formatCount(value)} ${value === 1 ? unit.replace(/s$/, "") : unit}`;
+
+/** The pressed arrange button as a phrase, "by folder" by default. */
+const clusterModeLabel = (refs: ChromeRefs): string =>
+  refs.clusterGroup.querySelector('[aria-pressed="true"]')?.textContent?.toLowerCase() ??
+  "by folder";
+
+/**
+ * Graph: say where you are and how the map is grouped, or the path of
+ * the file in focus.
+ */
+const graphCrumbs = (state: AppState, refs: ChromeRefs): void => {
+  refs.crumbs.appendChild(el("span", "current", state.data.root));
+  refs.crumbs.appendChild(el("span", "sep", "/"));
+  if (state.selected !== null) {
+    refs.crumbs.appendChild(el("span", "current", state.data.files[state.selected].path));
     return;
   }
+  refs.crumbs.appendChild(
+    el(
+      "span",
+      "collapsed",
+      `${formatCount(state.data.files.length)} files, grouped ${clusterModeLabel(refs)}`,
+    ),
+  );
+};
+
+/** One drill path segment: current, a link to its node, or static text. */
+const crumbSegment = (
+  state: AppState,
+  refs: ChromeRefs,
+  part: string,
+  target: string,
+  last: boolean,
+): HTMLElement => {
+  if (last) return el("span", "current", part);
+  if (state.index.nodesByPath.has(target)) {
+    const crumbButton = button("", part);
+    crumbButton.addEventListener("click", () => refs.crumbHandler?.(target));
+    return crumbButton;
+  }
+  // Segment collapsed into a single-child directory chain: there is
+  // no node to drill to, so render it as static text, not a dead link.
+  return el("span", "collapsed", part);
+};
+
+/** Map: the root button, then one segment per drilled directory. */
+const mapCrumbs = (state: AppState, refs: ChromeRefs): void => {
   const rootBtn = button("", state.data.root);
   rootBtn.addEventListener("click", () => refs.crumbHandler?.(""));
   refs.crumbs.appendChild(rootBtn);
+  if (state.drillPath === "") return;
+  const parts = state.drillPath.split("/");
+  let acc = "";
+  parts.forEach((part, index) => {
+    refs.crumbs.appendChild(el("span", "sep", "/"));
+    acc = acc ? `${acc}/${part}` : part;
+    refs.crumbs.appendChild(crumbSegment(state, refs, part, acc, index === parts.length - 1));
+  });
+};
 
-  if (state.drillPath !== "") {
-    const parts = state.drillPath.split("/");
-    let acc = "";
-    parts.forEach((part, index) => {
-      refs.crumbs.appendChild(el("span", "sep", "/"));
-      acc = acc ? `${acc}/${part}` : part;
-      if (index === parts.length - 1) {
-        refs.crumbs.appendChild(el("span", "current", part));
-      } else if (state.index.nodesByPath.has(acc)) {
-        const target = acc;
-        const crumbButton = button("", part);
-        crumbButton.addEventListener("click", () => refs.crumbHandler?.(target));
-        refs.crumbs.appendChild(crumbButton);
-      } else {
-        // Segment collapsed into a single-child directory chain: there is
-        // no node to drill to, so render it as static text, not a dead link.
-        refs.crumbs.appendChild(el("span", "collapsed", part));
-      }
-    });
-  }
+const updateCrumbs = (state: AppState, refs: ChromeRefs): void => {
+  refs.crumbs.replaceChildren();
+  if (state.view === "map") mapCrumbs(state, refs);
+  else graphCrumbs(state, refs);
 };
 
 const updateSearchCount = (state: AppState, refs: ChromeRefs): void => {

@@ -55,7 +55,7 @@ describe("lens registry", () => {
     expect(lensById("unused").count(appState)).toEqual({ value: 3, unit: "affected files" });
     expect(lensById("duplication").count(appState)).toEqual({
       value: 4,
-      unit: "clone groups",
+      unit: "duplicated blocks",
     });
     expect(lensById("architecture").count(appState)).toEqual({
       value: 5,

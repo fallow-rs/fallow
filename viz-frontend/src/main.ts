@@ -1,4 +1,4 @@
-import { applyHash, createState, runSearch, setDarkMode, syncHash } from "./state";
+import { applyHash, createState, runSearch, setDarkMode, storeTheme, syncHash } from "./state";
 import type { AppState } from "./state";
 import type { Lens, SecondaryAnalysis, TreeNode } from "./types";
 import {
@@ -34,6 +34,7 @@ import {
   roadFacts,
   setClusterMode,
   startGraphLensFade,
+  syncStandaloneForLens,
 } from "./graph";
 import { buildHelpOverlay } from "./overlays";
 import { buildChrome, statuslineOf, updateChrome } from "./chrome";
@@ -41,6 +42,7 @@ import type { ChromeRefs } from "./chrome";
 import { createPanel, panelRenderKey, renderPanel } from "./panel";
 import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
 import { installHintTips } from "./hint";
+import { installSlider } from "./slider";
 import {
   dirname,
   findingsForFile,
@@ -59,6 +61,25 @@ const renderView = (state: AppState): void => {
     paintTreemapHover(state);
     initGraphNodes(state);
   }
+};
+
+/** Mark the cluster segment button of `mode` as pressed. */
+const pressClusterButton = (refs: ChromeRefs, mode: string): void => {
+  for (const [clusterMode, button] of refs.clusterButtons) {
+    button.setAttribute("aria-pressed", String(clusterMode === mode));
+  }
+};
+
+const installSegmentSliders = (): void => {
+  for (const group of document.querySelectorAll<HTMLElement>(".lens-tabs, .seg")) {
+    installSlider(group);
+  }
+};
+
+/** True when keyboard focus sits in a text field. */
+const isTextInput = (target: EventTarget | null): boolean => {
+  const tag = (target as HTMLElement | null)?.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA";
 };
 
 const init = (): void => {
@@ -124,6 +145,7 @@ const init = (): void => {
     // The ranked panel opens or closes with the lens; keep the graph
     // fitted to the space that remains while the camera is untouched.
     if (state.view === "graph") refitOnResize(state);
+    if (state.view === "graph") syncStandaloneForLens(state);
     requestRender();
   };
 
@@ -163,15 +185,12 @@ const init = (): void => {
     },
     onTheme: () => {
       setDarkMode(state, !state.dark);
+      storeTheme(state.dark);
       requestRender();
     },
     onCrumb: () => {},
     onCluster: (mode) => {
-      if (refs) {
-        for (const [clusterMode, button] of refs.clusterButtons) {
-          button.setAttribute("aria-pressed", String(clusterMode === mode));
-        }
-      }
+      if (refs) pressClusterButton(refs, mode);
       setClusterMode(state, mode);
     },
   });
@@ -198,7 +217,13 @@ const init = (): void => {
   // The arrange toggle floats over the map (top-right, graph view only);
   // chrome builds it but leaves mounting to the stage here.
   stage.appendChild(refs.clusterGroup);
+  installSegmentSliders();
   const panel = createPanel();
+  // Overview triage cards open their lens.
+  panel.addEventListener("fallow:lens", (event) => {
+    const lens = (event as CustomEvent<Lens>).detail;
+    if (LENS_IDS.includes(lens)) setLens(lens);
+  });
   stage.appendChild(panel);
   app.appendChild(stage);
   app.appendChild(statuslineOf(refs));
@@ -306,6 +331,9 @@ const init = (): void => {
         );
       }
       renderView(state);
+      // Building the graph can change what the panel shows (the folder
+      // loops); repaint the panel on the next frame when it did.
+      if (panelRenderKey(state) !== renderedPanelKey) requestRender();
       syncHash(state);
     });
   };
@@ -503,47 +531,70 @@ const init = (): void => {
     }
   };
 
-  window.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    const inInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+  /** Step through the active lens's findings without going back to the list. */
+  const stepFinding = (key: string): void => {
+    if (state.selected === null) return;
+    document
+      .querySelector<HTMLButtonElement>(key === "j" ? "#panel .step-next" : "#panel .step-prev")
+      ?.click();
+  };
 
-    if (event.key === "Escape") {
-      handleEscape(inInput);
+  const resetZoom = (): void => {
+    if (state.view === "graph") {
+      resetGraphView(state);
       return;
     }
-    if (inInput) {
-      if (event.key === "Enter" && state.view === "graph" && state.search.trim() !== "") {
-        graphFocusSearch(state);
-      }
-      return;
-    }
+    drillTo(state, "");
+    requestRender();
+  };
 
+  const keyActions = new Map<string, (event: KeyboardEvent) => void>([
+    [
+      "/",
+      (event) => {
+        event.preventDefault();
+        refs?.search.focus();
+      },
+    ],
+    ["?", () => toggleHelp()],
+    ["t", () => setView("map")],
+    ["m", () => setView("map")],
+    ["g", () => setView("graph")],
+    ["j", () => stepFinding("j")],
+    ["k", () => stepFinding("k")],
+    ["0", resetZoom],
+  ]);
+  lensOrder.forEach((lens, index) => {
+    keyActions.set(String(index + 1), () => setLens(lens));
+  });
+
+  const handleInputKey = (event: KeyboardEvent): void => {
+    if (event.key === "Enter" && state.view === "graph" && state.search.trim() !== "") {
+      graphFocusSearch(state);
+    }
+  };
+
+  const handleShortcut = (event: KeyboardEvent): void => {
     if (state.helpOpen) {
       // With the modal open, only "?" (toggle closed) acts; lens/view
       // shortcuts must not mutate the map behind the dialog.
       if (event.key === "?") toggleHelp();
       return;
     }
+    keyActions.get(event.key)?.(event);
+  };
 
-    if (event.key === "/") {
-      event.preventDefault();
-      refs?.search.focus();
-    } else if (event.key === "?") {
-      toggleHelp();
-    } else if (event.key >= "1" && event.key <= "6") {
-      setLens(lensOrder[Number(event.key) - 1]);
-    } else if (event.key === "t" || event.key === "m") {
-      setView("map");
-    } else if (event.key === "g") {
-      setView("graph");
-    } else if (event.key === "0") {
-      if (state.view === "graph") {
-        resetGraphView(state);
-      } else {
-        drillTo(state, "");
-        requestRender();
-      }
+  window.addEventListener("keydown", (event) => {
+    const inInput = isTextInput(event.target);
+    if (event.key === "Escape") {
+      handleEscape(inInput);
+      return;
     }
+    if (inInput) {
+      handleInputKey(event);
+      return;
+    }
+    handleShortcut(event);
   });
 
   window.addEventListener("resize", () => {
@@ -556,17 +607,21 @@ const init = (): void => {
     requestRender();
   });
   window.addEventListener("hashchange", () => {
+    const lensBefore = state.lens;
     applyHash(state, window.location.hash);
+    // Back and forward can change the lens; the strip of unconnected
+    // folders must follow it as it does for a tab click.
+    if (state.lens !== lensBefore && state.view === "graph") syncStandaloneForLens(state);
     requestRender();
   });
 
-  // Initial paint.
+  // Initial paint, then again once the embedded census fonts are ready:
+  // the canvas measures and draws text with whatever face is loaded.
   requestRender();
+  void document.fonts?.ready.then(() => requestRender());
 
   // Keep the cluster segment in sync with the actual mode at boot.
-  for (const [clusterMode, button] of refs.clusterButtons) {
-    button.setAttribute("aria-pressed", String(clusterMode === getClusterMode(state)));
-  }
+  pressClusterButton(refs, getClusterMode(state));
 };
 
 const countLeaves = (node: {

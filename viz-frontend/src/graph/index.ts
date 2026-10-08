@@ -19,6 +19,7 @@ export {
   graphPathTrace,
   nodeScreenPos,
   refitOnResize,
+  syncStandaloneForLens,
   resetEgoTrail,
   resetGraphView,
   roadFacts,

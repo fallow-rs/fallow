@@ -9,7 +9,7 @@ import type {
   VizSecurityCandidate,
 } from "./types";
 import type { Theme } from "./theme";
-import { dupRamp, heatRamp, zoneColor } from "./theme";
+import { dupRamp, heatRamp, mix, zoneColor } from "./theme";
 
 export type AnalysisId =
   | "unused"
@@ -691,43 +691,94 @@ export const dupRatio = (file: VizFile): number => {
 
 // ── Lens coloring ───────────────────────────────────────────────
 
+/** Health risk (hotspot score or CRAP) for the medium tier. */
+const HEALTH_MILD = 10;
+/** Health risk for the high tier. */
+const HEALTH_SEVERE = 30;
+
+const FINDING_LENSES: readonly Lens[] = [
+  "unused",
+  "duplication",
+  "architecture",
+  "health",
+  "security",
+];
+
+/**
+ * Where problems concentrate, across every finding lens: 2 when any lens
+ * calls the file severe or three lenses flag it at all, 1 when any lens
+ * flags it. The overview map uses this so its first view already points
+ * at the files worth opening.
+ */
+const overviewLevel = (index: DataIndex, file: VizFile, fileIdx: number): 0 | 1 | 2 => {
+  if (fileIdx < 0) return 0;
+  let flagged = 0;
+  for (const lens of FINDING_LENSES) {
+    const level = lensFindingLevel(lens, index, file, fileIdx);
+    if (level === 2) return 2;
+    if (level === 1) flagged += 1;
+  }
+  if (flagged >= 3) return 2;
+  return flagged > 0 ? 1 : 0;
+};
+
+type LensColorFn = (theme: Theme, index: DataIndex, file: VizFile) => string;
+
+const fileIdxOf = (index: DataIndex, file: VizFile): number =>
+  index.fileIndexByPath.get(file.path) ?? -1;
+
+const overviewColor: LensColorFn = (theme, index, file) => {
+  const level = overviewLevel(index, file, fileIdxOf(index, file));
+  if (level === 2) return theme.red;
+  if (level === 1) return mix(theme.cellNeutral, theme.amber, 0.45);
+  return file.status === "entryPoint" ? theme.cellEntry : theme.cellNeutral;
+};
+
+const unusedColor: LensColorFn = (theme, _index, file) => {
+  if (file.status === "unused") return theme.red;
+  if (file.status === "hasUnusedExports") return theme.amber;
+  return theme.cellNeutral;
+};
+
+const duplicationColor: LensColorFn = (theme, index, file) =>
+  file.dup_lines > 0 ? dupRamp(theme, dupRatio(file) / index.dupCeiling) : theme.cellNeutral;
+
+const healthColor: LensColorFn = (theme, index, file) => {
+  const risk = index.healthRisks[fileIdxOf(index, file)];
+  if (risk === null || risk === undefined) return theme.cellNeutral;
+  // Below the finding threshold a file is fine; coloring it would turn
+  // the whole map amber and hide the files that need attention.
+  if (risk < HEALTH_MILD) return theme.cellNeutral;
+  // Two visual tiers: medium stays a muted amber so only high-risk
+  // files get the saturated end of the ramp.
+  if (risk < HEALTH_SEVERE) {
+    const t = (risk - HEALTH_MILD) / (HEALTH_SEVERE - HEALTH_MILD);
+    return mix(theme.cellNeutral, theme.amber, 0.22 + 0.2 * t);
+  }
+  const span = Math.max(HEALTH_SEVERE * 2, index.heatCeiling) - HEALTH_SEVERE;
+  return heatRamp(theme, 0.6 + 0.4 * Math.min(1, (risk - HEALTH_SEVERE) / span));
+};
+
+const securityColor: LensColorFn = (theme, index, file) => {
+  const level = index.securityLevels[fileIdxOf(index, file)] ?? 0;
+  if (level === 2) return theme.red;
+  if (level === 1) return theme.amber;
+  return theme.cellNeutral;
+};
+
+const LENS_COLORS = new Map<string, LensColorFn>([
+  ["overview", overviewColor],
+  ["unused", unusedColor],
+  ["duplication", duplicationColor],
+  ["architecture", (theme, _index, file) => zoneColor(theme, file.zone)],
+  ["health", healthColor],
+  ["security", securityColor],
+]);
+
 /** Fill color for one file under the active lens. */
 export const lensColor = (lens: Lens, theme: Theme, index: DataIndex, file: VizFile): string => {
-  const lensId = lens as string;
-  switch (lensId) {
-    case "overview":
-      return file.status === "entryPoint" ? theme.cellEntry : theme.cellNeutral;
-    case "unused":
-      switch (file.status) {
-        case "unused":
-          return theme.red;
-        case "hasUnusedExports":
-          return theme.amber;
-        case "entryPoint":
-          return theme.cellEntry;
-        default:
-          return theme.cellNeutral;
-      }
-    case "duplication":
-      return file.dup_lines > 0
-        ? dupRamp(theme, dupRatio(file) / index.dupCeiling)
-        : theme.cellNeutral;
-    case "architecture":
-      return zoneColor(theme, file.zone);
-    case "health": {
-      const risk = index.healthRisks[index.fileIndexByPath.get(file.path) ?? -1];
-      if (risk === null || risk === undefined) return theme.cellNeutral;
-      return heatRamp(theme, risk / Math.max(30, index.heatCeiling));
-    }
-    case "security": {
-      const level = index.securityLevels[index.fileIndexByPath.get(file.path) ?? -1] ?? 0;
-      if (level === 2) return theme.red;
-      if (level === 1) return theme.amber;
-      return theme.cellNeutral;
-    }
-    default:
-      return theme.cellNeutral;
-  }
+  const color = LENS_COLORS.get(lens as string);
+  return color ? color(theme, index, file) : theme.cellNeutral;
 };
 
 /**
@@ -745,7 +796,7 @@ export const lensFindingLevel = (
   const lensId = lens as string;
   switch (lensId) {
     case "overview":
-      return 0;
+      return overviewLevel(index, file, fileIdx);
     case "unused":
       if (file.status === "unused") return 2;
       return file.unused_export_count > 0 ? 1 : 0;
@@ -759,8 +810,8 @@ export const lensFindingLevel = (
       if (risk === null || risk === undefined) {
         return index.healthFindingFiles.has(file.path) ? 1 : 0;
       }
-      if (risk >= 20) return 2;
-      return risk >= 10 ? 1 : 0;
+      if (risk >= HEALTH_SEVERE) return 2;
+      return risk >= HEALTH_MILD ? 1 : 0;
     }
     case "security":
       return index.securityLevels[fileIdx] ?? 0;
@@ -779,8 +830,8 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
   const lensId = lens as string;
   if (lensId === "overview") {
     return view === "map"
-      ? "Each tile is a file, sized by bytes on disk. A blue outline marks an entry point."
-      : "Each dot is a file, sized by bytes. Blue marks an entry point; a line's thick end is the importer.";
+      ? "Each tile is a file, sized by bytes. Ochre: one or more findings. Red: a high finding, or findings in three lenses."
+      : "Each dot is a file. Ochre: one or more findings. Red: a high finding, or findings in three lenses. A line's thick end is the importer.";
   }
   const analysisId: AnalysisId | null =
     lensId === "unused"
@@ -812,12 +863,12 @@ export const legendText = (lens: Lens, data: VizData, view: "map" | "graph"): st
     return "No findings in this lens, so the map keeps its neutral colors.";
   }
   const lines: Record<AnalysisId, string> = {
-    unused: "Red is never imported, amber has unused exports.",
-    duplication: "Deeper amber means more duplicated lines.",
+    unused: "Red is never imported, ochre has unused exports.",
+    duplication: "Deeper ochre means more duplicated lines.",
     architecture:
-      "Red is a forbidden import or part of a loop. An amber outline marks folders that import each other.",
-    health: "Amber through red marks retained Health findings.",
-    security: "Amber and red mark static Security candidates by review priority.",
+      "Red is a forbidden import or part of a loop. An ochre outline marks folders that import each other.",
+    health: "Ochre: medium change risk. Red: high change risk.",
+    security: "Ochre: medium security candidate. Red: high security candidate.",
     dependencies: "Dependency findings are marked by review priority.",
     frameworks: "Framework findings are marked by review priority.",
     styling: "Styling findings are marked by review priority.",

@@ -1,5 +1,12 @@
 import type { AppState } from "./state";
-import type { Lens, SecondaryAnalysis, VizCloneGroup, VizFile } from "./types";
+import type {
+  Lens,
+  SecondaryAnalysis,
+  VizCloneGroup,
+  RoadSelection,
+  VizFile,
+  VizHealthFile,
+} from "./types";
 import {
   analysisAvailability,
   basename,
@@ -10,6 +17,7 @@ import {
   formatSize,
   healthRiskForFile,
   healthHasFindingForFile,
+  lensFindingLevel,
   reachSet,
   securityBlindSpots,
   securityBlindSpotsForFile,
@@ -25,6 +33,9 @@ import type {
   SecurityBlindSpotView,
 } from "./data";
 import { closeButton, copyButton, copyIconButton, el } from "./dom";
+import { confidenceLabel, healthReason, securityCategoryLabel, severityRank } from "./explain";
+import { LENSES } from "./lenses";
+import { getGVS } from "./graph/shared";
 
 /** Called when the user clicks through to another file. */
 export type NavigateFn = (fileIndex: number) => void;
@@ -82,17 +93,20 @@ const meterSpec = (value: number, max: number, tone: MeterTone): MeterSpec => ({
   tone,
 });
 
-/** An 8-slot text meter: a filled run (`█`) over a dotted track (`░`). The same
+/** A compact magnitude meter: a filled run over a quiet track. The same
  *  motif the per-function complexity bar uses, generalized so ranked lists,
- *  blast-radius facts, and search totals can reuse it. */
+ *  blast-radius facts, and search totals can reuse it. The fill grows in
+ *  from the left when the panel renders (see `.bar` in styles.css). */
 const meterBar = (value: number, max: number, tone: MeterTone): HTMLElement => {
-  const slots = 8;
-  const filled = max > 0 ? Math.max(0, Math.min(slots, Math.round((value / max) * slots))) : 0;
+  const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
   const bar = el("span", "bar");
+  bar.setAttribute("aria-hidden", "true");
   const fillClass =
     tone === "error" ? "fill-error" : tone === "neutral" ? "fill-neutral" : "fill-warn";
-  const fill = el("span", fillClass, "█".repeat(filled));
-  bar.append(fill, document.createTextNode("░".repeat(slots - filled)));
+  const fill = el("span", `bar-fill ${fillClass}`);
+  // A non-zero value always shows a sliver, so it never reads as empty.
+  fill.style.setProperty("--fill", String(value > 0 ? Math.max(0.06, ratio) : 0));
+  bar.appendChild(fill);
   return bar;
 };
 
@@ -336,23 +350,45 @@ const securityCandidateEl = (
   candidate: SecurityCandidateView,
   showOnMap: (() => void) | null,
 ): HTMLElement => {
-  const article = el("article", "security-candidate");
-  const heading = el("h4", undefined, candidate.title);
+  const rank = severityRank(candidate.severity);
+  const article = el("article", `security-candidate lvl-${rank >= 3 ? 2 : rank >= 2 ? 1 : 0}`);
+  // Lead with the consequence in plain words; the rule id moves to details.
+  const heading = el(
+    "h4",
+    "finding-title",
+    securityCategoryLabel(candidate.category, candidate.title),
+  );
+  if (candidate.line !== null)
+    heading.appendChild(el("span", "finding-line", `line ${candidate.line}`));
   article.appendChild(heading);
-  const badges = el("div", "status-line");
+  const badges = el("div", "finding-badges");
   badges.appendChild(
-    sev(
-      ["critical", "high", "error"].includes(candidate.severity.toLowerCase())
-        ? "sev-error"
-        : "sev-warn",
+    el(
+      "span",
+      `badge-sev ${rank >= 3 ? "sev-error" : rank >= 2 ? "sev-warn" : "sev-info"}`,
       candidate.severity,
     ),
   );
-  if (candidate.confidence)
-    badges.appendChild(sev("sev-info", `${candidate.confidence} confidence`));
+  if (candidate.confidence) {
+    badges.appendChild(el("span", "badge-soft", confidenceLabel(candidate.confidence)));
+  }
   article.appendChild(badges);
+  if (candidate.source || candidate.sink) {
+    const flow = el("div", "taint-pill");
+    flow.appendChild(el("span", "tp-end", candidate.source ?? "input"));
+    flow.appendChild(el("span", "tp-arrow", "→"));
+    flow.appendChild(el("span", "tp-end tp-sink", candidate.sink ?? "sink"));
+    article.appendChild(flow);
+  }
+  if (candidate.evidence) article.appendChild(el("p", "finding-evidence", candidate.evidence));
+  if (candidate.verificationPrompt) {
+    const check = el("p", "finding-check");
+    check.appendChild(el("strong", undefined, "Check: "));
+    check.appendChild(document.createTextNode(candidate.verificationPrompt));
+    article.appendChild(check);
+  }
   const facts: KvPair[] = [];
-  if (candidate.category) facts.push(["Category", candidate.category]);
+  if (candidate.category) facts.push(["Rule", candidate.category]);
   if (candidate.cwe) facts.push(["CWE", candidate.cwe]);
   if (candidate.line !== null) {
     facts.push([
@@ -360,8 +396,6 @@ const securityCandidateEl = (
       `${candidate.path}:${candidate.line}${candidate.column === null ? "" : `:${candidate.column}`}`,
     ]);
   }
-  if (candidate.source) facts.push(["Source", candidate.source]);
-  if (candidate.sink) facts.push(["Sink", candidate.sink]);
   if (candidate.urlShape) facts.push(["URL shape", candidate.urlShape]);
   if (candidate.networkDestination) {
     facts.push(["Network destination", candidate.networkDestination]);
@@ -373,15 +407,16 @@ const securityCandidateEl = (
   }
   if (candidate.deadCode !== null) facts.push(["Dead code", candidate.deadCode ? "Yes" : "No"]);
   if (candidate.runtime) facts.push(["Runtime evidence", candidate.runtime]);
-  if (facts.length > 0) article.appendChild(kvEl(facts));
-  if (candidate.evidence) article.appendChild(el("p", "finding-evidence", candidate.evidence));
+  const more = el("details", "finding-more") as HTMLDetailsElement;
+  more.appendChild(el("summary", undefined, "Evidence and trace"));
+  if (facts.length > 0) more.appendChild(kvEl(facts));
   if (candidate.trace.length > 0) {
     const trace = el("ol", "trace-list");
     for (const step of candidate.trace) trace.appendChild(el("li", undefined, step));
-    article.appendChild(trace);
+    more.appendChild(trace);
   }
   if (candidate.taintFlow) {
-    article.appendChild(el("p", "finding-evidence", `Taint flow: ${candidate.taintFlow}`));
+    more.appendChild(el("p", "finding-evidence", `Taint flow: ${candidate.taintFlow}`));
   }
   if (candidate.observedControls.length > 0) {
     const controls = el("div", "observed-controls");
@@ -390,13 +425,9 @@ const securityCandidateEl = (
     for (const control of candidate.observedControls)
       list.appendChild(el("li", undefined, control));
     controls.appendChild(list);
-    article.appendChild(controls);
+    more.appendChild(controls);
   }
-  if (candidate.verificationPrompt) {
-    article.appendChild(
-      el("p", "finding-evidence", `Verify controls: ${candidate.verificationPrompt}`),
-    );
-  }
+  article.appendChild(more);
   const actions = findingActions(candidate.actions);
   if (actions) article.appendChild(actions);
   const localActions = el("div", "finding-actions");
@@ -715,7 +746,7 @@ const factsSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElem
       reach.push([
         "Affects",
         countWithBar(up, totalFiles, `${formatCount(up)} files`, "neutral", labelWidthCh),
-        "Everything that could break if you change this file.",
+        "Files that import this file, directly or indirectly.",
       ]);
     }
     if (reach.length > 0) facts.appendChild(kvEl(reach));
@@ -767,6 +798,260 @@ const genericAnalysisSection = (
   return section;
 };
 
+/** Plain next step for a Health action id, falling back to its own text. */
+const healthActionText = (action: FindingActionView): string | null => {
+  const key = action.label.toLowerCase();
+  if (key.startsWith("refactor")) return "Split it into smaller functions";
+  if (key.startsWith("add tests")) return "Add tests";
+  if (key.startsWith("increase coverage")) return "Add tests for the branches without coverage";
+  if (key.startsWith("suppress")) return null;
+  return action.description ?? null;
+};
+
+/** A metric tile: value, unit, and a tone that says whether it is a problem. */
+const metricTile = (
+  label: string,
+  value: string,
+  tone: "error" | "warn" | "ok" | "",
+): HTMLElement => {
+  const tile = el("div", `metric-tile${tone ? ` tone-${tone}` : ""}`);
+  tile.appendChild(el("span", "mt-value", value));
+  tile.appendChild(el("span", "mt-label", label));
+  return tile;
+};
+
+/** Metric chips of a flagged function, keyed by the lower-cased fact label. */
+const FUNCTION_METRIC_CHIPS: ReadonlyArray<{
+  fact: string;
+  text: (value: string) => string;
+  hint: string;
+}> = [
+  {
+    fact: "cyclomatic",
+    text: (value) => `${value} branches`,
+    hint: "Cyclomatic complexity: the number of paths through the function.",
+  },
+  {
+    fact: "cognitive",
+    text: (value) => `difficulty ${value}`,
+    hint: "Cognitive complexity: how hard the function is to follow.",
+  },
+  {
+    fact: "line count",
+    text: (value) => `${value} lines`,
+    hint: "Lines of code in the function.",
+  },
+];
+
+/** Coverage chip per coverage tier; a fully covered function gets none. */
+const COVERAGE_CHIPS = new Map<string, { text: string; hint: string }>([
+  ["none", { text: "no tests", hint: "No test covers this function." }],
+  ["partial", { text: "some tests", hint: "Tests cover part of this function." }],
+]);
+
+/** The chip row of one flagged function, or null when no fact applies. */
+const functionChips = (facts: Map<string, string>): HTMLElement | null => {
+  const chips = el("div", "fn-chips");
+  const chip = (text: string, hint: string): void => {
+    const node = el("span", "fn-chip", text);
+    node.dataset.tip = hint;
+    chips.appendChild(node);
+  };
+  for (const spec of FUNCTION_METRIC_CHIPS) {
+    const value = facts.get(spec.fact);
+    if (value) chip(spec.text(value), spec.hint);
+  }
+  const coverage = COVERAGE_CHIPS.get(facts.get("coverage tier") ?? "");
+  if (coverage) chip(coverage.text, coverage.hint);
+  return chips.childNodes.length > 0 ? chips : null;
+};
+
+/** The collapsed suppress hint of a finding, or null without a command. */
+const suppressDetails = (finding: GenericFindingView): HTMLElement | null => {
+  const suppress = finding.actions.find((action) =>
+    action.label.toLowerCase().startsWith("suppress"),
+  );
+  if (!suppress?.command) return null;
+  const more = el("details", "finding-more") as HTMLDetailsElement;
+  more.appendChild(el("summary", undefined, "Suppress"));
+  more.appendChild(commandHint("comment", suppress.command));
+  return more;
+};
+
+/** Card level of a severity rank: 2 severe, 1 mild, 0 none. */
+const rankLevel = (rank: number): number => {
+  if (rank >= 3) return 2;
+  return rank >= 2 ? 1 : 0;
+};
+
+/** One function Health flagged: where it is, why, and what to do. */
+const healthFunctionEl = (finding: GenericFindingView): HTMLElement => {
+  const facts = new Map(finding.metrics.map(([label, value]) => [label.toLowerCase(), value]));
+  const rank = severityRank(finding.severity ?? "");
+  const card = el("article", `fn-card lvl-${rankLevel(rank)}`);
+  const head = el("div", "fn-head");
+  head.appendChild(el("span", "fn-title", facts.get("name") ?? finding.title));
+  if (finding.line !== null) head.appendChild(el("span", "finding-line", `line ${finding.line}`));
+  card.appendChild(head);
+  const chips = functionChips(facts);
+  if (chips) card.appendChild(chips);
+  const steps = finding.actions
+    .map(healthActionText)
+    .filter((text): text is string => text !== null);
+  if (steps.length > 0) {
+    card.appendChild(el("p", "fn-fix", [...new Set(steps)].join(", or ")));
+  }
+  const more = suppressDetails(finding);
+  if (more) card.appendChild(more);
+  return card;
+};
+
+/** Tone of a value where lower is worse. */
+const lowIsBadTone = (value: number, error: number, warn: number): "error" | "warn" | "ok" => {
+  if (value < error) return "error";
+  return value < warn ? "warn" : "ok";
+};
+
+/** Tone of a value where higher is worse. */
+const highIsBadTone = (value: number, error: number, warn: number): "error" | "warn" | "ok" => {
+  if (value >= error) return "error";
+  return value >= warn ? "warn" : "ok";
+};
+
+/** The three numbers that say how bad a file's health is. */
+const healthMetricTiles = (file: VizFile, fileHealth: VizHealthFile): HTMLElement => {
+  const mi = fileHealth.maintainability_index;
+  const risk = fileHealth.crap_max;
+  const tiles = el("div", "metric-tiles");
+  tiles.appendChild(metricTile("maintainability", mi.toFixed(0), lowIsBadTone(mi, 50, 70)));
+  tiles.appendChild(
+    metricTile("change risk", formatCount(Math.round(risk)), highIsBadTone(risk, 30, 10)),
+  );
+  tiles.appendChild(metricTile("imported by", formatCount(file.importer_count), ""));
+  return tiles;
+};
+
+/** The "Functions to fix" list of a file, appended to `section`. */
+const appendHealthFunctions = (section: HTMLElement, functions: GenericFindingView[]): void => {
+  if (functions.length === 0) return;
+  section.appendChild(el("h4", "sub-head", `Functions to fix (${formatCount(functions.length)})`));
+  for (const finding of functions) section.appendChild(healthFunctionEl(finding));
+};
+
+/**
+ * The Health tab for one file: why the file is listed, three numbers that
+ * say how bad it is, then each function to fix with its next step. Raw
+ * analyzer fields stay out; the function table below keeps the detail.
+ */
+const healthFileSection = (state: AppState, file: VizFile, fileIdx: number): HTMLElement => {
+  const availability = analysisAvailability(state.data, "health");
+  const section = sectionEl("Health");
+  if (availability.state !== "complete") {
+    section.appendChild(availabilityMessage("health", availability));
+    return section;
+  }
+  const fileHealth = state.data.health.files.find((entry) => entry.file === fileIdx);
+  const findings = findingsForFile(state.data, "health", fileIdx);
+  const functions = findings.filter((finding) =>
+    finding.metrics.some(([label]) => label.toLowerCase() === "name"),
+  );
+  const other = findings.filter(
+    (finding) => !functions.includes(finding) && finding.kind !== "file-health",
+  );
+  const fallback = findings.length > 0 ? "Health threshold exceeded" : "No Health findings";
+  section.appendChild(el("p", "health-reason", healthReason(fileHealth, fallback)));
+  if (fileHealth) section.appendChild(healthMetricTiles(file, fileHealth));
+  appendHealthFunctions(section, functions);
+  for (const finding of other) section.appendChild(genericFindingEl(finding));
+  return section;
+};
+
+/**
+ * The first thing the Overview tab says about a file: every lens that
+ * flags it, worst first, with the plain reason. Each row opens that lens's
+ * section in the panel.
+ */
+const fileFindingsSummary = (state: AppState, fileIdx: number): HTMLElement => {
+  const section = sectionEl("Findings");
+  const found: Array<{ lens: (typeof LENSES)[number]; row: RankRow }> = [];
+  for (const lens of LENSES) {
+    if (lens.id === "overview") continue;
+    if (analysisAvailability(state.data, lens.id as AnalysisId).state !== "complete") continue;
+    const row = rankRowsForLens(state, lens.id).rows.find(
+      (candidate) => candidate.fileIndex === fileIdx,
+    );
+    if (row) found.push({ lens, row });
+  }
+  if (found.length === 0) {
+    section.appendChild(el("p", "sev-ok", "No findings in this file"));
+    return section;
+  }
+  found.sort((left, right) => (right.row.level ?? 1) - (left.row.level ?? 1));
+  const list = el("ul", "file-findings");
+  for (const { lens, row } of found) {
+    const item = el("li", `ff-row lvl-${row.level ?? 1}`);
+    const btn = el("button", "ff-btn") as HTMLButtonElement;
+    btn.type = "button";
+    btn.appendChild(el("span", "ff-lens", lens.name));
+    btn.appendChild(el("span", "ff-why", row.why ?? row.metric));
+    btn.addEventListener("click", () => {
+      const target =
+        document.getElementById(sectionId(lens.id as AnalysisId, true)) ??
+        document.getElementById(sectionId(lens.id as AnalysisId, false));
+      if (target instanceof HTMLDetailsElement) target.open = true;
+      target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    item.appendChild(btn);
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+  return section;
+};
+
+/**
+ * "3 of 61" with previous and next buttons, when the open file is in the
+ * active lens's list. Triage then walks the list from the file view (also
+ * with the j and k keys) instead of going back to the list each time.
+ */
+const findingStepper = (
+  state: AppState,
+  fileIdx: number,
+  navigate: NavigateFn,
+): HTMLElement | null => {
+  if (state.lens === "overview" && state.activeAnalysis === null) return null;
+  const order = rankRowsFor(state)
+    .rows.toSorted((left, right) => (right.level ?? 1) - (left.level ?? 1))
+    .flatMap((row) => (row.fileIndex === null ? [] : [row.fileIndex]));
+  const files = [...new Set(order)];
+  const position = files.indexOf(fileIdx);
+  if (position < 0 || files.length < 2) return null;
+  const bar = el("nav", "finding-stepper");
+  bar.setAttribute("aria-label", "Step through findings");
+  const step = (cls: string, label: string, text: string, target: number | undefined): void => {
+    const btn = el("button", `step-btn ${cls}`, text) as HTMLButtonElement;
+    btn.type = "button";
+    btn.setAttribute("aria-label", label);
+    if (target === undefined) btn.disabled = true;
+    else btn.addEventListener("click", () => navigate(target));
+    bar.appendChild(btn);
+  };
+  step("step-prev", "Previous finding (k)", "‹", files[position - 1]);
+  const where = el("span", "step-pos");
+  where.appendChild(el("b", undefined, formatCount(position + 1)));
+  where.appendChild(
+    document.createTextNode(` of ${formatCount(files.length)} in ${lensLabel(state)}`),
+  );
+  bar.appendChild(where);
+  step("step-next", "Next finding (j)", "›", files[position + 1]);
+  return bar;
+};
+
+/** The name of the active lens or secondary analysis, for the stepper. */
+const lensLabel = (state: AppState): string =>
+  state.activeAnalysis !== null
+    ? SIGNAL_LABELS[analysisIdForSecondary(state.activeAnalysis)]
+    : (LENSES.find((lens) => lens.id === state.lens)?.name ?? state.lens);
+
 const blindSpotEl = (blindSpot: SecurityBlindSpotView): HTMLElement => {
   const location = blindSpot.path
     ? `${blindSpot.path}${blindSpot.line === null ? "" : `:${blindSpot.line}`}`
@@ -780,7 +1065,7 @@ const blindSpotEl = (blindSpot: SecurityBlindSpotView): HTMLElement => {
 
 const securitySection = (state: AppState, fileIdx: number, navigate: NavigateFn): HTMLElement => {
   const availability = analysisAvailability(state.data, "security");
-  const section = sectionEl("Static Security candidates");
+  const section = sectionEl("Security candidates");
   const candidates = securityCandidatesForFile(state.data, fileIdx);
   if (availability.state !== "complete" || candidates.length === 0) {
     section.appendChild(availabilityMessage("security", availability));
@@ -942,7 +1227,11 @@ const analysisContent = (
   navigate: NavigateFn,
 ): HTMLElement[] => {
   if (id === "overview") {
-    return [factsSection(state, file, fileIdx), ...connectionSections(state, fileIdx, navigate)];
+    return [
+      fileFindingsSummary(state, fileIdx),
+      factsSection(state, file, fileIdx),
+      ...connectionSections(state, fileIdx, navigate),
+    ];
   }
   if (id === "unused") {
     const finding = deadCodeSection(file);
@@ -981,7 +1270,7 @@ const analysisContent = (
     return sections;
   }
   if (id === "health") {
-    const health = genericAnalysisSection(state, "health", fileIdx);
+    const health = healthFileSection(state, file, fileIdx);
     const complexity =
       analysisAvailability(state.data, "health").state === "complete"
         ? complexitySection(file)
@@ -1000,7 +1289,9 @@ const activeAnalysis = (
 ): HTMLElement => {
   const container = el("div", "active-signal");
   container.id = sectionId(model.active, false);
-  container.appendChild(el("h2", undefined, SIGNAL_LABELS[model.active]));
+  // The tab row above names the active signal; the sections carry their own
+  // headings, so a second label here only repeats it.
+  container.setAttribute("aria-label", SIGNAL_LABELS[model.active]);
   for (const section of analysisContent(state, model.active, file, fileIdx, navigate)) {
     container.appendChild(section);
   }
@@ -1036,9 +1327,10 @@ const supportingAnalyses = (
 const fileHead = (file: VizFile, close: () => void): HTMLElement => {
   const head = el("div", "panel-head");
   const fileBox = el("div", "file");
+  // Census code names: the name leads, its path sits under it.
+  fileBox.appendChild(el("div", "name", basename(file.path)));
   const dir = dirname(file.path);
   if (dir) fileBox.appendChild(el("div", "dir", `${dir}/`));
-  fileBox.appendChild(el("div", "name", basename(file.path)));
   const statusLine = el("div", "status-line");
   statusLine.appendChild(statusLabel(file));
   fileBox.appendChild(statusLine);
@@ -1064,7 +1356,63 @@ export const panelRenderKey = (state: AppState): string =>
     state.lens,
     state.activeAnalysis,
     state.search,
+    // The architecture panel lists the graph's folder loops, which change
+    // with the grouping and exist only once the graph is built.
+    state.view,
+    getGVS(state).clusterMode,
+    getGVS(state).initialized,
   ].join("|");
+
+/** The panel without a selected file: clone, road, search, or lens list. */
+const renderUnselectedPanel = (
+  state: AppState,
+  panel: HTMLElement,
+  navigate: NavigateFn,
+  close: () => void,
+  refresh: () => void,
+): void => {
+  if (state.selectedClone !== null) {
+    renderClonePanel(state, panel, navigate, refresh);
+    return;
+  }
+  if (state.selectedRoad !== null) {
+    renderRoadPanel(state, panel, navigate, close);
+    return;
+  }
+  if (state.search.trim() !== "") {
+    // An active query owns the sidebar: the matched files and their
+    // combined blast radius, not the lens list they'd otherwise see.
+    renderSearchPanel(state, panel, navigate);
+    return;
+  }
+  // Nothing selected: every lens shows a ranked list. Finding lenses
+  // rank worst-first; overview shows the triage cards and the most
+  // imported files.
+  renderLensPanel(state, panel, navigate, refresh);
+};
+
+/** The detail panel of one selected file. */
+const renderFilePanel = (
+  state: AppState,
+  panel: HTMLElement,
+  fileIdx: number,
+  navigate: NavigateFn,
+  close: () => void,
+): void => {
+  const file = state.data.files[fileIdx];
+  panel.replaceChildren();
+  panel.classList.add("open");
+  panel.setAttribute("aria-label", "file details");
+  panel.appendChild(fileHead(file, close));
+  const stepper = findingStepper(state, fileIdx, navigate);
+  if (stepper) panel.appendChild(stepper);
+  const model = filePanelModel(state, fileIdx);
+  panel.appendChild(signalNavigator(model));
+  panel.appendChild(activeAnalysis(state, model, file, fileIdx, navigate));
+  for (const details of supportingAnalyses(state, model, file, fileIdx, navigate)) {
+    panel.appendChild(details);
+  }
+};
 
 export const renderPanel = (
   state: AppState,
@@ -1073,40 +1421,11 @@ export const renderPanel = (
   close: () => void,
   refresh: () => void,
 ): void => {
-  if (state.selected === null && state.selectedClone !== null) {
-    renderClonePanel(state, panel, navigate, refresh);
-    return;
-  }
-  if (state.selected === null && state.selectedRoad !== null) {
-    renderRoadPanel(state, panel, navigate, close);
-    return;
-  }
-  if (state.selected === null && state.search.trim() !== "") {
-    // An active query owns the sidebar: the matched files and their
-    // combined blast radius, not the lens list they'd otherwise see.
-    renderSearchPanel(state, panel, navigate);
-    return;
-  }
   if (state.selected === null) {
-    // Nothing selected: every lens shows a ranked list. Finding lenses
-    // rank worst-first; overview ranks the most depended-on files, the
-    // newcomer's entry point.
-    renderLensPanel(state, panel, navigate, refresh);
+    renderUnselectedPanel(state, panel, navigate, close, refresh);
     return;
   }
-
-  const fileIdx = state.selected;
-  const file = state.data.files[fileIdx];
-  panel.replaceChildren();
-  panel.classList.add("open");
-  panel.setAttribute("aria-label", "file details");
-  panel.appendChild(fileHead(file, close));
-  const model = filePanelModel(state, fileIdx);
-  panel.appendChild(signalNavigator(model));
-  panel.appendChild(activeAnalysis(state, model, file, fileIdx, navigate));
-  for (const details of supportingAnalyses(state, model, file, fileIdx, navigate)) {
-    panel.appendChild(details);
-  }
+  renderFilePanel(state, panel, state.selected, navigate, close);
 };
 
 /** Keywords the preview highlighter tints as language syntax. */
@@ -1235,6 +1554,10 @@ interface RankRow {
   cells: { value: string; cls: string }[];
   fileIndex: number | null;
   finding?: GenericFindingView;
+  /** Plain-language reason the row is listed, shown under the path. */
+  why?: string;
+  /** Severity tier: 2 = high, 1 = medium, 0 = low. */
+  level?: 0 | 1 | 2;
   /** Clone group index; rows with this open the clone panel instead. */
   clone?: number;
   /** Optional magnitude meter, drawn between the label and the value cells. */
@@ -1249,7 +1572,7 @@ interface RankColumn {
 
 /** The importer-count column shared by every used-by ranked list. */
 const usedByColumns: RankColumn[] = [
-  { header: "used by", hint: "How many files import this one." },
+  { header: "Used by", hint: "How many files import this one." },
 ];
 
 /** The shared shape a ranked table renders from. */
@@ -1297,8 +1620,31 @@ const genericRankRows = (
       cells: [{ value: finding.title, cls: finding.severity ? "sev-warn" : "" }],
       fileIndex,
       finding,
+      why: finding.detail ?? finding.title,
+      level: finding.severity ? (severityRank(finding.severity) >= 3 ? 2 : 1) : 1,
     };
   });
+
+/** Names the unused exports so the row says what to delete, not just how many. */
+const unusedExportsReason = (file: VizFile): string => {
+  const names = file.unused_exports ?? [];
+  if (names.length === 0) {
+    return `${formatCount(file.unused_export_count)} exports nothing imports`;
+  }
+  const shown = names.slice(0, 3).join(", ");
+  const rest = file.unused_export_count - Math.min(3, names.length);
+  return `Unused: ${shown}${rest > 0 ? ` +${formatCount(rest)} more` : ""}`;
+};
+
+/** Where the copies of a clone group live, by file name. */
+const cloneReason = (state: AppState, group: VizCloneGroup): string => {
+  const names = [
+    ...new Set(group.instances.map((instance) => basename(state.data.files[instance.file].path))),
+  ];
+  const copies = `${formatCount(group.instances.length)} copies`;
+  if (names.length === 1) return `${copies} inside this file`;
+  return `${copies}: ${names.slice(0, 3).join(", ")}${names.length > 3 ? " …" : ""}`;
+};
 
 export const rankRowsFor = (state: AppState): RankLensView =>
   rankRowsForLens(state, (state.activeAnalysis ?? state.lens) as Lens);
@@ -1307,9 +1653,8 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
   const files = state.data.files;
   switch (lens as string) {
     case "overview": {
-      // The newcomer's "what should I read first": files the rest of the
-      // codebase leans on hardest, ranked by how many import them. Reuses the
-      // shared used-by row shape (fileRankRows) rather than rebuilding it.
+      // Files ranked by how many files import them. Reuses the shared
+      // used-by row shape (fileRankRows).
       const ranked = files
         .map((file, index) => ({ file, index }))
         .filter(({ file }) => file.importer_count > 0)
@@ -1317,10 +1662,10 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         .map(({ index }) => index);
       const rows = fileRankRows(state, ranked);
       return {
-        title: "Most depended-on files",
+        title: "Most imported files",
         rows,
-        empty: "No shared files",
-        labelHead: "file",
+        empty: "No file is imported by another file",
+        labelHead: "File",
         columns: usedByColumns,
       };
     }
@@ -1339,6 +1684,8 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
           cells: [{ value: formatSize(file.size), cls: "sev-error" }],
           fileIndex: index,
           bar: meterSpec(file.size, maxUnusedSize, "error"),
+          why: "No file imports this file",
+          level: 2,
         });
       }
       const partial = files
@@ -1354,16 +1701,18 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
           cells: [{ value: `${formatCount(file.unused_export_count)} exports`, cls: "sev-warn" }],
           fileIndex: index,
           bar: meterSpec(file.unused_export_count, maxPartial, "warn"),
+          why: unusedExportsReason(file),
+          level: 1,
         });
       }
       return {
-        title: "Unused files",
+        title: "Unused files and exports",
         rows,
         empty: "Nothing is unreachable",
-        labelHead: "file",
+        labelHead: "File",
         columns: [
           {
-            header: "unused",
+            header: "Unused",
             hint: "The whole file, shown as its size on disk, or how many of its exports are never imported.",
           },
         ],
@@ -1390,6 +1739,8 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
           fileIndex: first.file,
           clone: groupIdx,
           bar: meterSpec(group.lines, maxCloneLines, "warn"),
+          why: cloneReason(state, group),
+          level: (group.lines >= 30 || group.instances.length >= 3 ? 2 : 1) as 0 | 1 | 2,
         };
       });
       const truncated = state.data.summary.clone_groups_truncated;
@@ -1400,8 +1751,8 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         title,
         rows,
         empty: "No duplicated blocks",
-        labelHead: "block",
-        columns: [{ header: "lines", hint: "Number of duplicated lines in the block." }],
+        labelHead: "Block",
+        columns: [{ header: "Lines", hint: "Number of duplicated lines in the block." }],
       };
     }
     case "architecture": {
@@ -1409,10 +1760,10 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         title: "Architecture findings",
         rows: genericRankRows(state, "architecture"),
         empty: "No architecture violations",
-        labelHead: "location",
+        labelHead: "Location",
         columns: [
           {
-            header: "finding",
+            header: "Finding",
             hint: "Boundary, policy, call, import-cycle, or re-export-cycle finding.",
           },
         ],
@@ -1429,76 +1780,91 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
           const metric = fileHealth
             ? `MI ${fileHealth.maintainability_index.toFixed(0)}, CRAP ${fileHealth.crap_max.toFixed(0)}`
             : (findings[0]?.title ?? "Review Health signals");
+          const level = lensFindingLevel("health", state.index, file, index);
+          const risk = fileHealth ? fileHealth.crap_max : null;
           return {
             label: basename(file.path),
             dir: dirname(file.path),
             metric,
             cells: [
               {
-                value: metric,
-                cls: findings.some((finding) => finding.severity) ? "sev-warn" : "",
+                value: risk === null ? "review" : formatCount(Math.round(risk)),
+                cls: level >= 2 ? "sev-error" : level === 1 ? "sev-warn" : "muted",
               },
             ],
             fileIndex: index,
+            why: healthReason(fileHealth, findings[0]?.title ?? "Health threshold exceeded"),
+            level,
           };
         });
       return {
-        title: "Files needing Health review",
+        title: "Health findings",
         rows,
         empty: "No files need Health review",
-        labelHead: "file",
-        columns: [{ header: "health", hint: "Retained Health metrics for this file." }],
+        labelHead: "File",
+        columns: [
+          {
+            header: "Risk",
+            hint: "Change risk: complexity weighted by missing tests (CRAP). Above 30 is high.",
+          },
+        ],
       };
     }
     case "security": {
-      const priority = (severity: string): number => {
-        switch (severity.toLowerCase()) {
-          case "critical":
-            return 4;
-          case "high":
-          case "error":
-            return 3;
-          case "medium":
-          case "moderate":
-            return 2;
-          default:
-            return 1;
-        }
-      };
       const rows = files
-        .flatMap((file, index) =>
-          securityCandidatesForFile(state.data, index).map((candidate) => ({
-            file,
-            index,
-            candidate,
-          })),
-        )
+        .map((file, index) => ({
+          file,
+          index,
+          candidates: securityCandidatesForFile(state.data, index),
+        }))
+        .filter(({ candidates }) => candidates.length > 0)
+        .map(({ file, index, candidates }) => {
+          const top = Math.max(...candidates.map((candidate) => severityRank(candidate.severity)));
+          const labels = [
+            ...new Set(
+              candidates
+                .toSorted(
+                  (left, right) => severityRank(right.severity) - severityRank(left.severity),
+                )
+                .map((candidate) => securityCategoryLabel(candidate.category, candidate.title)),
+            ),
+          ];
+          const topSeverity =
+            candidates.find((candidate) => severityRank(candidate.severity) === top)?.severity ??
+            "low";
+          return { file, index, candidates, top, labels, topSeverity };
+        })
         .toSorted(
-          (left, right) => priority(right.candidate.severity) - priority(left.candidate.severity),
+          (left, right) => right.top - left.top || right.candidates.length - left.candidates.length,
         )
-        .map(({ file, index, candidate }) => ({
+        .map(({ file, index, candidates, top, labels, topSeverity }): RankRow => ({
           label: basename(file.path),
           dir: dirname(file.path),
-          metric: `${candidate.severity}: ${candidate.title}`,
+          metric: `${topSeverity}: ${labels[0]}`,
           cells: [
             {
-              value: candidate.severity,
-              cls:
-                priority(candidate.severity) >= 3
-                  ? "sev-error"
-                  : priority(candidate.severity) >= 2
-                    ? "sev-warn"
-                    : "sev-info",
+              value: candidates.length === 1 ? topSeverity : `${formatCount(candidates.length)}×`,
+              cls: top >= 3 ? "sev-error" : top >= 2 ? "sev-warn" : "sev-info",
             },
           ],
           fileIndex: index,
+          why:
+            labels.length > 2
+              ? `${labels.slice(0, 2).join(" · ")} · +${labels.length - 2} more`
+              : labels.join(" · "),
+          level: top >= 3 ? 2 : top >= 2 ? 1 : 0,
         }));
       return {
-        title: "Static Security candidates",
+        title: "Security candidates",
         rows,
         empty: "No static Security candidates",
-        labelHead: "file",
-        columns: [{ header: "severity", hint: "Review priority, not proof of a vulnerability." }],
+        labelHead: "File",
+        columns: [
+          {
+            header: "Candidates",
+            hint: "Static candidates in this file. Review priority, not proof of a vulnerability.",
+          },
+        ],
       };
     }
     case "dependencies":
@@ -1517,8 +1883,8 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
         title: `${SIGNAL_LABELS[id]} ${noun}`,
         rows,
         empty: `No ${SIGNAL_LABELS[id]} ${noun}`,
-        labelHead: "file",
-        columns: [{ header: "finding", hint: `${SIGNAL_LABELS[id]} analysis finding.` }],
+        labelHead: "File",
+        columns: [{ header: "Finding", hint: `${SIGNAL_LABELS[id]} analysis finding.` }],
       };
     }
     default:
@@ -1531,25 +1897,18 @@ const rankRowsForLens = (state: AppState, lens: Lens): RankLensView => {
  * table: a head-truncated dim directory plus the filename in its own
  * span so it can ellipsize when the row is narrow.
  */
-const rankLabelEl = (label: string, dir: string, budgetHint: number): HTMLElement => {
+const rankLabelEl = (label: string, dir: string, _budgetHint: number): HTMLElement => {
   const labelBox = el("span", "rank-label");
+  const full = `${dir ? `${dir}/` : ""}${label}`;
+  const nameSpan = el("span", "rank-name", label);
+  nameSpan.title = full;
+  labelBox.appendChild(nameSpan);
   if (dir) {
-    // Head-truncate the directory in JS (monospace budget), keeping
-    // whole tail segments; CSS rtl tricks reorder path punctuation.
-    const budget = Math.max(8, 34 - label.length - budgetHint);
-    let shown = `${dir}/`;
-    if (shown.length > budget) {
-      const parts = dir.split("/");
-      while (parts.length > 1 && `…/${parts.join("/")}/`.length > budget) parts.shift();
-      shown = `…/${parts.join("/")}/`;
-    }
-    const dirSpan = el("span", "muted", shown);
-    dirSpan.title = `${dir}/${label}`;
+    // The folder trails the name and gives way first; CSS ellipsizes it.
+    const dirSpan = el("span", "muted rank-dir", `${dir}/`);
+    dirSpan.title = full;
     labelBox.appendChild(dirSpan);
   }
-  const nameSpan = el("span", "rank-name", label);
-  nameSpan.title = `${dir ? `${dir}/` : ""}${label}`;
-  labelBox.appendChild(nameSpan);
   return labelBox;
 };
 
@@ -1663,7 +2022,7 @@ const renderRankTable = (
 const fileTable = (state: AppState, indices: number[], navigate: NavigateFn): HTMLElement =>
   renderRankTable(
     state,
-    { rows: fileRankRows(state, indices), labelHead: "file", columns: usedByColumns },
+    { rows: fileRankRows(state, indices), labelHead: "File", columns: usedByColumns },
     (row) => {
       if (row.fileIndex !== null) navigate(row.fileIndex);
     },
@@ -1688,6 +2047,298 @@ const fileRankRows = (state: AppState, indices: number[]): RankRow[] => {
   });
 };
 
+/** What each finding lens means for the reader, in one sentence. */
+const LENS_PURPOSE: Partial<Record<Lens, string>> = {
+  unused: "Files and exports that no code imports.",
+  duplication:
+    "Code blocks that occur in more than one place. A fix in one copy does not change the other copies.",
+  architecture: "Imports that your boundary rules forbid, and import cycles.",
+  health:
+    "Files with complex code, low test coverage, or many importers. A change to these files is more likely to cause a bug.",
+  security:
+    "Places where external input reaches a sensitive call. Static analysis cannot confirm a vulnerability, so examine each one.",
+};
+
+/** What one row counts, for lenses whose rows are not files. */
+const ROW_NOUN: Partial<Record<Lens, [string, string]>> = {
+  duplication: ["duplicated block", "duplicated blocks"],
+  architecture: ["finding", "findings"],
+};
+
+const LEVEL_GROUPS: ReadonlyArray<{ level: 0 | 1 | 2; title: string; tone: string }> = [
+  { level: 2, title: "High", tone: "error" },
+  { level: 1, title: "Medium", tone: "warn" },
+  { level: 0, title: "Low", tone: "neutral" },
+];
+
+/** Import rows between two folders, grouped by what is wrong with them. */
+const ROAD_GROUPS: ReadonlyArray<{ level: 0 | 1 | 2; title: string; tone: string }> = [
+  { level: 2, title: "Forbidden", tone: "error" },
+  { level: 1, title: "In a cycle", tone: "warn" },
+  { level: 0, title: "Imports", tone: "neutral" },
+];
+
+/** Rows rendered per severity group before a "show more" control. */
+const GROUP_PAGE = 30;
+
+const levelCounts = (rows: RankRow[]): [number, number, number] => {
+  const counts: [number, number, number] = [0, 0, 0];
+  for (const row of rows) counts[row.level ?? 1] += 1;
+  return counts;
+};
+
+/** A proportional three-tone strip: how the findings split by severity. */
+const severityStrip = (counts: [number, number, number]): HTMLElement => {
+  const strip = el("div", "sev-strip");
+  const total = counts[0] + counts[1] + counts[2];
+  for (const group of LEVEL_GROUPS) {
+    const share = total === 0 ? 0 : counts[group.level] / total;
+    if (share === 0) continue;
+    const seg = el("span", `sev-seg tone-${group.tone}`);
+    seg.style.setProperty("--share", String(share));
+    strip.appendChild(seg);
+  }
+  return strip;
+};
+
+/** The lens header: what it measures, how much there is, how bad it is. */
+const lensSummaryEl = (state: AppState, rows: RankRow[]): HTMLElement => {
+  const box = el("section", "lens-brief");
+  const counts = levelCounts(rows);
+  const head = el("div", "brief-head");
+  head.appendChild(el("span", "brief-num", formatCount(rows.length)));
+  const [one, many] = ROW_NOUN[state.lens] ?? ["file", "files"];
+  head.appendChild(el("span", "brief-unit", rows.length === 1 ? one : many));
+  box.appendChild(head);
+  const purpose = LENS_PURPOSE[state.lens];
+  if (purpose) box.appendChild(el("p", "brief-purpose", purpose));
+  if (rows.length > 0) {
+    box.appendChild(severityStrip(counts));
+    const legend = el("div", "brief-legend");
+    for (const group of LEVEL_GROUPS) {
+      if (counts[group.level] === 0) continue;
+      const item = el("span", `brief-key tone-${group.tone}`);
+      item.appendChild(el("b", "", formatCount(counts[group.level])));
+      item.appendChild(document.createTextNode(` ${group.title.toLowerCase()}`));
+      legend.appendChild(item);
+    }
+    box.appendChild(legend);
+  }
+  return box;
+};
+
+/** One finding: file name first and whole, its folder, and why it is listed. */
+const findingRowEl = (row: RankRow, onPick: (row: RankRow) => void): HTMLElement => {
+  const li = el("li", `finding-row lvl-${row.level ?? 1}`);
+  const btn = el("button", "fr-btn") as HTMLButtonElement;
+  btn.type = "button";
+  const text = el("span", "fr-text");
+  const name = el("span", "fr-name", row.label);
+  text.appendChild(name);
+  if (row.dir) {
+    // RTL keeps the nearest folder visible when the path is long; the
+    // inner ltr span stops the slashes from being reordered.
+    const dir = el("span", "fr-dir");
+    const inner = el("span", "", `${row.dir}/`);
+    inner.dir = "ltr";
+    dir.appendChild(inner);
+    dir.title = `${row.dir}/${row.label}`;
+    text.appendChild(dir);
+  }
+  if (row.why) text.appendChild(el("span", "fr-why", row.why));
+  btn.appendChild(text);
+  const value = el("span", "fr-value");
+  for (const cell of row.cells) value.appendChild(el("span", `fr-num ${cell.cls}`, cell.value));
+  if (row.bar) value.appendChild(meterBar(row.bar.value, row.bar.max, row.bar.tone));
+  btn.appendChild(value);
+  if (row.fileIndex === null && row.clone === undefined) {
+    btn.disabled = true;
+  } else {
+    btn.addEventListener("click", () => onPick(row));
+  }
+  li.appendChild(btn);
+  return li;
+};
+
+/**
+ * Findings grouped by severity tier. Each group shows a page of rows and a
+ * control for the rest, so a 180-file list still opens on what matters.
+ */
+const renderFindingList = (
+  rows: RankRow[],
+  columns: RankColumn[],
+  onPick: (row: RankRow) => void,
+  groups: ReadonlyArray<{ level: 0 | 1 | 2; title: string; tone: string }> = LEVEL_GROUPS,
+): HTMLElement => {
+  const box = el("div", "finding-groups");
+  const unit = columns[0];
+  for (const group of groups) {
+    const members = rows.filter((row) => (row.level ?? 1) === group.level);
+    if (members.length === 0) continue;
+    const section = el("section", `finding-group tone-${group.tone}`);
+    const header = el("h4", "fg-head");
+    header.appendChild(el("span", "fg-title", group.title));
+    header.appendChild(el("span", "fg-count", formatCount(members.length)));
+    if (unit) {
+      const colHead = el("span", "fg-col", unit.header);
+      colHead.dataset.tip = unit.hint;
+      header.appendChild(colHead);
+    }
+    section.appendChild(header);
+    // A reason every row shares is said once, under the group header.
+    const reasons = new Set(members.map((row) => row.why ?? ""));
+    const sharedWhy = members.length > 1 && reasons.size === 1 ? members[0].why : undefined;
+    if (sharedWhy) section.appendChild(el("p", "fg-why", sharedWhy));
+    const list = el("ol", "finding-list");
+    const renderPage = (from: number): void => {
+      for (const row of members.slice(from, from + GROUP_PAGE)) {
+        list.appendChild(findingRowEl(sharedWhy ? { ...row, why: undefined } : row, onPick));
+      }
+      const remaining = members.length - (from + GROUP_PAGE);
+      if (remaining <= 0) return;
+      const more = el("button", "fg-more", `Show ${formatCount(remaining)} more`);
+      (more as HTMLButtonElement).type = "button";
+      more.addEventListener("click", () => {
+        more.remove();
+        renderPage(from + GROUP_PAGE);
+      });
+      section.appendChild(more);
+    };
+    section.appendChild(list);
+    renderPage(0);
+    box.appendChild(section);
+  }
+  return box;
+};
+
+type LensDef = (typeof LENSES)[number];
+
+/** The health grade and score badge at the top of the triage. */
+const triageScore = (grade: string | undefined, value: number): HTMLElement => {
+  const score = el("div", "triage-score");
+  score.appendChild(el("span", `grade grade-${(grade ?? "").toLowerCase()}`, grade ?? ""));
+  const text = el("div", "score-text");
+  text.appendChild(el("span", "score-num", `${value.toFixed(0)}/100`));
+  text.appendChild(el("span", "score-label", "Health score"));
+  score.appendChild(text);
+  return score;
+};
+
+/**
+ * The unit after a triage count. The tab counts findings; this card counts
+ * files. When the two differ (several security candidates in one file),
+ * say both so the numbers do not seem to disagree.
+ */
+const triageUnit = (state: AppState, lens: LensDef, rowCount: number): string => {
+  const [one, many] = ROW_NOUN[lens.id] ?? ["file", "files"];
+  const tabCount = lens.count(state);
+  const unit = rowCount === 1 ? one : many;
+  if (!tabCount || tabCount.value === rowCount) return unit;
+  return `${unit}, ${formatCount(tabCount.value)} ${tabCount.unit}`;
+};
+
+/** The headline figure of a triage card: off, clean, or the counts. */
+const triageFigure = (
+  state: AppState,
+  lens: LensDef,
+  analyzed: boolean,
+  rows: RankRow[],
+  counts: [number, number, number],
+): HTMLElement => {
+  const figure = el("span", "tc-figure");
+  if (!analyzed) {
+    figure.appendChild(el("span", "tc-off", "Not analyzed"));
+    return figure;
+  }
+  if (rows.length === 0) {
+    figure.appendChild(el("span", "tc-ok", "No findings"));
+    return figure;
+  }
+  figure.appendChild(el("span", "tc-num", formatCount(rows.length)));
+  figure.appendChild(el("span", "tc-unit", triageUnit(state, lens, rows.length)));
+  if (counts[2] > 0) figure.appendChild(el("span", "tc-severe", `${formatCount(counts[2])} high`));
+  return figure;
+};
+
+/** The worst file of a triage card with its reason, or null. */
+const triageSample = (rows: RankRow[]): HTMLElement | null => {
+  const worst = rows.find((row) => row.fileIndex !== null);
+  if (!worst) return null;
+  const sample = el("span", "tc-sample");
+  sample.appendChild(el("span", "tc-file", worst.label));
+  if (worst.why) sample.appendChild(el("span", "tc-why", worst.why));
+  return sample;
+};
+
+/** One triage card: size, severity split and worst file of a lens. */
+const triageCard = (state: AppState, lens: LensDef): HTMLElement => {
+  const analyzed = analysisAvailability(state.data, lens.id as AnalysisId).state === "complete";
+  const rows = analyzed ? rankRowsForLens(state, lens.id).rows : [];
+  const counts = levelCounts(rows);
+  const card = el("button", `triage-card${rows.length === 0 ? " is-clean" : ""}`);
+  (card as HTMLButtonElement).type = "button";
+  const top = el("span", "tc-top");
+  top.appendChild(el("span", "tc-name", lens.name));
+  top.appendChild(el("kbd", "tc-key", lens.shortcut));
+  card.appendChild(top);
+  card.appendChild(triageFigure(state, lens, analyzed, rows, counts));
+  if (rows.length > 0) card.appendChild(severityStrip(counts));
+  const sample = triageSample(rows);
+  if (sample) card.appendChild(sample);
+  card.addEventListener("click", () => {
+    card.dispatchEvent(new CustomEvent("fallow:lens", { detail: lens.id, bubbles: true }));
+  });
+  return card;
+};
+
+/**
+ * The overview's first question: how is this codebase doing, and where
+ * should I start? One card per finding lens with its size, severity split,
+ * and the worst files, each card opening its lens.
+ */
+const triageSection = (state: AppState): HTMLElement => {
+  const section = el("section", "triage");
+  const health = state.data.health;
+  if (health.score !== undefined) section.appendChild(triageScore(health.grade, health.score));
+  const cards = el("div", "triage-cards");
+  for (const lens of LENSES) {
+    if (lens.id !== "overview") cards.appendChild(triageCard(state, lens));
+  }
+  section.appendChild(cards);
+  return section;
+};
+
+/**
+ * The folders the graph outlines as an import loop. They are not rule
+ * violations, so the findings list stays empty; this section keeps the
+ * panel in step with the outlines on the map.
+ */
+const folderLoopsSection = (state: AppState): HTMLElement | null => {
+  if (state.view !== "graph") return null;
+  const gvs = getGVS(state);
+  const loops = gvs.clusters.filter((cluster) => cluster.tangle && cluster.indices.length > 1);
+  if (loops.length === 0) return null;
+  const section = sectionEl(`Folders in an import loop (${formatCount(loops.length)})`);
+  section.appendChild(
+    el(
+      "p",
+      "brief-purpose",
+      "These folders import each other, directly or through other folders. No rule forbids it, but a change in one can reach all of them, and they are hard to move or split on their own.",
+    ),
+  );
+  const list = el("ul", "loop-list");
+  for (const cluster of loops.toSorted(
+    (left, right) => right.indices.length - left.indices.length,
+  )) {
+    const item = el("li");
+    item.appendChild(el("span", "loop-name", cluster.key));
+    item.appendChild(el("span", "muted", `${formatCount(cluster.indices.length)} files`));
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+  return section;
+};
+
 /** Ranked worst-first findings for the active lens (nothing selected). */
 const renderLensPanel = (
   state: AppState,
@@ -1701,6 +2352,8 @@ const renderLensPanel = (
   panel.classList.add("open");
   panel.setAttribute("aria-label", `${analysisId} findings`);
 
+  if (analysisId === "overview") panel.appendChild(triageSection(state));
+  else if (state.activeAnalysis === null) panel.appendChild(lensSummaryEl(state, rows));
   const section = sectionEl(title);
   if (analysisId !== "overview") {
     const availability = analysisAvailability(state.data, analysisId);
@@ -1714,10 +2367,6 @@ const renderLensPanel = (
         el("div", "muted", `${formatCount(availability.truncated)} ${availability.unit} not shown`),
       );
     }
-  }
-  if (analysisId === "health") {
-    const summary = healthSummarySection(state);
-    if (summary) panel.appendChild(summary);
   }
   if (analysisId === "frameworks") {
     const summary = frameworkSummarySection(state);
@@ -1749,22 +2398,39 @@ const renderLensPanel = (
     );
   }
   if (rows.length === 0) {
+    if (analysisId !== "overview" && state.activeAnalysis === null) {
+      section.querySelector(":scope > h3")?.remove();
+    }
     section.appendChild(el("div", "sev-ok", empty));
     panel.appendChild(section);
+    if (analysisId === "architecture") {
+      const loops = folderLoopsSection(state);
+      if (loops) panel.appendChild(loops);
+    }
     if (analysisId === "security") panel.appendChild(securityCoverageSection(state));
     return;
   }
-  section.appendChild(
-    renderRankTable(state, { rows, labelHead, columns }, (row) => {
-      if (row.clone !== undefined) {
-        state.selectedClone = row.clone;
-        refresh();
-      } else {
-        if (row.fileIndex !== null) navigate(row.fileIndex);
-      }
-    }),
-  );
+  const pick = (row: RankRow): void => {
+    if (row.clone !== undefined) {
+      state.selectedClone = row.clone;
+      refresh();
+    } else if (row.fileIndex !== null) {
+      navigate(row.fileIndex);
+    }
+  };
+  if (analysisId === "overview") {
+    section.appendChild(renderRankTable(state, { rows, labelHead, columns }, pick));
+  } else {
+    // The lens brief above already names the list; a second heading only
+    // pushes the first finding down.
+    if (state.activeAnalysis === null) section.querySelector(":scope > h3")?.remove();
+    section.appendChild(renderFindingList(rows, columns, pick));
+  }
   panel.appendChild(section);
+  if (analysisId === "health") {
+    const summary = healthSummarySection(state);
+    if (summary) panel.appendChild(summary);
+  }
   if (analysisId === "health" && (state.data.health.findings_truncated ?? 0) > 0) {
     panel.appendChild(
       el(
@@ -1818,13 +2484,13 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
 
   const { query, matches, affected } = searchPanelModel(state);
 
-  const head = el("div", "panel-head");
+  const head = el("div", "panel-head is-text");
   const box = el("div", "file");
   const totalFiles = state.data.files.length;
-  box.appendChild(el("div", "dir", `Matches for "${query}"`));
   box.appendChild(
     el("div", "name", `${formatCount(matches.length)} file${matches.length === 1 ? "" : "s"}`),
   );
+  box.appendChild(el("div", "dir", `Matches for "${query}"`));
   if (matches.length > 0) {
     const matchMeter = el("div", "meter");
     matchMeter.appendChild(meterBar(matches.length, totalFiles, "neutral"));
@@ -1855,7 +2521,7 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
   section.appendChild(
     renderRankTable(
       state,
-      { rows: fileRankRows(state, matches), labelHead: "file", columns: usedByColumns },
+      { rows: fileRankRows(state, matches), labelHead: "File", columns: usedByColumns },
       (row) => {
         if (row.fileIndex !== null) navigate(row.fileIndex);
       },
@@ -1871,7 +2537,7 @@ const renderSearchPanel = (state: AppState, panel: HTMLElement, navigate: Naviga
     aff.appendChild(
       renderRankTable(
         state,
-        { rows: fileRankRows(state, affected), labelHead: "file", columns: usedByColumns },
+        { rows: fileRankRows(state, affected), labelHead: "File", columns: usedByColumns },
         (row) => {
           if (row.fileIndex !== null) navigate(row.fileIndex);
         },
@@ -1891,27 +2557,36 @@ const renderClonePanel = (
   const groupIdx = state.selectedClone;
   const group = groupIdx !== null ? state.data.clones[groupIdx] : undefined;
   if (groupIdx === null || !group) return;
-  const box = panelShell(
+  panelShell(
     panel,
     "Duplicated block",
-    `${formatCount(group.lines)} lines × ${formatCount(group.instances.length)} places`,
+    `${formatCount(group.lines)} lines in ${formatCount(group.instances.length)} places`,
     () => {
       state.selectedClone = null;
       refresh();
     },
   );
   panel.setAttribute("aria-label", "duplicated block");
-  const statusLine = el("div", "status-line");
-  statusLine.appendChild(sev("sev-warn", `${formatCount(group.tokens)} tokens`));
-  box.appendChild(statusLine);
+  const fileCount = new Set(group.instances.map((instance) => instance.file)).size;
+  const brief = el("section", "lens-brief");
+  brief.appendChild(
+    el(
+      "p",
+      "brief-purpose",
+      fileCount === 1
+        ? "The copies are in one file. Move the shared lines into one function."
+        : `The copies are in ${formatCount(fileCount)} files. Move the shared code into one function or component that each file imports.`,
+    ),
+  );
+  panel.appendChild(brief);
 
   const copies = sectionEl(`Every copy (${formatCount(group.instances.length)})`);
   const copiesTable = el("table", "rank-table");
   const copiesHead = el("thead");
   const copiesHr = el("tr");
   copiesHr.appendChild(el("th", "col-rank", "#"));
-  copiesHr.appendChild(el("th", "col-file", "file"));
-  copiesHr.appendChild(el("th", "col-val", "lines"));
+  copiesHr.appendChild(el("th", "col-file", "File"));
+  copiesHr.appendChild(el("th", "col-val", "Lines"));
   copiesHead.appendChild(copiesHr);
   copiesTable.appendChild(copiesHead);
   const copiesBody = el("tbody");
@@ -1947,25 +2622,110 @@ const renderClonePanel = (
 };
 
 /**
- * Open the panel with the shared head shell (eyebrow + title) used by
- * the drill-down panels; returns the box for extra status lines.
+ * Open the panel with the shared head shell used by the drill-down panels:
+ * the title opens the block and a meta line sits under it (the census has
+ * no small label above a title). Returns the box for extra status lines.
  */
 const panelShell = (
   panel: HTMLElement,
-  eyebrow: string,
   title: string,
+  meta: string,
   onClose: () => void,
 ): HTMLElement => {
   panel.replaceChildren();
   panel.classList.add("open");
-  const head = el("div", "panel-head");
+  const head = el("div", "panel-head is-text");
   const box = el("div", "file");
-  box.appendChild(el("div", "dir", eyebrow));
   box.appendChild(el("div", "name", title));
+  box.appendChild(el("div", "dir", meta));
   head.appendChild(box);
   head.appendChild(closeButton(onClose));
   panel.appendChild(head);
   return box;
+};
+
+type RoadRow = RankRow & { to: number };
+
+/** Why one file pair of a road matters, and how badly. */
+const roadPairNote = (forbidden: boolean, cyclic: boolean): { note: string; level: 0 | 1 | 2 } => {
+  if (forbidden) return { note: ": forbidden by a boundary rule", level: 2 };
+  if (cyclic) return { note: ": part of an import cycle", level: 1 };
+  return { note: "", level: 0 };
+};
+
+/** One contributing file pair of a road as a finding row. */
+const roadPairRow = (state: AppState, from: number, to: number): RoadRow => {
+  const packed = from * state.data.files.length + to;
+  const { note, level } = roadPairNote(
+    state.index.violationEdges.has(packed),
+    state.index.cycleEdges.has(packed),
+  );
+  const fromPath = state.data.files[from].path;
+  return {
+    label: basename(fromPath),
+    dir: dirname(fromPath),
+    metric: "",
+    cells: [],
+    fileIndex: from,
+    to,
+    why: `imports ${basename(state.data.files[to].path)}${note}`,
+    level,
+  };
+};
+
+/** The road headline: import count plus forbidden and cyclic parts. */
+const roadBrief = (road: RoadSelection): HTMLElement => {
+  const brief = el("section", "lens-brief");
+  const head = el("div", "brief-head");
+  head.appendChild(el("span", "brief-num", formatCount(road.count)));
+  head.appendChild(el("span", "brief-unit", road.count === 1 ? "import" : "imports"));
+  brief.appendChild(head);
+  const parts: string[] = [];
+  if (road.violations > 0) parts.push(`${formatCount(road.violations)} forbidden`);
+  if (road.cycleEdges > 0) parts.push(`${formatCount(road.cycleEdges)} in an import cycle`);
+  brief.appendChild(
+    el(
+      "p",
+      "brief-purpose",
+      parts.length > 0 ? parts.join(", ") : "No forbidden imports and no import cycles.",
+    ),
+  );
+  return brief;
+};
+
+/** Which files of the target folder this traffic actually uses. */
+const roadUsedSection = (
+  state: AppState,
+  road: RoadSelection,
+  rows: RoadRow[],
+  navigate: NavigateFn,
+): HTMLElement => {
+  const usage = new Map<number, number>();
+  for (const row of rows) usage.set(row.to, (usage.get(row.to) ?? 0) + 1);
+  const used = [...usage.entries()].toSorted((left, right) => right[1] - left[1]);
+  const usedSection = sectionEl(`Files used from ${road.dstKey} (${formatCount(used.length)})`);
+  const maxUse = used[0]?.[1] ?? 0;
+  usedSection.appendChild(
+    renderRankTable(
+      state,
+      {
+        rows: used.map(([index, count]) => ({
+          label: basename(state.data.files[index].path),
+          dir: dirname(state.data.files[index].path),
+          metric: `${formatCount(count)} importers`,
+          cells: [{ value: formatCount(count), cls: "muted" }],
+          fileIndex: index,
+          bar: meterSpec(count, maxUse, "neutral"),
+        })),
+        labelHead: "File",
+        columns: [{ header: "Importers", hint: `Files in ${road.srcKey} that import this file.` }],
+      },
+      (row) => {
+        if (row.fileIndex !== null) navigate(row.fileIndex);
+      },
+    ),
+  );
+  return usedSection;
 };
 
 /** Drill-down panel for an aggregated road: the contributing file pairs. */
@@ -1977,58 +2737,21 @@ const renderRoadPanel = (
 ): void => {
   const road = state.selectedRoad;
   if (!road) return;
-  const box = panelShell(
-    panel,
-    "Imports between folders",
-    `${road.srcKey} → ${road.dstKey}`,
-    close,
-  );
+  panelShell(panel, `${road.srcKey} → ${road.dstKey}`, "Imports between folders", close);
   panel.setAttribute("aria-label", "imports between folders");
-  const statusLine = el("div", "status-line");
-  statusLine.appendChild(
-    sev("sev-info", `${formatCount(road.count)} import${road.count === 1 ? "" : "s"}`),
-  );
-  if (road.violations > 0) {
-    statusLine.appendChild(document.createTextNode("  "));
-    statusLine.appendChild(sev("sev-error", `${formatCount(road.violations)} violations`));
-  }
-  if (road.cycleEdges > 0) {
-    statusLine.appendChild(document.createTextNode("  "));
-    statusLine.appendChild(sev("sev-warn", `${formatCount(road.cycleEdges)} cycle edges`));
-  }
-  box.appendChild(statusLine);
-
+  const rows = road.pairs.map(([from, to]) => roadPairRow(state, from, to));
+  panel.appendChild(roadBrief(road));
+  panel.appendChild(roadUsedSection(state, road, rows, navigate));
   const section = sectionEl(`Every import (${formatCount(road.pairs.length)})`);
-  const importsTable = el("table", "rank-table");
-  const importsHead = el("thead");
-  const importsHr = el("tr");
-  importsHr.appendChild(el("th", "col-rank", "#"));
-  importsHr.appendChild(el("th", "col-file", "importer"));
-  importsHr.appendChild(el("th", "col-val", "imports"));
-  importsHead.appendChild(importsHr);
-  importsTable.appendChild(importsHead);
-  const importsBody = el("tbody");
-  const fileCount = state.data.files.length;
-  road.pairs.forEach(([from, to], index) => {
-    const packed = from * fileCount + to;
-    const fromPath = state.data.files[from].path;
-    const toName = basename(state.data.files[to].path);
-    const cls = state.index.violationEdges.has(packed)
-      ? "sev-error"
-      : state.index.cycleEdges.has(packed)
-        ? "sev-warn"
-        : "";
-    const tr = el("tr");
-    tr.appendChild(el("td", "col-rank", formatCount(index + 1)));
-    tr.appendChild(
-      fileCell(basename(fromPath), dirname(fromPath), toName.length / 2, () => navigate(from)),
-    );
-    const toTd = el("td", "col-val");
-    toTd.appendChild(sev(cls, toName));
-    tr.appendChild(toTd);
-    importsBody.appendChild(tr);
-  });
-  importsTable.appendChild(importsBody);
-  section.appendChild(importsTable);
+  section.appendChild(
+    renderFindingList(
+      rows.toSorted((left, right) => (right.level ?? 0) - (left.level ?? 0)),
+      [],
+      (row) => {
+        if (row.fileIndex !== null) navigate(row.fileIndex);
+      },
+      ROAD_GROUPS,
+    ),
+  );
   panel.appendChild(section);
 };

@@ -26,6 +26,7 @@ import {
   clusterBounds,
   fitTransform,
   getGVS,
+  lensFlagsStandalone,
   shouldShowIntro,
   stageSize,
 } from "./shared";
@@ -165,10 +166,10 @@ const louvainCluster = (
   // import group, not a folder, so the plurality folder only names it honestly
   // when it is a real MAJORITY (Charts, Calendar, email): then use that folder
   // directly. When no folder reaches a majority the community is genuinely
-  // cross-cutting, so label it by its top-level area with a `(mixed)` marker
-  // (`src/components (mixed)`) rather than let a 9%-of-the-files folder imply
-  // it owns all 128. Two mixed areas that collide promote to their biggest
-  // slice (`src/features/ai (mixed)`) so the labels stay distinct.
+  // cross-cutting, so label it by its top-level area plus how many other
+  // folders it spans (`src/components + 3 more`) rather than let a
+  // 9%-of-the-files folder imply it owns all 128. Two mixed areas that
+  // collide promote to their biggest slice so the labels stay distinct.
   const comms = [...communityMap.values()];
   const MAJORITY = 0.5;
   const dominantFolder = (indices: number[], depth: number): { name: string; count: number } => {
@@ -184,6 +185,13 @@ const louvainCluster = (
     );
     return { name: sorted[0]?.[0] ?? "misc", count: sorted[0]?.[1] ?? 0 };
   };
+  const folderCount = (indices: number[], depth: number): number =>
+    new Set(
+      indices.map((index) => {
+        const parts = files[index].path.split("/");
+        return (parts.length > 1 ? parts.slice(0, -1) : parts).slice(0, depth).join("/");
+      }),
+    ).size;
   // Each community wants a `preferred` label, falling back to a more specific
   // `fallback` only when the preferred one collides with another community.
   const labels = comms.map((indices) => {
@@ -192,7 +200,9 @@ const louvainCluster = (
     if (specific.count / total >= MAJORITY)
       return { preferred: specific.name, fallback: specific.name };
     const area = dominantFolder(indices, 2).name;
-    return { preferred: `${area} (mixed)`, fallback: `${specific.name} (mixed)` };
+    const others = folderCount(indices, 2) - 1;
+    const more = others > 0 ? ` + ${others} more` : "";
+    return { preferred: `${area}${more}`, fallback: `${specific.name}${more}` };
   });
   const preferredCount = new Map<string, number>();
   for (const label of labels)
@@ -203,7 +213,8 @@ const louvainCluster = (
       (preferredCount.get(labels[index].preferred) ?? 0) > 1
         ? labels[index].fallback
         : labels[index].preferred;
-    while (result.has(name)) name = `${name}*`;
+    const base = name;
+    for (let copy = 2; result.has(name); copy++) name = `${base} (${copy})`;
     result.set(name, indices);
   });
   return new Map([...result.entries()].toSorted((left, right) => (left[0] < right[0] ? -1 : 1)));
@@ -662,35 +673,53 @@ const runLocalLayouts = (state: AppState, gvs: GraphViewState): void => {
     for (const node of nodes) gvs.fileNodes[node.fileIndex] = node;
   }
 };
-const convexHull = (pts: Pt[]): Pt[] => {
-  const sorted = [...pts].toSorted((left, right) => left.x - right.x || left.y - right.y);
-  if (sorted.length < 3) return sorted;
-  const cross = (origin: Pt, pointA: Pt, pointB: Pt): number =>
-    (pointA.x - origin.x) * (pointB.y - origin.y) - (pointA.y - origin.y) * (pointB.x - origin.x);
-  const lower: Pt[] = [];
-  for (const point of sorted) {
-    while (
-      lower.length >= 2 &&
-      cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0
-    ) {
-      lower.pop();
-    }
-    lower.push(point);
+/** Clearance between a folder's outermost files and its outline. */
+const HULL_PAD = 20;
+
+/**
+ * The tightest outline around the points that uses only 0, 45 and 90 degree
+ * edges, as on the census map: the intersection of the bounds on x, y,
+ * x + y and x - y, each pushed out by `pad`. Vertices run clockwise from
+ * the top-left end of the top edge.
+ */
+const octagonHull = (pts: Pt[], pad: number): Pt[] => {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minS = Infinity;
+  let maxS = -Infinity;
+  let minD = Infinity;
+  let maxD = -Infinity;
+  for (const { x, y } of pts) {
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+    minS = Math.min(minS, x + y);
+    maxS = Math.max(maxS, x + y);
+    minD = Math.min(minD, x - y);
+    maxD = Math.max(maxD, x - y);
   }
-  const upper: Pt[] = [];
-  for (let index = sorted.length - 1; index >= 0; index--) {
-    const point = sorted[index];
-    while (
-      upper.length >= 2 &&
-      cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0
-    ) {
-      upper.pop();
-    }
-    upper.push(point);
-  }
-  lower.pop();
-  upper.pop();
-  return lower.concat(upper);
+  const diagonalPad = pad * Math.SQRT2;
+  minX -= pad;
+  maxX += pad;
+  minY -= pad;
+  maxY += pad;
+  minS -= diagonalPad;
+  maxS += diagonalPad;
+  minD -= diagonalPad;
+  maxD += diagonalPad;
+  return [
+    { x: minS - minY, y: minY },
+    { x: maxD + minY, y: minY },
+    { x: maxX, y: maxX - maxD },
+    { x: maxX, y: maxS - maxX },
+    { x: maxS - maxY, y: maxY },
+    { x: minD + maxY, y: maxY },
+    { x: minX, y: minX - minD },
+    { x: minX, y: minS - minX },
+  ];
 };
 
 const buildHulls = (gvs: GraphViewState): void => {
@@ -710,23 +739,7 @@ const buildHulls = (gvs: GraphViewState): void => {
     cluster.cx = cx;
     cluster.cy = cy;
 
-    let hull: Pt[];
-    if (pts.length < 3) {
-      hull = [];
-      const radius = cluster.r * 0.5 + 20;
-      for (let index = 0; index < 8; index++) {
-        const angle = (index / 8) * Math.PI * 2;
-        hull.push({ x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
-      }
-    } else {
-      hull = convexHull(pts).map((point) => {
-        const dx = point.x - cx;
-        const dy = point.y - cy;
-        const dist = Math.max(1, Math.hypot(dx, dy));
-        const pad = 20;
-        return { x: cx + dx * ((dist + pad) / dist), y: cy + dy * ((dist + pad) / dist) };
-      });
-    }
+    const hull = octagonHull(pts.length > 0 ? pts : [{ x: cx, y: cy }], HULL_PAD);
     cluster.hull = hull;
     let maxD = 0;
     for (const point of hull) maxD = Math.max(maxD, Math.hypot(point.x - cx, point.y - cy));
@@ -735,20 +748,8 @@ const buildHulls = (gvs: GraphViewState): void => {
 };
 // ── Init ────────────────────────────────────────────────────────
 
-export const initGraphNodes = (state: AppState): void => {
-  const { data, canvas } = state;
-  const gvs = getGVS(state);
-  if (gvs.initialized) {
-    renderGraph(state);
-    return;
-  }
-
-  const files = data.files;
-  const groupMap =
-    gvs.clusterMode === "imports" ? louvainCluster(files, data.edges) : directoryCluster(files);
-
-  const clusterOf = new Array<number>(files.length).fill(0);
-  gvs.clusterOf = clusterOf;
+/** One cluster per group, with each file's cluster index filled in. */
+const buildClusters = (groupMap: Map<string, number[]>, clusterOf: number[]): ClusterInfo[] => {
   const clusters: ClusterInfo[] = [];
   for (const [key, indices] of groupMap) {
     const clusterIndex = clusters.length;
@@ -766,14 +767,11 @@ export const initGraphNodes = (state: AppState): void => {
       isolated: false,
     });
   }
-  gvs.clusters = clusters;
+  return clusters;
+};
 
-  const partitions = partitionEdges(data.edges, clusterOf, clusters.length);
-  gvs.intraEdges = partitions.intra;
-  gvs.interEdges = partitions.inter;
-  gvs.linksByCluster = partitions.byCluster;
-
-  const meta = buildMetaGraph(state, clusterOf, clusters.length);
+/** Mark clusters inside a strongly connected component; returns the SCC ids. */
+const markTangles = (clusters: ClusterInfo[], meta: MetaEdge[]): number[] => {
   const adj: number[][] = Array.from({ length: clusters.length }, () => []);
   for (const edge of meta) adj[edge.src].push(edge.dst);
   const sccOf = tarjanSCC(clusters.length, adj);
@@ -782,9 +780,20 @@ export const initGraphNodes = (state: AppState): void => {
   clusters.forEach((cluster, index) => {
     cluster.tangle = (sccSize.get(sccOf[index]) ?? 1) > 1;
   });
-  // Clusters with no inter-cluster imports at all sit outside the flow:
-  // park them in a standalone strip below the map instead of polluting
-  // the entry/shared columns.
+  return sccOf;
+};
+
+/**
+ * Clusters with no inter-cluster imports at all sit outside the flow:
+ * park them in a standalone strip below the map instead of polluting
+ * the entry/shared columns.
+ */
+const markIsolated = (
+  state: AppState,
+  gvs: GraphViewState,
+  clusters: ClusterInfo[],
+  meta: MetaEdge[],
+): void => {
   const connected = new Set<number>();
   for (const edge of meta) {
     connected.add(edge.src);
@@ -796,22 +805,11 @@ export const initGraphNodes = (state: AppState): void => {
   // An edge-free project marks every cluster isolated; the standalone
   // strip must then open by default or the map renders as an empty canvas.
   if (!clusters.some((cluster) => !cluster.isolated)) gvs.standaloneOpen = true;
+  else if (lensFlagsStandalone(state, clusters)) gvs.standaloneOpen = true;
+};
 
-  const layers = assignLayers(clusters.length, meta, sccOf);
-  clusters.forEach((cluster, index) => {
-    cluster.layer = layers[index];
-  });
-  orderWithinLayers(clusters, meta);
-  assignCoordinates(clusters, meta);
-  placeIsolated(clusters);
-
-  gvs.fileNodes = new Array<FileNode>(files.length);
-  runLocalLayouts(state, gvs);
-  buildHulls(gvs);
-  // Positions are frozen from here on; index them for pointer hit-tests.
-  gvs.grid = buildSpatialGrid(gvs.fileNodes);
-
-  // Hub floor: p95 of importer counts, min 25 (spec: badge, never suppress).
+/** Hub floor: p95 of importer counts, min 25 (spec: badge, never suppress). */
+const hubFloor = (files: VizFile[]): number => {
   const importerCounts = files
     .map((file) => file.importer_count)
     .filter((count) => count > 0)
@@ -822,11 +820,14 @@ export const initGraphNodes = (state: AppState): void => {
           Math.min(importerCounts.length - 1, Math.floor(importerCounts.length * 0.95))
         ]
       : Infinity;
-  gvs.hubFloor = Math.max(25, p95);
+  return Math.max(25, p95);
+};
 
+/** One road per meta edge, flagged when it runs both ways or backward. */
+const buildRoads = (clusters: ClusterInfo[], meta: MetaEdge[]): GraphViewState["roads"] => {
   const pairSet = new Set<number>();
   for (const edge of meta) pairSet.add(edge.src * clusters.length + edge.dst);
-  gvs.roads = meta.map((edge) => ({
+  return meta.map((edge) => ({
     src: edge.src,
     dst: edge.dst,
     count: edge.count,
@@ -835,19 +836,32 @@ export const initGraphNodes = (state: AppState): void => {
     bidi: pairSet.has(edge.dst * clusters.length + edge.src),
     back: clusters[edge.dst].layer <= clusters[edge.src].layer,
   }));
+};
 
-  // Fit-to-view. Standalone clusters are hidden until toggled: keep
-  // them out of the fit.
+/**
+ * Fit-to-view. Standalone clusters are hidden until toggled: keep
+ * them out of the fit.
+ */
+const fitClusters = (state: AppState, gvs: GraphViewState): GraphViewState["transform"] => {
+  const { clusters } = gvs;
   const { w: width, h: height } = stageSize(state);
   const anyConnected = clusters.some((cluster) => !cluster.isolated);
-  const fit = fitTransform(
+  return fitTransform(
     width,
     height,
-    clusterBounds(clusters, (cluster) => !(cluster.isolated && anyConnected)),
+    clusterBounds(
+      clusters,
+      (cluster) => !(cluster.isolated && anyConnected && !gvs.standaloneOpen),
+    ),
   );
-  gvs.transform = fit;
-  gvs.fitK = fit.k;
+};
 
+/** Attach the d3 pan and zoom behavior to the canvas, starting at `fit`. */
+const attachZoom = (
+  state: AppState,
+  gvs: GraphViewState,
+  fit: GraphViewState["transform"],
+): void => {
   const zoomBehavior = zoom<HTMLCanvasElement, unknown>()
     .scaleExtent([fit.k * 0.4, fit.k * 12])
     // A drag pans from ANYWHERE (including a node or road); selection runs on
@@ -869,18 +883,72 @@ export const initGraphNodes = (state: AppState): void => {
       renderGraph(state);
     });
   const initialTransform = zoomIdentity.translate(fit.x, fit.y).scale(fit.k);
-  select(canvas).call(zoomBehavior).call(zoomBehavior.transform, initialTransform);
+  select(state.canvas).call(zoomBehavior).call(zoomBehavior.transform, initialTransform);
   gvs.zoomBehavior = zoomBehavior;
+};
 
-  gvs.initialized = true;
+/** Start the opening sweep on the first layout only. */
+const startReveal = (state: AppState, gvs: GraphViewState): void => {
   if (gvs.hasRevealed) {
     // A re-arrange (by folder / by imports) is a compare gesture: paint
     // the new layout immediately instead of replaying the opening sweep.
     gvs.revealAt = -1;
-  } else {
-    gvs.revealAt = 0;
-    gvs.showIntro = shouldShowIntro() && !state.reducedMotion;
-    gvs.hasRevealed = true;
+    return;
   }
+  gvs.revealAt = 0;
+  gvs.showIntro = shouldShowIntro() && !state.reducedMotion;
+  gvs.hasRevealed = true;
+};
+
+export const initGraphNodes = (state: AppState): void => {
+  const { data } = state;
+  const gvs = getGVS(state);
+  if (gvs.initialized) {
+    renderGraph(state);
+    return;
+  }
+
+  const files = data.files;
+  const groupMap =
+    gvs.clusterMode === "imports" ? louvainCluster(files, data.edges) : directoryCluster(files);
+
+  const clusterOf = new Array<number>(files.length).fill(0);
+  gvs.clusterOf = clusterOf;
+  const clusters = buildClusters(groupMap, clusterOf);
+  gvs.clusters = clusters;
+
+  const partitions = partitionEdges(data.edges, clusterOf, clusters.length);
+  gvs.intraEdges = partitions.intra;
+  gvs.interEdges = partitions.inter;
+  gvs.linksByCluster = partitions.byCluster;
+
+  const meta = buildMetaGraph(state, clusterOf, clusters.length);
+  const sccOf = markTangles(clusters, meta);
+  markIsolated(state, gvs, clusters, meta);
+
+  const layers = assignLayers(clusters.length, meta, sccOf);
+  clusters.forEach((cluster, index) => {
+    cluster.layer = layers[index];
+  });
+  orderWithinLayers(clusters, meta);
+  assignCoordinates(clusters, meta);
+  placeIsolated(clusters);
+
+  gvs.fileNodes = new Array<FileNode>(files.length);
+  runLocalLayouts(state, gvs);
+  buildHulls(gvs);
+  // Positions are frozen from here on; index them for pointer hit-tests.
+  gvs.grid = buildSpatialGrid(gvs.fileNodes);
+
+  gvs.hubFloor = hubFloor(files);
+  gvs.roads = buildRoads(clusters, meta);
+
+  const fit = fitClusters(state, gvs);
+  gvs.transform = fit;
+  gvs.fitK = fit.k;
+  attachZoom(state, gvs, fit);
+
+  gvs.initialized = true;
+  startReveal(state, gvs);
   renderGraph(state);
 };

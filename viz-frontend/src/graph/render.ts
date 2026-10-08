@@ -32,7 +32,10 @@ import {
   getGVS,
   hullPath,
   isTestCluster,
+  roadDensityFloor,
+  octilinearBend,
   roadGeometry,
+  roadIsDrawn,
   roadWidth,
   taperedRibbon,
   usableStageWidth,
@@ -86,8 +89,14 @@ export const renderGraph = (state: AppState): void => {
 /** Opening choreography: layers sweep in left to right, then the roads. */
 const REVEAL_LAYER_MS = 110;
 const REVEAL_FADE_MS = 380;
-/** Graph node lens-color crossfade duration, matching the treemap's. */
-const GRAPH_LENS_MS = 200;
+/** Graph node lens-color ripple: total duration and the share spent staggering. */
+const GRAPH_LENS_MS = 640;
+const GRAPH_LENS_REDUCED_MS = 180;
+const GRAPH_LENS_SPREAD = 0.55;
+/** Hover focus: how long the rest of the map takes to recede. */
+const HOVER_DIM_MS = 160;
+/** Opacity of nodes outside the hovered neighborhood once the dim settles. */
+const HOVER_DIM_ALPHA = 0.16;
 
 const revealProgress = (
   gvs: GraphViewState,
@@ -127,8 +136,13 @@ interface Scene {
   kRel: number;
   reveal: ReturnType<typeof revealProgress>;
   searching: boolean;
-  /** Lens-color crossfade progress (1 = settled, no fade in flight). */
+  /** Linear lens-color fade progress (1 = settled, no fade in flight). */
   lensT: number;
+  /** Screen point the lens ripple spreads from, and its farthest reach. */
+  rippleCenter: { x: number; y: number };
+  rippleReach: number;
+  /** 0..1 progress of the hover dim settling in. */
+  dimT: number;
 }
 
 /** Direct hover context produced by the neighborhood phase. */
@@ -154,9 +168,10 @@ const forEachHull = (scene: Scene, draw: (cluster: ClusterInfo) => void): void =
 const drawHullFills = (scene: Scene): void => {
   const { state, reveal } = scene;
   const { ctx, theme } = state;
+  const hoverDim = state.graphHovered !== null ? 1 - 0.4 * scene.dimT : 1;
   forEachHull(scene, (cluster) => {
     ctx.fillStyle = theme.surface2;
-    ctx.globalAlpha = 0.9 * reveal.cluster(cluster) * (state.graphHovered !== null ? 0.6 : 1);
+    ctx.globalAlpha = 0.9 * reveal.cluster(cluster) * hoverDim;
     ctx.fill();
     ctx.globalAlpha = 1;
   });
@@ -193,11 +208,26 @@ const drawHullBorders = (scene: Scene): void => {
 };
 
 /** Roads with severity overdraw, plus the focused road highlight. */
+/**
+ * Start a new path holding a road's tapered ribbon: full width at the
+ * importer, thinning toward the imported folder (thinner still on trunks).
+ */
+const traceRoadRibbon = (
+  ctx: CanvasRenderingContext2D,
+  route: { p0: Pt; p1: Pt; p2: Pt; p3: Pt },
+  wSrc: number,
+  trunk: boolean,
+): void => {
+  ctx.beginPath();
+  const thinRatio = trunk ? 0.15 : 0.22;
+  taperedRibbon(ctx, route.p0, route.p1, route.p2, route.p3, wSrc, Math.max(0.5, wSrc * thinRatio));
+};
+
 const drawRoads = (scene: Scene): void => {
   const { state, gvs, kRel, reveal } = scene;
   const { ctx, theme } = state;
   const { transform, clusters, roads } = gvs;
-  const hoverDim = state.graphHovered !== null ? 0.35 : 1;
+  const hoverDim = state.graphHovered !== null ? 1 - 0.65 * scene.dimT : 1;
   // Roads: tapered ribbons, wide at importer, narrow at imported.
   // At fit zoom the ribbons carry the whole story, so hold a minimum
   // on-screen width and lift the alpha; both relax as the user zooms in.
@@ -208,33 +238,19 @@ const drawRoads = (scene: Scene): void => {
   const roadCounts = roads.map((road) => road.count).toSorted((left, right) => left - right);
   const trunkFloor =
     roadCounts.length > 0 ? roadCounts[Math.floor(roadCounts.length * 0.75)] : Infinity;
-  // With many clusters the pairwise roads become a mesh at fit zoom, so show
-  // only the strongest ones there and reveal the rest as the user zooms in
-  // (fully by kRel 1.6, where individual edges begin). Severity roads always
-  // show so the boundaries story is never hidden.
-  const manyClusters = clusters.length > 20;
-  const zoomRelax = Math.min(1, Math.max(0, (kRel - 1) / 0.6));
-  // The more clusters, the denser the mesh, so thin harder at fit zoom: a
-  // 30-cluster map keeps ~its top third of roads, a 90-cluster map only its
-  // top ~sixth. The floor relaxes to 0 as the user zooms in.
-  const basePct = manyClusters ? Math.min(0.85, 0.4 + clusters.length / 150) : 0;
-  const floorPct = basePct * (1 - zoomRelax);
-  const roadFloor =
-    floorPct > 0 && roadCounts.length > 0
-      ? roadCounts[Math.min(roadCounts.length - 1, Math.floor(roadCounts.length * floorPct))]
-      : 0;
+  const roadFloor = roadDensityFloor(gvs);
   // Hovering a cluster label lights up every road touching it and dims the
   // rest so the cluster's dependency fan reads at a glance.
   const litCluster = gvs.hoveredCluster;
-  for (const road of roads) {
-    const severity = road.violations > 0 || (road.bidi && road.cycleEdges > 0);
+  // Census focus: a focused road keeps its weight and the others fade to
+  // 18%, so its path reads end to end through the mesh.
+  const focusRoad = gvs.hoveredRoad ?? gvs.selectedRoad;
+  for (const [roadIndex, road] of roads.entries()) {
     const lit = litCluster !== null && (road.src === litCluster || road.dst === litCluster);
-    if (road.count < roadFloor && !severity && !lit) continue;
+    if (!roadIsDrawn(gvs, road, roadFloor)) continue;
     const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
     const wSrc = Math.max(minRoadW, roadWidth(road.count));
-    ctx.beginPath();
-    const thinRatio = road.count >= trunkFloor ? 0.15 : 0.22;
-    taperedRibbon(ctx, p0, p1, p2, p3, wSrc, Math.max(0.5, wSrc * thinRatio));
+    traceRoadRibbon(ctx, { p0, p1, p2, p3 }, wSrc, road.count >= trunkFloor);
     ctx.fillStyle = lit ? theme.blueText : theme.textLow;
     // Test-to-source imports are the least interesting overview signal
     // but the biggest bundles; keep them recessive so source roads lead.
@@ -242,6 +258,7 @@ const drawRoads = (scene: Scene): void => {
     const trunk = road.count >= trunkFloor && testDim === 1 ? 0.22 : 0;
     let alpha = (0.3 + 0.18 * roadBoost + trunk) * testDim * reveal.roads * hoverDim;
     if (litCluster !== null) alpha = lit ? Math.min(1, alpha + 0.55) : alpha * 0.18;
+    if (focusRoad !== null && roadIndex !== focusRoad) alpha *= 0.18;
     ctx.globalAlpha = alpha;
     ctx.fill();
     ctx.globalAlpha = 1;
@@ -254,7 +271,9 @@ const drawRoads = (scene: Scene): void => {
     ) {
       ctx.beginPath();
       ctx.moveTo(p0.x, p0.y + 4);
-      ctx.bezierCurveTo(p1.x, p1.y + 4, p2.x, p2.y + 4, p3.x, p3.y + 4);
+      ctx.lineTo(p1.x, p1.y + 4);
+      ctx.lineTo(p2.x, p2.y + 4);
+      ctx.lineTo(p3.x, p3.y + 4);
       if (road.violations > 0) {
         ctx.strokeStyle = theme.red;
         ctx.setLineDash([]);
@@ -273,33 +292,34 @@ const drawRoads = (scene: Scene): void => {
   // Individual severity edges from mid zoom (boundaries lens only).
   if (state.lens === "architecture" && kRel >= LOD_SEVERITY) drawSeverityEdges(state, gvs);
 
-  // Hovered / selected road highlight: bright centerline, marching when hovered.
-  const focusRoad = gvs.hoveredRoad ?? gvs.selectedRoad;
-  if (focusRoad !== null && gvs.roads[focusRoad]) {
-    const { p0, p1, p2, p3 } = roadGeometry(gvs, gvs.roads[focusRoad]);
+  // Focused road, as on the census map: a pale blue halo along its whole
+  // path, then the road itself in full ink at its own weight.
+  if (focusRoad !== null && roads[focusRoad]) {
+    const road = roads[focusRoad];
+    const { p0, p1, p2, p3 } = roadGeometry(gvs, road);
+    const wSrc = Math.max(minRoadW, roadWidth(road.count));
     ctx.beginPath();
     ctx.moveTo(p0.x, p0.y);
-    ctx.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
-    ctx.strokeStyle = theme.bg;
-    ctx.lineWidth = 5 / transform.k;
-    ctx.globalAlpha = 0.8;
+    ctx.lineTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.lineTo(p3.x, p3.y);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = theme.blueSubtle;
+    ctx.lineWidth = wSrc + 10 / transform.k;
     ctx.stroke();
-    ctx.strokeStyle = theme.blue;
-    ctx.lineWidth = 2 / transform.k;
-    ctx.globalAlpha = 1;
-    if (gvs.hoveredRoad !== null && !state.reducedMotion) {
-      ctx.setLineDash([8 / transform.k, 6 / transform.k]);
-      ctx.lineDashOffset = -((performance.now() / 40) % 14) / transform.k;
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.lineDashOffset = 0;
-    // Direction stamp: a filled dot marks the importer end, so the
+    traceRoadRibbon(ctx, { p0, p1, p2, p3 }, wSrc, road.count >= trunkFloor);
+    ctx.fillStyle = theme.textHigh;
+    ctx.fill();
+    // Direction stamp: a station ring marks the importer end, so the
     // taper's meaning is confirmable the moment a road is focused.
     ctx.beginPath();
     ctx.arc(p0.x, p0.y, 4 / transform.k, 0, Math.PI * 2);
-    ctx.fillStyle = theme.blue;
+    ctx.fillStyle = theme.bg;
     ctx.fill();
+    ctx.lineWidth = 2 / transform.k;
+    ctx.strokeStyle = theme.textHigh;
+    ctx.stroke();
   }
 };
 
@@ -308,10 +328,10 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
   const { state, gvs } = scene;
   const { ctx, theme } = state;
   const { transform, fileNodes } = gvs;
-  // Hover neighborhood. Direction is dual-encoded: files importing the
-  // hovered one arrive as solid blue ribbons (thick end at the
-  // importer, same rule as roads); its own imports leave as thin
-  // dashed blue lines. The adjacency index already carries exactly the
+  // Hover neighborhood, drawn like a focused census line: octilinear
+  // routes on a pale blue halo. Direction is dual-encoded: files importing
+  // the hovered one arrive as solid ink ribbons (thick end at the importer,
+  // same rule as roads); its own imports leave as thin dashed ink lines. The adjacency index already carries exactly the
   // hovered file's neighbors per direction: O(degree), not O(edges).
   const hovered = state.graphHovered;
   let neighbors: Set<number> | null = null;
@@ -328,21 +348,13 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
       if (!importerNode || !target) continue;
       if (importerNode.x == null || importerNode.y == null || target.x == null || target.y == null)
         continue;
-      edgeUnderlay(
-        ctx,
-        { x: importerNode.x, y: importerNode.y },
-        { x: target.x, y: target.y },
-        theme.bg,
-        4 / transform.k,
-      );
       const p0 = { x: importerNode.x, y: importerNode.y };
       const p3 = { x: target.x, y: target.y };
-      const p1 = { x: p0.x + (p3.x - p0.x) / 3, y: p0.y + (p3.y - p0.y) / 3 };
-      const p2 = { x: p0.x + ((p3.x - p0.x) * 2) / 3, y: p0.y + ((p3.y - p0.y) * 2) / 3 };
+      const bend = octilinearBend(p0, p3);
+      routeHalo(ctx, p0, bend, p3, theme.blueSubtle, 7 / transform.k);
       ctx.beginPath();
-      taperedRibbon(ctx, p0, p1, p2, p3, 2.4 / transform.k, 0.6 / transform.k);
-      ctx.fillStyle = theme.blue;
-      ctx.globalAlpha = 0.9;
+      taperedRibbon(ctx, p0, bend, bend, p3, 2.4 / transform.k, 0.8 / transform.k);
+      ctx.fillStyle = theme.textHigh;
       ctx.fill();
     }
     for (const to of state.index.importsOf[hovered]) {
@@ -353,19 +365,13 @@ const drawHoverNeighborhood = (scene: Scene): HoverContext => {
       if (!target || !importedNode) continue;
       if (target.x == null || target.y == null || importedNode.x == null || importedNode.y == null)
         continue;
-      edgeUnderlay(
-        ctx,
-        { x: target.x, y: target.y },
-        { x: importedNode.x, y: importedNode.y },
-        theme.bg,
-        4 / transform.k,
-      );
-      ctx.beginPath();
-      ctx.moveTo(target.x, target.y);
-      ctx.lineTo(importedNode.x, importedNode.y);
-      ctx.strokeStyle = theme.blue;
-      ctx.globalAlpha = 0.45;
-      ctx.lineWidth = 1.1 / transform.k;
+      const start = { x: target.x, y: target.y };
+      const end = { x: importedNode.x, y: importedNode.y };
+      const bend = octilinearBend(start, end);
+      routeHalo(ctx, start, bend, end, theme.blueSubtle, 5 / transform.k);
+      traceRoute(ctx, start, bend, end);
+      ctx.strokeStyle = theme.textHigh;
+      ctx.lineWidth = 1.2 / transform.k;
       ctx.setLineDash([4 / transform.k, 3 / transform.k]);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -404,7 +410,7 @@ const nodeAppearance = (
   // Crossfade node colors on a lens switch, matching the treemap.
   if (gvs.lensPrev && scene.lensT < 1) {
     const prev = gvs.lensPrev.get(node.fileIndex);
-    if (prev && prev !== color) color = mix(prev, color, scene.lensT);
+    if (prev && prev !== color) color = mix(prev, color, lensRipple(scene, node));
   }
   const recessive = color === theme.cellNeutral || color === theme.cellEntry;
   const matched = !searching || state.searchMatches.has(node.fileIndex);
@@ -413,7 +419,7 @@ const nodeAppearance = (
   const dimmed = hover.neighbors !== null && !isNeighbor;
 
   let alpha = recessive ? 0.82 : 0.95;
-  if (dimmed) alpha = 0.16;
+  if (dimmed) alpha += (HOVER_DIM_ALPHA - alpha) * scene.dimT;
   // Files reachable from the matched set stay legible (the combined blast
   // radius); everything else recedes.
   if (searching && !matched) alpha = Math.min(alpha, inReach ? 0.5 : 0.1);
@@ -423,12 +429,43 @@ const nodeAppearance = (
   return { color, alpha, matched, inReach, dimmed };
 };
 
+/** Lenses with few flagged files halo the medium ones as well. */
+const SPARSE_FINDINGS = 40;
+
+/**
+ * Files that get a halo, with its color: the copies of an open duplicated
+ * block, high findings, and, when findings are sparse, medium ones.
+ */
+const beaconFiles = (scene: Scene): Map<number, string> => {
+  const { state } = scene;
+  const { theme } = state;
+  const beacons = new Map<number, string>();
+  if (state.selectedClone !== null) {
+    for (const instance of state.data.clones[state.selectedClone]?.instances ?? []) {
+      beacons.set(instance.file, theme.amber);
+    }
+    return beacons;
+  }
+  if (state.lens === "overview" || state.activeAnalysis !== null) return beacons;
+  const medium: number[] = [];
+  state.data.files.forEach((file, fileIdx) => {
+    const level = lensFindingLevel(state.lens, state.index, file, fileIdx);
+    if (level === 2) beacons.set(fileIdx, theme.red);
+    else if (level === 1) medium.push(fileIdx);
+  });
+  if (beacons.size + medium.length <= SPARSE_FINDINGS) {
+    for (const fileIdx of medium) beacons.set(fileIdx, theme.amber);
+  }
+  return beacons;
+};
+
 const drawNodes = (scene: Scene, hover: HoverContext, width: number, height: number): void => {
   const { state, gvs, kRel, searching } = scene;
   const { ctx, theme, data } = state;
   const { transform, clusters, fileNodes } = gvs;
   const files = data.files;
   const { importers: hoverImporters, imports: hoverImports } = hover;
+  const beacons = beaconFiles(scene);
   // Nodes.
   for (const node of fileNodes) {
     if (!node || node.x == null || node.y == null) continue;
@@ -437,6 +474,26 @@ const drawNodes = (scene: Scene, hover: HoverContext, width: number, height: num
     if (!look) continue;
     const file = files[node.fileIndex];
     const { color, alpha, matched, inReach, dimmed } = look;
+
+    // A flagged file is often a 3 px dot; a fixed-size census interchange
+    // ring (paper fill, solid route-color ring) keeps it findable at any
+    // zoom without a glow.
+    if (!dimmed && !searching && beacons.has(node.fileIndex)) {
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.arc(
+        node.x,
+        node.y,
+        Math.max(node.radius + 4 / transform.k, 8 / transform.k),
+        0,
+        Math.PI * 2,
+      );
+      ctx.fillStyle = theme.bg;
+      ctx.fill();
+      ctx.lineWidth = 2 / transform.k;
+      ctx.strokeStyle = beacons.get(node.fileIndex) ?? color;
+      ctx.stroke();
+    }
 
     ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
@@ -451,15 +508,24 @@ const drawNodes = (scene: Scene, hover: HoverContext, width: number, height: num
     ctx.fill();
 
     // Direction ring on hover neighbors, echoing the tooltip prefixes:
-    // solid blue ring = imports the hovered file, quiet ring = imported
-    // by it.
+    // a solid ink ring = imports the hovered file, a dashed ink ring =
+    // imported by it. The hovered file itself is the interchange.
+    if (state.graphHovered === node.fileIndex) {
+      ctx.strokeStyle = theme.textHigh;
+      ctx.lineWidth = 2.5 / transform.k;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.radius * 1.3 + 3 / transform.k, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     if (hoverImporters.has(node.fileIndex) || hoverImports.has(node.fileIndex)) {
       const importer = hoverImporters.has(node.fileIndex);
-      ctx.strokeStyle = importer ? theme.blue : theme.borderStrong;
-      ctx.lineWidth = (importer ? 1.6 : 1) / transform.k;
+      ctx.strokeStyle = theme.textHigh;
+      if (!importer) ctx.setLineDash([2 / transform.k, 2 / transform.k]);
+      ctx.lineWidth = (importer ? 1.6 : 1.2) / transform.k;
       ctx.beginPath();
       ctx.arc(node.x, node.y, node.radius + 2.5 / transform.k, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     if (!dimmed) {
@@ -570,32 +636,130 @@ const drawSearchPulse = (scene: Scene): void => {
   }
 };
 
+/**
+ * Lens fade progress of one node. The new colors ripple outward from the
+ * middle of the stage, so a lens switch spreads through the graph the way
+ * the treemap's sweep crosses the map. Reduced motion fades uniformly.
+ */
+const lensRipple = (scene: Scene, node: FileNode): number => {
+  if (scene.state.reducedMotion) return easeOut(scene.lensT);
+  const { transform } = scene.gvs;
+  const sx = (node.x ?? 0) * transform.k + transform.x;
+  const sy = (node.y ?? 0) * transform.k + transform.y;
+  const dist = Math.hypot(sx - scene.rippleCenter.x, sy - scene.rippleCenter.y);
+  const delay = Math.min(1, dist / scene.rippleReach) * GRAPH_LENS_SPREAD;
+  return easeOut(Math.min(1, Math.max(0, (scene.lensT - delay) / (1 - GRAPH_LENS_SPREAD))));
+};
+
+/** Lens crossfade progress; clears the previous lens once the fade ends. */
+const lensFadeProgress = (state: AppState, gvs: GraphViewState, now: number): number => {
+  const lensMs = state.reducedMotion ? GRAPH_LENS_REDUCED_MS : GRAPH_LENS_MS;
+  const lensT = gvs.lensFadeAt <= 0 ? 1 : Math.min(1, (now - gvs.lensFadeAt) / lensMs);
+  if (lensT >= 1) {
+    gvs.lensPrev = null;
+    gvs.lensFadeAt = 0;
+  }
+  return lensT;
+};
+
+/**
+ * Hover dim progress. The hover dim eases in over a beat so the
+ * neighborhood surfaces instead of snapping; leaving a node restores the
+ * map at once.
+ */
+const hoverDimProgress = (state: AppState, gvs: GraphViewState, now: number): number => {
+  const hovering = state.graphHovered ?? null;
+  if (hovering !== gvs.hoverFadeFile) {
+    const fromNothing = gvs.hoverFadeFile === null;
+    gvs.hoverFadeFile = hovering;
+    // Moving between nodes keeps the map dimmed; only a fresh hover fades.
+    if (fromNothing) gvs.hoverFadeAt = now;
+  }
+  if (state.reducedMotion || hovering === null) return 1;
+  return easeOut(Math.min(1, (now - gvs.hoverFadeAt) / HOVER_DIM_MS));
+};
+
+/** Queue one more graph frame, replacing any frame already queued. */
+const scheduleGraphFrame = (state: AppState, gvs: GraphViewState): void => {
+  cancelAnimationFrame(gvs.raf);
+  gvs.raf = requestAnimationFrame(() => {
+    if (state.view === "graph") renderGraph(state);
+  });
+};
+
+/** Transient notice (fades after 1.8s). */
+const drawNotice = (state: AppState, gvs: GraphViewState, width: number): void => {
+  if (gvs.notice === "") return;
+  const age = performance.now() - gvs.noticeAt;
+  if (age >= 1800) {
+    gvs.notice = "";
+    return;
+  }
+  const { ctx, theme } = state;
+  ctx.font = FONT_SMALL;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = theme.amberText;
+  ctx.globalAlpha = age > 1400 ? 1 - (age - 1400) / 400 : 1;
+  ctx.fillText(gvs.notice, usableStageWidth(state, width) / 2, 28);
+  ctx.globalAlpha = 1;
+  scheduleGraphFrame(state, gvs);
+};
+
+/** True while some part of the overview still animates. */
+const overviewAnimating = (scene: Scene): boolean => {
+  const { state, gvs } = scene;
+  const motion = !state.reducedMotion && (gvs.hoveredRoad !== null || gvs.pulseFile !== null);
+  return motion || scene.lensT < 1 || scene.dimT < 1 || scene.reveal.progress < 1 || gvs.showIntro;
+};
+
+/** Build the per-frame scene of the overview. */
+const buildScene = (state: AppState, gvs: GraphViewState, width: number, height: number): Scene => {
+  const now = performance.now();
+  const usableW = usableStageWidth(state, width);
+  return {
+    state,
+    gvs,
+    kRel: gvs.transform.k / gvs.fitK,
+    reveal: revealProgress(gvs, state.reducedMotion),
+    searching: state.search.trim() !== "",
+    lensT: lensFadeProgress(state, gvs, now),
+    rippleCenter: { x: usableW / 2, y: height / 2 },
+    rippleReach: Math.hypot(usableW / 2, height / 2),
+    dimT: hoverDimProgress(state, gvs, now),
+  };
+};
+
+/**
+ * Labels join once the roads have flowed in (their internal alpha
+ * handling would fight a global fade). While a file is hovered the
+ * neighborhood labels own the foreground instead.
+ */
+const drawOverviewLabels = (
+  scene: Scene,
+  hover: HoverContext,
+  width: number,
+  height: number,
+): void => {
+  const { state, gvs } = scene;
+  if (scene.reveal.labels > 0.35 && hover.hovered === null) {
+    drawRoadLabels(state, gvs);
+    drawClusterLabels(state, gvs);
+  }
+  if (hover.hovered !== null && hover.neighbors !== null) {
+    drawHoverLabels(state, gvs, hover.hovered, hover.importers, hover.imports, width, height);
+  }
+};
+
 const renderOverview = (
   state: AppState,
   gvs: GraphViewState,
   width: number,
   height: number,
 ): void => {
-  const { ctx, theme } = state;
+  const { ctx } = state;
   const { transform } = gvs;
-  const kRel = transform.k / gvs.fitK;
-  const reveal = revealProgress(gvs, state.reducedMotion);
-  const lensT =
-    state.reducedMotion || gvs.lensFadeAt <= 0
-      ? 1
-      : easeOut(Math.min(1, (performance.now() - gvs.lensFadeAt) / GRAPH_LENS_MS));
-  if (lensT >= 1) {
-    gvs.lensPrev = null;
-    gvs.lensFadeAt = 0;
-  }
-  const scene: Scene = {
-    state,
-    gvs,
-    kRel,
-    reveal,
-    searching: state.search.trim() !== "",
-    lensT,
-  };
+  const scene = buildScene(state, gvs, width, height);
 
   ctx.save();
   ctx.translate(transform.x, transform.y);
@@ -615,70 +779,40 @@ const renderOverview = (
 
   ctx.restore();
 
-  // Labels join once the roads have flowed in (their internal alpha
-  // handling would fight a global fade). While a file is hovered the
-  // neighborhood labels own the foreground instead.
-  if (reveal.labels > 0.35 && hover.hovered === null) {
-    drawRoadLabels(state, gvs);
-    drawClusterLabels(state, gvs);
-  }
-  if (hover.hovered !== null && hover.neighbors !== null) {
-    drawHoverLabels(state, gvs, hover.hovered, hover.importers, hover.imports, width, height);
-  }
+  drawOverviewLabels(scene, hover, width, height);
   drawCanvasLegend(state, width, height);
   drawPathTrace(state, gvs, width, height);
 
   drawMinimap(state, gvs, width, height);
 
-  // Transient notice (fades after 1.8s).
-  if (gvs.notice !== "") {
-    const age = performance.now() - gvs.noticeAt;
-    if (age < 1800) {
-      ctx.font = FONT_SMALL;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = theme.amberText;
-      ctx.globalAlpha = age > 1400 ? 1 - (age - 1400) / 400 : 1;
-      ctx.fillText(gvs.notice, usableStageWidth(state, width) / 2, 28);
-      ctx.globalAlpha = 1;
-      cancelAnimationFrame(gvs.raf);
-      gvs.raf = requestAnimationFrame(() => {
-        if (state.view === "graph") renderGraph(state);
-      });
-    } else {
-      gvs.notice = "";
-    }
-  }
+  drawNotice(state, gvs, width);
 
   drawIntroCaptions(state, gvs, width);
 
   // Motion frames while something animates.
-  const animating =
-    (gvs.hoveredRoad !== null && !state.reducedMotion) ||
-    (gvs.pulseFile !== null && !state.reducedMotion) ||
-    scene.lensT < 1 ||
-    reveal.progress < 1 ||
-    gvs.showIntro;
-  if (animating) {
-    cancelAnimationFrame(gvs.raf);
-    gvs.raf = requestAnimationFrame(() => {
-      if (state.view === "graph") renderGraph(state);
-    });
-  }
+  if (overviewAnimating(scene)) scheduleGraphFrame(state, gvs);
 };
-/** Wide background stroke behind a highlighted edge so it pops. */
-const edgeUnderlay = (
-  ctx: CanvasRenderingContext2D,
-  start: Pt,
-  end: Pt,
-  bg: string,
-  width: number,
-): void => {
+/** Trace the census route start → bend → end into a new path. */
+const traceRoute = (ctx: CanvasRenderingContext2D, start: Pt, bend: Pt, end: Pt): void => {
   ctx.beginPath();
   ctx.moveTo(start.x, start.y);
+  ctx.lineTo(bend.x, bend.y);
   ctx.lineTo(end.x, end.y);
-  ctx.strokeStyle = bg;
-  ctx.globalAlpha = 0.9;
+};
+
+/** The census focus halo: a pale blue band along a whole route. */
+const routeHalo = (
+  ctx: CanvasRenderingContext2D,
+  start: Pt,
+  bend: Pt,
+  end: Pt,
+  color: string,
+  width: number,
+): void => {
+  traceRoute(ctx, start, bend, end);
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 1;
   ctx.lineWidth = width;
   ctx.stroke();
 };
