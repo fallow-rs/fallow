@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The agent gate audits the tree of the session, also in a nested git
+  worktree.** The hook process can start in a directory that is not the
+  session directory. For example, a session in a worktree below the main
+  checkout can get a hook process in the main checkout. The gate then audited
+  the main checkout: findings there blocked a clean commit in the worktree, and
+  findings in the worktree did not block. Now the generated `fallow-gate.sh`
+  reads the session directory from the `cwd` field of the hook input. It walks
+  up from there to the nearest directory that holds the gate script and stops
+  at the first `.git` entry, the same rule as the handler. When it finds no
+  script, for example with the user-scope gate in `$HOME`, it keeps the
+  directory of the hook process when that directory is in the git work tree of
+  the session, as before. Else it audits the git top level of the session
+  directory, or the session directory outside git. It never audits `$HOME`.
+  When the hook input has no usable `cwd`, the gate audits the directory of the
+  hook process, as before. Run `fallow hooks install --target agent` again to
+  update an installed gate script. Run it in the checkout where the hook
+  process starts (for a nested worktree, the main checkout), and in each
+  worktree that tracks its own copy.
 - **A warm run no longer reuses the analysis of the previous content of a
   file.** The parse cache, the duplication token cache and the kept modules of
   a long-lived session trusted a file when its modification time, change time
