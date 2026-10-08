@@ -230,6 +230,10 @@ after every gate set the exit code.
     hidden finding counts as matched in `baseline_staleness`, and
     `baselines prune` keeps it. A baseline saved while findings are hidden
     does not contain them.
+  - `fallow_engine::health::shared_parse_data_from_artifacts` restores the
+    hidden findings before the health pipeline reads the dead-code results.
+    The vital signs, the file scores and the score therefore count them in
+    bare `fallow` and in standalone `health` alike.
   - `--show-cascade`, the `showCascade` config key and the MCP and Node
     `show_cascade` option turn the filter off.
 - `dead-code --finding-id <id>` (repeatable or comma-separated) reports only

@@ -117,6 +117,11 @@ pub fn shared_parse_data_from_artifacts(
         return None;
     };
     let script_used_packages: FxHashSet<String> = script_used_packages.into_iter().collect();
+    // The vital signs and file scores measure the code, not the report, so
+    // they count the findings that the cascade filter hid. Standalone
+    // `health` runs no rule pass and sees the same set.
+    let mut results = results.clone();
+    results.restore_cascade_findings();
     let analysis_output = graph.map(|graph| DeadCodeAnalysisArtifacts {
         results: results.clone(),
         timings: None,
@@ -130,7 +135,7 @@ pub fn shared_parse_data_from_artifacts(
     Some(HealthSharedParseData {
         files,
         modules,
-        dead_code_results: Some(results.clone()),
+        dead_code_results: Some(results),
         workspaces,
         analysis_output,
     })

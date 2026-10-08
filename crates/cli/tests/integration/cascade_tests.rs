@@ -235,6 +235,42 @@ fn sarif_lists_only_the_reported_findings() {
     }));
 }
 
+/// The vital signs measure the code, so they count the hidden findings. The
+/// combined run reuses the dead-code results and must give the value of the
+/// standalone `health` command.
+#[test]
+fn vital_signs_count_hidden_exports_in_every_command() {
+    let root = super::common::fixture_path(FIXTURE);
+    let standalone = parse_json(&run_fallow_in_root(
+        "health",
+        &root,
+        &["--format", "json", "--quiet"],
+    ));
+    let standalone = &standalone["vital_signs"];
+    assert_eq!(standalone["counts"]["dead_exports"], 5);
+
+    for extra in [&[][..], &["--show-cascade"][..]] {
+        let mut cmd_args = vec![
+            "--root",
+            root.to_str().unwrap(),
+            "--format",
+            "json",
+            "--quiet",
+        ];
+        cmd_args.extend_from_slice(extra);
+        let combined = parse_json(&super::common::run_fallow_raw(&cmd_args));
+        let combined = &combined["health"]["vital_signs"];
+        assert_eq!(
+            combined["dead_export_pct"], standalone["dead_export_pct"],
+            "{extra:?}"
+        );
+        assert_eq!(
+            combined["counts"]["dead_exports"], standalone["counts"]["dead_exports"],
+            "{extra:?}"
+        );
+    }
+}
+
 /// An issue-type filter without unused files removes the file from the
 /// report, so the findings in it must stay.
 #[test]

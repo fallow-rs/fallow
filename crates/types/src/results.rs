@@ -1308,6 +1308,22 @@ impl AnalysisResults {
         self.cascade.hidden.extend(hidden);
     }
 
+    /// Move the findings that [`Self::hide_cascade_findings`] removed back
+    /// into the report and reset [`Self::cascade_hidden`].
+    ///
+    /// Metrics that measure the code, such as the vital signs, read the
+    /// result set after this call, so their value does not depend on
+    /// `showCascade`.
+    pub fn restore_cascade_findings(&mut self) {
+        let hidden = std::mem::take(&mut self.cascade.hidden);
+        self.unused_exports.extend(hidden.unused_exports);
+        self.unused_types.extend(hidden.unused_types);
+        self.unused_enum_members.extend(hidden.unused_enum_members);
+        self.unused_class_members
+            .extend(hidden.unused_class_members);
+        self.cascade_hidden = 0;
+    }
+
     /// Remove dead-code findings whose complete, non-empty source-owner set
     /// matches `is_ignored`.
     ///
