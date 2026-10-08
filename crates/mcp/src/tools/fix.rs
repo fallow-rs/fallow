@@ -30,6 +30,9 @@ pub fn build_fix_preview_args(params: &FixParams) -> Vec<String> {
     if params.no_create_config == Some(true) {
         args.push("--no-create-config".to_string());
     }
+    if params.show_cascade == Some(true) {
+        args.push("--show-cascade".to_string());
+    }
     push_global(
         &mut args,
         params.root.as_deref(),
@@ -53,6 +56,9 @@ pub fn build_fix_apply_args(params: &FixParams) -> Vec<String> {
     ];
     if params.no_create_config == Some(true) {
         args.push("--no-create-config".to_string());
+    }
+    if params.show_cascade == Some(true) {
+        args.push("--show-cascade".to_string());
     }
     push_global(
         &mut args,

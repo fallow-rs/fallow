@@ -661,6 +661,11 @@ pub struct FixParams {
     /// top-level config file would surprise the user.
     pub no_create_config: Option<bool>,
 
+    /// Also fix the unused exports, types, class members and enum members
+    /// of unused files. By default `fix` skips them, as the report hides
+    /// them. Passed through to the CLI's `--show-cascade` flag.
+    pub show_cascade: Option<bool>,
+
     /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 

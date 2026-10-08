@@ -173,6 +173,27 @@ fn fix_apply_args_production_false_is_omitted() {
 }
 
 #[test]
+fn fix_args_pass_show_cascade_only_when_true() {
+    for show_cascade in [None, Some(false), Some(true)] {
+        let params = FixParams {
+            show_cascade,
+            ..Default::default()
+        };
+        let expected = show_cascade == Some(true);
+        for args in [
+            build_fix_preview_args(&params),
+            build_fix_apply_args(&params),
+        ] {
+            assert_eq!(
+                args.contains(&"--show-cascade".to_string()),
+                expected,
+                "{show_cascade:?}: {args:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn health_args_boolean_flags_false_are_omitted() {
     let params = HealthParams {
         complexity: Some(false),
