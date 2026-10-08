@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `new Child().start()` was reported as an unused class member. Fallow moved an
   access one level for each pass over an unordered map. It now repeats the pass
   until nothing changes.
+- **GraphQL Codegen configs with other names or `.cjs` now count.** Fallow reads
+  `codegen*.{ts,js,cjs,mjs}` and uses the `documents` globs of each config as
+  entry points. The codegen run reads those files, so no import reaches them.
+  On a large Nx monorepo this removed about 300 false unused files.
 
 ## [3.32.0] - 2026-10-06
 
