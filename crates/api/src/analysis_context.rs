@@ -20,8 +20,13 @@ type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 /// Resolved common programmatic analysis context.
 ///
 /// This owns validation, root/config/diff resolution, production overrides,
-/// workspace scope, and the per-call thread pool shared by programmatic
+/// the workspace selection, and the per-call thread pool shared by programmatic
 /// analysis families. API runtimes and engine-backed runners use it directly.
+///
+/// The workspace selection resolves against the workspaces of the analysis
+/// session (see [`workspace_roots_for_session`]). These workspaces include the
+/// `workspaces.patterns` of the loaded config, so the context does not resolve
+/// the selection before the config loads.
 pub struct ProgrammaticAnalysisContext {
     pub(crate) root: PathBuf,
     pub(crate) config_path: Option<PathBuf>,
@@ -55,7 +60,6 @@ pub struct ProgrammaticAnalysisContext {
     pub(crate) changed_since_analyzed: Mutex<Option<FxHashSet<PathBuf>>>,
     pub(crate) workspace: Option<Vec<String>>,
     pub(crate) changed_workspaces: Option<String>,
-    pub(crate) workspace_roots: Option<Vec<PathBuf>>,
     pub(crate) explain: bool,
     pub(crate) cancellation: Option<Arc<AtomicBool>>,
 }
@@ -68,19 +72,6 @@ pub struct ProgrammaticAnalysisContext {
 /// counts, workspace scopes, or explicit diff files.
 pub fn resolve_programmatic_analysis_context(
     options: &AnalysisOptions,
-) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
-    resolve_programmatic_analysis_context_inner(options, true)
-}
-
-pub fn resolve_programmatic_analysis_context_deferred_workspace(
-    options: &AnalysisOptions,
-) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
-    resolve_programmatic_analysis_context_inner(options, false)
-}
-
-fn resolve_programmatic_analysis_context_inner(
-    options: &AnalysisOptions,
-    resolve_workspace: bool,
 ) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
     validate_analysis_option_shape(options)?;
     let root = resolve_analysis_root(options.root.as_deref())?;
@@ -98,15 +89,6 @@ fn resolve_programmatic_analysis_context_inner(
     let changed_since_files = OnceLock::new();
     let changed_since =
         resolve_changed_since(options, &root, &changed_since_request, &changed_since_files);
-    let workspace_roots = if resolve_workspace {
-        resolve_workspace_scope(
-            &root,
-            options.workspace.as_deref(),
-            options.changed_workspaces.as_deref(),
-        )?
-    } else {
-        None
-    };
     Ok(ProgrammaticAnalysisContext {
         root,
         config_path: options.config_path.clone(),
@@ -128,7 +110,6 @@ fn resolve_programmatic_analysis_context_inner(
         changed_since_analyzed: Mutex::new(None),
         workspace: options.workspace.clone(),
         changed_workspaces: options.changed_workspaces.clone(),
-        workspace_roots,
         explain: options.explain,
         cancellation: options.cancellation.clone(),
     })
@@ -632,6 +613,16 @@ pub fn changed_files_for_run(
         })
 }
 
+/// Check the workspace selection of the call against the session workspaces,
+/// for a route that reads the whole project but still rejects a selection
+/// that names no workspace.
+pub fn validate_workspace_selection(
+    resolved: &ProgrammaticAnalysisContext,
+    workspaces: &[WorkspaceInfo],
+) -> ProgrammaticResult<()> {
+    workspace_roots_for_session(resolved, workspaces).map(|_| ())
+}
+
 pub fn workspace_roots_for_session(
     resolved: &ProgrammaticAnalysisContext,
     workspaces: &[WorkspaceInfo],
@@ -642,19 +633,6 @@ pub fn workspace_roots_for_session(
         resolved.changed_workspaces.as_deref(),
         workspaces,
     )
-}
-
-fn resolve_workspace_scope(
-    root: &Path,
-    workspace: Option<&[String]>,
-    changed_workspaces: Option<&str>,
-) -> ProgrammaticResult<Option<Vec<PathBuf>>> {
-    fallow_engine::workspace_scope::resolve_workspace_scope_roots_for_project(
-        root,
-        workspace,
-        changed_workspaces,
-    )
-    .map_err(map_workspace_scope_error)
 }
 
 fn resolve_workspace_scope_from_workspaces(

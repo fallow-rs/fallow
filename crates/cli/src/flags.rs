@@ -187,7 +187,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         return emit_error("no files discovered", 2, opts.output);
     }
 
-    let scope = match resolve_flag_scope(opts) {
+    let scope = match resolve_flag_scope(opts, &session.config().workspace_patterns) {
         Ok(scope) => scope,
         Err(code) => return code,
     };
@@ -562,7 +562,10 @@ impl FlagScope {
     }
 }
 
-fn resolve_flag_scope(opts: &FlagsOptions<'_>) -> Result<FlagScope, ExitCode> {
+fn resolve_flag_scope(
+    opts: &FlagsOptions<'_>,
+    workspace_patterns: &[String],
+) -> Result<FlagScope, ExitCode> {
     // The recording resolver, not the printing one: an unresolvable ref widens
     // this report to the whole project, and the stderr line it prints is gone
     // under `--quiet` (issue #2734). The printed body is identical either way.
@@ -573,7 +576,7 @@ fn resolve_flag_scope(opts: &FlagsOptions<'_>) -> Result<FlagScope, ExitCode> {
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
-        &[],
+        workspace_patterns,
         opts.output,
     )?;
     Ok(FlagScope {

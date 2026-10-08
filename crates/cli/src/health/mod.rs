@@ -97,6 +97,7 @@ fn build_health_group_resolver(
         opts.group_by,
         opts.root,
         config.codeowners.as_deref(),
+        &config.workspace_patterns,
         opts.output,
     )
 }

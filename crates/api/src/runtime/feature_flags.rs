@@ -16,8 +16,8 @@ use fallow_types::results::FeatureFlag;
 use crate::{
     FeatureFlagsOptions, FeatureFlagsProgrammaticOutput, ProgrammaticError,
     analysis_context::{
-        ProgrammaticAnalysisContext, changed_files_for_run,
-        resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
+        ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
+        workspace_roots_for_session,
     },
 };
 
@@ -35,7 +35,7 @@ use super::ProgrammaticResult;
 pub fn run_feature_flags(
     options: &FeatureFlagsOptions,
 ) -> ProgrammaticResult<FeatureFlagsProgrammaticOutput> {
-    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| run_feature_flags_inner(options, &resolved))
 }
 

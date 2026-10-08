@@ -44,8 +44,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::analysis_context::{
-    ProgrammaticAnalysisContext, changed_files_for_run,
-    resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
+    ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
+    workspace_roots_for_session,
 };
 use crate::similar_code::{
     self, EmbeddingInput, EmbeddingResult, ProviderError, ReadyProvider, SimilarCodeProviderStatus,
@@ -116,7 +116,7 @@ impl PhaseCompleteness {
 /// setup, source discovery failures, or unusable provider output.
 pub fn run_similar_code(options: &SimilarCodeOptions) -> ProgrammaticResult<SimilarCodeOutput> {
     validate_options(options)?;
-    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     let provider = options
         .adapter_provider_path
         .as_deref()
@@ -208,7 +208,7 @@ pub fn inspect_similar_code(
 ) -> ProgrammaticResult<SimilarCodeInspectOutput> {
     let started = Instant::now();
     let candidate = options.snapshot.candidate.clone();
-    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     let root = resolved.root().to_path_buf();
     let mut left = inspect_side(&root, &candidate.left)?;
     let mut right = inspect_side(&root, &candidate.right)?;
@@ -2129,7 +2129,7 @@ mod tests {
         status: &SimilarCodeProviderStatus,
         embedder: &mut FixtureEmbedder,
     ) -> ProgrammaticResult<SimilarCodeOutput> {
-        let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
+        let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
         resolved
             .install(|| run_similar_code_inner_with_embedder(options, &resolved, status, embedder))
     }
@@ -2494,12 +2494,11 @@ mod tests {
     #[test]
     fn similar_code_scope_requires_one_endpoint_to_match_every_active_filter() {
         let root = tempfile::tempdir().unwrap();
-        let resolved =
-            resolve_programmatic_analysis_context_deferred_workspace(&crate::AnalysisOptions {
-                root: Some(root.path().to_path_buf()),
-                ..crate::AnalysisOptions::default()
-            })
-            .unwrap();
+        let resolved = resolve_programmatic_analysis_context(&crate::AnalysisOptions {
+            root: Some(root.path().to_path_buf()),
+            ..crate::AnalysisOptions::default()
+        })
+        .unwrap();
         let options = SimilarCodeOptions {
             files: vec![PathBuf::from("src/file-scoped.ts")],
             ..SimilarCodeOptions::default()

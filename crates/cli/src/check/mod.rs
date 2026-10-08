@@ -2027,6 +2027,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         opts.group_by,
         opts.root,
         result.config.codeowners.as_deref(),
+        &result.config.workspace_patterns,
         opts.output,
     ) {
         Ok(r) => r,

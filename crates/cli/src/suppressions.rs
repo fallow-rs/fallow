@@ -61,7 +61,9 @@ pub fn run_suppressions(opts: &SuppressionsOptions<'_>) -> ExitCode {
     };
 
     let mut active = results.active_suppressions;
-    if let Err(code) = apply_suppression_scopes(&mut active, opts) {
+    if let Err(code) =
+        apply_suppression_scopes(&mut active, opts, &session.config().workspace_patterns)
+    {
         return code;
     }
     crate::requests::measure_changed_since_scope(session.files());
@@ -121,6 +123,7 @@ fn load_suppressions_config(opts: &SuppressionsOptions<'_>) -> Result<ResolvedCo
 fn apply_suppression_scopes(
     active: &mut Vec<ActiveSuppression>,
     opts: &SuppressionsOptions<'_>,
+    workspace_patterns: &[String],
 ) -> Result<(), ExitCode> {
     // The recording resolver, for the same reason `fallow flags` uses it: an
     // unresolvable ref widens this inventory to the whole project, and only the
@@ -135,7 +138,7 @@ fn apply_suppression_scopes(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
-        &[],
+        workspace_patterns,
         opts.output,
     )?;
     if let Some(ref ws_roots) = ws_scope {

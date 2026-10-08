@@ -600,3 +600,42 @@ fn trace_does_not_read_the_package_map() {
     .expect_err("a scoped run rejects the malformed ref");
     assert_eq!(err.code.as_deref(), Some("FALLOW_PACKAGE_BASELINE_FAILED"));
 }
+
+/// The fixture declares its workspaces only through `workspaces.patterns`.
+fn config_patterns_fixture() -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../../tests/fixtures/workspaces-config-patterns")
+}
+
+fn select_config_pattern_workspace() -> AnalysisOptions {
+    AnalysisOptions {
+        workspace: Some(vec!["@test/one".to_string()]),
+        ..analysis(&config_patterns_fixture())
+    }
+}
+
+#[test]
+fn programmatic_health_selects_a_workspace_declared_by_config_patterns() {
+    let output = fallow_api::run_health(&fallow_api::ComplexityOptions {
+        analysis: select_config_pattern_workspace(),
+        complexity: true,
+        ..fallow_api::ComplexityOptions::default()
+    })
+    .and_then(fallow_api::serialize_health_programmatic_json)
+    .expect("`workspace` finds the workspace that the config declares");
+    assert_eq!(output["summary"]["files_analyzed"], 1);
+}
+
+#[test]
+fn programmatic_project_info_accepts_a_workspace_declared_by_config_patterns() {
+    fallow_api::run_project_info(&fallow_api::ProjectInfoOptions {
+        analysis: select_config_pattern_workspace(),
+        entry_points: false,
+        files: true,
+        plugins: false,
+        boundaries: false,
+    })
+    .expect("`workspace` finds the workspace that the config declares");
+}

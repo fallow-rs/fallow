@@ -17,8 +17,8 @@ use crate::{
     DupesReportPayload, DuplicationGroup, DuplicationMode, DuplicationOptions,
     DuplicationProgrammaticOutput, ProgrammaticError,
     analysis_context::{
-        ProgrammaticAnalysisContext, changed_files_for_run,
-        resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
+        ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
+        workspace_roots_for_session,
     },
     next_steps::{audit_changed_applicable, setup_pointer_applicable, suggestions_enabled},
 };
@@ -34,7 +34,7 @@ use super::ProgrammaticResult;
 pub fn run_duplication(
     options: &DuplicationOptions,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
-    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     run_duplication_in_context(options, &resolved)
 }
 

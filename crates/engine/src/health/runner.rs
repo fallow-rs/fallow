@@ -3,7 +3,7 @@
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 
-use fallow_config::ProductionAnalysis;
+use fallow_config::{ProductionAnalysis, WorkspaceInfo};
 use fallow_types::output_format::OutputFormat;
 use rustc_hash::FxHashSet;
 
@@ -20,40 +20,81 @@ use super::{
     NoGroupResolver, RuntimeCoverageOptions, RuntimeCoverageSeamInput, validate_health_churn_file,
 };
 
-/// Run health analysis without a presentation grouping resolver.
+/// A loaded project session for a health run without a presentation grouping
+/// resolver.
 ///
-/// This runner owns config loading, discovery, parser-cache use, parsing, and
+/// The runner owns config loading, discovery, parser-cache use, parsing, and
 /// command-neutral health execution for API and NAPI callers. CLI-only concerns
 /// still stay outside this path: runtime coverage sidecar execution, grouping
 /// resolver construction, process-global telemetry, and error rendering.
 ///
-/// # Errors
-///
-/// Returns the health command exit code for invalid inputs or analysis failures.
-pub fn run_ungrouped_health(
+/// The load and the run are two steps, so that a caller can resolve its
+/// workspace scope from the discovered workspaces. These workspaces include
+/// the `workspaces.patterns` of the loaded config.
+pub struct UngroupedHealthSession {
+    session: AnalysisSession,
+    config_ms: f64,
+}
+
+impl UngroupedHealthSession {
+    /// Load the project config and open the analysis session.
+    ///
+    /// # Errors
+    ///
+    /// Returns the health command exit code for invalid inputs or a config
+    /// that does not load.
+    pub fn load(options: &HealthExecutionOptions<'_>) -> Result<Self, HealthError> {
+        validate_health_churn_file(options)?;
+
+        let start = Instant::now();
+        let project_config = config_for_project_analysis(
+            options.root,
+            options.config_path.as_deref(),
+            ProjectConfigOptions {
+                output: OutputFormat::Human,
+                no_cache: options.no_cache,
+                threads: options.threads,
+                production_override: options.production_override,
+                quiet: true,
+                analysis: ProductionAnalysis::Health,
+                allow_remote_extends: options.allow_remote_extends,
+            },
+        )
+        .map_err(|_| HealthError::message("failed to load health project config", 2))?;
+        let config_ms = start.elapsed().as_secs_f64() * 1000.0;
+        Ok(Self {
+            session: AnalysisSession::from_config(project_config),
+            config_ms,
+        })
+    }
+
+    /// The workspaces that the session discovered.
+    #[must_use]
+    pub fn workspaces(&self) -> &[WorkspaceInfo] {
+        self.session.workspaces()
+    }
+
+    /// Run the health analysis on the loaded session.
+    ///
+    /// # Errors
+    ///
+    /// Returns the health command exit code for analysis failures.
+    pub fn run(
+        self,
+        options: &HealthExecutionOptions<'_>,
+        ws_roots: Option<Vec<PathBuf>>,
+    ) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
+        let Self { session, config_ms } = self;
+        run_ungrouped_health_on_session(options, ws_roots, &session, config_ms)
+    }
+}
+
+fn run_ungrouped_health_on_session(
     options: &HealthExecutionOptions<'_>,
     ws_roots: Option<Vec<PathBuf>>,
+    session: &AnalysisSession,
+    config_ms: f64,
 ) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
-    validate_health_churn_file(options)?;
-
-    let start = Instant::now();
-    let project_config = config_for_project_analysis(
-        options.root,
-        options.config_path.as_deref(),
-        ProjectConfigOptions {
-            output: OutputFormat::Human,
-            no_cache: options.no_cache,
-            threads: options.threads,
-            production_override: options.production_override,
-            quiet: true,
-            analysis: ProductionAnalysis::Health,
-            allow_remote_extends: options.allow_remote_extends,
-        },
-    )
-    .map_err(|_| HealthError::message("failed to load health project config", 2))?;
-    let config_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-    let session = AnalysisSession::from_config(project_config);
     let changed_files = options
         .changed_since
         .and_then(|git_ref| session.changed_files_since(git_ref).ok());

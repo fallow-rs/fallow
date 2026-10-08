@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_context};
+use crate::analysis_context::validate_workspace_selection;
 
 struct TraceArtifacts {
     graph: fallow_engine::module_graph::RetainedModuleGraph,
@@ -275,6 +276,7 @@ pub fn run_trace_clone(
     resolved.install(|| {
         resolved.ensure_not_cancelled("config load and file discovery")?;
         let session = duplication::load_duplication_session(&options.duplication, &resolved)?;
+        validate_workspace_selection(&resolved, session.workspaces())?;
         resolved.ensure_not_cancelled("duplication detection")?;
         let dupes_config =
             duplication::build_dupes_config(&options.duplication, &session.config().duplicates);
@@ -517,10 +519,12 @@ fn validate_trace_clone_target(target: &TraceCloneTarget) -> ProgrammaticResult<
 fn load_trace_session(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    super::dead_code::load_dead_code_session(
+    let session = super::dead_code::load_dead_code_session(
         &super::dead_code::default_dead_code_options_for_context(resolved),
         resolved,
-    )
+    )?;
+    validate_workspace_selection(resolved, session.workspaces())?;
+    Ok(session)
 }
 
 fn trace_artifacts(session: &AnalysisSession) -> ProgrammaticResult<TraceArtifacts> {

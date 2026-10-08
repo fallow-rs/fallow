@@ -34,13 +34,19 @@ pub(super) fn print_combined_report(
     health_result: Option<&HealthResult>,
     total_elapsed: std::time::Duration,
 ) -> Result<u8, ExitCode> {
-    let codeowners_cfg = check_result
+    let config = check_result
         .map(|r| &r.config)
         .or_else(|| health_result.map(|r| &r.config))
-        .or_else(|| dupes_result.map(|r| &r.config))
-        .and_then(|c| c.codeowners.as_deref());
-    let resolver =
-        crate::build_ownership_resolver(opts.group_by, opts.root, codeowners_cfg, opts.output)?;
+        .or_else(|| dupes_result.map(|r| &r.config));
+    let codeowners_cfg = config.and_then(|c| c.codeowners.as_deref());
+    let workspace_patterns = config.map_or(&[][..], |c| c.workspace_patterns.as_slice());
+    let resolver = crate::build_ownership_resolver(
+        opts.group_by,
+        opts.root,
+        codeowners_cfg,
+        workspace_patterns,
+        opts.output,
+    )?;
 
     if let Some(code) = print_machine_combined_report(
         opts,

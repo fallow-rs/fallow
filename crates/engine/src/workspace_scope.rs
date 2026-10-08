@@ -84,22 +84,6 @@ pub fn resolve_workspace_scope_roots(
     }
 }
 
-/// Resolve either explicit or changed workspace scope by discovering workspace
-/// metadata first.
-///
-/// # Errors
-///
-/// Returns a typed scope error when the selection is invalid, no workspaces are
-/// available, or git cannot resolve changed files.
-pub fn resolve_workspace_scope_roots_for_project(
-    root: &Path,
-    workspace: Option<&[String]>,
-    changed_workspaces: Option<&str>,
-) -> Result<Option<Vec<PathBuf>>, WorkspaceScopeError> {
-    let workspaces = crate::discover::discover_workspace_packages(root);
-    resolve_workspace_scope_roots(root, workspace, changed_workspaces, &workspaces)
-}
-
 /// Resolve explicit workspace filters against known workspace metadata.
 ///
 /// # Errors

@@ -1004,7 +1004,7 @@ fn session_backed_api_runtimes_defer_workspace_scope_to_session() {
     ] {
         let source = read_source_without_line_comments(source_path).expect("read runtime source");
         assert!(
-            source.contains("resolve_programmatic_analysis_context_deferred_workspace"),
+            source.contains("resolve_programmatic_analysis_context"),
             "{source_path} must defer workspace scope until an AnalysisSession has workspace metadata"
         );
     }
@@ -2140,12 +2140,12 @@ fn api_and_cli_workspace_scope_resolution_routes_through_engine() {
         );
         if source_path == "crates/api/src/analysis_context.rs" {
             assert!(
-                source.contains("resolve_workspace_scope_roots_for_project"),
-                "{source_path} must use the engine-owned project workspace-scope helper"
+                source.contains("fn workspace_roots_for_session("),
+                "{source_path} must resolve workspace scope from the session workspaces"
             );
             assert!(
-                !source.contains("discover_workspace_packages(root)"),
-                "{source_path} must not rediscover workspaces outside the engine workspace-scope helper"
+                !source.contains("discover_workspace_packages"),
+                "{source_path} must not rediscover workspaces without the config patterns"
             );
         }
         for forbidden in [

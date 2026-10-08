@@ -494,7 +494,7 @@ fn build_security_command_output(
 
     let mut analysis = analyze_security_candidates(opts, &config)?;
 
-    apply_security_scopes(opts, &mut analysis)?;
+    apply_security_scopes(opts, &config.workspace_patterns, &mut analysis)?;
 
     let gate_mode = apply_security_gate(opts, &config, &mut analysis.results)?;
 
@@ -1074,13 +1074,14 @@ fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults
 
 fn apply_security_scopes(
     opts: &SecurityOptions<'_>,
+    workspace_patterns: &[String],
     analysis: &mut SecurityAnalysisState,
 ) -> Result<(), ExitCode> {
     let mut ws_roots = crate::check::filtering::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
-        &[],
+        workspace_patterns,
         opts.output,
     )?;
     if let Some(scope) = opts.scope.as_ref() {
@@ -1248,7 +1249,12 @@ fn compute_base_security_snapshot(
         &base_snapshot_security_options(opts, &base_root, &current_config_path),
         &base_config,
     )?;
-    scope_base_snapshot_to_workspaces(opts, &base_root, &mut base_analysis.results)?;
+    scope_base_snapshot_to_workspaces(
+        opts,
+        &base_root,
+        &base_config.workspace_patterns,
+        &mut base_analysis.results,
+    )?;
     Ok(SecurityKeySnapshot {
         reachable: security_reachable_keys(&base_analysis.results.security_findings, &base_root),
     })
@@ -1300,13 +1306,14 @@ fn base_snapshot_security_options<'a>(
 fn scope_base_snapshot_to_workspaces(
     opts: &SecurityOptions<'_>,
     base_root: &Path,
+    workspace_patterns: &[String],
     results: &mut AnalysisResults,
 ) -> Result<(), ExitCode> {
     if let Some(ref roots) = crate::check::filtering::resolve_workspace_scope(
         base_root,
         opts.workspace,
         None,
-        &[],
+        workspace_patterns,
         opts.output,
     )? {
         crate::check::filtering::filter_to_workspaces(results, roots);

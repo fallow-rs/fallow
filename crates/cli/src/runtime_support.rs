@@ -167,13 +167,23 @@ impl From<GroupBy> for GroupByMode {
 ///
 /// Returns `None` when no grouping is requested. Returns `Err(ExitCode)` when
 /// `--group-by owner` is requested but no CODEOWNERS file can be found.
+///
+/// `workspace_patterns` is the `workspaces.patterns` config value. `--group-by
+/// package` adds these patterns to the manifest patterns.
 pub fn build_ownership_resolver(
     group_by: Option<GroupBy>,
     root: &Path,
     codeowners_path: Option<&str>,
+    workspace_patterns: &[String],
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
-    build_ownership_resolver_for_mode(group_by.map(Into::into), root, codeowners_path, output)
+    build_ownership_resolver_for_mode(
+        group_by.map(Into::into),
+        root,
+        codeowners_path,
+        workspace_patterns,
+        output,
+    )
 }
 
 /// Build an `OwnershipResolver` from a typed output grouping mode.
@@ -181,6 +191,7 @@ pub fn build_ownership_resolver_for_mode(
     group_by: Option<GroupByMode>,
     root: &Path,
     codeowners_path: Option<&str>,
+    workspace_patterns: &[String],
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
     let Some(mode) = group_by else {
@@ -209,7 +220,10 @@ pub fn build_ownership_resolver_for_mode(
         },
         GroupByMode::Directory => Ok(Some(crate::report::OwnershipResolver::Directory)),
         GroupByMode::Package => {
-            let workspaces = fallow_engine::discover::discover_workspace_packages(root);
+            let workspaces = fallow_engine::discover::discover_workspace_packages_with_patterns(
+                root,
+                workspace_patterns,
+            );
             if workspaces.is_empty() {
                 Err(crate::error::emit_error(
                     "--group-by package requires a monorepo with workspace packages \

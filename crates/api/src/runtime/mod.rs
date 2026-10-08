@@ -262,11 +262,12 @@ fn run_programmatic_health_on_engine(
     options: &ComplexityOptions,
 ) -> ProgrammaticResult<ProgrammaticHealthRun> {
     let health_options = derive_programmatic_health_execution_options(resolved, options);
-    let result = fallow_engine::health::run_ungrouped_health(
-        &health_options,
-        resolved.workspace_roots.clone(),
-    )
-    .map_err(|error| programmatic_health_error("health", error))?;
+    let loaded = fallow_engine::health::UngroupedHealthSession::load(&health_options)
+        .map_err(|error| programmatic_health_error("health", error))?;
+    let workspace_roots = workspace_roots_for_session(resolved, loaded.workspaces())?;
+    let result = loaded
+        .run(&health_options, workspace_roots)
+        .map_err(|error| programmatic_health_error("health", error))?;
     resolved.record_changed_since_from_runner(result.changed_files_analyzed.as_deref());
 
     Ok(programmatic_health_run_from_engine_result(

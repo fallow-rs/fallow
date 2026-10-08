@@ -11,8 +11,8 @@ use rustc_hash::FxHashMap;
 use crate::{
     AnalysisOptions, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, ListJsonEnvelope, ListJsonOutputInput, ProgrammaticError,
-    analysis_context::changed_files_for_run, resolve_programmatic_analysis_context,
-    serialize_list_json_output,
+    analysis_context::{changed_files_for_run, validate_workspace_selection},
+    resolve_programmatic_analysis_context, serialize_list_json_output,
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
@@ -204,6 +204,7 @@ pub fn run_list_boundaries(
         resolved.ensure_not_cancelled("config load and file discovery")?;
         let project_config = load_list_project_config(&resolved)?;
         let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        validate_workspace_selection(&resolved, session.workspaces())?;
         resolved.ensure_not_cancelled("the boundary listing")?;
         let changed_files = changed_files_for_run(&resolved)?;
         let discovered = scoped_discovered_files(session.files(), changed_files.as_ref());
@@ -232,6 +233,7 @@ pub fn run_project_info(
         resolved.ensure_not_cancelled("config load and file discovery")?;
         let project_config = load_list_project_config(&resolved)?;
         let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        validate_workspace_selection(&resolved, session.workspaces())?;
         resolved.ensure_not_cancelled("the project listing")?;
         let config = session.config();
         let workspaces = session.workspaces();

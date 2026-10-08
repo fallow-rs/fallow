@@ -846,19 +846,38 @@ fn saved_group_resolver(
     config_path: Option<&Path>,
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
-    let codeowners = config_path
-        .and_then(|path| FallowConfig::load(path).ok())
-        .and_then(|config| config.codeowners)
-        .or_else(|| {
+    let explicit = config_path.and_then(|path| FallowConfig::load(path).ok());
+    // The discovered config is loaded only when the explicit config gives no
+    // CODEOWNERS path, as before. The explicit config, when it loads, is the
+    // only source of `workspaces.patterns`.
+    let discovered = explicit
+        .as_ref()
+        .is_none_or(|config| config.codeowners.is_none())
+        .then(|| {
             FallowConfig::find_and_load(root)
                 .ok()
                 .flatten()
-                .and_then(|(config, _)| config.codeowners)
+                .map(|(config, _)| config)
+        })
+        .flatten();
+    let codeowners = explicit
+        .as_ref()
+        .and_then(|config| config.codeowners.as_deref())
+        .or_else(|| {
+            discovered
+                .as_ref()
+                .and_then(|config| config.codeowners.as_deref())
         });
+    let workspace_patterns = explicit
+        .as_ref()
+        .or(discovered.as_ref())
+        .and_then(|config| config.workspaces.as_ref())
+        .map_or(&[][..], |workspaces| workspaces.patterns.as_slice());
     crate::runtime_support::build_ownership_resolver_for_mode(
         grouped_by,
         root,
-        codeowners.as_deref(),
+        codeowners,
+        workspace_patterns,
         output,
     )
 }
