@@ -24,7 +24,7 @@ type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 /// analysis families. API runtimes and engine-backed runners use it directly.
 ///
 /// The workspace selection resolves against the workspaces of the analysis
-/// session (see [`workspace_roots_for_session`]). These workspaces include the
+/// session (see `workspace_roots_for_session`). These workspaces include the
 /// `workspaces.patterns` of the loaded config, so the context does not resolve
 /// the selection before the config loads.
 pub struct ProgrammaticAnalysisContext {
