@@ -643,7 +643,7 @@ fn test_regex_to_glob(regex: &str) -> Option<String> {
         .unwrap_or(regex.len());
     let prefix = &regex[..prefix_end];
 
-    if prefix.is_empty() || !prefix.contains('/') {
+    if prefix.is_empty() || !prefix.contains('/') || !prefix.ends_with('/') {
         return None;
     }
 
@@ -1123,6 +1123,11 @@ mod tests {
             test_regex_to_glob(r"test/integration/secure/.*\.integration-spec\.ts$"),
             Some("test/integration/secure/**/*.integration-spec.ts".to_string())
         );
+    }
+
+    #[test]
+    fn test_regex_prefix_without_a_trailing_slash_gives_no_glob() {
+        assert_eq!(test_regex_to_glob(r"test/helper\.int\.ts$"), None);
     }
 
     #[test]
