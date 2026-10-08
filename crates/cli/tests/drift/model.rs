@@ -559,6 +559,13 @@ fn write_files(root: &Path, files: &BTreeMap<String, String>) {
 /// Run git in `root` with an isolated identity and no signing, and without
 /// the `GIT_*` variables a hook environment can leak into the test process.
 ///
+/// Automatic maintenance is off. With git 2.55, `git commit` starts a
+/// detached `git repack -d` when two loose objects share the `objects/17`
+/// sample directory. That repack removes packed loose objects and empty object
+/// directories while the next `git add` of the same fixture writes into them,
+/// and `git add` then fails with "unable to create temporary file".
+/// `gc.auto=0` covers a git version that runs `git gc --auto` instead.
+///
 /// # Panics
 ///
 /// Panics when git cannot start or exits with a failure.
@@ -577,6 +584,10 @@ pub fn git(root: &Path, args: &[&str]) -> String {
             "user.name=drift",
             "-c",
             "user.email=drift@example.invalid",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
         ])
         .args(args)
         .current_dir(root)
@@ -596,9 +607,8 @@ pub fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-/// Which parts of the fixture repository still exist. CI sometimes reports
-/// "unable to create temporary file" during the fixture setup, which means a
-/// directory went away while git wrote to it. This line shows which one.
+/// Which parts of the fixture repository still exist, for a git failure
+/// report. A directory that went away while git wrote to it shows here.
 fn repository_state(root: &Path) -> String {
     let mut out = String::from("repository state:");
     for relative in ["", ".git", ".git/objects", ".git/refs/heads/main"] {
@@ -624,6 +634,43 @@ fn repository_state(root: &Path) -> String {
         if parent { "present" } else { "missing" }
     );
     out
+}
+
+/// A fixture commit must not start the repack that races the next `git add`.
+/// Git 2.55 starts it when two loose objects share `objects/17`. The commit
+/// here forces the repack decision on every git version that has the
+/// geometric strategy, and keeps automatic maintenance in the foreground, so
+/// a repack shows as a pack file when the commit returns.
+#[test]
+fn fixture_commit_starts_no_repack() {
+    let dir = tempfile::tempdir().expect("create repository dir");
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(&root).expect("create project dir");
+    git(&root, &["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("a.ts"), "export const a = 1;\n").expect("write a.ts");
+    git(&root, &["add", "-A"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "maintenance.strategy=geometric",
+            "-c",
+            "maintenance.geometric-repack.auto=-1",
+            "-c",
+            "maintenance.autoDetach=false",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    );
+    let packs: Vec<_> = std::fs::read_dir(root.join(".git/objects/pack"))
+        .expect("read pack dir")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "pack"))
+        .map(|entry| entry.file_name())
+        .collect();
+    assert!(packs.is_empty(), "a fixture commit repacked: {packs:?}");
 }
 
 /// Describe the files of the head commit, for a failure report.
