@@ -90,6 +90,14 @@ const securityCount = (state: AppState): number | null => {
   return arrayLength(security, "candidates") ?? arrayLength(security, "findings");
 };
 
+/** Every finding of an analysis, the shown ones plus the ones cut off. */
+const findingTotal = (state: AppState, property: string): number | null => {
+  const section = analysisSection(state, property);
+  const shown = arrayLength(section, "findings");
+  if (shown === null) return null;
+  return shown + (numberProperty(section, "findings_truncated") ?? 0);
+};
+
 const count = (value: number | null, unit: string): LensCount | null =>
   value === null ? null : { value, unit };
 
@@ -129,8 +137,10 @@ export const LENSES: readonly LensDefinition[] = [
     gloss: "Boundaries and dependency cycles",
     shortcut: "4",
     severity: "error",
+    // The payload headline counts only boundary and policy violations, but
+    // the lens lists and draws the import cycles too, so count every finding.
     count: (state) =>
-      analysisMetric(state, "architecture", "violations") ??
+      count(findingTotal(state, "architecture"), "findings") ??
       count(summaryCount(state, "boundary_violations"), "violations"),
   },
   {

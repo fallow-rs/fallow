@@ -65,6 +65,20 @@ describe("lens registry", () => {
     expect(lensById("security").count(appState)).toEqual({ value: 2, unit: "candidates" });
   });
 
+  it("counts every architecture finding, cut-off ones included, not only violations", () => {
+    const appState = state({
+      files: [],
+      summary: { boundary_violations: 0 },
+      architecture: {
+        availability: { state: "complete", count: 0, unit: "violations" },
+        findings: [{ kind: "circular-dependency" }, { kind: "re-export-cycle" }],
+        findings_truncated: 75,
+      },
+    });
+
+    expect(lensById("architecture").count(appState)).toEqual({ value: 77, unit: "findings" });
+  });
+
   it("distinguishes unavailable security from zero findings", () => {
     expect(lensAvailabilityDetails(state({ summary: {}, files: [] }), "security").state).toBe(
       "unavailable",
