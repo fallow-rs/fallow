@@ -25,15 +25,24 @@ pub fn posix_quote(word: &str) -> String {
     }
 }
 
-/// Double quotes, with an inner `"` doubled. `cmd` and PowerShell both read a
-/// double-quoted word with spaces and `& | < > ;` as one argument. Backslashes
-/// stay single, because Windows paths use them.
+/// Quote for `cmd` and PowerShell. Backslashes stay single, because Windows
+/// paths use them.
+///
+/// Double quotes keep spaces and `& | < > ;` inside one argument in both
+/// shells, so a path such as `C:\Program Files\...` works in either one. Inside
+/// double quotes PowerShell still expands `$` and backticks, and `cmd` expands
+/// `%` and `!`. A word with one of those characters, or with `"`, gets
+/// PowerShell single quotes (an inner `'` doubled), which PowerShell reads
+/// literally. `cmd` has no literal quoting, so it can still expand `%VAR%` in
+/// such a word.
 #[must_use]
 pub fn windows_quote(word: &str) -> String {
     if is_plain(word, &['\\', ':']) {
         word.to_owned()
+    } else if word.contains(['$', '`', '%', '!', '"']) {
+        format!("'{}'", word.replace('\'', "''"))
     } else {
-        format!("\"{}\"", word.replace('"', "\"\""))
+        format!("\"{word}\"")
     }
 }
 
@@ -78,7 +87,11 @@ mod tests {
         );
         assert_eq!(windows_quote("a&b"), "\"a&b\"");
         assert_eq!(windows_quote("x;y|z"), "\"x;y|z\"");
-        assert_eq!(windows_quote("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(windows_quote("say \"hi\""), "'say \"hi\"'");
+        assert_eq!(windows_quote("$(calc)"), "'$(calc)'");
+        assert_eq!(windows_quote("`calc`"), "'`calc`'");
+        assert_eq!(windows_quote("%PATH%"), "'%PATH%'");
+        assert_eq!(windows_quote("it's $x"), "'it''s $x'");
         assert_eq!(windows_quote(""), "\"\"");
     }
 }
