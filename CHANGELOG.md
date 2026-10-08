@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `--config` file that a script passes to `jest` is read.** Before, only
   `vitest` did this. A script config file is now also a used file when the path
   starts with `./`.
+- **A member that a leaf class calls now reaches the base of a long `extends`
+  chain.** With `Child extends Mid extends Base`, a call to `Base.start` through
+  `new Child().start()` was reported as an unused class member. Fallow moved an
+  access one level for each pass over an unordered map. It now repeats the pass
+  until nothing changes.
 
 ## [3.32.0] - 2026-10-06
 

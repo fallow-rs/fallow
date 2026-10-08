@@ -3285,3 +3285,63 @@ fn export_with_no_members_skipped() {
     assert!(enum_members.is_empty());
     assert!(class_members.is_empty());
 }
+
+#[test]
+fn inheritance_propagates_member_access_up_a_long_extends_chain() {
+    const DEPTH: u32 = 8;
+    let key = |level: u32| ExportKey::new(FileId(level), "Class");
+    let mut parent_to_children: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    for level in 0..DEPTH {
+        parent_to_children
+            .entry(key(level))
+            .or_default()
+            .push(key(level + 1));
+    }
+    let mut accessed: FxHashMap<ExportKey, FxHashSet<String>> = FxHashMap::default();
+    accessed
+        .entry(key(DEPTH))
+        .or_default()
+        .insert("start".to_string());
+    let mut self_accessed: FxHashMap<FileId, FxHashSet<String>> = FxHashMap::default();
+
+    heritage::propagate_class_inheritance(&parent_to_children, &mut accessed, &mut self_accessed);
+
+    for level in 0..=DEPTH {
+        assert!(
+            accessed
+                .get(&key(level))
+                .is_some_and(|members| members.contains("start")),
+            "level {level} of the chain must see the member that the leaf accesses"
+        );
+    }
+}
+
+#[test]
+fn inheritance_propagates_self_access_down_a_long_extends_chain() {
+    const DEPTH: u32 = 8;
+    let key = |level: u32| ExportKey::new(FileId(level), "Class");
+    let mut parent_to_children: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
+    for level in 0..DEPTH {
+        parent_to_children
+            .entry(key(level))
+            .or_default()
+            .push(key(level + 1));
+    }
+    let mut accessed: FxHashMap<ExportKey, FxHashSet<String>> = FxHashMap::default();
+    let mut self_accessed: FxHashMap<FileId, FxHashSet<String>> = FxHashMap::default();
+    self_accessed
+        .entry(FileId(0))
+        .or_default()
+        .insert("work".to_string());
+
+    heritage::propagate_class_inheritance(&parent_to_children, &mut accessed, &mut self_accessed);
+
+    for level in 0..=DEPTH {
+        assert!(
+            self_accessed
+                .get(&FileId(level))
+                .is_some_and(|members| members.contains("work")),
+            "level {level} of the chain must see the member that the root calls on `this`"
+        );
+    }
+}

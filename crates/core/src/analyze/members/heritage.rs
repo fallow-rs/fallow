@@ -439,7 +439,16 @@ pub(super) fn build_parent_to_children(
     parent_to_children
 }
 
+/// Longest `extends` chain whose accesses reach every class. A class chain is
+/// rarely deeper than a handful of levels; the bound only stops a cyclic
+/// `extends` graph, which the type checker rejects.
+const MAX_INHERITANCE_PASSES: usize = 64;
+
 /// Propagate member accesses through `extends` chains in both directions.
+///
+/// One pass moves an access one level. The map has no order, so the pass runs
+/// again until nothing changes: a member that the leaf of a three-level chain
+/// calls must reach the root, however the entries are ordered.
 pub(super) fn propagate_class_inheritance(
     parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
@@ -449,6 +458,35 @@ pub(super) fn propagate_class_inheritance(
         return;
     }
 
+    for _ in 0..MAX_INHERITANCE_PASSES {
+        let before = access_count(accessed_members, self_accessed_members);
+        propagate_class_inheritance_once(
+            parent_to_children,
+            accessed_members,
+            self_accessed_members,
+        );
+        if access_count(accessed_members, self_accessed_members) == before {
+            return;
+        }
+    }
+}
+
+fn access_count(
+    accessed_members: &FxHashMap<ExportKey, FxHashSet<String>>,
+    self_accessed_members: &FxHashMap<FileId, FxHashSet<String>>,
+) -> usize {
+    accessed_members.values().map(FxHashSet::len).sum::<usize>()
+        + self_accessed_members
+            .values()
+            .map(FxHashSet::len)
+            .sum::<usize>()
+}
+
+fn propagate_class_inheritance_once(
+    parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+    self_accessed_members: &mut FxHashMap<FileId, FxHashSet<String>>,
+) {
     let mut propagations: Vec<(FileId, Vec<String>)> = Vec::new();
 
     for (parent_key, children) in parent_to_children {
