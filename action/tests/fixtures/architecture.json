@@ -1,6 +1,6 @@
 {
-  "kind": "dead-code",
-  "schema_version": 10,
+  "kind": "architecture",
+  "schema_version": 1,
   "version": "3.32.0",
   "elapsed_ms": 66,
   "total_issues": 2,

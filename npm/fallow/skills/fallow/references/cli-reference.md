@@ -217,7 +217,7 @@ fallow dead-code --format json --quiet --include-entry-exports
 
 ## `architecture`: Cycles, Boundaries and Policy Rules
 
-Reports circular dependencies, re-export cycles, package cycles, boundary violations (with boundary coverage and forbidden calls) and rule-pack policy violations. The command runs the `dead-code` analysis with these issue types selected. The JSON output is the `dead-code` envelope (`kind: "dead-code"`) with the same arrays, finding ids, exit codes and baselines. The global scope and output flags (`--format`, `--changed-since`, `--workspace`, `--baseline`, `--save-baseline`) work as on `dead-code`.
+Reports circular dependencies, re-export cycles, package cycles, boundary violations (with boundary coverage and forbidden calls) and rule-pack policy violations. The command runs the `dead-code` analysis with these issue types selected. The JSON output has `kind: "architecture"` (with `--group-by`: `architecture-grouped`) and its own `schema_version`. The arrays, finding ids, actions, exit codes, gate outcomes and baselines are the same as on `dead-code`. A saved baseline keeps `kind: "dead-code"`. `fallow report --from` renders a saved architecture envelope in every format. The global scope and output flags (`--format`, `--changed-since`, `--workspace`, `--baseline`, `--save-baseline`) work as on `dead-code`.
 
 `fallow dead-code` still reports these findings by default until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. `fallow architecture` reports only part of the issue types, so `--fail-on-stale-baseline` does not gate on it, with any baseline. A baseline that `fallow architecture --save-baseline` writes lists only the architecture findings, and `fallow dead-code` warns when it reads such a baseline.
 
@@ -230,6 +230,21 @@ Reports circular dependencies, re-export cycles, package cycles, boundary violat
 | `--finding-id <ID>` | Only report the findings with these ids |
 
 Without a selection flag, the command reports every architecture issue type.
+
+```json
+{
+  "kind": "architecture",
+  "schema_version": 1,
+  "total_issues": 1,
+  "circular_dependencies": [
+    { "files": ["src/a.ts", "src/b.ts"], "length": 2, "finding_id": "dc1:circular-dependency:...", "actions": [] }
+  ],
+  "boundary_violations": [],
+  "policy_violations": []
+}
+```
+
+The MCP tool is `check_architecture` and the Node binding is `detectArchitecture`.
 
 With `--group-by`, each group shows its findings under one "Architecture" heading.
 

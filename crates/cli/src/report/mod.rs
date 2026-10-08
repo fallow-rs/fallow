@@ -199,6 +199,19 @@ impl ArchitectureLayout {
             Self::Embedded | Self::Split => "dead-code",
         }
     }
+
+    /// The JSON envelope that a report in this layout writes:
+    /// `architecture` for `Only`, else `dead-code`.
+    ///
+    /// Bare `fallow --only architecture` also uses `Only`, but its JSON and
+    /// CI formats go through the combined renderer and never reach the
+    /// dead-code JSON path, so the combined shape does not change.
+    pub(crate) const fn envelope(self) -> fallow_output::CheckEnvelope {
+        match self {
+            Self::Only => fallow_output::CheckEnvelope::Architecture,
+            Self::Embedded | Self::Split => fallow_output::CheckEnvelope::DeadCode,
+        }
+    }
 }
 
 /// Whether the results hold an architecture finding: an import cycle, a
@@ -342,7 +355,7 @@ pub(crate) fn render_check_json(
         config_fixable: input.config_fixable,
         workspace_diagnostics: input.workspace_diagnostics,
         json_style: input.json_style,
-        command: "dead-code",
+        envelope: fallow_output::CheckEnvelope::DeadCode,
     })
 }
 
@@ -494,7 +507,7 @@ pub(crate) fn print_results(
             config_fixable: ctx.config_fixable,
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
-            command: ctx.architecture_layout.command(),
+            envelope: ctx.architecture_layout.envelope(),
         }),
         OutputFormat::Compact => {
             compact::print_compact(results, ctx.root);
@@ -575,10 +588,10 @@ fn print_check_github_format(
             ..Default::default()
         },
         ctx.workspace_diagnostics,
-        ctx.architecture_layout.command(),
+        ctx.architecture_layout.envelope(),
     ) {
         Ok(envelope) => print_github_format(
-            github_annotations::EnvelopeKind::DeadCode,
+            ctx.architecture_layout.envelope().into(),
             &envelope,
             ctx.root,
             target,
@@ -661,7 +674,7 @@ fn print_results_ci_comment(
         grouping_dropped,
     );
     print_ci_comment_format_with_status(
-        "dead-code",
+        ctx.architecture_layout.command(),
         &issues,
         output,
         conclusion,
@@ -717,7 +730,7 @@ fn print_grouped_results(
             gate_outcomes: ctx.gate_outcomes.clone(),
             workspace_diagnostics: ctx.workspace_diagnostics,
             json_style: ctx.json_style,
-            command: ctx.architecture_layout.command(),
+            envelope: ctx.architecture_layout.envelope(),
         }),
         OutputFormat::Compact => {
             compact::print_grouped_compact(groups, ctx.root);

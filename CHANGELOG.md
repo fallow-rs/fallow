@@ -46,19 +46,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with only policy violations printed a status line with no count.
 - The `Failed:` line of bare `fallow` now says "1 issue" and "1 clone group"
   in the singular.
+- The published JSON schema now lists the `similar-code-status` and
+  `similar-code-cache-clear` kinds in the root `FallowOutput` union. Before,
+  a validator that used the schema rejected the valid output of
+  `fallow similar-code status --format json` and
+  `fallow similar-code cache clear --format json`.
+
 ### Added
 
 - **`fallow architecture`** reports import cycles, boundary violations and
   rule-pack policy violations in one command. Use `--cycles`, `--boundaries`
   or `--policy` to select one kind. The command takes the same scope and
-  output flags as `fallow dead-code`, and its JSON output is the `dead-code`
-  envelope with the same arrays and finding ids. Run `fallow guard <files>`
-  before an edit and `fallow architecture` after it. Bare `fallow` shows these
-  findings in an "Architecture" category after the other dead-code categories,
-  with and without `--quiet`, and also with `--group-by` and `--summary`. With
+  output flags as `fallow dead-code`. Run `fallow guard <files>` before an
+  edit and `fallow architecture` after it. Bare `fallow` shows these findings
+  in an "Architecture" category after the other dead-code categories, with and
+  without `--quiet`, and also with `--group-by` and `--summary`. With
   `--group-by`, `fallow architecture` shows one "Architecture" heading per
-  group. In JSON, `fallow architecture` names itself in `next_steps` and
-  `_meta.docs` points to the architecture page.
+  group.
+- `fallow architecture --format json` writes `kind: "architecture"` with its
+  own `schema_version` (1). With `--group-by`, the kind is
+  `architecture-grouped`. The arrays, finding ids, actions, exit codes, gate
+  outcomes and severities are the same as on `fallow dead-code`. `next_steps`
+  names `fallow architecture`, and with `--explain`, `_meta.docs` points to
+  the architecture page and `_meta.rules` lists only the architecture rules.
+  `--save-baseline` writes a dead-code baseline (`kind: "dead-code"`), so
+  `fallow architecture` and `fallow dead-code` read each other's baselines.
+  The JSON schema and the generated TypeScript types have the
+  `ArchitectureOutput` and `ArchitectureGroupedOutput` envelopes.
+- `fallow report --from` renders a saved `architecture` or
+  `architecture-grouped` envelope in every format, the same as the direct
+  run. PR comments and reviews of `fallow architecture` have the title
+  "Fallow architecture report".
+- The MCP server has a `check_architecture` tool, and Code Mode exposes it as
+  `checkArchitecture`. The Node bindings have `detectArchitecture`, and
+  `fallow_api` has `run_architecture`. Each returns the `architecture`
+  envelope. `detectCircularDependencies`, `detectBoundaryViolations` and the
+  MCP `analyze` tool keep the `dead-code` envelope.
 - Bare `fallow` accepts `architecture` in `--only` and `--skip`.
   `--only architecture` runs the dead-code analysis and reports only the
   architecture findings, and its `Failed:` line names `architecture`.

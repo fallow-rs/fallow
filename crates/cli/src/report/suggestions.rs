@@ -130,7 +130,9 @@ pub fn build_check_next_steps(
     command: &str,
 ) -> Vec<NextStep> {
     let workspace_ref = default_workspace_ref_for_next_step(root);
-    let loaded_baseline = crate::output_runtime::loaded_baseline_for("dead-code");
+    // `fallow architecture` records its own command when it loads a baseline,
+    // so the `recheck-baseline` step reruns the command that ran.
+    let loaded_baseline = crate::output_runtime::loaded_baseline_for(command);
     build_dead_code_next_steps_contract(DeadCodeNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         results,

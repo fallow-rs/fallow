@@ -195,7 +195,9 @@ const DIAGNOSTIC_SITES: &[&[&str]] = &[
 /// section's; the entry names the analysis separately.
 fn noun(root: &Map<String, Value>) -> &'static str {
     match root.get("kind").and_then(Value::as_str) {
-        Some("dead-code") => "issue",
+        Some("dead-code" | "dead-code-grouped" | "architecture" | "architecture-grouped") => {
+            "issue"
+        }
         Some("dupes") => "clone group",
         _ => "finding",
     }
@@ -633,6 +635,22 @@ fn degrading_kinds(diagnostics: &[Value]) -> BTreeMap<&str, usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn architecture_envelope_counts_issues_like_dead_code() {
+        for (kind, expected) in [
+            ("dead-code", "issue"),
+            ("architecture", "issue"),
+            ("dead-code-grouped", "issue"),
+            ("architecture-grouped", "issue"),
+            ("dupes", "clone group"),
+            ("health", "finding"),
+        ] {
+            let root = serde_json::json!({ "kind": kind });
+            let root = root.as_object().expect("object");
+            assert_eq!(noun(root), expected, "{kind}");
+        }
+    }
 
     fn warnings_of(envelope: &Value) -> Vec<String> {
         // `None` means the run had nothing to state, which is a verdict of its

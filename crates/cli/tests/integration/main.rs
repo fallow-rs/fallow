@@ -29,6 +29,7 @@ mod caveat_surface_tests;
 mod changed_since_added_files_tests;
 mod changed_workspaces_tests;
 mod check_tests;
+mod ci_command_routing_tests;
 mod claude_code_hint_tests;
 mod codeowners_tests;
 mod combined_coverage_tests;

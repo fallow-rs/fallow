@@ -384,7 +384,7 @@ pub fn audit_keys(envelope: &Value) -> AuditKeys {
 /// shape cannot pass as an empty key set.
 pub fn envelope_keys(envelope: &Value) -> KeySet {
     match envelope["kind"].as_str() {
-        Some("dead-code") => dead_code_keys(envelope),
+        Some("dead-code" | "architecture") => dead_code_keys(envelope),
         Some("dupes") => dupes_keys(envelope),
         Some("health") => health_keys(envelope),
         Some("combined") => combined_keys(envelope).all(),

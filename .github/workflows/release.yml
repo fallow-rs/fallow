@@ -361,6 +361,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target
+          # cc forwards -Cprofile-generate to the C compiler. Apple clang writes
+          # an older raw profile format than the Rust profiler runtime, and the
+          # instrumented binary then crashes at exit. Remove after #3285.
+          case "$FALLOW_TARGET" in
+            *-apple-darwin)
+              export "CFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-generate"
+              export "CXXFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-generate"
+              ;;
+          esac
           printf "[target.%s]\nrustflags = ['-Cprofile-generate=/tmp/pgo-raw']\n" "$FALLOW_TARGET" > target/pgo-generate.toml
           cargo build --release --locked --target "$FALLOW_TARGET" -p fallow-multicall --config target/pgo-generate.toml
 
@@ -598,6 +607,14 @@ jobs:
           printf "[target.%s]\nrustflags = ['-Cprofile-use=%s', '-Cllvm-args=-pgo-warn-missing-function']\n" "$FALLOW_TARGET" "$profile" > "$dir/pgo.toml"
           cat "$dir/pgo.toml"
           echo "PGO_PROFILE=$profile" >> "$GITHUB_ENV"
+          # cc also forwards -Cprofile-use, and Apple clang can reject a profile
+          # from the newer Rust llvm-profdata. Remove after #3285.
+          case "$FALLOW_TARGET" in
+            *-apple-darwin)
+              echo "CFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-use" >> "$GITHUB_ENV"
+              echo "CXXFLAGS_${FALLOW_TARGET//-/_}=-fno-profile-use" >> "$GITHUB_ENV"
+              ;;
+          esac
           echo "PGO profile ${digest} applied to fallow-cli, fallow-lsp, fallow-mcp and fallow-multicall for ${FALLOW_TARGET}." >> "$GITHUB_STEP_SUMMARY"
 
       # One cargo invocation builds the four binaries. Cargo then resolves the

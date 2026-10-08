@@ -147,6 +147,14 @@ Contract rules:
   that is absent from a scoped run, or from a run with other config, means
   unknown and not resolved. Drift invariant I10 checks the ids on both
   paths.
+- `check_architecture` is the MCP surface of `fallow architecture`. It runs
+  `fallow_api::run_architecture` and returns the `kind: "architecture"`
+  envelope. A `baseline` or `group_by` call runs `fallow architecture` as a
+  subprocess, because the typed runner loads no baseline and does not group.
+  Code Mode exposes it as `checkArchitecture` on the subprocess path, like
+  `analyze`. The `analyze` tool keeps the architecture findings in its
+  `kind: "dead-code"` result. Drift invariant I2 compares the CLI,
+  `fallow_api` and both MCP paths for this command.
 - The `analyze` description keeps the routing summary and the `finding_id`
   contract. The `fallow://tools/analyze` guide (`crates/mcp/src/tool_guides.rs`)
   holds the per-flag prose: the `boundary_violations` alias, the `group_by`

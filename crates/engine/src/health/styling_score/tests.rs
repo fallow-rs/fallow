@@ -462,13 +462,7 @@ fn apply_styling_penalties_clamps_below_zero() {
     };
     // 100 - 150 = -50, clamped to 0.0.
     let score = apply_styling_penalties(&penalties);
-    #[expect(
-        clippy::float_cmp,
-        reason = "the clamp lower bound is an exact 0.0 literal, so an exact compare is correct here"
-    )]
-    {
-        assert_eq!(score, 0.0);
-    }
+    assert_eq!(score, 0.0);
 }
 
 // --- CSS program Phase 3c: atomic object CSS-in-JS exclusion ---

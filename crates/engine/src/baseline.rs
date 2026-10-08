@@ -333,7 +333,12 @@ fn value_declares_baseline_format(value: &serde_json::Value, declared_keys: &[&s
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BaselineKind {
-    /// Saved by `fallow dead-code` (or `fallow check`).
+    /// Saved by `fallow dead-code` (or `fallow check`), and by
+    /// `fallow architecture`.
+    ///
+    /// The kind names the baseline format, not the command: `fallow
+    /// architecture` runs the dead-code analysis, so it writes and reads this
+    /// format although its JSON envelope has `kind: "architecture"`.
     DeadCode,
     /// Saved by `fallow dupes`.
     Dupes,

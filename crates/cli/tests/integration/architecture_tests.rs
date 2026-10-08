@@ -1,14 +1,19 @@
 //! `fallow architecture`: cycles, boundaries and rule-pack policy rules.
 //!
 //! The command runs the dead-code pipeline with the architecture issue types
-//! selected. These tests pin that the findings, the JSON envelope, the exit
-//! code and the baselines stay the same as the `dead-code` structure flags.
+//! selected. These tests pin that the findings, the finding ids, the exit
+//! code and the baselines stay the same as the `dead-code` structure flags,
+//! and that the JSON root has its own `kind` and `schema_version`.
 
 use std::path::Path;
 
 use crate::common::{
     CommandOutput, canonical_report, parse_json, run_fallow_in_root, run_fallow_raw,
+    strip_volatile_fields,
 };
+
+/// `ARCHITECTURE_SCHEMA_VERSION` of the `architecture` envelope.
+const ARCHITECTURE_SCHEMA_VERSION: u64 = 1;
 
 const ARCHITECTURE_ARRAYS: [&str; 7] = [
     "circular_dependencies",
@@ -113,6 +118,20 @@ fn array_len(json: &serde_json::Value, key: &str) -> usize {
     json[key].as_array().map_or(0, Vec::len)
 }
 
+/// The report body without the fields that name the command: the root `kind`
+/// and `schema_version`, `_meta` and `next_steps`. Equal bodies mean equal
+/// findings, finding ids, actions, gate outcomes and baselines.
+fn envelope_body(output: &CommandOutput) -> String {
+    let mut value = parse_json(output);
+    strip_volatile_fields(&mut value);
+    if let Some(root) = value.as_object_mut() {
+        for key in ["kind", "schema_version", "_meta", "next_steps"] {
+            root.remove(key);
+        }
+    }
+    serde_json::to_string(&value).expect("re-serialize report body")
+}
+
 #[test]
 fn architecture_json_equals_dead_code_structure_filters() {
     let dir = architecture_project("");
@@ -132,7 +151,154 @@ fn architecture_json_equals_dead_code_structure_filters() {
         ],
     );
     assert_eq!(architecture.code, legacy.code, "{}", architecture.stderr);
-    assert_eq!(canonical_report(&architecture), canonical_report(&legacy));
+    let architecture_json = parse_json(&architecture);
+    let legacy_json = parse_json(&legacy);
+    assert_eq!(architecture_json["kind"], "architecture");
+    assert_eq!(
+        architecture_json["schema_version"],
+        ARCHITECTURE_SCHEMA_VERSION
+    );
+    assert_eq!(legacy_json["kind"], "dead-code");
+    assert_eq!(envelope_body(&architecture), envelope_body(&legacy));
+}
+
+#[test]
+fn architecture_grouped_json_has_architecture_grouped_kind() {
+    let dir = architecture_project("");
+    let args = ["--group-by", "directory", "--format", "json", "--quiet"];
+    let architecture = run("architecture", dir.path(), &args);
+    let legacy = run(
+        "dead-code",
+        dir.path(),
+        &[
+            "--circular-deps",
+            "--re-export-cycles",
+            "--package-cycles",
+            "--boundary-violations",
+            "--policy-violations",
+            "--group-by",
+            "directory",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(architecture.code, legacy.code, "{}", architecture.stderr);
+    let json = parse_json(&architecture);
+    assert_eq!(
+        json["kind"], "architecture-grouped",
+        "{}",
+        architecture.stdout
+    );
+    assert_eq!(json["schema_version"], ARCHITECTURE_SCHEMA_VERSION);
+    assert_eq!(json["grouped_by"], "directory");
+    assert_eq!(parse_json(&legacy)["kind"], "dead-code-grouped");
+    assert_eq!(envelope_body(&architecture), envelope_body(&legacy));
+}
+
+#[test]
+fn dead_code_json_keeps_dead_code_kind_and_version() {
+    let dir = architecture_project("");
+    let flat = parse_json(&run(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(flat["kind"], "dead-code");
+    assert_eq!(flat["schema_version"], 10);
+    let grouped = parse_json(&run(
+        "dead-code",
+        dir.path(),
+        &["--group-by", "directory", "--format", "json", "--quiet"],
+    ));
+    assert_eq!(grouped["kind"], "dead-code-grouped");
+    assert_eq!(grouped["schema_version"], 10);
+}
+
+#[test]
+fn bare_only_architecture_json_keeps_combined_shape() {
+    let dir = architecture_project("");
+    let output = run_bare(
+        dir.path(),
+        &["--only", "architecture", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["kind"], "combined", "{}", output.stdout);
+    assert!(json.get("architecture").is_none());
+    assert!(
+        json["check"].get("kind").is_none(),
+        "the embedded check section carries no kind"
+    );
+    assert_eq!(json["check"]["schema_version"], 10);
+}
+
+#[test]
+fn architecture_save_baseline_keeps_the_dead_code_baseline_format() {
+    let dir = architecture_project("");
+    let baseline = dir.path().join("architecture-baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf-8 path");
+    let save = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_arg,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let saved: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&baseline)
+            .unwrap_or_else(|err| panic!("baseline saved ({err}): {}", save.stderr)),
+    )
+    .expect("baseline is JSON");
+    assert_eq!(saved["kind"], "dead-code");
+    assert_eq!(parse_json(&save)["kind"], "architecture");
+}
+
+#[test]
+fn architecture_recheck_baseline_step_names_architecture() {
+    let dir = architecture_project("");
+    let baseline = dir.path().join("baseline.json");
+    let baseline_arg = baseline.to_str().expect("utf-8 path");
+    let save = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_arg,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert!(baseline.exists(), "baseline saved: {}", save.stderr);
+
+    // The positional path narrows the run, so the baseline matches less than
+    // it carries and the envelope offers the unscoped recheck.
+    let output = run(
+        "architecture",
+        dir.path(),
+        &[
+            "src/db/query.ts",
+            "--baseline",
+            baseline_arg,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let recheck = json["next_steps"]
+        .as_array()
+        .and_then(|steps| steps.iter().find(|step| step["id"] == "recheck-baseline"))
+        .unwrap_or_else(|| panic!("expected a recheck-baseline entry, got {json}"));
+    let command = recheck["command"].as_str().expect("command is a string");
+    assert!(
+        command.starts_with("fallow architecture --baseline "),
+        "the step reruns the command that ran: {command}"
+    );
 }
 
 #[test]
@@ -140,10 +306,8 @@ fn architecture_reports_only_architecture_findings() {
     let dir = architecture_project("");
     let output = run("architecture", dir.path(), &["--format", "json", "--quiet"]);
     let json = parse_json(&output);
-    assert_eq!(
-        json["kind"], "dead-code",
-        "the envelope stays the dead-code one"
-    );
+    assert_eq!(json["kind"], "architecture");
+    assert_eq!(json["schema_version"], ARCHITECTURE_SCHEMA_VERSION);
     assert_eq!(array_len(&json, "circular_dependencies"), 1);
     assert_eq!(array_len(&json, "boundary_violations"), 1);
     assert_eq!(array_len(&json, "policy_violations"), 1);
@@ -225,8 +389,8 @@ fn architecture_filter_flags_select_one_kind() {
         &["--cycles", "--format", "json", "--quiet"],
     );
     assert_eq!(
-        canonical_report(&architecture_cycles),
-        canonical_report(&legacy_cycles)
+        envelope_body(&architecture_cycles),
+        envelope_body(&legacy_cycles)
     );
 }
 
@@ -239,7 +403,7 @@ fn architecture_honors_file_scope() {
         &["--file", "src/db/query.ts", "--format", "json", "--quiet"],
     );
     let json = parse_json(&output);
-    assert_eq!(json["kind"], "dead-code", "{}", output.stderr);
+    assert_eq!(json["kind"], "architecture", "{}", output.stderr);
     assert_eq!(array_len(&json, "boundary_violations"), 0);
     assert_eq!(array_len(&json, "policy_violations"), 0);
 }
@@ -268,7 +432,7 @@ fn architecture_accepts_a_dead_code_baseline() {
         &["--baseline", baseline_arg, "--format", "json", "--quiet"],
     );
     let json = parse_json(&output);
-    assert_eq!(json["kind"], "dead-code", "{}", output.stderr);
+    assert_eq!(json["kind"], "architecture", "{}", output.stderr);
     for key in ARCHITECTURE_ARRAYS {
         assert_eq!(array_len(&json, key), 0, "{key} is in the baseline");
     }
@@ -506,6 +670,25 @@ fn architecture_json_points_to_the_architecture_docs() {
         json["_meta"]["docs"], "https://fallow.tools/docs/cli/architecture/",
         "{}",
         output.stdout
+    );
+    let rules: Vec<&str> = json["_meta"]["rules"]
+        .as_object()
+        .expect("_meta.rules is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            "boundary-call-violation",
+            "boundary-coverage",
+            "boundary-violation",
+            "circular-dependency",
+            "package-cycle",
+            "policy-violation",
+            "re-export-cycle",
+        ],
+        "_meta.rules lists only the architecture rules"
     );
     let dead_code = run(
         "dead-code",

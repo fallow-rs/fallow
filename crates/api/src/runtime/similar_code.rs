@@ -1963,9 +1963,8 @@ fn usize_to_u64(value: usize) -> u64 {
 
 #[cfg(test)]
 #[expect(
-    clippy::float_cmp,
     clippy::unwrap_used,
-    reason = "deterministic fixtures fail immediately and ratios have exact binary representations"
+    reason = "deterministic fixtures fail immediately"
 )]
 mod tests {
     use super::*;

@@ -76,6 +76,7 @@ mod tests {
         ];
         let conditional_cli_backed = [
             "analyze.rs",
+            "architecture.rs",
             "audit.rs",
             "check_changed.rs",
             "dupes.rs",

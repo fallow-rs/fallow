@@ -6,7 +6,8 @@
 //! Supports GitHub-native text, CodeClimate, SARIF, markdown, and GitHub/GitLab
 //! PR feedback formats. Dispatch is on the envelope's `kind` field, so any envelope
 //! produced by `--format json`
-//! (dead-code, dupes, health, audit, security, or the bare combined run)
+//! (dead-code, architecture, dupes, health, audit, security, or the bare
+//! combined run)
 //! renders byte-identically to the direct `--format` run. The `fallow fix`
 //! envelope carries no `kind`; it is detected by its top-level fields and
 //! rendered via [`EnvelopeKind::Fix`].
@@ -197,7 +198,14 @@ fn validate_saved_report_envelope(
     match kind {
         EnvelopeKind::Security => fallow_output::validate_saved_security_envelope(envelope),
         EnvelopeKind::Fix => Ok(()),
-        _ => crate::report::codeclimate::validate_saved_schema(kind, envelope),
+        EnvelopeKind::DeadCode
+        | EnvelopeKind::Architecture
+        | EnvelopeKind::Dupes
+        | EnvelopeKind::Health
+        | EnvelopeKind::Audit
+        | EnvelopeKind::Combined => {
+            crate::report::codeclimate::validate_saved_schema(kind, envelope)
+        }
     }
 }
 
@@ -616,6 +624,7 @@ fn saved_ci_conclusion(
 const fn command_label(kind: EnvelopeKind) -> &'static str {
     match kind {
         EnvelopeKind::DeadCode => "dead-code",
+        EnvelopeKind::Architecture => "architecture",
         EnvelopeKind::Dupes => "dupes",
         EnvelopeKind::Health => "health",
         EnvelopeKind::Audit => "audit",
@@ -647,6 +656,24 @@ struct SavedEnvelope {
 
 pub const NORMALIZED_GROUPED_DEAD_CODE_MARKER: &str = "_fallow_report_normalized_grouped_dead_code";
 
+/// The grouped kinds that `fallow report --from` flattens before it renders:
+/// `(grouped kind, flat kind, current schema version)`.
+///
+/// Both members of the dead-code family write the same grouped body, so one
+/// flatten step serves both and keeps the flat kind of the row.
+const GROUPED_SAVED_KINDS: &[(&str, &str, u32)] = &[
+    (
+        "dead-code-grouped",
+        "dead-code",
+        fallow_output::CHECK_SCHEMA_VERSION,
+    ),
+    (
+        "architecture-grouped",
+        "architecture",
+        fallow_output::ARCHITECTURE_SCHEMA_VERSION,
+    ),
+];
+
 fn prepare_saved_envelope(
     envelope: serde_json::Value,
     output: OutputFormat,
@@ -664,12 +691,16 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         .get("grouped_by")
         .and_then(serde_json::Value::as_str)
         .and_then(parse_group_by_mode);
-    if envelope.get("kind").and_then(serde_json::Value::as_str) != Some("dead-code-grouped") {
+    let saved_kind = envelope.get("kind").and_then(serde_json::Value::as_str);
+    let Some(&(_, flat_kind, current_version)) = GROUPED_SAVED_KINDS
+        .iter()
+        .find(|(grouped, _, _)| saved_kind == Some(*grouped))
+    else {
         return Ok(SavedEnvelope {
             envelope,
             grouped_by,
         });
-    }
+    };
     let Some(root) = envelope.as_object_mut() else {
         return Err("saved grouped dead-code envelope must be an object".to_owned());
     };
@@ -685,14 +716,14 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
     let current_schema = root
         .get("schema_version")
         .and_then(serde_json::Value::as_u64)
-        == Some(u64::from(fallow_output::CHECK_SCHEMA_VERSION));
+        == Some(u64::from(current_version));
     if current_schema {
         validate_current_grouped_dead_code(root, groups)?;
     }
     root.remove("grouped_by");
     root.insert(
         "kind".to_string(),
-        serde_json::Value::String("dead-code".to_string()),
+        serde_json::Value::String(flat_kind.to_string()),
     );
     root.insert(
         NORMALIZED_GROUPED_DEAD_CODE_MARKER.to_string(),
@@ -904,7 +935,7 @@ fn envelope_kind(
         crate::emit_known_failure(
             &format!(
                 "unsupported envelope kind `{kind}` in {}; fallow report renders dead-code, \
-                 dupes, health, audit, security, and combined envelopes",
+                 architecture, dupes, health, audit, security, and combined envelopes",
                 from.display()
             ),
             2,
@@ -920,6 +951,7 @@ fn envelope_kind(
 fn parse_envelope_kind(kind: &str) -> Option<EnvelopeKind> {
     match kind {
         "dead-code" => Some(EnvelopeKind::DeadCode),
+        "architecture" => Some(EnvelopeKind::Architecture),
         "dupes" => Some(EnvelopeKind::Dupes),
         "health" => Some(EnvelopeKind::Health),
         "audit" => Some(EnvelopeKind::Audit),
@@ -953,6 +985,10 @@ mod tests {
             parse_envelope_kind("dead-code"),
             Some(EnvelopeKind::DeadCode)
         );
+        assert_eq!(
+            parse_envelope_kind("architecture"),
+            Some(EnvelopeKind::Architecture)
+        );
         assert_eq!(parse_envelope_kind("dupes"), Some(EnvelopeKind::Dupes));
         assert_eq!(parse_envelope_kind("health"), Some(EnvelopeKind::Health));
         assert_eq!(parse_envelope_kind("audit"), Some(EnvelopeKind::Audit));
@@ -966,9 +1002,47 @@ mod tests {
         );
     }
 
+    /// Every command that `fallow report --from` renders parses, and its grouped
+    /// kind flattens to the flat kind. Every refused command stays refused.
+    #[test]
+    fn report_from_follows_the_command_envelope_table() {
+        use fallow_types::command_surfaces::{COMMAND_ENVELOPES, ReportFrom};
+
+        for row in COMMAND_ENVELOPES {
+            match row.report_from {
+                ReportFrom::Renders => {
+                    let kind = parse_envelope_kind(row.kind).unwrap_or_else(|| {
+                        panic!("report --from does not parse kind `{}`", row.kind)
+                    });
+                    assert_eq!(command_label(kind), row.command);
+                    if let Some(grouped) = row.grouped_kind {
+                        let normalized = normalize_saved_envelope(serde_json::json!({
+                            "kind": grouped,
+                            "grouped_by": "directory",
+                            "total_issues": 0,
+                            "groups": [],
+                        }))
+                        .unwrap_or_else(|err| panic!("{grouped} does not normalize: {err}"));
+                        assert_eq!(normalized.envelope["kind"], row.kind);
+                    }
+                }
+                ReportFrom::Refused(reason) => {
+                    assert!(!reason.is_empty(), "{}: empty reason", row.command);
+                    assert_eq!(
+                        parse_envelope_kind(row.kind),
+                        None,
+                        "report --from renders `{}`; mark the row Renders",
+                        row.kind
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn parse_envelope_kind_rejects_unknown_and_grouped_kinds() {
         assert_eq!(parse_envelope_kind("dead-code-grouped"), None);
+        assert_eq!(parse_envelope_kind("architecture-grouped"), None);
         assert_eq!(parse_envelope_kind("feature-flags"), None);
         assert_eq!(parse_envelope_kind(""), None);
     }
@@ -1076,6 +1150,55 @@ mod tests {
             normalized.envelope[NORMALIZED_GROUPED_DEAD_CODE_MARKER],
             true
         );
+    }
+
+    #[test]
+    fn grouped_architecture_is_flattened_to_architecture() {
+        let normalized = normalize_saved_envelope(serde_json::json!({
+            "kind": "architecture-grouped",
+            "grouped_by": "directory",
+            "total_issues": 1,
+            "groups": [{
+                "key": "src",
+                "total_issues": 1,
+                "circular_dependencies": [{
+                    "files": ["src/a.ts", "src/b.ts"],
+                    "length": 2,
+                    "line": 1,
+                    "col": 0,
+                    "actions": []
+                }]
+            }]
+        }))
+        .expect("valid grouped architecture envelope");
+
+        assert_eq!(normalized.grouped_by, Some(GroupByMode::Directory));
+        assert_eq!(normalized.envelope["kind"], "architecture");
+        assert_eq!(
+            normalized.envelope["circular_dependencies"][0]["files"][0],
+            "src/a.ts"
+        );
+        assert!(normalized.envelope.get("groups").is_none());
+    }
+
+    #[test]
+    fn malformed_current_grouped_architecture_fails_before_flattening() {
+        let error = normalize_saved_envelope(serde_json::json!({
+            "kind": "architecture-grouped",
+            "schema_version": fallow_output::ARCHITECTURE_SCHEMA_VERSION,
+            "version": env!("CARGO_PKG_VERSION"),
+            "elapsed_ms": 0,
+            "grouped_by": "owner",
+            "total_issues": 1,
+            "groups": [{
+                "key": "@team",
+                "total_issues": 1,
+                "circular_dependencies": "invalid"
+            }]
+        }))
+        .expect_err("malformed current group must fail closed");
+
+        assert!(error.contains("group 0 is incompatible with this Fallow version"));
     }
 
     #[test]

@@ -13,6 +13,7 @@ npm install @fallow-cli/fallow-node   # or: pnpm/yarn/bun add @fallow-cli/fallow
 - `detectDeadCode(options?)`
 - `detectCircularDependencies(options?)`
 - `detectBoundaryViolations(options?)`
+- `detectArchitecture(options?)`
 - `detectDuplication(options?)`
 - `detectSimilarCode(options?)`
 - `detectFeatureFlags(options?)`

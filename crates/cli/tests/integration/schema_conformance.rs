@@ -172,7 +172,41 @@ fn run_and_validate_with(
         )
     });
     assert_conforms(schema, expected_kind, &value);
+    VALIDATED_KINDS.with(|kinds| kinds.borrow_mut().insert(expected_kind.to_string()));
     value
+}
+
+/// Command kinds that this suite cannot produce, with the reason.
+const CONFORMANCE_EXEMPT_KINDS: &[(&str, &str)] = &[(
+    "similar-code",
+    "needs the local similar-code companion and model; the typed output is pinned by the schema drift tests",
+)];
+
+thread_local! {
+    /// The `kind` of every document that `run_and_validate_with` validated on
+    /// this thread.
+    static VALIDATED_KINDS: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+}
+
+/// Every kind and grouped kind of `COMMAND_ENVELOPES` must be in `validated`,
+/// unless `CONFORMANCE_EXEMPT_KINDS` names it with a reason.
+fn assert_every_command_kind_was_validated(validated: &std::collections::BTreeSet<String>) {
+    for row in fallow_types::command_surfaces::COMMAND_ENVELOPES {
+        for kind in std::iter::once(row.kind).chain(row.grouped_kind) {
+            if CONFORMANCE_EXEMPT_KINDS
+                .iter()
+                .any(|(exempt, reason)| *exempt == kind && !reason.is_empty())
+            {
+                continue;
+            }
+            assert!(
+                validated.contains(kind),
+                "`fallow {}` writes `{kind}`, but no live document of that kind was validated; add a case to cli_json_documents_conform_to_output_schema",
+                row.command
+            );
+        }
+    }
 }
 
 #[test]
@@ -185,8 +219,22 @@ fn cli_json_documents_conform_to_output_schema() {
     // _meta.telemetry shape is exactly what the process boundary must emit
     // conformantly.
     run_and_validate(&schema, root, &["dead-code"], "dead-code");
+    run_and_validate(
+        &schema,
+        root,
+        &["dead-code", "--group-by", "directory"],
+        "dead-code-grouped",
+    );
+    run_and_validate(&schema, root, &["architecture"], "architecture");
+    run_and_validate(
+        &schema,
+        root,
+        &["architecture", "--group-by", "directory"],
+        "architecture-grouped",
+    );
     run_and_validate(&schema, root, &["health"], "health");
     run_and_validate(&schema, root, &["dupes"], "dupes");
+    run_and_validate(&schema, root, &["security"], "security");
     run_and_validate(&schema, root, &[], "combined");
     run_and_validate(&schema, root, &["suppressions"], "suppression-inventory");
     run_and_validate(&schema, root, &["flags"], "feature-flags");
@@ -245,6 +293,8 @@ fn cli_json_documents_conform_to_output_schema() {
         &["type-aware", "status"],
         "type-aware-status",
     );
+
+    VALIDATED_KINDS.with(|kinds| assert_every_command_kind_was_validated(&kinds.borrow()));
 }
 
 /// The facts a run publishes about itself: `request_outcomes` and the

@@ -540,9 +540,12 @@ elapsed time, so no field is masked. `report::markdown::print_saved_markdown`
 reads the typed sections back from the envelope and calls the section printers
 of the live run in the same order:
 
-- `dead-code`: the findings, the type-aware evidence and the config patterns
-  that matched nothing. A grouped envelope is flattened, sorted into the order
-  of the analysis, and grouped again with the saved `grouped_by` mode.
+- `dead-code` and `architecture`: the findings, the type-aware evidence and
+  the config patterns that matched nothing. A grouped envelope
+  (`dead-code-grouped` or `architecture-grouped`) is flattened to its flat
+  kind, sorted into the order of the analysis, and grouped again with the
+  saved `grouped_by` mode. `cli_report::GROUPED_SAVED_KINDS` lists the grouped
+  kinds with their flat kind and current schema version.
 - `dupes`: the duplication report. The live markdown of a grouped run is not
   grouped, so the saved render is not grouped.
 - `health`: the full `HealthReport`, then the `## Health by <mode>` section

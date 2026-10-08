@@ -157,9 +157,9 @@ impl SavedMarkdown {
         resolver: Option<&OwnershipResolver>,
     ) -> Result<Self, String> {
         match kind {
-            EnvelopeKind::DeadCode => Ok(Self::DeadCode(SavedDeadCode::parse(
-                envelope, envelope, root, resolver, None,
-            )?)),
+            EnvelopeKind::DeadCode | EnvelopeKind::Architecture => Ok(Self::DeadCode(
+                SavedDeadCode::parse(envelope, envelope, root, resolver, None)?,
+            )),
             EnvelopeKind::Dupes => Ok(Self::Dupes(parse_saved(envelope, "dupes envelope")?)),
             EnvelopeKind::Health => Ok(Self::Health(SavedHealth {
                 report: Box::new(parse_saved(envelope, "health envelope")?),
@@ -301,6 +301,7 @@ pub fn saved_markdown_unsupported(kind: EnvelopeKind) -> String {
         EnvelopeKind::Security => "security",
         EnvelopeKind::Fix => "fix",
         EnvelopeKind::DeadCode => "dead-code",
+        EnvelopeKind::Architecture => "architecture",
         EnvelopeKind::Dupes => "dupes",
         EnvelopeKind::Health => "health",
         EnvelopeKind::Combined => "combined",

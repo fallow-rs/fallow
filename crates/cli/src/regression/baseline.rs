@@ -535,6 +535,7 @@ fn format_schema_mismatch_error(
     expected: u32,
     actual: u32,
     writer_version: &str,
+    command: &str,
 ) -> String {
     let path_display = path.display();
     if actual == 0 {
@@ -542,13 +543,13 @@ fn format_schema_mismatch_error(
             "regression baseline '{path_display}' appears to predate schema versioning \
              (schema_version is 0; this fallow build expects {expected}).\n\
              The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow dead-code --save-regression-baseline {path_display}"
+             Regenerate it by running: fallow {command} --save-regression-baseline {path_display}"
         )
     } else {
         format!(
             "regression baseline '{path_display}' has schema_version {actual} but this fallow build expects {expected}.\n\
              The baseline was written by fallow {writer_version}.\n\
-             Regenerate it by running: fallow dead-code --save-regression-baseline {path_display}"
+             Regenerate it by running: fallow {command} --save-regression-baseline {path_display}"
         )
     }
 }
@@ -556,14 +557,14 @@ fn format_schema_mismatch_error(
 /// Build the message for a baseline missing `schema_version` entirely. Pre-versioning
 /// baselines (hand-edited or written by a very old fallow) hit this path; the raw
 /// serde error ("missing field `schema_version`") is unhelpful to a CI user.
-fn format_missing_schema_version_error(path: &Path) -> String {
+fn format_missing_schema_version_error(path: &Path, command: &str) -> String {
     let path_display = path.display();
     let expected = REGRESSION_SCHEMA_VERSION;
     format!(
         "regression baseline '{path_display}' is missing the schema_version field; \
          this fallow build expects schema_version {expected}.\n\
          The baseline likely predates schema versioning or was hand-edited.\n\
-         Regenerate it by running: fallow dead-code --save-regression-baseline {path_display}"
+         Regenerate it by running: fallow {command} --save-regression-baseline {path_display}"
     )
 }
 
@@ -582,6 +583,20 @@ fn format_missing_schema_version_error(path: &Path) -> String {
 pub fn load_regression_baseline(
     path: &Path,
     output: OutputFormat,
+) -> Result<RegressionBaseline, ExitCode> {
+    load_regression_baseline_for(path, output, "dead-code")
+}
+
+/// Load a regression baseline from disk for `command`, the subcommand that
+/// runs. The regenerate hints name that command.
+///
+/// # Errors
+///
+/// The same errors as [`load_regression_baseline`].
+pub fn load_regression_baseline_for(
+    path: &Path,
+    output: OutputFormat,
+    command: &str,
 ) -> Result<RegressionBaseline, ExitCode> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -607,7 +622,7 @@ pub fn load_regression_baseline(
     })?;
     let baseline: RegressionBaseline = serde_json::from_str(&content).map_err(|e| {
         let message = if e.to_string().contains("missing field `schema_version`") {
-            format_missing_schema_version_error(path)
+            format_missing_schema_version_error(path, command)
         } else {
             format!(
                 "failed to parse regression baseline '{}': {e}",
@@ -622,6 +637,7 @@ pub fn load_regression_baseline(
             REGRESSION_SCHEMA_VERSION,
             baseline.schema_version,
             &baseline.fallow_version,
+            command,
         );
         return Err(emit_error(&message, 2, output));
     }
@@ -640,6 +656,7 @@ fn compare_check_regression(
         opts,
         config_baseline,
         &fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
+        "dead-code",
     )
 }
 
@@ -648,6 +665,7 @@ pub fn compare_check_regression_with_identity(
     opts: &RegressionOpts<'_>,
     config_baseline: Option<&fallow_config::RegressionBaseline>,
     analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
+    command: &str,
 ) -> Result<Option<RegressionOutcome>, ExitCode> {
     if !opts.fail_on_regression {
         return Ok(None);
@@ -663,12 +681,13 @@ pub fn compare_check_regression_with_identity(
     }
 
     let baseline_counts: CheckCounts = if let Some(baseline_path) = opts.regression_baseline_file {
-        let baseline = load_regression_baseline(baseline_path, opts.output)?;
+        let baseline = load_regression_baseline_for(baseline_path, opts.output, command)?;
         ensure_regression_identity(
             &baseline.analysis_identity,
             analysis_identity,
             baseline_path,
             opts.output,
+            command,
         )?;
         let Some(counts) = baseline.check else {
             return Err(emit_error(
@@ -687,6 +706,7 @@ pub fn compare_check_regression_with_identity(
             analysis_identity,
             Path::new("project config"),
             opts.output,
+            command,
         )?;
         CheckCounts::from_config_baseline(config_baseline)
     } else {
@@ -725,6 +745,7 @@ fn ensure_regression_identity(
     current: &fallow_types::semantic::SemanticAnalysisIdentity,
     path: &Path,
     output: OutputFormat,
+    command: &str,
 ) -> Result<(), ExitCode> {
     let incompatible = stored.incompatible_fields(current);
     if incompatible.is_empty() {
@@ -740,7 +761,7 @@ fn ensure_regression_identity(
     };
     Err(emit_error(
         &format!(
-            "regression baseline '{}' has an incompatible analysis identity in: {}. Regenerate it with: fallow dead-code{type_aware_flag} --save-regression-baseline {}",
+            "regression baseline '{}' has an incompatible analysis identity in: {}. Regenerate it with: fallow {command}{type_aware_flag} --save-regression-baseline {}",
             path.display(),
             incompatible.join(", "),
             path.display(),
@@ -1543,8 +1564,13 @@ mod tests {
 
     #[test]
     fn format_schema_mismatch_error_too_high() {
-        let msg =
-            format_schema_mismatch_error(Path::new("/repo/.fallow-baseline.json"), 1, 99, "3.0.0");
+        let msg = format_schema_mismatch_error(
+            Path::new("/repo/.fallow-baseline.json"),
+            1,
+            99,
+            "3.0.0",
+            "dead-code",
+        );
         assert!(msg.contains("schema_version 99"));
         assert!(msg.contains("expects 1"));
         assert!(msg.contains("fallow 3.0.0"));
@@ -1557,8 +1583,13 @@ mod tests {
 
     #[test]
     fn format_schema_mismatch_error_actual_zero_special_case() {
-        let msg =
-            format_schema_mismatch_error(Path::new("/repo/.fallow-baseline.json"), 1, 0, "2.0.0");
+        let msg = format_schema_mismatch_error(
+            Path::new("/repo/.fallow-baseline.json"),
+            1,
+            0,
+            "2.0.0",
+            "dead-code",
+        );
         assert!(msg.contains("predate"));
         assert!(msg.contains("fallow 2.0.0"));
         assert!(
@@ -1568,9 +1599,23 @@ mod tests {
 
     #[test]
     fn format_missing_schema_version_error_includes_regenerate_command() {
-        let msg = format_missing_schema_version_error(Path::new("/repo/baseline.json"));
+        let msg =
+            format_missing_schema_version_error(Path::new("/repo/baseline.json"), "dead-code");
         assert!(msg.contains("missing the schema_version field"));
         assert!(msg.contains("fallow dead-code --save-regression-baseline /repo/baseline.json"));
+    }
+
+    #[test]
+    fn regenerate_hints_name_the_architecture_command() {
+        let path = Path::new("/repo/baseline.json");
+        let expected = "fallow architecture --save-regression-baseline /repo/baseline.json";
+        assert!(format_missing_schema_version_error(path, "architecture").contains(expected));
+        assert!(
+            format_schema_mismatch_error(path, 1, 0, "2.0.0", "architecture").contains(expected)
+        );
+        assert!(
+            format_schema_mismatch_error(path, 1, 99, "3.0.0", "architecture").contains(expected)
+        );
     }
 
     #[test]

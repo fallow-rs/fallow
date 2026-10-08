@@ -1869,3 +1869,84 @@ fn run_dead_code_without_overrides_is_unchanged() {
         "default configuration must keep every unused export: {paths:?}"
     );
 }
+
+/// A project with one import cycle and one unused export.
+fn architecture_project() -> tempfile::TempDir {
+    let project = tempfile::tempdir().expect("temp dir");
+    let root = project.path();
+    std::fs::create_dir(root.join("src")).expect("src dir");
+    write_json(
+        root.join("package.json"),
+        r#"{"name":"api-architecture","main":"src/index.ts"}"#,
+    );
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { a } from './a';\nconsole.log(a);\n",
+    )
+    .expect("entry");
+    std::fs::write(
+        root.join("src/a.ts"),
+        "import { b } from './b';\nexport const a = b + 1;\nexport const unusedA = 1;\n",
+    )
+    .expect("a");
+    std::fs::write(
+        root.join("src/b.ts"),
+        "import { a } from './a';\nexport const b = 1;\nexport const useA = () => a;\n",
+    )
+    .expect("b");
+    project
+}
+
+#[test]
+fn run_architecture_keeps_only_architecture_findings_and_its_own_envelope() {
+    let project = architecture_project();
+    let root = project.path();
+    let output = run_architecture(&crate::ArchitectureOptions {
+        analysis: AnalysisOptions {
+            explain: true,
+            ..analysis_at(root)
+        },
+        ..crate::ArchitectureOptions::default()
+    })
+    .expect("architecture run");
+    let _: &crate::ArchitectureOutput = &output.output;
+    assert_eq!(output.results().circular_dependencies.len(), 1);
+    assert!(output.results().unused_exports.is_empty());
+    assert_eq!(
+        output.output.schema_version.0,
+        fallow_output::ARCHITECTURE_SCHEMA_VERSION
+    );
+
+    let json = crate::runtime_json::serialize_architecture_programmatic_json(output).expect("json");
+    assert_eq!(json["kind"], "architecture");
+    assert_eq!(
+        json["schema_version"],
+        fallow_output::ARCHITECTURE_SCHEMA_VERSION
+    );
+    assert_eq!(json["_meta"]["docs"], fallow_output::ARCHITECTURE_DOCS);
+    assert!(json["_meta"]["rules"].get("unused-export").is_none());
+
+    let policy_only = run_architecture(&crate::ArchitectureOptions {
+        analysis: analysis_at(root),
+        policy: true,
+        ..crate::ArchitectureOptions::default()
+    })
+    .expect("policy run");
+    assert!(policy_only.results().circular_dependencies.is_empty());
+}
+
+#[test]
+fn architecture_selectors_map_onto_the_dead_code_filters() {
+    let all = crate::ArchitectureOptions::default().dead_code_filters();
+    assert!(all.circular_deps && all.re_export_cycles && all.package_cycles);
+    assert!(all.boundary_violations && all.policy_violations);
+    assert!(!all.unused_exports && !all.unused_files);
+
+    let cycles = crate::ArchitectureOptions {
+        cycles: true,
+        ..crate::ArchitectureOptions::default()
+    }
+    .dead_code_filters();
+    assert!(cycles.circular_deps && cycles.re_export_cycles && cycles.package_cycles);
+    assert!(!cycles.boundary_violations && !cycles.policy_violations);
+}

@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -72,6 +72,8 @@ kind: "health"
 kind: "dupes"
 }) | (CheckGroupedOutput & {
 kind: "dead-code-grouped"
+}) | (ArchitectureGroupedOutput & {
+kind: "architecture-grouped"
 }) | ((ImpactReport | SemanticSymbolImpact) & {
 kind: "impact"
 }) | (CrossRepoImpactReport & {
@@ -84,6 +86,8 @@ kind: "security-survivors"
 kind: "security-blind-spots"
 }) | (CheckOutput & {
 kind: "dead-code"
+}) | (ArchitectureOutput & {
+kind: "architecture"
 }) | (CombinedOutput & {
 kind: "combined"
 }) | (FeatureFlagsOutput & {
@@ -108,6 +112,10 @@ kind: "similar-code"
 kind: "similar-code-inspect"
 }) | (SimilarCodeReviewOutput & {
 kind: "similar-code-review"
+}) | (SimilarCodeStatusOutput & {
+kind: "similar-code-status"
+}) | (SimilarCodeCacheClearOutput & {
+kind: "similar-code-cache-clear"
 }))
 /**
  * Schema projection for the audit envelope's exact version.
@@ -1242,6 +1250,13 @@ export type GroupTrendStatus = ("compared" | "new_group" | "no_group_baseline")
  */
 export type DupesSchemaVersion = (4 | 10)
 /**
+ * Schema projection for the architecture envelope's exact version.
+ *
+ * The schema emitter registers this type by name and points the
+ * `ArchitectureOutput` and `ArchitectureGroupedOutput` definitions at it.
+ */
+export type ArchitectureSchemaVersion = 1
+/**
  * Wire-version discriminator for [`ImpactReport`]. Independent from the global
  * `SchemaVersion` (the impact report versions on its own cadence) and from the
  * on-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions
@@ -1562,6 +1577,14 @@ export type SimilarCodeDomainOutcome = ("same-responsibility" | "related-but-dis
  * How review matched an external verdict to the current candidate.
  */
 export type SimilarCodeVerdictMatch = ("candidate-id" | "review-key" | "unverified" | "ambiguous-review-key")
+/**
+ * Version singleton for local-provider status output.
+ */
+export type SimilarCodeStatusSchemaVersion = "1"
+/**
+ * Version singleton for vector-cache clear output.
+ */
+export type SimilarCodeCacheClearSchemaVersion = "1"
 /**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
@@ -13730,6 +13753,89 @@ thin_wrappers?: ThinWrapperFinding[]
 duplicate_prop_shapes?: DuplicatePropShapeFinding[]
 }
 /**
+ * Envelope emitted by `fallow architecture --group-by ... --format json`.
+ *
+ * The body is the `CheckGroupedOutput` body of `fallow dead-code`: issues are partitioned into resolver buckets (CODEOWNERS team, directory prefix, workspace package, or GitLab CODEOWNERS section), and each bucket carries the same issue-array shape as `ArchitectureOutput`, plus per-group `key` / `owners` / `total_issues`.
+ */
+export interface ArchitectureGroupedOutput {
+schema_version: ArchitectureSchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+grouped_by: GroupByMode
+/**
+ * Total findings across all groups.
+ */
+total_issues: number
+/**
+ * One bucket per resolver key.
+ */
+groups: CheckGroupedEntry[]
+/**
+ * `true` when the `unused-load-data-key` detector abstained for the whole
+ * project. The abstain has no file, so it is on the root and not in a
+ * group. An empty `unused_load_data_keys` with this flag set does not
+ * mean the project is clean: the rule could not run safely. Serialized
+ * only when `true`, like the flat `CheckOutput` field.
+ */
+unused_load_data_keys_global_abstain?: boolean
+/**
+ * This run's view of the loaded baseline, present only in baseline runs.
+ * Carries the staleness counts, the advisory verdict and `gate_trips`, the
+ * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+ * reads one field instead of restating the rule. Read `change_scoped`
+ * before dividing `matched_entries` by `baseline_entries`: a narrowed run
+ * can report `matched_entries: 0` on a healthy baseline.
+ */
+baseline_staleness?: (BaselineStaleness | null)
+/**
+ * The answer to `--finding-id`, present only when the run received one
+ * or more `--finding-id` values. The report then holds only the
+ * requested findings. Read `missing` as resolved only when `conclusive`
+ * is true; a scope, a baseline or a filter can hide a finding that still
+ * exists. See [`crate::FindingIdQuery`].
+ */
+finding_id_query?: (FindingIdQuery | null)
+/**
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
+ */
+gate_outcomes?: (GateOutcomes | null)
+/**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
+/**
+ * Applied package Git refs, omitted outside package-baseline runs.
+ */
+package_baselines?: PackageBaselineStatus[]
+/**
+ * `_meta` block with docs and rule definitions, when `--explain` was
+ * passed.
+ */
+_meta?: (Meta | null)
+/**
+ * Diagnostics collected for the full analysis before issue grouping.
+ * See [`CheckOutput::workspace_diagnostics`] for the contract.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
+ * Read-only follow-up commands computed from the full (ungrouped) findings.
+ * See [`CheckOutput::next_steps`] for the contract.
+ */
+next_steps?: NextStep[]
+}
+/**
  * The rendered impact report, derived purely from the store.
  */
 export interface ImpactReport {
@@ -14974,6 +15080,489 @@ path: string
  * Count in the bounded diagnostic sample.
  */
 sampled_count: number
+}
+/**
+ * Envelope emitted by `fallow architecture --format json`.
+ *
+ * The body is the `CheckOutput` body of `fallow dead-code`: the same issue arrays, `summary`, `entry_points`, actions and `gate_outcomes`. The architecture arrays (`circular_dependencies`, `re_export_cycles`, `package_cycles`, `boundary_violations`, `boundary_coverage_violations`, `boundary_call_violations`, `policy_violations`) carry the findings. The combined and audit envelopes do not use this envelope; their `check` block stays `CheckOutput`.
+ */
+export interface ArchitectureOutput {
+schema_version: ArchitectureSchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+/**
+ * Total findings across all issue arrays; excludes `next_steps`.
+ */
+total_issues: number
+/**
+ * Entry-point totals per source, when the analysis recorded them.
+ */
+entry_points?: (EntryPoints | null)
+summary: CheckSummary
+/**
+ * Files not reachable from any entry point. Wrapped in
+ * [`UnusedFileFinding`] so each entry carries a typed `actions` array
+ * natively, replacing the pre-2.76 post-pass injection.
+ */
+unused_files: UnusedFileFinding[]
+/**
+ * Exports never imported by other modules. Wrapped in
+ * [`UnusedExportFinding`] so each entry carries a typed `actions`
+ * array natively.
+ */
+unused_exports: UnusedExportFinding[]
+/**
+ * Type exports never imported by other modules. Wrapped in
+ * [`UnusedTypeFinding`]: the inner [`UnusedExport`] struct is shared
+ * with `unused_exports` but the wrapper emits a type-targeted fix
+ * description.
+ */
+unused_types: UnusedTypeFinding[]
+/**
+ * Exported symbols whose public signature references same-file private
+ * types. Wrapped in [`PrivateTypeLeakFinding`] so each entry carries a
+ * typed `actions` array natively.
+ */
+private_type_leaks: PrivateTypeLeakFinding[]
+/**
+ * Exports marked `@deprecated` that still have at least one consumer in
+ * a reachable file. Wrapped in [`DeprecatedExportInUseFinding`]. Opt-in: the
+ * `deprecated-exports-in-use` rule defaults to `off`.
+ */
+deprecated_exports_in_use?: DeprecatedExportInUseFinding[]
+/**
+ * Dependencies listed in package.json but never imported. Wrapped in
+ * [`UnusedDependencyFinding`] so each entry carries a typed `actions`
+ * array natively. The fix action swaps from `remove-dependency` to
+ * `move-dependency` when `used_in_workspaces` is non-empty.
+ */
+unused_dependencies: UnusedDependencyFinding[]
+/**
+ * Dev dependencies listed in package.json but never imported. Wrapped
+ * in [`UnusedDevDependencyFinding`]: same bare struct as
+ * `unused_dependencies` with a `devDependencies`-targeted fix
+ * description.
+ */
+unused_dev_dependencies: UnusedDevDependencyFinding[]
+/**
+ * Optional dependencies listed in package.json but never imported.
+ * Wrapped in [`UnusedOptionalDependencyFinding`] with an
+ * `optionalDependencies`-targeted fix description.
+ */
+unused_optional_dependencies: UnusedOptionalDependencyFinding[]
+/**
+ * Enum members never accessed. Wrapped in
+ * [`UnusedEnumMemberFinding`] so each entry carries a typed `actions`
+ * array natively.
+ */
+unused_enum_members: UnusedEnumMemberFinding[]
+/**
+ * Class members never accessed. Wrapped in
+ * [`UnusedClassMemberFinding`]: same inner [`UnusedMember`] struct as
+ * `unused_enum_members`, with a class-targeted fix description and the
+ * `auto_fixable: false` default to reflect dependency-injection
+ * patterns.
+ */
+unused_class_members: UnusedClassMemberFinding[]
+/**
+ * Store members (Pinia `state` / `getters` / `actions` key, or a
+ * setup-store returned key) declared but never accessed by any consumer
+ * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_class_members`, with a
+ * store-targeted fix description. Cross-graph: the store binding is
+ * imported (the module is reachable) yet a specific member is dead.
+ */
+unused_store_members?: UnusedStoreMemberFinding[]
+/**
+ * Import specifiers that could not be resolved. Wrapped in
+ * [`UnresolvedImportFinding`] so each entry carries a typed `actions`
+ * array natively.
+ */
+unresolved_imports: UnresolvedImportFinding[]
+/**
+ * Dependencies used in code but not listed in package.json. Wrapped in
+ * [`UnlistedDependencyFinding`].
+ */
+unlisted_dependencies: UnlistedDependencyFinding[]
+/**
+ * Exports with the same name across multiple modules. Wrapped in
+ * [`DuplicateExportFinding`] so each entry carries a typed `actions`
+ * array natively, with the position-0 `add-to-config` `ignoreExports`
+ * snippet wired in at wrapper construction.
+ */
+duplicate_exports: DuplicateExportFinding[]
+/**
+ * Production dependencies only used via type-only imports (could be
+ * devDependencies). Only populated in production mode. Wrapped in
+ * [`TypeOnlyDependencyFinding`].
+ */
+type_only_dependencies: TypeOnlyDependencyFinding[]
+/**
+ * Production dependencies only imported by test files (could be
+ * devDependencies). Wrapped in [`TestOnlyDependencyFinding`].
+ */
+test_only_dependencies?: TestOnlyDependencyFinding[]
+/**
+ * devDependencies imported by production (non-test, non-config) source code
+ * via a runtime/value import; they should be promoted to dependencies.
+ * The promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in
+ * [`DevDependencyInProductionFinding`].
+ */
+dev_dependencies_in_production?: DevDependencyInProductionFinding[]
+/**
+ * Circular dependency chains detected in the module graph. Wrapped in
+ * [`CircularDependencyFinding`] so each entry carries a typed `actions`
+ * array natively.
+ */
+circular_dependencies: CircularDependencyFinding[]
+/**
+ * Cycles or self-loops in the re-export edge subgraph (barrel files
+ * re-exporting from each other in a loop). Wrapped in
+ * [`ReExportCycleFinding`] so each entry carries a typed `actions`
+ * array natively (a `refactor-re-export-cycle` informational primary
+ * plus a `suppress-file` secondary; cycles are file-scoped so a single
+ * suppression breaks the cycle).
+ */
+re_export_cycles?: ReExportCycleFinding[]
+/**
+ * Dependency cycles between workspace packages, built from resolved
+ * cross-package imports. Wrapped in [`PackageCycleFinding`] so each
+ * entry carries a typed `actions` array natively.
+ */
+package_cycles?: PackageCycleFinding[]
+/**
+ * Imports that cross architecture boundary rules. Wrapped in
+ * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
+ * array natively.
+ */
+boundary_violations?: BoundaryViolationFinding[]
+/**
+ * Files that matched no architecture boundary zone while
+ * `boundaries.coverage.requireAllFiles` was enabled.
+ */
+boundary_coverage_violations?: BoundaryCoverageViolationFinding[]
+/**
+ * Calls from zoned files to callees forbidden for that zone via
+ * `boundaries.calls.forbidden`. Wrapped in
+ * [`BoundaryCallViolationFinding`] so each entry carries a typed
+ * `actions` array natively.
+ */
+boundary_call_violations?: BoundaryCallViolationFinding[]
+/**
+ * Banned calls, imports, and catalogue-derived effects matched by
+ * declarative rule packs
+ * (`rulePacks` config). Wrapped in [`PolicyViolationFinding`] so each
+ * entry carries a typed `actions` array natively. Each finding carries
+ * its effective per-rule severity.
+ */
+policy_violations?: PolicyViolationFinding[]
+/**
+ * Suppression comments or JSDoc tags that no longer match any issue.
+ */
+stale_suppressions?: StaleSuppression[]
+/**
+ * Entries in package manager catalog sections not referenced by any
+ * workspace package via the catalog: protocol. Supports
+ * `pnpm-workspace.yaml` catalogs and Bun root `package.json` catalogs.
+ * Wrapped in [`UnusedCatalogEntryFinding`] so each entry carries a typed
+ * `actions` array natively, with per-instance `auto_fixable` derived
+ * from `hardcoded_consumers` and the catalog source file.
+ */
+unused_catalog_entries?: UnusedCatalogEntryFinding[]
+/**
+ * Named groups under package manager catalogs sections that declare no
+ * package entries. The top-level catalog: map is not reported. Wrapped in
+ * [`EmptyCatalogGroupFinding`].
+ */
+empty_catalog_groups?: EmptyCatalogGroupFinding[]
+/**
+ * Workspace package.json references to catalogs (`catalog:` or
+ * `catalog:<name>`) that do not declare the consumed package. The package
+ * manager install will error until the named catalog grows to include the
+ * package or the reference is switched / removed. Wrapped in
+ * [`UnresolvedCatalogReferenceFinding`] with the discriminated
+ * `add-catalog-entry` / `update-catalog-reference` primary at position 0.
+ */
+unresolved_catalog_references?: UnresolvedCatalogReferenceFinding[]
+/**
+ * Entries in pnpm-workspace.yaml's overrides section, package.json's
+ * pnpm.overrides block, npm or Bun's top-level overrides object, or Bun's
+ * top-level resolutions object,
+ * whose target package is not declared by any workspace package and is
+ * not present in pnpm-lock.yaml, package-lock.json, npm-shrinkwrap.json,
+ * or bun.lock. Default severity is warn because projects without a
+ * readable lockfile fall back to manifest-only checks; the hint field
+ * flags those conservative cases. When the only lockfile is bun's binary
+ * bun.lockb, resolution cannot be read and the check emits nothing.
+ * Wrapped in [`UnusedDependencyOverrideFinding`].
+ */
+unused_dependency_overrides?: UnusedDependencyOverrideFinding[]
+/**
+ * Package-manager override or resolution entries whose key or value does
+ * not parse in the declaration source's grammar (empty key, empty value,
+ * malformed selector, unbalanced parent matcher). The package manager may
+ * reject or ignore these at install time. Default severity is error. Wrapped in
+ * [`MisconfiguredDependencyOverrideFinding`].
+ */
+misconfigured_dependency_overrides?: MisconfiguredDependencyOverrideFinding[]
+/**
+ * `"use client"` files that export a Next.js server-only / route-segment
+ * config name (e.g. `metadata`, `revalidate`, `GET`). Next.js rejects this
+ * at build time. Wrapped in [`InvalidClientExportFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+invalid_client_exports?: InvalidClientExportFinding[]
+/**
+ * Barrel files that re-export BOTH a `"use client"` origin module AND a
+ * server-only origin module (the Next.js App Router footgun). Wrapped in
+ * [`MixedClientServerBarrelFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+mixed_client_server_barrels?: MixedClientServerBarrelFinding[]
+/**
+ * `"use client"` / `"use server"` directives written as expression
+ * statements after a non-directive statement, so the RSC bundler parses
+ * them as ordinary strings and silently ignores them. Wrapped in
+ * [`MisplacedDirectiveFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+misplaced_directives?: MisplacedDirectiveFinding[]
+/**
+ * Vue `inject(KEY)` / Svelte `getContext(KEY)` calls whose symbol KEY is
+ * provided nowhere in the project (the injected-never-provided dead-half).
+ * Wrapped in [`UnprovidedInjectFinding`] so each entry carries a typed
+ * `actions` array natively. Default severity is `warn`.
+ */
+unprovided_injects?: UnprovidedInjectFinding[]
+/**
+ * Vue/Svelte single-file components that are reachable but rendered nowhere
+ * (the imported-but-never-rendered dead-half). Wrapped in
+ * [`UnrenderedComponentFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unrendered_components?: UnrenderedComponentFinding[]
+/**
+ * Next.js App Router route files that resolve to the same URL within one
+ * app-root (a guaranteed `next build` failure). Wrapped in
+ * [`RouteCollisionFinding`] so each entry carries a typed `actions` array
+ * natively. One finding per colliding file. Default severity is `warn`.
+ */
+route_collisions?: RouteCollisionFinding[]
+/**
+ * Sibling Next.js dynamic route segments at one tree position using
+ * different param spellings (a dev / runtime error; `next build` does NOT
+ * catch it). Wrapped in [`DynamicSegmentNameConflictFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+dynamic_segment_name_conflicts?: DynamicSegmentNameConflictFinding[]
+/**
+ * Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, and React props
+ * referenced nowhere in their own component. Wrapped in
+ * [`UnusedComponentPropFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unused_component_props?: UnusedComponentPropFinding[]
+/**
+ * Used optional component inputs absent from inspected reachable callers. Off by default.
+ */
+absent_component_props?: AbsentComponentPropFinding[]
+/**
+ * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
+ * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
+ * each entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_component_emits?: UnusedComponentEmitFinding[]
+/**
+ * Angular `@Input()` / signal `input()` / `model()` inputs read nowhere in
+ * their own component (neither the template nor the class body). Wrapped in
+ * [`UnusedComponentInputFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unused_component_inputs?: UnusedComponentInputFinding[]
+/**
+ * Angular `@Output()` / signal `output()` outputs emitted nowhere in their
+ * own component (no `this.<output>.emit(...)`). Wrapped in
+ * [`UnusedComponentOutputFinding`] so each entry carries a typed `actions`
+ * array natively. Default severity is `warn`.
+ */
+unused_component_outputs?: UnusedComponentOutputFinding[]
+/**
+ * Svelte components dispatching a custom event via `createEventDispatcher()`
+ * whose event name is listened to nowhere project-wide (cross-file
+ * dead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_svelte_events?: UnusedSvelteEventFinding[]
+/**
+ * Next.js Server Actions (exports of `"use server"` files) that no code in
+ * the project references. Reclassified out of `unused_exports` for
+ * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
+ * entry carries a typed `actions` array natively. Default severity is
+ * `warn`.
+ */
+unused_server_actions?: UnusedServerActionFinding[]
+/**
+ * SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object keys
+ * read by no consumer. Wrapped in [`UnusedLoadDataKeyFinding`] so each entry
+ * carries a typed `actions` array natively. Default severity is `warn`.
+ */
+unused_load_data_keys?: UnusedLoadDataKeyFinding[]
+/**
+ * `true` when the `unused-load-data-key` detector abstained project-wide
+ * because a whole-object use of `page.data` / `$page.data` was seen
+ * somewhere (S1 observability: an empty `unused_load_data_keys` with this
+ * flag set is NOT a clean bill, it means the rule could not run safely).
+ * Serialized only when `true` so the default JSON contract is unchanged.
+ */
+unused_load_data_keys_global_abstain?: boolean
+/**
+ * React/Preact props forwarded unchanged through `>= N` intermediate
+ * pass-through components until a consumer (located per-chain records).
+ * Wrapped in [`PropDrillingChainFinding`] so each entry carries a typed
+ * `actions` array natively. Health signal: the rule defaults to `off`
+ * (opt-in), so this is dormant and populated ONLY when the user enables it.
+ */
+prop_drilling_chains?: PropDrillingChainFinding[]
+/**
+ * React/Preact components whose entire body is a single spread-forwarded
+ * child render (`return <Child {...props}/>`): pure structural indirection,
+ * a candidate for inlining at call sites. Wrapped in [`ThinWrapperFinding`]
+ * so each entry carries a typed `actions` array natively. Health signal: the
+ * rule defaults to `off` (opt-in), so this is dormant and populated ONLY
+ * when the user enables it.
+ */
+thin_wrappers?: ThinWrapperFinding[]
+/**
+ * React/Preact components that participate in a duplicate-prop-shape group:
+ * three or more components across two or more files whose statically-known
+ * prop NAME set is identical after stripping ubiquitous DOM / passthrough
+ * names (a missing shared `Props` type / base component). Wrapped in
+ * [`DuplicatePropShapeFinding`] so each entry carries a typed `actions`
+ * array and its sibling roster natively. Health signal: the rule defaults to
+ * `off` (opt-in), so this is dormant and populated ONLY when the user
+ * enables it.
+ */
+duplicate_prop_shapes?: DuplicatePropShapeFinding[]
+/**
+ * Count deltas against the matched baseline, in baseline runs.
+ */
+baseline_deltas?: (BaselineDeltas | null)
+/**
+ * Which baseline snapshot was matched, in baseline runs.
+ */
+baseline?: (BaselineMatch | null)
+/**
+ * This run's view of the loaded baseline, present only in baseline runs.
+ * Carries the staleness counts, the advisory verdict and `gate_trips`, the
+ * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
+ * reads one field instead of restating the rule. Read `change_scoped`
+ * before dividing `matched_entries` by `baseline_entries`: a narrowed run
+ * can report `matched_entries: 0` on a healthy baseline.
+ */
+baseline_staleness?: (BaselineStaleness | null)
+/**
+ * The answer to `--finding-id`, present only when the run received one
+ * or more `--finding-id` values. The report then holds only the
+ * requested findings. Read `missing` as resolved only when `conclusive`
+ * is true; a scope, a baseline or a filter can hide a finding that still
+ * exists. See [`crate::FindingIdQuery`].
+ */
+finding_id_query?: (FindingIdQuery | null)
+/**
+ * Regression verdict against the baseline, in `--fail-on-regression` runs.
+ */
+regression?: (RegressionResult | null)
+/**
+ * The verdict of every gate this run evaluated, keyed by name. The CLI
+ * always emits it, with the command's default exit rule in it also when
+ * no flag armed a gate, so a CI integration reads the verdict instead of
+ * guessing from a process status it usually cannot see. A gate fails the
+ * build when `status` is `fail` AND `enforced` is true. The typed
+ * programmatic API runs no CLI gate and leaves it absent. See
+ * [`crate::GateOutcomes`].
+ */
+gate_outcomes?: (GateOutcomes | null)
+/**
+ * Every narrowing or shaping request this run RECEIVED, keyed by name,
+ * absent when it was asked for nothing. An entry whose `status` is not
+ * `applied` means the run could not do what it was asked and reported
+ * something WIDER instead, so what follows is a valid report of a scope
+ * nobody requested. Honoured requests are published too, with
+ * `status: "applied"`, so an absent object means "nothing was asked for",
+ * never "nothing failed". See [`crate::RequestOutcomes`].
+ */
+request_outcomes?: (RequestOutcomes | null)
+/**
+ * Applied Git refs for exact workspace packages. Absent when no package
+ * baselines were selected, including runs with a global changed-since ref.
+ */
+package_baselines?: PackageBaselineStatus[]
+/**
+ * `_meta` block with docs and rule definitions, when `--explain` was
+ * passed.
+ */
+_meta?: (Meta | null)
+/**
+ * Non-fatal diagnostics about the project itself, from all three stages
+ * that record them (issue #473):
+ *
+ * - workspace discovery, at config load: `undeclared-workspace`,
+ *   `malformed-package-json`, `glob-matched-no-package-json`,
+ *   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
+ * - source discovery, during the file walk: `skipped-large-file`,
+ *   `skipped-minified-file`, `skipped-source-dotdir`,
+ *   `excluded-by-default-ignore`, `source-read-failure`,
+ *   `source-parse-degraded`;
+ * - dead-code analysis, from the dependency-catalog and override
+ *   detectors: `malformed-pnpm-workspace-yaml`,
+ *   `bun-lockb-override-resolution-skipped`;
+ * - framework plugins, while they read their own build configs:
+ *   `plugin-config-unreadable`, `plugin-effect-not-modeled`;
+ * - the dead-code result, for config patterns that matched nothing:
+ *   `ignore-dependencies-glob-unmatched`,
+ *   `ignore-findings-pattern-unmatched`.
+ *
+ * Analysis-stage and plugin-stage kinds therefore reach only the envelopes
+ * whose run includes a dead-code analyze pass, never a standalone
+ * `fallow dupes --format json`. `path` is project-root-relative with
+ * forward slashes; the array is omitted when empty. The same list is
+ * repeated on each top-level command's envelope so single-command
+ * consumers see it without having to look at a separate top-level field.
+ *
+ * A diagnostic here is advisory and never withholds a finding. Where an
+ * entry reports a source file this run never fully analyzed
+ * (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
+ * `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
+ * verdict, so the affected `unused_files[]`, `unused_exports[]`, and
+ * dependency entries additionally carry the caveat themselves in their own
+ * optional `reachability_caveats[]` array, and a reader who never scrolls
+ * back up to this list still sees it. `fallow fix` reads the same array
+ * and withholds the removal while a caveat stands.
+ *
+ * `excluded-by-default-ignore` is the one source-discovery kind that
+ * reports unseen files WITHOUT raising a caveat. It names a built-in
+ * ignore pattern (`** /dist/**`, `** /build/**`, `** /coverage/**`, or one
+ * of the four minified-bundle globs) that removed candidate source files
+ * from the walk, which is designed behavior on generated output rather
+ * than a degraded run, so it is advisory only and no finding inherits it.
+ * One entry per pattern, never per file, so the array stays bounded on a
+ * project of any size. Gitignored trees are pruned before the walk sees
+ * them and count zero, and `** /node_modules/**` is never reported:
+ * installed dependencies are not the first-party source the kind is
+ * about.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
+ * Read-only follow-up commands computed from this run's findings, emitted
+ * at the JSON root so an agent acting on the output is pointed at fallow's
+ * adjacent verification capabilities (trace, complexity breakdown, audit,
+ * workspace scoping). Each command is runnable as-is and never mutating;
+ * see [`NextStep`] for both contracts. Omitted when empty or when
+ * `FALLOW_SUGGESTIONS=off`; does NOT contribute to `total_issues`.
+ */
+next_steps?: NextStep[]
 }
 /**
  * Bare `fallow --format json` envelope.
@@ -17668,6 +18257,88 @@ outcome: SimilarCodeDomainOutcome
  * Bounded explanation grounded in the inspected sources.
  */
 rationale: string
+}
+/**
+ * Machine-readable readiness of the exact local companion and pinned model.
+ */
+export interface SimilarCodeStatusOutput {
+schema_version: SimilarCodeStatusSchemaVersion
+version: ToolVersion
+/**
+ * Companion protocol version.
+ */
+protocol_version: number
+/**
+ * Embedding calculation semantics implemented by the companion.
+ */
+embedding_semantics_version: number
+/**
+ * Exact companion package version.
+ */
+companion_version: string
+/**
+ * Whether every pinned model artifact is ready and verified.
+ */
+model_ready: boolean
+/**
+ * Immutable model identifier.
+ */
+model_id: string
+/**
+ * Immutable model revision.
+ */
+model_revision: string
+/**
+ * Embedding width.
+ */
+dimensions: number
+/**
+ * Maximum tokenizer length.
+ */
+max_tokens: number
+/**
+ * Model license identifier.
+ */
+license: string
+/**
+ * Local model cache directory.
+ */
+cache_dir: string
+/**
+ * Expected download size for all pinned artifacts.
+ */
+download_bytes: number
+/**
+ * Whether source analysis stays local and offline.
+ */
+analysis_offline: boolean
+/**
+ * Whether all installed artifacts passed integrity validation.
+ */
+integrity_verified: boolean
+/**
+ * Actionable readiness problem when the model is unavailable.
+ */
+problem?: (string | null)
+/**
+ * Whether this setup invocation downloaded new bytes.
+ */
+downloaded?: (boolean | null)
+}
+/**
+ * Result of explicitly clearing the derived project-namespaced vector cache.
+ */
+export interface SimilarCodeCacheClearOutput {
+schema_version: SimilarCodeCacheClearSchemaVersion
+version: ToolVersion
+/**
+ * Whether an existing vector cache was removed.
+ */
+removed: boolean
+/**
+ * Whether model artifacts were removed. Version 1 always emits false.
+ */
+model_removed: boolean
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

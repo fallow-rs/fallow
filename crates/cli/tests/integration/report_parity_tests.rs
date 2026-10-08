@@ -231,6 +231,105 @@ fn saved_reports_preserve_native_health_duplication_and_combined_output() {
     );
 }
 
+/// The saved-report parity case of each command that `fallow report --from`
+/// renders, as `(command, test)`. A new command row that renders needs a case
+/// here and a test that compares its saved and direct output.
+const PARITY_CASES: &[(&str, &str)] = &[
+    (
+        "dead-code",
+        "saved_reports_preserve_native_health_duplication_and_combined_output",
+    ),
+    (
+        "architecture",
+        "saved_architecture_reports_match_direct_rendering",
+    ),
+    (
+        "dupes",
+        "saved_reports_preserve_native_health_duplication_and_combined_output",
+    ),
+    (
+        "health",
+        "saved_reports_preserve_native_health_duplication_and_combined_output",
+    ),
+    (
+        "security",
+        "saved_security_report_preserves_native_sarif_and_rejects_codeclimate",
+    ),
+    ("audit", "saved_audit_reports_preserve_all_native_sections"),
+];
+
+#[test]
+fn every_report_from_command_has_a_parity_case() {
+    use fallow_types::command_surfaces::{COMMAND_ENVELOPES, ReportFrom};
+
+    let renders: std::collections::BTreeSet<&str> = COMMAND_ENVELOPES
+        .iter()
+        .filter(|row| row.report_from == ReportFrom::Renders)
+        .map(|row| row.command)
+        .collect();
+    let cases: std::collections::BTreeSet<&str> =
+        PARITY_CASES.iter().map(|(command, _)| *command).collect();
+    assert_eq!(
+        renders, cases,
+        "every command that report --from renders needs a saved-report parity case"
+    );
+    let source = include_str!("report_parity_tests.rs");
+    for (command, test) in PARITY_CASES {
+        let body = test_body(source, test)
+            .unwrap_or_else(|| panic!("{command}: parity test `{test}` does not exist"));
+        // `check` is the hidden alias of `dead-code` that the older cases use.
+        let selectors: &[&str] = if *command == "dead-code" {
+            &["dead-code", "check"]
+        } else {
+            &[command]
+        };
+        assert!(
+            selectors
+                .iter()
+                .any(|selector| body.contains(&format!("Some(\"{selector}\")"))),
+            "{command}: parity test `{test}` does not run `fallow {command}`"
+        );
+    }
+}
+
+/// The source of `fn {name}()` up to the closing brace at column zero.
+fn test_body<'a>(source: &'a str, name: &str) -> Option<&'a str> {
+    let start = source.find(&format!("fn {name}()"))?;
+    let rest = &source[start..];
+    let end = rest.find("\n}\n").map_or(rest.len(), |offset| offset + 3);
+    Some(&rest[..end])
+}
+
+/// `fallow architecture` writes its own `kind`, so `fallow report --from` must
+/// accept it and render every target byte-identical to the direct run, flat and
+/// grouped.
+#[test]
+fn saved_architecture_reports_match_direct_rendering() {
+    for fixture in [
+        "tests/fixtures/boundary-violations",
+        "tests/fixtures/re-export-cycle-2-node",
+    ] {
+        let root = workspace_fixture(fixture);
+        let json = run(
+            &root,
+            &analysis_args(Some("architecture"), &root, "json", &[]),
+        );
+        let envelope: serde_json::Value =
+            serde_json::from_slice(&json.stdout).expect("architecture JSON");
+        assert_eq!(envelope["kind"], "architecture", "{fixture}");
+        assert!(
+            envelope["total_issues"].as_u64().unwrap_or(0) > 0,
+            "{fixture} must have an architecture finding so the parity is not vacuous"
+        );
+        assert_saved_report_parity(&root, Some("architecture"));
+        assert_saved_report_parity_with_args(
+            &root,
+            Some("architecture"),
+            &["--group-by", "directory"],
+        );
+    }
+}
+
 /// The two GitHub-native targets build their own render input. They do not read
 /// the report the JSON format serializes. A member the live call leaves out is
 /// therefore absent from the body they write, and `report --from` renders it from

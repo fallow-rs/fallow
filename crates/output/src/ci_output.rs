@@ -527,6 +527,7 @@ fn render_findings_table(out: &mut String, issues: &[&CiIssue], max: usize, summ
 pub fn command_title(command: &str) -> &'static str {
     match command {
         "dead-code" | "check" => "codebase report",
+        "architecture" => "architecture report",
         "dupes" => "duplication report",
         "health" => "health report",
         "audit" => "audit report",
@@ -1148,6 +1149,13 @@ mod tests {
             "fallow/unused-dependency" => "Dependencies",
             _ => "Dead code",
         }
+    }
+
+    #[test]
+    fn command_title_names_each_analysis_command() {
+        assert_eq!(command_title("dead-code"), "codebase report");
+        assert_eq!(command_title("architecture"), "architecture report");
+        assert_eq!(command_title("dupes"), "duplication report");
     }
 
     #[test]

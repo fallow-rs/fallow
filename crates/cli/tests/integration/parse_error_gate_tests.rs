@@ -98,7 +98,7 @@ fn assert_names_the_broken_file(entry: &Value) {
     );
 }
 
-const COMMANDS: [&str; 3] = ["dead-code", "health", ""];
+const COMMANDS: [&str; 4] = ["dead-code", "architecture", "health", ""];
 
 #[test]
 fn an_unarmed_run_keeps_its_exit_code_and_envelope() {
@@ -280,6 +280,18 @@ fn the_ci_comment_names_the_file_in_the_gate_summary() {
         "stdout: {}",
         output.stdout
     );
+}
+
+/// The rejection names every command that runs the gate.
+#[test]
+fn the_dupes_rejection_names_every_gated_command() {
+    let project = broken_project(WARN_UNUSED_FILES);
+    let (output, json) = run_json(&project, "dupes", &["--fail-on-parse-error"]);
+    assert_eq!(output.code, 2, "stderr: {}", output.stderr);
+    let message = json["message"].as_str().unwrap_or_default();
+    for command in ["dead-code", "architecture", "health", "audit", "bare run"] {
+        assert!(message.contains(command), "{command}: {message}");
+    }
 }
 
 #[test]

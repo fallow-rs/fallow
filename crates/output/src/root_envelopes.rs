@@ -346,6 +346,7 @@ pub enum FallowOutput<
     Explain,
     Inspect,
     Trace,
+    TraceError,
     ReviewEnvelope,
     ReviewReconcile,
     CoverageSetup,
@@ -355,6 +356,7 @@ pub enum FallowOutput<
     Health,
     Dupes,
     CheckGrouped,
+    ArchitectureGrouped,
     Impact,
     ImpactCrossRepo,
     SecuritySummary,
@@ -362,6 +364,7 @@ pub enum FallowOutput<
     SecuritySurvivors,
     SecurityBlindSpots,
     Check,
+    Architecture,
     Combined,
     FeatureFlags,
     AuditBrief,
@@ -389,6 +392,9 @@ pub enum FallowOutput<
     /// `fallow trace <symbol> --format json`.
     #[serde(rename = "trace")]
     Trace(Trace),
+    /// `fallow trace-error [FILE|-] --format json`.
+    #[serde(rename = "trace-error")]
+    TraceError(TraceError),
     /// `fallow --format review-github` / `--format review-gitlab`.
     #[serde(rename = "review-envelope")]
     ReviewEnvelope(ReviewEnvelope),
@@ -416,6 +422,9 @@ pub enum FallowOutput<
     /// `fallow dead-code --format json --group-by <mode>`.
     #[serde(rename = "dead-code-grouped")]
     CheckGrouped(CheckGrouped),
+    /// `fallow architecture --format json --group-by <mode>`.
+    #[serde(rename = "architecture-grouped")]
+    ArchitectureGrouped(ArchitectureGrouped),
     /// `fallow impact --format json`.
     #[serde(rename = "impact")]
     Impact(Impact),
@@ -437,6 +446,9 @@ pub enum FallowOutput<
     /// `fallow dead-code --format json`.
     #[serde(rename = "dead-code")]
     Check(Check),
+    /// `fallow architecture --format json`.
+    #[serde(rename = "architecture")]
+    Architecture(Architecture),
     /// Bare `fallow --format json`.
     #[serde(rename = "combined")]
     Combined(Combined),

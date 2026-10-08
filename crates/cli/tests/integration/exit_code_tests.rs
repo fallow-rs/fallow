@@ -1356,7 +1356,7 @@ fn subcommands_without_a_baseline_reject_global_baseline_flags() {
 /// The subcommands that use the global baseline flags keep them.
 #[test]
 fn baseline_subcommands_keep_the_global_save_baseline_flag() {
-    for command in ["dead-code", "dupes", "health"] {
+    for command in ["dead-code", "architecture", "dupes", "health"] {
         let dir = tempfile::tempdir().expect("create temp dir");
         let root = dir.path();
         std::fs::write(root.join("package.json"), r#"{"name": "keeps-baseline"}"#).unwrap();
@@ -2176,8 +2176,38 @@ fn dupes_and_health_reject_the_sarif_file_flag() {
             message.contains("--sarif-file") && message.contains(command),
             "{command}: {message}"
         );
+        for writer in [
+            "`fallow dead-code`",
+            "`fallow architecture`",
+            "`fallow security`",
+        ] {
+            assert!(
+                message.contains(writer),
+                "{command} names {writer}: {message}"
+            );
+        }
         assert!(!root.join("report.sarif").exists(), "{command}");
     }
+}
+
+/// `fallow architecture` writes the SARIF file, as the rejection hint says.
+#[test]
+fn architecture_writes_the_sarif_file() {
+    let (dir, root) = write_confinement_project();
+    let output = run_fallow_from(
+        dir.path(),
+        &root,
+        &[
+            "architecture",
+            "--sarif-file",
+            "report.sarif",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_ne!(output.code, 2, "{}", output.stdout);
+    assert!(root.join("report.sarif").exists(), "{}", output.stderr);
 }
 
 /// A bare run writes SARIF only from the dead-code analysis. When `--only`

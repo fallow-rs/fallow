@@ -57,6 +57,7 @@ fn api_check_json_document(
     elapsed: Duration,
 ) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_check_json(fallow_api::CheckJsonOutputInput {
+        envelope: fallow_output::CheckEnvelope::DeadCode,
         results,
         root,
         elapsed,

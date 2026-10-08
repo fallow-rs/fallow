@@ -391,7 +391,8 @@ struct Cli {
     max_file_size: Option<u32>,
 
     /// Compare against a previously saved baseline file. Used by bare
-    /// `fallow`, `dead-code`, `dupes` and `health`; other subcommands reject it
+    /// `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other
+    /// subcommands reject it
     #[arg(hide_short_help = true, long, global = true)]
     baseline: Option<PathBuf>,
 
@@ -426,8 +427,9 @@ struct Cli {
     parent_run: Option<String>,
 
     /// Save the current results as a baseline file. Used by bare `fallow`,
-    /// `dead-code`, `dupes` and `health`; other subcommands reject it. The path
-    /// must resolve inside the project root, its Git work tree, the CI workspace or a temp directory
+    /// `dead-code`, `architecture`, `dupes` and `health`; other subcommands
+    /// reject it. The path must resolve inside the project root, its Git work
+    /// tree, the CI workspace or a temp directory
     #[arg(hide_short_help = true, long, global = true)]
     save_baseline: Option<PathBuf>,
 
@@ -514,9 +516,9 @@ struct Cli {
     fail_on_issues: bool,
 
     /// Write SARIF output to a file (in addition to the primary --format output).
-    /// Used by bare `fallow`, `dead-code` and `security`. The path must resolve
-    /// inside the project root, its Git work tree, the CI workspace or a temp
-    /// directory
+    /// Used by bare `fallow`, `dead-code`, `architecture` and `security`. The
+    /// path must resolve inside the project root, its Git work tree, the CI
+    /// workspace or a temp directory
     #[arg(hide_short_help = true, long, global = true, value_name = "PATH")]
     sarif_file: Option<PathBuf>,
 
@@ -582,7 +584,7 @@ struct Cli {
     /// default branch. A baseline that the base ref does not have is a new
     /// baseline and passes with a note. A base ref that git cannot resolve
     /// (for example in a shallow clone) exits 2. Applies to `dead-code`,
-    /// `dupes`, `health`, `audit` and the bare run, and reaches a machine
+    /// `architecture`, `dupes`, `health`, `audit` and the bare run, and reaches a machine
     /// consumer as `gate_outcomes["baseline-growth"]`.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_baseline_growth: bool,
@@ -600,9 +602,9 @@ struct Cli {
     /// entry in `workspace_diagnostics[]` fails the run, and the gate entry in
     /// `gate_outcomes["parse-error"]` names each such file. Off by default,
     /// because the parser also rejects valid syntax that is newer than the
-    /// parser. Applies to `dead-code`, `health`, `audit` and the bare run, in
-    /// every output format. The `failOnParseError` config key arms the same
-    /// gate. `health --report-only` never fails a run.
+    /// parser. Applies to `dead-code`, `architecture`, `health`, `audit` and
+    /// the bare run, in every output format. The `failOnParseError` config key
+    /// arms the same gate. `health --report-only` never fails a run.
     #[arg(hide_short_help = true, long, global = true)]
     fail_on_parse_error: bool,
 
@@ -2124,7 +2126,8 @@ enum Command {
     /// SARIF, markdown, and GitHub/GitLab PR-comment and review formats.
     Report {
         /// Path to a fallow JSON results file produced by `--format json`
-        /// (dead-code, dupes, health, audit, security, or bare combined).
+        /// (dead-code, architecture, dupes, health, audit, security, or bare
+        /// combined).
         #[arg(long, value_name = "PATH")]
         from: PathBuf,
     },
@@ -7343,6 +7346,50 @@ mod tests {
                 listed,
                 "root --help command list is missing subcommand '{name}'; \
                  add it to a top_level_*_command_groups! section"
+            );
+        }
+    }
+
+    /// A new visible subcommand must say whether it writes an analysis report.
+    /// A row in `COMMAND_ENVELOPES` binds it to the schema, `report --from`,
+    /// MCP and drift tests; the other list records why it has no row.
+    #[test]
+    fn every_visible_subcommand_is_classified_for_its_machine_contract() {
+        use clap::CommandFactory;
+        use fallow_types::command_surfaces::{
+            COMMAND_ENVELOPES, COMMANDS_WITHOUT_ANALYSIS_ENVELOPE,
+        };
+
+        let visible: Vec<String> = Cli::command()
+            .get_subcommands()
+            .filter(|sub| !sub.is_hide_set() && sub.get_name() != "help")
+            .map(|sub| sub.get_name().to_string())
+            .collect();
+        for name in &visible {
+            let rows = COMMAND_ENVELOPES
+                .iter()
+                .filter(|row| row.command == name)
+                .count();
+            let others = COMMANDS_WITHOUT_ANALYSIS_ENVELOPE
+                .iter()
+                .filter(|(command, _)| command == name)
+                .count();
+            assert_eq!(
+                rows + others,
+                1,
+                "subcommand `{name}` must be in exactly one of COMMAND_ENVELOPES and \
+                 COMMANDS_WITHOUT_ANALYSIS_ENVELOPE (crates/types/src/command_surfaces.rs)"
+            );
+        }
+        let listed = COMMAND_ENVELOPES.iter().map(|row| row.command).chain(
+            COMMANDS_WITHOUT_ANALYSIS_ENVELOPE
+                .iter()
+                .map(|(command, _)| *command),
+        );
+        for command in listed {
+            assert!(
+                visible.iter().any(|name| name == command),
+                "`{command}` is listed in command_surfaces.rs but is not a visible subcommand"
             );
         }
     }

@@ -24,22 +24,23 @@ mod similar_code;
 mod trace;
 
 pub use crate::runtime_output::{
-    AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
-    BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
-    CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput, DeadCodeOutput,
-    DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput, DuplicationOutput,
-    DuplicationProgrammaticOutput, FeatureFlagsOutput, FeatureFlagsProgrammaticOutput,
-    HealthJsonReportInput, HealthProgrammaticOutput, TraceClassMemberOutput, TraceCloneOutput,
-    TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
-    TraceErrorOutput, TraceErrorProgrammaticOutput, TraceExportOutput,
-    TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
+    ArchitectureOutput, ArchitectureProgrammaticOutput, AuditProgrammaticKeySnapshot,
+    AuditProgrammaticOutput, BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput,
+    CircularDependenciesOutput, CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput,
+    DeadCodeOutput, DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
+    DuplicationOutput, DuplicationProgrammaticOutput, FeatureFlagsOutput,
+    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
+    TraceClassMemberOutput, TraceCloneOutput, TraceCloneProgrammaticOutput, TraceDependencyOutput,
+    TraceDependencyProgrammaticOutput, TraceErrorOutput, TraceErrorProgrammaticOutput,
+    TraceExportOutput, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
     TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
     serialize_health_report_json,
 };
 pub use audit::run_audit;
 pub use combined::run_combined;
 pub use dead_code::{
-    run_boundary_violations, run_circular_dependencies, run_dead_code, run_dead_code_with_baseline,
+    run_architecture, run_boundary_violations, run_circular_dependencies, run_dead_code,
+    run_dead_code_with_baseline,
 };
 pub use decision_surface::run_decision_surface;
 pub use duplication::run_duplication;

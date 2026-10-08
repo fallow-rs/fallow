@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   computeComplexity,
   computeHealth,
+  detectArchitecture,
   detectBoundaryViolations,
   detectCircularDependencies,
   detectDeadCode,
@@ -585,6 +586,29 @@ writeFileSync(
   assert.equal(report.summary.total_issues, 1);
   assert.equal(report.circular_dependencies.length, 0);
   console.log("  [PASS] detectBoundaryViolations");
+}
+
+{
+  const report = await detectArchitecture({ root });
+  assert.equal(report.kind, "architecture");
+  assert.equal(report.schema_version, 1);
+  assert.equal(report.circular_dependencies.length, 1);
+  assert.equal(report.boundary_violations.length, 1);
+  assert.equal(report.unused_exports.length, 0);
+  const cycles = await detectCircularDependencies({ root });
+  const boundaries = await detectBoundaryViolations({ root });
+  assert.deepEqual(
+    report.circular_dependencies.map((item) => item.finding_id),
+    cycles.circular_dependencies.map((item) => item.finding_id),
+  );
+  assert.deepEqual(
+    report.boundary_violations.map((item) => item.finding_id),
+    boundaries.boundary_violations.map((item) => item.finding_id),
+  );
+  const onlyCycles = await detectArchitecture({ root, cycles: true });
+  assert.equal(onlyCycles.boundary_violations.length, 0);
+  assert.equal(onlyCycles.circular_dependencies.length, 1);
+  console.log("  [PASS] detectArchitecture");
 }
 
 {

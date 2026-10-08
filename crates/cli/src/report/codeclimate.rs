@@ -105,6 +105,8 @@ pub fn envelope_codeclimate_issues_with_config(
     match saved_native_codeclimate_issues(kind, envelope, root, config_path, resolver) {
         Ok(issues) => Ok(issues),
         Err(native_error)
+            // `architecture` has no legacy schema: it first shipped with its
+            // own envelope, so a saved architecture file is never legacy.
             if matches!(
                 kind,
                 EnvelopeKind::DeadCode
@@ -195,7 +197,7 @@ fn saved_native_codeclimate_issues(
 ) -> Result<Vec<CodeClimateIssue>, String> {
     let rules = super::sarif::saved_report_rules(root, config_path);
     match kind {
-        EnvelopeKind::DeadCode => {
+        EnvelopeKind::DeadCode | EnvelopeKind::Architecture => {
             let mut results =
                 parse_saved_section::<AnalysisResults>(envelope, "dead-code envelope")?;
             if !saved_schema_is_legacy(kind, envelope) {
@@ -376,7 +378,9 @@ fn validate_current_saved_envelope(
     )?;
 
     match kind {
-        EnvelopeKind::DeadCode => validate_current_dead_code_envelope(kind, envelope)?,
+        EnvelopeKind::DeadCode | EnvelopeKind::Architecture => {
+            validate_current_dead_code_envelope(kind, envelope)?;
+        }
         EnvelopeKind::Dupes => validate_current_duplication_payload(envelope)?,
         EnvelopeKind::Health => validate_current_health_payload(envelope)?,
         EnvelopeKind::Audit => {
@@ -451,7 +455,8 @@ fn validate_current_analysis_sections(
             EnvelopeKind::DeadCode => validate_current_dead_code_section(section),
             EnvelopeKind::Dupes => validate_current_duplication_payload(section),
             EnvelopeKind::Health => validate_current_health_payload(section),
-            EnvelopeKind::Audit
+            EnvelopeKind::Architecture
+            | EnvelopeKind::Audit
             | EnvelopeKind::Combined
             | EnvelopeKind::Security
             | EnvelopeKind::Fix => {
@@ -609,6 +614,7 @@ fn saved_schema_is_legacy(kind: EnvelopeKind, envelope: &serde_json::Value) -> b
 fn current_schema_version(kind: EnvelopeKind) -> Option<u32> {
     match kind {
         EnvelopeKind::DeadCode => Some(fallow_output::CHECK_SCHEMA_VERSION),
+        EnvelopeKind::Architecture => Some(fallow_output::ARCHITECTURE_SCHEMA_VERSION),
         EnvelopeKind::Dupes => Some(fallow_output::DUPES_SCHEMA_VERSION),
         EnvelopeKind::Health => Some(fallow_output::HEALTH_SCHEMA_VERSION),
         EnvelopeKind::Audit => Some(fallow_output::AUDIT_SCHEMA_VERSION),
@@ -620,6 +626,7 @@ fn current_schema_version(kind: EnvelopeKind) -> Option<u32> {
 const fn envelope_kind_label(kind: EnvelopeKind) -> &'static str {
     match kind {
         EnvelopeKind::DeadCode => "dead-code",
+        EnvelopeKind::Architecture => "architecture",
         EnvelopeKind::Dupes => "dupes",
         EnvelopeKind::Health => "health",
         EnvelopeKind::Audit => "audit",

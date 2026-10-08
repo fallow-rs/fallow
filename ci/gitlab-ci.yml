@@ -595,7 +595,8 @@ variables:
           [ -n "$FALLOW_SAVE_REGRESSION_BASELINE" ] && ARGS+=(--save-regression-baseline "$FALLOW_SAVE_REGRESSION_BASELINE")
           ;;
         architecture)
-          # Same analysis and envelope as dead-code. FALLOW_ISSUE_TYPES takes
+          # Same analysis as dead-code, with its own `architecture` envelope.
+          # FALLOW_ISSUE_TYPES takes
           # the architecture filters (cycles, boundaries, policy). The command
           # has no unused-export filter, so FALLOW_INCLUDE_ENTRY_EXPORTS does
           # not apply.

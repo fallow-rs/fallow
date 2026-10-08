@@ -44,7 +44,7 @@ cargo install fallow-cli   # build from source
 1. **Always use `--format json --quiet`** for machine-readable output and parse stdout as JSON. Compact JSON is the default; never depend on whitespace or add `--pretty` in agent pipelines. Keep stderr separate so diagnostics remain visible; never merge it into the JSON stream with `2>&1`.
 2. **Preserve and interpret the exit status.** Codes 0 and 1 are successful analysis outcomes: 0 is clean and 1 means findings. Treat every other code according to `fallow schema.exit_codes`. Do not force a successful status, because that hides validation, license, setup, network, and security-gate outcomes.
 3. **Use `--explain`** to include a `_meta` object in JSON output with metric definitions, ranges, and interpretation hints. In human format, `--explain` prints a `Description:` line under each section header.
-4. **Use the root `kind` field** to identify typed JSON envelopes (`dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, etc.).
+4. **Use the root `kind` field** to identify typed JSON envelopes (`dead-code`, `dead-code-grouped`, `architecture`, `architecture-grouped`, `health`, `dupes`, `combined`, `audit`, etc.).
 5. **Use issue type filters** (`--unused-exports`, `--unused-files`, etc.) to limit output scope
 6. **Always `--dry-run` before `fix`**, then `fix --yes` to apply
 7. **All output paths are relative** to the project root
@@ -109,7 +109,7 @@ Full command catalogue, one row per command: **[references/cli-reference.md](ref
 
 Dead-code filter flags select issue categories (`--unused-exports`, `--unused-types`, `--unused-deps`, `--unused-files`, and so on). Some flags select related types together; `--unused-deps` covers several dependency types. Passing one or more narrows `fallow dead-code` to those categories. Passing none applies no issue-type filter.
 
-`fallow architecture` reports the architecture findings: circular dependencies, re-export cycles, package cycles, boundary violations and rule-pack policy violations. Use `--cycles`, `--boundaries` or `--policy` to select one kind. The JSON output is the `dead-code` envelope with the same arrays and finding ids. `fallow dead-code` still reports these findings until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. Run `fallow guard <files>` before an edit and `fallow architecture` after it. In bare `fallow`, `--only architecture` reports only these findings and `--skip architecture` removes them.
+`fallow architecture` reports the architecture findings: circular dependencies, re-export cycles, package cycles, boundary violations and rule-pack policy violations. Use `--cycles`, `--boundaries` or `--policy` to select one kind. The JSON output has `kind: "architecture"` and its own `schema_version`, with the same arrays and finding ids as `dead-code`. `fallow dead-code` still reports these findings until the next major version. Its `--circular-deps`, `--re-export-cycles`, `--package-cycles`, `--boundary-violations` and `--policy-violations` flags are deprecated aliases. Run `fallow guard <files>` before an edit and `fallow architecture` after it. In bare `fallow`, `--only architecture` reports only these findings and `--skip architecture` removes them.
 
 For suppressible findings, use the placement listed in the issue catalogue: `// fallow-ignore-next-line <issue-type>` above the finding, or `// fallow-ignore-file <issue-type>` at the top of the file. Some types support only file-level suppression; others have no suppression comment. A bare supported form without a type suppresses all matching findings at that placement.
 
@@ -285,7 +285,7 @@ fallow dead-code --format json --quiet --save-baseline .fallow/snapshot.json
 fallow dead-code --format json --quiet --baseline .fallow/snapshot.json
 ```
 
-`--save-regression-baseline` / `--regression-baseline` / `--fail-on-regression` / `--tolerance` are count-based gates for `dead-code`, bare combined mode, and `flags --retirement` (a flags baseline needs a PATH; without `--retirement` the options have no effect on `flags` and it warns). `--save-baseline` / `--baseline` are identity-based (track finding identity, fail on new). `audit` rejects the global baseline flags and uses `--dead-code-baseline` / `--health-baseline` / `--dupes-baseline` instead.
+`--save-regression-baseline` / `--regression-baseline` / `--fail-on-regression` / `--tolerance` are count-based gates for `dead-code`, `architecture`, bare combined mode, and `flags --retirement` (a flags baseline needs a PATH; without `--retirement` the options have no effect on `flags` and it warns). `--save-baseline` / `--baseline` are identity-based (track finding identity, fail on new). `audit` rejects the global baseline flags and uses `--dead-code-baseline` / `--health-baseline` / `--dupes-baseline` instead.
 
 With no path, `--save-regression-baseline` updates `regression.baseline` in the discovered fallow config, or creates `.fallowrc.json` when none exists. Pass a path only when a standalone baseline file is preferred.
 
