@@ -3,10 +3,13 @@
 //!
 //! A new analysis command must reach the root `FallowOutput` schema, `fallow
 //! report --from`, the MCP server and the drift harness. Each of those
-//! surfaces has a test that reads [`COMMAND_ENVELOPES`], so a command that is
-//! added to the CLI without a row, or a row without a surface, fails a test
-//! instead of shipping a silent gap. Every other visible subcommand is listed
-//! in [`COMMANDS_WITHOUT_ANALYSIS_ENVELOPE`] with the reason it has no row.
+//! surfaces has a test that reads
+//! [`COMMAND_ENVELOPES`](crate::command_surfaces::COMMAND_ENVELOPES), so a
+//! command that is added to the CLI without a row, or a row without a
+//! surface, fails a test instead of shipping a silent gap. Every other
+//! visible subcommand is listed in
+//! [`COMMANDS_WITHOUT_ANALYSIS_ENVELOPE`](crate::command_surfaces::COMMANDS_WITHOUT_ANALYSIS_ENVELOPE)
+//! with the reason it has no row.
 
 /// How `fallow report --from` treats a saved envelope of a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
