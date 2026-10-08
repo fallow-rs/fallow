@@ -51,22 +51,12 @@ pub enum McpSource {
 }
 
 impl McpCommand {
-    /// Shell-quoted rendering for next actions. Words with whitespace or
-    /// shell-significant characters are double-quoted with `"` and `\`
-    /// escaped.
+    /// Shell-quoted rendering for next actions. Each word stays one argument
+    /// in the shell of this platform, whatever characters its path holds.
     pub fn shell_words(&self) -> String {
         std::iter::once(self.command.as_str())
             .chain(self.args.iter().map(String::as_str))
-            .map(|word| {
-                let needs_quotes = word
-                    .chars()
-                    .any(|c| c.is_whitespace() || matches!(c, '"' | '\\' | '$' | '`' | '\''));
-                if needs_quotes {
-                    format!("\"{}\"", word.replace('\\', "\\\\").replace('"', "\\\""))
-                } else {
-                    word.to_string()
-                }
-            })
+            .map(fallow_engine::shell_quote::shell_quote)
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -1030,4 +1020,43 @@ pub const fn cursor_file() -> &'static str {
 
 pub const fn codex_file() -> &'static str {
     CODEX_FILE
+}
+
+#[cfg(test)]
+mod shell_words_tests {
+    use super::{McpCommand, McpSource};
+
+    fn command(command: &str, args: &[&str]) -> McpCommand {
+        McpCommand {
+            command: command.to_owned(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            source: McpSource::Path,
+        }
+    }
+
+    #[test]
+    fn plain_words_stay_unquoted() {
+        assert_eq!(
+            command("npx", &["--no", "fallow-mcp"]).shell_words(),
+            "npx --no fallow-mcp"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_path_with_shell_characters_stays_one_argument() {
+        assert_eq!(
+            command("/opt/my tools/fallow-mcp;touch x", &["--root", "/srv/a&b"]).shell_words(),
+            "'/opt/my tools/fallow-mcp;touch x' --root '/srv/a&b'"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_path_with_shell_characters_stays_one_argument() {
+        assert_eq!(
+            command(r"C:\Program Files\nodejs\npx.cmd", &["--root", r"C:\a&b"]).shell_words(),
+            r#""C:\Program Files\nodejs\npx.cmd" --root "C:\a&b""#
+        );
+    }
 }

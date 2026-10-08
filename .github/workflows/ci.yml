@@ -151,6 +151,7 @@ jobs:
               - 'crates/engine/src/changed_files.rs'
               - 'crates/engine/src/churn.rs'
               - 'crates/engine/src/repo_refs.rs'
+              - 'crates/engine/src/shell_quote.rs'
               - 'crates/engine/src/write_guard.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/engine/src/health/scoring.rs'

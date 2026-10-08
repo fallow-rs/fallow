@@ -362,15 +362,7 @@ impl BaselineKind {
         // while `--baseline` resolves it against the working directory. An
         // absolute path names the same file in both.
         let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        let display = absolute.display().to_string();
-        let quoted = if display
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '+'))
-        {
-            display
-        } else {
-            format!("'{}'", display.replace('\'', "'\\''"))
-        };
+        let quoted = crate::shell_quote::shell_quote(&absolute.display().to_string());
         format!(
             "fallow baselines prune --{}-baseline {quoted}",
             self.as_str()

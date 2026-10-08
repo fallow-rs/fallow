@@ -18,6 +18,8 @@ use fallow_config::OutputFormat;
 use fallow_engine::baseline::{BaselineKind, BaselinePrune, BaselinePruneRefusal, PrunedEntry};
 
 use crate::combined::{CombinedOptions, CombinedResults, collect_combined_results};
+use fallow_engine::shell_quote::shell_quote;
+
 use crate::report;
 
 /// The most removed keys that the human report lists for one file.
@@ -387,21 +389,6 @@ fn save_command(outcome: &FileOutcome, root: &Path) -> String {
     )
 }
 
-/// Quote a word for a POSIX shell. The paths come from the project config, and
-/// an agent can run an action `command` in a shell, so a path must never add
-/// a command of its own.
-fn shell_quote(word: &str) -> String {
-    let plain = !word.is_empty()
-        && word
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '+'));
-    if plain {
-        word.to_owned()
-    } else {
-        format!("'{}'", word.replace('\'', "'\\''"))
-    }
-}
-
 fn prune_json(outcomes: &[FileOutcome], check: bool, root: &Path) -> serde_json::Value {
     let files: Vec<serde_json::Value> = outcomes
         .iter()
@@ -564,22 +551,4 @@ fn print_removed(removed: &[PrunedEntry]) {
 
 const fn entry_noun(count: usize) -> &'static str {
     if count == 1 { "entry" } else { "entries" }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::shell_quote;
-
-    #[test]
-    fn shell_quote_keeps_plain_paths_and_quotes_the_rest() {
-        assert_eq!(
-            shell_quote("baselines/dead-code.json"),
-            "baselines/dead-code.json"
-        );
-        assert_eq!(shell_quote("a b.json"), "'a b.json'");
-        assert_eq!(shell_quote("x;rm -rf ~.json"), "'x;rm -rf ~.json'");
-        assert_eq!(shell_quote("$(id).json"), "'$(id).json'");
-        assert_eq!(shell_quote("it's.json"), "'it'\\''s.json'");
-        assert_eq!(shell_quote(""), "''");
-    }
 }

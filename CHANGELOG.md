@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The copy-paste commands that `fallow agent install` and
+  `fallow baselines prune` print now quote each path for the shell of the
+  platform. A path with `;`, `|`, `&` or similar characters stays one
+  argument and cannot add a command. On Windows, a quoted path keeps single
+  backslashes.
 - **`fallow viz` no longer stops drawing the graph on a narrow stage.** On a
   stage narrower than 200 px, the camera fit gave a negative zoom, and the
   canvas threw an error for each negative ring radius. The fit now keeps a

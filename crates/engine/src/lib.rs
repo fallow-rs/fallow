@@ -71,6 +71,7 @@ mod results;
 mod security;
 pub mod session;
 mod session_reuse;
+pub mod shell_quote;
 pub mod similar_code;
 pub mod source;
 mod suppress;
