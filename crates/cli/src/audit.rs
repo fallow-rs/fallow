@@ -2184,6 +2184,7 @@ fn run_audit_check<'a>(
         use_shared_diff_index: true,
         baseline: opts.dead_code_baseline,
         baseline_flag: "--dead-code-baseline",
+        bare_run: false,
         save_baseline: None,
         // The gate is answered once by `note_stale_baseline_gate_inert`;
         // this sub-pass is change-scoped and could only stand down again.

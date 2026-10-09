@@ -229,6 +229,48 @@ pub fn note_unrecognised_baseline(
     );
 }
 
+/// The bare-run flag that loads a baseline of `kind`, when that flag is not
+/// `--baseline`. On the bare run, `--baseline` holds the dead-code baseline
+/// only, and health and duplication read their baselines through their own
+/// flags.
+const fn bare_run_flag(kind: BaselineKind) -> Option<&'static str> {
+    match kind {
+        BaselineKind::DeadCode => None,
+        BaselineKind::Dupes => Some("--dupes-baseline"),
+        BaselineKind::Health => Some("--health-baseline"),
+    }
+}
+
+/// [`note_unrecognised_baseline`] for the dead-code sub-pass of bare `fallow`.
+///
+/// A `fallow health` or `fallow dupes` baseline passed to bare `--baseline`
+/// has a correct home on the same run, so the note names that flag. The
+/// generic remedy, to point `--baseline` at the command's own baseline, would
+/// send the reader to save a dead-code baseline that they did not want. Every
+/// other case prints the generic note.
+pub fn note_unrecognised_bare_run_baseline(
+    path: Option<&Path>,
+    unrecognised_format: bool,
+    saved_by: Option<BaselineKind>,
+) {
+    match (path, saved_by, saved_by.and_then(bare_run_flag)) {
+        (Some(path), Some(found), Some(flag)) if unrecognised_format => eprintln!(
+            "Note: `fallow {}` saved the baseline at {}. On bare `fallow`, --baseline holds the \
+             `fallow dead-code` baseline only, so this file suppresses nothing. Pass it with \
+             {flag} instead.",
+            found.as_str(),
+            path.display(),
+        ),
+        _ => note_unrecognised_baseline(
+            path,
+            unrecognised_format,
+            saved_by,
+            BaselineKind::DeadCode,
+            "--baseline",
+        ),
+    }
+}
+
 /// One loaded baseline as the gate reads it: the counts it compares, the
 /// recognition verdict that overrides them, and what the file turned out to be.
 struct GateReport<'a> {

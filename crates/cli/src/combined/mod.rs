@@ -271,6 +271,7 @@ fn build_combined_check_options<'a>(
         use_shared_diff_index: true,
         baseline: opts.baseline,
         baseline_flag: "--baseline",
+        bare_run: true,
         save_baseline: opts.save_baseline,
         fail_on_stale_baseline: opts.fail_on_stale_baseline,
         sarif_file: opts.sarif_file,

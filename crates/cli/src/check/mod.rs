@@ -451,6 +451,10 @@ pub struct CheckOptions<'a> {
     /// command saved names an argument this run accepts. `fallow audit` passes
     /// `--dead-code-baseline`; every other caller passes `--baseline`.
     pub baseline_flag: &'a str,
+    /// True for the dead-code sub-pass of bare `fallow`. There `--baseline`
+    /// holds the dead-code baseline only, so the note about a health or dupes
+    /// baseline names `--health-baseline` or `--dupes-baseline` instead.
+    pub bare_run: bool,
     pub save_baseline: Option<&'a std::path::Path>,
     /// Fail the run when a loaded `baseline` has entries that match nothing.
     pub fail_on_stale_baseline: bool,
@@ -1392,6 +1396,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             save_path: opts.save_baseline,
             load_path: opts.baseline,
             load_flag: opts.baseline_flag,
+            bare_run: opts.bare_run,
             command: opts.surface.command(),
             root: &config.root,
             quiet: opts.quiet,
@@ -1513,6 +1518,7 @@ pub fn benchmark_dead_code_json(
         use_shared_diff_index: true,
         baseline: None,
         baseline_flag: "--baseline",
+        bare_run: false,
         save_baseline: None,
         fail_on_stale_baseline: false,
         sarif_file: None,
@@ -2104,6 +2110,9 @@ struct BaselineIo<'a> {
     /// `--dead-code-baseline`, so a fixed `--baseline` would name an argument that
     /// run does not accept.
     load_flag: &'a str,
+    /// True for the dead-code sub-pass of bare `fallow`, see
+    /// [`CheckOptions::bare_run`].
+    bare_run: bool,
     /// The subcommand that runs, for the `recheck-baseline` next step and the
     /// regenerate hint. The baseline file format stays `dead-code`.
     command: &'static str,
@@ -2362,13 +2371,21 @@ fn load_and_compare_baseline(
     if unrecognised_format {
         // The file suppresses nothing, so every finding stays in the report and
         // the counts say the baseline carried no entry (issue #2738).
-        crate::baseline_gate::note_unrecognised_baseline(
-            Some(baseline_path),
-            true,
-            saved_by,
-            fallow_engine::baseline::BaselineKind::DeadCode,
-            io.load_flag,
-        );
+        if io.bare_run {
+            crate::baseline_gate::note_unrecognised_bare_run_baseline(
+                Some(baseline_path),
+                true,
+                saved_by,
+            );
+        } else {
+            crate::baseline_gate::note_unrecognised_baseline(
+                Some(baseline_path),
+                true,
+                saved_by,
+                fallow_engine::baseline::BaselineKind::DeadCode,
+                io.load_flag,
+            );
+        }
     }
     crate::output_runtime::set_loaded_baseline(crate::output_runtime::LoadedBaselineRecheck {
         command: io.command,
@@ -2810,6 +2827,7 @@ mod tests {
                 save_path: Some(&baseline_path),
                 load_path: None,
                 load_flag: "--baseline",
+                bare_run: false,
                 command: "dead-code",
                 root: std::path::Path::new("/project"),
                 quiet: true,

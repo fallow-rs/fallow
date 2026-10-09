@@ -397,7 +397,9 @@ struct Cli {
 
     /// Compare against a previously saved baseline file. Used by bare
     /// `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other
-    /// subcommands reject it
+    /// subcommands reject it. On bare `fallow` it holds the dead-code baseline
+    /// only: pass health and duplication baselines with `--health-baseline`
+    /// and `--dupes-baseline`
     #[arg(hide_short_help = true, long, global = true)]
     baseline: Option<PathBuf>,
 
@@ -433,8 +435,10 @@ struct Cli {
 
     /// Save the current results as a baseline file. Used by bare `fallow`,
     /// `dead-code`, `architecture`, `dupes` and `health`; other subcommands
-    /// reject it. The path must resolve inside the project root, its Git work
-    /// tree, the CI workspace or a temp directory
+    /// reject it. On bare `fallow` it saves the dead-code baseline only: save
+    /// the others with `fallow health --save-baseline` and `fallow dupes
+    /// --save-baseline`. The path must resolve inside the project root, its Git
+    /// work tree, the CI workspace or a temp directory
     #[arg(hide_short_help = true, long, global = true)]
     save_baseline: Option<PathBuf>,
 
@@ -6606,6 +6610,7 @@ fn dispatch_check_run(
         use_shared_diff_index: true,
         baseline: cli.baseline.as_deref(),
         baseline_flag: "--baseline",
+        bare_run: false,
         save_baseline: cli.save_baseline.as_deref(),
         fail_on_stale_baseline: cli.fail_on_stale_baseline,
         sarif_file: cli.sarif_file.as_deref(),

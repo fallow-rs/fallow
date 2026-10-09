@@ -1236,7 +1236,7 @@
       "section": "flags:global",
       "row": "--baseline",
       "column": "Description",
-      "seed": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it"
+      "seed": "Compare against a previously saved baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it. On bare `fallow` it holds the dead-code baseline only: pass health and duplication baselines with `--health-baseline` and `--dupes-baseline`"
     },
     {
       "section": "flags:global",
@@ -1572,7 +1572,7 @@
       "section": "flags:global",
       "row": "--save-baseline",
       "column": "Description",
-      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
+      "seed": "Save the current results as a baseline file. Used by bare `fallow`, `dead-code`, `architecture`, `dupes` and `health`; other subcommands reject it. On bare `fallow` it saves the dead-code baseline only: save the others with `fallow health --save-baseline` and `fallow dupes --save-baseline`. The path must resolve inside the project root, its Git work tree, the CI workspace or a temp directory"
     },
     {
       "section": "flags:global",

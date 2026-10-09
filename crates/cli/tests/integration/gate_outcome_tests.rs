@@ -304,6 +304,66 @@ fn bare_fallow_names_the_writer_of_each_foreign_baseline() {
     }
 }
 
+/// On bare `fallow`, `--baseline` holds the dead-code baseline only. A health
+/// or dupes baseline passed there has its own flag on the same run, so the note
+/// names that flag instead of telling the reader to save a dead-code baseline.
+/// The standalone `dead-code` command keeps the generic remedy.
+#[test]
+fn bare_fallow_points_a_health_or_dupes_baseline_at_its_own_flag() {
+    let project = cloned_project();
+    for (command, flag) in [
+        ("health", "--health-baseline"),
+        ("dupes", "--dupes-baseline"),
+    ] {
+        let path = project.path().join(format!("{command}-baseline.json"));
+        save_baseline(command, &project, &path);
+        let path_arg = path.to_str().expect("utf8");
+
+        let bare = run(&[
+            "--root",
+            root_arg(&project),
+            "--format",
+            "json",
+            "--quiet",
+            "--baseline",
+            path_arg,
+        ]);
+        assert!(
+            bare.stderr
+                .contains(&format!("`fallow {command}` saved the baseline at")),
+            "the bare note names the writer: {}",
+            bare.stderr
+        );
+        assert!(
+            bare.stderr
+                .contains(&format!("Pass it with {flag} instead.")),
+            "the bare note names {flag}: {}",
+            bare.stderr
+        );
+        assert!(
+            !bare
+                .stderr
+                .contains("Point --baseline at this command's own baseline"),
+            "the bare note does not send the reader to a dead-code baseline: {}",
+            bare.stderr
+        );
+
+        let standalone = compare_with_baseline("dead-code", &project, &path, false);
+        assert!(
+            standalone
+                .stderr
+                .contains("Point --baseline at this command's own baseline."),
+            "the standalone command keeps the generic remedy: {}",
+            standalone.stderr
+        );
+        assert!(
+            !standalone.stderr.contains(flag),
+            "the standalone command does not accept {flag}, so it does not name it: {}",
+            standalone.stderr
+        );
+    }
+}
+
 /// A baseline the previous release saved carries no `kind`, so the keys decide,
 /// and all three commands must read their own exactly as they do today.
 #[test]
