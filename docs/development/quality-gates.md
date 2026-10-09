@@ -282,6 +282,29 @@ Coverage falls back to computation on detector failure and publishes only after
 successful fresh computation. Supersession and release concurrency remain as
 specified above.
 
+### Parallel heavy jobs
+
+The slowest `CI` jobs have parts that run in parallel:
+
+- `Check` runs the nextest suite, the runtime-coverage feature tests, the
+  schema drift gate and the coverage producer conformance check.
+- `Lint and contracts` runs both Clippy passes, `cargo fmt --check`, the
+  contract bundle drift gate, the staged subgenerator tests, and the NAPI build
+  and smoke test.
+- `Windows path and subprocess handling` runs the Windows nextest selection
+  and the platform Clippy pass. `Windows drift harness` runs the drift harness
+  on Windows. The two Windows jobs have the same trigger.
+- `Miri` runs `cargo miri test` for `fallow-types`, `fallow-graph` and
+  `fallow-extract` as three parallel processes in one step. The Miri
+  interpreter uses one core, so the job takes as long as the slowest crate.
+  Do not use `cargo miri nextest run`: it starts a new Miri process for each
+  test, and each start costs seconds.
+
+`Check` and `Lint and contracts` have the same trigger, and both use the runner
+that the `heavy-runner` job selects. Each split job uses one more runner slot in
+a run. `scripts/workflow-policy.test.mjs` asserts that each moved step runs in
+exactly one of these jobs.
+
 ### Rule for new workflows
 
 A job that runs on pull requests must meet one of these conditions:
@@ -397,12 +420,14 @@ repository variable `BLACKSMITH_HEAVY_ALLOCATION` only after confirming the
 current monthly allowance, usage and organization headroom:
 
 ```json
-{"month":"2026-09","budgetCredits":2222,"priorReservedCredits":2100,"allocations":[{"workflow":"ci.yml","job":"check","firstRunNumber":12345,"slots":1}]}
+{"month":"2026-09","budgetCredits":2250,"priorReservedCredits":2100,"allocations":[{"workflow":"ci.yml","job":"check","firstRunNumber":12345,"slots":1}]}
 ```
 
 This example activates nothing. Each 4-vCPU Ubuntu 24.04 Check slot reserves
-90 credits; each full drift slot reserves 210. Costs use the existing 30/90-minute
-timeouts at 2 credits per minute plus 30 for overhead.
+150 credits, because one slot gives the runner to two parallel 30-minute jobs:
+`Check` and `Lint and contracts`. Each full drift slot reserves 210. Costs use
+the job timeouts (2 x 30 and 90 minutes) at 2 credits per minute plus 30 for
+overhead.
 
 The only supported pairs are `ci.yml/check`,
 `release-validation.yml/drift-full` and `release.yml/drift-full`. Reusable
