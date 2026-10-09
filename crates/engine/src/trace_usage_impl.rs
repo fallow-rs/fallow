@@ -1151,8 +1151,19 @@ fn wrapper_consumers(
     consumers
 }
 
-/// The sort key of a site: `file`, `line`, `col`, kind, `specifier`, `via`.
-type SiteKey<'a> = (&'a str, u32, u32, UsageSiteKind, &'a str, &'a str);
+/// The sort key of a site: `file`, `line`, `col`, kind, `specifier`, `via`,
+/// `local_name`, `member`. Two sites at one position can differ only in the
+/// last two fields, so the key holds every field to keep pages exact.
+type SiteKey<'a> = (
+    &'a str,
+    u32,
+    u32,
+    UsageSiteKind,
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a str,
+);
 
 fn site_key(site: &UsageSite) -> SiteKey<'_> {
     (
@@ -1162,6 +1173,8 @@ fn site_key(site: &UsageSite) -> SiteKey<'_> {
         site.kind,
         site.specifier.as_deref().unwrap_or(""),
         site.via.as_deref().unwrap_or(""),
+        site.local_name.as_deref().unwrap_or(""),
+        site.member.as_deref().unwrap_or(""),
     )
 }
 
@@ -1173,6 +1186,8 @@ struct CursorKey {
     kind: UsageSiteKind,
     specifier: String,
     via: String,
+    local_name: String,
+    member: String,
 }
 
 impl CursorKey {
@@ -1184,6 +1199,8 @@ impl CursorKey {
             self.kind,
             self.specifier.as_str(),
             self.via.as_str(),
+            self.local_name.as_str(),
+            self.member.as_str(),
         )
     }
 }
@@ -1261,6 +1278,8 @@ fn encode_cursor(hash: u64, site: &UsageSite) -> String {
         site.kind.as_str().to_owned(),
         site.specifier.clone().unwrap_or_default(),
         site.via.clone().unwrap_or_default(),
+        site.local_name.clone().unwrap_or_default(),
+        site.member.clone().unwrap_or_default(),
     ]
     .join(&CURSOR_SEPARATOR.to_string());
     let mut token = String::with_capacity(CURSOR_PREFIX.len() + payload.len() * 2);
@@ -1288,7 +1307,18 @@ fn decode_cursor(token: &str, expected_hash: u64) -> Result<CursorKey, UsageErro
         .ok_or(UsageError::InvalidCursor)?;
     let payload = String::from_utf8(bytes).map_err(|_| UsageError::InvalidCursor)?;
     let fields: Vec<&str> = payload.split(CURSOR_SEPARATOR).collect();
-    let [hash, file, line, col, kind, specifier, via] = fields.as_slice() else {
+    let [
+        hash,
+        file,
+        line,
+        col,
+        kind,
+        specifier,
+        via,
+        local_name,
+        member,
+    ] = fields.as_slice()
+    else {
         return Err(UsageError::InvalidCursor);
     };
     if u64::from_str_radix(hash, 16).ok() != Some(expected_hash) {
@@ -1301,6 +1331,8 @@ fn decode_cursor(token: &str, expected_hash: u64) -> Result<CursorKey, UsageErro
         kind: site_kind_from_str(kind).ok_or(UsageError::InvalidCursor)?,
         specifier: (*specifier).to_owned(),
         via: (*via).to_owned(),
+        local_name: (*local_name).to_owned(),
+        member: (*member).to_owned(),
     })
 }
 

@@ -894,3 +894,33 @@ fn a_namespace_import_read_only_as_a_type_is_type_only() {
     assert_eq!(entry.type_only_file_count, 1);
     assert_eq!(entry.unresolved.binding_without_site, 0, "{entry:#?}");
 }
+
+#[test]
+fn a_page_boundary_keeps_sites_that_differ_only_in_member_or_local_name() {
+    let site = |member: &str| RawSite {
+        file_id: FileId(0),
+        site: UsageSite {
+            file: "src/a.ts".to_owned(),
+            line: 3,
+            col: 7,
+            specifier: Some("store".to_owned()),
+            local_name: Some("store".to_owned()),
+            member: Some(member.to_owned()),
+            kind: UsageSiteKind::Call,
+            via: None,
+        },
+        counts_as_call: false,
+    };
+    let sites = [site("dispatch"), site("getState")];
+    let first = site_page(&sites, None, PACKAGE, 1, None).unwrap();
+    assert_eq!(first.items.len(), 1);
+    let cursor = first.next_cursor.clone().unwrap();
+    let second = site_page(&sites, None, PACKAGE, 1, Some(&cursor)).unwrap();
+    let members: Vec<_> = first
+        .items
+        .iter()
+        .chain(&second.items)
+        .map(|s| s.member.clone().unwrap())
+        .collect();
+    assert_eq!(members, ["dispatch", "getState"]);
+}

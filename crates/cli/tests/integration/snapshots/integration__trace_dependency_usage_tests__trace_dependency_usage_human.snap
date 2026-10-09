@@ -35,7 +35,7 @@ expression: "redact_paths(&output.stdout, &root)"
     src/components/Badge.tsx:3:31  useSelector call via src/store/hooks.ts:useAppSelector
     src/components/Counter.tsx:5:16  useSelector call via src/store/hooks.ts:useAppSelector
     src/components/Counter.tsx:6:16  useSelector call via src/store/hooks.ts:useAppSelector
-  Next page: --cursor v1.65623334313337366165393762313737007372632f636f6d706f6e656e74732f436f756e7465722e74737800360031360063616c6c0075736553656c6563746f72007372632f73746f72652f686f6f6b732e74733a75736541707053656c6563746f72
+  Next page: --cursor v1.65623334313337366165393762313737007372632f636f6d706f6e656e74732f436f756e7465722e74737800360031360063616c6c0075736553656c6563746f72007372632f73746f72652f686f6f6b732e74733a75736541707053656c6563746f720075736541707053656c6563746f7200
 
   Files that import the users (depth 1, 4 file(s)):
     [1] src/components/Badge.tsx
