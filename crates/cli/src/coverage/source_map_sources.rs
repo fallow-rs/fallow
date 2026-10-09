@@ -529,8 +529,10 @@ mod tests {
     /// on either side that alters a candidate list fails one of the two suites.
     #[test]
     fn source_candidates_match_the_shared_contract() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/source-map-path-contract.json");
+        let path = Path::new(
+            &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("../../tests/fixtures/source-map-path-contract.json");
         let text = std::fs::read_to_string(&path).expect("read contract fixture");
         let contract: serde_json::Value = serde_json::from_str(&text).expect("parse contract");
         assert_eq!(contract["schemaVersion"], 1);
