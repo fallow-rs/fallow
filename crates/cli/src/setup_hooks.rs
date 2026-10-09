@@ -2263,6 +2263,9 @@ mod tests {
             "git --git-dir /x/.git --work-tree=/x -c a=b push",
             "cd /tmp && git commit -m x",
             "echo hi; git -c u=v push",
+            "git -C \"/tmp/a dir\" commit -m x",
+            "cd '/tmp/a dir' && git push",
+            "echo \"$(git commit -m x)\"",
         ];
         for command in recognized {
             let output = probe_gate_command(command, &[]);
@@ -2282,6 +2285,8 @@ mod tests {
             "git stash push",
             "git show commit",
             "git -c",
+            "echo \"git commit\"",
+            "git log --grep 'x; git push'",
             "cargo test",
             "",
         ];

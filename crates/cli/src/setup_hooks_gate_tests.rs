@@ -4,7 +4,8 @@
 //! directory. The gate reads the session directory from the `cwd` field of
 //! the hook input and runs the audit from the audit root of that directory.
 //! Each test runs the rendered script in bash with a stub `fallow` on `PATH`.
-//! The stub writes the directory of the `audit` call to a log file.
+//! The stub adds the directory of each `audit` call to a log file. It returns
+//! a fail verdict in a directory that holds `STUB_FAIL_MARKER`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -16,8 +17,11 @@ use super::rendered_gate_script;
 
 const STUB_FALLOW: &str = "#!/bin/sh\n\
 if [ \"$1\" = \"--version\" ]; then echo 'fallow 9.0.0'; exit 0; fi\n\
-pwd -P > \"$FALLOW_STUB_LOG\"\n\
-echo '{\"verdict\":\"pass\"}'\n";
+pwd -P >> \"$FALLOW_STUB_LOG\"\n\
+if [ -f .stub-fail ]; then echo '{\"verdict\":\"fail\"}'; else echo '{\"verdict\":\"pass\"}'; fi\n";
+
+/// A file that makes the stub return a fail verdict in its directory.
+const STUB_FAIL_MARKER: &str = ".stub-fail";
 
 /// Environment variables that point git at a different repository. A git
 /// hook that runs the test suite sets some of them.
@@ -100,8 +104,8 @@ fn init_repo(dir: &Path) {
 
 struct GateRun {
     output: Output,
-    /// The directory of the `audit` call, or `None` when the audit did not run.
-    audit_dir: Option<PathBuf>,
+    /// The directory of each `audit` call, in call order.
+    audit_dirs: Vec<PathBuf>,
 }
 
 /// Runs `script` in bash from `process_dir`, the way a handler starts it.
@@ -164,10 +168,12 @@ fn run_gate_with_debug(
         .write_all(payload.to_string().as_bytes())
         .unwrap();
     let output = child.wait_with_output().expect("wait");
-    let audit_dir = std::fs::read_to_string(&log)
-        .ok()
-        .map(|text| PathBuf::from(text.trim_end()));
-    GateRun { output, audit_dir }
+    let audit_dirs = std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .map(PathBuf::from)
+        .collect();
+    GateRun { output, audit_dirs }
 }
 
 fn commit_payload(cwd: &Path) -> serde_json::Value {
@@ -185,8 +191,8 @@ fn assert_audited_in(run: &GateRun, expected: &Path, case: &str) {
         String::from_utf8_lossy(&run.output.stderr)
     );
     assert_eq!(
-        run.audit_dir.as_deref(),
-        Some(expected),
+        run.audit_dirs,
+        [expected],
         "{case}: wrong audit root; stderr={}",
         String::from_utf8_lossy(&run.output.stderr)
     );
@@ -352,7 +358,10 @@ fn gate_skips_other_commands_before_the_audit_root_work() {
         "fallow-gate: not a git commit/push, skipping audit.\n",
         "a skipped command must write only the skip line"
     );
-    assert_eq!(run.audit_dir, None, "a skipped command must not audit");
+    assert!(
+        run.audit_dirs.is_empty(),
+        "a skipped command must not audit"
+    );
 
     let commit = serde_json::json!({
         "cwd": session,
@@ -520,4 +529,176 @@ fn user_scope_gate_audits_the_git_top_level_of_the_session() {
 
     let run = run_gate(&gate, &home, &home, &commit_payload(&not_a_repo));
     assert_audited_in(&run, &not_a_repo, "session outside a git repository");
+}
+
+fn command_payload(cwd: &Path, command: &str) -> serde_json::Value {
+    serde_json::json!({
+        "cwd": cwd,
+        "tool_input": { "command": command },
+    })
+}
+
+/// A main checkout with the gate and two linked worktrees beside it. The
+/// session works in worktree `a`; the hook process starts in the main
+/// checkout. Worktree `b` has a space in its name.
+struct TwoWorktrees {
+    _tmp: TempDir,
+    root: PathBuf,
+    gate: PathBuf,
+    main: PathBuf,
+    a: PathBuf,
+    b: PathBuf,
+}
+
+fn two_worktrees() -> TwoWorktrees {
+    let (tmp, root) = spaced_root();
+    let main = root.join("main");
+    init_repo(&main);
+    let gate = install_gate(&main, ".claude");
+    let a = root.join("wt-a");
+    let b = root.join("wt b");
+    for worktree in [&a, &b] {
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                worktree.to_str().unwrap(),
+            ],
+        );
+    }
+    TwoWorktrees {
+        _tmp: tmp,
+        root,
+        gate,
+        main,
+        a,
+        b,
+    }
+}
+
+/// A git write that names another work tree audits that tree, not the
+/// session tree. A session in worktree `a` that commits in worktree `b` must
+/// not be blocked by findings in `a`.
+#[test]
+fn gate_audits_the_work_tree_that_the_command_targets() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let session = trees.a.join("src");
+    std::fs::create_dir_all(&session).unwrap();
+    let b = trees.b.display().to_string();
+    let a_file = trees.a.join("README.md");
+    std::fs::write(&a_file, "readme\n").unwrap();
+
+    let cases = [
+        (
+            "plain commit".to_owned(),
+            "git commit -m x".to_owned(),
+            &trees.a,
+        ),
+        (
+            "-C with a quoted path".to_owned(),
+            format!("git -C \"{b}\" commit -m x"),
+            &trees.b,
+        ),
+        (
+            "-C with a single-quoted path".to_owned(),
+            format!("git -C '{b}' push origin main"),
+            &trees.b,
+        ),
+        (
+            "-C with an escaped space".to_owned(),
+            format!("git -C {} commit -m x", b.replace(' ', "\\ ")),
+            &trees.b,
+        ),
+        (
+            "relative -C".to_owned(),
+            "git -C '../../wt b' commit -m x".to_owned(),
+            &trees.b,
+        ),
+        (
+            "cd and &&".to_owned(),
+            format!("cd \"{b}\" && git commit -m \"a b\""),
+            &trees.b,
+        ),
+        (
+            "cd and ;".to_owned(),
+            format!("cd \"{b}\"; git commit -m x"),
+            &trees.b,
+        ),
+        (
+            "--work-tree=".to_owned(),
+            format!("git \"--work-tree={b}\" commit -m x"),
+            &trees.b,
+        ),
+        (
+            "--git-dir of a .git entry".to_owned(),
+            format!("git --git-dir \"{b}/.git\" commit -m x"),
+            &trees.b,
+        ),
+        (
+            "missing target".to_owned(),
+            format!(
+                "git -C \"{}\" commit -m x",
+                trees.root.join("gone").display()
+            ),
+            &trees.a,
+        ),
+        (
+            "file target".to_owned(),
+            format!("git -C \"{}\" commit -m x", a_file.display()),
+            &trees.a,
+        ),
+        (
+            "a quoted git write is not a target".to_owned(),
+            format!("git commit -m \"cd {b}\""),
+            &trees.a,
+        ),
+    ];
+    for (case, command, expected) in cases {
+        let run = run_gate(
+            &trees.gate,
+            &trees.main,
+            &trees.root.join("home"),
+            &command_payload(&session, &command),
+        );
+        assert_audited_in(&run, expected, &case);
+    }
+}
+
+/// Two git writes into two trees audit both trees, in command order. A fail
+/// verdict in the second tree blocks the command.
+#[test]
+fn gate_audits_each_work_tree_that_the_command_targets() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let command = format!(
+        "git -C \"{}\" commit -m x && git -C \"{}\" push && git -C \"{}\" push",
+        trees.a.display(),
+        trees.b.display(),
+        trees.a.display()
+    );
+    let payload = command_payload(&trees.a, &command);
+    let home = trees.root.join("home");
+    let expected = [trees.a.as_path(), trees.b.as_path()];
+
+    let run = run_gate(&trees.gate, &trees.main, &home, &payload);
+    assert_eq!(run.output.status.code(), Some(0));
+    assert_eq!(run.audit_dirs, expected);
+
+    std::fs::write(trees.b.join(STUB_FAIL_MARKER), "").unwrap();
+    let run = run_gate(&trees.gate, &trees.main, &home, &payload);
+    assert_eq!(
+        run.output.status.code(),
+        Some(2),
+        "a fail verdict in the second tree must block; stderr={}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
+    assert_eq!(run.audit_dirs, expected);
 }

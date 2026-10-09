@@ -28,47 +28,216 @@ fi
 INPUT="$(cat)"
 CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
 
+# Unit separator: marks the end of a simple command in CMD_WORDS. A shell
+# word cannot hold it, so it never clashes with a real word.
+GATE_SEGMENT_END=$'\x1e'
+
+# Splits a command into shell words in CMD_WORDS. Single and double quotes
+# group a word, so a quoted path with spaces stays one word. Unquoted control
+# operators (; | & ( ) and a new line) and a command substitution (`$(...)` or
+# backticks, also inside double quotes) end a simple command. This is not a
+# full shell parser: it does not expand variables or globs.
+split_command_words() {
+  # Byte semantics: the special characters are all ASCII, and string slices
+  # in a multibyte locale cost much more time.
+  local LC_ALL=C
+  local rest="$1" chunk c quote="" word="" have=0 resume_quote=""
+  CMD_WORDS=()
+  while [ -n "$rest" ]; do
+    # Copy the plain characters up to the next one that matters in one step,
+    # so a long commit message costs few loop turns.
+    case "$quote" in
+      "'") chunk="${rest%%"'"*}" ;;
+      '"') chunk="${rest%%[\"\\\`\$]*}" ;;
+      *) chunk="${rest%%[[:space:]\;\|\&\(\)\`\'\"\\]*}" ;;
+    esac
+    if [ -n "$chunk" ]; then
+      word+="$chunk"
+      have=1
+      rest="${rest:${#chunk}}"
+      [ -n "$rest" ] || break
+    fi
+    c="${rest:0:1}"
+    rest="${rest:1}"
+    if [ "$quote" = "'" ]; then
+      quote=""
+      continue
+    fi
+    if [ "$c" = "\\" ]; then
+      word+="${rest:0:1}"
+      rest="${rest:1}"
+      have=1
+      continue
+    fi
+    if [ "$quote" = '"' ]; then
+      case "$c" in
+        '"')
+          quote=""
+          ;;
+        '$')
+          if [ "${rest:0:1}" = "(" ]; then
+            rest="${rest:1}"
+            [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
+            CMD_WORDS+=("$GATE_SEGMENT_END")
+            word=""
+            have=0
+            quote=""
+            resume_quote=')'
+          else
+            word+="$c"
+          fi
+          ;;
+        '`')
+          [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
+          CMD_WORDS+=("$GATE_SEGMENT_END")
+          word=""
+          have=0
+          quote=""
+          resume_quote='`'
+          ;;
+      esac
+      continue
+    fi
+    case "$c" in
+      "'" | '"')
+        quote="$c"
+        have=1
+        ;;
+      ';' | '|' | '&' | '(' | ')' | '`' | $'\n')
+        [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
+        CMD_WORDS+=("$GATE_SEGMENT_END")
+        word=""
+        have=0
+        # The end of a command substitution that started inside double
+        # quotes returns to those quotes.
+        if [ -n "$resume_quote" ] && [ "$c" = "$resume_quote" ]; then
+          quote='"'
+          resume_quote=""
+        fi
+        ;;
+      *)
+        # Unquoted white space ends a word.
+        [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
+        word=""
+        have=0
+        ;;
+    esac
+  done
+  [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
+  return 0
+}
+
+# Joins a path from a command to the directory before it. An empty base is
+# the session directory, so a relative result stays relative until the main
+# part resolves it.
+gate_join_path() {
+  local base="$1" path="$2"
+  # The tilde is literal here on purpose: the command text is not expanded.
+  # shellcheck disable=SC2088
+  case "$path" in
+    "~") path="${HOME:-~}" ;;
+    "~/"*) path="${HOME:-~}/${path#"~/"}" ;;
+  esac
+  if [[ "$path" == /* || "$path" =~ ^[A-Za-z]:[\\/] || -z "$base" ]]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s\n' "$base/$path"
+  fi
+}
+
 # Tokenize instead of matching one regex so git-level options between `git`
 # and the subcommand (git -c k=v commit, git -C dir push, git --no-pager
 # commit, git --git-dir=/x push) still route into the audit, while subcommand
 # lookalikes in arguments (git log commit-message.txt) do not. See issue #2106.
+#
+# A git write can name another work tree than the session directory. For each
+# git commit or push, GIT_WRITE_TARGETS gets the directory that the command
+# names, or an empty entry when it names none. The sources are, in order of
+# precedence: --work-tree, the parent of a --git-dir that ends in .git, and
+# the directory of the git process after `cd` and `-C`. A `cd` (or `pushd`)
+# at the start of a simple command changes the directory for the later
+# simple commands of the same command line.
 is_git_write_command() {
-  local cmd="$1" segment
-  # Control operators separate simple commands; each becomes its own line.
-  while IFS= read -r segment; do
-    # Intentional word splitting; globbing is disabled below.
-    # shellcheck disable=SC2086
-    set -- $segment
-    while [ "$#" -gt 0 ]; do
-      if [ "$1" != "git" ]; then
-        shift
-        continue
+  local word cd_dir="" git_cwd work_tree git_dir_tree value i=0 n segment_start=1
+  GIT_WRITE_TARGETS=()
+  split_command_words "$1"
+  n=${#CMD_WORDS[@]}
+  while [ "$i" -lt "$n" ]; do
+    word="${CMD_WORDS[i]}"
+    i=$((i + 1))
+    if [ "$word" = "$GATE_SEGMENT_END" ]; then
+      segment_start=1
+      continue
+    fi
+    if [ "$segment_start" -eq 1 ] && { [ "$word" = cd ] || [ "$word" = pushd ]; }; then
+      segment_start=0
+      value=""
+      if [ "$i" -lt "$n" ]; then
+        value="${CMD_WORDS[i]}"
       fi
-      shift
-      while [ "$#" -gt 0 ]; do
-        case "$1" in
-          commit | push)
-            return 0
-            ;;
-          -c | -C | --git-dir | --work-tree | --namespace | --config-env | --super-prefix | --exec-path | --list-cmds | --attr-source)
-            # Global option whose value arrives as the next word.
-            shift
-            [ "$#" -gt 0 ] && shift
-            ;;
-          -*)
-            # Value-less global option (--no-pager) or inline-value form
-            # (--git-dir=/x, -cuser.name=x).
-            shift
-            ;;
-          *)
-            # A different subcommand; resume scanning for a later `git` word.
-            break
-            ;;
-        esac
-      done
+      if [ -z "$value" ] || [ "$value" = "$GATE_SEGMENT_END" ]; then
+        # A bare `cd` goes to the home directory.
+        cd_dir="$(gate_join_path "" "~")"
+      elif [ "$value" != "-" ] && [ "${value#-}" = "$value" ]; then
+        cd_dir="$(gate_join_path "$cd_dir" "$value")"
+        i=$((i + 1))
+      fi
+      continue
+    fi
+    segment_start=0
+    [ "$word" = git ] || continue
+    git_cwd="$cd_dir"
+    work_tree=""
+    git_dir_tree=""
+    while [ "$i" -lt "$n" ]; do
+      word="${CMD_WORDS[i]}"
+      [ "$word" = "$GATE_SEGMENT_END" ] && break
+      i=$((i + 1))
+      value=""
+      case "$word" in
+        commit | push)
+          GIT_WRITE_TARGETS+=("${work_tree:-${git_dir_tree:-$git_cwd}}")
+          break
+          ;;
+        -c | -C | --git-dir | --work-tree | --namespace | --config-env | --super-prefix | --exec-path | --list-cmds | --attr-source)
+          # Global option whose value arrives as the next word.
+          if [ "$i" -lt "$n" ] && [ "${CMD_WORDS[i]}" != "$GATE_SEGMENT_END" ]; then
+            value="${CMD_WORDS[i]}"
+            i=$((i + 1))
+          fi
+          ;;
+        --git-dir=* | --work-tree=*)
+          value="${word#*=}"
+          word="${word%%=*}"
+          ;;
+        -*)
+          # Value-less global option (--no-pager) or inline-value form
+          # (-cuser.name=x).
+          continue
+          ;;
+        *)
+          # A different subcommand; resume scanning for a later `git` word.
+          break
+          ;;
+      esac
+      [ -n "$value" ] || continue
+      case "$word" in
+        -C)
+          git_cwd="$(gate_join_path "$git_cwd" "$value")"
+          ;;
+        --work-tree)
+          work_tree="$(gate_join_path "$git_cwd" "$value")"
+          ;;
+        --git-dir)
+          value="${value%/}"
+          if [ "$(basename "$value")" = .git ]; then
+            git_dir_tree="$(gate_join_path "$git_cwd" "$(dirname "$value")")"
+          fi
+          ;;
+      esac
     done
-  done < <(printf '%s\n' "$cmd" | tr ';|&()' '\n\n\n\n\n')
-  return 1
+  done
+  [ "${#GIT_WRITE_TARGETS[@]}" -gt 0 ]
 }
 
 set -f
@@ -88,7 +257,11 @@ fi
 # The hook process can start in a directory that is not the session directory.
 # For example, a session in a nested git worktree can get a hook process in the
 # main checkout. The audit must run against the tree of the session. The hook
-# input gives the session directory in its `cwd` field. The audit root is:
+# input gives the session directory in its `cwd` field.
+# A git write can also name another tree (`git -C <dir> commit`,
+# `cd <dir> && git push`, `--work-tree`, `--git-dir <dir>/.git`). When that
+# named directory exists, it replaces the session directory below. A relative
+# name resolves against the session directory. The audit root is:
 #   1. The nearest directory at or above the session directory that holds this
 #      script at the same relative location (.claude/hooks/fallow-gate.sh or
 #      .codex/hooks/fallow-gate.sh). The walk stops at the first .git entry,
@@ -154,109 +327,167 @@ resolve_audit_root() {
   printf '%s\n' "$session_dir"
 }
 
+PROCESS_DIR="$(pwd -P 2>/dev/null || pwd)"
+SESSION_DIR=""
 SESSION_CWD="$(jq -r '.cwd // empty' <<<"$INPUT" 2>/dev/null || true)"
 if [ -n "$SESSION_CWD" ] && [ -d "$SESSION_CWD" ]; then
   # `cd` and `pwd` give an absolute path, also for a Windows path in git-bash.
-  if SESSION_DIR="$(physical_dir "$SESSION_CWD")"; then
-    HOME_DIR=""
-    if [ -n "${HOME:-}" ]; then
-      HOME_DIR="$(physical_dir "$HOME" || true)"
+  SESSION_DIR="$(physical_dir "$SESSION_CWD" || true)"
+fi
+HOME_DIR=""
+if [ -n "${HOME:-}" ]; then
+  HOME_DIR="$(physical_dir "$HOME" || true)"
+fi
+GATE_REL="$(gate_relative_path)"
+
+# One audit root for each different tree that the git writes of the command
+# target, in command order. Usually there is one: `git commit && git push`
+# names one tree. Two writes into two trees get two audits, because a clean
+# first tree must not let a commit into a second tree pass unchecked.
+AUDIT_ROOTS=()
+add_audit_root() {
+  local root="$1" known
+  if [ "${#AUDIT_ROOTS[@]}" -gt 0 ]; then
+    for known in "${AUDIT_ROOTS[@]}"; do
+      [ "$known" = "$root" ] && return 0
+    done
+  fi
+  AUDIT_ROOTS+=("$root")
+}
+
+for TARGET in "${GIT_WRITE_TARGETS[@]}"; do
+  START_DIR="$SESSION_DIR"
+  TARGET_DIR=""
+  if [ -n "$TARGET" ]; then
+    if [[ "$TARGET" != /* && ! "$TARGET" =~ ^[A-Za-z]:[\\/] ]]; then
+      TARGET="${SESSION_DIR:-$PROCESS_DIR}/$TARGET"
     fi
-    PROCESS_DIR="$(pwd -P 2>/dev/null || true)"
-    AUDIT_ROOT="$(resolve_audit_root "$SESSION_DIR" "$(gate_relative_path)" "$PROCESS_DIR" "$HOME_DIR")"
-    if cd "$AUDIT_ROOT" 2>/dev/null; then
-      if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
-        echo "fallow-gate: auditing $AUDIT_ROOT (session directory $SESSION_DIR)." >&2
-      fi
-    else
-      echo "fallow-gate: cannot enter $AUDIT_ROOT, auditing $(pwd) instead." >&2
+    if [ -d "$TARGET" ] && TARGET_DIR="$(physical_dir "$TARGET")"; then
+      START_DIR="$TARGET_DIR"
+    elif [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
+      echo "fallow-gate: command target $TARGET is not a directory, using the session directory." >&2
     fi
   fi
-fi
+  if [ -z "$START_DIR" ]; then
+    # No usable `cwd` and no command target: audit the process directory.
+    add_audit_root "$PROCESS_DIR"
+    continue
+  fi
+  AUDIT_ROOT="$(resolve_audit_root "$START_DIR" "$GATE_REL" "$PROCESS_DIR" "$HOME_DIR")"
+  if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
+    if [ -n "$TARGET_DIR" ]; then
+      echo "fallow-gate: auditing $AUDIT_ROOT (command target $TARGET_DIR, session directory ${SESSION_DIR:-unknown})." >&2
+    else
+      echo "fallow-gate: auditing $AUDIT_ROOT (session directory $SESSION_DIR)." >&2
+    fi
+  fi
+  add_audit_root "$AUDIT_ROOT"
+done
 
-# A real installed Git hook keeps its caller's PATH and does not add
-# node_modules/.bin, so a project-local install is invisible to `command -v`.
-# The arms below cover the layouts a project-local install can take, in the
-# order they are cheapest to probe. Keep them in step with the Lefthook job
-# `fallow init --hooks` prints: the two must resolve the same installs.
-if command -v fallow >/dev/null 2>&1; then
-  RUNNER=(fallow)
-  BIN_DESC="$(command -v fallow)"
-elif [ -x ./node_modules/.bin/fallow ]; then
-  RUNNER=(./node_modules/.bin/fallow)
-  BIN_DESC="./node_modules/.bin/fallow"
-elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ]; then
-  # Yarn Plug'n'Play has no node_modules/.bin at all, so neither the launcher
-  # check above nor npx can see the install.
-  RUNNER=(yarn exec fallow --)
-  BIN_DESC="yarn exec fallow"
-elif command -v npx >/dev/null 2>&1 && VER_PROBE="$(npx --no-install fallow --version 2>/dev/null || true)" && [[ "$VER_PROBE" == fallow* ]]; then
-  RUNNER=(npx --no-install fallow)
-  BIN_DESC="npx --no-install fallow"
-else
-  echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install), skipping audit." >&2
-  exit 0
-fi
+run_audit() {
+  # A real installed Git hook keeps its caller's PATH and does not add
+  # node_modules/.bin, so a project-local install is invisible to `command -v`.
+  # The arms below cover the layouts a project-local install can take, in the
+  # order they are cheapest to probe. Keep them in step with the Lefthook job
+  # `fallow init --hooks` prints: the two must resolve the same installs.
+  if command -v fallow >/dev/null 2>&1; then
+    RUNNER=(fallow)
+    BIN_DESC="$(command -v fallow)"
+  elif [ -x ./node_modules/.bin/fallow ]; then
+    RUNNER=(./node_modules/.bin/fallow)
+    BIN_DESC="./node_modules/.bin/fallow"
+  elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ]; then
+    # Yarn Plug'n'Play has no node_modules/.bin at all, so neither the launcher
+    # check above nor npx can see the install.
+    RUNNER=(yarn exec fallow --)
+    BIN_DESC="yarn exec fallow"
+  elif command -v npx >/dev/null 2>&1 && VER_PROBE="$(npx --no-install fallow --version 2>/dev/null || true)" && [[ "$VER_PROBE" == fallow* ]]; then
+    RUNNER=(npx --no-install fallow)
+    BIN_DESC="npx --no-install fallow"
+  else
+    echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install), skipping audit." >&2
+    exit 0
+  fi
 
-VERSION_RAW="$("${RUNNER[@]}" --version 2>/dev/null || true)"
-VERSION="${VERSION_RAW#fallow }"
-VERSION="${VERSION%% *}"
+  VERSION_RAW="$("${RUNNER[@]}" --version 2>/dev/null || true)"
+  VERSION="${VERSION_RAW#fallow }"
+  VERSION="${VERSION%% *}"
 
-MIN_VERSION="${FALLOW_GATE_MIN_VERSION-2.85.0}"
-if [ -n "$MIN_VERSION" ] && [ -n "$VERSION" ]; then
-  LOWER="$(printf '%s\n%s\n' "$MIN_VERSION" "$VERSION" | sort -V | head -n1)"
-  if [ "$LOWER" != "$MIN_VERSION" ]; then
-    {
-      echo "fallow-gate: blocked: $BIN_DESC is fallow $VERSION, below required $MIN_VERSION."
-      echo "fallow-gate: older binaries reject the --gate-marker flag this gate passes"
-      echo "fallow-gate: (added in fallow v2.85.0), so the audit cannot run."
-      echo "fallow-gate: upgrade the fallow on PATH (e.g. npm install -g fallow@latest or"
-      echo "fallow-gate: cargo install fallow-cli), or set FALLOW_GATE_MIN_VERSION= to disable."
-    } >&2
+  MIN_VERSION="${FALLOW_GATE_MIN_VERSION-2.85.0}"
+  if [ -n "$MIN_VERSION" ] && [ -n "$VERSION" ]; then
+    LOWER="$(printf '%s\n%s\n' "$MIN_VERSION" "$VERSION" | sort -V | head -n1)"
+    if [ "$LOWER" != "$MIN_VERSION" ]; then
+      {
+        echo "fallow-gate: blocked: $BIN_DESC is fallow $VERSION, below required $MIN_VERSION."
+        echo "fallow-gate: older binaries reject the --gate-marker flag this gate passes"
+        echo "fallow-gate: (added in fallow v2.85.0), so the audit cannot run."
+        echo "fallow-gate: upgrade the fallow on PATH (e.g. npm install -g fallow@latest or"
+        echo "fallow-gate: cargo install fallow-cli), or set FALLOW_GATE_MIN_VERSION= to disable."
+      } >&2
+      exit 2
+    fi
+  fi
+
+  TMP_JSON="$(mktemp)"
+  TMP_ERR="$(mktemp)"
+  # shellcheck disable=SC2329 # Called by the EXIT trap.
+  cleanup() {
+    rm -f "$TMP_JSON" "$TMP_ERR"
+  }
+  trap cleanup EXIT
+
+  if "${RUNNER[@]}" audit --format json --quiet --explain --gate-marker agent >"$TMP_JSON" 2>"$TMP_ERR"; then
+    STATUS=0
+  else
+    STATUS=$?
+  fi
+
+  VERDICT="$(jq -r '.verdict // empty' <"$TMP_JSON" 2>/dev/null || true)"
+  IS_ERROR="$(jq -r '.error // false' <"$TMP_JSON" 2>/dev/null || echo false)"
+
+  if [ "$VERDICT" = "fail" ]; then
+    echo "fallow-gate: blocked by fallow ${VERSION:-unknown} at $BIN_DESC" >&2
+    cat "$TMP_JSON" >&2
     exit 2
   fi
-fi
 
-TMP_JSON="$(mktemp)"
-TMP_ERR="$(mktemp)"
-cleanup() {
-  rm -f "$TMP_JSON" "$TMP_ERR"
+  if [ "$STATUS" -eq 2 ] || [ "$IS_ERROR" = "true" ]; then
+    MSG="$(jq -r '.message // empty' <"$TMP_JSON" 2>/dev/null || true)"
+    if [ -n "$MSG" ]; then
+      echo "fallow-gate: fallow audit runtime error ($MSG), skipping." >&2
+    else
+      echo "fallow-gate: fallow audit runtime error, skipping." >&2
+    fi
+    exit 0
+  fi
+
+  if [ "$STATUS" -ne 0 ]; then
+    ERR_LINE="$(sed -n '1p' "$TMP_ERR" 2>/dev/null || true)"
+    if [ -n "$ERR_LINE" ]; then
+      echo "fallow-gate: fallow audit exited $STATUS ($ERR_LINE), skipping." >&2
+    else
+      echo "fallow-gate: fallow audit exited $STATUS, skipping." >&2
+    fi
+    exit 0
+  fi
 }
-trap cleanup EXIT
 
-if "${RUNNER[@]}" audit --format json --quiet --explain --gate-marker agent >"$TMP_JSON" 2>"$TMP_ERR"; then
-  STATUS=0
-else
-  STATUS=$?
-fi
-
-VERDICT="$(jq -r '.verdict // empty' <"$TMP_JSON" 2>/dev/null || true)"
-IS_ERROR="$(jq -r '.error // false' <"$TMP_JSON" 2>/dev/null || echo false)"
-
-if [ "$VERDICT" = "fail" ]; then
-  echo "fallow-gate: blocked by fallow ${VERSION:-unknown} at $BIN_DESC" >&2
-  cat "$TMP_JSON" >&2
-  exit 2
-fi
-
-if [ "$STATUS" -eq 2 ] || [ "$IS_ERROR" = "true" ]; then
-  MSG="$(jq -r '.message // empty' <"$TMP_JSON" 2>/dev/null || true)"
-  if [ -n "$MSG" ]; then
-    echo "fallow-gate: fallow audit runtime error ($MSG), skipping." >&2
-  else
-    echo "fallow-gate: fallow audit runtime error, skipping." >&2
+# Each audit runs in a subshell, so its `cd`, `exit` and cleanup trap stay
+# local to that audit root.
+for AUDIT_ROOT in "${AUDIT_ROOTS[@]}"; do
+  set +e
+  (
+    set -e
+    if ! cd "$AUDIT_ROOT" 2>/dev/null; then
+      echo "fallow-gate: cannot enter $AUDIT_ROOT, auditing $(pwd) instead." >&2
+    fi
+    run_audit
+  )
+  AUDIT_STATUS=$?
+  set -e
+  if [ "$AUDIT_STATUS" -ne 0 ]; then
+    exit "$AUDIT_STATUS"
   fi
-  exit 0
-fi
-
-if [ "$STATUS" -ne 0 ]; then
-  ERR_LINE="$(sed -n '1p' "$TMP_ERR" 2>/dev/null || true)"
-  if [ -n "$ERR_LINE" ]; then
-    echo "fallow-gate: fallow audit exited $STATUS ($ERR_LINE), skipping." >&2
-  else
-    echo "fallow-gate: fallow audit exited $STATUS, skipping." >&2
-  fi
-  exit 0
-fi
+done
 
 exit 0

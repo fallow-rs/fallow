@@ -74,6 +74,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not in the cloud, so the check could test a path that the cloud never
   uses. A shared fixture of path cases now keeps the two implementations
   equal.
+- **The agent gate now audits the work tree that a git command names.** A
+  session in one worktree can commit in another worktree with `git -C <dir>
+  commit`. The gate audited the session tree, so a finding there blocked a
+  clean commit in the other tree. Now the generated `fallow-gate.sh` reads the
+  target directory from `git -C <dir>`, `cd <dir> && git ...`, `--work-tree`
+  and `--git-dir <dir>/.git`. It finds the audit root from that directory
+  with the same rules as before. A relative directory resolves against the
+  session directory. Quoted paths with spaces work. When the named directory
+  does not exist, the gate audits the session tree, as before. A command with
+  git writes into two trees audits both trees and blocks when one audit
+  fails. Run `fallow hooks install --target agent` again to update an
+  installed gate script.
 
 ## [3.33.0] - 2026-10-09
 
