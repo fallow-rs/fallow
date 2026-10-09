@@ -1,0 +1,10 @@
+{
+  "name": "vitest-jsx-default-react-no-jsx",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "react": "^19.0.0",
+    "vitest": "^5.0.0"
+  }
+}

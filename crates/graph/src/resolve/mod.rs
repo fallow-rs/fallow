@@ -65,7 +65,8 @@ use oxc_span::Span;
 
 use auto_imports::synthesize_auto_import_edges;
 use dynamic_imports::{GlobMatcherCache, resolve_dynamic_imports, resolve_dynamic_patterns};
-use jsx_runtime::{CompiledJsxRule, compile_jsx_rules, resolve_config_jsx_runtime_imports};
+use jsx_runtime::resolve_config_jsx_runtime_imports;
+pub use jsx_runtime::{CompiledJsxRule, compile_jsx_rules};
 use re_exports::resolve_re_exports;
 use react_native::{build_condition_names, build_extensions, synthesize_platform_family_edges};
 use require_imports::resolve_require_imports;

@@ -429,6 +429,15 @@ pub struct AggregatedPluginResult {
     /// each config transforms. The resolver adds the runtime edge to each
     /// matching module with `jsx_runtime_from_config` set.
     pub jsx_import_sources: Vec<JsxImportSourceRule>,
+    /// Runtime packages that a JSX transform imports when its config sets no
+    /// import source. The analysis credits a package only when a matching
+    /// module has `jsx_runtime_from_config` set. These rules add no graph
+    /// edge.
+    pub jsx_package_credits: Vec<JsxImportSourceRule>,
+    /// The directories of the tsconfig files that set the JSX runtime of
+    /// TypeScript files, so Vite does not use the default `react` runtime for
+    /// the TypeScript files below them.
+    pub tsconfig_jsx_dirs: Vec<PathBuf>,
 }
 
 /// Append `incoming` string items to `target`, skipping values already present
@@ -546,6 +555,8 @@ impl AggregatedPluginResult {
             config_diagnostics,
             federation_sources,
             jsx_import_sources,
+            jsx_package_credits,
+            tsconfig_jsx_dirs,
         } = other;
 
         self.entry_patterns.extend(entry_patterns);
@@ -593,6 +604,16 @@ impl AggregatedPluginResult {
         for rule in jsx_import_sources {
             if !self.jsx_import_sources.contains(&rule) {
                 self.jsx_import_sources.push(rule);
+            }
+        }
+        for rule in jsx_package_credits {
+            if !self.jsx_package_credits.contains(&rule) {
+                self.jsx_package_credits.push(rule);
+            }
+        }
+        for dir in tsconfig_jsx_dirs {
+            if !self.tsconfig_jsx_dirs.contains(&dir) {
+                self.tsconfig_jsx_dirs.push(dir);
             }
         }
         for diagnostic in config_diagnostics {

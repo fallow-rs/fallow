@@ -24,38 +24,79 @@ const JSX_DEV_RUNTIME_SUBPATH: &str = "jsx-dev-runtime";
 /// `<source>/jsx-dev-runtime`.
 const JSX_DEV_RUNTIME_BINDINGS: [&str; 2] = ["jsxDEV", "Fragment"];
 
-/// One config JSX import source with its compiled include globs.
-pub(super) struct CompiledJsxRule<'a> {
+/// One config JSX import source with its compiled include and exclude globs.
+pub struct CompiledJsxRule<'a> {
     rule: &'a JsxImportSourceRule,
     include: GlobSet,
+    exclude: GlobSet,
 }
 
-/// Compile the include globs of each rule. A rule without a valid glob
-/// matches no file, so it is dropped.
-pub(super) fn compile_jsx_rules(rules: &[JsxImportSourceRule]) -> Vec<CompiledJsxRule<'_>> {
+impl<'a> CompiledJsxRule<'a> {
+    /// The rule that these globs come from.
+    #[must_use]
+    pub const fn rule(&self) -> &'a JsxImportSourceRule {
+        self.rule
+    }
+
+    /// Whether the config transforms the file at `file_path`: its path
+    /// relative to the config directory matches an include glob and no
+    /// exclude glob.
+    #[must_use]
+    pub fn matches(&self, file_path: &Path) -> bool {
+        file_path
+            .strip_prefix(&self.rule.config_dir)
+            .is_ok_and(|relative| {
+                self.include.is_match(relative) && !self.exclude.is_match(relative)
+            })
+    }
+}
+
+/// Compile the globs of each rule. A rule without a valid include glob
+/// matches no file, so it is dropped. An exclude glob that does not compile
+/// is skipped.
+#[must_use]
+pub fn compile_jsx_rules(rules: &[JsxImportSourceRule]) -> Vec<CompiledJsxRule<'_>> {
     rules
         .iter()
         .filter_map(|rule| {
-            let mut builder = GlobSetBuilder::new();
-            let mut added = false;
-            for pattern in &rule.include {
-                if let Ok(glob) = GlobBuilder::new(pattern).literal_separator(true).build() {
-                    builder.add(glob);
-                    added = true;
-                }
+            let (include, added) = compile_globs(&rule.include);
+            if added == 0 {
+                return None;
             }
-            let include = builder.build().ok().filter(|_| added)?;
-            Some(CompiledJsxRule { rule, include })
+            let (exclude, _) = compile_globs(&rule.exclude);
+            Some(CompiledJsxRule {
+                rule,
+                include,
+                exclude,
+            })
         })
         .collect()
+}
+
+/// Compile the valid patterns into one set, with the number of patterns
+/// that compiled.
+fn compile_globs(patterns: &[String]) -> (GlobSet, usize) {
+    let mut builder = GlobSetBuilder::new();
+    let mut added = 0;
+    for pattern in patterns {
+        if let Ok(glob) = GlobBuilder::new(pattern).literal_separator(true).build() {
+            builder.add(glob);
+            added += 1;
+        }
+    }
+    match builder.build() {
+        Ok(set) => (set, added),
+        Err(_) => (GlobSet::empty(), 0),
+    }
 }
 
 /// Resolve the config JSX runtime imports of one module.
 ///
 /// A module gets an edge only when extraction set `jsx_runtime_from_config`
 /// (JSX and no runtime pragma) and its path relative to the config directory
-/// matches the include globs of a rule. A relative source that does not
-/// resolve from the module resolves from the config directory, as Vite does.
+/// matches the include globs and no exclude glob of a rule. A relative
+/// source that does not resolve from the module resolves from the config
+/// directory, as Vite does.
 /// A source that resolves from neither place adds no edge, so a config value
 /// never causes an unresolved-import finding.
 pub(super) fn resolve_config_jsx_runtime_imports(
@@ -71,10 +112,7 @@ pub(super) fn resolve_config_jsx_runtime_imports(
     let mut imports = Vec::new();
     for compiled in rules {
         let rule = compiled.rule;
-        let Ok(relative) = file_path.strip_prefix(&rule.config_dir) else {
-            continue;
-        };
-        if !compiled.include.is_match(relative) || !seen.insert(rule.source.as_str()) {
+        if !compiled.matches(file_path) || !seen.insert(rule.source.as_str()) {
             continue;
         }
         let specifier = jsx_dev_runtime_specifier(&rule.source);

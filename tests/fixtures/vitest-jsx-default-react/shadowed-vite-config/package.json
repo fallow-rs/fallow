@@ -1,0 +1,12 @@
+{
+  "name": "vitest-jsx-default-react-shadowed-vite-config",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "preact": "^10.0.0",
+    "react": "^19.0.0",
+    "vite": "^8.0.0",
+    "vitest": "^5.0.0"
+  }
+}

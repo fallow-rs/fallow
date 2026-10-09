@@ -1,0 +1,13 @@
+{
+  "name": "vitest-jsx-default-react-workspaces",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "vitest": "^5.0.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -212,18 +212,77 @@ the transform in dev mode, so such a file imports `jsxDEV` and `Fragment`
 from `<source>/jsx-dev-runtime`. Extraction stays config-blind: the visitor
 sets `jsx_runtime_from_config` on a file with JSX and with no
 `@jsxImportSource` or `@jsxRuntime classic` pragma. The Vitest plugin reads
-the source and the `test.include` globs into a `JsxImportSourceRule`. With
-`test.projects`, each inline project gives a rule and the root config gives
-none, because the root is then not a test project. A project inherits the
-root source only with `extends: true`, and the classic runtime gives no rule.
-A package source gives no rule and only credits the package. A synthetic edge
+the source, the `test.include` globs and the `test.exclude` globs of each test
+project into a `JsxImportSourceRule`.
+
+The plugin follows the Vitest 5 project model:
+
+- Without `test.projects`, the config is the only test project. With
+  `test.projects`, the root config gives no rule, because it is then not a
+  test project.
+- An inline project merges the declaring config unless `extends` is `false`.
+  Vitest 4 merged it only with `extends: true`. The plugin reads the Vitest
+  major from `node_modules/vitest/package.json`, else from the declared
+  `vitest` range, in the directories from the config up to the root. On a
+  major below 5, a project without `extends` merges nothing. When no major is
+  known, or a range has no upper major (`>=4`, `latest`), the plugin follows
+  Vitest 5.
+- `extends: '<path>'` merges the named config file instead. The plugin reads
+  that file one level deep and credits it as used. A path to the declaring
+  config is the same as `extends: true`.
+- A merge concatenates `include` and `exclude`, with the base values first,
+  as Vite `mergeConfig` does. Other values of the project replace the base
+  values.
+- A project without `include` uses the Vitest default include. A project
+  without `exclude` uses the Vitest default exclude
+  (`**/node_modules/**`, `**/.git/**`). A config `exclude` replaces the
+  default.
+- A negated `include` entry is an exclude. Vitest ignores a negated `exclude`
+  entry, so the plugin ignores it too. An exclude pattern that names a
+  directory also excludes the files in it.
+- The globs are relative to `test.dir`, else to `test.root` or the Vite
+  `root`, else to the config directory. The plugin stores them relative to the
+  config directory. A project directory outside the config directory gives no
+  rule.
+- A `test.projects` string that names a config file with a name such as
+  `vitest.e2e.config.ts` is read for its rules, which match relative to the
+  directory of that file. The config patterns already find a file with a
+  standard name. A glob entry is expanded on disk, without `node_modules`.
+  A glob that starts with `**` is not followed, because it walks the whole
+  tree on each run.
+  A glob with a brace group is not followed, because the glob matcher has no
+  brace support.
+- Vitest does not load a `vite.config.*` when a `vitest.config.*` is in the
+  same directory. Such a vite config gives no rule, unless the vitest config
+  imports it, for example to pass it to `mergeConfig`.
+
+The classic runtime, `jsx: 'preserve'` and `oxc: false` give no rule. A
+package source gives no rule and only credits the package. A synthetic edge
 from test files alone would make a runtime dependency of the app look
 test-only.
+
+A project that sets no import source uses the `react` runtime, because Vite
+uses `react` by default. The plugin records this as a credit rule in
+`jsx_package_credits`, not as an edge rule. The analysis credits `react` as used
+only when a flagged module matches the rule, so a project without JSX test
+files still reports an unused `react`. The credit goes to one
+manifest only, as for an import: the nearest manifest of the module
+(its workspace, the ancestor workspaces, then the root) that declares the
+package. A JSX test file in one workspace thus does not hide an unused
+`react` in a different workspace. When a
+tsconfig sets `jsxImportSource` or a `jsx` mode without an automatic runtime
+import, Vite uses the tsconfig settings for TypeScript files. The analysis
+then skips the credit rule for TypeScript files below the directory of that
+tsconfig. The check uses the directory only, not the `include` of the
+tsconfig.
+
 The resolver adds the edge to each flagged module that an include glob
-matches, relative to the config directory. A relative source resolves from
-the module first and then from the config directory, as in Vite. A source
-that resolves from neither place adds no edge, so a config value never causes
-an unresolved import. The rules are part of the graph cache key.
+matches and no exclude glob matches, relative to the config directory. A
+relative source resolves from the module first and then from the config
+directory, as in Vite. A source that resolves from neither place adds no
+edge, so a config value never causes an unresolved import. The edge rules,
+with their include and exclude globs, are part of the graph cache key. The
+credit rules add no edge, so they are not part of it.
 
 ## Verification
 

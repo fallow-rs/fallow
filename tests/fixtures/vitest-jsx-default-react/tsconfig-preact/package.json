@@ -1,0 +1,12 @@
+{
+  "name": "vitest-jsx-default-react-tsconfig-preact",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "preact": "^10.0.0",
+    "react": "^19.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^5.0.0"
+  }
+}

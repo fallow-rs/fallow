@@ -2020,16 +2020,20 @@ fn plugin_config_hash(
         key.hash(&mut hasher);
     }
 
-    let mut jsx_import_sources: Vec<(&str, String, Vec<&str>)> = plugin_result
+    fn sorted(patterns: &[String]) -> Vec<&str> {
+        let mut patterns: Vec<&str> = patterns.iter().map(String::as_str).collect();
+        patterns.sort_unstable();
+        patterns
+    }
+    let mut jsx_import_sources: Vec<(&str, String, Vec<&str>, Vec<&str>)> = plugin_result
         .jsx_import_sources
         .iter()
         .map(|rule| {
-            let mut include: Vec<&str> = rule.include.iter().map(String::as_str).collect();
-            include.sort_unstable();
             (
                 rule.source.as_str(),
                 root_relative_key(root, &rule.config_dir),
-                include,
+                sorted(&rule.include),
+                sorted(&rule.exclude),
             )
         })
         .collect();
@@ -3779,6 +3783,7 @@ mod tests {
             source: "./src/jsx".to_string(),
             config_dir: PathBuf::from("/project"),
             include: vec!["src/**/*.test.tsx".to_string()],
+            exclude: vec![],
         };
         let base = plugin_result();
         let mut with_rule = plugin_result();
@@ -3794,12 +3799,25 @@ mod tests {
             .jsx_import_sources
             .push(fallow_config::JsxImportSourceRule {
                 source: "./src/jsx/dom".to_string(),
-                ..rule
+                ..rule.clone()
             });
         assert_ne!(
             plugin_config_hash(&with_rule, std::path::Path::new("")),
             plugin_config_hash(&other_source, std::path::Path::new("")),
             "a changed JSX import source must invalidate the graph cache"
+        );
+
+        let mut with_exclude = plugin_result();
+        with_exclude
+            .jsx_import_sources
+            .push(fallow_config::JsxImportSourceRule {
+                exclude: vec!["src/skip/**".to_string()],
+                ..rule
+            });
+        assert_ne!(
+            plugin_config_hash(&with_rule, std::path::Path::new("")),
+            plugin_config_hash(&with_exclude, std::path::Path::new("")),
+            "a changed JSX exclude must invalidate the graph cache"
         );
     }
 

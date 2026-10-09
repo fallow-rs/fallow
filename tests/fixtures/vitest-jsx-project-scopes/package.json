@@ -1,0 +1,9 @@
+{
+  "name": "vitest-jsx-project-scopes",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitest": "^5.0.0"
+  }
+}

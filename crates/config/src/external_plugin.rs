@@ -97,6 +97,9 @@ pub struct JsxImportSourceRule {
     /// Glob patterns, relative to `config_dir`, of the files that the config
     /// transforms.
     pub include: Vec<String>,
+    /// Glob patterns, relative to `config_dir`, of the files that the config
+    /// does not transform, also when `include` matches them.
+    pub exclude: Vec<String>,
 }
 
 /// How to detect if a plugin should be activated.

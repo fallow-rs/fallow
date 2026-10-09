@@ -43,6 +43,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dead-code baseline only on bare `fallow`. When a bare run gets a
   `fallow health` or `fallow dupes` baseline through `--baseline`, the note
   now tells you to pass it with `--health-baseline` or `--dupes-baseline`.
+- **The Vitest JSX import source now follows the Vitest project model.** On
+  Vitest 5, an inline `test.projects` entry inherits the JSX import source of
+  the declaring config unless it sets `extends: false`. On Vitest 4, it
+  inherits only with `extends: true`. Fallow reads the version from
+  `node_modules/vitest`, else from the declared range. Project and base
+  `include` globs now add up, as in Vitest. Fallow also reads the config that
+  `extends: './base.config.ts'` names, and project config files with a custom
+  name such as `vitest.e2e.config.ts`, also through a glob entry. These files
+  are no longer reported as unused.
+- **Fallow now reads `test.exclude` for the Vitest JSX import source.** A test
+  file that `test.exclude` or a negated `test.include` entry removes no longer
+  reaches the runtime of its project. Without `test.exclude`, the Vitest
+  default exclude applies. The globs are relative to `test.dir`, `test.root`
+  or the Vite `root` when the config sets one.
+- **`react` is no longer an unused dependency when Vitest test files use JSX
+  with the default runtime.** When a Vitest config sets no JSX import source,
+  Vite imports the `react` JSX runtime. Fallow now credits `react` when at
+  least one test file of the config has JSX and no `@jsxImportSource` pragma.
+  TypeScript test files below a tsconfig that sets `jsxImportSource` or a
+  `jsx` mode without the automatic runtime give no credit. The credit applies
+  only to the workspace of the test file. A `vite.config.*` next to a
+  `vitest.config.*` gives no credit, because Vitest does not load it.
 
 ## [3.33.0] - 2026-10-09
 

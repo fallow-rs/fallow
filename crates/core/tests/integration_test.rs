@@ -193,6 +193,8 @@ mod unreachable_exports;
 mod vercel_api_directory_functions;
 #[path = "integration_test/vitest_jsx_import_source.rs"]
 mod vitest_jsx_import_source;
+#[path = "integration_test/vitest_jsx_project_scopes.rs"]
+mod vitest_jsx_project_scopes;
 #[path = "integration_test/waku.rs"]
 mod waku;
 #[path = "integration_test/workspaces.rs"]

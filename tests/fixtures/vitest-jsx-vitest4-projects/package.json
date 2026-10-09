@@ -1,0 +1,9 @@
+{
+  "name": "vitest-jsx-vitest4-projects",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitest": "^4.0.0"
+  }
+}

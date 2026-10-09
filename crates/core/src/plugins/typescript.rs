@@ -127,6 +127,18 @@ impl Plugin for TypeScriptPlugin {
             &["compilerOptions", "jsxImportSource"],
         ) {
             result.referenced_dependencies.push(jsx_source);
+            mark_tsconfig_jsx_dir(&mut result, config_path);
+        }
+        // Vite reads these tsconfig settings for TypeScript files when the
+        // Vite config sets no JSX import source.
+        if config_parser::extract_config_string(
+            &parse_source,
+            parse_path,
+            &["compilerOptions", "jsx"],
+        )
+        .is_some_and(|mode| matches!(mode.as_str(), "preserve" | "react" | "react-native"))
+        {
+            mark_tsconfig_jsx_dir(&mut result, config_path);
         }
 
         for (find, replacement) in config_parser::extract_config_path_aliases(
@@ -149,6 +161,16 @@ impl Plugin for TypeScriptPlugin {
         parse_tsconfig_references(&parse_source, parse_path, root, &mut result);
 
         result
+    }
+}
+
+/// Record the directory of a tsconfig that sets the JSX runtime of the
+/// TypeScript files below it.
+fn mark_tsconfig_jsx_dir(result: &mut PluginResult, config_path: &Path) {
+    if let Some(dir) = config_path.parent()
+        && !result.tsconfig_jsx_dirs.iter().any(|known| known == dir)
+    {
+        result.tsconfig_jsx_dirs.push(dir.to_path_buf());
     }
 }
 

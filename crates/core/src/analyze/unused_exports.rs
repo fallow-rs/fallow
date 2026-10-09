@@ -3004,6 +3004,8 @@ mod tests {
             config_diagnostics: vec![],
             federation_sources: vec![],
             jsx_import_sources: vec![],
+            jsx_package_credits: vec![],
+            tsconfig_jsx_dirs: Vec::new(),
         }
     }
 

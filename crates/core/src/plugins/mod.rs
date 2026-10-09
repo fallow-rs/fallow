@@ -265,6 +265,16 @@ pub struct PluginResult {
     /// The resolver adds the runtime edge to each matching file without a
     /// JSX pragma.
     jsx_import_sources: Vec<JsxImportSourceRule>,
+    /// Runtime packages that the JSX transform of a config imports when the
+    /// config sets no import source. The analysis credits a package only when
+    /// a matching file has JSX and no pragma. These rules never add a graph
+    /// edge.
+    jsx_package_credits: Vec<JsxImportSourceRule>,
+    /// The directories of the tsconfig files that set the JSX runtime of
+    /// TypeScript files, through `jsxImportSource` or a `jsx` mode that adds
+    /// no automatic runtime import. Vite then does not use the default
+    /// `react` runtime for the TypeScript files below these directories.
+    tsconfig_jsx_dirs: Vec<PathBuf>,
 }
 
 /// What a Module Federation config declares, and where, for the trace output.
@@ -764,6 +774,8 @@ impl PluginResult {
             && self.provided_dependencies.is_empty()
             && self.federation_sources.is_empty()
             && self.jsx_import_sources.is_empty()
+            && self.jsx_package_credits.is_empty()
+            && self.tsconfig_jsx_dirs.is_empty()
     }
 }
 
@@ -2220,7 +2232,7 @@ mod tests {
 
         assert!(PluginResult::default().is_empty());
 
-        let rows: [(&str, Fill); 16] = [
+        let rows: [(&str, Fill); 18] = [
             ("entry_patterns", |r| {
                 r.entry_patterns.push(PathRule::new("src/*.ts"));
             }),
@@ -2291,7 +2303,19 @@ mod tests {
                     source: "./src/jsx".to_string(),
                     config_dir: PathBuf::from("/project"),
                     include: vec!["src/**/*.test.tsx".to_string()],
+                    exclude: vec![],
                 });
+            }),
+            ("jsx_package_credits", |r| {
+                r.jsx_package_credits.push(JsxImportSourceRule {
+                    source: "react".to_string(),
+                    config_dir: PathBuf::from("/project"),
+                    include: vec!["src/**/*.test.tsx".to_string()],
+                    exclude: vec![],
+                });
+            }),
+            ("tsconfig_jsx_dirs", |r| {
+                r.tsconfig_jsx_dirs.push(PathBuf::from("/project"));
             }),
         ];
 

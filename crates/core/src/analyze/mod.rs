@@ -12,6 +12,7 @@ mod graph_confidence;
 mod iconify;
 mod inline_loaders;
 mod invalid_client_exports;
+mod jsx_runtime_credits;
 mod members;
 mod misplaced_directive;
 mod mixed_barrel;
@@ -820,9 +821,9 @@ struct SetupAndDetectInput<'a, 'm> {
     collect_usages: bool,
 }
 
-/// Build the plugin result augmented with Iconify and inline loader packages,
-/// derive plugin-backed slices and the user class-member set, then run the
-/// parallel dead-code detectors.
+/// Build the plugin result augmented with Iconify, inline loader and default
+/// JSX runtime packages, derive plugin-backed slices and the user
+/// class-member set, then run the parallel dead-code detectors.
 /// Extracted from `find_dead_code_full` to keep that orchestrator's body as
 /// setup -> detect -> populate.
 fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults {
@@ -830,10 +831,18 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         iconify::collect_iconify_referenced_deps(input.modules, input.pkg, input.workspaces);
     let loader_referenced =
         inline_loaders::collect_inline_loader_referenced_deps(input.resolved_modules, input.graph);
+    let jsx_runtime_referenced = jsx_runtime_credits::collect_jsx_runtime_package_credits(
+        input.plugin_result,
+        input.modules,
+        input.graph,
+        &input.config.root,
+        input.workspaces,
+    );
     let runtime_remotes = collect_federation_runtime_remotes(input);
     let augmented_plugin_result;
     let plugin_result = if iconify_referenced.is_empty()
         && loader_referenced.is_empty()
+        && jsx_runtime_referenced.is_empty()
         && runtime_remotes.is_empty()
     {
         input.plugin_result
@@ -841,6 +850,9 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
         let mut owned = input.plugin_result.cloned().unwrap_or_default();
         owned.referenced_dependencies.extend(iconify_referenced);
         owned.referenced_dependencies.extend(loader_referenced);
+        owned
+            .package_referenced_dependencies
+            .extend(jsx_runtime_referenced);
         owned.provided_dependencies.extend(runtime_remotes);
         augmented_plugin_result = owned;
         Some(&augmented_plugin_result)

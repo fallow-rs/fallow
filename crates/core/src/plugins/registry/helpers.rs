@@ -755,6 +755,16 @@ fn merge_plugin_result_fields(
             result.jsx_import_sources.push(rule);
         }
     }
+    for rule in plugin_result.jsx_package_credits {
+        if !result.jsx_package_credits.contains(&rule) {
+            result.jsx_package_credits.push(rule);
+        }
+    }
+    for dir in plugin_result.tsconfig_jsx_dirs {
+        if !result.tsconfig_jsx_dirs.contains(&dir) {
+            result.tsconfig_jsx_dirs.push(dir);
+        }
+    }
     for diagnostic in plugin_result.config_diagnostics {
         if !result.config_diagnostics.contains(&diagnostic) {
             result.config_diagnostics.push(diagnostic);
