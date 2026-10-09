@@ -18,10 +18,14 @@ use super::rendered_gate_script;
 const STUB_FALLOW: &str = "#!/bin/sh\n\
 if [ \"$1\" = \"--version\" ]; then echo 'fallow 9.0.0'; exit 0; fi\n\
 pwd -P >> \"$FALLOW_STUB_LOG\"\n\
+if [ -f .stub-error ]; then echo '{\"error\":true,\"message\":\"stub\"}'; exit 2; fi\n\
 if [ -f .stub-fail ]; then echo '{\"verdict\":\"fail\"}'; else echo '{\"verdict\":\"pass\"}'; fi\n";
 
 /// A file that makes the stub return a fail verdict in its directory.
 const STUB_FAIL_MARKER: &str = ".stub-fail";
+
+/// A file that makes the stub report a runtime error in its directory.
+const STUB_ERROR_MARKER: &str = ".stub-error";
 
 /// Environment variables that point git at a different repository. A git
 /// hook that runs the test suite sets some of them.
@@ -540,7 +544,8 @@ fn command_payload(cwd: &Path, command: &str) -> serde_json::Value {
 
 /// A main checkout with the gate and two linked worktrees beside it. The
 /// session works in worktree `a`; the hook process starts in the main
-/// checkout. Worktree `b` has a space in its name.
+/// checkout. Worktree `b` has a space in its name. Worktree `c` is a third,
+/// clean tree for the redirection cases.
 struct TwoWorktrees {
     _tmp: TempDir,
     root: PathBuf,
@@ -548,6 +553,7 @@ struct TwoWorktrees {
     main: PathBuf,
     a: PathBuf,
     b: PathBuf,
+    c: PathBuf,
 }
 
 fn two_worktrees() -> TwoWorktrees {
@@ -557,7 +563,8 @@ fn two_worktrees() -> TwoWorktrees {
     let gate = install_gate(&main, ".claude");
     let a = root.join("wt-a");
     let b = root.join("wt b");
-    for worktree in [&a, &b] {
+    let c = root.join("wt-c");
+    for worktree in [&a, &b, &c] {
         git(
             &main,
             &[
@@ -576,6 +583,7 @@ fn two_worktrees() -> TwoWorktrees {
         main,
         a,
         b,
+        c,
     }
 }
 
@@ -701,4 +709,210 @@ fn gate_audits_each_work_tree_that_the_command_targets() {
         String::from_utf8_lossy(&run.output.stderr)
     );
     assert_eq!(run.audit_dirs, expected);
+}
+
+/// Runs each `(case, command, expected audit roots)` from a session in
+/// worktree `a/src` and checks the audit roots in order.
+fn assert_cases(trees: &TwoWorktrees, cases: &[(&str, String, Vec<&Path>)]) {
+    let session = trees.a.join("src");
+    std::fs::create_dir_all(&session).unwrap();
+    for (case, command, expected) in cases {
+        let run = run_gate(
+            &trees.gate,
+            &trees.main,
+            &trees.root.join("home"),
+            &command_payload(&session, command),
+        );
+        assert_eq!(
+            run.output.status.code(),
+            Some(0),
+            "{case}: the gate must pass on pass verdicts; stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+        assert_eq!(
+            &run.audit_dirs,
+            expected,
+            "{case}: wrong audit roots for {command:?}; stderr={}",
+            String::from_utf8_lossy(&run.output.stderr)
+        );
+    }
+}
+
+/// Shell forms that the parser must read as bash runs them. A form that it
+/// cannot model must still count as a git write, and the session tree must
+/// stay in the audit.
+#[test]
+fn gate_reads_shell_forms_of_a_git_write() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let (a, b) = (trees.a.as_path(), trees.b.as_path());
+    let bq = trees.b.display().to_string();
+    let gone = trees.root.join("gone").display().to_string();
+    let cases: Vec<(&str, String, Vec<&Path>)> = vec![
+        ("ANSI-C quoting", format!("git -C $'{bq}' commit"), vec![b]),
+        (
+            "escaped quotes in double quotes",
+            format!("git commit -m \"say \\\"hi\\\"\" && git -C \"{bq}\" push"),
+            vec![a, b],
+        ),
+        (
+            "line continuation",
+            format!("git \\\n  -C \"{bq}\" \\\n  commit -m x"),
+            vec![b],
+        ),
+        (
+            "bash -c",
+            format!("bash -c 'git -C \"{bq}\" commit -m x'"),
+            vec![b, a],
+        ),
+        ("sh -c", "sh -c \"git commit -m x\"".to_owned(), vec![a]),
+        ("eval", "eval 'git commit -m x'".to_owned(), vec![a]),
+        ("env", format!("env git -C \"{bq}\" commit"), vec![b]),
+        (
+            "command",
+            format!("command git -C \"{bq}\" commit"),
+            vec![b],
+        ),
+        (
+            "-C with a substitution",
+            "git -C \"$(pwd)\" commit".to_owned(),
+            vec![a],
+        ),
+        (
+            "cd into a missing directory",
+            format!("cd \"{gone}\" && git commit"),
+            vec![a],
+        ),
+        ("cd ||", format!("cd \"{bq}\" || git commit"), vec![a]),
+        (
+            "subshell",
+            format!("( cd \"{bq}\" && git commit ); git push"),
+            vec![b, a],
+        ),
+        (
+            "GIT_DIR prefix",
+            format!("GIT_DIR=\"{bq}/.git\" git commit"),
+            vec![b],
+        ),
+        (
+            "GIT_WORK_TREE prefix",
+            format!("GIT_WORK_TREE=\"{bq}\" git commit"),
+            vec![b],
+        ),
+        (
+            "here-document",
+            format!("git commit -F - <<'EOF'\nit's done\nEOF\ngit -C \"{bq}\" push"),
+            vec![a, b],
+        ),
+        (
+            "write in a substitution",
+            format!("echo \"$(git -C \"{bq}\" commit -m x)\""),
+            vec![b, a],
+        ),
+        ("pipeline cd", format!("cd \"{bq}\" | git commit"), vec![a]),
+        (
+            "comment that the old parser read",
+            "ls # git push".to_owned(),
+            vec![a],
+        ),
+    ];
+    assert_cases(&trees, &cases);
+}
+
+/// A command must not make the gate audit a clean tree while the write lands
+/// in another tree. When the parser cannot be certain of the directory, the
+/// session tree stays in the audit.
+#[test]
+fn gate_does_not_redirect_the_audit_to_a_clean_tree() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let (a, b, c) = (trees.a.as_path(), trees.b.as_path(), trees.c.as_path());
+    std::fs::create_dir_all(trees.c.join("src")).unwrap();
+    let bq = trees.b.display().to_string();
+    let cq = trees.c.display().to_string();
+    let gone = trees.root.join("gone").display().to_string();
+    let cases: Vec<(&str, String, Vec<&Path>)> = vec![
+        (
+            "-C of another git command",
+            format!("git -C \"{cq}\" status && git commit"),
+            vec![a],
+        ),
+        (
+            "cd -",
+            format!("cd \"{cq}\" && cd - && git commit"),
+            vec![a],
+        ),
+        (
+            "cd ..",
+            format!("cd \"{cq}/src\"; cd ..; git commit"),
+            vec![c],
+        ),
+        (
+            "pushd and popd",
+            format!("pushd \"{cq}\"; popd; git commit"),
+            vec![a],
+        ),
+        (
+            "cumulative -C",
+            format!("git -C \"{cq}\" -C \"../wt b\" commit"),
+            vec![b],
+        ),
+        (
+            "--git-dir and --work-tree",
+            format!("git \"--git-dir={cq}/.git\" \"--work-tree={bq}\" commit"),
+            vec![b, c],
+        ),
+        (
+            "cd $OLDPWD",
+            "cd \"$OLDPWD\" && git commit".to_owned(),
+            vec![a],
+        ),
+        ("cd ~", "cd ~ && git commit".to_owned(), vec![a]),
+        ("bare cd", "cd && git commit".to_owned(), vec![a]),
+        (
+            "a cd that fails",
+            format!("cd \"{gone}\"; git -C \"{cq}\" status; git commit"),
+            vec![a],
+        ),
+        (
+            "a failed cd before a relative cd",
+            format!("cd \"{gone}\"; cd ../wt-c; git commit"),
+            vec![a],
+        ),
+    ];
+    assert_cases(&trees, &cases);
+}
+
+/// A runtime error in one audit root does not hide a fail verdict in the
+/// next root.
+#[test]
+fn gate_blocks_on_a_fail_after_a_runtime_error_in_another_root() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    std::fs::write(trees.a.join(STUB_ERROR_MARKER), "").unwrap();
+    std::fs::write(trees.b.join(STUB_FAIL_MARKER), "").unwrap();
+    let command = format!(
+        "git -C \"{}\" commit && git -C \"{}\" push",
+        trees.a.display(),
+        trees.b.display()
+    );
+    let run = run_gate(
+        &trees.gate,
+        &trees.main,
+        &trees.root.join("home"),
+        &command_payload(&trees.a, &command),
+    );
+    assert_eq!(
+        run.output.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&run.output.stderr)
+    );
+    assert_eq!(run.audit_dirs, [trees.a.as_path(), trees.b.as_path()]);
 }

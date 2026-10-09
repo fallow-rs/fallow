@@ -28,45 +28,209 @@ fi
 INPUT="$(cat)"
 CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
 
-# Unit separator: marks the end of a simple command in CMD_WORDS. A shell
-# word cannot hold it, so it never clashes with a real word.
-GATE_SEGMENT_END=$'\x1e'
+# The parser below reads the command text to find each git commit or push and
+# the directory where it runs. It is not a full shell. When it cannot model a
+# part of the command, it sets GATE_UNSURE, and the gate then also audits the
+# session tree. It never drops the session tree audit for a target that it
+# did not resolve with certainty.
 
-# Splits a command into shell words in CMD_WORDS. Single and double quotes
-# group a word, so a quoted path with spaces stays one word. Unquoted control
-# operators (; | & ( ) and a new line) and a command substitution (`$(...)` or
-# backticks, also inside double quotes) end a simple command. This is not a
-# full shell parser: it does not expand variables or globs.
+# Markers in the word lists. A shell word cannot hold these control bytes.
+GATE_OP=$'\x1e'
+GATE_UNKNOWN=$'\x1f'
+GATE_STEP=$'\x1d'
+GATE_SUB_OPEN="${GATE_OP}<"
+GATE_SUB_CLOSE="${GATE_OP}>"
+GATE_RESET="${GATE_OP}R"
+
+GATE_UNSURE=0
+GIT_WRITE_TARGETS=()
+GATE_NESTED=()
+
+# The helpers below change the local variables of split_command_words through
+# the dynamic scope of bash.
+gate_emit_word() {
+  if [ "$have" -eq 1 ]; then
+    CMD_WORDS+=("$word")
+    CMD_DYN+=("$dyn")
+  fi
+  word=""
+  have=0
+  dyn=0
+}
+
+gate_emit_op() {
+  gate_emit_word
+  CMD_WORDS+=("$GATE_OP$1")
+  CMD_DYN+=(0)
+}
+
+# Starts a command substitution: `$(` (kind s) or a backquote (kind b). The
+# word around it continues after the substitution and is dynamic.
+gate_open_substitution() {
+  local depth=${#kinds}
+  kinds+="$1"
+  saved_quote[depth]="$quote"
+  saved_word[depth]="$word"
+  CMD_WORDS+=("$GATE_SUB_OPEN")
+  CMD_DYN+=(0)
+  word=""
+  have=0
+  dyn=0
+  quote=""
+}
+
+gate_close_substitution() {
+  local depth=$((${#kinds} - 1))
+  gate_emit_word
+  CMD_WORDS+=("$GATE_SUB_CLOSE")
+  CMD_DYN+=(0)
+  kinds="${kinds:0:depth}"
+  quote="${saved_quote[depth]}"
+  word="${saved_word[depth]}\$()"
+  have=1
+  dyn=1
+}
+
+gate_top_kind() {
+  if [ -n "$kinds" ]; then
+    printf '%s' "${kinds:${#kinds}-1}"
+  fi
+}
+
+# Reads `$...` after the `$`: a command substitution, ANSI-C quoting, a
+# locale string, or a parameter expansion (dynamic).
+gate_dollar() {
+  local next="${rest:0:1}" body
+  case "$next" in
+    "(")
+      rest="${rest:1}"
+      gate_open_substitution s
+      ;;
+    "'")
+      if [ -n "$quote" ]; then
+        word+='$'
+        have=1
+        return 0
+      fi
+      rest="${rest:1}"
+      have=1
+      while [ -n "$rest" ]; do
+        body="${rest%%[\'\\]*}"
+        word+="$body"
+        rest="${rest:${#body}}"
+        [ -n "$rest" ] || break
+        if [ "${rest:0:1}" = "'" ]; then
+          rest="${rest:1}"
+          break
+        fi
+        case "${rest:1:1}" in
+          "'" | "\\" | '"') word+="${rest:1:1}" ;;
+          *)
+            word+="${rest:0:2}"
+            dyn=1
+            ;;
+        esac
+        rest="${rest:2}"
+      done
+      ;;
+    '"')
+      if [ -z "$quote" ]; then
+        rest="${rest:1}"
+        quote='"'
+      else
+        word+='$'
+      fi
+      have=1
+      ;;
+    [A-Za-z_0-9@*#?!\{-] | '$')
+      word+='$'
+      have=1
+      dyn=1
+      ;;
+    *)
+      word+='$'
+      have=1
+      ;;
+  esac
+}
+
+# Reads a here-document operator after `<<` and queues its delimiter.
+gate_heredoc() {
+  local strip=0 piece
+  if [ "${rest:0:1}" = "-" ]; then
+    strip=1
+    rest="${rest:1}"
+  fi
+  while [ "${rest:0:1}" = " " ] || [ "${rest:0:1}" = $'\t' ]; do
+    rest="${rest:1}"
+  done
+  piece="${rest%%[[:space:]\;\|\&\(\)\<\>]*}"
+  rest="${rest:${#piece}}"
+  heredocs+=("$strip${piece//[\'\"\\]/}")
+}
+
+# Skips the bodies of the queued here-documents after a new line.
+gate_skip_heredocs() {
+  local entry strip delim line i=0
+  while [ "$i" -lt "${#heredocs[@]}" ]; do
+    entry="${heredocs[i]}"
+    i=$((i + 1))
+    strip="${entry:0:1}"
+    delim="${entry:1}"
+    while [ -n "$rest" ]; do
+      line="${rest%%$'\n'*}"
+      if [ "$line" = "$rest" ]; then
+        rest=""
+      else
+        rest="${rest#*$'\n'}"
+      fi
+      if [ "$strip" = 1 ]; then
+        while [ "${line:0:1}" = $'\t' ]; do
+          line="${line:1}"
+        done
+      fi
+      [ "$line" = "$delim" ] && break
+    done
+  done
+  heredocs=()
+}
+
+# Splits a command into shell words in CMD_WORDS, with a flag in CMD_DYN for
+# a word that holds an expansion or a glob. Quotes group a word, so a quoted
+# path with spaces stays one word. Control operators become marker words. A
+# command substitution becomes a marked region of its own words.
 split_command_words() {
   # Byte semantics: the special characters are all ASCII, and string slices
   # in a multibyte locale cost much more time.
   local LC_ALL=C
-  local rest="$1" chunk c quote="" word="" have=0 resume_quote=""
+  local rest="$1" chunk c next quote="" word="" have=0 dyn=0 kinds=""
+  local -a saved_quote=() saved_word=() heredocs=()
   CMD_WORDS=()
+  CMD_DYN=()
   while [ -n "$rest" ]; do
     # Copy the plain characters up to the next one that matters in one step,
     # so a long commit message costs few loop turns.
     case "$quote" in
       "'") chunk="${rest%%"'"*}" ;;
       '"') chunk="${rest%%[\"\\\`\$]*}" ;;
-      *) chunk="${rest%%[[:space:]\;\|\&\(\)\`\'\"\\]*}" ;;
+      *) chunk="${rest%%[[:space:]\;\|\&\(\)\`\'\"\\\$\<\#]*}" ;;
     esac
     if [ -n "$chunk" ]; then
       word+="$chunk"
       have=1
+      if [ -z "$quote" ]; then
+        case "$chunk" in
+          *[\*\?\[]*) dyn=1 ;;
+        esac
+      fi
       rest="${rest:${#chunk}}"
       [ -n "$rest" ] || break
     fi
     c="${rest:0:1}"
+    next="${rest:1:1}"
     rest="${rest:1}"
     if [ "$quote" = "'" ]; then
       quote=""
-      continue
-    fi
-    if [ "$c" = "\\" ]; then
-      word+="${rest:0:1}"
-      rest="${rest:1}"
-      have=1
       continue
     fi
     if [ "$quote" = '"' ]; then
@@ -74,26 +238,25 @@ split_command_words() {
         '"')
           quote=""
           ;;
+        "\\")
+          case "$next" in
+            $'\n') rest="${rest:1}" ;;
+            '$' | '`' | '"' | "\\")
+              word+="$next"
+              rest="${rest:1}"
+              ;;
+            *) word+="\\" ;;
+          esac
+          ;;
         '$')
-          if [ "${rest:0:1}" = "(" ]; then
-            rest="${rest:1}"
-            [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
-            CMD_WORDS+=("$GATE_SEGMENT_END")
-            word=""
-            have=0
-            quote=""
-            resume_quote=')'
-          else
-            word+="$c"
-          fi
+          gate_dollar
           ;;
         '`')
-          [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
-          CMD_WORDS+=("$GATE_SEGMENT_END")
-          word=""
-          have=0
-          quote=""
-          resume_quote='`'
+          if [ "$(gate_top_kind)" = b ]; then
+            gate_close_substitution
+          else
+            gate_open_substitution b
+          fi
           ;;
       esac
       continue
@@ -103,111 +266,352 @@ split_command_words() {
         quote="$c"
         have=1
         ;;
-      ';' | '|' | '&' | '(' | ')' | '`' | $'\n')
-        [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
-        CMD_WORDS+=("$GATE_SEGMENT_END")
-        word=""
-        have=0
-        # The end of a command substitution that started inside double
-        # quotes returns to those quotes.
-        if [ -n "$resume_quote" ] && [ "$c" = "$resume_quote" ]; then
-          quote='"'
-          resume_quote=""
+      "\\")
+        if [ "$next" = $'\n' ]; then
+          rest="${rest:1}"
+        elif [ -n "$next" ]; then
+          word+="$next"
+          have=1
+          rest="${rest:1}"
+        fi
+        ;;
+      '$')
+        gate_dollar
+        ;;
+      '`')
+        if [ "$(gate_top_kind)" = b ]; then
+          gate_close_substitution
+        else
+          gate_open_substitution b
+        fi
+        ;;
+      '#')
+        if [ "$have" -eq 1 ]; then
+          word+='#'
+        elif [ "${rest#*$'\n'}" = "$rest" ]; then
+          # A comment runs to the end of the line.
+          rest=""
+        else
+          rest=$'\n'"${rest#*$'\n'}"
+        fi
+        ;;
+      '<')
+        if [ "$next" = "<" ] && [ "${rest:1:1}" != "<" ]; then
+          rest="${rest:1}"
+          gate_emit_word
+          gate_heredoc
+        else
+          word+='<'
+          have=1
+        fi
+        ;;
+      ';')
+        gate_emit_op ";"
+        ;;
+      '&')
+        if [ "$next" = "&" ]; then
+          rest="${rest:1}"
+          gate_emit_op "&&"
+        elif [ "$next" = ">" ] || [ "${word:${#word}-1}" = ">" ] || [ "${word:${#word}-1}" = "<" ]; then
+          # A redirection such as `2>&1` or `&>file`, not an operator.
+          word+='&'
+          have=1
+        else
+          gate_emit_op "&"
+        fi
+        ;;
+      '|')
+        if [ "$next" = "|" ]; then
+          rest="${rest:1}"
+          gate_emit_op "||"
+        else
+          [ "$next" = "&" ] && rest="${rest:1}"
+          gate_emit_op "|"
+        fi
+        ;;
+      '(')
+        kinds+="p"
+        gate_emit_op "("
+        ;;
+      ')')
+        case "$(gate_top_kind)" in
+          s)
+            gate_close_substitution
+            ;;
+          p)
+            kinds="${kinds:0:${#kinds}-1}"
+            gate_emit_op ")"
+            ;;
+          *)
+            gate_emit_op ")"
+            ;;
+        esac
+        ;;
+      $'\n')
+        gate_emit_op "nl"
+        if [ "${#heredocs[@]}" -gt 0 ]; then
+          gate_skip_heredocs
         fi
         ;;
       *)
         # Unquoted white space ends a word.
-        [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
-        word=""
-        have=0
+        gate_emit_word
         ;;
     esac
   done
-  [ "$have" -eq 1 ] && CMD_WORDS+=("$word")
+  gate_emit_word
   return 0
 }
 
-# Joins a path from a command to the directory before it. An empty base is
-# the session directory, so a relative result stays relative until the main
-# part resolves it.
-gate_join_path() {
-  local base="$1" path="$2"
-  # The tilde is literal here on purpose: the command text is not expanded.
-  # shellcheck disable=SC2088
-  case "$path" in
-    "~") path="${HOME:-~}" ;;
-    "~/"*) path="${HOME:-~}/${path#"~/"}" ;;
-  esac
-  if [[ "$path" == /* || "$path" =~ ^[A-Za-z]:[\\/] || -z "$base" ]]; then
-    printf '%s\n' "$path"
+# Moves the words of command substitutions out of CMD_WORDS into NEST_WORDS,
+# with a reset marker at each substitution edge. MAIN_WORDS keeps the rest.
+gate_partition_words() {
+  local i=0 n=${#CMD_WORDS[@]} depth=0 word
+  MAIN_WORDS=()
+  MAIN_DYN=()
+  NEST_WORDS=()
+  NEST_DYN=()
+  while [ "$i" -lt "$n" ]; do
+    word="${CMD_WORDS[i]}"
+    if [ "$word" = "$GATE_SUB_OPEN" ] || [ "$word" = "$GATE_SUB_CLOSE" ]; then
+      if [ "$word" = "$GATE_SUB_OPEN" ]; then
+        depth=$((depth + 1))
+      elif [ "$depth" -gt 0 ]; then
+        depth=$((depth - 1))
+      fi
+      NEST_WORDS+=("$GATE_RESET")
+      NEST_DYN+=(0)
+    elif [ "$depth" -gt 0 ]; then
+      NEST_WORDS+=("$word")
+      NEST_DYN+=("${CMD_DYN[i]}")
+    else
+      MAIN_WORDS+=("$word")
+      MAIN_DYN+=("${CMD_DYN[i]}")
+    fi
+    i=$((i + 1))
+  done
+}
+
+# A path word as a directory step: GATE_UNKNOWN when it is dynamic.
+gate_step() {
+  if [ "$2" = 1 ]; then
+    printf '%s' "$GATE_STEP$GATE_UNKNOWN"
   else
-    printf '%s\n' "$base/$path"
+    printf '%s' "$GATE_STEP$1"
   fi
 }
 
-# Tokenize instead of matching one regex so git-level options between `git`
-# and the subcommand (git -c k=v commit, git -C dir push, git --no-pager
-# commit, git --git-dir=/x push) still route into the audit, while subcommand
-# lookalikes in arguments (git log commit-message.txt) do not. See issue #2106.
-#
-# A git write can name another work tree than the session directory. For each
-# git commit or push, GIT_WRITE_TARGETS gets the directory that the command
-# names, or an empty entry when it names none. The sources are, in order of
-# precedence: --work-tree, the parent of a --git-dir that ends in .git, and
-# the directory of the git process after `cd` and `-C`. A `cd` (or `pushd`)
-# at the start of a simple command changes the directory for the later
-# simple commands of the same command line.
-is_git_write_command() {
-  local word cd_dir="" git_cwd work_tree git_dir_tree value i=0 n segment_start=1
-  GIT_WRITE_TARGETS=()
-  split_command_words "$1"
-  n=${#CMD_WORDS[@]}
+# Records one git write of gate_scan_words. The entry is a kind letter and a
+# list of directory steps from the session directory: W for a work tree, G
+# for a git directory. With both --work-tree and --git-dir, both get an entry.
+gate_record_write() {
+  if [ -n "$work_tree" ]; then
+    GIT_WRITE_TARGETS+=("W$work_tree")
+  fi
+  if [ -n "$git_dir" ]; then
+    GIT_WRITE_TARGETS+=("G$git_dir")
+  fi
+  if [ -z "$work_tree" ] && [ -z "$git_dir" ]; then
+    GIT_WRITE_TARGETS+=("W$git_steps")
+  fi
+  if [ "$nested" = 1 ] || [ "$plain_prefix" = 0 ]; then
+    GATE_UNSURE=1
+  fi
+}
+
+# Scans SCAN_WORDS for git writes. The directory of each simple command is a
+# list of steps: each `cd`, `pushd` and `-C` adds one. A `cd` takes effect
+# after `;`, `&&` or a new line. After `||`, it takes effect after the next
+# of those operators. In a pipeline part or a background job, a `cd` changes
+# nothing, and a subshell restores the directory at its end. `$1` is 1 for
+# words from a command substitution or a `-c` string; their writes always
+# set GATE_UNSURE.
+gate_scan_words() {
+  local nested="$1" i=0 n=${#SCAN_WORDS[@]} word dyn op name base j value
+  local steps="" pending="" pending_set=0 deferred="" deferred_set=0
+  local segment_start=1 plain_prefix=1 env_work_tree="" env_git_dir="" joined
+  local git_steps work_tree git_dir
+  local -a dir_stack=()
   while [ "$i" -lt "$n" ]; do
-    word="${CMD_WORDS[i]}"
+    word="${SCAN_WORDS[i]}"
+    dyn="${SCAN_DYN[i]}"
     i=$((i + 1))
-    if [ "$word" = "$GATE_SEGMENT_END" ]; then
+    if [ "${word:0:1}" = "$GATE_OP" ]; then
+      op="${word:1}"
+      case "$op" in
+        ";" | "&&" | nl)
+          if [ "$pending_set" = 1 ]; then
+            steps="$pending"
+          elif [ "$deferred_set" = 1 ]; then
+            steps="$deferred"
+          fi
+          pending_set=0
+          deferred_set=0
+          ;;
+        "||")
+          if [ "$pending_set" = 1 ]; then
+            deferred="$pending"
+            deferred_set=1
+          fi
+          pending_set=0
+          ;;
+        "|" | "&")
+          pending_set=0
+          ;;
+        "(")
+          dir_stack+=("$steps")
+          ;;
+        ")")
+          pending_set=0
+          if [ "${#dir_stack[@]}" -gt 0 ]; then
+            steps="${dir_stack[${#dir_stack[@]} - 1]}"
+            unset "dir_stack[${#dir_stack[@]} - 1]"
+          fi
+          ;;
+        R)
+          steps=""
+          pending_set=0
+          deferred_set=0
+          dir_stack=()
+          ;;
+      esac
+      if [ -n "$env_work_tree" ] || [ -n "$env_git_dir" ]; then
+        # A git location variable without a git command after it, as in
+        # `export GIT_DIR=x`, can change later git commands.
+        GATE_UNSURE=1
+      fi
       segment_start=1
+      plain_prefix=1
+      env_work_tree=""
+      env_git_dir=""
       continue
     fi
-    if [ "$segment_start" -eq 1 ] && { [ "$word" = cd ] || [ "$word" = pushd ]; }; then
-      segment_start=0
-      value=""
-      if [ "$i" -lt "$n" ]; then
-        value="${CMD_WORDS[i]}"
-      fi
-      if [ -z "$value" ] || [ "$value" = "$GATE_SEGMENT_END" ]; then
-        # A bare `cd` goes to the home directory.
-        cd_dir="$(gate_join_path "" "~")"
-      elif [ "$value" != "-" ] && [ "${value#-}" = "$value" ]; then
-        cd_dir="$(gate_join_path "$cd_dir" "$value")"
-        i=$((i + 1))
-      fi
+    if [[ "$word" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      name="${word%%=*}"
+      value="${word#*=}"
+      case "$name" in
+        GIT_WORK_TREE) env_work_tree="$(gate_step "$value" "$dyn")" ;;
+        GIT_DIR) env_git_dir="$(gate_step "$value" "$dyn")" ;;
+        GIT_*) GATE_UNSURE=1 ;;
+      esac
       continue
+    fi
+    case "$word" in
+      *GIT_DIR* | *GIT_WORK_TREE*) GATE_UNSURE=1 ;;
+    esac
+    if [ "$segment_start" = 1 ]; then
+      case "$word" in
+        cd | pushd)
+          segment_start=0
+          j="$i"
+          while [ "$j" -lt "$n" ]; do
+            case "${SCAN_WORDS[j]}" in
+              -P | -L | -e | -@ | -- | -n) j=$((j + 1)) ;;
+              [0-9]*[\<\>]* | [\<\>]*) j=$((j + 1)) ;;
+              *) break ;;
+            esac
+          done
+          if [ "$j" -ge "$n" ] || [ "${SCAN_WORDS[j]:0:1}" = "$GATE_OP" ]; then
+            # A bare `cd` goes to the home directory.
+            pending="$steps$GATE_STEP~"
+            i="$j"
+          elif [[ "${SCAN_WORDS[j]}" == "-" || ("$word" == pushd && "${SCAN_WORDS[j]}" == [+-]*) ]]; then
+            # `cd -` and the `pushd` stack forms depend on earlier state.
+            pending="$steps$GATE_STEP$GATE_UNKNOWN"
+            i=$((j + 1))
+          else
+            pending="$steps$(gate_step "${SCAN_WORDS[j]}" "${SCAN_DYN[j]}")"
+            i=$((j + 1))
+          fi
+          pending_set=1
+          continue
+          ;;
+        popd)
+          segment_start=0
+          pending="$steps$GATE_STEP$GATE_UNKNOWN"
+          pending_set=1
+          continue
+          ;;
+        "{" | "}" | "!" | if | then | else | elif | do | while | until | time | command | builtin | exec | nohup)
+          continue
+          ;;
+      esac
     fi
     segment_start=0
-    [ "$word" = git ] || continue
-    git_cwd="$cd_dir"
+    base="${word##*/}"
+    case "$base" in
+      bash | sh | zsh | dash | ksh)
+        j="$i"
+        value=0
+        while [ "$j" -lt "$n" ] && [ "${SCAN_WORDS[j]:0:1}" = "-" ] && [ "${SCAN_WORDS[j]:0:2}" != "--" ]; do
+          case "${SCAN_WORDS[j]}" in
+            *c*) value=1 ;;
+          esac
+          j=$((j + 1))
+        done
+        if [ "$value" = 1 ] && [ "$j" -lt "$n" ] && [ "${SCAN_WORDS[j]:0:1}" != "$GATE_OP" ]; then
+          GATE_NESTED+=("${SCAN_WORDS[j]}")
+        fi
+        plain_prefix=0
+        continue
+        ;;
+      eval)
+        joined=""
+        while [ "$i" -lt "$n" ] && [ "${SCAN_WORDS[i]:0:1}" != "$GATE_OP" ]; do
+          joined+="${SCAN_WORDS[i]} "
+          i=$((i + 1))
+        done
+        GATE_NESTED+=("$joined")
+        continue
+        ;;
+      git)
+        [ "$dyn" = 1 ] && continue
+        ;;
+      env | sudo | nice)
+        # Only a plain wrapper keeps the directory certain. An option such
+        # as `env -C dir` can change it.
+        if [ "$i" -lt "$n" ] && [ "${SCAN_WORDS[i]:0:1}" = "-" ]; then
+          plain_prefix=0
+        fi
+        continue
+        ;;
+      *)
+        plain_prefix=0
+        continue
+        ;;
+    esac
+    # A git invocation. Global options apply to this invocation only.
+    git_steps="$steps"
     work_tree=""
-    git_dir_tree=""
+    git_dir=""
+    if [ -n "$env_work_tree" ]; then
+      work_tree="$git_steps$env_work_tree"
+    fi
+    if [ -n "$env_git_dir" ]; then
+      git_dir="$git_steps$env_git_dir"
+    fi
+    env_work_tree=""
+    env_git_dir=""
     while [ "$i" -lt "$n" ]; do
-      word="${CMD_WORDS[i]}"
-      [ "$word" = "$GATE_SEGMENT_END" ] && break
+      word="${SCAN_WORDS[i]}"
+      dyn="${SCAN_DYN[i]}"
+      [ "${word:0:1}" = "$GATE_OP" ] && break
       i=$((i + 1))
       value=""
       case "$word" in
         commit | push)
-          GIT_WRITE_TARGETS+=("${work_tree:-${git_dir_tree:-$git_cwd}}")
+          gate_record_write
           break
           ;;
-        -c | -C | --git-dir | --work-tree | --namespace | --config-env | --super-prefix | --exec-path | --list-cmds | --attr-source)
+        -C | --git-dir | --work-tree | -c | --namespace | --config-env | --super-prefix | --exec-path | --list-cmds | --attr-source)
           # Global option whose value arrives as the next word.
-          if [ "$i" -lt "$n" ] && [ "${CMD_WORDS[i]}" != "$GATE_SEGMENT_END" ]; then
-            value="${CMD_WORDS[i]}"
+          if [ "$i" -lt "$n" ] && [ "${SCAN_WORDS[i]:0:1}" != "$GATE_OP" ]; then
+            value="$(gate_step "${SCAN_WORDS[i]}" "${SCAN_DYN[i]}")"
             i=$((i + 1))
           fi
           ;;
         --git-dir=* | --work-tree=*)
-          value="${word#*=}"
+          value="$(gate_step "${word#*=}" "$dyn")"
           word="${word%%=*}"
           ;;
         -*)
@@ -216,35 +620,116 @@ is_git_write_command() {
           continue
           ;;
         *)
-          # A different subcommand; resume scanning for a later `git` word.
+          if [ "$dyn" = 1 ]; then
+            # The subcommand is not known before the shell runs: treat it as
+            # a write and audit the session tree too.
+            gate_record_write
+            GATE_UNSURE=1
+          fi
           break
           ;;
       esac
       [ -n "$value" ] || continue
       case "$word" in
-        -C)
-          git_cwd="$(gate_join_path "$git_cwd" "$value")"
-          ;;
-        --work-tree)
-          work_tree="$(gate_join_path "$git_cwd" "$value")"
-          ;;
-        --git-dir)
-          value="${value%/}"
-          if [ "$(basename "$value")" = .git ]; then
-            git_dir_tree="$(gate_join_path "$git_cwd" "$(dirname "$value")")"
-          fi
-          ;;
+        # Each -C applies relative to the directory of the previous one, as
+        # in git.
+        -C) git_steps+="$value" ;;
+        --work-tree) work_tree="$git_steps$value" ;;
+        --git-dir) git_dir="$git_steps$value" ;;
       esac
     done
+  done
+}
+
+# Scans the word lists of the last split: the main words, then the words of
+# command substitutions as nested words.
+gate_scan_split() {
+  SCAN_WORDS=()
+  SCAN_DYN=()
+  if [ "${#MAIN_WORDS[@]}" -gt 0 ]; then
+    SCAN_WORDS=("${MAIN_WORDS[@]}")
+    SCAN_DYN=("${MAIN_DYN[@]}")
+    gate_scan_words "$1"
+  fi
+  if [ "${#NEST_WORDS[@]}" -gt 0 ]; then
+    SCAN_WORDS=("${NEST_WORDS[@]}")
+    SCAN_DYN=("${NEST_DYN[@]}")
+    gate_scan_words 1
+  fi
+}
+
+# Tokenize instead of matching one regex so git-level options between `git`
+# and the subcommand (git -c k=v commit, git -C dir push, git --no-pager
+# commit, git --git-dir=/x push) still route into the audit, while subcommand
+# lookalikes in arguments (git log commit-message.txt) do not. See issue #2106.
+# The words of command substitutions and of `sh -c` or `eval` strings are
+# scanned too.
+is_git_write_command() {
+  local queue_index=0
+  GIT_WRITE_TARGETS=()
+  GATE_NESTED=()
+  GATE_UNSURE=0
+  split_command_words "$1"
+  gate_partition_words
+  gate_scan_split 0
+  # `sh -c` and `eval` strings, with a limit on the nesting work.
+  while [ "$queue_index" -lt "${#GATE_NESTED[@]}" ] && [ "$queue_index" -lt 16 ]; do
+    split_command_words "${GATE_NESTED[queue_index]}"
+    queue_index=$((queue_index + 1))
+    gate_partition_words
+    gate_scan_split 1
   done
   [ "${#GIT_WRITE_TARGETS[@]}" -gt 0 ]
 }
 
+# The classifier of earlier releases, kept as a floor: a command that it
+# detects stays a git write, so the new parser cannot skip a command that the
+# gate audited before. The new parser decides the directories.
+legacy_git_write_scan() {
+  local cmd="$1" segment
+  # Control operators separate simple commands; each becomes its own line.
+  # shellcheck disable=SC2020 # Each operator character becomes a new line.
+  while IFS= read -r segment; do
+    # Intentional word splitting; globbing is disabled below.
+    # shellcheck disable=SC2086
+    set -- $segment
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" != "git" ]; then
+        shift
+        continue
+      fi
+      shift
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          commit | push)
+            return 0
+            ;;
+          -c | -C | --git-dir | --work-tree | --namespace | --config-env | --super-prefix | --exec-path | --list-cmds | --attr-source)
+            shift
+            [ "$#" -gt 0 ] && shift
+            ;;
+          -*)
+            shift
+            ;;
+          *)
+            break
+            ;;
+        esac
+      done
+    done
+  done < <(printf '%s\n' "$cmd" | tr ';|&()' '\n\n\n\n\n')
+  return 1
+}
+
 set -f
+GIT_WRITE=0
 if is_git_write_command "$CMD"; then
   GIT_WRITE=1
-else
-  GIT_WRITE=0
+fi
+if [ "$GIT_WRITE" -eq 0 ] && legacy_git_write_scan "$CMD"; then
+  GIT_WRITE=1
+  GATE_UNSURE=1
+  GIT_WRITE_TARGETS=("W")
 fi
 set +f
 if [ "$GIT_WRITE" -eq 0 ]; then
@@ -261,7 +746,9 @@ fi
 # A git write can also name another tree (`git -C <dir> commit`,
 # `cd <dir> && git push`, `--work-tree`, `--git-dir <dir>/.git`). When that
 # named directory exists, it replaces the session directory below. A relative
-# name resolves against the session directory. The audit root is:
+# name resolves against the session directory. When the parser is not certain
+# of the directory, the session directory is audited as well. The audit root
+# is:
 #   1. The nearest directory at or above the session directory that holds this
 #      script at the same relative location (.claude/hooks/fallow-gate.sh or
 #      .codex/hooks/fallow-gate.sh). The walk stops at the first .git entry,
@@ -340,6 +827,57 @@ if [ -n "${HOME:-}" ]; then
 fi
 GATE_REL="$(gate_relative_path)"
 
+# Follows a list of directory steps from a start directory, as `cd` and
+# `git -C` do. A step to a missing directory changes nothing, as a failed
+# `cd` before `;`. Prints the end directory. Returns 0 when each step went to
+# an existing directory, 2 when a step did not, and 1 when a step is not
+# known before the shell runs.
+gate_follow_steps() {
+  local cur="$1" steps="$2" step candidate status=0
+  while [ -n "$steps" ]; do
+    step="${steps%%"$GATE_STEP"*}"
+    if [ "$step" = "$steps" ]; then
+      steps=""
+    else
+      steps="${steps#*"$GATE_STEP"}"
+    fi
+    [ "$step" = "$GATE_UNKNOWN" ] && return 1
+    # The tilde is literal here on purpose: the command text is not expanded.
+    # shellcheck disable=SC2088
+    case "$step" in
+      "~") step="${HOME:-}" ;;
+      "~/"*) step="${HOME:-}/${step#"~/"}" ;;
+    esac
+    [ -n "$step" ] || continue
+    if [[ "$step" == /* || "$step" =~ ^[A-Za-z]:[\\/] ]]; then
+      candidate="$step"
+    else
+      candidate="$cur/$step"
+    fi
+    if [ -d "$candidate" ] && candidate="$(physical_dir "$candidate")"; then
+      cur="$candidate"
+    else
+      status=2
+    fi
+  done
+  printf '%s\n' "$cur"
+  return "$status"
+}
+
+# Turns a git directory entry into the steps of its work tree: the parent of
+# a git directory named `.git`. Returns 1 for any other git directory.
+gate_git_dir_steps() {
+  local steps="$1" last head
+  last="${steps##*"$GATE_STEP"}"
+  head="${steps%"$GATE_STEP"*}"
+  [ "$last" = "$GATE_UNKNOWN" ] && return 1
+  while [ "${last%/}" != "$last" ] && [ "$last" != / ]; do
+    last="${last%/}"
+  done
+  [ "$(basename "$last")" = .git ] || return 1
+  printf '%s\n' "$head$GATE_STEP$(dirname "$last")"
+}
+
 # One audit root for each different tree that the git writes of the command
 # target, in command order. Usually there is one: `git commit && git push`
 # names one tree. Two writes into two trees get two audits, because a clean
@@ -355,34 +893,57 @@ add_audit_root() {
   AUDIT_ROOTS+=("$root")
 }
 
-for TARGET in "${GIT_WRITE_TARGETS[@]}"; do
-  START_DIR="$SESSION_DIR"
-  TARGET_DIR=""
-  if [ -n "$TARGET" ]; then
-    if [[ "$TARGET" != /* && ! "$TARGET" =~ ^[A-Za-z]:[\\/] ]]; then
-      TARGET="${SESSION_DIR:-$PROCESS_DIR}/$TARGET"
-    fi
-    if [ -d "$TARGET" ] && TARGET_DIR="$(physical_dir "$TARGET")"; then
-      START_DIR="$TARGET_DIR"
-    elif [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
-      echo "fallow-gate: command target $TARGET is not a directory, using the session directory." >&2
-    fi
-  fi
-  if [ -z "$START_DIR" ]; then
-    # No usable `cwd` and no command target: audit the process directory.
+add_session_root() {
+  local root
+  if [ -z "$SESSION_DIR" ]; then
+    # No usable `cwd`: audit the process directory, as before.
     add_audit_root "$PROCESS_DIR"
+    return 0
+  fi
+  root="$(resolve_audit_root "$SESSION_DIR" "$GATE_REL" "$PROCESS_DIR" "$HOME_DIR")"
+  if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
+    echo "fallow-gate: auditing $root (session directory $SESSION_DIR)." >&2
+  fi
+  add_audit_root "$root"
+}
+
+BASE_DIR="${SESSION_DIR:-$PROCESS_DIR}"
+for TARGET in "${GIT_WRITE_TARGETS[@]}"; do
+  KIND="${TARGET:0:1}"
+  STEPS="${TARGET:1}"
+  if [ "$KIND" = W ] && [ -z "$STEPS" ]; then
+    add_session_root
     continue
+  fi
+  if [ "$KIND" = G ] && ! STEPS="$(gate_git_dir_steps "$STEPS")"; then
+    GATE_UNSURE=1
+    continue
+  fi
+  set +e
+  START_DIR="$(gate_follow_steps "$BASE_DIR" "$STEPS")"
+  FOLLOW_STATUS=$?
+  set -e
+  if [ "$FOLLOW_STATUS" -eq 1 ]; then
+    GATE_UNSURE=1
+    continue
+  fi
+  if [ "$FOLLOW_STATUS" -ne 0 ]; then
+    GATE_UNSURE=1
   fi
   AUDIT_ROOT="$(resolve_audit_root "$START_DIR" "$GATE_REL" "$PROCESS_DIR" "$HOME_DIR")"
   if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
-    if [ -n "$TARGET_DIR" ]; then
-      echo "fallow-gate: auditing $AUDIT_ROOT (command target $TARGET_DIR, session directory ${SESSION_DIR:-unknown})." >&2
-    else
-      echo "fallow-gate: auditing $AUDIT_ROOT (session directory $SESSION_DIR)." >&2
-    fi
+    echo "fallow-gate: auditing $AUDIT_ROOT (command target $START_DIR, session directory ${SESSION_DIR:-unknown})." >&2
   fi
   add_audit_root "$AUDIT_ROOT"
 done
+# A target that the parser could not resolve with certainty never replaces
+# the session tree: the session tree is audited too.
+if [ "$GATE_UNSURE" -eq 1 ]; then
+  if [ -n "${FALLOW_GATE_DEBUG:-}" ]; then
+    echo "fallow-gate: the command directory is not certain, auditing the session tree too." >&2
+  fi
+  add_session_root
+fi
 
 run_audit() {
   # A real installed Git hook keeps its caller's PATH and does not add
@@ -473,7 +1034,10 @@ run_audit() {
 }
 
 # Each audit runs in a subshell, so its `cd`, `exit` and cleanup trap stay
-# local to that audit root.
+# local to that audit root. Each root gets the same block rule as a single
+# audit: exit 2 blocks. Any other failure of one root does not stop the
+# audits of the other roots, and the gate exits with it at the end.
+FINAL_STATUS=0
 for AUDIT_ROOT in "${AUDIT_ROOTS[@]}"; do
   set +e
   (
@@ -485,9 +1049,12 @@ for AUDIT_ROOT in "${AUDIT_ROOTS[@]}"; do
   )
   AUDIT_STATUS=$?
   set -e
-  if [ "$AUDIT_STATUS" -ne 0 ]; then
-    exit "$AUDIT_STATUS"
+  if [ "$AUDIT_STATUS" -eq 2 ]; then
+    exit 2
+  fi
+  if [ "$AUDIT_STATUS" -ne 0 ] && [ "$FINAL_STATUS" -eq 0 ]; then
+    FINAL_STATUS="$AUDIT_STATUS"
   fi
 done
 
-exit 0
+exit "$FINAL_STATUS"
