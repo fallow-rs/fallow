@@ -603,8 +603,8 @@ jobs:
   windows-rust:
     name: Windows path and subprocess handling
     needs: changes
-    # Also on push: Release Validation does not run the ignored drift cases
-    # on Windows, so the release commit needs this job.
+    # Also on push: the release commit needs a Windows result for the
+    # nextest selection and the platform Clippy pass.
     if: needs.changes.outputs.windows-rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: windows-latest
     # The suite plus the platform clippy pass takes around 14 minutes of real
@@ -618,10 +618,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Both Windows debug jobs build the dev and test profiles with the same
+      # toolchain, so they share one cache entry. This keeps one multi-GB
+      # Windows entry in the repository cache quota.
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-          cache-key: pr-windows-rust
+          shared-key: windows-debug
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-nextest
@@ -675,6 +678,9 @@ jobs:
   windows-drift:
     name: Windows drift harness
     needs: changes
+    # Release Validation runs the drift harness on Linux only, so this job is
+    # the only Windows run of the ignored drift cases. The job also runs on
+    # push so that the release commit has a Windows result.
     if: needs.changes.outputs.windows-rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: windows-latest
     timeout-minutes: 40
@@ -686,10 +692,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: pr-windows-drift
+          shared-key: windows-debug
       # The drift harness builds git fixtures, spawns the CLI and the MCP
-      # server, and compares root-relative paths. Release validation runs it on
-      # Windows, so a harness change must pass here before it merges.
+      # server, and compares root-relative paths. A harness change must pass
+      # here on Windows before it merges.
       - name: Build fallow-mcp for the drift harness
         run: cargo build -p fallow-mcp
       - name: Test drift harness on Windows

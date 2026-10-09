@@ -130,6 +130,30 @@ test("workflow run-number namespaces share the whole budget and keep separate wi
   }
 });
 
+test("a record sized for 90-credit Check slots needs half the Check slots at 180 credits", () => {
+  const drift = [
+    { workflow: "release-validation.yml", job: "drift-full", firstRunNumber: 200, slots: 1 },
+    { workflow: "release.yml", job: "drift-full", firstRunNumber: 300, slots: 1 },
+  ];
+  const check = { workflow: "ci.yml", job: "check", firstRunNumber: 100 };
+  // 2100 prior + 420 drift + 6 x 90 Check credits.
+  const sized = { ...allocation, budgetCredits: 3060 };
+  const old = { ...sized, allocations: [{ ...check, slots: 6 }, ...drift] };
+  const migrated = { ...sized, allocations: [...drift, { ...check, slots: 3 }] };
+  const releaseDrift = {
+    GITHUB_WORKFLOW_REF: "fallow-rs/fallow/.github/workflows/release.yml@refs/heads/main",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_RUN_NUMBER: "300",
+    HEAVY_JOB: "drift-full",
+  };
+  assert.equal(select(old), "ubuntu-26.04");
+  assert.equal(select(old, releaseDrift), "ubuntu-26.04", "the whole record is rejected");
+  assert.equal(select(migrated), "blacksmith-4vcpu-ubuntu-2404");
+  assert.equal(select(migrated, { GITHUB_RUN_NUMBER: "102" }), "blacksmith-4vcpu-ubuntu-2404");
+  assert.equal(select(migrated, { GITHUB_RUN_NUMBER: "103" }), "ubuntu-26.04");
+  assert.equal(select(migrated, releaseDrift), "blacksmith-4vcpu-ubuntu-2404");
+});
+
 test("strict shared schema rejects unsafe, partial and extra fields", () => {
   assert.equal(select(), "blacksmith-4vcpu-ubuntu-2404");
   for (const record of [

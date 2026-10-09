@@ -435,6 +435,12 @@ same step. Otherwise the selector rejects the complete record, and every heavy
 job falls back to GitHub-hosted runners, including the release `drift-full`
 jobs.
 
+For the change from 90 to 180 credits per Check slot, halve the `slots` of each
+`ci.yml/check` window. The reservation in credits stays the same. Put the
+`drift-full` windows first in `allocations`, because the selector reserves
+credits in array order. The selector before this change also accepts the
+migrated record, so set the variable before the merge.
+
 The only supported pairs are `ci.yml/check`,
 `release-validation.yml/drift-full` and `release.yml/drift-full`. Reusable
 validation uses its caller's workflow identity and run number, so direct and
