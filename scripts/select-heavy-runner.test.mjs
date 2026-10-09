@@ -5,7 +5,7 @@ import { selectHeavyRunner } from "./select-heavy-runner.mjs";
 const now = new Date("2026-09-30T12:00:00Z");
 const allocation = {
   month: "2026-09",
-  budgetCredits: 2250,
+  budgetCredits: 2280,
   priorReservedCredits: 2100,
   allocations: [{ workflow: "ci.yml", job: "check", firstRunNumber: 100, slots: 1 }],
 };
@@ -39,8 +39,8 @@ test("Check admits only reserved runs after accounting for the complete Miri win
   assert.equal(select(allocation, { GITHUB_RUN_NUMBER: "99" }), "ubuntu-26.04");
   assert.equal(select(allocation, { GITHUB_RUN_NUMBER: "101" }), "ubuntu-26.04");
   assert.equal(select({ ...allocation, priorReservedCredits: 2099 }), "ubuntu-26.04");
-  assert.equal(select({ ...allocation, budgetCredits: 2249 }), "ubuntu-26.04");
-  assert.equal(select({ ...allocation, budgetCredits: 2250 }), "blacksmith-4vcpu-ubuntu-2404");
+  assert.equal(select({ ...allocation, budgetCredits: 2279 }), "ubuntu-26.04");
+  assert.equal(select({ ...allocation, budgetCredits: 2280 }), "blacksmith-4vcpu-ubuntu-2404");
 });
 
 test("every window is validated before any admission, including nonmatching windows", () => {
@@ -95,7 +95,7 @@ test("workflow run-number namespaces share the whole budget and keep separate wi
   const record = {
     ...allocation,
     priorReservedCredits: 0,
-    budgetCredits: 570,
+    budgetCredits: 600,
     allocations: [
       { workflow: "ci.yml", job: "check", firstRunNumber: 100, slots: 1 },
       { workflow: "release-validation.yml", job: "drift-full", firstRunNumber: 200, slots: 1 },
@@ -155,7 +155,7 @@ test("strict shared schema rejects unsafe, partial and extra fields", () => {
       { priorReservedCredits: -1 },
       { priorReservedCredits: "2100" },
       { priorReservedCredits: 2100.5 },
-      { priorReservedCredits: 2251 },
+      { priorReservedCredits: 2281 },
       { priorReservedCredits: Number.MAX_SAFE_INTEGER + 1 },
       { extra: true },
     ].map((override) => ({ ...allocation, ...override })),
@@ -167,7 +167,7 @@ test("strict shared schema rejects unsafe, partial and extra fields", () => {
       "ubuntu-26.04",
     );
   }
-  const largest = { ...allocation, budgetCredits: 8000, priorReservedCredits: 7850 };
+  const largest = { ...allocation, budgetCredits: 8000, priorReservedCredits: 7820 };
   assert.equal(
     select(largest),
     "blacksmith-4vcpu-ubuntu-2404",
@@ -178,7 +178,7 @@ test("strict shared schema rejects unsafe, partial and extra fields", () => {
     allocations: [
       { ...allocation.allocations[0], firstRunNumber: Number.MAX_SAFE_INTEGER - 1, slots: 2 },
     ],
-    budgetCredits: 2400,
+    budgetCredits: 2460,
   };
   assert.equal(
     select(endpoint, { GITHUB_RUN_NUMBER: String(Number.MAX_SAFE_INTEGER) }),
@@ -220,7 +220,7 @@ test("Miri accounting validates full reservations, legacy records and UTC expiry
   for (const raw of ["{", "null", "[]", "{}", JSON.stringify({ ...legacy, slots: 17 })]) {
     assert.equal(select(allocation, { BLACKSMITH_MIRI_ALLOCATION: raw }), "ubuntu-26.04", raw);
   }
-  const noPrior = { ...allocation, priorReservedCredits: 0, budgetCredits: 150 };
+  const noPrior = { ...allocation, priorReservedCredits: 0, budgetCredits: 180 };
   for (const raw of ["", undefined, JSON.stringify({ ...miri, month: "2026-08" })]) {
     assert.equal(
       select(noPrior, { BLACKSMITH_MIRI_ALLOCATION: raw }),
@@ -325,12 +325,12 @@ test("the executable publishes real routing output only after a successful summa
       ...allocation,
       month: new Date().toISOString().slice(0, 7),
       priorReservedCredits: 0,
-      budgetCredits: 150,
+      budgetCredits: 180,
     });
     const valid = run("valid", raw);
     assert.equal(valid.result.status, 0, valid.result.stderr);
     assert.equal(valid.output, "runner=blacksmith-4vcpu-ubuntu-2404\n");
-    assert.match(readFileSync(valid.summary, "utf8"), /ci.yml\/check.*150 credits/);
+    assert.match(readFileSync(valid.summary, "utf8"), /ci.yml\/check.*180 credits/);
     const invalid = run("invalid", "{");
     assert.equal(invalid.result.status, 0, invalid.result.stderr);
     assert.equal(invalid.output, "runner=ubuntu-26.04\n");

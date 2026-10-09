@@ -1924,11 +1924,12 @@ test("heavy admission reserves the actual job timeouts including overhead", asyn
     // A CI Check slot covers every job that runs on the runner it selects:
     // Check and Lint and contracts.
     const slotJobs = job === "check" ? ["check", "check-lint"] : [job];
-    const minutes = slotJobs
+    // Each job has its own runner start, checkout and cache overhead.
+    const credits = slotJobs
       .map((name) =>
         Number(indentedBlock(source, name, 2).match(/^    timeout-minutes: (\d+)$/m)[1]),
       )
-      .reduce((sum, value) => sum + value, 0);
+      .reduce((sum, minutes) => sum + minutes * 2 + 30, 0);
     const environment = {
       GITHUB_REPOSITORY: "fallow-rs/fallow",
       GITHUB_EVENT_NAME: event,
@@ -1941,7 +1942,7 @@ test("heavy admission reserves the actual job timeouts including overhead", asyn
     };
     const reservation = {
       month: "2026-09",
-      budgetCredits: minutes * 2 + 30,
+      budgetCredits: credits,
       priorReservedCredits: 0,
       allocations: [{ workflow, job, firstRunNumber: 1, slots: 1 }],
     };
@@ -2053,11 +2054,22 @@ test("Miri runs the three crates in parallel with the same test selection", () =
   );
   assert.match(extract, /export MIRIFLAGS=-Zmiri-tree-borrows/);
   assert.equal(miri.match(/MIRIFLAGS/g)?.length, 1, "types and graph stay on Stacked Borrows");
-  // Each crate runs in the background, and the step fails when one crate fails.
-  assert.match(miri, /run_crate "\$crate" > "\$logs\/\$crate\.log" 2>&1 &/);
-  assert.match(
-    miri,
-    /if wait "\$\{pids\[\$index\]\}"; then result=passed; else result=failed; failed=1; fi/,
+  // Each crate runs in the background and streams its output live, so a run
+  // that hits the job timeout still shows the hung test. The step fails when
+  // one crate fails or does not write its exit status.
+  assert.ok(
+    miri.includes(
+      '{ run_crate "$crate" 2>&1; echo "$?" > "$logs/$crate.status"; } \\\n' +
+        '              | tee "$logs/$crate.log" | sed -u "s/^/[$crate] /" &',
+    ),
+    "Miri must stream each crate live and record its exit status",
+  );
+  assert.ok(miri.includes('for pid in "${pids[@]}"; do wait "$pid" || true; done'));
+  assert.ok(
+    miri.includes(
+      'if [ "$(cat "$logs/$crate.status" 2>/dev/null)" = 0 ]; then result=passed; else result=failed; failed=1; fi',
+    ),
+    "Miri must fail a crate that has no zero exit status",
   );
   assert.match(miri, /exit "\$failed"/);
 });

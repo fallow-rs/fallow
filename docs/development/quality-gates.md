@@ -420,14 +420,20 @@ repository variable `BLACKSMITH_HEAVY_ALLOCATION` only after confirming the
 current monthly allowance, usage and organization headroom:
 
 ```json
-{"month":"2026-09","budgetCredits":2250,"priorReservedCredits":2100,"allocations":[{"workflow":"ci.yml","job":"check","firstRunNumber":12345,"slots":1}]}
+{"month":"2026-09","budgetCredits":2280,"priorReservedCredits":2100,"allocations":[{"workflow":"ci.yml","job":"check","firstRunNumber":12345,"slots":1}]}
 ```
 
 This example activates nothing. Each 4-vCPU Ubuntu 24.04 Check slot reserves
-150 credits, because one slot gives the runner to two parallel 30-minute jobs:
-`Check` and `Lint and contracts`. Each full drift slot reserves 210. Costs use
-the job timeouts (2 x 30 and 90 minutes) at 2 credits per minute plus 30 for
-overhead.
+180 credits, because one slot gives the runner to two parallel 30-minute jobs:
+`Check` and `Lint and contracts`. Each full drift slot reserves 210. Each job
+costs its timeout at 2 credits per minute plus 30 credits for its own runner
+start, checkout and cache overhead. A Check slot is 2 x (30 x 2 + 30) = 180,
+and a drift slot is 90 x 2 + 30 = 210.
+
+When a change raises a slot cost, update `BLACKSMITH_HEAVY_ALLOCATION` in the
+same step. Otherwise the selector rejects the complete record, and every heavy
+job falls back to GitHub-hosted runners, including the release `drift-full`
+jobs.
 
 The only supported pairs are `ci.yml/check`,
 `release-validation.yml/drift-full` and `release.yml/drift-full`. Reusable

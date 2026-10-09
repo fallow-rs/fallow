@@ -1533,14 +1533,19 @@ jobs:
           mkdir -p "$logs"
           crates=(fallow-types fallow-graph fallow-extract)
           pids=()
+          # Stream each crate live with a prefix, so a run that hits the job
+          # timeout still shows which test hung. The exit status goes to a file,
+          # because the status of the pipeline is the status of `sed`.
           for crate in "${crates[@]}"; do
-            run_crate "$crate" > "$logs/$crate.log" 2>&1 &
+            { run_crate "$crate" 2>&1; echo "$?" > "$logs/$crate.status"; } \
+              | tee "$logs/$crate.log" | sed -u "s/^/[$crate] /" &
             pids+=("$!")
           done
+          for pid in "${pids[@]}"; do wait "$pid" || true; done
           failed=0
-          for index in "${!crates[@]}"; do
-            crate="${crates[$index]}"
-            if wait "${pids[$index]}"; then result=passed; else result=failed; failed=1; fi
+          # Replay each complete log in one group after all crates stop.
+          for crate in "${crates[@]}"; do
+            if [ "$(cat "$logs/$crate.status" 2>/dev/null)" = 0 ]; then result=passed; else result=failed; failed=1; fi
             echo "::group::$crate ($result)"
             cat "$logs/$crate.log"
             echo "::endgroup::"
