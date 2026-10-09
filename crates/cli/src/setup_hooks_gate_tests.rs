@@ -1166,14 +1166,15 @@ fn git_rev_parse(dir: &Path, flag: &str) -> String {
 }
 
 /// Whether `dir` is another work tree than `session` for a write: another
-/// top level, and for a push also another common git directory, because
-/// linked worktrees share refs.
+/// git directory (each linked worktree has its own, a gitfile into the
+/// session repository does not), and for a push also another common git
+/// directory, because linked worktrees share refs.
 fn other_tree_for_write(dir: &Path, session: &Path, push: bool) -> bool {
-    let other_top =
-        git_rev_parse(dir, "--show-toplevel") != git_rev_parse(session, "--show-toplevel");
+    let other_git_dir =
+        git_rev_parse(dir, "--absolute-git-dir") != git_rev_parse(session, "--absolute-git-dir");
     let other_common =
         git_rev_parse(dir, "--git-common-dir") != git_rev_parse(session, "--git-common-dir");
-    other_top && (!push || other_common)
+    other_git_dir && (!push || other_common)
 }
 
 /// Runs main's gate and the new gate at `gate` over the same commands. The
