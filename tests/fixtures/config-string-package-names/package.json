@@ -1,0 +1,19 @@
+{
+  "name": "config-string-package-names",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "@nestjs/core": "11.0.0",
+    "next": "15.0.0"
+  },
+  "devDependencies": {
+    "vite": "6.0.0",
+    "@vitejs/plugin-react-swc": "3.0.0",
+    "@wyw-in-js/vite": "0.7.0",
+    "@lingui/swc-plugin": "5.0.0",
+    "@acme/next-swc-plugin": "1.0.0",
+    "@babel/preset-typescript": "7.0.0",
+    "@nestjs/schematics": "11.0.0",
+    "unused-dev-tool": "1.0.0"
+  }
+}

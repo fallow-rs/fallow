@@ -934,13 +934,53 @@ pub(crate) fn extract_config_plugin_option_string_from_paths(
     })
 }
 
-/// Extract Babel plugin and preset package names configured through
-/// `@vitejs/plugin-react` options in a Vite-style `plugins` array.
+/// A Vite plugin package whose options object names other packages as strings.
+struct VitePluginOptionReader {
+    package: &'static str,
+    read: fn(&ObjectExpression<'_>, &mut Vec<String>),
+}
+
+/// The Vite plugins whose options name packages that the plugin loads at
+/// build time. The list is closed so that an unknown plugin option never
+/// credits a package.
+const VITE_PLUGIN_OPTION_READERS: &[VitePluginOptionReader] = &[
+    VitePluginOptionReader {
+        package: "@vitejs/plugin-react",
+        read: collect_vite_react_babel_dependencies,
+    },
+    VitePluginOptionReader {
+        package: "@vitejs/plugin-react-swc",
+        read: collect_vite_react_swc_dependencies,
+    },
+    VitePluginOptionReader {
+        package: "@wyw-in-js/vite",
+        read: collect_wyw_babel_options_dependencies,
+    },
+];
+
+/// How many wrapper calls, such as `profile(wyw({ ... }))`, the reader looks
+/// through to find a known plugin call in a `plugins` array entry.
+const MAX_VITE_PLUGIN_WRAPPER_DEPTH: usize = 3;
+
+/// Extract package names that known Vite plugins read from their options in a
+/// Vite-style `plugins` array: Babel plugins and presets of
+/// `@vitejs/plugin-react`, SWC plugins of `@vitejs/plugin-react-swc`, and
+/// `babelOptions` of `@wyw-in-js/vite`.
 #[must_use]
-pub(crate) fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -> Vec<String> {
+pub(crate) fn extract_vite_plugin_option_dependencies(source: &str, path: &Path) -> Vec<String> {
     extract_from_source(source, path, |program| {
-        let react_plugin_imports = collect_vite_react_plugin_imports(program);
-        if react_plugin_imports.is_empty() {
+        let bindings: Vec<(PluginImportBindings, &VitePluginOptionReader)> =
+            VITE_PLUGIN_OPTION_READERS
+                .iter()
+                .map(|reader| {
+                    (
+                        collect_plugin_import_bindings(program, reader.package),
+                        reader,
+                    )
+                })
+                .filter(|(imports, _)| !imports.is_empty())
+                .collect();
+        if bindings.is_empty() {
             return None;
         }
 
@@ -952,23 +992,67 @@ pub(crate) fn extract_vite_react_babel_dependencies(source: &str, path: &Path) -
 
         let mut deps = Vec::new();
         for element in &plugin_array.elements {
-            let Some(Expression::CallExpression(call)) = element.as_expression() else {
-                continue;
-            };
-            if !is_vite_react_plugin_call(call, &react_plugin_imports) {
-                continue;
+            if let Some(Expression::CallExpression(call)) = element.as_expression() {
+                read_vite_plugin_call(call, &bindings, 0, &mut deps);
             }
-            let Some(Expression::ObjectExpression(options)) =
-                call.arguments.first().and_then(Argument::as_expression)
-            else {
-                continue;
-            };
-            collect_vite_react_babel_dependencies(options, &mut deps);
         }
 
         (!deps.is_empty()).then_some(deps)
     })
     .unwrap_or_default()
+}
+
+fn read_vite_plugin_call(
+    call: &CallExpression<'_>,
+    bindings: &[(PluginImportBindings, &VitePluginOptionReader)],
+    depth: usize,
+    deps: &mut Vec<String>,
+) {
+    if let Some((_, reader)) = bindings
+        .iter()
+        .find(|(imports, _)| is_plugin_binding_call(call, imports))
+    {
+        if let Some(Expression::ObjectExpression(options)) =
+            call.arguments.first().and_then(Argument::as_expression)
+        {
+            (reader.read)(options, deps);
+        }
+        return;
+    }
+    if depth >= MAX_VITE_PLUGIN_WRAPPER_DEPTH {
+        return;
+    }
+    for argument in &call.arguments {
+        if let Some(Expression::CallExpression(inner)) = argument.as_expression() {
+            read_vite_plugin_call(inner, bindings, depth + 1, deps);
+        }
+    }
+}
+
+/// The package name that a config string names, such as an SWC plugin in a
+/// `[name, options]` tuple. A relative or absolute path, a protocol value, or
+/// an invalid specifier names no package. A subpath maps to its package.
+#[must_use]
+pub(crate) fn config_string_package_name(raw: &str) -> Option<String> {
+    let specifier = raw.trim();
+    is_package_specifier(specifier).then(|| crate::resolve::extract_package_name(specifier))
+}
+
+/// Extract the package names of SWC plugin tuples, such as
+/// `swcPlugins: [["@lingui/swc-plugin", {}]]`, at a property path.
+#[must_use]
+pub(crate) fn extract_config_swc_plugin_dependencies(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+) -> Vec<String> {
+    extract_config_array_tuple_heads(source, path, array_path)
+        .iter()
+        .filter_map(|raw| config_string_package_name(raw))
+        .fold(Vec::new(), |mut deps, dep| {
+            push_unique_string(&mut deps, dep);
+            deps
+        })
 }
 
 /// How a config reader reads a path value with a leading `/`.
@@ -1137,26 +1221,28 @@ pub(crate) fn extract_from_source<T>(
     extractor(&parsed.program)
 }
 
+/// The local names that `import` declarations bind to the default export of
+/// one plugin package.
 #[derive(Default)]
-struct ViteReactPluginImports {
+struct PluginImportBindings {
     callables: Vec<String>,
     namespaces: Vec<String>,
 }
 
-impl ViteReactPluginImports {
+impl PluginImportBindings {
     fn is_empty(&self) -> bool {
         self.callables.is_empty() && self.namespaces.is_empty()
     }
 }
 
-fn collect_vite_react_plugin_imports(program: &Program<'_>) -> ViteReactPluginImports {
-    let mut imports = ViteReactPluginImports::default();
+fn collect_plugin_import_bindings(program: &Program<'_>, package: &str) -> PluginImportBindings {
+    let mut imports = PluginImportBindings::default();
 
     for stmt in &program.body {
         let Statement::ImportDeclaration(decl) = stmt else {
             continue;
         };
-        if decl.source.value != "@vitejs/plugin-react" {
+        if decl.source.value != package {
             continue;
         }
         let Some(specifiers) = &decl.specifiers else {
@@ -1183,7 +1269,7 @@ fn collect_vite_react_plugin_imports(program: &Program<'_>) -> ViteReactPluginIm
     imports
 }
 
-fn is_vite_react_plugin_call(call: &CallExpression<'_>, imports: &ViteReactPluginImports) -> bool {
+fn is_plugin_binding_call(call: &CallExpression<'_>, imports: &PluginImportBindings) -> bool {
     match &call.callee {
         Expression::Identifier(identifier) => imports
             .callables
@@ -1197,9 +1283,48 @@ fn is_vite_react_plugin_call(call: &CallExpression<'_>, imports: &ViteReactPlugi
 }
 
 fn collect_vite_react_babel_dependencies(options: &ObjectExpression<'_>, deps: &mut Vec<String>) {
-    let Some(babel) = property_object(options, "babel") else {
+    if let Some(babel) = property_object(options, "babel") {
+        collect_babel_plugin_and_preset_dependencies(babel, deps);
+    }
+}
+
+/// `@wyw-in-js/vite` passes `babelOptions` to Babel, which loads each named
+/// plugin and preset.
+fn collect_wyw_babel_options_dependencies(options: &ObjectExpression<'_>, deps: &mut Vec<String>) {
+    if let Some(babel) = property_object(options, "babelOptions") {
+        collect_babel_plugin_and_preset_dependencies(babel, deps);
+    }
+}
+
+/// `@vitejs/plugin-react-swc` passes `plugins` to SWC, which loads the package
+/// at the head of each `[name, options]` tuple.
+fn collect_vite_react_swc_dependencies(options: &ObjectExpression<'_>, deps: &mut Vec<String>) {
+    let Some(prop) = find_property(options, "plugins") else {
         return;
     };
+    let Expression::ArrayExpression(plugins) = &prop.value else {
+        return;
+    };
+    for entry in &plugins.elements {
+        let Some(Expression::ArrayExpression(tuple)) = entry.as_expression() else {
+            continue;
+        };
+        if let Some(dep) = tuple
+            .elements
+            .first()
+            .and_then(ArrayExpressionElement::as_expression)
+            .and_then(expression_to_string)
+            .and_then(|raw| config_string_package_name(&raw))
+        {
+            push_unique_string(deps, dep);
+        }
+    }
+}
+
+fn collect_babel_plugin_and_preset_dependencies(
+    babel: &ObjectExpression<'_>,
+    deps: &mut Vec<String>,
+) {
     for key in ["plugins", "presets"] {
         let Some(prop) = find_property(babel, key) else {
             continue;
@@ -3631,7 +3756,7 @@ mod tests {
             });
         "#;
 
-        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+        let deps = extract_vite_plugin_option_dependencies(source, &ts_path());
 
         assert_eq!(
             deps,
@@ -3659,7 +3784,7 @@ mod tests {
             };
         "#;
 
-        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+        let deps = extract_vite_plugin_option_dependencies(source, &ts_path());
 
         assert_eq!(deps, vec!["@scope/pkg".to_string()]);
     }
@@ -3680,7 +3805,7 @@ mod tests {
             };
         "#;
 
-        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+        let deps = extract_vite_plugin_option_dependencies(source, &ts_path());
 
         assert!(deps.is_empty());
     }
@@ -3701,7 +3826,7 @@ mod tests {
             };
         "#;
 
-        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+        let deps = extract_vite_plugin_option_dependencies(source, &ts_path());
 
         assert!(deps.is_empty());
     }
@@ -5760,7 +5885,7 @@ mod tests {
                 ],
             });
         "#;
-        let deps = extract_vite_react_babel_dependencies(source, &ts_path());
+        let deps = extract_vite_plugin_option_dependencies(source, &ts_path());
         assert_eq!(deps, vec!["babel-plugin-ns".to_string()]);
     }
 

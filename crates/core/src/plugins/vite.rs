@@ -178,7 +178,7 @@ define_plugin!(
             result.referenced_dependencies.push(dep);
         }
         result.referenced_dependencies.extend(
-            config_parser::extract_vite_react_babel_dependencies(source, config_path),
+            config_parser::extract_vite_plugin_option_dependencies(source, config_path),
         );
 
         result.referenced_dependencies.extend(super::react_compiler::extract_dependencies(
@@ -336,6 +336,106 @@ mod tests {
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"react".to_string()));
         assert!(deps.contains(&"@my/heavy-dep".to_string()));
+    }
+
+    fn resolve_vite_deps(source: &str) -> Vec<String> {
+        VitePlugin
+            .resolve_config(Path::new("vite.config.ts"), source, Path::new("/project"))
+            .referenced_dependencies
+    }
+
+    #[test]
+    fn resolve_config_credits_react_swc_plugin_tuple_heads() {
+        let deps = resolve_vite_deps(
+            r#"
+            import { defineConfig } from "vite";
+            import react from "@vitejs/plugin-react-swc";
+
+            export default defineConfig(({ mode }) => {
+                return {
+                    plugins: [
+                        react({
+                            plugins: [
+                                ["@lingui/swc-plugin", {}],
+                                ["@acme/swc-plugin/wasm", {}],
+                                ["./local-plugin.wasm", {}],
+                                "plain-string-entry",
+                            ],
+                        }),
+                    ],
+                };
+            });
+        "#,
+        );
+        assert!(deps.contains(&"@lingui/swc-plugin".to_string()), "{deps:?}");
+        assert!(deps.contains(&"@acme/swc-plugin".to_string()), "{deps:?}");
+        assert!(
+            !deps.iter().any(|dep| dep.contains("local-plugin")),
+            "a relative SWC plugin path is not a package: {deps:?}"
+        );
+        assert!(
+            !deps.contains(&"plain-string-entry".to_string()),
+            "SWC reads only [name, options] tuples: {deps:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_config_credits_wyw_babel_options_inside_a_wrapper_call() {
+        let deps = resolve_vite_deps(
+            r#"
+            import { defineConfig } from "vite";
+            import wyw from "@wyw-in-js/vite";
+            import { wrap } from "./wrap";
+
+            export default defineConfig({
+                plugins: [
+                    wrap(
+                        wyw({
+                            babelOptions: {
+                                presets: ["@babel/preset-typescript"],
+                                plugins: ["@babel/plugin-transform-export-namespace-from"],
+                            },
+                        }),
+                    ),
+                ],
+            });
+        "#,
+        );
+        assert!(
+            deps.contains(&"@babel/preset-typescript".to_string()),
+            "{deps:?}"
+        );
+        assert!(
+            deps.contains(&"@babel/plugin-transform-export-namespace-from".to_string()),
+            "{deps:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_config_ignores_plugin_options_of_an_unknown_plugin() {
+        let deps = resolve_vite_deps(
+            r#"
+            import { defineConfig } from "vite";
+            import other from "vite-plugin-other";
+
+            export default defineConfig({
+                plugins: [
+                    other({
+                        plugins: [["swc-plugin-not-read", {}]],
+                        babelOptions: { presets: ["babel-preset-not-read"] },
+                    }),
+                ],
+            });
+        "#,
+        );
+        assert!(
+            !deps.contains(&"swc-plugin-not-read".to_string()),
+            "{deps:?}"
+        );
+        assert!(
+            !deps.contains(&"babel-preset-not-read".to_string()),
+            "{deps:?}"
+        );
     }
 
     #[test]
