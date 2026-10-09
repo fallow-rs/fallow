@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A class in a CSS Modules global scope is no longer an unused export.**
+  CSS Modules do not put a global class in the class map of the module, so
+  you cannot import it. Fallow now skips the classes in `:global(.a .b)`,
+  the classes after a bare `:global` up to `:local` or the next selector,
+  and the classes of rules nested in a global rule. A class in `:local(.a)`
+  stays an export. Also, a rule with a bare `:global` or `:local` no longer
+  hides its local classes in `.module.css` files. This applies to
+  `.module.css`, `.module.scss`, `.module.sass` and `.module.less` files.
+  The parse cache version changes, so the first run after the upgrade parses
+  all files again. Thanks to @peterssonjonas for the report. (#3311)
 - The copy-paste commands that `fallow agent install` and
   `fallow baselines prune` print now quote each path for the shell of the
   platform. A path with `;`, `|`, `&` or similar characters stays one

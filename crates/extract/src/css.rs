@@ -774,19 +774,24 @@ fn mask_with_whitespace(src: &str, re: &regex::Regex) -> String {
 /// `:any()` / `::slotted()` / `:host()` / `:nth-child(... of ...)` are
 /// collected too, matching the regex scanner's "every `.class` token" behavior.
 fn lightningcss_class_set(source: &str) -> Option<FxHashSet<String>> {
+    // lightningcss rejects the bare `:global` / `:local` forms, and error
+    // recovery then drops the full rule with its local classes. Blank the bare
+    // keywords so the rule parses. The scope scan in
+    // `mask_css_module_global_scopes` removes the global classes later.
+    let source = blank_bare_css_module_scope_keywords(source);
     let options = ParserOptions {
         // Recover from individual malformed rules so a single bad rule does not
         // discard class names from the rest of the file.
         error_recovery: true,
         // These files are CSS Modules, so parse standard CSS syntax in CSS Modules
         // mode. That makes the `:local()` / `:global()` pseudo-classes parse as
-        // real selectors rather than erroring, so classes wrapped in them are
-        // collected (matching the regex scanner). Renaming is a print-time
+        // real selectors rather than erroring. Classes in `:local()` are
+        // collected, classes in `:global()` are not. Renaming is a print-time
         // concern, so the AST class names stay the original author-written names.
         css_modules: Some(lightningcss::css_modules::Config::default()),
         ..ParserOptions::default()
     };
-    let stylesheet = StyleSheet::parse(source, options).ok()?;
+    let stylesheet = StyleSheet::parse(&source, options).ok()?;
     let mut classes = FxHashSet::default();
     collect_classes_from_rules(&stylesheet.rules.0, &mut classes);
     Some(classes)
@@ -856,10 +861,11 @@ fn collect_classes_from_selector(selector: &Selector<'_>, classes: &mut FxHashSe
                     collect_classes_from_selector(nested, classes);
                 }
             }
-            // CSS Modules `:local(.foo)` / `:global(.foo)` wrap a real selector.
-            Component::NonTSPseudoClass(
-                PseudoClass::Local { selector } | PseudoClass::Global { selector },
-            ) => collect_classes_from_selector(selector, classes),
+            // CSS Modules `:local(.foo)` wraps a real local selector. A
+            // `:global(.foo)` class is not in the class map, so it is skipped.
+            Component::NonTSPseudoClass(PseudoClass::Local { selector }) => {
+                collect_classes_from_selector(selector, classes);
+            }
             _ => {}
         }
     }
@@ -918,7 +924,209 @@ fn mask_css_module_class_candidates(comment_masked: &str, has_class_filter: bool
     if !has_class_filter {
         masked = mask_with_whitespace(&masked, &CSS_AT_RULE_PRELUDE_RE);
     }
-    masked
+    mask_css_module_global_scopes(masked)
+}
+
+const GLOBAL_KEYWORD: &str = ":global";
+const LOCAL_KEYWORD: &str = ":local";
+
+/// A CSS Modules scope keyword (`:global` or `:local`) at a byte offset.
+#[derive(Clone, Copy)]
+struct ScopeKeyword {
+    is_global: bool,
+    len: usize,
+    /// The keyword opens a `(...)` argument, as in `:global(.foo)`.
+    has_argument: bool,
+}
+
+/// Return the CSS Modules scope keyword that starts at `bytes[i]`, if any.
+/// A longer identifier such as `:global-ish` is not a scope keyword.
+fn scope_keyword_at(bytes: &[u8], i: usize) -> Option<ScopeKeyword> {
+    let rest = &bytes[i..];
+    let (is_global, len) = if rest.starts_with(GLOBAL_KEYWORD.as_bytes()) {
+        (true, GLOBAL_KEYWORD.len())
+    } else if rest.starts_with(LOCAL_KEYWORD.as_bytes()) {
+        (false, LOCAL_KEYWORD.len())
+    } else {
+        return None;
+    };
+    let next = rest.get(len).copied();
+    if next.is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return None;
+    }
+    Some(ScopeKeyword {
+        is_global,
+        len,
+        has_argument: next == Some(b'('),
+    })
+}
+
+/// Replace each bare `:global` / `:local` keyword (without a `(...)` argument)
+/// with spaces of equal length, so lightningcss can parse the rule.
+fn blank_bare_css_module_scope_keywords(source: &str) -> std::borrow::Cow<'_, str> {
+    if !source.contains(GLOBAL_KEYWORD) && !source.contains(LOCAL_KEYWORD) {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    let bytes = source.as_bytes();
+    let mut out = source.to_string();
+    let mut i = 0;
+    while i < bytes.len() {
+        match scope_keyword_at(bytes, i) {
+            Some(keyword) => {
+                if !keyword.has_argument {
+                    out.replace_range(i..i + keyword.len, &" ".repeat(keyword.len));
+                }
+                i += keyword.len;
+            }
+            None => i += 1,
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// The scope of one open parenthesis in a selector.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParenScope {
+    Global,
+    Local,
+    Other,
+}
+
+/// Selector scope state for [`mask_css_module_global_scopes`].
+struct GlobalScopeScan {
+    /// The scope that each open `{` block gives to its nested rules.
+    block_global: Vec<bool>,
+    /// The scope of the current selector, changed by a bare `:global`/`:local`.
+    selector_global: bool,
+    parens: Vec<ParenScope>,
+}
+
+impl GlobalScopeScan {
+    fn inherited(&self) -> bool {
+        self.block_global.last().copied().unwrap_or(false)
+    }
+
+    /// End the current selector or declaration. The next one starts in the
+    /// scope of the enclosing block.
+    fn reset_selector(&mut self) {
+        self.selector_global = self.inherited();
+        self.parens.clear();
+    }
+
+    /// A `:global(...)` or `:local(...)` argument sets the scope for its
+    /// content. Otherwise the selector scope applies.
+    fn is_global(&self) -> bool {
+        self.parens
+            .iter()
+            .rev()
+            .find(|scope| **scope != ParenScope::Other)
+            .map_or(self.selector_global, |scope| *scope == ParenScope::Global)
+    }
+}
+
+/// Blank the `.` of each class token in a CSS Modules global scope, so the
+/// class scanner does not report it. CSS Modules do not put such a class in
+/// the class map of the module (issue #3311).
+///
+/// The input must have comments and strings masked already. These forms make
+/// a global scope:
+/// - `:global(.a .b)`: the classes in the argument are global.
+/// - a bare `:global`: the rest of the selector is global, until a bare
+///   `:local`, a `:local(...)` argument, or the next selector in the list.
+/// - a rule whose selector ends in a global scope: its nested rules start in
+///   the global scope, as Sass and `postcss-nested` compile them.
+///
+/// A source without a block `{` (a `#{` interpolation does not count) uses the
+/// indented Sass syntax, so a line end also ends the selector there.
+fn mask_css_module_global_scopes(masked: String) -> String {
+    if !masked.contains(GLOBAL_KEYWORD) {
+        return masked;
+    }
+    let indented = !masked
+        .match_indices('{')
+        .any(|(i, _)| i == 0 || masked.as_bytes()[i - 1] != b'#');
+    let bytes = masked.as_bytes();
+    let mut blank = Vec::new();
+    let mut scan = GlobalScopeScan {
+        block_global: Vec::new(),
+        selector_global: false,
+        parens: Vec::new(),
+    };
+    let mut i = 0;
+    while i < bytes.len() {
+        if let Some(keyword) = scope_keyword_at(bytes, i) {
+            if keyword.has_argument {
+                scan.parens.push(if keyword.is_global {
+                    ParenScope::Global
+                } else {
+                    ParenScope::Local
+                });
+                i += keyword.len + 1;
+                continue;
+            }
+            if scan.parens.is_empty() {
+                scan.selector_global = keyword.is_global;
+            }
+            i += keyword.len;
+            continue;
+        }
+        match bytes[i] {
+            b'#' if bytes.get(i + 1) == Some(&b'{') => {
+                i = scss_interpolation_end(bytes, i + 2);
+                continue;
+            }
+            b'(' => scan.parens.push(ParenScope::Other),
+            b')' => {
+                scan.parens.pop();
+            }
+            b',' if scan.parens.is_empty() => scan.selector_global = scan.inherited(),
+            b'{' => {
+                scan.block_global.push(scan.selector_global);
+                scan.reset_selector();
+            }
+            b'}' => {
+                scan.block_global.pop();
+                scan.reset_selector();
+            }
+            b';' => scan.reset_selector(),
+            b'\n' if indented => scan.reset_selector(),
+            b'.' if scan.is_global()
+                && bytes
+                    .get(i + 1)
+                    .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_') =>
+            {
+                blank.push(i);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let mut out = masked;
+    for offset in blank {
+        out.replace_range(offset..=offset, " ");
+    }
+    out
+}
+
+/// Return the offset after the `}` that closes a SCSS `#{...}` interpolation
+/// whose content starts at `start`.
+fn scss_interpolation_end(bytes: &[u8], start: usize) -> usize {
+    let mut depth = 1usize;
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bytes.len()
 }
 
 fn push_css_class_export(
@@ -1157,12 +1365,131 @@ mod tests {
         assert_eq!(names, vec!["myClass"]);
     }
 
+    fn scss_export_names(source: &str) -> Vec<String> {
+        extract_css_module_exports(source, true)
+            .into_iter()
+            .filter_map(|e| match e.name {
+                ExportName::Named(n) => Some(n),
+                ExportName::Default => None,
+            })
+            .collect()
+    }
+
     #[test]
-    fn extracts_class_inside_global_pseudo() {
-        // CSS Modules `:global(.foo)` must surface `foo`: the parser understands
-        // the wrapped selector, which the regex scanner could not on its own.
+    fn skips_class_inside_global_pseudo() {
+        // CSS Modules do not put a `:global(.foo)` class in the class map.
         let names = export_names(":global(.globalClass) { color: red; }");
-        assert_eq!(names, vec!["globalClass"]);
+        assert!(names.is_empty(), "got {names:?}");
+    }
+
+    #[test]
+    fn keeps_local_class_next_to_global_pseudo() {
+        // Issue #3311.
+        let names = export_names(".wrapper :global(.selector) { color: red; }");
+        assert_eq!(names, vec!["wrapper"]);
+    }
+
+    #[test]
+    fn skips_every_class_inside_global_pseudo_with_descendants() {
+        let names = export_names(".panel :global(.outer .inner.mod) { color: red; }");
+        assert_eq!(names, vec!["panel"]);
+    }
+
+    #[test]
+    fn skips_classes_after_bare_global() {
+        let names = export_names(".lead :global .first .second { color: red; }");
+        assert_eq!(names, vec!["lead"]);
+    }
+
+    #[test]
+    fn bare_global_stops_at_local() {
+        let names = export_names(":global .g1 :local(.l1) .g2 :local .l2 .l3, .l4 { color: red; }");
+        assert_eq!(names, vec!["l1", "l2", "l3", "l4"]);
+    }
+
+    #[test]
+    fn bare_global_stops_at_comma() {
+        let names = export_names(":global .g1, .l1 :is(.l2, .l3) { color: red; }");
+        assert_eq!(names, vec!["l1", "l2", "l3"]);
+    }
+
+    #[test]
+    fn global_class_inside_media_query_is_skipped() {
+        let names = export_names("@media (min-width: 1px) { .media :global(.g) { color: red; } }");
+        assert_eq!(names, vec!["media"]);
+    }
+
+    #[test]
+    fn class_both_local_and_global_stays_exported_at_local_span() {
+        let source = ":global(.both) { color: red; }\n.both { color: blue; }";
+        let exports = extract_css_module_exports(source, false);
+        assert_eq!(exports.len(), 1);
+        let span = exports[0].span;
+        assert_eq!(&source[span.start as usize..span.end as usize], "both");
+        assert!(
+            span.start > 20,
+            "span must point at the local rule: {span:?}"
+        );
+    }
+
+    #[test]
+    fn composes_keeps_local_classes() {
+        let names = export_names(
+            ".base { color: red; }\n.button { composes: base; composes: g from global; }",
+        );
+        assert_eq!(names, vec!["base", "button"]);
+    }
+
+    #[test]
+    fn global_in_strings_and_comments_has_no_effect() {
+        let names =
+            export_names("/* :global */ .a { content: \":global\"; }\n.b :global(.c) { }\n.d { }");
+        assert_eq!(names, vec!["a", "b", "d"]);
+    }
+
+    #[test]
+    fn scss_skips_global_pseudo_and_global_block() {
+        let names = scss_export_names(
+            ".card {\n  :global(.g1) { color: red; }\n  .title { color: blue; }\n}\n\
+             :global {\n  .g2 { color: red; }\n  .g3 { :local(.l1) { color: red; } }\n}\n\
+             .after { color: blue; }",
+        );
+        assert_eq!(names, vec!["card", "title", "l1", "after"]);
+    }
+
+    #[test]
+    fn scss_bare_global_in_parent_reaches_nested_rules() {
+        let names = scss_export_names(
+            ".a :global .b {\n  .c { color: red; }\n  &:hover { color: blue; }\n}\n.d { }",
+        );
+        assert_eq!(names, vec!["a", "d"]);
+    }
+
+    #[test]
+    fn scss_interpolation_does_not_end_global_scope() {
+        let names = scss_export_names("$n: x;\n.a :global .b-#{$n} .c { }\n.d { }");
+        assert_eq!(names, vec!["a", "d"]);
+    }
+
+    #[test]
+    fn sass_indented_bare_global_ends_at_line_end() {
+        let names = scss_export_names(".a :global .b\n  color: red\n.c\n  color: blue\n");
+        assert_eq!(names, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn sass_indented_with_interpolation_still_ends_global_at_line_end() {
+        let names = scss_export_names(
+            ".a :global .b\n  color: red\n.c-#{$x}\n  color: blue\n.d\n  color: blue\n",
+        );
+        // The scanner keeps the static prefix `c-` of an interpolated class.
+        assert_eq!(names, vec!["a", "c-", "d"]);
+    }
+
+    #[test]
+    fn global_like_pseudo_names_are_not_global() {
+        let names = export_names(".a:global-ish .b { }");
+        assert!(names.contains(&"b".to_string()), "got {names:?}");
     }
 
     #[test]

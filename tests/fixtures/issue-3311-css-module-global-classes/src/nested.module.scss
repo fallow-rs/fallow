@@ -1,0 +1,19 @@
+.card {
+  :global(.scssGlobal) {
+    color: red;
+  }
+
+  .title {
+    color: blue;
+  }
+}
+
+:global {
+  .blockGlobal {
+    color: red;
+  }
+}
+
+.scssUnused {
+  color: blue;
+}

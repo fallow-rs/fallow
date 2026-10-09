@@ -1,0 +1,21 @@
+.wrapper :global(.selector) {
+  color: red;
+}
+
+.lead :global .afterBare .alsoGlobal {
+  color: red;
+}
+
+:local(.explicitLocal) :global(.outer .inner) {
+  color: red;
+}
+
+@media (min-width: 640px) {
+  .media :global(.mediaGlobal) {
+    color: red;
+  }
+}
+
+.unusedLocal {
+  color: blue;
+}

@@ -1,0 +1,4 @@
+{
+  "name": "issue-3311-css-module-global-classes",
+  "main": "src/index.ts"
+}
