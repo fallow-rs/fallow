@@ -246,8 +246,10 @@ fn complexity_with_every_finding_baselined_stays_clean() {
     let args = ["--complexity", "--baseline", baseline.as_str()];
     let markdown = health(dir.path(), &args, "markdown").stdout;
     let summary = health(dir.path(), &args, "github-summary").stdout;
+    // The baseline accepts both functions, so the headline says that none is
+    // new and gives the accepted functions as context.
     assert!(
-        summary.contains("**No functions exceed complexity thresholds**"),
+        summary.contains("**No new functions exceed complexity thresholds (2 in the baseline)**"),
         "{summary}"
     );
     for body in [&markdown, &summary] {

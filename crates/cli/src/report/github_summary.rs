@@ -1653,6 +1653,22 @@ fn runtime_finding_row(it: &Value) -> String {
     )
 }
 
+/// The functions above a threshold after a loaded health baseline, and the
+/// functions that the baseline accepts.
+///
+/// `summary.functions_above_threshold` counts the functions before the
+/// baseline. `baseline_staleness.remaining_findings` counts them after it.
+/// `None` without a baseline, and in an envelope from a fallow version before
+/// `remaining_findings`, so those runs render as before.
+fn baselined_complexity(summary: &Value) -> Option<(u64, u64)> {
+    let remaining = summary
+        .get("baseline_staleness")?
+        .get("remaining_findings")?
+        .as_u64()?;
+    let accepted = u(summary, "functions_above_threshold").saturating_sub(remaining);
+    Some((remaining, accepted))
+}
+
 fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> String {
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let above = u(&summary, "functions_above_threshold");
@@ -1660,9 +1676,22 @@ fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> 
     if listing.count_unlisted() {
         return render_health_complexity_not_listed(&summary, above, &listing, elapsed);
     }
+    let baselined = baselined_complexity(&summary).filter(|&(_, accepted)| accepted > 0);
     if complex == 0 {
+        // Only when the baseline accepts every function. A run that lists none
+        // of its remaining functions keeps the old line.
+        let headline = baselined
+            .filter(|&(remaining, _)| remaining == 0)
+            .map_or_else(
+                || "No functions exceed complexity thresholds".to_owned(),
+                |(_, accepted)| {
+                    format!(
+                        "No new functions exceed complexity thresholds ({accepted} in the baseline)"
+                    )
+                },
+            );
         return format!(
-            "## Fallow - Code Complexity\n\n> [!NOTE]\n> **No functions exceed complexity thresholds** \u{b7} {elapsed}ms\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {})",
+            "## Fallow - Code Complexity\n\n> [!NOTE]\n> **{headline}** \u{b7} {elapsed}ms\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {})",
             num(&summary, "functions_analyzed"),
             num(&summary, "max_cyclomatic_threshold"),
             num(&summary, "max_cognitive_threshold"),
@@ -1678,10 +1707,14 @@ fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> 
     } else {
         String::new()
     };
+    let (shown, new, baseline_note) = baselined
+        .map_or((above, "", String::new()), |(remaining, accepted)| {
+            (remaining, "new ", format!(" ({accepted} in the baseline)"))
+        });
     format!(
-        "## Fallow - Code Complexity\n\n> [!WARNING]\n> **{above} function{} exceed{} thresholds** \u{b7} {elapsed}ms\n\n{COMPLEXITY_TABLE_HEADER}{}{tail}{}",
-        if above == 1 { "" } else { "s" },
-        if above == 1 { "s" } else { "" },
+        "## Fallow - Code Complexity\n\n> [!WARNING]\n> **{shown} {new}function{} exceed{} thresholds{baseline_note}** \u{b7} {elapsed}ms\n\n{COMPLEXITY_TABLE_HEADER}{}{tail}{}",
+        if shown == 1 { "" } else { "s" },
+        if shown == 1 { "s" } else { "" },
         complexity_rows(&findings, 25),
         health_thresholds_footer(env),
     )
@@ -2841,8 +2874,13 @@ fn combined_counts(env: &Value) -> CombinedCounts {
             .saturating_add(u(dupes, "clone_groups_omitted") as usize)
     });
     let health = env.get("health").cloned().unwrap_or(Value::Null);
+    // After the baseline when one is loaded: the functions it accepts are
+    // not health findings of this run.
     let complex = health.get("summary").map_or(0, |summary| {
-        u(summary, "functions_above_threshold") as usize
+        baselined_complexity(summary).map_or_else(
+            || u(summary, "functions_above_threshold"),
+            |(remaining, _)| remaining,
+        ) as usize
     });
     let runtime = health
         .get("runtime_coverage")
@@ -2907,8 +2945,20 @@ fn combined_zero_case(env: &Value, counts: &CombinedCounts) -> String {
         }
     } else {
         out.push_str(
-            "> [!NOTE]\n> **Quality gate passed**\n\n:white_check_mark: No code issues \u{b7} :white_check_mark: No duplication \u{b7} :white_check_mark: No complex functions",
+            "> [!NOTE]\n> **Quality gate passed**\n\n:white_check_mark: No code issues \u{b7} :white_check_mark: No duplication \u{b7} :white_check_mark: ",
         );
+        // A health baseline that accepts functions gets them as context, so
+        // the line does not read as a project with no complex functions.
+        let accepted = env
+            .get("health")
+            .and_then(|health| health.get("summary"))
+            .and_then(baselined_complexity)
+            .map_or(0, |(_, accepted)| accepted);
+        if accepted > 0 {
+            let _ = write!(out, "No new complex functions ({accepted} in the baseline)");
+        } else {
+            out.push_str("No complex functions");
+        }
     }
     if let Some(maintainability) = opt_f(&vitals, "maintainability_avg") {
         let _ = write!(
@@ -3090,14 +3140,28 @@ fn combined_complexity_breakdown(env: &Value, counts: &CombinedCounts) -> String
     } else {
         String::new()
     };
+    let label = match baselined_complexity(&summary).filter(|&(_, accepted)| accepted > 0) {
+        Some((_, accepted)) => format!(
+            "{} new {} above threshold, {accepted} in the baseline",
+            counts.complex,
+            if counts.complex == 1 {
+                "function"
+            } else {
+                "functions"
+            },
+        ),
+        None => format!(
+            "{} {} above threshold",
+            counts.complex,
+            if counts.complex == 1 {
+                "function"
+            } else {
+                "functions"
+            },
+        ),
+    };
     format!(
-        "<details>\n<summary><strong><a href=\"{HEALTH_DOCS}#complexity-metrics\">Complexity</a> ({} {} above threshold)</strong></summary>\n\n| File | Function | Severity | [Cyclomatic]({HEALTH_DOCS}#cyclomatic-complexity) | [Cognitive]({HEALTH_DOCS}#cognitive-complexity){crap_header} | Lines |\n|:-----|:---------|:---------|----------:|---------:{crap_separator}|------:|\n{rows}\n\n**{}** files, **{}** functions analyzed (thresholds: cyclomatic > {cyc_t}, cognitive > {cog_t}{crap_footer})\n\n</details>\n\n",
-        counts.complex,
-        if counts.complex == 1 {
-            "function"
-        } else {
-            "functions"
-        },
+        "<details>\n<summary><strong><a href=\"{HEALTH_DOCS}#complexity-metrics\">Complexity</a> ({label})</strong></summary>\n\n| File | Function | Severity | [Cyclomatic]({HEALTH_DOCS}#cyclomatic-complexity) | [Cognitive]({HEALTH_DOCS}#cognitive-complexity){crap_header} | Lines |\n|:-----|:---------|:---------|----------:|---------:{crap_separator}|------:|\n{rows}\n\n**{}** files, **{}** functions analyzed (thresholds: cyclomatic > {cyc_t}, cognitive > {cog_t}{crap_footer})\n\n</details>\n\n",
         threshold_or(&summary, "files_analyzed", "unknown"),
         threshold_or(&summary, "functions_analyzed", "unknown"),
     )
@@ -3297,7 +3361,116 @@ mod tests {
 
     use fallow_types::issue_meta::counted_result_issue_metas;
 
-    use super::{DEAD_CODE_CATEGORIES, render_health_summary};
+    use super::{
+        DEAD_CODE_CATEGORIES, LinkContext, render_combined_summary, render_health_summary,
+    };
+
+    /// One listed complexity finding.
+    fn complexity_finding(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "path": "src/a.ts", "name": name, "line": 1, "col": 0,
+            "cyclomatic": 25, "cognitive": 30, "line_count": 40,
+            "exceeded": "both", "severity": "high"
+        })
+    }
+
+    /// A health summary with a loaded baseline: `above` functions exceed a
+    /// threshold before the baseline, and `remaining` after it.
+    fn health_with_baseline(above: u64, remaining: u64) -> serde_json::Value {
+        let findings: Vec<serde_json::Value> = (0..remaining)
+            .map(|index| complexity_finding(&format!("f{index}")))
+            .collect();
+        serde_json::json!({
+            "elapsed_ms": 1,
+            "findings": findings,
+            "vital_signs": { "avg_cyclomatic": 2.0 },
+            "summary": {
+                "files_analyzed": 3,
+                "functions_analyzed": 90,
+                "functions_above_threshold": above,
+                "max_cyclomatic_threshold": 20,
+                "max_cognitive_threshold": 15,
+                "max_crap_threshold": 30.0,
+                "baseline_staleness": {
+                    "baseline_entries": above,
+                    "matched_entries": above,
+                    "stale_entries": 0,
+                    "current_findings": above,
+                    "remaining_findings": remaining,
+                    "stale": false
+                }
+            }
+        })
+    }
+
+    fn no_links() -> LinkContext {
+        LinkContext {
+            prefix: String::new(),
+            repo: String::new(),
+            sha: String::new(),
+        }
+    }
+
+    /// With a baseline, the headline counts the functions after the
+    /// baseline and gives the accepted functions as context.
+    #[test]
+    fn health_summary_headline_counts_after_the_baseline() {
+        let out = render_health_summary(&health_with_baseline(76, 0));
+        assert!(
+            out.contains("**No new functions exceed complexity thresholds (76 in the baseline)**"),
+            "{out}"
+        );
+        let out = render_health_summary(&health_with_baseline(76, 2));
+        assert!(
+            out.contains("**2 new functions exceed thresholds (74 in the baseline)**"),
+            "{out}"
+        );
+        assert!(!out.contains("76 functions"), "{out}");
+    }
+
+    /// The bare-run summary counts health findings after the baseline too.
+    #[test]
+    fn combined_summary_counts_health_after_the_baseline() {
+        let combined = |health: serde_json::Value| {
+            serde_json::json!({
+                "check": { "total_issues": 0 },
+                "dupes": { "clone_groups": [], "stats": {} },
+                "health": health
+            })
+        };
+        let out = render_combined_summary(&combined(health_with_baseline(76, 0)), &no_links());
+        assert!(
+            out.contains(":white_check_mark: No new complex functions (76 in the baseline)"),
+            "{out}"
+        );
+        assert!(!out.contains("above threshold"), "{out}");
+
+        let out = render_combined_summary(&combined(health_with_baseline(76, 2)), &no_links());
+        assert!(out.contains(":warning: **2** health findings"), "{out}");
+        assert!(
+            out.contains("(2 new functions above threshold, 74 in the baseline)"),
+            "{out}"
+        );
+    }
+
+    /// Without `remaining_findings` the combined count stays the summary count.
+    #[test]
+    fn combined_summary_without_a_baseline_keeps_the_summary_count() {
+        let mut health = health_with_baseline(3, 3);
+        health["summary"]
+            .as_object_mut()
+            .expect("summary")
+            .remove("baseline_staleness");
+        let env = serde_json::json!({
+            "check": { "total_issues": 0 },
+            "dupes": { "clone_groups": [], "stats": {} },
+            "health": health
+        });
+        let out = render_combined_summary(&env, &no_links());
+        assert!(out.contains(":warning: **3** health findings"), "{out}");
+        assert!(out.contains("(3 functions above threshold)"), "{out}");
+        assert!(!out.contains("baseline"), "{out}");
+    }
 
     /// A run without a finding list (for example `--score`) still counts the
     /// functions above a threshold. The summary must give that count.

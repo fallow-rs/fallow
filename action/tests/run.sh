@@ -3388,6 +3388,28 @@ else
     fail "summary.sh native fastpath renders the architecture envelope" "$(cat "$FASTPATH_ARCH_SUMMARY" 2>/dev/null)"
   fi
 
+  # (c2) A loaded health baseline: the headline counts the functions after the
+  # baseline, and the accepted functions are context.
+  for baselined_case in \
+    'health|health-baselined.json|No new functions exceed complexity thresholds (76 in the baseline)' \
+    '|combined-health-baselined.json|No new complex functions (3 in the baseline)' \
+    ; do
+    IFS='|' read -r baselined_command baselined_fixture baselined_expected <<< "$baselined_case"
+    FASTPATH_BASELINED_SUMMARY="$FASTPATH_WORK/baselined-${baselined_fixture%.json}.md"
+    HAS_NATIVE_REPORT=true \
+      FALLOW_BIN="$FASTPATH_BIN" \
+      FALLOW_COMMAND="$baselined_command" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      GITHUB_STEP_SUMMARY="$FASTPATH_BASELINED_SUMMARY" \
+      FALLOW_RESULTS_FILE="$FIXTURES/$baselined_fixture" \
+      bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
+    FASTPATH_BASELINED_OUT=$(cat "$FASTPATH_BASELINED_SUMMARY" 2>/dev/null)
+    assert_contains "$FASTPATH_BASELINED_OUT" "$baselined_expected" \
+      "summary.sh native fastpath counts ${baselined_fixture} after the baseline"
+    assert_not_contains "$FASTPATH_BASELINED_OUT" "functions exceed thresholds" \
+      "summary.sh native fastpath does not headline the baselined count for ${baselined_fixture}"
+  done
+
   # (d) fix has no report kind: the fastpath is bypassed for the jq summary.
   FASTPATH_FIX_SUMMARY="$FASTPATH_WORK/fix-summary.md"
   FASTPATH_FIX_LOG=$(

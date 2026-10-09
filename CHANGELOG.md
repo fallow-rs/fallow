@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every gate of the CLI passed. The count now reads
   `baseline_staleness.remaining_findings` when a baseline is loaded. The
   duplication count was already correct.
+- **The job summary no longer counts health findings that a baseline
+  accepts.** With a loaded health baseline, `fallow report --format
+  github-summary` now counts the functions after the baseline and gives the
+  accepted functions as context, for example "2 new functions exceed
+  thresholds (74 in the baseline)". On bare `fallow` the summary showed every
+  accepted function as a health finding above an empty table. Without a
+  baseline the summary does not change.
 - `fallow --help` now says that `--baseline` and `--save-baseline` hold the
   dead-code baseline only on bare `fallow`. When a bare run gets a
   `fallow health` or `fallow dupes` baseline through `--baseline`, the note

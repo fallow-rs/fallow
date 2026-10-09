@@ -1,9 +1,19 @@
 {
+  "kind": "combined",
   "schema_version": 9,
   "version": "3.32.0",
   "elapsed_ms": 20,
-  "check": { "total_issues": 0, "unused_files": [], "unused_exports": [] },
-  "dupes": { "clone_groups": [], "stats": { "clone_groups": 0 } },
+  "check": {
+    "total_issues": 0,
+    "unused_files": [],
+    "unused_exports": []
+  },
+  "dupes": {
+    "clone_groups": [],
+    "stats": {
+      "clone_groups": 0
+    }
+  },
   "health": {
     "findings": [],
     "summary": {
@@ -22,11 +32,27 @@
         "gate_trips": false,
         "moved_entries": 0
       }
-    }
+    },
+    "sections": [
+      "complexity"
+    ]
   },
   "gate_outcomes": {
-    "error-severity-findings": { "status": "pass", "enforced": true, "observed": 0.0, "threshold_label": "error" },
-    "health-findings": { "status": "pass", "enforced": true, "observed": 0.0, "threshold_label": "error" },
-    "stale-baseline": { "status": "pass", "enforced": false }
+    "error-severity-findings": {
+      "status": "pass",
+      "enforced": true,
+      "observed": 0.0,
+      "threshold_label": "error"
+    },
+    "health-findings": {
+      "status": "pass",
+      "enforced": true,
+      "observed": 0.0,
+      "threshold_label": "error"
+    },
+    "stale-baseline": {
+      "status": "pass",
+      "enforced": false
+    }
   }
 }

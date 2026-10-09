@@ -25,7 +25,18 @@
     }
   },
   "gate_outcomes": {
-    "health-findings": { "status": "pass", "enforced": true, "observed": 0.0, "threshold_label": "error" },
-    "stale-baseline": { "status": "pass", "enforced": false }
-  }
+    "health-findings": {
+      "status": "pass",
+      "enforced": true,
+      "observed": 0.0,
+      "threshold_label": "error"
+    },
+    "stale-baseline": {
+      "status": "pass",
+      "enforced": false
+    }
+  },
+  "sections": [
+    "complexity"
+  ]
 }
