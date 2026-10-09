@@ -1,0 +1,502 @@
+{
+  "schemaVersion": 1,
+  "description": "Repo-relative path candidates for one source-map sources[] entry, in resolution order. Each case gives the raw entry, the map sourceRoot (null when absent), and the repo-relative map path. Any implementation of these path rules must produce the same ordered candidate list.",
+  "cases": [
+    {
+      "name": "tsc dist-relative source",
+      "raw": "../../../src/consumers/base/index.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/consumers/base/index.js.map",
+      "candidates": [
+        "src/consumers/base/index.ts"
+      ]
+    },
+    {
+      "name": "vite dist-relative source",
+      "raw": "../../src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/assets/app.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "bare source next to the map",
+      "raw": "index.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/index.js.map",
+      "candidates": [
+        "dist/index.ts",
+        "index.ts"
+      ]
+    },
+    {
+      "name": "map at the repository root",
+      "raw": "src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "app.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "source above the repository root",
+      "raw": "../../../../x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "x.ts"
+      ]
+    },
+    {
+      "name": "sourceRoot slash with rootDir src",
+      "raw": "index.ts",
+      "sourceRoot": "/",
+      "mapPath": "dist/index.js.map",
+      "candidates": [
+        "index.ts"
+      ]
+    },
+    {
+      "name": "sourceRoot slash with a nested source",
+      "raw": "consumers/base/index.ts",
+      "sourceRoot": "/",
+      "mapPath": "dist/consumers/base/index.js.map",
+      "candidates": [
+        "consumers/base/index.ts",
+        "dist/consumers/consumers/base/index.ts",
+        "dist/consumers/base/index.ts"
+      ]
+    },
+    {
+      "name": "sourceRoot slash with repo-relative sources",
+      "raw": "../../../src/consumers/base/index.ts",
+      "sourceRoot": "/",
+      "mapPath": "dist/consumers/base/index.js.map",
+      "candidates": [
+        "src/consumers/base/index.ts"
+      ]
+    },
+    {
+      "name": "relative sourceRoot without a trailing slash",
+      "raw": "x.ts",
+      "sourceRoot": "../src",
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "relative sourceRoot with a trailing slash",
+      "raw": "x.ts",
+      "sourceRoot": "../src/",
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "empty sourceRoot",
+      "raw": "x.ts",
+      "sourceRoot": "",
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/x.ts",
+        "x.ts"
+      ]
+    },
+    {
+      "name": "file sourceRoot with Turbopack project root",
+      "raw": "[project]/src/x.ts",
+      "sourceRoot": "file:///",
+      "mapPath": "a.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "webpack dot source",
+      "raw": "webpack://./src/app.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/assets/app.js.map",
+      "candidates": [
+        "src/app.ts",
+        "dist/src/app.ts"
+      ]
+    },
+    {
+      "name": "webpack triple slash dot source",
+      "raw": "webpack:///./src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/main.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "webpack triple slash source",
+      "raw": "webpack:///src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/main.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "webpack scoped namespace with dot segment",
+      "raw": "webpack://@scope/app/./src/x.component.ts",
+      "sourceRoot": null,
+      "mapPath": "packages/app/dist/387.js.map",
+      "candidates": [
+        "@scope/app/src/x.component.ts",
+        "packages/app/src/x.component.ts",
+        "packages/src/x.component.ts",
+        "src/x.component.ts"
+      ]
+    },
+    {
+      "name": "webpack scoped namespace with parent segment",
+      "raw": "webpack://@scope/app/../components/src/button.ts",
+      "sourceRoot": null,
+      "mapPath": "packages/app/dist/387.js.map",
+      "candidates": [
+        "@scope/components/src/button.ts",
+        "packages/components/src/button.ts",
+        "components/src/button.ts"
+      ]
+    },
+    {
+      "name": "webpack namespace without dot segment",
+      "raw": "webpack://app/src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/main.js.map",
+      "candidates": [
+        "app/src/x.ts"
+      ]
+    },
+    {
+      "name": "webpack triple slash with namespace-shaped path",
+      "raw": "webpack:///@scope/app/./src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "packages/app/dist/main.js.map",
+      "candidates": [
+        "@scope/app/src/x.ts",
+        "packages/app/@scope/app/src/x.ts",
+        "packages/@scope/app/src/x.ts"
+      ]
+    },
+    {
+      "name": "webpack dependency source",
+      "raw": "webpack://./node_modules/x/y.js",
+      "sourceRoot": null,
+      "mapPath": "dist/assets/app.js.map",
+      "candidates": [
+        "node_modules/x/y.js",
+        "dist/node_modules/x/y.js"
+      ]
+    },
+    {
+      "name": "uppercase webpack scheme",
+      "raw": "WEBPACK://app/./src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/main.js.map",
+      "candidates": [
+        "app/src/x.ts"
+      ]
+    },
+    {
+      "name": "Angular CLI workspace-relative source",
+      "raw": "apps/client/src/app/app.routes.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/client/browser/main.js.map",
+      "candidates": [
+        "dist/client/browser/apps/client/src/app/app.routes.ts",
+        "dist/client/apps/client/src/app/app.routes.ts",
+        "dist/apps/client/src/app/app.routes.ts",
+        "apps/client/src/app/app.routes.ts"
+      ]
+    },
+    {
+      "name": "Turbopack project source",
+      "raw": "[project]/src/x.ts",
+      "sourceRoot": null,
+      "mapPath": ".next/static/chunks/a.js.map",
+      "candidates": [
+        ".next/static/chunks/[project]/src/x.ts",
+        ".next/static/[project]/src/x.ts",
+        ".next/[project]/src/x.ts",
+        "[project]/src/x.ts"
+      ]
+    },
+    {
+      "name": "Turbopack project source with a scheme",
+      "raw": "turbopack:///[project]/src/x.ts",
+      "sourceRoot": null,
+      "mapPath": ".next/static/chunks/a.js.map",
+      "candidates": [
+        "src/x.ts",
+        ".next/static/[project]/src/x.ts",
+        ".next/[project]/src/x.ts",
+        "[project]/src/x.ts"
+      ]
+    },
+    {
+      "name": "file URL absolute source",
+      "raw": "file:///home/ci/repo/src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "home/ci/repo/src/x.ts"
+      ]
+    },
+    {
+      "name": "absolute posix source",
+      "raw": "/src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "percent-encoded space",
+      "raw": "my%20file.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/my file.ts",
+        "my file.ts"
+      ]
+    },
+    {
+      "name": "percent-encoded multi-byte character",
+      "raw": "caf%C3%A9.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/café.ts",
+        "café.ts"
+      ]
+    },
+    {
+      "name": "literal multi-byte character",
+      "raw": "café/ü.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/café/ü.ts",
+        "café/ü.ts"
+      ]
+    },
+    {
+      "name": "invalid percent escape",
+      "raw": "%zz.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/%zz.ts",
+        "%zz.ts"
+      ]
+    },
+    {
+      "name": "truncated percent escape",
+      "raw": "x%4",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/x%4",
+        "x%4"
+      ]
+    },
+    {
+      "name": "percent escape with a sign",
+      "raw": "%+1.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/%+1.ts",
+        "%+1.ts"
+      ]
+    },
+    {
+      "name": "percent escape that is not UTF-8",
+      "raw": "%FF.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/%FF.ts",
+        "%FF.ts"
+      ]
+    },
+    {
+      "name": "percent-encoded slash",
+      "raw": "src%2Fx.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/src/x.ts",
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "double encoding on a relative source",
+      "raw": "a%2541.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/a%41.ts",
+        "a%41.ts"
+      ]
+    },
+    {
+      "name": "double encoding on an absolute source",
+      "raw": "/src/a%2541.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "src/aA.ts",
+        "src/a%41.ts"
+      ]
+    },
+    {
+      "name": "double encoding on a scheme source",
+      "raw": "webpack://./src/a%2541.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "src/aA.ts",
+        "src/a%41.ts"
+      ]
+    },
+    {
+      "name": "Windows drive source",
+      "raw": "C:/x",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/C:/x",
+        "C:/x"
+      ]
+    },
+    {
+      "name": "Windows drive source with a path",
+      "raw": "C:/repo/src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/C:/repo/src/x.ts",
+        "C:/repo/src/x.ts"
+      ]
+    },
+    {
+      "name": "backslash source",
+      "raw": "..\\src\\x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/..\\src\\x.ts",
+        "..\\src\\x.ts"
+      ]
+    },
+    {
+      "name": "scheme with a leading digit",
+      "raw": "1http://x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/1http:/x.ts",
+        "1http:/x.ts"
+      ]
+    },
+    {
+      "name": "scheme with a space",
+      "raw": "a b://x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/a b:/x.ts",
+        "a b:/x.ts"
+      ]
+    },
+    {
+      "name": "scheme with one slash",
+      "raw": "app:/src/x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist/app:/src/x.ts",
+        "app:/src/x.ts"
+      ]
+    },
+    {
+      "name": "doubled slashes in a source",
+      "raw": "..//src//x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "src/x.ts"
+      ]
+    },
+    {
+      "name": "source that resolves to the repository root",
+      "raw": "../..",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": []
+    },
+    {
+      "name": "empty source",
+      "raw": "",
+      "sourceRoot": null,
+      "mapPath": "dist/a.js.map",
+      "candidates": [
+        "dist"
+      ]
+    },
+    {
+      "name": "map path with a dot segment",
+      "raw": "x.ts",
+      "sourceRoot": null,
+      "mapPath": "./dist/a.js.map",
+      "candidates": [
+        "dist/x.ts",
+        "x.ts"
+      ]
+    },
+    {
+      "name": "map path with a parent segment",
+      "raw": "x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist/../out/a.js.map",
+      "candidates": [
+        "out/x.ts",
+        "x.ts"
+      ]
+    },
+    {
+      "name": "map path with doubled slashes",
+      "raw": "x.ts",
+      "sourceRoot": null,
+      "mapPath": "dist//assets/a.js.map",
+      "candidates": [
+        "dist/assets/x.ts",
+        "dist/x.ts",
+        "x.ts"
+      ]
+    },
+    {
+      "name": "deep map with a workspace-relative source",
+      "raw": "libs/ui/src/button.ts",
+      "sourceRoot": null,
+      "mapPath": "apps/web/dist/browser/chunks/main.js.map",
+      "candidates": [
+        "apps/web/dist/browser/chunks/libs/ui/src/button.ts",
+        "apps/web/dist/browser/libs/ui/src/button.ts",
+        "apps/web/dist/libs/ui/src/button.ts",
+        "apps/web/libs/ui/src/button.ts",
+        "apps/libs/ui/src/button.ts",
+        "libs/ui/src/button.ts"
+      ]
+    }
+  ]
+}

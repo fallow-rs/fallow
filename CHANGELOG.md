@@ -65,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `jsx` mode without the automatic runtime give no credit. The credit applies
   only to the workspace of the test file. A `vite.config.*` next to a
   `vitest.config.*` gives no credit, because Vitest does not load it.
+- **The source-map warning of `fallow coverage upload-source-maps` now tries
+  the same paths as Fallow Cloud.** A source such as
+  `webpack:///@scope/app/./src/x.ts` lost its first segments in the CLI but
+  not in the cloud, so the check could test a path that the cloud never
+  uses. A shared fixture of path cases now keeps the two implementations
+  equal.
 
 ## [3.33.0] - 2026-10-09
 

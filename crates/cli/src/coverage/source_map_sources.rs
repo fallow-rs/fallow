@@ -170,11 +170,18 @@ const WEBPACK_SCHEME: &str = "webpack://";
 /// with any webpack namespace removed, to each parent of the map's directory
 /// up to the repository root. This covers sources relative to a workspace
 /// root (Angular CLI) or to a webpack context. The cloud keeps the first
-/// candidate that is a known repository file.
+/// candidate that is a known repository file. Empty candidates are dropped.
+/// `tests/fixtures/source-map-path-contract.json` holds the cases that both
+/// implementations must pass.
 fn source_candidates(raw: &str, source_root: Option<&str>, map_path: &str) -> Vec<String> {
-    let mut candidates = vec![resolve_map_source_path(raw, source_root, map_path)];
+    let mut candidates = Vec::new();
+    let resolved = resolve_map_source_path(raw, source_root, map_path);
+    if !resolved.is_empty() {
+        candidates.push(resolved);
+    }
     let decoded = decode_with_source_root(raw, source_root);
     let relative = relative_source(&decoded);
+    let map_path = canonicalize_posix(map_path);
     let mut dir = map_path.rsplit_once('/').map_or("", |(dir, _)| dir);
     while !dir.is_empty() {
         dir = dir.rsplit_once('/').map_or("", |(parent, _)| parent);
@@ -183,7 +190,7 @@ fn source_candidates(raw: &str, source_root: Option<&str>, map_path: &str) -> Ve
         } else {
             canonicalize_posix(&format!("{dir}/{relative}"))
         };
-        if !candidates.contains(&joined) {
+        if !joined.is_empty() && !candidates.contains(&joined) {
             candidates.push(joined);
         }
     }
@@ -192,10 +199,14 @@ fn source_candidates(raw: &str, source_root: Option<&str>, map_path: &str) -> Ve
 
 /// The source without its scheme, webpack namespace, and leading `/` or `./`.
 /// A webpack namespace is every segment in front of the first `.` or `..`
-/// segment, as in `webpack://@scope/app/./src/x.ts`.
+/// segment, as in `webpack://@scope/app/./src/x.ts`. A source with a `/` or
+/// `.` right after `webpack://` has no namespace.
 fn relative_source(decoded: &str) -> &str {
     let mut value = strip_scheme(decoded);
-    if decoded.starts_with(WEBPACK_SCHEME) && !value.starts_with(['/', '.']) {
+    let has_namespace = decoded
+        .strip_prefix(WEBPACK_SCHEME)
+        .is_some_and(|rest| !rest.starts_with(['/', '.']));
+    if has_namespace {
         let mut offset = 0;
         for segment in value.split('/') {
             if segment == "." || segment == ".." {
@@ -224,7 +235,7 @@ fn normalize_source_path(raw: &str) -> String {
 
 fn decode_with_source_root(raw: &str, source_root: Option<&str>) -> String {
     let joined = match source_root {
-        None => raw.to_owned(),
+        None | Some("") => raw.to_owned(),
         Some(root) if root.ends_with('/') => format!("{root}{raw}"),
         Some(root) => format!("{root}/{raw}"),
     };
@@ -512,6 +523,36 @@ mod tests {
         assert!(
             find_unresolved_map(repo.path(), "dist/consumers/base/index.js.map", &map).is_some()
         );
+    }
+
+    /// The cloud runs the same cases against its implementation, so a change
+    /// on either side that alters a candidate list fails one of the two suites.
+    #[test]
+    fn source_candidates_match_the_shared_contract() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/source-map-path-contract.json");
+        let text = std::fs::read_to_string(&path).expect("read contract fixture");
+        let contract: serde_json::Value = serde_json::from_str(&text).expect("parse contract");
+        assert_eq!(contract["schemaVersion"], 1);
+        let cases = contract["cases"].as_array().expect("cases array");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let name = case["name"].as_str().expect("name");
+            let raw = case["raw"].as_str().expect("raw");
+            let source_root = case["sourceRoot"].as_str();
+            let map_path = case["mapPath"].as_str().expect("mapPath");
+            let expected: Vec<&str> = case["candidates"]
+                .as_array()
+                .expect("candidates")
+                .iter()
+                .map(|candidate| candidate.as_str().expect("candidate string"))
+                .collect();
+            assert_eq!(
+                source_candidates(raw, source_root, map_path),
+                expected,
+                "case: {name}"
+            );
+        }
     }
 
     #[test]
