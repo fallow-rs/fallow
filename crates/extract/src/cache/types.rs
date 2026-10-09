@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 338;
+pub(super) const CACHE_VERSION: u32 = 339;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -267,6 +267,8 @@ pub struct CachedModule {
     pub has_global_declarations: bool,
     /// `/// <reference path>` values. Mirrors `ModuleInfo.triple_slash_reference_paths`.
     pub triple_slash_reference_paths: Box<[String]>,
+    /// Config JSX runtime flag. Mirrors `ModuleInfo.jsx_runtime_from_config`.
+    pub jsx_runtime_from_config: bool,
     /// Vue `<script setup>` `defineProps` and Svelte 5 `$props()` declared props.
     /// Round-trips so the `unused-component-prop` detector sees them on
     /// warm-cache loads.

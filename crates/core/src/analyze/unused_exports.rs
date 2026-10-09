@@ -3003,6 +3003,7 @@ mod tests {
             provided_dependencies: vec![],
             config_diagnostics: vec![],
             federation_sources: vec![],
+            jsx_import_sources: vec![],
         }
     }
 

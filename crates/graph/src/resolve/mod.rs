@@ -19,6 +19,7 @@ mod auto_imports;
 mod dynamic_imports;
 pub(crate) mod fallbacks;
 pub(crate) mod inline_loaders;
+mod jsx_runtime;
 mod memo;
 mod output_entry;
 mod path_info;
@@ -57,13 +58,14 @@ use std::sync::Mutex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{AutoImportKind, AutoImportRule};
+use fallow_config::{AutoImportKind, AutoImportRule, JsxImportSourceRule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo, SemanticFact};
 use oxc_span::Span;
 
 use auto_imports::synthesize_auto_import_edges;
 use dynamic_imports::{GlobMatcherCache, resolve_dynamic_imports, resolve_dynamic_patterns};
+use jsx_runtime::{CompiledJsxRule, compile_jsx_rules, resolve_config_jsx_runtime_imports};
 use re_exports::resolve_re_exports;
 use react_native::{build_condition_names, build_extensions, synthesize_platform_family_edges};
 use require_imports::resolve_require_imports;
@@ -86,6 +88,9 @@ pub struct ResolveAllImportsInput<'a> {
     pub path_aliases: &'a [(String, String)],
     /// Auto-import rules that synthesize implicit graph edges.
     pub auto_imports: &'a [AutoImportRule],
+    /// JSX import sources from bundler and test configs. Each adds a runtime
+    /// edge to the matching modules that have JSX and no runtime pragma.
+    pub jsx_import_sources: &'a [JsxImportSourceRule],
     /// Additional Sass and SCSS include directories.
     pub scss_include_paths: &'a [PathBuf],
     /// Static directory mappings for framework-specific asset resolution.
@@ -215,6 +220,7 @@ pub fn resolve_all_imports_with_session(
     let tsconfig_cache = types::TsconfigCache::default();
     let canonicalize_cache = types::CanonicalizeCache::default();
     let glob_matcher_cache = GlobMatcherCache::default();
+    let jsx_rules = compile_jsx_rules(input.jsx_import_sources);
 
     let ctx = ResolveContext {
         resolver: &session.resolver,
@@ -245,7 +251,10 @@ pub fn resolve_all_imports_with_session(
             resolve_module_imports(
                 module,
                 &ctx,
-                &glob_matcher_cache,
+                &ProjectResolveRules {
+                    glob_matcher_cache: &glob_matcher_cache,
+                    jsx_rules: &jsx_rules,
+                },
                 &file_paths,
                 &canonical_paths,
                 input.files,
@@ -400,10 +409,16 @@ fn build_path_to_id<'a>(
     }
 }
 
+/// Per-run state that every module resolution reads.
+struct ProjectResolveRules<'a> {
+    glob_matcher_cache: &'a GlobMatcherCache,
+    jsx_rules: &'a [CompiledJsxRule<'a>],
+}
+
 fn resolve_module_imports(
     module: &ModuleInfo,
     ctx: &ResolveContext<'_>,
-    glob_matcher_cache: &GlobMatcherCache,
+    rules: &ProjectResolveRules<'_>,
     file_paths: &[&Path],
     canonical_paths: &[PathBuf],
     files: &[DiscoveredFile],
@@ -418,6 +433,12 @@ fn resolve_module_imports(
 
     let resolve = || {
         let mut all_imports = resolve_static_imports(ctx, file_path, &module.imports);
+        all_imports.extend(resolve_config_jsx_runtime_imports(
+            ctx,
+            file_path,
+            module,
+            rules.jsx_rules,
+        ));
         all_imports.extend(resolve_require_imports(
             ctx,
             file_path,
@@ -438,7 +459,7 @@ fn resolve_module_imports(
         let module = build_resolved_module(ResolvedModuleBuildInput {
             module,
             ctx,
-            glob_matcher_cache,
+            glob_matcher_cache: rules.glob_matcher_cache,
             file_path,
             from_dir,
             canonical_paths,

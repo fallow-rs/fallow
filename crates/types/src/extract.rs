@@ -240,6 +240,12 @@ pub struct ModuleInfo {
     /// file, in source order. A declaration file named by one stays an entry
     /// point. Captured only by JS/TS extraction.
     pub triple_slash_reference_paths: Box<[String]>,
+    /// `true` when the file has a JSX element or fragment and no
+    /// `@jsxImportSource` or `@jsxRuntime classic` pragma. A bundler or test
+    /// config can then select the automatic JSX runtime for the file, so the
+    /// resolver adds the runtime edge from a plugin rule. Captured only by
+    /// JS/TS extraction; `false` for every other module.
+    pub jsx_runtime_from_config: bool,
     /// Local names of import bindings that ARE referenced somewhere in this file
     /// (script value/type position OR template/markup). The complement of
     /// `unused_import_bindings` among `imports`. Derived by
@@ -476,6 +482,7 @@ impl ModuleInfo {
             is_server_action_module: false,
             has_global_declarations: false,
             triple_slash_reference_paths: Box::default(),
+            jsx_runtime_from_config: false,
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             component_contracts: None,
@@ -4455,6 +4462,7 @@ mod tests {
             is_server_action_module: false,
             has_global_declarations: false,
             triple_slash_reference_paths: Box::default(),
+            jsx_runtime_from_config: false,
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             component_contracts: None,

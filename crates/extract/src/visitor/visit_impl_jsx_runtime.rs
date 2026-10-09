@@ -47,6 +47,9 @@ impl ModuleInfoExtractor {
     ///
     /// Call this after the walk, because the walk sets `has_jsx`.
     ///
+    /// A file with JSX and neither pragma sets `jsx_runtime_from_config`,
+    /// because a bundler or test config can then supply the source.
+    ///
     /// The import is named, with no local binding, so the graph credits the
     /// runtime bindings without a local usage check. The dev runtime
     /// (`<source>/jsx-dev-runtime`) is not recorded: a build can omit it, and
@@ -76,12 +79,15 @@ impl ModuleInfoExtractor {
                 }
             }
         }
-        let Some((value, comment_span)) = import_source else {
-            return;
-        };
         if classic_runtime {
             return;
         }
+        let Some((value, comment_span)) = import_source else {
+            // Without a file pragma, the bundler or test config selects the
+            // runtime source. The resolver adds that edge from a plugin rule.
+            self.jsx_runtime_from_config = true;
+            return;
+        };
         let source = jsx_runtime_specifier(value.value);
         let value_end = value.start + u32::try_from(value.value.len()).unwrap_or(0);
         let source_span = Span::new(value.start, value_end);

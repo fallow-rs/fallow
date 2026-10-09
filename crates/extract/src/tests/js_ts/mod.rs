@@ -11,6 +11,7 @@ mod imports;
 mod jsdoc;
 mod jsx_assets;
 mod jsx_retry;
+mod jsx_runtime_from_config;
 mod load_data;
 mod member_access;
 mod module_augmentation;

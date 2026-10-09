@@ -184,6 +184,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A JSX import source in a Vitest config now adds a module graph edge.**
+  With the automatic JSX runtime, `oxc.jsx.importSource` (or the older
+  `esbuild.jsxImportSource`) makes each test file with JSX import
+  `<source>/jsx-dev-runtime`. Fallow now adds this edge for a test file that
+  has JSX and no `@jsxImportSource` pragma, when the source is a path. A
+  package source only marks the package as used. The edge applies to the
+  files that `test.include` matches: in the root config when it has no
+  `test.projects`, else in each inline project config. A project inherits
+  the root source only with `extends: true`, and the classic runtime adds no
+  edge. A local JSX runtime
+  no longer shows as unused, and `--impact-closure` on a runtime file now
+  includes these test files. A relative source resolves from the test file
+  first and then from the config directory. A source that does not resolve
+  adds no edge and no unresolved import. The extraction cache and the graph
+  cache are invalidated once.
 - **`fallow hooks install --target git --prune-baselines`** adds a
   `fallow baselines prune` step before the audit in the pre-commit hook, and
   stages the baseline files that the prune wrote. The prune reads the working

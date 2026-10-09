@@ -556,6 +556,7 @@ pub fn cached_to_module_opts(
         is_server_action_module: cached.is_server_action_module,
         has_global_declarations: cached.has_global_declarations,
         triple_slash_reference_paths: cached.triple_slash_reference_paths.clone(),
+        jsx_runtime_from_config: cached.jsx_runtime_from_config,
         // Derived in `release_resolution_payload` from `imports` + `unused_import_bindings`
         // (both cached); never persisted, so the cache-load path leaves it empty.
         referenced_import_bindings: Vec::new(),
@@ -691,6 +692,7 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
         is_server_action_module: module.is_server_action_module,
         has_global_declarations: module.has_global_declarations,
         triple_slash_reference_paths: module.triple_slash_reference_paths.clone(),
+        jsx_runtime_from_config: module.jsx_runtime_from_config,
         component_props: module.component_props.clone(),
         component_contracts: module.component_contracts.clone(),
         has_props_attrs_fallthrough: module.has_props_attrs_fallthrough,

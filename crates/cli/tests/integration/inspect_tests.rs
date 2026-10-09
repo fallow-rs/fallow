@@ -332,3 +332,40 @@ fn impact_closure_follows_jsx_import_source_pragma() {
         "the closure must follow the pragma edge, affected: {affected:?}"
     );
 }
+
+#[test]
+fn impact_closure_follows_vitest_jsx_import_source() {
+    // The Vitest config sets `oxc.jsx.importSource: './src/jsx'` for
+    // `src/**/*.test.tsx`. The nested test file has JSX and no pragma, so it
+    // imports `src/jsx/jsx-dev-runtime.ts`, which imports `./context`. A
+    // change to the context reaches the test file.
+    let output = crate::common::run_fallow(
+        "dead-code",
+        "vitest-jsx-import-source",
+        &[
+            "--impact-closure",
+            "src/jsx/context.ts",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "impact-closure should exit 0: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let affected: Vec<&str> = json["affected_not_shown"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        affected.contains(&"src/jsx/jsx-dev-runtime.ts")
+            && affected.contains(&"src/deep/widget.test.tsx"),
+        "the closure must follow the config JSX runtime edge, affected: {affected:?}"
+    );
+}

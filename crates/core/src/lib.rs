@@ -1747,6 +1747,7 @@ fn resolve_analysis_imports(
         active_plugins: &plugin_result.active_plugins,
         path_aliases: &plugin_result.path_aliases,
         auto_imports: &plugin_result.auto_imports,
+        jsx_import_sources: &plugin_result.jsx_import_sources,
         scss_include_paths: &plugin_result.scss_include_paths,
         static_dir_mappings: &plugin_result.static_dir_mappings,
         framework_static_dir_mappings: &plugin_result.framework_static_dir_mappings,
@@ -2016,6 +2017,26 @@ fn plugin_config_hash(
     auto_imports.sort_unstable();
     auto_imports.len().hash(&mut hasher);
     for key in &auto_imports {
+        key.hash(&mut hasher);
+    }
+
+    let mut jsx_import_sources: Vec<(&str, String, Vec<&str>)> = plugin_result
+        .jsx_import_sources
+        .iter()
+        .map(|rule| {
+            let mut include: Vec<&str> = rule.include.iter().map(String::as_str).collect();
+            include.sort_unstable();
+            (
+                rule.source.as_str(),
+                root_relative_key(root, &rule.config_dir),
+                include,
+            )
+        })
+        .collect();
+    jsx_import_sources.sort_unstable();
+    jsx_import_sources.dedup();
+    jsx_import_sources.len().hash(&mut hasher);
+    for key in &jsx_import_sources {
         key.hash(&mut hasher);
     }
 
@@ -3749,6 +3770,36 @@ mod tests {
             plugin_config_hash(&with_scoped_auto_import, std::path::Path::new("")),
             plugin_config_hash(&with_auto_import, std::path::Path::new("")),
             "auto-import scope changes must invalidate the graph cache"
+        );
+    }
+
+    #[test]
+    fn graph_cache_plugin_hash_includes_jsx_import_sources() {
+        let rule = fallow_config::JsxImportSourceRule {
+            source: "./src/jsx".to_string(),
+            config_dir: PathBuf::from("/project"),
+            include: vec!["src/**/*.test.tsx".to_string()],
+        };
+        let base = plugin_result();
+        let mut with_rule = plugin_result();
+        with_rule.jsx_import_sources.push(rule.clone());
+        assert_ne!(
+            plugin_config_hash(&base, std::path::Path::new("")),
+            plugin_config_hash(&with_rule, std::path::Path::new("")),
+            "JSX import source changes must invalidate the graph cache"
+        );
+
+        let mut other_source = plugin_result();
+        other_source
+            .jsx_import_sources
+            .push(fallow_config::JsxImportSourceRule {
+                source: "./src/jsx/dom".to_string(),
+                ..rule
+            });
+        assert_ne!(
+            plugin_config_hash(&with_rule, std::path::Path::new("")),
+            plugin_config_hash(&other_source, std::path::Path::new("")),
+            "a changed JSX import source must invalidate the graph cache"
         );
     }
 

@@ -2664,6 +2664,7 @@ fn deno_import_maps_follow_nearest_package_scope_and_declaring_base() {
         active_plugins: &[],
         path_aliases: &[],
         auto_imports: &[],
+        jsx_import_sources: &[],
         scss_include_paths: &[],
         static_dir_mappings: &[],
         framework_static_dir_mappings: &[],

@@ -204,8 +204,26 @@ last value wins, and `@jsxRuntime classic` cancels the pragma.
 The dev runtime (`<source>/jsx-dev-runtime`) is not recorded, because a build
 can omit it and a missing relative dev runtime would be a false unresolved
 import. The tsconfig `jsxImportSource` option only credits the package as a
-referenced dependency, and bundler or test config options (for example Vitest
-`oxc.jsx.importSource`) add no edge.
+referenced dependency.
+
+A Vitest config can set the source for a group of files with
+`oxc.jsx.importSource` (or the older `esbuild.jsxImportSource`). Vitest runs
+the transform in dev mode, so such a file imports `jsxDEV` and `Fragment`
+from `<source>/jsx-dev-runtime`. Extraction stays config-blind: the visitor
+sets `jsx_runtime_from_config` on a file with JSX and with no
+`@jsxImportSource` or `@jsxRuntime classic` pragma. The Vitest plugin reads
+the source and the `test.include` globs into a `JsxImportSourceRule`. With
+`test.projects`, each inline project gives a rule and the root config gives
+none, because the root is then not a test project. A project inherits the
+root source only with `extends: true`, and the classic runtime gives no rule.
+A package source gives no rule and only credits the package. A synthetic edge
+from test files alone would make a runtime dependency of the app look
+test-only.
+The resolver adds the edge to each flagged module that an include glob
+matches, relative to the config directory. A relative source resolves from
+the module first and then from the config directory, as in Vite. A source
+that resolves from neither place adds no edge, so a config value never causes
+an unresolved import. The rules are part of the graph cache key.
 
 ## Verification
 

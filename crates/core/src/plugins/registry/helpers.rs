@@ -750,6 +750,11 @@ fn merge_plugin_result_fields(
     result
         .federation_sources
         .extend(plugin_result.federation_sources);
+    for rule in plugin_result.jsx_import_sources {
+        if !result.jsx_import_sources.contains(&rule) {
+            result.jsx_import_sources.push(rule);
+        }
+    }
     for diagnostic in plugin_result.config_diagnostics {
         if !result.config_diagnostics.contains(&diagnostic) {
             result.config_diagnostics.push(diagnostic);

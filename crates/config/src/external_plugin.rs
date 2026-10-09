@@ -77,6 +77,28 @@ impl AutoImportRule {
     }
 }
 
+/// A JSX import source that a bundler or test config sets for a group of files.
+///
+/// With the automatic JSX runtime, the transform adds an import of
+/// `<source>/jsx-dev-runtime` to each file with JSX, and no import statement
+/// shows that edge. A per-file `@jsxImportSource` pragma overrides the config,
+/// so the resolver applies a rule only to a module with
+/// `jsx_runtime_from_config` set. Built from the config each run and never
+/// cached with per-file extraction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsxImportSourceRule {
+    /// The `importSource` value as written, for example `./src/jsx` or
+    /// `preact`.
+    pub source: String,
+    /// Absolute directory of the config file. The `include` globs match paths
+    /// relative to it, and a relative `source` that does not resolve from the
+    /// file resolves from it.
+    pub config_dir: PathBuf,
+    /// Glob patterns, relative to `config_dir`, of the files that the config
+    /// transforms.
+    pub include: Vec<String>,
+}
+
 /// How to detect if a plugin should be activated.
 ///
 /// When set on an `ExternalPluginDef`, this takes priority over `enablers`.

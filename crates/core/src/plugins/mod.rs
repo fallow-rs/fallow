@@ -11,7 +11,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{AutoImportRule, EntryPointRole, PackageJson, UsedClassMemberRule};
+use fallow_config::{
+    AutoImportRule, EntryPointRole, JsxImportSourceRule, PackageJson, UsedClassMemberRule,
+};
 use fallow_types::semantic::SemanticFrameworkContract;
 use regex::Regex;
 
@@ -259,6 +261,10 @@ pub struct PluginResult {
     /// Where a Module Federation config exposes a file or declares a remote
     /// alias, kept so a trace can name the config (issue #2796).
     federation_sources: Vec<FederationSource>,
+    /// JSX import sources that the config sets for the files it transforms.
+    /// The resolver adds the runtime edge to each matching file without a
+    /// JSX pragma.
+    jsx_import_sources: Vec<JsxImportSourceRule>,
 }
 
 /// What a Module Federation config declares, and where, for the trace output.
@@ -757,6 +763,7 @@ impl PluginResult {
             && self.framework_static_dir_mappings.is_empty()
             && self.provided_dependencies.is_empty()
             && self.federation_sources.is_empty()
+            && self.jsx_import_sources.is_empty()
     }
 }
 
@@ -2213,7 +2220,7 @@ mod tests {
 
         assert!(PluginResult::default().is_empty());
 
-        let rows: [(&str, Fill); 15] = [
+        let rows: [(&str, Fill); 16] = [
             ("entry_patterns", |r| {
                 r.entry_patterns.push(PathRule::new("src/*.ts"));
             }),
@@ -2277,6 +2284,13 @@ mod tests {
                     config_path: PathBuf::from("/project/webpack.config.js"),
                     plugin: "webpack".to_string(),
                     key: "remotes",
+                });
+            }),
+            ("jsx_import_sources", |r| {
+                r.jsx_import_sources.push(JsxImportSourceRule {
+                    source: "./src/jsx".to_string(),
+                    config_dir: PathBuf::from("/project"),
+                    include: vec!["src/**/*.test.tsx".to_string()],
                 });
             }),
         ];

@@ -191,6 +191,8 @@ mod unmeasured_zero_diagnostics;
 mod unreachable_exports;
 #[path = "integration_test/vercel_api_directory_functions.rs"]
 mod vercel_api_directory_functions;
+#[path = "integration_test/vitest_jsx_import_source.rs"]
+mod vitest_jsx_import_source;
 #[path = "integration_test/waku.rs"]
 mod waku;
 #[path = "integration_test/workspaces.rs"]

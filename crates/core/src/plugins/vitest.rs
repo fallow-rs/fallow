@@ -6,6 +6,9 @@
 
 use std::path::Path;
 
+use fallow_config::JsxImportSourceRule;
+use oxc_ast::ast::{Expression, ObjectExpression};
+
 use super::config_parser;
 use super::test_alias;
 use super::{Plugin, PluginResult};
@@ -146,6 +149,7 @@ impl Plugin for VitestPlugin {
         apply_vitest_aliases(&mut result, source, config_path, root);
         apply_vitest_includes(&mut result, source, config_path);
         add_vitest_setup_files(&mut result, source, config_path, root);
+        add_vitest_jsx_import_sources(&mut result, source, config_path);
 
         add_vitest_environment_dependency(&mut result, source, config_path);
         add_vitest_reporter_dependencies(&mut result, source, config_path);
@@ -190,6 +194,217 @@ fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &
         &["test", "include"],
     );
     result.extend_entry_patterns(project_includes);
+}
+
+/// The Vitest default `test.include`, `**/*.{test,spec}.?(c|m)[jt]s?(x)`, as
+/// brace groups that the glob matcher supports.
+const VITEST_DEFAULT_INCLUDE: &str = "**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}";
+
+/// The JSX transform settings of one config object (`oxc.jsx` or the older
+/// `esbuild` form).
+#[derive(Clone, Default)]
+struct JsxTransform {
+    /// `Some(false)` when the transform imports no runtime (classic runtime,
+    /// `preserve`, or esbuild `transform`). `None` when the config is silent.
+    automatic: Option<bool>,
+    import_source: Option<String>,
+}
+
+impl JsxTransform {
+    /// Read the settings of one config object. `oxc` wins over `esbuild`,
+    /// because Vite maps the older `esbuild` options to `oxc`.
+    fn read(config: &ObjectExpression<'_>) -> Self {
+        if let Some(oxc) = config_parser::property_expr(config, "oxc") {
+            return config_parser::object_expression(oxc)
+                .and_then(|oxc| config_parser::property_expr(oxc, "jsx"))
+                .map_or_else(Self::default, Self::read_oxc_jsx);
+        }
+        config_parser::property_object(config, "esbuild").map_or_else(Self::default, |esbuild| {
+            Self {
+                automatic: config_parser::property_string(esbuild, "jsx")
+                    .map(|mode| mode == "automatic"),
+                import_source: config_parser::property_string(esbuild, "jsxImportSource"),
+            }
+        })
+    }
+
+    fn read_oxc_jsx(jsx: &Expression<'_>) -> Self {
+        let Some(jsx) = config_parser::object_expression(jsx) else {
+            // `jsx: 'preserve'` keeps the JSX, so no runtime import is added.
+            return Self {
+                automatic: config_parser::expression_to_string(jsx).map(|_| false),
+                import_source: None,
+            };
+        };
+        Self {
+            automatic: config_parser::property_string(jsx, "runtime")
+                .map(|runtime| runtime != "classic"),
+            import_source: config_parser::property_string(jsx, "importSource"),
+        }
+    }
+
+    /// Apply `self` over `base`, as Vite merges a project config over the
+    /// root config.
+    fn over(self, base: &Self) -> Self {
+        Self {
+            automatic: self.automatic.or(base.automatic),
+            import_source: self.import_source.or_else(|| base.import_source.clone()),
+        }
+    }
+
+    /// The import source when the transform adds a runtime import.
+    fn runtime_source(self) -> Option<String> {
+        if self.automatic == Some(false) {
+            return None;
+        }
+        self.import_source.filter(|source| !source.is_empty())
+    }
+}
+
+/// Record the JSX import source of the root config and of each inline
+/// `test.projects` config, with the files that each config transforms.
+///
+/// A project with `extends: true` inherits the root settings. A project
+/// without its own `test.include` uses the root include, and the root falls
+/// back to the Vitest default include.
+fn add_vitest_jsx_import_sources(result: &mut PluginResult, source: &str, config_path: &Path) {
+    let Some(config_dir) = config_path.parent() else {
+        return;
+    };
+    let rules = config_parser::extract_from_source(source, config_path, |program| {
+        config_parser::find_config_object(program).map(collect_jsx_import_sources)
+    })
+    .unwrap_or_default();
+    for (source, include) in rules {
+        // A package runtime has no project file to reach, so it only credits
+        // the package. A graph edge from test files alone would also make a
+        // runtime dependency of the app look test-only.
+        if !is_path_source(&source) {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(&source));
+            continue;
+        }
+        result.jsx_import_sources.push(JsxImportSourceRule {
+            source,
+            config_dir: config_dir.to_path_buf(),
+            include,
+        });
+    }
+}
+
+fn collect_jsx_import_sources(root: &ObjectExpression<'_>) -> Vec<(String, Vec<String>)> {
+    let root_jsx = JsxTransform::read(root);
+    let root_test = config_parser::property_object(root, "test");
+    let root_include = root_test
+        .and_then(test_include)
+        .unwrap_or_else(|| vec![VITEST_DEFAULT_INCLUDE.to_string()]);
+    let mut rules = Vec::new();
+    let projects = root_test
+        .and_then(|test| config_parser::property_expr(test, "projects"))
+        .and_then(config_parser::array_expression);
+    // With `test.projects`, the root config is not a test project, and a
+    // project inherits the root transform only with `extends: true`.
+    if projects.is_none()
+        && let Some(source) = root_jsx.clone().runtime_source()
+    {
+        rules.push((source, root_include.clone()));
+    }
+    for project in projects
+        .iter()
+        .flat_map(|projects| projects.elements.iter())
+        .filter_map(|element| element.as_expression())
+        .filter_map(config_parser::object_expression)
+    {
+        let own = JsxTransform::read(project);
+        let jsx = if extends_root(project) {
+            own.over(&root_jsx)
+        } else {
+            own
+        };
+        let Some(source) = jsx.runtime_source() else {
+            continue;
+        };
+        let include = config_parser::property_object(project, "test")
+            .and_then(test_include)
+            .unwrap_or_else(|| root_include.clone());
+        rules.push((source, include));
+    }
+    rules
+}
+
+/// Whether a project config has `extends: true`, which merges the root config
+/// into it. A string value names another config file, which is not read.
+/// Whether a JSX import source names a path, not a package.
+fn is_path_source(source: &str) -> bool {
+    source.starts_with('.') || source.starts_with('/')
+}
+
+fn extends_root(project: &ObjectExpression<'_>) -> bool {
+    matches!(
+        config_parser::property_expr(project, "extends"),
+        Some(Expression::BooleanLiteral(value)) if value.value
+    )
+}
+
+/// The `include` globs of a `test` block, or `None` when it sets none.
+fn test_include(test: &ObjectExpression<'_>) -> Option<Vec<String>> {
+    let include: Vec<String> = config_parser::property_expr(test, "include")
+        .map(config_parser::expression_to_string_or_array)?
+        .iter()
+        .map(|pattern| vitest_include_glob(pattern))
+        .collect();
+    (!include.is_empty()).then_some(include)
+}
+
+/// Rewrite the extglob groups of a Vitest include pattern as brace groups,
+/// which the glob matcher supports.
+///
+/// Vitest matches `include` with picomatch. `@(a|b)`, `+(a|b)` and a plain
+/// `(a|b)` group become `{a,b}`, so `(*.)+(spec|test)` becomes
+/// `*.{spec,test}`. A `+(..)` group matches its body once only, which is the
+/// common case. Other forms (`!(..)`, `?(..)`, `*(..)`) and groups with
+/// nested syntax stay as written, so they match nothing and add no edge.
+fn vitest_include_glob(pattern: &str) -> String {
+    let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+    let mut out = String::with_capacity(pattern.len());
+    let mut rest = pattern;
+    while let Some(open) = rest.find('(') {
+        let (before, after_open) = (&rest[..open], &rest[open + 1..]);
+        let Some(close) = after_open.find(')') else {
+            break;
+        };
+        let body = &after_open[..close];
+        let operator = before.chars().next_back();
+        if matches!(operator, Some('!' | '*'))
+            || body.is_empty()
+            || body.contains(['(', '{', '}', ','])
+        {
+            return format!("{out}{rest}");
+        }
+        let has_operator = matches!(operator, Some('@' | '+' | '?'));
+        out.push_str(if has_operator {
+            &before[..before.len() - 1]
+        } else {
+            before
+        });
+        let alternatives = body.replace('|', ",");
+        if operator == Some('?') {
+            // `?(a|b)` matches zero or one of the alternatives.
+            out.push_str("{,");
+            out.push_str(&alternatives);
+            out.push('}');
+        } else if body.contains('|') {
+            out.push('{');
+            out.push_str(&alternatives);
+            out.push('}');
+        } else {
+            out.push_str(body);
+        }
+        rest = &after_open[close + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn add_vitest_setup_files(
@@ -322,6 +537,218 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         )
+    }
+
+    #[test]
+    fn package_jsx_import_source_credits_the_package_without_a_rule() {
+        let result = VitestPlugin.resolve_config(
+            std::path::Path::new("/project/vitest.config.ts"),
+            "export default defineConfig({ oxc: { jsx: { importSource: '@emotion/react' } } });",
+            std::path::Path::new("/project"),
+        );
+        assert!(result.jsx_import_sources.is_empty());
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@emotion/react".to_string())
+        );
+    }
+
+    #[test]
+    fn optional_extglob_groups_become_optional_brace_groups() {
+        assert_eq!(
+            vitest_include_glob("**/*.{test,spec}.?(c|m)[jt]s?(x)"),
+            "**/*.{test,spec}.{,c,m}[jt]s{,x}"
+        );
+    }
+
+    fn jsx_rules(source: &str) -> Vec<(String, Vec<String>)> {
+        let result = VitestPlugin.resolve_config(
+            std::path::Path::new("/project/vitest.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        result
+            .jsx_import_sources
+            .iter()
+            .map(|rule| {
+                assert_eq!(rule.config_dir, std::path::Path::new("/project"));
+                (rule.source.clone(), rule.include.clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn jsx_import_source_at_root_uses_root_include() {
+        let source = r"
+            export default defineConfig({
+                oxc: { jsx: { runtime: 'automatic', importSource: './src/jsx' } },
+                test: { include: ['./src/**/*.test.tsx'] },
+            });
+        ";
+        assert_eq!(
+            jsx_rules(source),
+            vec![(
+                "./src/jsx".to_string(),
+                vec!["src/**/*.test.tsx".to_string()]
+            )]
+        );
+    }
+
+    #[test]
+    fn jsx_import_source_at_root_falls_back_to_default_include() {
+        let source = r"
+            export default defineConfig({
+                oxc: { jsx: { importSource: './jsx' } },
+            });
+        ";
+        assert_eq!(
+            jsx_rules(source),
+            vec![(
+                "./jsx".to_string(),
+                vec![VITEST_DEFAULT_INCLUDE.to_string()]
+            )]
+        );
+    }
+
+    #[test]
+    fn jsx_import_source_per_project() {
+        let source = r"
+            export default defineConfig({
+                test: {
+                    include: ['src/**/*.spec.ts'],
+                    projects: [
+                        './packages/*/vitest.config.ts',
+                        {
+                            oxc: { jsx: { runtime: 'automatic', importSource: './src/jsx' } },
+                            extends: true,
+                            test: {
+                                include: ['src/**/(*.)+(spec|test).+(ts|tsx|js)'],
+                                name: 'main',
+                            },
+                        },
+                        {
+                            oxc: { jsx: { importSource: './src/jsx/dom' } },
+                            test: { name: 'dom' },
+                        },
+                    ],
+                },
+            });
+        ";
+        assert_eq!(
+            jsx_rules(source),
+            vec![
+                (
+                    "./src/jsx".to_string(),
+                    vec!["src/**/*.{spec,test}.{ts,tsx,js}".to_string()]
+                ),
+                (
+                    "./src/jsx/dom".to_string(),
+                    vec!["src/**/*.spec.ts".to_string()]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn jsx_import_source_is_inherited_only_with_extends_true() {
+        let source = r"
+            export default defineConfig({
+                oxc: { jsx: { importSource: './jsx' } },
+                test: {
+                    projects: [
+                        { extends: true, test: { include: ['a/**/*.test.tsx'] } },
+                        { test: { include: ['b/**/*.test.tsx'] } },
+                        {
+                            extends: true,
+                            oxc: { jsx: { runtime: 'automatic' } },
+                            test: { include: ['c/**/*.test.tsx'] },
+                        },
+                    ],
+                },
+            });
+        ";
+        assert_eq!(
+            jsx_rules(source),
+            vec![
+                ("./jsx".to_string(), vec!["a/**/*.test.tsx".to_string()]),
+                ("./jsx".to_string(), vec!["c/**/*.test.tsx".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn classic_jsx_runtime_adds_no_rule() {
+        let source = r"
+            export default defineConfig({
+                oxc: { jsx: { runtime: 'automatic', importSource: './jsx' } },
+                test: {
+                    projects: [
+                        {
+                            extends: true,
+                            oxc: { jsx: { runtime: 'classic' } },
+                            test: { include: ['a/**/*.test.tsx'] },
+                        },
+                        {
+                            esbuild: { jsx: 'transform', jsxImportSource: 'solid-js' },
+                            test: { include: ['b/**/*.test.tsx'] },
+                        },
+                        {
+                            oxc: { jsx: 'preserve' },
+                            test: { include: ['c/**/*.test.tsx'] },
+                        },
+                    ],
+                },
+            });
+        ";
+        assert!(jsx_rules(source).is_empty());
+    }
+
+    #[test]
+    fn esbuild_jsx_import_source_is_read() {
+        let source = r"
+            export default defineConfig({
+                esbuild: { jsx: 'automatic', jsxImportSource: './src/jsx' },
+                test: { include: ['test/**/*.test.tsx'] },
+            });
+        ";
+        assert_eq!(
+            jsx_rules(source),
+            vec![(
+                "./src/jsx".to_string(),
+                vec!["test/**/*.test.tsx".to_string()]
+            )]
+        );
+    }
+
+    #[test]
+    fn config_without_jsx_import_source_adds_no_rule() {
+        let source = r"
+            export default defineConfig({
+                oxc: { jsx: { runtime: 'automatic' } },
+                test: { include: ['src/**/*.test.tsx'] },
+            });
+        ";
+        assert!(jsx_rules(source).is_empty());
+    }
+
+    #[test]
+    fn include_extglob_groups_become_brace_groups() {
+        assert_eq!(
+            vitest_include_glob("./src/**/(*.)+(spec|test).+(ts|tsx|js)"),
+            "src/**/*.{spec,test}.{ts,tsx,js}"
+        );
+        assert_eq!(
+            vitest_include_glob("src/**/*.@(test|spec).tsx"),
+            "src/**/*.{test,spec}.tsx"
+        );
+        assert_eq!(
+            vitest_include_glob("src/**/*.test.tsx"),
+            "src/**/*.test.tsx"
+        );
+        // Forms without a brace equivalent stay as written.
+        assert_eq!(vitest_include_glob("src/!(skip)/*.ts"), "src/!(skip)/*.ts");
+        assert_eq!(vitest_include_glob("src/(a|(b))/*.ts"), "src/(a|(b))/*.ts");
     }
 
     /// Issue #2226: neither runner gives literal `X/__mocks__` imports special

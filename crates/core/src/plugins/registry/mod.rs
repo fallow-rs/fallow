@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 use fallow_config::{
-    AutoImportRule, EntryPointRole, ExternalPluginDef, PackageJson, UsedClassMemberRule,
+    AutoImportRule, EntryPointRole, ExternalPluginDef, JsxImportSourceRule, PackageJson,
+    UsedClassMemberRule,
 };
 
 use crate::scripts;
@@ -424,6 +425,10 @@ pub struct AggregatedPluginResult {
     /// Where Module Federation configs expose files and declare remote
     /// aliases, for the trace output.
     pub federation_sources: Vec<super::FederationSource>,
+    /// JSX import sources that bundler and test configs set, with the files
+    /// each config transforms. The resolver adds the runtime edge to each
+    /// matching module with `jsx_runtime_from_config` set.
+    pub jsx_import_sources: Vec<JsxImportSourceRule>,
 }
 
 /// Append `incoming` string items to `target`, skipping values already present
@@ -540,6 +545,7 @@ impl AggregatedPluginResult {
             provided_dependencies,
             config_diagnostics,
             federation_sources,
+            jsx_import_sources,
         } = other;
 
         self.entry_patterns.extend(entry_patterns);
@@ -584,6 +590,11 @@ impl AggregatedPluginResult {
             .extend(framework_static_dir_mappings);
         self.provided_dependencies.extend(provided_dependencies);
         self.federation_sources.extend(federation_sources);
+        for rule in jsx_import_sources {
+            if !self.jsx_import_sources.contains(&rule) {
+                self.jsx_import_sources.push(rule);
+            }
+        }
         for diagnostic in config_diagnostics {
             if !self.config_diagnostics.contains(&diagnostic) {
                 self.config_diagnostics.push(diagnostic);
