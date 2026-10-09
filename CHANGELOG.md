@@ -77,21 +77,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a
-  clean commit in the other tree. Now the generated `fallow-gate.sh` reads the
-  target directory from `git -C <dir>` (each `-C` applies after the one
-  before, as in git), `cd <dir> && git ...`, `--work-tree`, `--git-dir
-  <dir>/.git` and the `GIT_WORK_TREE` and `GIT_DIR` prefixes. With both
-  `--work-tree` and `--git-dir`, it audits both trees. It finds each audit
-  root with the same rules as before. A relative directory resolves against
-  the session directory. Quoted paths with spaces work. The parser also reads
-  command substitutions, `sh -c` and `eval` strings, here-documents and line
-  continuations. When the parser is not certain of the directory, for example
-  after `cd -`, `popd`, a `cd` to a missing directory or a directory from a
-  variable, the gate also audits the session tree. A command that the earlier
-  gate classified as a git write is still a git write. A command with git
-  writes into two trees audits both trees and blocks when one audit fails.
-  Run `fallow hooks install --target agent` again to update an installed gate
-  script.
+  clean commit in the other tree. Now the generated `fallow-gate.sh` audits
+  only the target tree when the command has this strict form: `[cd <dir> &&]
+  git [-C <dir>]... commit|push [<arg>]...`. Each directory is one plain or
+  quoted word that exists. Each `-C` applies after the one before, as in git.
+  A relative directory resolves against the session directory. Any other
+  form, for example with `;`, a pipe, `--work-tree`, `--git-dir`, a `GIT_*`
+  prefix, `sh -c`, `eval` or an expansion, audits the session tree. It also
+  audits each directory that the command names and that exists. The gate
+  blocks when one audit fails. A command with quotes or expansions that
+  holds `git` and later `commit` or `push` also counts as a git write now,
+  for example `bash -c 'git commit'`. Run `fallow hooks install --target
+  agent` again to update an installed gate script.
 
 ## [3.33.0] - 2026-10-09
 

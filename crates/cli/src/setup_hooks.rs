@@ -2285,8 +2285,6 @@ mod tests {
             "git stash push",
             "git show commit",
             "git -c",
-            "echo \"git commit\"",
-            "git log --grep 'x; git push'",
             "cargo test",
             "",
         ];
