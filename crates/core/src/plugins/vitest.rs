@@ -500,7 +500,8 @@ impl ProjectScope {
         if let Some(dir) = &self.dir {
             base = lexical_join(&base, dir);
         }
-        let prefix = base.strip_prefix(config_dir).ok()?.to_str()?.to_string();
+        // A glob needs forward slashes, also on Windows.
+        let prefix = config_parser::path_to_config_string(base.strip_prefix(config_dir).ok()?);
         let scoped = |pattern: &str| scoped_glob(&prefix, pattern, config_dir);
 
         // Vitest reads a negated include entry as an exclude.
@@ -553,7 +554,9 @@ impl ProjectScope {
 fn scoped_glob(prefix: &str, pattern: &str, config_dir: &Path) -> Option<String> {
     if pattern.starts_with('/') {
         let relative = Path::new(pattern).strip_prefix(config_dir).ok()?;
-        return Some(vitest_include_glob(relative.to_str()?));
+        return Some(vitest_include_glob(&config_parser::path_to_config_string(
+            relative,
+        )));
     }
     let glob = vitest_include_glob(pattern);
     if prefix.is_empty() {
