@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The GitHub Action and the GitLab template can now baseline health and
+  duplication on the default run.** On bare `fallow`, `--baseline` holds the
+  dead-code baseline only, so a project with existing complexity could not
+  pass the health gate with a baseline. The CLI already reads the other two
+  baselines with `--health-baseline` and `--dupes-baseline`. The action now
+  forwards its `health-baseline` and `dupes-baseline` inputs when `command`
+  is empty. The GitLab template has two new variables for the same run,
+  `FALLOW_HEALTH_BASELINE` and `FALLOW_DUPES_BASELINE`. Both integrations
+  report each of these baselines when it is stale or saved by another
+  command, and `fail-on-stale-baseline` (`FALLOW_FAIL_ON_STALE_BASELINE`)
+  judges them too. Create the files with `fallow health --save-baseline` and
+  `fallow dupes --save-baseline`. Other commands ignore these inputs, as
+  before. A `--health-baseline` or `--dupes-baseline` flag in the `args`
+  input (`FALLOW_ARGS`) also counts as a baseline for the stale-baseline
+  gate on the bare run.
+- **The GitHub Action and the GitLab template no longer count health findings
+  that a baseline accepts.** The issue count read
+  `summary.functions_above_threshold`, which also counts the functions that a
+  loaded health baseline accepts. A `fallow health` run, or a bare run with
+  `--health-baseline`, then failed the job with `fail-on-issues` although
+  every gate of the CLI passed. The count now reads
+  `baseline_staleness.remaining_findings` when a baseline is loaded. The
+  duplication count was already correct.
+- `fallow --help` now says that `--baseline` and `--save-baseline` hold the
+  dead-code baseline only on bare `fallow`. When a bare run gets a
+  `fallow health` or `fallow dupes` baseline through `--baseline`, the note
+  now tells you to pass it with `--health-baseline` or `--dupes-baseline`.
+
 ## [3.33.0] - 2026-10-09
 
 ### Fixed

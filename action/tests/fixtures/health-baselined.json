@@ -1,0 +1,31 @@
+{
+  "kind": "health",
+  "schema_version": 9,
+  "version": "3.32.0",
+  "elapsed_ms": 12,
+  "findings": [],
+  "summary": {
+    "files_analyzed": 12,
+    "functions_analyzed": 17,
+    "functions_above_threshold": 76,
+    "max_cyclomatic_threshold": 20,
+    "max_cognitive_threshold": 15,
+    "max_crap_threshold": 30.0,
+    "baseline_staleness": {
+      "baseline_entries": 80,
+      "matched_entries": 80,
+      "stale_entries": 0,
+      "current_findings": 76,
+      "remaining_findings": 0,
+      "change_scoped": false,
+      "stale": false,
+      "warning": "none",
+      "gate_trips": false,
+      "moved_entries": 0
+    }
+  },
+  "gate_outcomes": {
+    "health-findings": { "status": "pass", "enforced": true, "observed": 0.0, "threshold_label": "error" },
+    "stale-baseline": { "status": "pass", "enforced": false }
+  }
+}

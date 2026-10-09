@@ -294,6 +294,20 @@ if [ "${MOCK_BASELINE_STALENESS:-}" = "1" ]; then
   if [ -n "$reasons" ]; then
     scoped=true
   fi
+  # A bare-run envelope with a health or dupes section baseline. The check
+  # section carries no staleness, so each section is read on its own.
+  if [ "${MOCK_BARE_SECTIONS:-}" = "1" ]; then
+    if [ "$scoped" = "true" ]; then
+      printf '{"total_issues":0,"health":{"summary":{"baseline_staleness":{"baseline_entries":6,"matched_entries":0,"stale_entries":6,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":[%s]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false}}}\n' "$reasons"
+    else
+      printf '%s\n' '{"total_issues":0,"health":{"summary":{"baseline_staleness":{"baseline_entries":6,"matched_entries":2,"stale_entries":4,"current_findings":2,"change_scoped":false,"stale":true,"warning":"partial","gate_trips":true}}},"gate_outcomes":{"stale-baseline":{"status":"fail","enforced":false}}}'
+    fi
+    exit 0
+  fi
+  if [ "${MOCK_BARE_SECTIONS:-}" = "2" ]; then
+    printf '%s\n' '{"total_issues":0,"dupes":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":"health"}},"gate_outcomes":{"stale-baseline":{"status":"fail","enforced":false}}}'
+    exit 0
+  fi
   if [ "$scoped" = "true" ]; then
     if [ "${MOCK_NO_SCOPE_REASONS:-}" = "1" ]; then
       printf '%s\n' '{"total_issues":0,"baseline_staleness":{"baseline_entries":8,"matched_entries":0,"stale_entries":8,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false}}'
@@ -779,6 +793,130 @@ else
 fi
 assert_contains "$OUT" "cannot apply to command: audit" \
   "audit baselines: the rejection says why"
+
+# The bare run reads FALLOW_BASELINE as the dead-code baseline only, so it
+# forwards FALLOW_HEALTH_BASELINE and FALLOW_DUPES_BASELINE through their own
+# flags, and the gate judges each one.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+BARE_SECTION_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_BARE_SECTIONS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_COMMAND= \
+  FALLOW_HEALTH_BASELINE=he.json \
+  FALLOW_DUPES_BASELINE=du.json \
+  FALLOW_FAIL_ON_STALE_BASELINE=true 2>&1) || BARE_SECTION_EXIT=$?
+assert_contains "$(sed -n '1p' "$STALE_LOG")" "--health-baseline he.json" \
+  "bare baselines: the bare run forwards FALLOW_HEALTH_BASELINE"
+assert_contains "$(sed -n '1p' "$STALE_LOG")" "--dupes-baseline du.json" \
+  "bare baselines: the bare run forwards FALLOW_DUPES_BASELINE"
+assert_contains "$OUT" "WARNING: the health baseline at he.json is partially stale: 4 of 6 entries" \
+  "bare baselines: a stale health baseline warns"
+assert_contains "$OUT" "ERROR: Fallow baseline gate failed: 4 of 6 entries in the health baseline at he.json matched nothing this run" \
+  "bare baselines: the gate fails on a stale health baseline"
+if [ "$BARE_SECTION_EXIT" -eq 1 ]; then
+  pass "bare baselines: a tripped section gate exits 1"
+else
+  fail "bare baselines: a tripped section gate exits 1" "exit $BARE_SECTION_EXIT"
+fi
+
+assert_not_contains "$OUT" "has no baseline to judge" \
+  "bare baselines: section variables alone are a baseline the gate can judge"
+
+# A baseline that only FALLOW_ARGS passes still counts.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+BARE_SECTION_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_BARE_SECTIONS=1 \
+  FALLOW_COMMAND= \
+  FALLOW_ARGS="--health-baseline codex-app/health-baseline.json" \
+  FALLOW_FAIL_ON_STALE_BASELINE=true 2>&1) || BARE_SECTION_EXIT=$?
+assert_not_contains "$OUT" "has no baseline to judge" \
+  "bare baselines: --health-baseline in FALLOW_ARGS is a baseline the gate can judge"
+assert_contains "$OUT" "WARNING: the health baseline passed through FALLOW_ARGS is partially stale: 4 of 6 entries" \
+  "bare baselines: a health baseline from FALLOW_ARGS gets the staleness warning"
+if [ "$BARE_SECTION_EXIT" -eq 1 ]; then
+  pass "bare baselines: a health baseline from FALLOW_ARGS fails the pipeline when stale"
+else
+  fail "bare baselines: a health baseline from FALLOW_ARGS fails the pipeline when stale" "exit $BARE_SECTION_EXIT"
+fi
+
+# Other commands keep ignoring the two variables.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_COMMAND=health \
+  FALLOW_BASELINE=baseline.json \
+  FALLOW_HEALTH_BASELINE=he.json)
+assert_not_contains "$(cat "$STALE_LOG")" "--health-baseline" \
+  "bare baselines: FALLOW_COMMAND health does not forward FALLOW_HEALTH_BASELINE"
+
+# On another command a section variable alone is still no baseline to judge.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+BARE_SECTION_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  FALLOW_COMMAND=health \
+  FALLOW_HEALTH_BASELINE=he.json \
+  FALLOW_FAIL_ON_STALE_BASELINE=true 2>&1) || BARE_SECTION_EXIT=$?
+if [ "$BARE_SECTION_EXIT" -eq 2 ]; then
+  pass "bare baselines: FALLOW_COMMAND health with only FALLOW_HEALTH_BASELINE still rejects the gate"
+else
+  fail "bare baselines: FALLOW_COMMAND health with only FALLOW_HEALTH_BASELINE still rejects the gate" "exit $BARE_SECTION_EXIT"
+fi
+assert_contains "$OUT" "Set FALLOW_BASELINE, or turn the gate off." \
+  "bare baselines: the rejection on other commands keeps its wording"
+
+# A merge-request pipeline is scoped, so a section baseline alone earns the
+# unscoped re-read.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+STALE_LOG="$STALE_WORK/fallow.log"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_BARE_SECTIONS=1 \
+  FALLOW_TEST_LOG="$STALE_LOG" \
+  FALLOW_COMMAND= \
+  FALLOW_HEALTH_BASELINE=he.json \
+  FALLOW_CHANGED_SINCE=abc123 \
+  FALLOW_FAIL_ON_STALE_BASELINE=true)
+STALE_RUNS=$(grep -c '^fallow ' "$STALE_LOG" || true)
+if [ "$STALE_RUNS" = "2" ]; then
+  pass "bare baselines: a scoped pipeline re-reads a health baseline unscoped"
+else
+  fail "bare baselines: a scoped pipeline re-reads a health baseline unscoped" "ran $STALE_RUNS times"
+fi
+assert_not_contains "$(sed -n '2p' "$STALE_LOG")" "--changed-since" \
+  "bare baselines: the re-read drops --changed-since"
+assert_contains "$(sed -n '2p' "$STALE_LOG")" "--health-baseline he.json" \
+  "bare baselines: the re-read still loads the health baseline"
+assert_contains "$OUT" "ERROR: Fallow baseline gate failed: 4 of 6 entries in the health baseline at he.json" \
+  "bare baselines: the re-read verdict fails the merge-request pipeline"
+
+# A baseline another command saved names the variable that reads it.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_BARE_SECTIONS=2 \
+  FALLOW_COMMAND= \
+  FALLOW_DUPES_BASELINE=du.json)
+assert_contains "$OUT" 'WARNING: `fallow health` saved the dupes baseline at du.json, so this run reads nothing from it and it suppresses nothing. Pass that file with FALLOW_HEALTH_BASELINE instead.' \
+  "bare baselines: a health baseline in FALLOW_DUPES_BASELINE points at FALLOW_HEALTH_BASELINE"
+
+# On the bare run FALLOW_SAVE_BASELINE writes the dead-code baseline, so
+# naming the health baseline file there replaces it.
+rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
+OUT=$(run_generated_gitlab_fixture "$STALE_WORK" \
+  MOCK_BASELINE_STALENESS=1 \
+  MOCK_BARE_SECTIONS=1 \
+  FALLOW_COMMAND= \
+  FALLOW_HEALTH_BASELINE=he.json \
+  FALLOW_SAVE_BASELINE=he.json)
+assert_contains "$OUT" "WARNING: FALLOW_SAVE_BASELINE and FALLOW_HEALTH_BASELINE name the same file (he.json)" \
+  "bare baselines: FALLOW_SAVE_BASELINE over the health baseline warns"
 
 # Diff scoping reaches the CLI through FALLOW_DIFF_FILE, not argv.
 rm -rf "$STALE_WORK"; mkdir -p "$STALE_WORK"
@@ -1996,6 +2134,44 @@ gitlab_gate_envelope() {
   printf '{%s}\n' "$body" > "$GATE_WORK/envelope.json"
   printf '%s' "$GATE_WORK/envelope.json"
 }
+
+# A loaded health baseline filters the findings, but
+# summary.functions_above_threshold still counts the functions it accepts. The
+# issue count reads remaining_findings, so a fully baselined run is clean.
+BASELINED_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$FIXTURES/health-baselined.json" \
+  FALLOW_COMMAND=health \
+  FALLOW_BASELINE=h.json \
+  FALLOW_FAIL_ON_ISSUES=true 2>&1) || BASELINED_EXIT=$?
+assert_contains "$OUT" "Found 0 issues" \
+  "baselined count: FALLOW_COMMAND health counts only the findings the baseline does not accept"
+if [ "$BASELINED_EXIT" -eq 0 ]; then
+  pass "baselined count: a fully baselined health run passes FALLOW_FAIL_ON_ISSUES"
+else
+  fail "baselined count: a fully baselined health run passes FALLOW_FAIL_ON_ISSUES" "exit $BASELINED_EXIT"
+fi
+jq '.summary.baseline_staleness.remaining_findings = 2' "$FIXTURES/health-baselined.json" > "$GATE_WORK/health-two-new.json"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$GATE_WORK/health-two-new.json" \
+  FALLOW_COMMAND=health \
+  FALLOW_BASELINE=h.json \
+  FALLOW_FAIL_ON_ISSUES=false)
+assert_contains "$OUT" "Found 2 issues" \
+  "baselined count: new functions above a threshold still count"
+BASELINED_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$FIXTURES/combined-health-baselined.json" \
+  FALLOW_COMMAND= \
+  FALLOW_HEALTH_BASELINE=h.json \
+  FALLOW_FAIL_ON_ISSUES=true 2>&1) || BASELINED_EXIT=$?
+assert_contains "$OUT" "Found 0 issues" \
+  "baselined count: the bare run counts only the health findings the baseline does not accept"
+if [ "$BASELINED_EXIT" -eq 0 ]; then
+  pass "baselined count: a fully baselined bare run passes FALLOW_FAIL_ON_ISSUES"
+else
+  fail "baselined count: a fully baselined bare run passes FALLOW_FAIL_ON_ISSUES" "exit $BASELINED_EXIT"
+fi
 
 # A gate the variable asked for fails the pipeline even with
 # FALLOW_FAIL_ON_ISSUES false, which is the whole point of every issue here.

@@ -28,7 +28,9 @@ Set `fail-on-stale-baseline: true` to fail the job on a stale baseline. This gat
 
 The action can still be unable to judge the baseline with `production: true`, `workspace`, `changed-workspaces`, or a positional path in `args`. It emits a `::warning::` when the gate was requested, or a `::notice::` otherwise.
 
-If the installed fallow predates this feature or a command reports no staleness, the action warns without failing on the stale-baseline gate. Other gates can still fail the job. Invalid input combinations exit 2 before analysis: the gate without `baseline`, or the gate with `command: fix` or `command: security`.
+If the installed fallow predates this feature or a command reports no staleness, the action warns without failing on the stale-baseline gate. Other gates can still fail the job. Invalid input combinations exit 2 before analysis: the gate without a baseline input (on the combined run, `health-baseline` or `dupes-baseline` is enough), or the gate with `command: fix` or `command: security`.
+
+On the combined run (empty `command`), `baseline` holds the dead-code baseline only. Pass the health baseline with `health-baseline` and the duplication baseline with `dupes-baseline`. Create them with `fallow health --save-baseline` and `fallow dupes --save-baseline`. The action reports and gates each of these baselines in the same way as `baseline`, and names the file in each step log line. A `--health-baseline` or `--dupes-baseline` flag in `args` counts as well. The job summary and the `baseline-*` outputs describe the `baseline` input only.
 
 Do not point `baseline` and `save-baseline` at the same file. The run saves before it compares, so it replaces the reference baseline and cannot report stale entries. The action warns about this configuration.
 

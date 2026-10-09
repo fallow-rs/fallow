@@ -3871,6 +3871,25 @@ if [ "${MOCK_AUDIT_BASELINES:-}" = "3" ]; then
   printf '{"kind":"audit","schema_version":6,"total_issues":0,"verdict":"pass","complexity":{"summary":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":"dead-code","scope_reasons":["changed-files"]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false},"audit-verdict":{"status":"pass","enforced":true}}}\n'
   exit 0
 fi
+# A bare-run envelope with a health or dupes section baseline. The `check`
+# section carries no staleness, so the first-match chain finds nothing and
+# each section has to be read on its own.
+if [ "${MOCK_BARE_SECTIONS:-}" = "1" ]; then
+  if [ "$scoped" = "true" ]; then
+    printf '{"schema_version":9,"total_issues":0,"health":{"summary":{"baseline_staleness":{"baseline_entries":6,"matched_entries":0,"stale_entries":6,"current_findings":0,"change_scoped":true,"stale":false,"warning":"none","gate_trips":false,"scope_reasons":[%s]}}},"gate_outcomes":{"stale-baseline":{"status":"skipped","enforced":false}}}\n' "$reasons"
+  else
+    printf '{"schema_version":9,"total_issues":0,"health":{"summary":{"baseline_staleness":{"baseline_entries":6,"matched_entries":2,"stale_entries":4,"current_findings":2,"change_scoped":false,"stale":true,"warning":"partial","gate_trips":true}}},"gate_outcomes":{"stale-baseline":{"status":"fail","enforced":false}}}\n'
+  fi
+  exit 0
+fi
+if [ "${MOCK_BARE_SECTIONS:-}" = "2" ]; then
+  printf '{"schema_version":9,"total_issues":0,"dupes":{"baseline_staleness":{"baseline_entries":0,"matched_entries":0,"stale_entries":0,"current_findings":0,"change_scoped":false,"stale":false,"warning":"none","gate_trips":true,"unrecognised_format":true,"saved_by":"health"}},"gate_outcomes":{"stale-baseline":{"status":"fail","enforced":false}}}\n'
+  exit 0
+fi
+if [ "${MOCK_BARE_SECTIONS:-}" = "3" ]; then
+  printf '{"schema_version":9,"total_issues":0,"health":{"summary":{"baseline_staleness":{"baseline_entries":6,"matched_entries":6,"stale_entries":0,"current_findings":6,"change_scoped":false,"stale":false,"warning":"none","gate_trips":false}}},"gate_outcomes":{"stale-baseline":{"status":"pass","enforced":false}}}\n'
+  exit 0
+fi
 if [ "${MOCK_GATE_RUN_BROKEN:-}" = "1" ] && [ "$scoped" = "false" ]; then
   printf 'not json at all\n'
   exit 2
@@ -4462,6 +4481,167 @@ else
   fail "audit baselines: the rejection is scoped to audit" "exit ${STALE_EXIT}"
 fi
 
+# 18. The bare run reads `baseline` as the dead-code baseline only, so it
+# forwards `health-baseline` and `dupes-baseline` through their own flags.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="3" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_DUPES_BASELINE="du.json"
+assert_contains "$STALE_ANALYSIS_LOG" "--health-baseline he.json" \
+  "bare baselines: the bare run forwards health-baseline"
+assert_contains "$STALE_ANALYSIS_LOG" "--dupes-baseline du.json" \
+  "bare baselines: the bare run forwards dupes-baseline"
+
+# Other single-analysis commands keep ignoring the two inputs.
+run_stale_analyze INPUT_COMMAND="health" INPUT_BASELINE="baseline.json" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_DUPES_BASELINE="du.json"
+assert_not_contains "$STALE_ANALYSIS_LOG" "--health-baseline" \
+  "bare baselines: command: health does not forward health-baseline"
+assert_not_contains "$STALE_ANALYSIS_LOG" "--dupes-baseline" \
+  "bare baselines: command: health does not forward dupes-baseline"
+
+# The gate accepts a section baseline as its only baseline on the bare run.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="1" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the health baseline at he.json is partially stale: 4 of 6 entries" \
+  "bare baselines: a stale health baseline warns"
+assert_contains "$STALE_STDOUT" "fallow health --save-baseline he.json" \
+  "bare baselines: the warning names the command that re-saves the file"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed: 4 of 6 entries in the health baseline at he.json matched nothing this run" \
+  "bare baselines: the gate fails on a stale health baseline"
+if [ "$STALE_EXIT" -eq 1 ]; then
+  pass "bare baselines: a tripped section gate exits 1"
+else
+  fail "bare baselines: a tripped section gate exits 1" "exit ${STALE_EXIT}"
+fi
+assert_not_contains "$STALE_STDOUT" "baseline staleness could not be judged" \
+  "bare baselines: the envelope gate entry does not add a stand-down"
+
+assert_not_contains "$STALE_STDOUT" "has no baseline to judge" \
+  "bare baselines: health-baseline alone is a baseline the gate can judge"
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "gates_failed=stale-baseline" \
+  "bare baselines: the failed gate reaches the gates-failed output"
+
+# The same with dupes-baseline as the only baseline.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="2" \
+  INPUT_DUPES_BASELINE="du.json" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_not_contains "$STALE_STDOUT" "has no baseline to judge" \
+  "bare baselines: dupes-baseline alone is a baseline the gate can judge"
+if [ "$STALE_EXIT" -eq 1 ]; then
+  pass "bare baselines: a dupes-baseline gate can fail the run"
+else
+  fail "bare baselines: a dupes-baseline gate can fail the run" "exit ${STALE_EXIT}"
+fi
+
+# A baseline that only the args input passes still counts, and its lines say
+# where it came from because this script never sees the path.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="1" \
+  INPUT_ARGS="--health-baseline codex-app/health-baseline.json" \
+  INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_not_contains "$STALE_STDOUT" "has no baseline to judge" \
+  "bare baselines: --health-baseline in args is a baseline the gate can judge"
+assert_contains "$STALE_STDOUT" "::warning::fallow: the health baseline passed through args is partially stale: 4 of 6 entries" \
+  "bare baselines: a health baseline from args gets the staleness warning"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed: 4 of 6 entries in the health baseline passed through args" \
+  "bare baselines: a health baseline from args can fail the gate"
+if [ "$STALE_EXIT" -eq 1 ]; then
+  pass "bare baselines: a health baseline from args fails the run when stale"
+else
+  fail "bare baselines: a health baseline from args fails the run when stale" "exit ${STALE_EXIT}"
+fi
+
+# On another command the same input pair still has no baseline to judge.
+run_stale_analyze INPUT_COMMAND="health" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_FAIL_ON_STALE_BASELINE="true"
+if [ "$STALE_EXIT" -eq 2 ]; then
+  pass "bare baselines: command: health with only health-baseline still rejects the gate"
+else
+  fail "bare baselines: command: health with only health-baseline still rejects the gate" "exit ${STALE_EXIT}"
+fi
+assert_contains "$STALE_STDOUT" "Set the 'baseline' input, or turn the gate off." \
+  "bare baselines: the rejection on other commands keeps its wording"
+
+run_stale_analyze INPUT_COMMAND="" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "Set the 'baseline', 'health-baseline' or 'dupes-baseline' input" \
+  "bare baselines: the bare-run rejection names the section inputs"
+
+# A clean section baseline passes the armed gate.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="3" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_FAIL_ON_STALE_BASELINE="true"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "bare baselines: a clean health baseline passes the armed gate"
+else
+  fail "bare baselines: a clean health baseline passes the armed gate" "exit ${STALE_EXIT}"
+fi
+assert_not_contains "$STALE_STDOUT" "::error::" \
+  "bare baselines: a clean health baseline prints no error"
+
+# A pull-request run is scoped, so a section baseline alone earns the re-read.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="1" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_CHANGED_SINCE="abc123" \
+  INPUT_FAIL_ON_STALE_BASELINE="true"
+STALE_RUN_COUNT=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep -c '^analysis ' || true)
+if [ "$STALE_RUN_COUNT" = "2" ]; then
+  pass "bare baselines: a scoped run re-reads a health baseline unscoped"
+else
+  fail "bare baselines: a scoped run re-reads a health baseline unscoped" "ran ${STALE_RUN_COUNT} times"
+fi
+GATE_ARGV=$(printf '%s\n' "$STALE_ANALYSIS_LOG" | grep '^analysis ' | sed -n '2p')
+assert_not_contains "$GATE_ARGV" "--changed-since" \
+  "bare baselines: the re-read drops --changed-since"
+assert_contains "$GATE_ARGV" "--health-baseline he.json" \
+  "bare baselines: the re-read still loads the health baseline"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed: 4 of 6 entries in the health baseline at he.json" \
+  "bare baselines: the re-read verdict fails the pull-request job"
+
+# A channel the re-read cannot remove stands the section down, by name.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="1" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_CHANGED_SINCE="abc123" \
+  INPUT_PRODUCTION="true" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" "::warning::fallow: baseline staleness could not be judged on this run because the health analysis covered only part of the project (changed-since, production)" \
+  "bare baselines: an unremovable channel stands the health baseline down"
+if [ "$STALE_EXIT" -eq 0 ]; then
+  pass "bare baselines: a section stand-down does not fail the run"
+else
+  fail "bare baselines: a section stand-down does not fail the run" "exit ${STALE_EXIT}"
+fi
+
+# A baseline another command saved names the input that reads it.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="2" \
+  INPUT_DUPES_BASELINE="du.json" INPUT_FAIL_ON_STALE_BASELINE="true"
+assert_contains "$STALE_STDOUT" '::warning::fallow: `fallow health` saved the dupes baseline at du.json, so this run reads nothing from it and it suppresses nothing. Pass that file with the health-baseline input instead.' \
+  "bare baselines: a health baseline in dupes-baseline points at health-baseline"
+assert_contains "$STALE_STDOUT" "::error::Fallow baseline gate failed: the dupes baseline at du.json suppresses nothing" \
+  "bare baselines: the armed gate names the unreadable section baseline"
+
+# The step outputs stay bound to the `baseline` input.
+assert_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_entries=" \
+  "bare baselines: the step outputs are written"
+assert_not_contains "$(cat "$STALE_OUTPUT_FILE")" "baseline_unrecognised=true" \
+  "bare baselines: a section baseline does not leak into the baseline outputs"
+
+# The section inputs reach workflow commands, so they are validated too.
+run_stale_analyze INPUT_COMMAND="" INPUT_HEALTH_BASELINE=$'he.json\n::error::x'
+if [ "$STALE_EXIT" -eq 2 ]; then
+  pass "bare baselines: a control character in health-baseline is rejected"
+else
+  fail "bare baselines: a control character in health-baseline is rejected" "exit ${STALE_EXIT}"
+fi
+assert_contains "$STALE_STDOUT" "::error::health-baseline must not contain ASCII control characters" \
+  "bare baselines: the rejection names the input"
+run_stale_analyze INPUT_COMMAND="health" INPUT_BASELINE="baseline.json" \
+  INPUT_HEALTH_BASELINE=$'he.json\n::error::x'
+if [ "$STALE_EXIT" -ne 2 ]; then
+  pass "bare baselines: a command that ignores health-baseline does not validate it"
+else
+  fail "bare baselines: a command that ignores health-baseline does not validate it" "exit ${STALE_EXIT}"
+fi
+
+# On the bare run save-baseline writes the dead-code baseline, so naming the
+# health baseline file there replaces it.
+run_stale_analyze INPUT_COMMAND="" MOCK_BARE_SECTIONS="3" \
+  INPUT_HEALTH_BASELINE="he.json" INPUT_SAVE_BASELINE="he.json"
+assert_contains "$STALE_STDOUT" "::warning::fallow: save-baseline and health-baseline name the same file (he.json)" \
+  "bare baselines: save-baseline over the health baseline warns"
+
 rm -rf "$STALE_WORK"
 
 # --- Gate verdicts (issues #2680, #2681, #2683, #2685, #2686) ---
@@ -4997,6 +5177,36 @@ MAP_ARGS=$(
 )
 assert_contains "$MAP_ARGS" "--no-package-baselines" \
   "re-read: a package-map run turns the map off"
+
+# A loaded health baseline filters the findings, but
+# summary.functions_above_threshold still counts the functions it accepts. The
+# issue count reads remaining_findings, so a fully baselined run is clean.
+run_gate_analyze "$(cat "$FIXTURES/health-baselined.json")" \
+  INPUT_COMMAND="health" INPUT_BASELINE="h.json" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_OUTPUTS" "issues=0" \
+  "baselined count: command: health counts only the findings the baseline does not accept"
+if [ "$GATE_EXIT" -eq 0 ]; then
+  pass "baselined count: a fully baselined health run passes fail-on-issues"
+else
+  fail "baselined count: a fully baselined health run passes fail-on-issues" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
+run_gate_analyze "$(jq -c '.summary.baseline_staleness.remaining_findings = 2' "$FIXTURES/health-baselined.json")" \
+  INPUT_COMMAND="health" INPUT_BASELINE="h.json" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_OUTPUTS" "issues=2" \
+  "baselined count: new functions above a threshold still count"
+run_gate_analyze "$(jq -c 'del(.summary.baseline_staleness)' "$FIXTURES/health-baselined.json")" \
+  INPUT_COMMAND="health"
+assert_contains "$GATE_OUTPUTS" "issues=76" \
+  "baselined count: without a baseline the summary count stays the count"
+run_gate_analyze "$(cat "$FIXTURES/combined-health-baselined.json")" \
+  INPUT_COMMAND="" INPUT_HEALTH_BASELINE="h.json" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_OUTPUTS" "issues=0" \
+  "baselined count: the bare run counts only the health findings the baseline does not accept"
+if [ "$GATE_EXIT" -eq 0 ]; then
+  pass "baselined count: a fully baselined bare run passes fail-on-issues"
+else
+  fail "baselined count: a fully baselined bare run passes fail-on-issues" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
 
 rm -rf "$GATE_WORK"
 

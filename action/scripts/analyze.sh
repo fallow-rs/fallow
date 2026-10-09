@@ -359,6 +359,10 @@ build_command_args() {
       [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
       [ -n "${INPUT_COVERAGE:-}" ] && ARGS+=(--coverage "$INPUT_COVERAGE")
       [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
+      # On the bare run `--baseline` holds the dead-code baseline only. Health
+      # and duplication read their baselines through their own flags.
+      [ -n "${INPUT_HEALTH_BASELINE:-}" ] && ARGS+=(--health-baseline "$INPUT_HEALTH_BASELINE")
+      [ -n "${INPUT_DUPES_BASELINE:-}" ] && ARGS+=(--dupes-baseline "$INPUT_DUPES_BASELINE")
       ;;
   esac
 }
@@ -405,6 +409,40 @@ validate_action_scalars() {
     printf '%s\n' "::error::baseline must not contain ASCII control characters"
     exit 2
   fi
+  # The per-analysis baselines reach workflow commands on the runs that read
+  # them: audit reads all three, the bare run reads health and dupes. Other
+  # commands ignore these inputs, so they are not checked there.
+  local name value
+  for name in dead-code-baseline health-baseline dupes-baseline; do
+    case "${INPUT_COMMAND:-}:${name}" in
+      audit:*|:health-baseline|:dupes-baseline) ;;
+      *) continue ;;
+    esac
+    case "$name" in
+      dead-code-baseline) value="${INPUT_DEAD_CODE_BASELINE:-}" ;;
+      health-baseline) value="${INPUT_HEALTH_BASELINE:-}" ;;
+      dupes-baseline) value="${INPUT_DUPES_BASELINE:-}" ;;
+    esac
+    if contains_ascii_control "$value"; then
+      printf '%s\n' "::error::${name} must not contain ASCII control characters"
+      exit 2
+    fi
+  done
+}
+
+# True when the run reads a per-analysis baseline beside the `baseline` input:
+# the bare run forwards `health-baseline` and `dupes-baseline`.
+# A flag in the `args` input counts too: the run then loads the baseline,
+# although this script never sees its path.
+bare_run_has_section_baseline() {
+  [ -z "${INPUT_COMMAND:-}" ] || return 1
+  [ -n "${INPUT_HEALTH_BASELINE:-}" ] || [ -n "${INPUT_DUPES_BASELINE:-}" ] \
+    || bare_section_flag_in_args health || bare_section_flag_in_args dupes
+}
+
+# True when the `args` input passes `--<label>-baseline` itself.
+bare_section_flag_in_args() {
+  printf '%s' " ${INPUT_ARGS:-}" | grep -qE -- " --${1}-baseline([ =]|\$)"
 }
 
 validate_action_scalars
@@ -452,8 +490,12 @@ fi
 # The stale-baseline gate reads the analysis envelope, so it needs a baseline to
 # judge and a command that reports one. Saying so here beats a silent pass.
 if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
-  if [ -z "${INPUT_BASELINE:-}" ]; then
-    echo "::error::fail-on-stale-baseline has no baseline to judge. Set the 'baseline' input, or turn the gate off."
+  if [ -z "${INPUT_BASELINE:-}" ] && ! bare_run_has_section_baseline; then
+    if [ -z "${INPUT_COMMAND:-}" ]; then
+      echo "::error::fail-on-stale-baseline has no baseline to judge. Set the 'baseline', 'health-baseline' or 'dupes-baseline' input, or turn the gate off."
+    else
+      echo "::error::fail-on-stale-baseline has no baseline to judge. Set the 'baseline' input, or turn the gate off."
+    fi
     exit 2
   fi
   case "$INPUT_COMMAND" in
@@ -474,6 +516,19 @@ fi
 # fire. Cheap to configure by accident, and silent without this line.
 if [ -n "${INPUT_BASELINE:-}" ] && [ "${INPUT_BASELINE:-}" = "${INPUT_SAVE_BASELINE:-}" ]; then
   echo "::warning::fallow: baseline and save-baseline name the same file (${INPUT_BASELINE}). The run saves before it compares, so the baseline is rewritten from this run and can never report stale entries. Save to a different path, or drop save-baseline from the job that reads the baseline."
+fi
+
+# On the bare run `save-baseline` writes the dead-code baseline. When it names
+# the file that `health-baseline` or `dupes-baseline` reads, the run replaces
+# that baseline with a dead-code one, which then suppresses nothing.
+if [ -z "${INPUT_COMMAND:-}" ] && [ -n "${INPUT_SAVE_BASELINE:-}" ]; then
+  for section_input in health-baseline:INPUT_HEALTH_BASELINE dupes-baseline:INPUT_DUPES_BASELINE; do
+    section_var=${section_input#*:}
+    section_path=${!section_var:-}
+    if [ "$section_path" = "${INPUT_SAVE_BASELINE}" ]; then
+      echo "::warning::fallow: save-baseline and ${section_input%%:*} name the same file (${INPUT_SAVE_BASELINE}). On the bare run save-baseline writes the dead-code baseline, so this run replaces that file with a baseline it cannot read. Save to a different path."
+    fi
+  done
 fi
 
 if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
@@ -907,8 +962,11 @@ read_staleness_field() {
 # `scope_reasons` needs its own reader: it is an array, and the scalar reader
 # above returns the raw jq rendering of one, which is not a log line.
 read_staleness_scope_reasons() {
-  local file=$1
-  jq_debug -r "(${BASELINE_STALENESS_JQ}) | (.scope_reasons // []) | join(\", \")" \
+  local file=$1 section=${2:-} selector="${BASELINE_STALENESS_JQ}"
+  if [ -n "$section" ]; then
+    selector="${section}.baseline_staleness // empty"
+  fi
+  jq_debug -r "(${selector}) | (.scope_reasons // []) | join(\", \")" \
     "$file" || true
 }
 
@@ -956,10 +1014,16 @@ read_all_staleness_fields "$RESULTS_FILE"
 # reading available there.
 BASELINE_REMOVABLE_SCOPE_REASONS="diff changed-since package-baselines changed-files scope file issue-type-filter"
 
+# An argument replaces the `baseline` input's reasons, for a bare-run section
+# baseline that carries its own staleness object.
 action_can_rerun_unscoped() {
-  if [ -n "${BASELINE_SCOPE_REASONS:-}" ]; then
+  local reasons="${BASELINE_SCOPE_REASONS:-}"
+  if [ $# -gt 0 ]; then
+    reasons=$1
+  fi
+  if [ -n "$reasons" ]; then
     local reason
-    for reason in $(printf '%s' "$BASELINE_SCOPE_REASONS" | tr ',' ' '); do
+    for reason in $(printf '%s' "$reasons" | tr ',' ' '); do
       case " ${BASELINE_REMOVABLE_SCOPE_REASONS} " in
         *" ${reason} "*) ;;
         *) return 1 ;;
@@ -1119,27 +1183,158 @@ stale_baseline_stand_down() {
   fi
 }
 
+# --- Bare-run section baselines ---
+#
+# The bare run reads `baseline` as the dead-code baseline, and the
+# `health-baseline` and `dupes-baseline` inputs through their own flags. The
+# `//` chain above reads the dead-code object only, and the step outputs stay
+# bound to the `baseline` input. These two baselines get their own lines and
+# arm the same gate. Each row is label:jq-section:command:input-variable.
+BARE_SECTION_ROWS=(
+  'health:.health.summary:health:INPUT_HEALTH_BASELINE'
+  'dupes:.dupes:dupes:INPUT_DUPES_BASELINE'
+)
+BARE_SECTION_GATE_FAILURES=()
+
+# True when a bare-run section baseline covers only part of the project and
+# every channel that narrowed it is one the unscoped re-read removes.
+bare_sections_need_rerun() {
+  local file=$1 row section input
+  bare_run_has_section_baseline || return 1
+  for row in "${BARE_SECTION_ROWS[@]}"; do
+    section=$(printf '%s' "$row" | cut -d: -f2)
+    input=${row##*:}
+    [ -n "${!input:-}" ] || bare_section_flag_in_args "${row%%:*}" || continue
+    [ "$(read_staleness_field "$file" change_scoped "$section")" = "true" ] || continue
+    if action_can_rerun_unscoped "$(read_staleness_scope_reasons "$file" "$section")"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# The bare-run input that reads a baseline the named command saved.
+bare_input_for_writer() {
+  case "$1" in
+    dead-code) printf 'baseline' ;;
+    dupes) printf 'dupes-baseline' ;;
+    health) printf 'health-baseline' ;;
+  esac
+}
+
+# Report each bare-run section baseline the way the block below reports the
+# `baseline` input, and collect a gate failure for each one that trips.
+bare_section_baseline_report() {
+  local file=$1 row label section command input path entries stale
+  local advisory trips scoped reasons unrecognised saved_by home resave where
+  bare_run_has_section_baseline || return 0
+  for row in "${BARE_SECTION_ROWS[@]}"; do
+    label=${row%%:*}
+    section=$(printf '%s' "$row" | cut -d: -f2)
+    command=$(printf '%s' "$row" | cut -d: -f3)
+    input=${row##*:}
+    path=${!input:-}
+    if [ -n "$path" ]; then
+      where="at ${path}"
+      resave="Re-save it with \`fallow ${command} --save-baseline ${path}\`."
+    elif bare_section_flag_in_args "$label"; then
+      where="passed through args"
+      resave="Re-save it with \`fallow ${command} --save-baseline\`."
+    else
+      continue
+    fi
+    entries=$(read_staleness_field "$file" baseline_entries "$section")
+    if [ -z "$entries" ]; then
+      if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
+        stale_baseline_stand_down "it reported no staleness for the ${label} baseline" "A fallow that predates this feature cannot report it: pin a current version."
+      fi
+      continue
+    fi
+    trips=$(read_staleness_field "$file" gate_trips "$section")
+    unrecognised=$(read_staleness_field "$file" unrecognised_format "$section")
+    if [ "$unrecognised" = "true" ]; then
+      saved_by=$(read_staleness_saved_by "$file" "$section")
+      home=$(bare_input_for_writer "$saved_by")
+      if [ -n "$saved_by" ] && [ -n "$home" ]; then
+        echo "::warning::fallow: \`fallow ${saved_by}\` saved the ${label} baseline ${where}, so this run reads nothing from it and it suppresses nothing. Pass that file with the ${home} input instead."
+      else
+        echo "::warning::fallow: the ${label} baseline ${where} has no entries this run recognises. It may be a baseline saved by another command, or an empty file. Either way it suppresses nothing."
+      fi
+      if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ] && [ "$trips" = "true" ]; then
+        BARE_SECTION_GATE_FAILURES+=("Fallow baseline gate failed: the ${label} baseline ${where} suppresses nothing, because this run cannot read it as a \`fallow ${command}\` baseline. Point the ${label}-baseline input at a \`fallow ${command} --save-baseline\` file, or set fail-on-stale-baseline: false.")
+      fi
+      continue
+    fi
+    scoped=$(read_staleness_field "$file" change_scoped "$section")
+    if [ "$scoped" = "true" ]; then
+      reasons=$(read_staleness_scope_reasons "$file" "$section")
+      stale_baseline_stand_down "the ${label} analysis covered only part of the project${reasons:+ (${reasons})}" "Run an unscoped job to judge the ${label} baseline."
+      continue
+    fi
+    stale=$(read_staleness_field "$file" stale_entries "$section")
+    advisory=$(read_staleness_field "$file" warning "$section")
+    case "$advisory" in
+      partial)
+        echo "::warning::fallow: the ${label} baseline ${where} is partially stale: ${stale} of ${entries} entries matched nothing this run, so it protects less than what was saved. ${resave}"
+        ;;
+      zero-overlap)
+        echo "::warning::fallow: the ${label} baseline ${where} has ${entries} entries but matched nothing this run. Paths may have changed, or the baseline was saved elsewhere. ${resave}"
+        ;;
+      *)
+        if [ "$trips" = "true" ]; then
+          echo "::warning::fallow: ${stale} of ${entries} entries in the ${label} baseline ${where} matched nothing this run. The project may be clean, or the baseline may no longer describe it. ${resave}"
+        fi
+        ;;
+    esac
+    if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ] && [ "$trips" = "true" ]; then
+      BARE_SECTION_GATE_FAILURES+=("Fallow baseline gate failed: ${stale} of ${entries} entries in the ${label} baseline ${where} matched nothing this run. Re-save it with \`fallow ${command} --save-baseline\`, or set fail-on-stale-baseline: false.")
+    fi
+  done
+}
+
+STALE_REREAD=false
 if [ -n "${INPUT_BASELINE:-}" ] && [ -z "$BASELINE_ENTRIES" ]; then
   if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ]; then
     stale_baseline_stand_down "it reported no baseline staleness" "A fallow that predates this feature cannot report it: pin a current version, or run the gate on dead-code, dupes or health."
   fi
 elif [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
   if action_can_rerun_unscoped; then
-    GATE_RESULTS_RAW_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate-raw.json"
-    GATE_RESULTS_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate.json"
-    GATE_STDERR_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate-stderr.log"
-    if run_stale_gate_analysis; then
-      read_all_staleness_fields "$GATE_RESULTS_FILE"
-      if [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
-        stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project$(baseline_scope_clause)" "Remove the positional path from the 'args' input to judge the baseline."
-      fi
-    else
-      stale_baseline_stand_down "the unscoped baseline re-read produced no readable result" "The primary analysis is unaffected; the step debug log carries its stderr."
-    fi
-    rm -f "$GATE_RESULTS_RAW_FILE" "$GATE_RESULTS_FILE" "$GATE_STDERR_FILE"
+    STALE_REREAD=true
   else
     stale_baseline_stand_down "it analyzed only part of the project$(baseline_unremovable_scope_clause)" "Run an unscoped job to judge the baseline."
   fi
+fi
+
+# The bare run also reads `health-baseline` and `dupes-baseline`. Each one has
+# its own staleness object in its own section of the envelope, so a run that
+# loads only those still needs the unscoped re-read on a pull request.
+if [ "${STALE_REREAD:-false}" = "false" ] && bare_sections_need_rerun "$RESULTS_FILE"; then
+  STALE_REREAD=true
+fi
+
+SECTION_STALENESS_FILE="$RESULTS_FILE"
+if [ "${STALE_REREAD:-false}" = "true" ]; then
+  GATE_RESULTS_RAW_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate-raw.json"
+  GATE_RESULTS_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate.json"
+  GATE_STDERR_FILE="${ARTIFACTS_DIR}/fallow-stale-baseline-gate-stderr.log"
+  if run_stale_gate_analysis; then
+    read_all_staleness_fields "$GATE_RESULTS_FILE"
+    if [ "$BASELINE_CHANGE_SCOPED" = "true" ]; then
+      stale_baseline_stand_down "the unscoped re-read was still narrowed to part of the project$(baseline_scope_clause)" "Remove the positional path from the 'args' input to judge the baseline."
+    fi
+    SECTION_STALENESS_FILE="$GATE_RESULTS_FILE"
+  else
+    stale_baseline_stand_down "the unscoped baseline re-read produced no readable result" "The primary analysis is unaffected; the step debug log carries its stderr."
+    # The line above covers every baseline of the run, so the sections add none.
+    SECTION_STALENESS_FILE=""
+  fi
+fi
+
+if [ -n "$SECTION_STALENESS_FILE" ]; then
+  bare_section_baseline_report "$SECTION_STALENESS_FILE"
+fi
+if [ "${STALE_REREAD:-false}" = "true" ]; then
+  rm -f "$GATE_RESULTS_RAW_FILE" "$GATE_RESULTS_FILE" "$GATE_STDERR_FILE"
 fi
 
 # `fallow audit` loads up to three baselines and judges none of them: every
@@ -1267,6 +1462,9 @@ elif [ -n "$BASELINE_ENTRIES" ]; then
 fi
 
 if [ "${INPUT_FAIL_ON_STALE_BASELINE:-}" = "true" ] && [ "$BASELINE_GATE_TRIPS" = "true" ]; then
+  STALE_BASELINE_GATE_FAILED=true
+fi
+if [ ${#BARE_SECTION_GATE_FAILURES[@]} -gt 0 ]; then
   STALE_BASELINE_GATE_FAILED=true
 fi
 
@@ -1470,6 +1668,14 @@ record_gate_failure() {
   # are user-facing strings a repository may already match on.
   case "$gate" in
     stale-baseline)
+      # A bare-run section baseline brings its own line, and the `baseline`
+      # line below joins it only when that baseline tripped the gate too.
+      if [ ${#BARE_SECTION_GATE_FAILURES[@]} -gt 0 ]; then
+        GATE_FAILURES+=("${BARE_SECTION_GATE_FAILURES[@]}")
+        if [ "${BASELINE_GATE_TRIPS:-}" != "true" ]; then
+          return
+        fi
+      fi
       # The gate also trips on a file this command cannot read as its own, whose
       # counts are all zero: re-saving is not the remedy there, and "0 of 0
       # entries matched nothing" names nothing the reader can act on.
@@ -1594,7 +1800,8 @@ if [ "$HAS_GATE_OUTCOMES" = "true" ]; then
     # the primary run is change-scoped and reports `skipped`, so classifying it
     # here would print a stand-down beside that block's own error and list the
     # gate in both gates_skipped and gates_failed.
-    if [ "$gate_key" = "stale-baseline" ] && [ -n "${INPUT_BASELINE:-}" ]; then
+    if [ "$gate_key" = "stale-baseline" ] \
+      && { [ -n "${INPUT_BASELINE:-}" ] || bare_run_has_section_baseline; }; then
       continue
     fi
     classify_gate "$gate_key" "$(read_gate_member "$gate_key" status)" "$(read_gate_member "$gate_key" enforced)"
@@ -1828,14 +2035,18 @@ elif [ "$INPUT_COMMAND" = "security" ]; then
   GATE=$(jq -r '.gate.mode // ""' "$RESULTS_FILE")
 fi
 
+# A loaded health baseline filters the findings, but
+# summary.functions_above_threshold still counts the functions it accepts.
+# remaining_findings is the count after the baseline and before --top, so
+# it is the count when a baseline is loaded.
 case "$INPUT_COMMAND" in
   dead-code|check|architecture) ISSUES=$(jq -r '.total_issues' "$RESULTS_FILE") ;;
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' "$RESULTS_FILE") ;;
-  health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
+  health)          ISSUES=$(jq -r '((.summary.baseline_staleness.remaining_findings // .summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
   audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0) + ((.complexity.styling_findings // []) | length)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0) + (.attribution.styling_introduced // 0)) end' "$RESULTS_FILE") ;;
   security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' "$RESULTS_FILE") ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' "$RESULTS_FILE") ;;
-  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (((.dupes.clone_groups // []) | length) + (.dupes.clone_groups_omitted // 0)) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
+  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (((.dupes.clone_groups // []) | length) + (.dupes.clone_groups_omitted // 0)) + (.health.summary.baseline_staleness.remaining_findings // .health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
 esac
 
 if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then
