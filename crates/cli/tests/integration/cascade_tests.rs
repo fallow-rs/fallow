@@ -376,3 +376,78 @@ fn grouped_output_carries_the_hidden_count_at_the_root() {
     let shown = dead_code_json(dir.path(), &["--group-by", "directory", "--show-cascade"]);
     assert!(shown.get("cascade_hidden").is_none());
 }
+
+/// Grouped markdown has no entry for a hidden finding either, so the report
+/// names the count once, outside the groups.
+#[test]
+fn grouped_markdown_names_the_hidden_count_once() {
+    let root = super::common::fixture_path(FIXTURE);
+    let markdown = |extra: &[&str]| -> String {
+        let mut args = vec!["--group-by", "directory", "--format", "markdown", "--quiet"];
+        args.extend_from_slice(extra);
+        run_fallow_in_root("dead-code", &root, &args).stdout
+    };
+    let note = "_4 findings in unused files are hidden; use `--show-cascade` to list them._";
+
+    let grouped = markdown(&[]);
+    assert_eq!(grouped.matches(note).count(), 1, "{grouped}");
+    assert!(!markdown(&["--show-cascade"]).contains("--show-cascade"));
+}
+
+/// Save a health snapshot in a copy of the fixture and return its vital signs.
+fn saved_vital_signs(extra: &[&str]) -> serde_json::Value {
+    let dir = copy_fixture(FIXTURE);
+    let mut args = vec!["--save-snapshot", "--format", "json", "--quiet"];
+    args.extend_from_slice(extra);
+    let output = run_fallow_in_root("health", dir.path(), &args);
+    assert!(output.code == 0 || output.code == 1, "{}", output.stderr);
+    let path = std::fs::read_dir(dir.path().join(".fallow/snapshots"))
+        .expect("snapshot dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .expect("snapshot json");
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    snapshot["vital_signs"].clone()
+}
+
+/// A snapshot measures the code, so it counts the hidden findings and does
+/// not change with `--show-cascade`.
+#[test]
+fn saved_snapshot_counts_hidden_findings_with_and_without_the_flag() {
+    let hidden = saved_vital_signs(&[]);
+    let shown = saved_vital_signs(&["--show-cascade"]);
+
+    assert_eq!(hidden["counts"]["dead_exports"], 5, "{hidden}");
+    assert_eq!(hidden["dead_export_pct"], shown["dead_export_pct"]);
+    assert_eq!(hidden["counts"], shown["counts"]);
+}
+
+/// A trend against a snapshot saved without the flag shows no change in the
+/// dead-export metric, with or without `--show-cascade`.
+#[test]
+fn trend_shows_no_dead_export_change_across_the_flag() {
+    let dir = copy_fixture(FIXTURE);
+    let save = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--save-snapshot", "--format", "json", "--quiet"],
+    );
+    assert!(save.code == 0 || save.code == 1, "{}", save.stderr);
+
+    for extra in [&[][..], &["--show-cascade"][..]] {
+        let mut args = vec!["--trend", "--format", "json", "--quiet"];
+        args.extend_from_slice(extra);
+        let trend = parse_json(&run_fallow_in_root("health", dir.path(), &args));
+        let metric = trend["health_trend"]["metrics"]
+            .as_array()
+            .expect("trend metrics")
+            .iter()
+            .find(|metric| metric["name"] == "dead_export_pct")
+            .cloned()
+            .unwrap_or_else(|| panic!("{extra:?}: no dead_export_pct in {trend}"));
+        assert_eq!(metric["previous"], metric["current"], "{extra:?}: {metric}");
+        assert_eq!(metric["delta"], 0.0, "{extra:?}: {metric}");
+    }
+}

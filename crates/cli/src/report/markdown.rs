@@ -12,8 +12,11 @@ pub(super) fn print_markdown(results: &AnalysisResults, root: &Path) {
     outln!("{}", fallow_api::build_markdown(results, root));
 }
 
-pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path) {
-    outln!("{}", fallow_api::build_grouped_markdown(groups, root));
+pub(super) fn print_grouped_markdown(groups: &[ResultGroup], root: &Path, cascade_hidden: usize) {
+    outln!(
+        "{}",
+        fallow_api::build_grouped_markdown(groups, root, cascade_hidden)
+    );
 }
 
 pub(super) fn print_duplication_markdown(report: &DuplicationReport, root: &Path) {
@@ -228,7 +231,7 @@ impl SavedDeadCode {
 
     fn print(&self, root: &Path) {
         match &self.groups {
-            Some(groups) => print_grouped_markdown(groups, root),
+            Some(groups) => print_grouped_markdown(groups, root, self.results.cascade_hidden),
             None => print_markdown(&self.results, root),
         }
         print_type_aware_markdown(self.type_aware.as_ref(), self.type_aware_scope);

@@ -738,7 +738,7 @@ fn print_grouped_results(
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
-            markdown::print_grouped_markdown(groups, ctx.root);
+            markdown::print_grouped_markdown(groups, ctx.root, original.cascade_hidden);
             markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
             markdown::print_config_pattern_markdown(ctx.workspace_diagnostics);
             ExitCode::SUCCESS

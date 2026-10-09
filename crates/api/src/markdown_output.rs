@@ -1025,14 +1025,22 @@ fn format_unused_dependency_override(
 }
 
 /// Build grouped markdown output: each group gets a heading and issue sections.
+///
+/// `cascade_hidden` is the count of the whole run. The groups do not carry
+/// it, so the report names it once, after the last group.
 #[must_use]
-pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
+pub fn build_grouped_markdown(
+    groups: &[ResultGroup],
+    root: &Path,
+    cascade_hidden: usize,
+) -> String {
     let total: usize = groups.iter().map(|g| g.results.total_issues()).sum();
     let signals: usize = groups.iter().map(|g| health_signal_count(&g.results)).sum();
     let mut out = String::new();
 
     if total == 0 && signals == 0 {
         out.push_str("## Fallow: no issues found\n");
+        push_cascade_note(&mut out, cascade_hidden);
         return out;
     }
 
@@ -1072,6 +1080,7 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
         push_markdown_sections(&mut out, &group.results, root);
     }
 
+    push_cascade_note(&mut out, cascade_hidden);
     out
 }
 
