@@ -280,31 +280,57 @@ if [ -n "$SESSION_DIR" ]; then
 fi
 GATE_NL=$'\n'
 
-# Prints the work tree top level and the git directory of a directory, as git
-# finds them (git also skips an empty `.git` directory and follows a gitfile).
+# Prints three lines for a directory, as git finds them: the work tree top
+# level, the git directory and the common git directory. Linked worktrees of
+# one repository have their own top level and git directory but share the
+# common git directory, with its refs. Git also skips an empty `.git`
+# directory and follows a gitfile.
 gate_git_identity() {
-  local out top git_dir
-  out="$(git -C "$1" rev-parse --show-toplevel --absolute-git-dir 2>/dev/null)" || return 1
+  local out top git_dir common
+  out="$(git -C "$1" rev-parse --show-toplevel --absolute-git-dir --git-common-dir 2>/dev/null)" || return 1
   top="${out%%"$GATE_NL"*}"
-  git_dir="${out#*"$GATE_NL"}"
-  [ -n "$top" ] && [ -n "$git_dir" ] && [ "$top" != "$out" ] || return 1
-  top="$(physical_dir "$top")" && git_dir="$(physical_dir "$git_dir")" || return 1
-  printf '%s\n%s\n' "$top" "$git_dir"
+  out="${out#*"$GATE_NL"}"
+  git_dir="${out%%"$GATE_NL"*}"
+  common="${out#*"$GATE_NL"}"
+  [ -n "$top" ] && [ -n "$git_dir" ] && [ -n "$common" ] && [ "$git_dir" != "$out" ] || return 1
+  # An older git prints the common directory relative to the directory.
+  case "$common" in
+    /* | [A-Za-z]:[\\/]*) ;;
+    *) common="$1/$common" ;;
+  esac
+  top="$(physical_dir "$top")" && git_dir="$(physical_dir "$git_dir")" &&
+    common="$(physical_dir "$common")" || return 1
+  printf '%s\n%s\n%s\n' "$top" "$git_dir" "$common"
 }
 SESSION_IDENTITY="$(gate_git_identity "$BASE_DIR" || true)"
 
 # Returns 0 when git reports another work tree for a directory than for the
-# session directory: both the top level and the git directory differ. A
-# directory in the same work tree, or a git error, returns 1.
+# session directory: both the top level and the git directory differ. With
+# `push` as the second argument, the common git directory must differ too,
+# because linked worktrees share refs: a push from one of them can send the
+# branch or tags of the session. A directory in the same work tree, or a git
+# error, returns 1.
 gate_other_work_tree() {
-  local identity
+  local identity top git_dir common session_top session_git_dir session_common rest
   [ -n "$SESSION_IDENTITY" ] || return 1
   identity="$(gate_git_identity "$1")" || return 1
-  [ "${identity%%"$GATE_NL"*}" != "${SESSION_IDENTITY%%"$GATE_NL"*}" ] &&
-    [ "${identity#*"$GATE_NL"}" != "${SESSION_IDENTITY#*"$GATE_NL"}" ]
+  top="${identity%%"$GATE_NL"*}"
+  rest="${identity#*"$GATE_NL"}"
+  git_dir="${rest%%"$GATE_NL"*}"
+  common="${rest#*"$GATE_NL"}"
+  session_top="${SESSION_IDENTITY%%"$GATE_NL"*}"
+  rest="${SESSION_IDENTITY#*"$GATE_NL"}"
+  session_git_dir="${rest%%"$GATE_NL"*}"
+  session_common="${rest#*"$GATE_NL"}"
+  [ "$top" != "$session_top" ] && [ "$git_dir" != "$session_git_dir" ] || return 1
+  if [ "${2:-}" = push ] && [ "$common" = "$session_common" ]; then
+    return 1
+  fi
+  return 0
 }
 
-# Prints the target directory of a command in a strict form, in which each
+# Prints the subcommand and the target directory of a command in a strict
+# form, in which each
 # word is inert and the target is certain:
 #   [cd <dir> &&] git [-C <dir>]... (commit|push) [<option or name>]...
 # A directory is one plain word, or one pair of single or double quotes
@@ -364,7 +390,7 @@ gate_allowlisted_target() {
       *:-*) gate_inert_option "$subcommand" "$word" || return 1 ;;
     esac
   done
-  printf '%s\n' "$dir"
+  printf '%s\n%s\n' "$subcommand" "$dir"
 }
 
 # Options of `git commit` and `git push` that do not run a command, read a
@@ -443,10 +469,21 @@ add_audit_root() {
 # tree for it. Every other git write audits the session directory exactly as
 # before. It also audits each candidate directory that git reports in another
 # work tree, so a command that the scan reads wrong can only add audits.
-if TARGET_DIR="$(gate_allowlisted_target "$CMD")" && gate_other_work_tree "$TARGET_DIR"; then
+STRICT_SUBCOMMAND=""
+TARGET_DIR=""
+if STRICT="$(gate_allowlisted_target "$CMD")"; then
+  STRICT_SUBCOMMAND="${STRICT%%"$GATE_NL"*}"
+  TARGET_DIR="${STRICT#*"$GATE_NL"}"
+fi
+if [ -n "$TARGET_DIR" ] && gate_other_work_tree "$TARGET_DIR" "$STRICT_SUBCOMMAND"; then
   add_audit_root "$TARGET_DIR"
 else
   add_audit_root "$BASE_DIR"
+  # A strict push from a linked worktree of the same repository can send the
+  # refs of the session, so it audits both trees.
+  if [ -n "$TARGET_DIR" ] && gate_other_work_tree "$TARGET_DIR"; then
+    add_audit_root "$TARGET_DIR"
+  fi
   if [ "${#GIT_WRITE_CANDIDATES[@]}" -gt 0 ]; then
     for CANDIDATE in "${GIT_WRITE_CANDIDATES[@]}"; do
       CANDIDATE="$(gate_join "$BASE_DIR" "$CANDIDATE")"

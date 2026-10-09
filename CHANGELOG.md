@@ -82,9 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strict form: `[cd <dir> &&] git [-C <dir>]... commit|push [<option or
   name>]...`. Second, git reports another work tree for the target: `git
   rev-parse --show-toplevel --absolute-git-dir` gives a different top level
-  and a different git directory than for the session directory. A target in
-  the same work tree, for example another package of a monorepo, keeps the
-  session audit as before, because `git commit` commits the whole index.
+  and a different git directory than for the session directory. For a push,
+  the common git directory (`--git-common-dir`) must differ too. Linked
+  worktrees of one repository share refs, so a push from another linked
+  worktree can send the branch or tags of the session: it audits the session
+  tree and the target. A target in the same work tree, for example another
+  package of a monorepo, keeps the session audit as before, because `git
+  commit` commits the whole index.
   Each word of the strict form must be inert. A `-C` directory resolves
   physically, as git does, and cannot start with `-`, `+` or `=`. A `cd`
   directory must start with `/`, `./` or `../`, or be `.` or `..`. A

@@ -637,7 +637,7 @@ fn gate_audits_only_the_target_of_a_strict_git_write() {
         ),
         (
             "-C with a single-quoted path",
-            format!("git -C '{bq}' push origin main"),
+            format!("git -C '{bq}' commit -m x"),
             vec![b],
         ),
         (
@@ -657,7 +657,7 @@ fn gate_audits_only_the_target_of_a_strict_git_write() {
         ),
         (
             "relative cd",
-            "cd ../../wt-c && git push".to_owned(),
+            "cd ../../wt-c && git commit -m x".to_owned(),
             vec![c],
         ),
         (
@@ -666,6 +666,60 @@ fn gate_audits_only_the_target_of_a_strict_git_write() {
             vec![c],
         ),
     ];
+    assert_cases(&trees, &cases);
+}
+
+/// Linked worktrees share refs. A strict push from another linked worktree
+/// of the session repository can send the branch or tags of the session, so
+/// it keeps the session audit and adds the target.
+#[test]
+fn gate_keeps_the_session_audit_for_a_push_from_a_linked_worktree() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let (a, b, c) = (trees.a.as_path(), trees.b.as_path(), trees.c.as_path());
+    let main = trees.main.as_path();
+    let cases: Vec<(&str, String, Vec<&Path>)> = vec![
+        (
+            "push from the main checkout",
+            "git -C ../../main push origin feat-a".to_owned(),
+            vec![a, main],
+        ),
+        (
+            "push from a sibling worktree",
+            "git -C '../../wt b' push origin feat-a".to_owned(),
+            vec![a, b],
+        ),
+        (
+            "push tags",
+            "git -C ../../wt-c push --tags".to_owned(),
+            vec![a, c],
+        ),
+        (
+            "cd and push",
+            "cd ../../wt-c && git push origin main".to_owned(),
+            vec![a, c],
+        ),
+    ];
+    assert_cases(&trees, &cases);
+
+    // A clone has its own refs: a push from it audits only the clone.
+    let clone = trees.root.join("clone");
+    git(
+        &trees.root,
+        &[
+            "clone",
+            "-q",
+            trees.main.to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    let cases: Vec<(&str, String, Vec<&Path>)> = vec![(
+        "push from a clone",
+        "git -C ../../clone push origin main".to_owned(),
+        vec![clone.as_path()],
+    )];
     assert_cases(&trees, &cases);
 }
 
@@ -943,7 +997,7 @@ fn gate_resolves_the_strict_target_physically() {
         (
             "push with names",
             "git -C ../../wt-c push -u --force-with-lease origin HEAD:main".to_owned(),
-            vec![c],
+            vec![a, c],
         ),
         (
             "not a work tree",
@@ -1060,6 +1114,8 @@ const DIFFERENTIAL_COMMANDS: &[&str] = &[
     "git commit -m x",
     "git -C ../../wt-c commit -m x",
     "git -C '../../wt b' push origin main",
+    "git -C ../../main push origin feat-a",
+    "git -C '../../wt b' push --tags",
     "cd ../../wt-c && git push",
     "git -C .. commit -m x",
     "git -C ../../main commit -m x",
@@ -1095,16 +1151,29 @@ const DIFFERENTIAL_COMMANDS: &[&str] = &[
     "git status",
 ];
 
-/// The git top level of a directory.
-fn git_toplevel(dir: &Path) -> String {
-    let out = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
+/// The output of `git rev-parse <flag>` in a directory.
+fn git_rev_parse(dir: &Path, flag: &str) -> String {
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "--path-format=absolute", flag])
         .current_dir(dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .output()
-        .unwrap();
+        .env("GIT_CONFIG_GLOBAL", "/dev/null");
+    for var in GIT_LOCATION_VARS {
+        cmd.env_remove(var);
+    }
+    let out = cmd.output().unwrap();
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// Whether `dir` is another work tree than `session` for a write: another
+/// top level, and for a push also another common git directory, because
+/// linked worktrees share refs.
+fn other_tree_for_write(dir: &Path, session: &Path, push: bool) -> bool {
+    let other_top =
+        git_rev_parse(dir, "--show-toplevel") != git_rev_parse(session, "--show-toplevel");
+    let other_common =
+        git_rev_parse(dir, "--git-common-dir") != git_rev_parse(session, "--git-common-dir");
+    other_top && (!push || other_common)
 }
 
 /// Runs main's gate and the new gate at `gate` over the same commands. The
@@ -1117,7 +1186,6 @@ fn assert_never_less_than_main(
     home: &Path,
     commands: &[&str],
 ) {
-    let session_top = git_toplevel(session);
     let new_gate = rendered_gate_script();
     for command in commands {
         let payload = command_payload(session, command);
@@ -1133,8 +1201,8 @@ fn assert_never_less_than_main(
         if missing.is_empty() {
             continue;
         }
-        let target_only =
-            new_run.audit_dirs.len() == 1 && git_toplevel(&new_run.audit_dirs[0]) != session_top;
+        let target_only = new_run.audit_dirs.len() == 1
+            && other_tree_for_write(&new_run.audit_dirs[0], session, command.contains("push"));
         assert!(
             target_only,
             "{command:?}: the new gate skips {missing:?} that main audits; new={:?}",
@@ -1188,4 +1256,6 @@ fn gate_never_audits_less_than_main_below_the_git_root() {
     ];
     commands.extend_from_slice(DIFFERENTIAL_COMMANDS);
     assert_never_less_than_main(&gate, &app, &app, &root.join("home"), &commands);
+    // The same with the hook process in the repository root.
+    assert_never_less_than_main(&gate, &repo, &app, &root.join("home"), &commands);
 }
