@@ -690,9 +690,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Restore only: `Windows path and subprocess handling` saves the shared
+      # entry. Two jobs that save one key race, and the loser keeps a cache
+      # without its packages.
       - uses: ./.github/actions/setup-rust
         with:
           shared-key: windows-debug
+          save-if: 'false'
       # The drift harness builds git fixtures, spawns the CLI and the MCP
       # server, and compares root-relative paths. A harness change must pass
       # here on Windows before it merges.
@@ -1543,7 +1547,8 @@ jobs:
           # timeout still shows which test hung. The exit status goes to a file,
           # because the status of the pipeline is the status of `sed`.
           for crate in "${crates[@]}"; do
-            { run_crate "$crate" 2>&1; echo "$?" > "$logs/$crate.status"; } \
+            # `&& s=0 || s=$?` keeps errexit from skipping the status write.
+            { run_crate "$crate" 2>&1 && s=0 || s=$?; echo "$s" > "$logs/$crate.status"; } \
               | tee "$logs/$crate.log" | sed -u "s/^/[$crate] /" &
             pids+=("$!")
           done

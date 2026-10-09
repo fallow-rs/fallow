@@ -392,8 +392,8 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(windowsRustPaths.includes("crates/cli/tests/integration/exit_code_tests.rs"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
-  // Release validation runs the drift harness on Windows, so a harness change
-  // must run there on the pull request too.
+  // Release Validation runs the drift harness on Linux only, so a harness
+  // change must run on Windows on the pull request.
   assert.ok(windowsRustPaths.includes("crates/cli/tests/drift/**"));
   // The drift harness has its own Windows job with the same trigger, so it
   // runs in parallel with the Windows test job.
@@ -2059,7 +2059,7 @@ test("Miri runs the three crates in parallel with the same test selection", () =
   // one crate fails or does not write its exit status.
   assert.ok(
     miri.includes(
-      '{ run_crate "$crate" 2>&1; echo "$?" > "$logs/$crate.status"; } \\\n' +
+      '{ run_crate "$crate" 2>&1 && s=0 || s=$?; echo "$s" > "$logs/$crate.status"; } \\\n' +
         '              | tee "$logs/$crate.log" | sed -u "s/^/[$crate] /" &',
     ),
     "Miri must stream each crate live and record its exit status",
