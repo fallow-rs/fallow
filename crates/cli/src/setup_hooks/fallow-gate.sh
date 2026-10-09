@@ -273,6 +273,36 @@ if [ -n "${HOME:-}" ]; then
 fi
 GATE_REL="$(gate_relative_path)"
 BASE_DIR="${SESSION_DIR:-$PROCESS_DIR}"
+# The directory of the shell as it names it, for a logical `cd`.
+LOGICAL_BASE="$PROCESS_DIR"
+if [ -n "$SESSION_DIR" ]; then
+  LOGICAL_BASE="$SESSION_CWD"
+fi
+GATE_NL=$'\n'
+
+# Prints the work tree top level and the git directory of a directory, as git
+# finds them (git also skips an empty `.git` directory and follows a gitfile).
+gate_git_identity() {
+  local out top git_dir
+  out="$(git -C "$1" rev-parse --show-toplevel --absolute-git-dir 2>/dev/null)" || return 1
+  top="${out%%"$GATE_NL"*}"
+  git_dir="${out#*"$GATE_NL"}"
+  [ -n "$top" ] && [ -n "$git_dir" ] && [ "$top" != "$out" ] || return 1
+  top="$(physical_dir "$top")" && git_dir="$(physical_dir "$git_dir")" || return 1
+  printf '%s\n%s\n' "$top" "$git_dir"
+}
+SESSION_IDENTITY="$(gate_git_identity "$BASE_DIR" || true)"
+
+# Returns 0 when git reports another work tree for a directory than for the
+# session directory: both the top level and the git directory differ. A
+# directory in the same work tree, or a git error, returns 1.
+gate_other_work_tree() {
+  local identity
+  [ -n "$SESSION_IDENTITY" ] || return 1
+  identity="$(gate_git_identity "$1")" || return 1
+  [ "${identity%%"$GATE_NL"*}" != "${SESSION_IDENTITY%%"$GATE_NL"*}" ] &&
+    [ "${identity#*"$GATE_NL"}" != "${SESSION_IDENTITY#*"$GATE_NL"}" ]
+}
 
 # Prints the target directory of a command in a strict form, in which each
 # word is inert and the target is certain:
@@ -280,12 +310,13 @@ BASE_DIR="${SESSION_DIR:-$PROCESS_DIR}"
 # A directory is one plain word, or one pair of single or double quotes
 # without a new line. A plain word holds only letters, digits and `-_./=:,@+%`
 # (no glob, `~` or `{`). A double-quoted word cannot hold `$`, a backquote or
-# a backslash. After the subcommand, only the options in
+# a backslash. A `-C` directory cannot start with `-`, `+` or `=`, and a `cd`
+# directory must start with `/`, `./` or `../`, or be `.` or `..`. After the
+# subcommand, only the options in
 # gate_inert_option are allowed; a quoted word is allowed only as the value of
 # `-m` or `--message`. Nothing else is allowed: no other operator, expansion,
 # redirection, environment prefix or git option such as `-c`. Each directory
-# must exist, and the target must be in a git work tree. Returns 1 for any
-# other command.
+# must exist. Returns 1 for any other command.
 gate_allowlisted_target() {
   local cmd="$1" rest dir="$BASE_DIR" subcommand word
   # The letters are listed, not given as a range, so that no locale can make
@@ -308,12 +339,12 @@ gate_allowlisted_target() {
   done
   set -- "${words[@]}"
   if [ "$1" = cd ]; then
-    dir="$(gate_target_step "$dir" "$2")" || return 1
+    dir="$(gate_cd_step "$LOGICAL_BASE" "$dir" "$2")" || return 1
     shift 3
   fi
   shift
   while [ "$1" = -C ]; do
-    dir="$(gate_target_step "$dir" "$2")" || return 1
+    dir="$(gate_c_step "$dir" "$2")" || return 1
     shift 2
   done
   subcommand="$1"
@@ -333,7 +364,6 @@ gate_allowlisted_target() {
       *:-*) gate_inert_option "$subcommand" "$word" || return 1 ;;
     esac
   done
-  [ "$(git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || return 1
   printf '%s\n' "$dir"
 }
 
@@ -353,14 +383,32 @@ gate_inert_option() {
   return 1
 }
 
-# Follows one directory word from a directory, as `cd` and `git -C` do.
-gate_target_step() {
+# Follows the directory word of a `cd`. Bash resolves `..` from the logical
+# path, so the step counts only when the logical and the physical result are
+# the same directory. Only an explicit path form is allowed, so CDPATH and
+# directory stack forms such as `-` or `+1` never apply.
+gate_cd_step() {
+  local word logical physical
+  word="$(gate_unquote "$3")"
+  case "$word" in
+    /* | ./* | ../* | . | ..) ;;
+    *) return 1 ;;
+  esac
+  logical="$(CDPATH='' cd -L "$1" 2>/dev/null && CDPATH='' cd -L "$word" 2>/dev/null && pwd -P)" || return 1
+  physical="$(CDPATH='' cd -P "$2" 2>/dev/null && CDPATH='' cd -P "$word" 2>/dev/null && pwd -P)" || return 1
+  [ "$logical" = "$physical" ] || return 1
+  printf '%s\n' "$physical"
+}
+
+# Follows the directory word of a `git -C`. Git calls chdir(), which resolves
+# `..` physically.
+gate_c_step() {
   local word
   word="$(gate_unquote "$2")"
   case "$word" in
-    /*) physical_dir "$word" ;;
-    *) physical_dir "$1/$word" ;;
+    "" | -* | +* | =*) return 1 ;;
   esac
+  (CDPATH='' cd -P "$1" 2>/dev/null && CDPATH='' cd -P "$word" 2>/dev/null && pwd -P)
 }
 
 # One audit root for each different tree, in order. Without a usable `cwd`,
@@ -391,17 +439,19 @@ add_audit_root() {
   AUDIT_ROOTS+=("$root")
 }
 
-# Only a command in the strict grammar audits its target tree alone. Every
-# other git write audits the session tree and each candidate directory that
-# exists, so a command that the scan reads wrong can only add audits.
-if TARGET_DIR="$(gate_allowlisted_target "$CMD")"; then
+# A strict command audits its target alone only when git reports another work
+# tree for it. Every other git write audits the session directory exactly as
+# before. It also audits each candidate directory that git reports in another
+# work tree, so a command that the scan reads wrong can only add audits.
+if TARGET_DIR="$(gate_allowlisted_target "$CMD")" && gate_other_work_tree "$TARGET_DIR"; then
   add_audit_root "$TARGET_DIR"
 else
   add_audit_root "$BASE_DIR"
   if [ "${#GIT_WRITE_CANDIDATES[@]}" -gt 0 ]; then
     for CANDIDATE in "${GIT_WRITE_CANDIDATES[@]}"; do
       CANDIDATE="$(gate_join "$BASE_DIR" "$CANDIDATE")"
-      if CANDIDATE_DIR="$(physical_dir "$CANDIDATE")"; then
+      if CANDIDATE_DIR="$(CDPATH='' cd -P "$CANDIDATE" 2>/dev/null && pwd -P)" &&
+        gate_other_work_tree "$CANDIDATE_DIR"; then
         add_audit_root "$CANDIDATE_DIR"
       fi
     done

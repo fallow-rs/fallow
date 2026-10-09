@@ -922,8 +922,7 @@ fn gate_resolves_the_strict_target_physically() {
     }
     let trees = two_worktrees();
     let (a, c) = (trees.a.as_path(), trees.c.as_path());
-    let plain = trees.root.join("plain");
-    std::fs::create_dir_all(&plain).unwrap();
+    std::fs::create_dir_all(trees.root.join("plain")).unwrap();
     std::os::unix::fs::symlink(&trees.c, trees.root.join("link-c")).unwrap();
     let cases: Vec<(&str, String, Vec<&Path>)> = vec![
         (
@@ -949,8 +948,244 @@ fn gate_resolves_the_strict_target_physically() {
         (
             "not a work tree",
             "git -C ../../plain commit -m x".to_owned(),
-            vec![a, plain.as_path()],
+            vec![a],
         ),
     ];
     assert_cases(&trees, &cases);
+}
+
+/// A strict command into another part of the same work tree must not move
+/// the audit: `git commit` commits the whole index. Only git decides whether
+/// a target is another work tree. Here the install root is below the git
+/// root, with a sibling install, and the hook process starts in the install
+/// root of the session.
+#[test]
+fn gate_keeps_the_session_audit_inside_the_same_work_tree() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let app = repo.join("packages/app");
+    let gate = install_gate(&app, ".claude");
+    install_gate(&repo.join("packages/other"), ".claude");
+    std::fs::create_dir_all(repo.join("packages/empty/.git")).unwrap();
+    let linked = repo.join("packages/linked");
+    std::fs::create_dir_all(&linked).unwrap();
+    std::fs::write(
+        linked.join(".git"),
+        format!("gitdir: {}\n", repo.join(".git").display()),
+    )
+    .unwrap();
+    let repo_q = repo.display().to_string();
+    let cases = [
+        ("sibling package", "git -C ../other commit -m x".to_owned()),
+        (
+            "cd to the repo root",
+            format!("cd \"{repo_q}\" && git commit -m x"),
+        ),
+        ("-C to the repo root", "git -C ../.. commit -m x".to_owned()),
+        (
+            "empty .git directory",
+            "git -C ../empty commit -m x".to_owned(),
+        ),
+        (
+            "gitfile to the session repo",
+            "git -C ../linked commit -m x".to_owned(),
+        ),
+        ("cd -", "cd - && git commit -m x".to_owned()),
+        ("cd +1", "cd +1 && git commit -m x".to_owned()),
+        (
+            "cd through CDPATH form",
+            "cd packages && git commit -m x".to_owned(),
+        ),
+    ];
+    for (case, command) in cases {
+        let run = run_gate(
+            &gate,
+            &app,
+            &root.join("home"),
+            &command_payload(&app, &command),
+        );
+        assert_audited_in(&run, &app, case);
+    }
+
+    // The same commands without the session audit fail as on main.
+    std::fs::write(app.join(STUB_FAIL_MARKER), "").unwrap();
+    let run = run_gate(
+        &gate,
+        &app,
+        &root.join("home"),
+        &command_payload(&app, "git -C ../other commit -m x"),
+    );
+    assert_eq!(run.output.status.code(), Some(2));
+}
+
+/// `git -C` changes the directory with chdir(), so `link/..` is the parent
+/// of the link target, not the directory that holds the link. A `cd` resolves
+/// `..` logically, so `cd ./link/..` is not strict: the session tree stays in
+/// the audit, and the physical candidate only adds an audit.
+#[test]
+fn gate_resolves_git_c_physically_through_a_symlink() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let session = trees.a.join("src");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(trees.c.join("src")).unwrap();
+    std::os::unix::fs::symlink(trees.c.join("src"), session.join("link")).unwrap();
+    let cases: Vec<(&str, String, Vec<&Path>)> = vec![
+        (
+            "-C link/..",
+            "git -C link/.. commit -m x".to_owned(),
+            vec![trees.c.as_path()],
+        ),
+        (
+            "cd link/..",
+            "cd ./link/.. && git commit -m x".to_owned(),
+            vec![trees.a.as_path(), trees.c.as_path()],
+        ),
+    ];
+    assert_cases(&trees, &cases);
+}
+
+/// The gate script on main before the target support, for the differential
+/// test.
+const MAIN_GATE_SCRIPT: &str = include_str!("setup_hooks/fallow-gate.main.sh");
+
+/// Commands for the differential test, run from a session in `wt-a/src`.
+const DIFFERENTIAL_COMMANDS: &[&str] = &[
+    "git commit -m x",
+    "git -C ../../wt-c commit -m x",
+    "git -C '../../wt b' push origin main",
+    "cd ../../wt-c && git push",
+    "git -C .. commit -m x",
+    "git -C ../../main commit -m x",
+    "cd ../../main && git commit -m x",
+    "git -C ../../wt-c -C ../main commit",
+    "git -C link/.. commit -m x",
+    "git -C ../../wt-c commit -m \"$(git push)\"",
+    "git -C ../../wt-c commit -m \"`git push`\"",
+    "git -c core.hooksPath=/tmp/h -C ../../wt-c commit -m x",
+    "git -C ../../wt-c commit -F /tmp/m",
+    "git -C ../../wt-c push --receive-pack=x origin",
+    "git --git-dir=../../wt-c/.git --work-tree=../../wt-c commit",
+    "GIT_DIR=../../wt-c/.git git commit",
+    "git -C ../../wt-c status && git commit",
+    "cd ../../wt-c && cd - && git commit",
+    "cd ../../wt-c/src; cd ..; git commit",
+    "pushd ../../wt-c; popd; git commit",
+    "cd ../../wt-c || git commit",
+    "( cd ../../wt-c && git commit ); git push",
+    "cd ../../wt-c | git commit",
+    "git commit -m x; git -C ../../wt-c push",
+    "git commit -F - <<'EOF'\nit's done\nEOF\ngit -C ../../wt-c push",
+    "echo \"$(git -C ../../wt-c commit -m x)\"",
+    "bash -c 'git -C ../../wt-c commit -m x'",
+    "eval 'git commit -m x'",
+    "env git -C ../../wt-c commit",
+    "git -C $'../../wt-c' commit",
+    "git \\\n  -C ../../wt-c \\\n  commit -m x",
+    "git -C ../../plain commit -m x",
+    "git -C ../../gone commit -m x",
+    "cd +1 && git commit",
+    "git log --oneline",
+    "git status",
+];
+
+/// The git top level of a directory.
+fn git_toplevel(dir: &Path) -> String {
+    let out = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// Runs main's gate and the new gate at `gate` over the same commands. The
+/// new gate must audit every root that main audits, unless it audits only a
+/// strict target that git reports in another work tree than the session.
+fn assert_never_less_than_main(
+    gate: &Path,
+    process_dir: &Path,
+    session: &Path,
+    home: &Path,
+    commands: &[&str],
+) {
+    let session_top = git_toplevel(session);
+    let new_gate = rendered_gate_script();
+    for command in commands {
+        let payload = command_payload(session, command);
+        std::fs::write(gate, MAIN_GATE_SCRIPT).unwrap();
+        let main_run = run_gate(gate, process_dir, home, &payload);
+        std::fs::write(gate, &new_gate).unwrap();
+        let new_run = run_gate(gate, process_dir, home, &payload);
+        let missing: Vec<&PathBuf> = main_run
+            .audit_dirs
+            .iter()
+            .filter(|dir| !new_run.audit_dirs.contains(dir))
+            .collect();
+        if missing.is_empty() {
+            continue;
+        }
+        let target_only =
+            new_run.audit_dirs.len() == 1 && git_toplevel(&new_run.audit_dirs[0]) != session_top;
+        assert!(
+            target_only,
+            "{command:?}: the new gate skips {missing:?} that main audits; new={:?}",
+            new_run.audit_dirs
+        );
+    }
+}
+
+#[test]
+fn gate_never_audits_less_than_main() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let session = trees.a.join("src");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::create_dir_all(trees.c.join("src")).unwrap();
+    std::fs::create_dir_all(trees.root.join("plain")).unwrap();
+    std::os::unix::fs::symlink(trees.c.join("src"), session.join("link")).unwrap();
+    assert_never_less_than_main(
+        &trees.gate,
+        &trees.main,
+        &session,
+        &trees.root.join("home"),
+        DIFFERENTIAL_COMMANDS,
+    );
+}
+
+/// The same comparison with the install root below the git root and the hook
+/// process in the install root of the session.
+#[test]
+fn gate_never_audits_less_than_main_below_the_git_root() {
+    if skip_without_tools() {
+        return;
+    }
+    let (_tmp, root) = spaced_root();
+    let repo = root.join("repo");
+    init_repo(&repo);
+    let app = repo.join("packages/app");
+    let gate = install_gate(&app, ".claude");
+    install_gate(&repo.join("packages/other"), ".claude");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    let repo_q = repo.display().to_string();
+    let cd_root = format!("cd \"{repo_q}\" && git commit -m x");
+    let mut commands = vec![
+        "git -C ../other commit -m x",
+        "git -C ../.. commit -m x",
+        "git -C .. commit -m x",
+        "cd ../other && git commit -m x",
+        cd_root.as_str(),
+    ];
+    commands.extend_from_slice(DIFFERENTIAL_COMMANDS);
+    assert_never_less_than_main(&gate, &app, &app, &root.join("home"), &commands);
 }

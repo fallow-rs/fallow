@@ -78,21 +78,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a
   clean commit in the other tree. Now the generated `fallow-gate.sh` audits
-  only the target tree when the command has this strict form: `[cd <dir> &&]
-  git [-C <dir>]... commit|push [<option or name>]...`. Each word must be
-  inert. A directory is one plain or quoted word, it must exist, and it must
-  be in a git work tree after `pwd -P`. Each `-C` applies after the one
-  before, as in git. A double-quoted word cannot hold `$`, a backquote or a
-  backslash. After `commit` or `push`, only a short list of options is
-  allowed, for example `-m`, `--amend`, `--no-edit`, `-S`, `-u` and
-  `--force-with-lease`. Any other form audits the session tree as before. It
-  also audits each directory that the command names and that exists, also
-  through a `GIT_WORK_TREE` or `GIT_DIR` prefix. Examples of other forms are
-  `git -c`, `--git-dir`, `-F`, `--receive-pack`, `;`, a pipe, `sh -c`, `eval`
-  or an expansion. The gate blocks when one audit fails. A command with
-  quotes or expansions that holds `git` and later `commit` or `push` also
-  counts as a git write now, for example `bash -c 'git commit'`. Run `fallow
-  hooks install --target agent` again to update an installed gate script.
+  only the target when two conditions are true. First, the command has this
+  strict form: `[cd <dir> &&] git [-C <dir>]... commit|push [<option or
+  name>]...`. Second, git reports another work tree for the target: `git
+  rev-parse --show-toplevel --absolute-git-dir` gives a different top level
+  and a different git directory than for the session directory. A target in
+  the same work tree, for example another package of a monorepo, keeps the
+  session audit as before, because `git commit` commits the whole index.
+  Each word of the strict form must be inert. A `-C` directory resolves
+  physically, as git does, and cannot start with `-`, `+` or `=`. A `cd`
+  directory must start with `/`, `./` or `../`, or be `.` or `..`. A
+  double-quoted word cannot hold `$`, a backquote or a backslash. After
+  `commit` or `push`, only a short list of options is allowed, for example
+  `-m`, `--amend`, `--no-edit`, `-S`, `-u` and `--force-with-lease`. Any
+  other command audits the session tree as before. It also audits each
+  directory that the command names when git reports another work tree for it,
+  also through a `GIT_WORK_TREE` or `GIT_DIR` prefix. The gate blocks when one
+  audit fails. A command with quotes or expansions that holds `git` and later
+  `commit` or `push` also counts as a git write now, for example `bash -c
+  'git commit'`. Run `fallow hooks install --target agent` again to update an
+  installed gate script.
 
 ## [3.33.0] - 2026-10-09
 
