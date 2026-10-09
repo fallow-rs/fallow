@@ -311,6 +311,15 @@ define_plugin!(
                 .push(crate::resolve::extract_package_name(package));
         }
 
+        // Next.js loads each SWC plugin package named in this tuple list.
+        result
+            .referenced_dependencies
+            .extend(config_parser::extract_config_swc_plugin_dependencies(
+                source,
+                config_path,
+                &["experimental", "swcPlugins"],
+            ));
+
         if config_parser::extract_config_truthy_bool_or_object(
             source,
             config_path,
@@ -806,6 +815,31 @@ mod tests {
         assert!(
             result.entry_patterns.is_empty(),
             "no pageExtensions means no extra entry patterns"
+        );
+    }
+
+    #[test]
+    fn resolve_config_experimental_swc_plugins_are_referenced_dependencies() {
+        let source = r#"
+            const nextConfig = {
+                experimental: {
+                    swcPlugins: [
+                        ["@lingui/swc-plugin", { runtimeModules: {} }],
+                        ["@acme/swc-plugin/wasm", {}],
+                        ["./local-plugin.wasm", {}],
+                    ],
+                },
+            };
+            export default withSomething(nextConfig);
+        "#;
+        let deps = NextJsPlugin
+            .resolve_config(Path::new("next.config.ts"), source, Path::new("/project"))
+            .referenced_dependencies;
+        assert!(deps.contains(&"@lingui/swc-plugin".to_string()), "{deps:?}");
+        assert!(deps.contains(&"@acme/swc-plugin".to_string()), "{deps:?}");
+        assert!(
+            !deps.iter().any(|dep| dep.contains("local-plugin")),
+            "a relative SWC plugin path is not a package: {deps:?}"
         );
     }
 

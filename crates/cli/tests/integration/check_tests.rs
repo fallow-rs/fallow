@@ -4459,3 +4459,55 @@ fn benchmark_dead_code_run_starts_no_git_process() {
     run("off", &[]);
     assert_eq!(shim.calls(), "", "unexpected git calls");
 }
+
+/// The `scope-workspaces` next step counts the packages that only the config
+/// `workspaces.patterns` declares. The manifest pattern matches no package.
+#[test]
+fn scope_workspaces_next_step_sees_config_pattern_workspaces() {
+    let project = tempfile::tempdir().expect("project directory");
+    let root_dir = project.path();
+    std::fs::create_dir_all(root_dir.join("apps/web")).expect("create workspace");
+    std::fs::write(
+        root_dir.join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("write root manifest");
+    std::fs::write(
+        root_dir.join(".fallowrc.json"),
+        r#"{"workspaces":{"patterns":["apps/*"]}}"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root_dir.join("apps/web/package.json"),
+        r#"{"name":"web","main":"index.js"}"#,
+    )
+    .expect("write workspace manifest");
+    std::fs::write(root_dir.join("apps/web/index.js"), "console.log(1);\n").expect("write entry");
+    std::fs::write(root_dir.join("apps/web/orphan.js"), "console.log(2);\n")
+        .expect("write unused file");
+    crate::common::git(root_dir, &["init", "-q"]);
+    crate::common::commit_all(root_dir, "init");
+    crate::common::git(
+        root_dir,
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+
+    let output = run_fallow_raw_with_env(
+        &[
+            "dead-code",
+            "--quiet",
+            "--format",
+            "json",
+            "--no-cache",
+            "--root",
+            root_dir.to_str().expect("UTF-8 root"),
+        ],
+        &[("FALLOW_SUGGESTIONS", "on"), ("FALLOW_DIFF_FILE", "")],
+    );
+    let json = parse_json(&output);
+    let steps = json["next_steps"].as_array().cloned().unwrap_or_default();
+    assert!(
+        steps.iter().any(|step| step["id"] == "scope-workspaces"),
+        "expected a scope-workspaces step, got: {steps:?}"
+    );
+}

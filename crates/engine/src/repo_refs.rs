@@ -85,14 +85,22 @@ pub struct TemporaryBaseWorktree {
 impl TemporaryBaseWorktree {
     /// Create a detached base worktree for `base_ref`.
     ///
+    /// `workspace_patterns` are the `workspaces.patterns` of the resolved
+    /// config. They add packages beyond the manifests, and the base view
+    /// must link the generated context of those packages too.
+    ///
     /// # Errors
     ///
     /// Returns an engine error when the temp path cannot be generated, `git`
     /// cannot be started, or the worktree cannot be created.
-    pub fn create(repo_root: &Path, base_ref: &str) -> EngineResult<Self> {
+    pub fn create(
+        repo_root: &Path,
+        base_ref: &str,
+        workspace_patterns: &[String],
+    ) -> EngineResult<Self> {
         let path = base_worktree_path()?;
         create_detached_base_worktree(repo_root, &path, base_ref)?;
-        materialize_base_dependency_context(repo_root, &path);
+        materialize_base_dependency_context(repo_root, &path, workspace_patterns);
         Ok(Self {
             repo_root: repo_root.to_path_buf(),
             path,
@@ -107,8 +115,14 @@ impl TemporaryBaseWorktree {
 }
 
 /// Share dependency and generated context from the host checkout with a base view.
-pub fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
-    for slot in audit_materialized_context_slots(repo_root) {
+///
+/// `workspace_patterns` are the `workspaces.patterns` of the resolved config.
+pub fn materialize_base_dependency_context(
+    repo_root: &Path,
+    worktree_path: &Path,
+    workspace_patterns: &[String],
+) {
+    for slot in audit_materialized_context_slots(repo_root, workspace_patterns) {
         let Ok(source) = canonical_context_directory(&slot.source) else {
             continue;
         };
@@ -135,13 +149,19 @@ pub fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Pat
 }
 
 /// Build a bounded fingerprint of the host context materialized into a base view.
+///
+/// `workspace_patterns` must be the patterns that the base view gets, so the
+/// fingerprint covers each directory that the base view links.
 #[must_use]
-pub fn audit_materialized_context_fingerprint(root: &Path) -> AuditMaterializedContextFingerprint {
+pub fn audit_materialized_context_fingerprint(
+    root: &Path,
+    workspace_patterns: &[String],
+) -> AuditMaterializedContextFingerprint {
     let lockfiles = AUDIT_LOCKFILES
         .iter()
         .map(|name| fingerprint_context_file(root, &root.join(name)))
         .collect();
-    let directories = audit_materialized_context_slots(root)
+    let directories = audit_materialized_context_slots(root, workspace_patterns)
         .iter()
         .map(fingerprint_context_directory)
         .collect();
@@ -158,7 +178,10 @@ struct AuditMaterializedContextSlot {
     source: PathBuf,
 }
 
-fn audit_materialized_context_slots(root: &Path) -> Vec<AuditMaterializedContextSlot> {
+fn audit_materialized_context_slots(
+    root: &Path,
+    workspace_patterns: &[String],
+) -> Vec<AuditMaterializedContextSlot> {
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut slots = AUDIT_MATERIALIZED_CONTEXT_DIRS
         .iter()
@@ -169,7 +192,9 @@ fn audit_materialized_context_slots(root: &Path) -> Vec<AuditMaterializedContext
         })
         .collect::<Vec<_>>();
 
-    for workspace in crate::discover::discover_workspace_packages(root) {
+    for workspace in
+        crate::discover::discover_workspace_packages_with_patterns(root, workspace_patterns)
+    {
         let Ok(canonical_workspace) = dunce::canonicalize(&workspace.root) else {
             continue;
         };
@@ -1367,11 +1392,13 @@ pub fn head_sha(root: &Path) -> std::io::Result<Option<String>> {
 
 /// Resolve a concrete `--changed-workspaces` ref for project-level next steps.
 ///
+/// `workspace_patterns` are the `workspaces.patterns` of the resolved config.
 /// Returns `None` when the project has no workspaces, is not a git repository,
 /// or has no resolvable remote default branch.
 #[must_use]
-pub fn default_workspace_ref(root: &Path) -> Option<String> {
-    let workspaces = crate::discover::discover_workspace_packages(root);
+pub fn default_workspace_ref(root: &Path, workspace_patterns: &[String]) -> Option<String> {
+    let workspaces =
+        crate::discover::discover_workspace_packages_with_patterns(root, workspace_patterns);
     default_workspace_ref_for_workspaces(root, &workspaces)
 }
 
@@ -2157,7 +2184,7 @@ mod tests {
             &format!("#!/bin/sh\nprintf ran > '{}'\n", sentinel.display()),
         );
 
-        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD")
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD", &[])
             .expect("temporary worktree should be created");
 
         assert_eq!(
@@ -2185,7 +2212,7 @@ mod tests {
             &format!("#!/bin/sh\nprintf ran > '{}'\n", sentinel.display()),
         );
 
-        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD")
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD", &[])
             .expect("temporary worktree should be created");
 
         assert_eq!(
@@ -2230,7 +2257,7 @@ mod tests {
             ],
         );
 
-        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD")
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD", &[])
             .expect("temporary worktree should be created");
 
         assert_eq!(
@@ -2272,7 +2299,7 @@ mod tests {
             ],
         );
 
-        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD")
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD", &[])
             .expect("temporary worktree should be created");
 
         assert_eq!(
@@ -2341,7 +2368,7 @@ mod tests {
         );
         git(&repo, &["commit", "-m", "gitlink"]);
 
-        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD")
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD", &[])
             .expect("temporary worktree should be created");
         let regular_mode = fs::metadata(worktree.path().join("regular.txt"))
             .expect("regular metadata")
@@ -2426,15 +2453,15 @@ mod tests {
         )
         .expect("node marker");
 
-        let first = audit_materialized_context_fingerprint(root);
-        let unchanged = audit_materialized_context_fingerprint(root);
+        let first = audit_materialized_context_fingerprint(root, &[]);
+        let unchanged = audit_materialized_context_fingerprint(root, &[]);
         assert_eq!(
             first, unchanged,
             "unchanged context must preserve a warm key"
         );
 
         fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: 10\n").expect("mutate lockfile");
-        let lock_changed = audit_materialized_context_fingerprint(root);
+        let lock_changed = audit_materialized_context_fingerprint(root, &[]);
         assert_ne!(
             first, lock_changed,
             "lockfile content must invalidate the key"
@@ -2445,7 +2472,7 @@ mod tests {
             "layoutVersion: 6\n",
         )
         .expect("mutate node marker");
-        let marker_changed = audit_materialized_context_fingerprint(root);
+        let marker_changed = audit_materialized_context_fingerprint(root, &[]);
         assert_ne!(
             lock_changed, marker_changed,
             "bounded dependency markers must invalidate the key"
@@ -2455,7 +2482,7 @@ mod tests {
         fs::write(root.join(".nuxt/imports.d.ts"), "export {}\n").expect("nuxt marker");
         assert_ne!(
             marker_changed,
-            audit_materialized_context_fingerprint(root),
+            audit_materialized_context_fingerprint(root, &[]),
             "missing and materialized generated context must differ"
         );
     }
@@ -2478,7 +2505,7 @@ mod tests {
         fs::write(nuxt.join(".nuxt/imports.d.ts"), "export {};\n").expect("nuxt marker");
         fs::write(astro.join(".astro/types.d.ts"), "export {};\n").expect("astro marker");
 
-        let first = audit_materialized_context_fingerprint(root);
+        let first = audit_materialized_context_fingerprint(root, &[]);
         assert!(
             first
                 .directories
@@ -2499,7 +2526,7 @@ mod tests {
         .expect("mutate nuxt marker");
         assert_ne!(
             first,
-            audit_materialized_context_fingerprint(root),
+            audit_materialized_context_fingerprint(root, &[]),
             "nested workspace marker changes must invalidate the audit context"
         );
     }
@@ -2532,7 +2559,7 @@ mod tests {
                 .expect("generated marker");
         }
 
-        materialize_base_dependency_context(host.path(), worktree.path());
+        materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
         for (workspace, generated, marker) in [
             ("nuxt-app", ".nuxt", "imports.d.ts"),
@@ -2573,9 +2600,9 @@ mod tests {
                 .expect("source directory symlink");
         }
 
-        materialize_base_dependency_context(host.path(), worktree.path());
+        materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
-        let fingerprint = audit_materialized_context_fingerprint(host.path());
+        let fingerprint = audit_materialized_context_fingerprint(host.path(), &[]);
         for kind in AUDIT_MATERIALIZED_CONTEXT_DIRS {
             let target = dunce::canonicalize(targets.path().join(kind)).expect("canonical target");
             let mirrored = worktree.path().join(kind);
@@ -2595,6 +2622,44 @@ mod tests {
                     && marker.content_hash.is_some()
             }));
         }
+    }
+
+    /// A package that only the config patterns declare gets the same linked
+    /// context and fingerprint entry as a package that a manifest declares.
+    #[cfg(unix)]
+    #[test]
+    fn materialize_base_context_covers_config_pattern_workspaces() {
+        let host = tempfile::tempdir().expect("host");
+        let worktree = tempfile::tempdir().expect("worktree");
+        fs::write(
+            host.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("root package");
+        let host_workspace = host.path().join("apps/web");
+        fs::create_dir_all(host_workspace.join(".nuxt")).expect("host generated context");
+        fs::write(host_workspace.join("package.json"), r#"{"name":"web"}"#)
+            .expect("workspace package");
+        fs::create_dir_all(worktree.path().join("apps/web")).expect("base workspace");
+        let patterns = vec!["apps/*".to_owned()];
+        let names = |patterns: &[String]| {
+            audit_materialized_context_fingerprint(host.path(), patterns)
+                .directories
+                .into_iter()
+                .map(|directory| directory.name)
+                .collect::<Vec<_>>()
+        };
+
+        assert!(!names(&[]).contains(&"apps/web/.nuxt".to_owned()));
+        assert!(names(&patterns).contains(&"apps/web/.nuxt".to_owned()));
+
+        materialize_base_dependency_context(host.path(), worktree.path(), &patterns);
+        assert!(
+            fs::symlink_metadata(worktree.path().join("apps/web/.nuxt"))
+                .expect("linked generated context")
+                .file_type()
+                .is_symlink()
+        );
     }
 
     #[cfg(unix)]
@@ -2623,7 +2688,7 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), worktree.path().join("packages"))
             .expect("hostile workspace parent symlink");
 
-        materialize_base_dependency_context(host.path(), worktree.path());
+        materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
         assert_eq!(
             fs::read_link(&outside_generated).expect("sentinel symlink must survive"),

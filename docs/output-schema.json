@@ -24469,14 +24469,14 @@
           "items": {
             "type": "string"
           },
-          "description": "Files that import this dependency."
+          "description": "Files that import this dependency, each listed once."
         },
         "type_only_imported_by": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Files that import this dependency with type-only imports."
+          "description": "Files whose every import of this dependency is type-only, each listed\nonce."
         },
         "used_in_scripts": {
           "type": "boolean",
@@ -24488,7 +24488,7 @@
         },
         "import_count": {
           "type": "integer",
-          "description": "Total import count."
+          "description": "Number of files that import this dependency."
         },
         "peer_of": {
           "type": "array",

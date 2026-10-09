@@ -1214,7 +1214,12 @@ fn compute_base_security_snapshot(
     base_ref: &str,
     base_sha: &str,
 ) -> Result<SecurityKeySnapshot, ExitCode> {
-    let Some(worktree) = BaseWorktree::create(opts.root, base_ref, Some(base_sha)) else {
+    let Some(worktree) = BaseWorktree::create(
+        opts.root,
+        base_ref,
+        Some(base_sha),
+        &config.workspace_patterns,
+    ) else {
         return Err(emit_error(
             &format!("could not create a temporary worktree for base ref '{base_ref}'"),
             2,

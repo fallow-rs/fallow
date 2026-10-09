@@ -706,7 +706,7 @@ fn map_no_workspaces_error(
     match mode {
         WorkspaceScopeMode::Workspace => ProgrammaticError::new(
             format!(
-                "`workspace` {} specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, or tsconfig.json has \"references\".",
+                "`workspace` {} specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, tsconfig.json has \"references\", or the project sets \"workspaces.patterns\" in the fallow config.",
                 quote_owned_patterns(patterns)
             ),
             2,
@@ -717,7 +717,7 @@ fn map_no_workspaces_error(
             let git_ref = git_ref.unwrap_or_default();
             ProgrammaticError::new(
                 format!(
-                    "`changed_workspaces` '{git_ref}' specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, or tsconfig.json has \"references\"."
+                    "`changed_workspaces` '{git_ref}' specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, tsconfig.json has \"references\", or the project sets \"workspaces.patterns\" in the fallow config."
                 ),
                 2,
             )
@@ -797,6 +797,22 @@ mod tests {
             usize::from(frame[0])
         } else {
             1 + consume_stack(depth - 1)
+        }
+    }
+
+    #[test]
+    fn no_workspaces_error_names_the_config_key() {
+        for (mode, git_ref) in [
+            (super::WorkspaceScopeMode::Workspace, None),
+            (super::WorkspaceScopeMode::ChangedWorkspaces, Some("main")),
+        ] {
+            let err = super::map_no_workspaces_error(mode, &["web".to_owned()], git_ref);
+            assert!(
+                err.message
+                    .contains("\"workspaces.patterns\" in the fallow config"),
+                "{}",
+                err.message
+            );
         }
     }
 }

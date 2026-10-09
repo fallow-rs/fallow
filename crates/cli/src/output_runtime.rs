@@ -7,6 +7,27 @@ static TELEMETRY_ANALYSIS_RUN_ID: Mutex<Option<String>> = Mutex::new(None);
 /// The baseline this run loaded, recorded for the `recheck-baseline` next step.
 static LOADED_BASELINE: Mutex<Option<LoadedBaselineRecheck>> = Mutex::new(None);
 
+/// The `workspaces.patterns` of the config this run loaded, recorded for the
+/// `scope-workspaces` next step. The render layer does not get the config, so
+/// the config loader records the patterns, like the loaded baseline.
+static WORKSPACE_PATTERNS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Record the `workspaces.patterns` of the config that this run loaded.
+pub fn set_workspace_patterns(patterns: &[String]) {
+    if let Ok(mut current) = WORKSPACE_PATTERNS.lock() {
+        patterns.clone_into(&mut current);
+    }
+}
+
+/// The `workspaces.patterns` of the config that this run loaded.
+#[must_use]
+pub fn workspace_patterns() -> Vec<String> {
+    WORKSPACE_PATTERNS
+        .lock()
+        .map(|patterns| patterns.clone())
+        .unwrap_or_default()
+}
+
 /// What the `recheck-baseline` next step needs about the loaded baseline.
 ///
 /// Recorded at load time rather than threaded through the render layer. Every
@@ -41,6 +62,9 @@ pub fn set_loaded_baseline(loaded: LoadedBaselineRecheck) {
 pub fn reset_run_state() {
     if let Ok(mut current) = LOADED_BASELINE.lock() {
         *current = None;
+    }
+    if let Ok(mut current) = WORKSPACE_PATTERNS.lock() {
+        current.clear();
     }
     crate::baseline_growth::reset();
 }

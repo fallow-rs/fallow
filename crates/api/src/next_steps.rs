@@ -34,11 +34,14 @@ pub fn setup_pointer_applicable(root: &Path) -> bool {
 /// next step, or `None` when no workspace or resolvable ref exists.
 ///
 /// Returns `None` without a git probe when suggestions are disabled.
+///
+/// Only the isolated combined run uses this path. That run has no resolved
+/// config, so only the manifests declare workspaces here.
 pub fn default_workspace_ref(root: &Path) -> Option<String> {
     if !suggestions_enabled() {
         return None;
     }
-    fallow_engine::repo_refs::default_workspace_ref(root)
+    fallow_engine::repo_refs::default_workspace_ref(root, &[])
 }
 
 /// Resolve a concrete `--changed-workspaces` ref using already discovered

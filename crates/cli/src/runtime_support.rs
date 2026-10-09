@@ -227,7 +227,8 @@ pub fn build_ownership_resolver_for_mode(
             if workspaces.is_empty() {
                 Err(crate::error::emit_error(
                     "--group-by package requires a monorepo with workspace packages \
-                     (package.json workspaces, pnpm-workspace.yaml, or tsconfig references). \
+                     (package.json workspaces, pnpm-workspace.yaml, tsconfig references, \
+                     or \"workspaces.patterns\" in the fallow config). \
                      For single-package projects try --group-by directory instead.",
                     2,
                     output,
@@ -370,6 +371,7 @@ pub fn load_config_for_analysis(
 
     report_workspace_diagnostics(root, &resolved, &options)?;
     warn_unknown_security_categories(&resolved.security);
+    crate::output_runtime::set_workspace_patterns(&resolved.workspace_patterns);
 
     Ok(resolved)
 }

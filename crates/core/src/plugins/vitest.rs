@@ -140,7 +140,7 @@ impl Plugin for VitestPlugin {
         let imports = config_parser::extract_imports(source, config_path);
         add_import_dependencies(&mut result, &imports);
         result.referenced_dependencies.extend(
-            config_parser::extract_vite_react_babel_dependencies(source, config_path),
+            config_parser::extract_vite_plugin_option_dependencies(source, config_path),
         );
 
         apply_vitest_aliases(&mut result, source, config_path, root);

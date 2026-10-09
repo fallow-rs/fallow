@@ -276,6 +276,43 @@ fn changed_workspaces_without_monorepo_errors() {
         combined.contains("no workspaces found"),
         "expected 'no workspaces found' error, got:\n{combined}"
     );
+    assert!(
+        combined.contains(CONFIG_PATTERNS_HINT),
+        "the error must name the config key, got:\n{combined}"
+    );
+}
+
+/// The config key that also declares workspaces. Each error that reports no
+/// workspace names it next to the manifest sources.
+const CONFIG_PATTERNS_HINT: &str = "\"workspaces.patterns\" in the fallow config";
+
+#[test]
+fn workspace_errors_without_monorepo_name_the_config_key() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"single","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    let root = dir.to_str().unwrap();
+
+    for args in [
+        &["check", "--workspace", "web"][..],
+        &["check", "--group-by", "package"][..],
+    ] {
+        let mut full = vec!["--root", root, "--quiet"];
+        full.extend_from_slice(args);
+        let output = run_fallow_raw(&full);
+        assert_eq!(output.code, 2, "{args:?}");
+        let combined = format!("{}\n{}", output.stdout, output.stderr);
+        assert!(
+            combined.contains(CONFIG_PATTERNS_HINT),
+            "{args:?}: the error must name the config key, got:\n{combined}"
+        );
+    }
 }
 
 #[test]

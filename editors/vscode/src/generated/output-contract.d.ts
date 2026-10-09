@@ -11677,11 +11677,12 @@ export interface DependencyTrace {
  */
 package_name: string
 /**
- * Files that import this dependency.
+ * Files that import this dependency, each listed once.
  */
 imported_by: string[]
 /**
- * Files that import this dependency with type-only imports.
+ * Files whose every import of this dependency is type-only, each listed
+ * once.
  */
 type_only_imported_by: string[]
 /**
@@ -11695,7 +11696,7 @@ used_in_scripts: boolean
  */
 is_used: boolean
 /**
- * Total import count.
+ * Number of files that import this dependency.
  */
 import_count: number
 /**

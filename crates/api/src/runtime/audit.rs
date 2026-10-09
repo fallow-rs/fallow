@@ -169,7 +169,12 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
         base_ref: &str,
         _base_sha: Option<&str>,
     ) -> ProgrammaticResult<TemporaryBaseWorktree> {
-        TemporaryBaseWorktree::create(self.resolved.root(), base_ref).map_err(|err| {
+        TemporaryBaseWorktree::create(
+            self.resolved.root(),
+            base_ref,
+            &self.config.workspace_patterns,
+        )
+        .map_err(|err| {
             ProgrammaticError::new(err.to_string(), 2)
                 .with_code("FALLOW_AUDIT_BASE_WORKTREE_FAILED")
                 .with_context("audit.base")

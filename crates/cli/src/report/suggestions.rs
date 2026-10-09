@@ -99,7 +99,10 @@ fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
     if !suggestions_enabled() {
         return None;
     }
-    fallow_engine::repo_refs::default_workspace_ref(root)
+    fallow_engine::repo_refs::default_workspace_ref(
+        root,
+        &crate::output_runtime::workspace_patterns(),
+    )
 }
 
 /// `audit-changed`: gate only the files the current branch changed. `fallow

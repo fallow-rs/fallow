@@ -433,13 +433,14 @@ jobs:
         if: steps.runner.outcome == 'failure'
         run: echo 'Check uses GitHub because allocation selection failed.' >> "$GITHUB_STEP_SUMMARY"
 
+  # Check and Lint and contracts share no step, so they run in parallel. Both
+  # use the runner that the heavy-runner job selects, and each one ends with
+  # its own check for uncommitted changes.
   check:
     name: Check
     needs: [changes, heavy-runner]
     if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
     runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
-    # A cold Rust cache can leave the NAPI release build finishing just after
-    # the previous 20-minute limit on merged commits.
     timeout-minutes: 30
     permissions:
       contents: read
@@ -448,12 +449,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup-rust
-        with:
-          components: clippy, rustfmt
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: 11.25.0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -489,7 +484,7 @@ jobs:
         # built target/debug/fallow, and setup-node is already present. The
         # harness reads committed producer maps, so it installs nothing and
         # touches no network. It writes only to a temporary directory, which
-        # the `git diff --exit-code` step at the end of this job depends on.
+        # the `git diff --exit-code` step at the end of this job checks.
         run: npm run check:coverage-producers
 
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
@@ -497,6 +492,35 @@ jobs:
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
         run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
+
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
+
+  check-lint:
+    name: Lint and contracts
+    needs: [changes, heavy-runner]
+    if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
+    runs-on: ${{ github.run_attempt == 1 && needs['heavy-runner'].result == 'success' && needs['heavy-runner'].outputs.runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
+    # A cold Rust cache can leave the NAPI release build finishing just after
+    # the previous 20-minute limit on merged commits.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy, rustfmt
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.25.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
 
       - name: Install contract bundle dependencies
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
@@ -579,14 +603,14 @@ jobs:
   windows-rust:
     name: Windows path and subprocess handling
     needs: changes
-    # Also on push: Release Validation does not run the ignored drift cases
-    # on Windows, so the release commit needs this job.
+    # Also on push: the release commit needs a Windows result for the
+    # nextest selection and the platform Clippy pass.
     if: needs.changes.outputs.windows-rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
     runs-on: windows-latest
     # The suite plus the platform clippy pass takes around 14 minutes of real
     # work on a warm cache, so a 15-minute budget cancels the job during
-    # cache-save cleanup even though every step succeeded. The drift harness
-    # step and the graph, api and multicall test builds add more on top.
+    # cache-save cleanup even though every step succeeded. The graph, api and
+    # multicall test builds add more on top.
     timeout-minutes: 40
     permissions:
       contents: read
@@ -594,10 +618,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Both Windows debug jobs build the dev and test profiles with the same
+      # toolchain, so they share one cache entry. This keeps one multi-GB
+      # Windows entry in the repository cache quota.
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-          cache-key: pr-windows-rust
+          shared-key: windows-debug
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-nextest
@@ -616,8 +643,7 @@ jobs:
       # The groups for fallow-graph, fallow-api and fallow-multicall run the
       # tests that hold Windows-only code: symlinked package sources, drive
       # prefixes, verbatim paths and `.exe` binary names.
-      # fallow-cli is in the package list so that the drift harness below
-      # reuses this build with the same feature set.
+      # fallow-cli is in the package list for the null-device exit code tests.
       - name: Test Windows path and subprocess handling
         shell: bash
         run: >-
@@ -643,15 +669,41 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: ignore
           retention-days: 14
+      - name: Clippy platform-specific paths
+        run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall -p fallow-config -p fallow-process -p fallow-types --all-targets -- -D warnings
+
+  # The drift harness runs in its own Windows job, in parallel with the job
+  # above. It has the same trigger, so a change that the job above tests also
+  # runs the harness on Windows.
+  windows-drift:
+    name: Windows drift harness
+    needs: changes
+    # Release Validation runs the drift harness on Linux only, so this job is
+    # the only Windows run of the ignored drift cases. The job also runs on
+    # push so that the release commit has a Windows result.
+    if: needs.changes.outputs.windows-rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Restore only: `Windows path and subprocess handling` saves the shared
+      # entry. Two jobs that save one key race, and the loser keeps a cache
+      # without its packages.
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: windows-debug
+          save-if: 'false'
       # The drift harness builds git fixtures, spawns the CLI and the MCP
-      # server, and compares root-relative paths. Release validation runs it on
-      # Windows, so a harness change must pass here before it merges.
+      # server, and compares root-relative paths. A harness change must pass
+      # here on Windows before it merges.
       - name: Build fallow-mcp for the drift harness
         run: cargo build -p fallow-mcp
       - name: Test drift harness on Windows
         run: cargo test -p fallow-cli --test drift -- --include-ignored
-      - name: Clippy platform-specific paths
-        run: cargo clippy -p fallow-cli -p fallow-core -p fallow-engine -p fallow-lsp -p fallow-mcp -p fallow-graph -p fallow-api -p fallow-multicall -p fallow-config -p fallow-process -p fallow-types --all-targets -- -D warnings
 
   windows-type-aware:
     name: Windows type-aware npm and transport
@@ -1437,30 +1489,80 @@ jobs:
           key: miri
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: fallow-types
-        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests -- --skip proptests
+      # Build every Miri test binary first, with the same commands as the run
+      # below, so that the parallel runs do not wait on the Cargo build lock.
+      - name: Build Miri test binaries
+        run: |
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests --no-run
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests --no-run
+          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests --no-run
 
-      - name: fallow-graph
-        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests
-
-      # Only suppress, CSS helpers, and visitor helpers run under Miri (pure data logic).
-      # Parser-heavy modules have no unsafe code and are too slow under Miri interpretation.
+      # The Miri interpreter runs on one core, and `cargo miri test` runs the
+      # tests of a crate one after the other. The three crates run as three
+      # parallel processes, so the job takes as long as the slowest crate, not
+      # the sum of the three. `cargo miri nextest run` is slower: it starts a
+      # new Miri process for each test, and each start costs seconds.
       #
-      # Tree Borrows for this crate only: the css analytics path parses via
+      # Only suppress, CSS helpers, and visitor helpers of fallow-extract run
+      # under Miri (pure data logic). Parser-heavy modules have no unsafe code
+      # and are too slow under Miri interpretation.
+      #
+      # Tree Borrows for fallow-extract only: the css analytics path parses via
       # lightningcss (alpha), whose @layer string handling reconstructs a &str
       # from raw parts in a way Miri's Stacked Borrows flags as a benign
       # (still-experimental-rules) violation. Tree Borrows models the same
       # aliasing safety but accepts lightningcss's reconstructed-pointer pattern.
       # types/graph stay on Stacked Borrows (default).
-      - name: fallow-extract
-        env:
-          MIRIFLAGS: -Zmiri-tree-borrows
+      - name: Run Miri tests (fallow-types, fallow-graph, fallow-extract in parallel)
         run: |
-          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css:: -- --skip sfc_css::
-          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_classes::
-          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_metrics::
-          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests suppress::
-          cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests visitor::helpers::
+          set -u
+          run_crate() {
+            local crate="$1"
+            local start="$SECONDS"
+            local status=0
+            case "$crate" in
+              fallow-types)
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests -- --skip proptests || status=1
+                ;;
+              fallow-graph)
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests || status=1
+                ;;
+              fallow-extract)
+                export MIRIFLAGS=-Zmiri-tree-borrows
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css:: -- --skip sfc_css:: || status=1
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_classes:: || status=1
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests css_metrics:: || status=1
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests suppress:: || status=1
+                cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests visitor::helpers:: || status=1
+                ;;
+            esac
+            echo "$crate: exit $status after $((SECONDS - start)) s"
+            return "$status"
+          }
+          logs="$RUNNER_TEMP/miri"
+          mkdir -p "$logs"
+          crates=(fallow-types fallow-graph fallow-extract)
+          pids=()
+          # Stream each crate live with a prefix, so a run that hits the job
+          # timeout still shows which test hung. The exit status goes to a file,
+          # because the status of the pipeline is the status of `sed`.
+          for crate in "${crates[@]}"; do
+            # `&& s=0 || s=$?` keeps errexit from skipping the status write.
+            { run_crate "$crate" 2>&1 && s=0 || s=$?; echo "$s" > "$logs/$crate.status"; } \
+              | tee "$logs/$crate.log" | sed -u "s/^/[$crate] /" &
+            pids+=("$!")
+          done
+          for pid in "${pids[@]}"; do wait "$pid" || true; done
+          failed=0
+          # Replay each complete log in one group after all crates stop.
+          for crate in "${crates[@]}"; do
+            if [ "$(cat "$logs/$crate.status" 2>/dev/null)" = 0 ]; then result=passed; else result=failed; failed=1; fi
+            echo "::group::$crate ($result)"
+            cat "$logs/$crate.log"
+            echo "::endgroup::"
+            if [ "$result" = failed ]; then echo "::error::Miri tests failed for $crate"; fi
+          done
+          exit "$failed"
 
   viz-frontend:
     name: Viz frontend
@@ -1489,7 +1591,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, docker, check, drift, windows-rust, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [changes, docker, check, check-lint, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}

@@ -7,9 +7,10 @@ const REPOSITORY = "fallow-rs/fallow";
 const MAX_BUDGET_CREDITS = 8000;
 const MIRI_SLOT_CREDITS = 150;
 const MIRI_LEGACY_BUDGET = 2400;
-// Full job timeouts at 2 credits/minute plus 30 credits for overhead.
+// Full job timeouts at 2 credits/minute plus 30 credits of overhead per job. A
+// CI Check slot covers two 30-minute jobs: Check and Lint and contracts.
 const SLOT_CREDITS = new Map([
-  ["ci.yml/check", 90],
+  ["ci.yml/check", 180],
   ["release-validation.yml/drift-full", 210],
   ["release.yml/drift-full", 210],
 ]);

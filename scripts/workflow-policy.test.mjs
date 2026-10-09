@@ -100,7 +100,7 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
 test("public skill PR parity uses the exact base while push and candidate checks stay strict", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const job = indentedBlock(workflow, "skills-vendor", 2);
-  const checkJob = indentedBlock(workflow, "check", 2);
+  const lintJob = indentedBlock(workflow, "check-lint", 2);
   const jsJob = indentedBlock(workflow, "js-lint", 2);
   const aggregate = indentedBlock(workflow, "ci-ok", 2);
   const rustPaths = listedPaths(indentedBlock(workflow, "rust", 12));
@@ -119,7 +119,7 @@ test("public skill PR parity uses the exact base while push and candidate checks
   assert.match(aggregate, /needs: \[[^\n]*skills-vendor/u);
   assert.ok(rustPaths.includes("npm/fallow/skills/fallow/**"));
   assert.ok(rustPaths.includes("npm/fallow/skills/fallow-setup/**"));
-  assert.match(checkJob, /run: CI=true npm run generate:contracts:check/u);
+  assert.match(lintJob, /run: CI=true npm run generate:contracts:check/u);
   assert.match(jsJob, /run: npm run check:agent-adapters/u);
 });
 
@@ -355,6 +355,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   const vscodePaths = listedPaths(indentedBlock(workflow, "vscode", 12));
   const checkJob = indentedBlock(workflow, "check", 2);
   const windowsRustJob = indentedBlock(workflow, "windows-rust", 2);
+  const windowsDriftJob = indentedBlock(workflow, "windows-drift", 2);
   const windowsTypeAwareJob = indentedBlock(workflow, "windows-type-aware", 2);
   const vscodePackageTargetsJob = indentedBlock(workflow, "vscode-package-targets", 2);
   const vscodeTargetHostJob = indentedBlock(workflow, "vscode-target-host", 2);
@@ -362,14 +363,17 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   const aggregateJob = indentedBlock(workflow, "ci-ok", 2);
   const workflowWithoutWindowsJobs = workflow
     .replace(windowsRustJob, "")
+    .replace(windowsDriftJob, "")
     .replace(windowsTypeAwareJob, "")
     .replace(vscodePackageTargetsJob, "")
     .replace(vscodeTargetHostJob, "");
 
   assert.doesNotMatch(workflowWithoutWindowsJobs, /windows-latest|windows-11-arm|macos-latest/);
-  assert.match(checkJob, /runs-on:.*\|\| \x27ubuntu-26.04\x27/);
-  assert.match(checkJob, /timeout-minutes: 30/);
-  assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
+  for (const job of [checkJob, indentedBlock(workflow, "check-lint", 2)]) {
+    assert.match(job, /runs-on:.*\|\| \x27ubuntu-26.04\x27/);
+    assert.match(job, /timeout-minutes: 30/);
+    assert.doesNotMatch(job, /matrix\.|windows-latest|macos-latest/);
+  }
   assert.match(vscodePackageTargetsJob, /runs-on: ubuntu-26.04/);
   assert.match(vscodeTargetHostJob, /linux-x64[\s\S]*win32-x64[\s\S]*darwin-x64/u);
   assert.match(windowsRustJob, /needs: changes/);
@@ -388,14 +392,23 @@ test("regular CI keeps affected checks on Ubuntu", () => {
   assert.ok(windowsRustPaths.includes("crates/cli/tests/integration/exit_code_tests.rs"));
   assert.ok(windowsRustPaths.includes("crates/cli/src/signal/**"));
   assert.ok(windowsRustPaths.includes("crates/lsp/**"));
-  // Release validation runs the drift harness on Windows, so a harness change
-  // must run there on the pull request too.
+  // Release Validation runs the drift harness on Linux only, so a harness
+  // change must run on Windows on the pull request.
   assert.ok(windowsRustPaths.includes("crates/cli/tests/drift/**"));
-  assert.match(windowsRustJob, /^[ \t]+run: cargo build -p fallow-mcp$/m);
+  // The drift harness has its own Windows job with the same trigger, so it
+  // runs in parallel with the Windows test job.
+  assert.match(windowsDriftJob, /needs: changes/);
+  assert.equal(
+    windowsDriftJob.match(/^    if: (.+)$/m)?.[1],
+    windowsRustJob.match(/^    if: (.+)$/m)?.[1],
+  );
+  assert.match(windowsDriftJob, /runs-on: windows-latest/);
+  assert.match(windowsDriftJob, /^[ \t]+run: cargo build -p fallow-mcp$/m);
   assert.match(
-    windowsRustJob,
+    windowsDriftJob,
     /^[ \t]+run: cargo test -p fallow-cli --test drift -- --include-ignored$/m,
   );
+  assert.doesNotMatch(windowsRustJob, /--test drift|cargo build -p fallow-mcp/);
   // Path rendering lives across both crates (`Display`, `join`, `components`),
   // and a separator regression there is invisible until the weekly Release
   // Validation runs the full suite on Windows.
@@ -458,6 +471,7 @@ test("regular CI keeps affected checks on Ubuntu", () => {
     /missing windows-audit-smoke block/,
   );
   assert.match(aggregateJob, /windows-rust/);
+  assert.match(aggregateJob, /windows-drift/);
   assert.match(aggregateJob, /windows-type-aware/);
   assert.match(aggregateJob, /needs: \[[^\n]*\bzed\b[^\n]*\]/);
   assert.doesNotMatch(aggregateJob, /windows-audit-smoke|windows-arm64/);
@@ -1528,8 +1542,10 @@ test("ordinary main prose skips heavy CI while detection failures reach the aggr
   assert.match(changes, /scripts\/ci-change-policy\.mjs/u);
   for (const name of [
     "check",
+    "check-lint",
     "drift",
     "windows-rust",
+    "windows-drift",
     "windows-type-aware",
     "miri",
     "vscode",
@@ -1612,7 +1628,7 @@ test("Miri caches restore on PRs but save only on main", async () => {
     assert.equal(runInNewContext(save, { github: { ref } }), expected);
   }
   assert.doesNotMatch(
-    cache.split("- name: fallow-types")[0],
+    cache.split("- name: Build Miri test binaries")[0],
     /\n\s+if:/,
     "PRs still restore the cache",
   );
@@ -1735,6 +1751,7 @@ test("heavy jobs admit a reserved runner and retain GitHub fallback after select
   const { runInNewContext } = await import("node:vm");
   for (const [file, jobName] of [
     ["ci.yml", "check"],
+    ["ci.yml", "check-lint"],
     ["release-validation.yml", "drift-full"],
   ]) {
     const workflow = readWorkflow(`.github/workflows/${file}`);
@@ -1864,6 +1881,8 @@ test("CI aggregate ignores optional selector failure while real Check failure pr
   const aggregate = indentedBlock(workflow, "ci-ok", 2);
   const names = aggregate.match(/^    needs: \[([^\]]+)\]/m)[1].split(/,\s*/);
   assert.ok(names.includes("check"));
+  assert.ok(names.includes("check-lint"));
+  assert.ok(names.includes("windows-drift"));
   assert.ok(
     !names.includes("heavy-runner"),
     "optional selector failures are carried by Check fallback",
@@ -1902,7 +1921,15 @@ test("heavy admission reserves the actual job timeouts including overhead", asyn
     const source = readWorkflow(
       `.github/workflows/${workflow === "release.yml" ? "release-validation.yml" : workflow}`,
     );
-    const minutes = Number(indentedBlock(source, job, 2).match(/^    timeout-minutes: (\d+)$/m)[1]);
+    // A CI Check slot covers every job that runs on the runner it selects:
+    // Check and Lint and contracts.
+    const slotJobs = job === "check" ? ["check", "check-lint"] : [job];
+    // Each job has its own runner start, checkout and cache overhead.
+    const credits = slotJobs
+      .map((name) =>
+        Number(indentedBlock(source, name, 2).match(/^    timeout-minutes: (\d+)$/m)[1]),
+      )
+      .reduce((sum, minutes) => sum + minutes * 2 + 30, 0);
     const environment = {
       GITHUB_REPOSITORY: "fallow-rs/fallow",
       GITHUB_EVENT_NAME: event,
@@ -1915,7 +1942,7 @@ test("heavy admission reserves the actual job timeouts including overhead", asyn
     };
     const reservation = {
       month: "2026-09",
-      budgetCredits: minutes * 2 + 30,
+      budgetCredits: credits,
       priorReservedCredits: 0,
       allocations: [{ workflow, job, firstRunNumber: 1, slots: 1 }],
     };
@@ -1997,5 +2024,106 @@ test("only the top-level env of a workflow sets GIT_CONFIG variables", () => {
       .split("\n")
       .filter((line) => /^\s{4,}GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+):/.test(line));
     assert.deepEqual(nested, [], `${name} sets GIT_CONFIG variables below the top-level env`);
+  }
+});
+
+test("Miri runs the three crates in parallel with the same test selection", () => {
+  const miri = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "miri", 2);
+  assert.match(miri, /^    name: Miri$/m, "Miri is a required status check name");
+  // `cargo miri nextest run` starts one Miri process for each test, and each
+  // start costs seconds, so it is slower than one `cargo miri test` per crate.
+  assert.doesNotMatch(miri, /^\s+cargo [^\n]*miri nextest/m);
+  const toolchain = 'cargo +"$MIRI_TOOLCHAIN" miri test';
+  for (const command of [
+    `${toolchain} -p fallow-types --lib --tests -- --skip proptests`,
+    `${toolchain} -p fallow-graph --lib --tests -- --skip proptests`,
+    `${toolchain} -p fallow-extract --lib --tests css:: -- --skip sfc_css::`,
+    `${toolchain} -p fallow-extract --lib --tests css_classes::`,
+    `${toolchain} -p fallow-extract --lib --tests css_metrics::`,
+    `${toolchain} -p fallow-extract --lib --tests suppress::`,
+    `${toolchain} -p fallow-extract --lib --tests visitor::helpers::`,
+  ]) {
+    assert.equal(miri.split(`${command} || status=1`).length, 2, `Miri must run ${command} once`);
+  }
+  for (const crate of ["fallow-types", "fallow-graph", "fallow-extract"]) {
+    assert.ok(miri.includes(`${toolchain} -p ${crate} --lib --tests --no-run`));
+  }
+  const extract = miri.slice(
+    miri.indexOf("fallow-extract)"),
+    miri.indexOf(";;", miri.indexOf("fallow-extract)")),
+  );
+  assert.match(extract, /export MIRIFLAGS=-Zmiri-tree-borrows/);
+  assert.equal(miri.match(/MIRIFLAGS/g)?.length, 1, "types and graph stay on Stacked Borrows");
+  // Each crate runs in the background and streams its output live, so a run
+  // that hits the job timeout still shows the hung test. The step fails when
+  // one crate fails or does not write its exit status.
+  assert.ok(
+    miri.includes(
+      '{ run_crate "$crate" 2>&1 && s=0 || s=$?; echo "$s" > "$logs/$crate.status"; } \\\n' +
+        '              | tee "$logs/$crate.log" | sed -u "s/^/[$crate] /" &',
+    ),
+    "Miri must stream each crate live and record its exit status",
+  );
+  assert.ok(miri.includes('for pid in "${pids[@]}"; do wait "$pid" || true; done'));
+  assert.ok(
+    miri.includes(
+      'if [ "$(cat "$logs/$crate.status" 2>/dev/null)" = 0 ]; then result=passed; else result=failed; failed=1; fi',
+    ),
+    "Miri must fail a crate that has no zero exit status",
+  );
+  assert.match(miri, /exit "\$failed"/);
+});
+
+test("the Check, Lint and contracts, and Windows jobs run each step exactly once", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const jobs = {
+    check: [
+      "Run tests",
+      "Upload test report",
+      "Run coverage producer conformance",
+      "Run runtime-coverage integration tests (feature-gated stub sidecar)",
+      "Run schema drift gate (feature-gated schema-emit binary)",
+    ],
+    "check-lint": [
+      "Install contract bundle dependencies",
+      "Run staged subgenerator integration tests",
+      "Run contract bundle drift gate",
+      "Clippy",
+      "Clippy (test-sidecar-key and schema-emit features)",
+      "Format",
+      "Install NAPI package dependencies",
+      "Build NAPI package",
+      "Run NAPI smoke test",
+    ],
+    "windows-rust": ["Test Windows path and subprocess handling", "Clippy platform-specific paths"],
+    "windows-drift": ["Build fallow-mcp for the drift harness", "Test drift harness on Windows"],
+  };
+  const stepNames = (text) => [...text.matchAll(/^ {6}- name: (.+)$/gm)].map((match) => match[1]);
+  const allSteps = Object.keys(jobs).flatMap((job) => stepNames(indentedBlock(workflow, job, 2)));
+  for (const [job, steps] of Object.entries(jobs)) {
+    const jobSteps = stepNames(indentedBlock(workflow, job, 2));
+    for (const step of steps) {
+      assert.ok(jobSteps.includes(step), `${job} must run "${step}"`);
+      if (step === "Upload test report") continue;
+      assert.equal(
+        allSteps.filter((name) => name === step).length,
+        1,
+        `"${step}" must run in exactly one of these jobs`,
+      );
+    }
+  }
+  assert.equal(indentedBlock(workflow, "check", 2).match(/^    name: (.+)$/m)?.[1], "Check");
+  assert.equal(
+    indentedBlock(workflow, "windows-rust", 2).match(/^    name: (.+)$/m)?.[1],
+    "Windows path and subprocess handling",
+  );
+  const check = indentedBlock(workflow, "check", 2);
+  const lint = indentedBlock(workflow, "check-lint", 2);
+  assert.doesNotMatch(check, /cargo clippy|cargo fmt|napi build/);
+  assert.doesNotMatch(lint, /cargo nextest run|cargo test /);
+  for (const job of [check, lint]) {
+    assert.match(job, /^    needs: \[changes, heavy-runner\]$/m);
+    assert.equal(job.match(/^    if: (.+)$/m)?.[1], check.match(/^    if: (.+)$/m)?.[1]);
+    assert.equal(job.match(/^    runs-on: (.+)$/m)?.[1], check.match(/^    runs-on: (.+)$/m)?.[1]);
   }
 });

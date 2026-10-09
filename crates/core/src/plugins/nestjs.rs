@@ -7,10 +7,12 @@
 //! are not reported as `unused-class-member`. Each rule is scoped to the
 //! relevant Nest interface so unrelated classes are unaffected.
 
+use std::path::Path;
+
 use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 use fallow_types::semantic::{SemanticFrameworkContract, SemanticFrameworkRelation};
 
-use super::Plugin;
+use super::{Plugin, PluginResult, config_parser};
 
 const ENABLERS: &[&str] = &["@nestjs/core"];
 
@@ -30,6 +32,8 @@ const ENTRY_PATTERNS: &[&str] = &[
 ];
 
 const ALWAYS_USED: &[&str] = &["nest-cli.json"];
+
+const CONFIG_PATTERNS: &[&str] = &["nest-cli.json"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "@nestjs/core",
@@ -106,6 +110,23 @@ impl Plugin for NestJsPlugin {
         TOOLING_DEPENDENCIES
     }
 
+    fn config_patterns(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
+    /// The Nest CLI loads the schematics package that `collection` names, so
+    /// that package has no import in the project.
+    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+        let mut result = PluginResult::default();
+        if let Some(dep) =
+            config_parser::extract_config_string(source, config_path, &["collection"])
+                .and_then(|raw| config_parser::config_string_package_name(&raw))
+        {
+            result.referenced_dependencies.push(dep);
+        }
+        result
+    }
+
     fn used_class_member_rules(&self) -> Vec<UsedClassMemberRule> {
         vec![
             // NestModule: middleware configuration
@@ -157,6 +178,34 @@ impl Plugin for NestJsPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn nest_cli_dependencies(source: &str) -> Vec<String> {
+        NestJsPlugin
+            .resolve_config(
+                std::path::Path::new("/project/nest-cli.json"),
+                source,
+                std::path::Path::new("/project"),
+            )
+            .referenced_dependencies
+    }
+
+    #[test]
+    fn nest_cli_collection_package_is_referenced() {
+        let deps =
+            nest_cli_dependencies(r#"{ "collection": "@nestjs/schematics", "sourceRoot": "src" }"#);
+        assert_eq!(deps, vec!["@nestjs/schematics".to_string()]);
+    }
+
+    #[test]
+    fn nest_cli_collection_path_is_not_a_package() {
+        assert!(nest_cli_dependencies(r#"{ "collection": "./schematics" }"#).is_empty());
+        assert!(nest_cli_dependencies(r#"{ "sourceRoot": "src" }"#).is_empty());
+    }
+
+    #[test]
+    fn nest_cli_json_is_a_config_pattern() {
+        assert!(NestJsPlugin.config_patterns().contains(&"nest-cli.json"));
+    }
 
     #[test]
     fn enablers_contain_nestjs_core() {

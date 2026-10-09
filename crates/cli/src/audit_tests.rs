@@ -1231,7 +1231,7 @@ fn reuse_or_create_stamps_sidecar_on_fresh_create() {
     let repo = init_throwaway_repo(tmp.path(), "repo-fresh-create-stamp");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
 
-    let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha)
+    let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
         .expect("fresh reuse_or_create should succeed on a clean repo");
     let cache_path = worktree.path().to_path_buf();
     let sidecar = reusable_worktree_last_used_path(&cache_path);
@@ -1280,7 +1280,7 @@ fn base_worktree_reusable_create_leaves_no_registered_entry() {
     let repo = init_throwaway_repo(tmp.path(), "repo-1815-headline");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
 
-    let first = BaseWorktree::create(&repo, "HEAD", Some(&base_sha))
+    let first = BaseWorktree::create(&repo, "HEAD", Some(&base_sha), &[])
         .expect("persistent base worktree should be created");
     let cache_path = first.path().to_path_buf();
     assert!(cache_path.is_dir(), "cache directory should exist on disk");
@@ -1297,7 +1297,7 @@ fn base_worktree_reusable_create_leaves_no_registered_entry() {
     fs::write(&marker, "keep").expect("marker should be written");
     drop(first);
 
-    let second = BaseWorktree::create(&repo, "HEAD", Some(&base_sha))
+    let second = BaseWorktree::create(&repo, "HEAD", Some(&base_sha), &[])
         .expect("second create should reuse the cache");
     assert_eq!(
         second.path(),
@@ -1324,7 +1324,7 @@ fn base_worktree_non_reusable_create_leaves_no_registered_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-1815-nonreusable");
 
-    let worktree = BaseWorktree::create(&repo, "HEAD", None)
+    let worktree = BaseWorktree::create(&repo, "HEAD", None, &[])
         .expect("non-reusable base worktree should be created");
     let path = worktree.path().to_path_buf();
     assert!(path.is_dir());
@@ -1358,7 +1358,7 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
     let repo = init_throwaway_repo(tmp.path(), "repo-sha-readiness");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
 
-    let first = BaseWorktree::reuse_or_create(&repo, &base_sha)
+    let first = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
         .expect("fresh reusable worktree should be created");
     let cache_path = first.path().to_path_buf();
     let sha_path = reusable_worktree_sha_path(&cache_path);
@@ -1368,15 +1368,15 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
 
     // Matching .sha reuses (marker survives).
     let reused =
-        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("matching .sha should reuse");
+        BaseWorktree::reuse_or_create(&repo, &base_sha, &[]).expect("matching .sha should reuse");
     assert_eq!(reused.path(), cache_path);
     assert!(marker.is_file(), "matching .sha must reuse without rebuild");
     drop(reused);
 
     // Mismatched .sha -> rebuild wipes the marker and rewrites the sidecar.
     fs::write(&sha_path, "ffffffffffffffff\n").expect("sha should be overwritable");
-    let rebuilt =
-        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("mismatched .sha should rebuild");
+    let rebuilt = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
+        .expect("mismatched .sha should rebuild");
     assert_eq!(rebuilt.path(), cache_path);
     assert!(
         !marker.exists(),
@@ -1393,7 +1393,7 @@ fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
     // Missing .sha -> rebuild wipes the marker.
     fs::remove_file(&sha_path).expect("sha removable");
     let rebuilt2 =
-        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("missing .sha should rebuild");
+        BaseWorktree::reuse_or_create(&repo, &base_sha, &[]).expect("missing .sha should rebuild");
     assert!(!marker.exists(), "missing .sha must force a rebuild");
     drop(rebuilt2);
     cleanup_reusable_worktree(&repo, &cache_path);
@@ -1405,7 +1405,7 @@ fn reusable_cache_rebuilds_same_path_for_a_new_sha_and_publishes_new_content() {
     let repo = init_throwaway_repo(tmp.path(), "repo-root-cache-rebuild");
     let first_sha = git_rev_parse(&repo, "HEAD").expect("initial HEAD should resolve");
 
-    let first = BaseWorktree::reuse_or_create(&repo, &first_sha)
+    let first = BaseWorktree::reuse_or_create(&repo, &first_sha, &[])
         .expect("first reusable worktree should materialize");
     let cache_path = first.path().to_path_buf();
     assert_eq!(
@@ -1415,7 +1415,7 @@ fn reusable_cache_rebuilds_same_path_for_a_new_sha_and_publishes_new_content() {
     drop(first);
 
     let second_sha = commit_file(&repo, "README.md", "second snapshot\n");
-    let second = BaseWorktree::reuse_or_create(&repo, &second_sha)
+    let second = BaseWorktree::reuse_or_create(&repo, &second_sha, &[])
         .expect("second reusable worktree should rebuild");
     assert_eq!(second.path(), cache_path, "both SHAs must share one path");
     assert_eq!(
@@ -1438,7 +1438,7 @@ fn failed_reusable_cache_rebuild_leaves_no_matching_readiness() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-failed-cache-rebuild");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
-    let initial = BaseWorktree::reuse_or_create(&repo, &base_sha)
+    let initial = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
         .expect("initial reusable worktree should materialize");
     let cache_path = initial.path().to_path_buf();
     let sha_path = reusable_worktree_sha_path(&cache_path);
@@ -1446,7 +1446,7 @@ fn failed_reusable_cache_rebuild_leaves_no_matching_readiness() {
 
     let missing_sha = "0000000000000000000000000000000000000000";
     assert!(
-        BaseWorktree::reuse_or_create(&repo, missing_sha).is_none(),
+        BaseWorktree::reuse_or_create(&repo, missing_sha, &[]).is_none(),
         "a missing git object must fail materialization",
     );
     assert!(
@@ -1461,7 +1461,7 @@ fn retained_reusable_lock_makes_remove_skip_then_succeed_and_preserve_lock() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-remove-retained-lock");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
-    let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha)
+    let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
         .expect("reusable worktree should materialize");
     let cache_path = worktree.path().to_path_buf();
     let lock_path = reusable_worktree_lock_path(&cache_path);
@@ -1627,7 +1627,7 @@ fn reusable_cache_rejects_world_readable_preseed() {
     .expect("preseeded readiness should be written");
     fs::write(cache_path.join("POISONED"), "untrusted\n").expect("poison marker should be written");
 
-    let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha)
+    let worktree = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
         .expect("unsafe preseed should be rebuilt safely");
 
     assert!(
@@ -1717,14 +1717,15 @@ fn reusable_cache_stub_git_repaired_on_cache_hit() {
     let repo = init_throwaway_repo(tmp.path(), "repo-stub-repair");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
     let first =
-        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("fresh create should succeed");
+        BaseWorktree::reuse_or_create(&repo, &base_sha, &[]).expect("fresh create should succeed");
     let cache_path = first.path().to_path_buf();
     let git_stub = cache_path.join(".git");
     assert!(git_stub.is_file(), "fresh create writes a .git stub");
     drop(first);
     fs::remove_file(&git_stub).expect("stub removable");
 
-    let reused = BaseWorktree::reuse_or_create(&repo, &base_sha).expect("cache hit should succeed");
+    let reused =
+        BaseWorktree::reuse_or_create(&repo, &base_sha, &[]).expect("cache hit should succeed");
     assert_eq!(reused.path(), cache_path);
     assert!(
         git_stub.is_file(),
@@ -1758,7 +1759,7 @@ fn base_snapshot_discovery_honors_gitignore_via_stub_git() {
     );
     let base_sha = git_rev_parse(&root, "HEAD").expect("HEAD should resolve");
 
-    let worktree = BaseWorktree::create(&root, "HEAD", Some(&base_sha))
+    let worktree = BaseWorktree::create(&root, "HEAD", Some(&base_sha), &[])
         .expect("base worktree should be created");
     let cache_path = worktree.path().to_path_buf();
     assert!(
@@ -1853,7 +1854,7 @@ fn registered_current_cache_is_deregistered_and_reused_warm() {
     let marker = cache_path.join(".fallow-reuse-marker");
     fs::write(&marker, "warm").expect("marker should be written");
 
-    let migrated = BaseWorktree::reuse_or_create(&repo, &base_sha)
+    let migrated = BaseWorktree::reuse_or_create(&repo, &base_sha, &[])
         .expect("legacy cache should migrate and reuse");
     assert_eq!(migrated.path(), cache_path);
     assert!(
@@ -2027,7 +2028,7 @@ fn audit_base_worktree_reuses_current_node_modules_context() {
     .expect("node_modules tsconfig should be written");
 
     let worktree =
-        BaseWorktree::create(root, "HEAD", None).expect("base worktree should be created");
+        BaseWorktree::create(root, "HEAD", None, &[]).expect("base worktree should be created");
     assert!(
         worktree.path().join("node_modules").is_dir(),
         "base worktree should reuse ignored node_modules from the current checkout"
@@ -2062,7 +2063,7 @@ fn audit_base_worktree_uses_no_checkout_engine_materializer() {
     fs::set_permissions(&hook, permissions).expect("hook should be executable");
 
     let worktree =
-        BaseWorktree::create(&repo, "HEAD", None).expect("base worktree should be created");
+        BaseWorktree::create(&repo, "HEAD", None, &[]).expect("base worktree should be created");
 
     assert!(worktree.path().join("README.md").is_file());
     assert!(
@@ -2096,7 +2097,7 @@ fn materialize_base_dependency_context_symlinks_nuxt_generated_dir() {
     )
     .expect(".nuxt/tsconfig.app.json should be written");
 
-    materialize_base_dependency_context(host.path(), worktree.path());
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
     let mirrored = worktree.path().join(".nuxt");
     assert!(
@@ -2135,7 +2136,7 @@ fn materialize_base_dependency_context_symlinks_astro_generated_dir() {
     fs::write(dot_astro.join("types.d.ts"), "// generated types\n")
         .expect(".astro/types.d.ts should be written");
 
-    materialize_base_dependency_context(host.path(), worktree.path());
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
     let mirrored = worktree.path().join(".astro");
     assert!(
@@ -2160,7 +2161,7 @@ fn materialize_base_dependency_context_skips_when_host_lacks_meta_framework_dir(
     let host = tempfile::TempDir::new().expect("host tempdir should be created");
     let worktree = tempfile::TempDir::new().expect("worktree tempdir should be created");
 
-    materialize_base_dependency_context(host.path(), worktree.path());
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
     assert!(
         !worktree.path().join(".nuxt").exists(),
@@ -2187,7 +2188,7 @@ fn materialize_base_dependency_context_handles_each_dir_independently() {
     fs::create_dir_all(host.path().join("node_modules"))
         .expect("host node_modules should be created");
 
-    materialize_base_dependency_context(host.path(), worktree.path());
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
     assert!(
         worktree.path().join("node_modules").is_dir(),
@@ -2220,7 +2221,7 @@ fn materialize_base_dependency_context_preserves_real_worktree_dir() {
     fs::write(worktree_nuxt.join("tsconfig.json"), r#"{"_source":"base"}"#)
         .expect("worktree .nuxt/tsconfig.json should be written");
 
-    materialize_base_dependency_context(host.path(), worktree.path());
+    materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
     let link_meta = fs::symlink_metadata(&worktree_nuxt)
         .expect(".nuxt entry should still exist in the worktree");
@@ -2258,7 +2259,7 @@ fn audit_reusable_base_worktree_refreshes_current_node_modules_context() {
         .expect("node_modules tsconfig should be written");
 
     let base_sha = git_rev_parse(root, "HEAD").expect("HEAD should resolve");
-    let first = BaseWorktree::reuse_or_create(root, &base_sha)
+    let first = BaseWorktree::reuse_or_create(root, &base_sha, &[])
         .expect("persistent base worktree should be created");
     let worktree_path = first.path().to_path_buf();
     assert!(
@@ -2272,7 +2273,7 @@ fn audit_reusable_base_worktree_refreshes_current_node_modules_context() {
     );
     drop(first);
 
-    let reused = BaseWorktree::reuse_or_create(root, &base_sha)
+    let reused = BaseWorktree::reuse_or_create(root, &base_sha, &[])
         .expect("ready persistent base worktree should be reused");
     assert_eq!(reused.path(), worktree_path.as_path());
     assert!(
@@ -4144,7 +4145,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
 
     let changed_files = fallow_engine::changed_files::get_changed_files(root, "HEAD")
         .expect("changed files should resolve");
-    let key = audit_base_snapshot_cache_key(&opts, "HEAD", &changed_files)
+    let key = audit_base_snapshot_cache_key(&opts, "HEAD", &changed_files, &[])
         .expect("cache key should compute")
         .expect("cache key should exist");
     assert!(

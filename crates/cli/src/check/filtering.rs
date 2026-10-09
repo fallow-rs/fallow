@@ -153,13 +153,13 @@ fn no_workspaces_message(
 ) -> String {
     match mode {
         WorkspaceScopeMode::Workspace => format!(
-            "--workspace {} specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, or tsconfig.json has \"references\".",
+            "--workspace {} specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, tsconfig.json has \"references\", or the project sets \"workspaces.patterns\" in the fallow config.",
             quote_owned_patterns(patterns)
         ),
         WorkspaceScopeMode::ChangedWorkspaces => {
             let git_ref = git_ref.unwrap_or_default();
             format!(
-                "--changed-workspaces '{git_ref}' specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, or tsconfig.json has \"references\"."
+                "--changed-workspaces '{git_ref}' specified but no workspaces found. Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, tsconfig.json has \"references\", or the project sets \"workspaces.patterns\" in the fallow config."
             )
         }
     }
