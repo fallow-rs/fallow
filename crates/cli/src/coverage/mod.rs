@@ -44,6 +44,7 @@ mod analyze;
 mod cloud_client;
 mod cloud_reads;
 mod cloud_transport;
+mod source_map_sources;
 pub mod upload_common;
 mod upload_inventory;
 mod upload_source_maps;

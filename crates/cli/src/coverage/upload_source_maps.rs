@@ -22,6 +22,9 @@ use crate::api::{
     retry_delay_for_status, sanitize_network_error, should_retry_status,
     try_api_agent_with_timeout,
 };
+use crate::coverage::source_map_sources::{
+    UnresolvedMap, find_unresolved_map, warn_unresolved_maps,
+};
 use crate::coverage::upload_common::{
     self, take_last_two_segments, to_posix_string, url_encode_path_segment,
 };
@@ -106,11 +109,61 @@ fn run_inner(args: &UploadSourceMapsArgs, root: &Path) -> Result<(), UploadSourc
 
     if args.dry_run {
         print_dry_run(&repo, &git_sha, args.endpoint.as_deref(), &maps);
+        check_maps_for_dry_run(root, &maps);
+        println!("{LOG_PREFIX}: dry run, no uploads performed");
         return Ok(());
     }
 
     let api_key = resolve_api_key()?;
-    upload_maps(args, &repo, &git_sha, &api_key, &maps)
+    upload_maps(args, root, &repo, &git_sha, &api_key, &maps)
+}
+
+/// Warns, without failing, when maps point at sources that are not in the
+/// repository. A build may upload from a stage without the original sources,
+/// so a missing file is a strong signal but not proof of a broken map.
+fn warn_unresolved_sources(repo_root: &Path, ready: &[PreparedSourceMap], total: usize) {
+    let unresolved: Vec<UnresolvedMap> = ready
+        .iter()
+        .filter_map(|prepared| unresolved_map(repo_root, prepared))
+        .collect();
+    warn_unresolved_maps(LOG_PREFIX, &unresolved, total);
+}
+
+fn unresolved_map(repo_root: &Path, prepared: &PreparedSourceMap) -> Option<UnresolvedMap> {
+    let map_path = prepared.candidate.map_path.as_deref()?;
+    find_unresolved_map(repo_root, map_path, &prepared.source_map)
+}
+
+/// Runs the same per-map checks as an upload, one map at a time, so a dry run
+/// never holds every parsed map in memory and still reports maps that an
+/// upload would reject.
+fn check_maps_for_dry_run(repo_root: &Path, maps: &[SourceMapCandidate]) {
+    let mut unresolved = Vec::new();
+    let mut failed = Vec::new();
+    for candidate in maps {
+        warn_large_source_map(candidate);
+        match prepare_source_map(candidate) {
+            MapOutcome::Ready(prepared) => unresolved.extend(unresolved_map(repo_root, &prepared)),
+            outcome @ MapOutcome::Failed { .. } => failed.push(outcome),
+            MapOutcome::Success => {}
+        }
+    }
+    warn_unresolved_maps(LOG_PREFIX, &unresolved, maps.len());
+    for outcome in &failed {
+        if let MapOutcome::Failed {
+            file_name, reason, ..
+        } = outcome
+        {
+            eprintln!("  {} {file_name} ({reason})", "x".red());
+        }
+    }
+    if !failed.is_empty() {
+        eprintln!(
+            "{LOG_PREFIX}: {} of {} maps would fail to upload",
+            failed.len(),
+            maps.len()
+        );
+    }
 }
 
 fn resolve_build_dir(root: &Path, dir: &Path) -> PathBuf {
@@ -300,52 +353,50 @@ fn collect_source_maps(
     };
     collect_source_maps_inner(&mut input, dir)?;
     maps.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
-    reject_file_name_collisions(&maps)?;
+    if strip_path {
+        key_colliding_file_names_by_path(&mut maps);
+    }
     Ok(maps)
 }
 
-const MAX_REPORTED_COLLISIONS: usize = 10;
+const MAX_REPORTED_COLLISIONS: usize = 5;
 
 /// The cloud stores one map per `fileName` for a commit, so a second map with
-/// the same name silently replaces the first (issue #3298). Refuse the whole
-/// upload instead of reporting success for maps that will not be stored.
-fn reject_file_name_collisions(maps: &[SourceMapCandidate]) -> Result<(), UploadSourceMapsError> {
-    let mut by_name: FxHashMap<&str, Vec<&Path>> = FxHashMap::default();
-    for map in maps {
-        by_name
-            .entry(map.file_name.as_str())
-            .or_default()
-            .push(&map.rel_path);
+/// the same basename would replace the first (issue #3298). Key each map in a
+/// colliding group by its path in the build directory instead. Paths in one
+/// directory tree are unique, and a basename contains no `/`, so the result
+/// has no collisions. Maps with a unique basename keep the basename key.
+fn key_colliding_file_names_by_path(maps: &mut [SourceMapCandidate]) {
+    let mut counts: FxHashMap<String, usize> = FxHashMap::default();
+    for map in maps.iter() {
+        *counts.entry(map.file_name.clone()).or_default() += 1;
     }
-    let mut collisions: Vec<(&str, Vec<&Path>)> = by_name
-        .into_iter()
-        .filter(|(_, paths)| paths.len() > 1)
-        .collect();
-    if collisions.is_empty() {
-        return Ok(());
+    let mut renamed: Vec<String> = Vec::new();
+    for map in maps.iter_mut() {
+        if counts.get(&map.file_name).copied().unwrap_or(0) > 1 {
+            map.file_name = to_posix_string(&map.rel_path);
+            renamed.push(map.file_name.clone());
+        }
     }
-    collisions.sort_unstable_by_key(|(name, _)| *name);
-
-    let mut message = format!(
-        "{} source map fileName(s) are not unique, and each later upload would replace the earlier one:",
-        collisions.len()
+    if renamed.is_empty() {
+        return;
+    }
+    let mut note = format!(
+        "{LOG_PREFIX}: {} source maps share a file name with another map, so each one is \
+         uploaded under its path in the build directory:",
+        renamed.len()
     );
-    for (name, paths) in collisions.iter().take(MAX_REPORTED_COLLISIONS) {
-        let paths: Vec<String> = paths.iter().map(|path| to_posix_string(path)).collect();
-        let _ = write!(message, "\n  {name}: {}", paths.join(", "));
+    for name in renamed.iter().take(MAX_REPORTED_COLLISIONS) {
+        let _ = write!(note, "\n  {name}");
     }
-    if collisions.len() > MAX_REPORTED_COLLISIONS {
+    if renamed.len() > MAX_REPORTED_COLLISIONS {
         let _ = write!(
-            message,
+            note,
             "\n  ... and {} more",
-            collisions.len() - MAX_REPORTED_COLLISIONS
+            renamed.len() - MAX_REPORTED_COLLISIONS
         );
     }
-    message.push_str(
-        "\nUse --strip-path=false to key each map by its path in the build directory, \
-         or --exclude to skip maps you do not need.",
-    );
-    Err(UploadSourceMapsError::Validation(message))
+    eprintln!("{note}");
 }
 
 struct SourceMapWalkInput<'a> {
@@ -703,6 +754,7 @@ fn securely_open_source_map(candidate: &SourceMapCandidate) -> std::io::Result<s
 
 fn upload_maps(
     args: &UploadSourceMapsArgs,
+    repo_root: &Path,
     repo: &str,
     git_sha: &str,
     api_key: &str,
@@ -712,6 +764,7 @@ fn upload_maps(
     if ready.is_empty() {
         return Err(UploadSourceMapsError::Partial(outcomes));
     }
+    warn_unresolved_sources(repo_root, &ready, maps.len());
 
     print_upload_source_maps_summary(args, repo, git_sha, maps);
 
@@ -1121,7 +1174,6 @@ fn print_dry_run(
     if maps.len() > 20 {
         println!("  ... and {} more", maps.len() - 20);
     }
-    println!("{LOG_PREFIX}: dry run, no uploads performed");
 }
 
 #[cfg(test)]
@@ -1200,27 +1252,26 @@ mod tests {
     }
 
     #[test]
-    fn collect_source_maps_rejects_file_name_collisions_before_upload() {
+    fn collect_source_maps_keys_colliding_basenames_by_path() {
         let dir = tempdir().expect("tempdir");
         for sub in ["consumers/base", "consumers/feed"] {
             std::fs::create_dir_all(dir.path().join(sub)).expect("consumer dir");
             std::fs::write(dir.path().join(sub).join("index.js.map"), "{}").expect("map");
         }
+        std::fs::write(dir.path().join("consumers/base/worker.js.map"), "{}").expect("map");
         let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
         let exclude = compile_glob_set(&[], "--exclude").unwrap();
 
-        let Err(UploadSourceMapsError::Validation(message)) =
-            collect_source_maps(dir.path(), dir.path(), &include, &exclude, true)
-        else {
-            panic!("expected a validation error for colliding fileNames");
-        };
-        assert!(message.contains("index.js.map"), "{message}");
-        assert!(message.contains("consumers/base/index.js.map"), "{message}");
-        assert!(message.contains("consumers/feed/index.js.map"), "{message}");
-        assert!(message.contains("--strip-path=false"), "{message}");
-
-        let maps = collect_source_maps(dir.path(), dir.path(), &include, &exclude, false).unwrap();
-        assert_eq!(maps.len(), 2);
+        let maps = collect_source_maps(dir.path(), dir.path(), &include, &exclude, true).unwrap();
+        let file_names: Vec<&str> = maps.iter().map(|map| map.file_name.as_str()).collect();
+        assert_eq!(
+            file_names,
+            vec![
+                "consumers/base/index.js.map",
+                "worker.js.map",
+                "consumers/feed/index.js.map",
+            ]
+        );
     }
 
     #[cfg(unix)]

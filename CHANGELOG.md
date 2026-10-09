@@ -9,13 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `fallow coverage upload-source-maps` now fails with exit code 2 before
-  any upload when two source maps get the same `fileName`. With the default
-  `--strip-path=true`, a `tsc` output tree with more than one `index.js.map`
-  gave the same name to each map. The cloud kept only the last one, but the
-  command reported every map as uploaded. The error lists each duplicate name
-  with its paths and suggests `--strip-path=false` or `--exclude`. Thanks
-  @voslartomas for the report (#3298).
+- `fallow coverage upload-source-maps` no longer loses maps that share a
+  file name. With the default `--strip-path=true`, a `tsc` output tree with
+  more than one `index.js.map` sent each map under the same name, and the
+  cloud kept only the last one. Maps that share a basename are now sent under
+  their path in the build directory, and the command prints which maps it
+  renamed. Thanks @voslartomas for the report (#3298).
+- `fallow coverage upload-source-maps` now warns when the `sources` of a map
+  do not point at files in the repository. A `sourceRoot` such as `"/"` in
+  `tsconfig.json` removes the `src/` segment from each source path, so
+  runtime coverage cannot resolve to source. The warning names the map, the
+  source, and the `sourceRoot`, and runs in `--dry-run` too (#3298).
 - The copy-paste commands that `fallow agent install` and
   `fallow baselines prune` print now quote each path for the shell of the
   platform. A path with `;`, `|`, `&` or similar characters stays one
