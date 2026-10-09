@@ -35,7 +35,8 @@ CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
 #
 # The scan also collects GIT_WRITE_CANDIDATES: the directories that a git
 # write may target (`cd <dir>` before it, `-C`, `--work-tree`, the parent of a
-# `--git-dir` that ends in .git). The word split is simple, so a candidate can
+# `--git-dir` that ends in .git, and the same two as `GIT_WORK_TREE` and
+# `GIT_DIR` prefixes). The word split is simple, so a candidate can
 # be wrong. A candidate only adds an audit: the session tree is audited too,
 # unless gate_allowlisted_target below proves the target.
 GIT_WRITE_CANDIDATES=()
@@ -69,6 +70,19 @@ is_git_write_command() {
     fi
     while [ "$#" -gt 0 ]; do
       if [ "$1" != "git" ]; then
+        # A git location prefix names a candidate too.
+        case "$1" in
+          GIT_WORK_TREE=?*)
+            GIT_WRITE_CANDIDATES+=("$(gate_join "$cd_dir" "$(gate_unquote "${1#*=}")")")
+            ;;
+          GIT_DIR=?*)
+            value="$(gate_unquote "${1#*=}")"
+            value="${value%/}"
+            if [ "${value##*/}" = .git ]; then
+              GIT_WRITE_CANDIDATES+=("$(gate_join "$cd_dir" "$(dirname "$value")")")
+            fi
+            ;;
+        esac
         shift
         continue
       fi
@@ -260,17 +274,23 @@ fi
 GATE_REL="$(gate_relative_path)"
 BASE_DIR="${SESSION_DIR:-$PROCESS_DIR}"
 
-# Prints the target directory of a command that matches a strict grammar, in
-# which the target is certain:
-#   [cd <dir> &&] git [-C <dir>]... (commit|push) [<arg>]...
-# A word is plain characters, or one pair of single or double quotes. A
-# directory word cannot hold a new line; a double-quoted word cannot hold `$`,
-# a backquote or a backslash. Nothing else is allowed: no other operator,
-# expansion, redirection, environment prefix or other git option. Each
-# directory must exist. Returns 1 for any other command.
+# Prints the target directory of a command in a strict form, in which each
+# word is inert and the target is certain:
+#   [cd <dir> &&] git [-C <dir>]... (commit|push) [<option or name>]...
+# A directory is one plain word, or one pair of single or double quotes
+# without a new line. A plain word holds only letters, digits and `-_./=:,@+%`
+# (no glob, `~` or `{`). A double-quoted word cannot hold `$`, a backquote or
+# a backslash. After the subcommand, only the options in
+# gate_inert_option are allowed; a quoted word is allowed only as the value of
+# `-m` or `--message`. Nothing else is allowed: no other operator, expansion,
+# redirection, environment prefix or git option such as `-c`. Each directory
+# must exist, and the target must be in a git work tree. Returns 1 for any
+# other command.
 gate_allowlisted_target() {
-  local cmd="$1" rest dir="$BASE_DIR"
-  local plain='[A-Za-z0-9_./:@%+,=-]+'
+  local cmd="$1" rest dir="$BASE_DIR" subcommand word
+  # The letters are listed, not given as a range, so that no locale can make
+  # the class match a non-ASCII character.
+  local plain='[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./:@%+,=-]+'
   local sq_dir=$'\'[^\'\n]*\'' dq_dir=$'"[^"$`\\\\\n]*"'
   local sq_arg="'[^']*'" dq_arg='"[^"$`\\]*"'
   local blank=$'[ \t]' sp re word_re dir_re arg_re
@@ -296,7 +316,41 @@ gate_allowlisted_target() {
     dir="$(gate_target_step "$dir" "$2")" || return 1
     shift 2
   done
+  subcommand="$1"
+  shift
+  while [ "$#" -gt 0 ]; do
+    word="$1"
+    shift
+    case "$word" in
+      \'* | \"*) return 1 ;;
+    esac
+    case "$subcommand:$word" in
+      commit:-m | commit:--message | commit:-am)
+        # The message: any one word of the grammar, quoted or plain.
+        [ "$#" -gt 0 ] || return 1
+        shift
+        ;;
+      *:-*) gate_inert_option "$subcommand" "$word" || return 1 ;;
+    esac
+  done
+  [ "$(git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || return 1
   printf '%s\n' "$dir"
+}
+
+# Options of `git commit` and `git push` that do not run a command, read a
+# file, or change the repository or the directory.
+gate_inert_option() {
+  case "$1:$2" in
+    commit:--message=* | commit:-a | commit:--all | commit:--amend | commit:--no-edit | \
+      commit:-s | commit:--signoff | commit:--allow-empty | commit:-v | commit:--verbose | \
+      commit:-S | commit:-S* | commit:--gpg-sign | commit:--gpg-sign=* | commit:--no-gpg-sign | \
+      commit:-q | commit:--quiet | commit:-n | commit:--no-verify) return 0 ;;
+    push:-u | push:--set-upstream | push:-f | push:--force | push:--force-with-lease | \
+      push:--force-with-lease=* | push:--tags | push:--follow-tags | push:--dry-run | \
+      push:-n | push:-v | push:--verbose | push:-q | push:--quiet | push:--no-verify | \
+      push:-d | push:--delete) return 0 ;;
+  esac
+  return 1
 }
 
 # Follows one directory word from a directory, as `cd` and `git -C` do.
@@ -310,11 +364,16 @@ gate_target_step() {
 }
 
 # One audit root for each different tree, in order. Without a usable `cwd`,
-# the process directory is audited as it is, as before.
+# an empty root keeps the audit in the process directory without a `cd`,
+# exactly as before.
 AUDIT_ROOTS=()
 add_audit_root() {
   local root="$1" known
-  if [ -n "$SESSION_DIR" ] || [ "$1" != "$PROCESS_DIR" ]; then
+  if [ -n "$SESSION_DIR" ]; then
+    root="$(resolve_audit_root "$1" "$GATE_REL" "$PROCESS_DIR" "$HOME_DIR")"
+  elif [ "$1" = "$PROCESS_DIR" ]; then
+    root=""
+  else
     root="$(resolve_audit_root "$1" "$GATE_REL" "$PROCESS_DIR" "$HOME_DIR")"
   fi
   if [ "${#AUDIT_ROOTS[@]}" -gt 0 ]; then
@@ -446,7 +505,7 @@ for AUDIT_ROOT in "${AUDIT_ROOTS[@]}"; do
   set +e
   (
     set -e
-    if ! cd "$AUDIT_ROOT" 2>/dev/null; then
+    if [ -n "$AUDIT_ROOT" ] && ! cd "$AUDIT_ROOT" 2>/dev/null; then
       echo "fallow-gate: cannot enter $AUDIT_ROOT, auditing $(pwd) instead." >&2
     fi
     run_audit

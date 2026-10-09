@@ -793,12 +793,12 @@ fn gate_audits_the_session_tree_for_shell_forms() {
         (
             "GIT_DIR prefix",
             "GIT_DIR=../../wt-c/.git git commit".to_owned(),
-            vec![a],
+            vec![a, c],
         ),
         (
             "GIT_WORK_TREE prefix",
             "GIT_WORK_TREE=../../wt-c git commit".to_owned(),
-            vec![a],
+            vec![a, c],
         ),
         (
             "here-document",
@@ -859,4 +859,98 @@ fn gate_blocks_when_one_of_several_audits_fails() {
         String::from_utf8_lossy(&run.output.stderr)
     );
     assert_eq!(run.audit_dirs, expected);
+}
+
+/// A strict form with an active word is not strict: an expansion in a
+/// double-quoted message, a git config override, or an option that runs a
+/// command or reads a file. The gate then audits the session tree too.
+#[test]
+fn gate_leaves_the_strict_form_for_active_words() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let (a, c) = (trees.a.as_path(), trees.c.as_path());
+    let target = "git -C ../../wt-c";
+    let cases: Vec<(&str, String, Vec<&Path>)> = [
+        ("substitution in a message", "commit -m \"$(git push)\""),
+        ("backquotes in a message", "commit -m \"`git push`\""),
+        ("parameter in a message", "commit -m \"$X\""),
+        ("substitution in an option", "commit -S\"$(git push)\" -m x"),
+        ("commit template", "commit --template=/tmp/t"),
+        ("commit message file", "commit -F /tmp/m"),
+        ("commit reuse message", "commit -c HEAD"),
+        ("push receive-pack", "push --receive-pack=x origin"),
+        ("push exec", "push --exec=x origin"),
+        ("push option", "push -o ci.skip origin"),
+        ("push repo", "push --repo=other"),
+        ("quoted option", "push origin '--receive-pack=x'"),
+        ("separator", "commit -m x -- file"),
+        ("carriage return", "commit -m x\rgit push"),
+    ]
+    .into_iter()
+    .map(|(case, rest)| (case, format!("{target} {rest}"), vec![a, c]))
+    .chain([
+        (
+            "config override",
+            "git -c core.hooksPath=/tmp/h -C ../../wt-c commit -m x".to_owned(),
+            vec![a, c],
+        ),
+        ("glob", "git -C ../../wt-* commit -m x".to_owned(), vec![a]),
+        ("tilde", "git -C ~ commit -m x".to_owned(), vec![a]),
+        (
+            "brace",
+            "git -C {../../wt-c} commit -m x".to_owned(),
+            vec![a],
+        ),
+        (
+            "variable",
+            "git -C \"$HOME\" commit -m x".to_owned(),
+            vec![a],
+        ),
+    ])
+    .collect();
+    assert_cases(&trees, &cases);
+}
+
+/// The strict form resolves its target with physical paths and requires a
+/// git work tree. Tabs separate words as in bash.
+#[test]
+fn gate_resolves_the_strict_target_physically() {
+    if skip_without_tools() {
+        return;
+    }
+    let trees = two_worktrees();
+    let (a, c) = (trees.a.as_path(), trees.c.as_path());
+    let plain = trees.root.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    std::os::unix::fs::symlink(&trees.c, trees.root.join("link-c")).unwrap();
+    let cases: Vec<(&str, String, Vec<&Path>)> = vec![
+        (
+            "symlinked target",
+            "git -C ../../link-c commit -m x".to_owned(),
+            vec![c],
+        ),
+        (
+            "tabs",
+            "git\t-C\t../../wt-c\tcommit\t-m\tx".to_owned(),
+            vec![c],
+        ),
+        (
+            "inert options",
+            "git -C ../../wt-c commit --amend --no-edit -m 'a' -m \"b\" -S".to_owned(),
+            vec![c],
+        ),
+        (
+            "push with names",
+            "git -C ../../wt-c push -u --force-with-lease origin HEAD:main".to_owned(),
+            vec![c],
+        ),
+        (
+            "not a work tree",
+            "git -C ../../plain commit -m x".to_owned(),
+            vec![a, plain.as_path()],
+        ),
+    ];
+    assert_cases(&trees, &cases);
 }
