@@ -116,9 +116,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   globs for analysis and for `fallow list --workspaces`. On a large Nx monorepo
   with 22 undeclared app packages, this removed about 1,900 false unused files.
   `--workspace` and `--changed-workspaces` use them in every command that has
-  a loaded config, and so does `--group-by package`. `fallow init`,
-  `coverage setup`, and the base checkout of `audit` still read the manifest
-  globs only.
+  a loaded config, and so does `--group-by package`. The base checkout of
+  `audit` and `security` links the generated context of these packages, and
+  the `scope-workspaces` next step lists them. The error for an unknown
+  `--workspace` now names `workspaces.patterns`. `fallow init` and
+  `coverage setup` still read the manifest globs only.
 - **TypeORM migrations that a `DataSource` config loads by glob now count.**
   Fallow reads the `migrations` globs of `data-source.ts`, `*.datasource.ts`
   and `ormconfig` files. A conditional template such as
@@ -137,6 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import) is a whole-object use. So is an enum that is passed to
   `registerEnumType` from `@nestjs/graphql` or `type-graphql`. The `run` method
   of a `CommandRunner` subclass counts when `nest-commander` is a dependency.
+- **A package that a config names only in a string is no longer unused.**
+  Fallow credits the SWC plugins of `@vitejs/plugin-react-swc` and of
+  `experimental.swcPlugins` in a Next.js config, the Babel plugins and presets
+  in the `babelOptions` of `@wyw-in-js/vite`, and the `collection` of
+  `nest-cli.json`.
 
 ### Added
 
@@ -340,7 +347,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Findings in an unused file are hidden by default.** An unused export, type,
   class member or enum member in a file that fallow reports as unused is no
   longer listed, because deleting the file removes it. The JSON output has the
-  count in `cascade_hidden`. SARIF and markdown name the count too. Pass
+  count in `cascade_hidden`. SARIF and markdown, grouped or not, name the count
+  too. Pass
   `--show-cascade`, set `showCascade` in the config, or use the `show_cascade`
   parameter of the MCP tools to list them. The health vital signs still count
   them. When an issue-type filter leaves out `unused-files`, nothing is hidden.
