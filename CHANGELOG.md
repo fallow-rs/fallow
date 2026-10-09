@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.module.css`, `.module.scss`, `.module.sass` and `.module.less` files.
   The parse cache version changes, so the first run after the upgrade parses
   all files again. Thanks to @peterssonjonas for the report. (#3311)
+- **A `/** @jsxImportSource <source> */` pragma now adds a module graph
+  edge.** With the automatic JSX runtime, the pragma makes the file import
+  `<source>/jsx-runtime`. Fallow did not see this import, so a local JSX
+  runtime could show as unused, and `--impact-closure` on a runtime file did
+  not include the `.tsx` files that use it. The edge now resolves like a
+  normal import, for relative and package values. As with the compiler, the
+  edge needs JSX in the file, and the pragma must be in a comment before the
+  first statement. The extraction cache and the graph cache are invalidated
+  once.
 - The copy-paste commands that `fallow agent install` and
   `fallow baselines prune` print now quote each path for the shell of the
   platform. A path with `;`, `|`, `&` or similar characters stays one

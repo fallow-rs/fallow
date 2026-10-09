@@ -56,6 +56,8 @@ mod visit_dynamic_imports;
 mod visit_factory_returns;
 #[path = "visit_impl_helpers.rs"]
 mod visit_helpers;
+#[path = "visit_impl_jsx_runtime.rs"]
+mod visit_jsx_runtime;
 #[path = "visit_impl_node_runtime.rs"]
 mod visit_node_runtime;
 #[path = "visit_impl_object_bindings.rs"]
@@ -3035,6 +3037,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_program_local_import_loaders(program);
         walk::walk_program(self, program);
         self.finish_local_import_loaders();
+        self.record_jsx_import_source_pragma(program);
     }
 
     fn visit_formal_parameter(&mut self, param: &FormalParameter<'a>) {
@@ -4521,7 +4524,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_jsx_attribute(self, attr);
     }
 
+    fn visit_jsx_fragment(&mut self, fragment: &oxc_ast::ast::JSXFragment<'a>) {
+        self.has_jsx = true;
+        walk::walk_jsx_fragment(self, fragment);
+    }
+
     fn visit_jsx_element(&mut self, element: &oxc_ast::ast::JSXElement<'a>) {
+        self.has_jsx = true;
         // Record a render edge for a component tag (capitalized or
         // member-expression) plus the passed attribute names + spread presence.
         // Lowercase host elements are skipped for render purposes. No-op on

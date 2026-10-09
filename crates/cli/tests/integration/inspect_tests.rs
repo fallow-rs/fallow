@@ -297,3 +297,38 @@ fn dead_code_impact_closure_flag_emits_closure_json() {
             .is_some_and(|n| n.contains("attention pointer"))
     );
 }
+
+#[test]
+fn impact_closure_follows_jsx_import_source_pragma() {
+    // `src/index.tsx` imports `./jsx/jsx-runtime` only through its
+    // `@jsxImportSource ./jsx` pragma, and the runtime imports
+    // `./context`. A change to the context reaches the `.tsx` file.
+    let output = crate::common::run_fallow(
+        "dead-code",
+        "jsx-import-source-pragma",
+        &[
+            "--impact-closure",
+            "src/jsx/context.ts",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "impact-closure should exit 0: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let affected: Vec<&str> = json["affected_not_shown"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        affected.contains(&"src/jsx/jsx-runtime.ts") && affected.contains(&"src/index.tsx"),
+        "the closure must follow the pragma edge, affected: {affected:?}"
+    );
+}

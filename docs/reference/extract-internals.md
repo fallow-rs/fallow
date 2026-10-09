@@ -193,6 +193,20 @@ Do not replace their source tests with tests of a parallel scanner. Angular
 metadata and injection-token/interface bridging must stay provenance-gated;
 unknown framework behavior must not invent member-use evidence.
 
+A per-file `@jsxImportSource <source>` pragma is an import fact too. With the
+automatic JSX runtime, the compiler imports `jsx`, `jsxs` and `Fragment` from
+`<source>/jsx-runtime`, so the visitor records these three named imports with
+no local binding. The visitor records them only when the file has a JSX
+element or fragment, as the compiler does. Only comments before the first
+statement hold the pragma, as in TypeScript, so a `@jsxImportSource` line in a
+later doc comment adds no edge. Inside those comments, the Oxc rules apply: the
+last value wins, and `@jsxRuntime classic` cancels the pragma.
+The dev runtime (`<source>/jsx-dev-runtime`) is not recorded, because a build
+can omit it and a missing relative dev runtime would be a false unresolved
+import. The tsconfig `jsxImportSource` option only credits the package as a
+referenced dependency, and bundler or test config options (for example Vitest
+`oxc.jsx.importSource`) add no edge.
+
 ## Verification
 
 Add the smallest parser or visitor test for the syntax boundary. Add an

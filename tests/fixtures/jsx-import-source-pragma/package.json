@@ -1,0 +1,9 @@
+{
+  "name": "jsx-import-source-pragma",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.tsx",
+  "dependencies": {
+    "preact": "^10.0.0"
+  }
+}

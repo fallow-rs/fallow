@@ -746,6 +746,9 @@ pub(crate) struct ModuleInfoExtractor {
     has_global_declarations: bool,
     /// `/// <reference path>` values, set in `visit_program`.
     triple_slash_reference_paths: Vec<String>,
+    /// Whether the program has a JSX element or fragment. The automatic JSX
+    /// runtime adds its import only to such a file.
+    has_jsx: bool,
     /// Module-scope `const NAME = "literal"` names: a DI key bound to a string
     /// literal has STRING identity (a provider supplying the literal, often
     /// inside a package, matches it), so its `di_key_sites` are dropped at
