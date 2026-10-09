@@ -91,16 +91,6 @@ pub fn run_trace_dependency(opts: &TraceDependencyOptions<'_>) -> ExitCode {
         Ok(query) => query,
         Err(err) => return emit_error(&err.to_string(), 2, opts.output),
     };
-    // `fallow dead-code --trace-dependency` validates the workspace scope the
-    // same way. The scope does not narrow the trace itself.
-    if let Err(code) = crate::check::resolve_workspace_scope(
-        opts.root,
-        opts.workspace,
-        opts.changed_workspaces,
-        opts.output,
-    ) {
-        return code;
-    }
     let config = match load_config_for_analysis(
         opts.root,
         opts.config_path,
@@ -121,6 +111,17 @@ pub fn run_trace_dependency(opts: &TraceDependencyOptions<'_>) -> ExitCode {
         Ok(config) => config,
         Err(code) => return code,
     };
+    // `fallow dead-code --trace-dependency` validates the workspace scope the
+    // same way. The scope does not narrow the trace itself.
+    if let Err(code) = crate::check::resolve_workspace_scope(
+        opts.root,
+        opts.workspace,
+        opts.changed_workspaces,
+        &config.workspace_patterns,
+        opts.output,
+    ) {
+        return code;
+    }
     let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
         Ok(session) => session,
         Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
