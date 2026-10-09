@@ -175,7 +175,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again. The stale-baseline warning
   and gate message now name the prune command. (#3281, requested by
   @BenMcGit)
-||||||| parent of d674b53 (docs(trace): document the dependency usage trace)
 - **`fallow trace --dependency <package>`** reports how the code uses each
   imported name of a package. It gives file and call counts, sites with line
   and column, one hop through project wrappers such as
