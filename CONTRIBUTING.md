@@ -331,6 +331,8 @@ npm run generate:contracts:check
 4. Ensure `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass
 5. Open a pull request against `main`
 
+When the description leaves work for later ("Not in this change", "a separate change", "out of scope"), link a tracking issue for each item. For an intentional non-goal, write "No follow-up planned." instead. CI checks this.
+
 ## Reporting issues
 
 - **Bug reports**: [Open an issue](https://github.com/fallow-rs/fallow/issues/new?template=bug_report.yml) with reproduction steps
