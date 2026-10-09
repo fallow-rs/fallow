@@ -258,11 +258,13 @@ fn compute_base_decision_snapshot(
     manifests: &[String],
     head_config: &fallow_config::ResolvedConfig,
 ) -> ProgrammaticResult<DecisionSnapshot> {
-    let worktree = TemporaryBaseWorktree::create(current_root, base_ref).map_err(|err| {
-        ProgrammaticError::new(err.to_string(), 2)
-            .with_code("FALLOW_DECISION_SURFACE_FAILED")
-            .with_context("decisionSurface.base")
-    })?;
+    let worktree =
+        TemporaryBaseWorktree::create(current_root, base_ref, &head_config.workspace_patterns)
+            .map_err(|err| {
+                ProgrammaticError::new(err.to_string(), 2)
+                    .with_code("FALLOW_DECISION_SURFACE_FAILED")
+                    .with_context("decisionSurface.base")
+            })?;
     let base_root = match repo_refs::resolve_base_analysis_root(current_root, worktree.path()) {
         repo_refs::BaseAnalysisRoot::Present(root) => root,
         // A root the base commit does not contain has an empty base snapshot:

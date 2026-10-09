@@ -370,6 +370,7 @@ pub fn load_config_for_analysis(
 
     report_workspace_diagnostics(root, &resolved, &options)?;
     warn_unknown_security_categories(&resolved.security);
+    crate::output_runtime::set_workspace_patterns(&resolved.workspace_patterns);
 
     Ok(resolved)
 }

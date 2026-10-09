@@ -311,6 +311,27 @@ fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> 
     files
 }
 
+/// The `workspaces.patterns` of the audit config.
+///
+/// A config that does not load gives no patterns. The head analysis loads the
+/// same config and reports the error, so this function stays silent.
+pub(super) fn audit_workspace_patterns(opts: &AuditOptions<'_>) -> Vec<String> {
+    let load_options = fallow_config::ConfigLoadOptions {
+        allow_remote_extends: opts.allow_remote_extends,
+    };
+    let config = match opts.config_path {
+        Some(path) => fallow_config::FallowConfig::load_with_options(path, load_options).ok(),
+        None => fallow_config::FallowConfig::find_and_load_with_options(opts.root, load_options)
+            .ok()
+            .flatten()
+            .map(|(config, _)| config),
+    };
+    config
+        .and_then(|config| config.workspaces)
+        .map(|workspaces| workspaces.patterns)
+        .unwrap_or_default()
+}
+
 pub(super) fn config_file_fingerprint(
     opts: &AuditOptions<'_>,
 ) -> Result<AuditConfigFingerprint, ExitCode> {
@@ -383,10 +404,13 @@ fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> AuditCoverageF
     }
 }
 
+/// `workspace_patterns` must be the patterns that the base checkout gets, so
+/// the key covers each context directory that the checkout links.
 pub(super) fn audit_base_snapshot_cache_key(
     opts: &AuditOptions<'_>,
     base_ref: &str,
     changed_files: &FxHashSet<PathBuf>,
+    workspace_patterns: &[String],
 ) -> Result<Option<AuditBaseSnapshotCacheKey>, ExitCode> {
     if opts.no_cache {
         return Ok(None);
@@ -402,8 +426,10 @@ pub(super) fn audit_base_snapshot_cache_key(
         .map(Path::to_path_buf)
         .or_else(|| fallow_engine::health::scoring::auto_detect_coverage(opts.root))
         .map(|p| coverage_file_fingerprint(&p, opts.root));
-    let materialized_context =
-        fallow_engine::repo_refs::audit_materialized_context_fingerprint(opts.root);
+    let materialized_context = fallow_engine::repo_refs::audit_materialized_context_fingerprint(
+        opts.root,
+        workspace_patterns,
+    );
     let bytes = AuditCacheKeyBuilder::new(
         AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         env!("CARGO_PKG_VERSION"),

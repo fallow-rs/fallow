@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use fallow_config::{AuditGate, OutputFormat, ProductionAnalysis};
@@ -221,8 +222,8 @@ use cache::{
     ensure_audit_base_snapshot_cache_dir, snapshot_from_cached,
 };
 use cache::{
-    AuditBaseSnapshotCacheKey, audit_base_snapshot_cache_key, load_cached_base_snapshot,
-    save_cached_base_snapshot, sorted_keys,
+    AuditBaseSnapshotCacheKey, audit_base_snapshot_cache_key, audit_workspace_patterns,
+    load_cached_base_snapshot, save_cached_base_snapshot, sorted_keys,
 };
 use fallow_engine::repo_refs::short_head_sha;
 
@@ -439,6 +440,16 @@ struct CliAuditBackend<'a> {
     opts: &'a AuditOptions<'a>,
     type_aware: AuditTypeAwareOptions<'a>,
     base_ref: &'a str,
+    /// Loaded on first use, so an audit without changes reads no config.
+    workspace_patterns: OnceLock<Vec<String>>,
+}
+
+impl CliAuditBackend<'_> {
+    /// The `workspaces.patterns` that the base checkout and its cache key use.
+    fn workspace_patterns(&self) -> &[String] {
+        self.workspace_patterns
+            .get_or_init(|| audit_workspace_patterns(self.opts))
+    }
 }
 
 impl AuditBackend for CliAuditBackend<'_> {
@@ -476,7 +487,13 @@ impl AuditBackend for CliAuditBackend<'_> {
         base_ref: &str,
         base_sha: Option<&str>,
     ) -> Result<BaseWorktree, ExitCode> {
-        BaseWorktree::create(self.opts.root, base_ref, base_sha).ok_or_else(|| {
+        BaseWorktree::create(
+            self.opts.root,
+            base_ref,
+            base_sha,
+            self.workspace_patterns(),
+        )
+        .ok_or_else(|| {
             use std::fmt::Write as _;
             let mut message =
                 format!("could not create a temporary worktree for base ref '{base_ref}'");
@@ -500,7 +517,7 @@ impl AuditBackend for CliAuditBackend<'_> {
         base_ref: &str,
         focus: &FxHashSet<PathBuf>,
     ) -> Result<Option<AuditBaseSnapshotCacheKey>, ExitCode> {
-        audit_base_snapshot_cache_key(self.opts, base_ref, focus)
+        audit_base_snapshot_cache_key(self.opts, base_ref, focus, self.workspace_patterns())
     }
 
     fn cached_base_sha<'k>(&self, key: &'k AuditBaseSnapshotCacheKey) -> Option<&'k str> {
@@ -960,6 +977,7 @@ pub fn execute_audit_with_type_aware(
         opts,
         type_aware,
         base_ref: &base_ref,
+        workspace_patterns: OnceLock::new(),
     };
     let run = fallow_api::audit_run::run(
         &backend,

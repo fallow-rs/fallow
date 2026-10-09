@@ -18,10 +18,17 @@ pub struct BaseWorktree {
 }
 
 impl BaseWorktree {
-    pub fn create(repo_root: &Path, base_ref: &str, base_sha: Option<&str>) -> Option<Self> {
+    /// `workspace_patterns` are the `workspaces.patterns` of the resolved
+    /// config, so the base view links the context of those packages too.
+    pub fn create(
+        repo_root: &Path,
+        base_ref: &str,
+        base_sha: Option<&str>,
+        workspace_patterns: &[String],
+    ) -> Option<Self> {
         sweep_orphan_audit_worktrees(repo_root);
         if let Some(base_sha) = base_sha
-            && let Some(worktree) = Self::reuse_or_create(repo_root, base_sha)
+            && let Some(worktree) = Self::reuse_or_create(repo_root, base_sha, workspace_patterns)
         {
             return Some(worktree);
         }
@@ -58,11 +65,15 @@ impl BaseWorktree {
             persistent: false,
             _reusable_lock: None,
         };
-        materialize_base_dependency_context(repo_root, worktree.path());
+        materialize_base_dependency_context(repo_root, worktree.path(), workspace_patterns);
         Some(worktree)
     }
 
-    pub fn reuse_or_create(repo_root: &Path, base_sha: &str) -> Option<Self> {
+    pub fn reuse_or_create(
+        repo_root: &Path,
+        base_sha: &str,
+        workspace_patterns: &[String],
+    ) -> Option<Self> {
         let path = reusable_audit_worktree_path(repo_root);
         let reusable_lock =
             ReusableWorktreeLock::try_acquire(&path, "falling back to non-reusable worktree")?;
@@ -75,7 +86,7 @@ impl BaseWorktree {
                 persistent: true,
                 _reusable_lock: Some(reusable_lock),
             };
-            materialize_base_dependency_context(repo_root, worktree.path());
+            materialize_base_dependency_context(repo_root, worktree.path(), workspace_patterns);
             record_last_used(worktree.path(), repo_root);
             return Some(worktree);
         }
@@ -130,7 +141,7 @@ impl BaseWorktree {
             persistent: true,
             _reusable_lock: Some(reusable_lock),
         };
-        materialize_base_dependency_context(repo_root, worktree.path());
+        materialize_base_dependency_context(repo_root, worktree.path(), workspace_patterns);
         if readiness_published {
             record_last_used(worktree.path(), repo_root);
         }

@@ -2581,6 +2581,103 @@ fn audit_base_preserves_node_modules_tsconfig_extends_context() {
     );
 }
 
+/// A package that only `workspaces.patterns` declares gets its generated
+/// `.nuxt` context in the base checkout too. Without it, the base analysis
+/// cannot resolve the alias, and an old unused export shows as introduced.
+/// The alias uses `${configDir}`, so it resolves against the package that
+/// extends the generated config, also through the link.
+#[test]
+fn audit_base_links_generated_context_of_config_pattern_workspace() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    let web = dir.join("apps/web");
+    fs::create_dir_all(web.join("src")).unwrap();
+    fs::write(dir.join(".gitignore"), "node_modules\n.nuxt\n.fallow\n").unwrap();
+    // The manifest declares other workspaces, so the fallback scan for
+    // undeclared packages stays off and only the config finds `apps/web`.
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"workspaces":{"patterns":["apps/*"]}}"#,
+    )
+    .unwrap();
+    fs::write(
+        web.join("package.json"),
+        r#"{"name":"web","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        web.join("tsconfig.json"),
+        r#"{"extends":"./.nuxt/tsconfig.json"}"#,
+    )
+    .unwrap();
+    fs::write(
+        web.join("src/index.ts"),
+        "import { used } from '@/feature';\nconsole.log(used);\n",
+    )
+    .unwrap();
+    fs::write(
+        web.join("src/feature.ts"),
+        "export const used = 1;\nexport const legacyUnused = 2;\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::create_dir_all(web.join(".nuxt")).unwrap();
+    fs::write(
+        web.join(".nuxt/tsconfig.json"),
+        r#"{"compilerOptions":{"paths":{"@/*":["${configDir}/src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        web.join("src/feature.ts"),
+        "export const used = 1;\nexport const legacyUnused = 2;\nexport const introduced = 3;\n",
+    )
+    .unwrap();
+    commit_all(dir, "introduce new export");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    let json = parse_json(&output);
+    assert_eq!(
+        json["dead_code"]["summary"]["unresolved_imports"].as_u64(),
+        Some(0),
+        "the generated alias should resolve in the current analysis"
+    );
+    let exports = json["dead_code"]["unused_exports"].as_array().unwrap();
+    let introduced_of = |name: &str| {
+        exports
+            .iter()
+            .find(|export| export["export_name"] == name)
+            .map(|export| export["introduced"].clone())
+    };
+    assert_eq!(introduced_of("introduced"), Some(serde_json::json!(true)));
+    assert_eq!(
+        introduced_of("legacyUnused"),
+        Some(serde_json::json!(false)),
+        "the base checkout must see the generated context of the pattern package"
+    );
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(1)
+    );
+}
+
 #[test]
 fn audit_new_unlisted_dependency_import_site_is_introduced() {
     let tmp = TempDir::new().expect("failed to create temp dir");
