@@ -1877,7 +1877,7 @@ Uploads retry network failures, HTTP 429, and HTTP 502/503/504 up to three attem
 | `--repo <NAME>` | string | `package.json` `repository.url`, then `git remote get-url origin` parsed to `owner/repo` | Repo identifier used in the source-map API path. Must match the beacon's `projectId` (and `upload-inventory`'s `--project-id`); pass `--repo <bare-name>` explicitly if the beacon reports a bare name. |
 | `--git-sha <SHA>` | string | `$GITHUB_SHA` -> `$CI_COMMIT_SHA` -> `$COMMIT_SHA` -> `git rev-parse HEAD` | Commit SHA, 7-40 hex chars. |
 | `--endpoint <URL>` | string | `$FALLOW_API_URL` or `https://api.fallow.cloud` | Override for staging / on-prem. |
-| `--strip-path <BOOL>` | bool | `true` | Upload basename-only `fileName` values. Use `--strip-path=false` when runtime coverage reports paths like `assets/app.js`. |
+| `--strip-path <BOOL>` | bool | `true` | Upload basename-only `fileName` values. Use `--strip-path=false` when runtime coverage reports paths like `assets/app.js`. Exits 2 before any upload when two maps get the same `fileName`. |
 | `--dry-run` | bool | `false` | Print what would upload; no API key or network call. |
 | `--concurrency <N>` | integer | `4` | Parallel upload fanout. |
 | `--fail-fast` | bool | `false` | Stop on the first upload failure. |

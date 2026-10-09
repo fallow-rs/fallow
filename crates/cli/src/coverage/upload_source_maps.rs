@@ -4,6 +4,7 @@
 //! coverage against deployed bundle paths; source maps uploaded here let the
 //! cloud resolver map those positions back to original source files.
 
+use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -13,6 +14,7 @@ use colored::Colorize as _;
 use fallow_engine::changed_files::clear_ambient_git_env;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
@@ -298,7 +300,52 @@ fn collect_source_maps(
     };
     collect_source_maps_inner(&mut input, dir)?;
     maps.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    reject_file_name_collisions(&maps)?;
     Ok(maps)
+}
+
+const MAX_REPORTED_COLLISIONS: usize = 10;
+
+/// The cloud stores one map per `fileName` for a commit, so a second map with
+/// the same name silently replaces the first (issue #3298). Refuse the whole
+/// upload instead of reporting success for maps that will not be stored.
+fn reject_file_name_collisions(maps: &[SourceMapCandidate]) -> Result<(), UploadSourceMapsError> {
+    let mut by_name: FxHashMap<&str, Vec<&Path>> = FxHashMap::default();
+    for map in maps {
+        by_name
+            .entry(map.file_name.as_str())
+            .or_default()
+            .push(&map.rel_path);
+    }
+    let mut collisions: Vec<(&str, Vec<&Path>)> = by_name
+        .into_iter()
+        .filter(|(_, paths)| paths.len() > 1)
+        .collect();
+    if collisions.is_empty() {
+        return Ok(());
+    }
+    collisions.sort_unstable_by_key(|(name, _)| *name);
+
+    let mut message = format!(
+        "{} source map fileName(s) are not unique, and each later upload would replace the earlier one:",
+        collisions.len()
+    );
+    for (name, paths) in collisions.iter().take(MAX_REPORTED_COLLISIONS) {
+        let paths: Vec<String> = paths.iter().map(|path| to_posix_string(path)).collect();
+        let _ = write!(message, "\n  {name}: {}", paths.join(", "));
+    }
+    if collisions.len() > MAX_REPORTED_COLLISIONS {
+        let _ = write!(
+            message,
+            "\n  ... and {} more",
+            collisions.len() - MAX_REPORTED_COLLISIONS
+        );
+    }
+    message.push_str(
+        "\nUse --strip-path=false to key each map by its path in the build directory, \
+         or --exclude to skip maps you do not need.",
+    );
+    Err(UploadSourceMapsError::Validation(message))
 }
 
 struct SourceMapWalkInput<'a> {
@@ -1150,6 +1197,30 @@ mod tests {
 
         let file_names: Vec<&str> = maps.iter().map(|map| map.file_name.as_str()).collect();
         assert_eq!(file_names, vec!["assets/app.js.map", "root.js.map"]);
+    }
+
+    #[test]
+    fn collect_source_maps_rejects_file_name_collisions_before_upload() {
+        let dir = tempdir().expect("tempdir");
+        for sub in ["consumers/base", "consumers/feed"] {
+            std::fs::create_dir_all(dir.path().join(sub)).expect("consumer dir");
+            std::fs::write(dir.path().join(sub).join("index.js.map"), "{}").expect("map");
+        }
+        let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
+        let exclude = compile_glob_set(&[], "--exclude").unwrap();
+
+        let Err(UploadSourceMapsError::Validation(message)) =
+            collect_source_maps(dir.path(), dir.path(), &include, &exclude, true)
+        else {
+            panic!("expected a validation error for colliding fileNames");
+        };
+        assert!(message.contains("index.js.map"), "{message}");
+        assert!(message.contains("consumers/base/index.js.map"), "{message}");
+        assert!(message.contains("consumers/feed/index.js.map"), "{message}");
+        assert!(message.contains("--strip-path=false"), "{message}");
+
+        let maps = collect_source_maps(dir.path(), dir.path(), &include, &exclude, false).unwrap();
+        assert_eq!(maps.len(), 2);
     }
 
     #[cfg(unix)]

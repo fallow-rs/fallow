@@ -2707,6 +2707,8 @@ enum CoverageCli {
         ///
         /// Use `--strip-path=false` when your runtime coverage reports bundle
         /// paths relative to the build directory, such as `assets/app.js`.
+        /// The command fails before it uploads when two maps get the same
+        /// fileName, because the later map would replace the earlier one.
         #[arg(long, value_name = "BOOL", default_value_t = true, action = clap::ArgAction::Set)]
         strip_path: bool,
 
