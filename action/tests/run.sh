@@ -4794,7 +4794,8 @@ done
 # `::warning::`.
 HOSTILE_PARSE_PATH='src/a%\r\n::error title=pwned::injected.ts'
 for hostile_enforced in true false; do
-  run_gate_analyze "$(gate_envelope "{\"parse-error\":{\"status\":\"fail\",\"enforced\":${hostile_enforced},\"observed\":1.0,\"files\":[{\"path\":\"${HOSTILE_PARSE_PATH}\",\"error_count\":1,\"panicked\":true}]}}")" \
+  HOSTILE_GATE_JSON="{\"parse-error\":{\"status\":\"fail\",\"enforced\":${hostile_enforced},\"observed\":1.0,\"files\":[{\"path\":\"${HOSTILE_PARSE_PATH}\",\"error_count\":1,\"panicked\":true}]}}"
+  run_gate_analyze "$(gate_envelope "$HOSTILE_GATE_JSON")" \
     INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="false"
   assert_contains "$GATE_STDOUT" "src/a%25%0D%0A::error title=pwned::injected.ts (1 parser error, the parser stopped)" \
     "gate: a hostile parse-error path is escaped (enforced ${hostile_enforced})"
