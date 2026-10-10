@@ -319,8 +319,15 @@ pub struct AnalysisOptions {
     pub threads: Option<usize>,
     /// Explicit unified diff file that scopes changed-code analysis.
     ///
+    /// Relative file paths resolve against the analysis root. Patch headers
+    /// are placed relative to that root or its Git repository toplevel.
+    /// A readable patch with foreign or ambiguous paths leaves the analysis
+    /// at full scope and records a `not-applied` diff-filter request outcome.
+    /// Empty and deletion-only patches apply an empty scope.
+    ///
     /// A file that cannot be read fails the call with
     /// `FALLOW_INVALID_DIFF_FILE`: the caller named it and can fix it.
+    /// An explicit file never falls back to `ambient_diff_file`.
     pub diff_file: Option<PathBuf>,
     /// Unified diff file inherited from the environment (`FALLOW_DIFF_FILE`)
     /// rather than named by the caller. Read only when `diff_file` is unset.

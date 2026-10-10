@@ -573,6 +573,51 @@ writeFileSync(
 }
 
 {
+  const repo = mkdtempSync(join(tmpdir(), "fallow-node-nested-diff-"));
+  const nestedRoot = join(repo, "packages", "web");
+  try {
+    mkdirSync(join(nestedRoot, "src"), { recursive: true });
+    writeFileSync(
+      join(nestedRoot, "package.json"),
+      JSON.stringify({ name: "web", main: "src/index.ts" }),
+    );
+    writeFileSync(join(nestedRoot, "src", "index.ts"), "import './a';\nimport './b';\n");
+    writeFileSync(join(nestedRoot, "src", "a.ts"), "export const deadA = 1;\n");
+    writeFileSync(join(nestedRoot, "src", "b.ts"), "export const deadB = 2;\n");
+    execFileSync("git", ["init", "-q"], { cwd: repo, stdio: "ignore" });
+    const options = { root: nestedRoot, noCache: true, unusedExports: true };
+    const full = await detectDeadCode(options);
+    assert.deepEqual(
+      full.unused_exports.map((item) => item.export_name),
+      ["deadA", "deadB"],
+    );
+    assert.equal(full.request_outcomes?.["diff-filter"], undefined);
+    writeFileSync(
+      join(nestedRoot, "input.diff"),
+      [
+        "diff --git a/packages/web/src/a.ts b/packages/web/src/a.ts",
+        "--- a/packages/web/src/a.ts",
+        "+++ b/packages/web/src/a.ts",
+        "@@ -0,0 +1 @@",
+        "+export const deadA = 1;",
+        "",
+      ].join("\n"),
+    );
+    const scoped = await detectDeadCode({ ...options, diffFile: "input.diff" });
+    assert.deepEqual(
+      scoped.unused_exports.map((item) => [item.path, item.export_name]),
+      [["src/a.ts", "deadA"]],
+    );
+    assert.equal(scoped.request_outcomes["diff-filter"].status, "applied");
+    assert.equal(scoped.request_outcomes["diff-filter"].requested, "diffFile input.diff");
+    assert.equal(scoped.request_outcomes["diff-filter"].scope_size, 1);
+    console.log("  [PASS] detectDeadCode repository-relative diffFile under a nested root");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+
+{
   const report = await detectCircularDependencies({ root });
   assert.equal(report.summary.circular_dependencies, 1);
   assert.equal(report.summary.total_issues, 1);

@@ -10,8 +10,8 @@
 use std::path::Path;
 
 use fallow_api::{
-    AnalysisOptions, CombinedOptions, DeadCodeOptions, DuplicationOptions, run_combined,
-    run_dead_code, run_duplication, serialize_combined_programmatic_json,
+    AnalysisOptions, CombinedOptions, DeadCodeFilters, DeadCodeOptions, DuplicationOptions,
+    run_combined, run_dead_code, run_duplication, serialize_combined_programmatic_json,
     serialize_dead_code_programmatic_json, serialize_duplication_programmatic_json,
 };
 use serde_json::Value;
@@ -638,4 +638,250 @@ fn programmatic_project_info_accepts_a_workspace_declared_by_config_patterns() {
         boundaries: false,
     })
     .expect("`workspace` finds the workspace that the config declares");
+}
+
+fn nested_diff_repository() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write(
+        dir.path(),
+        "packages/web/package.json",
+        r#"{"name":"web","main":"src/index.ts"}"#,
+    );
+    write(
+        dir.path(),
+        "packages/web/src/index.ts",
+        "import './a';\nimport './b';\n",
+    );
+    write(
+        dir.path(),
+        "packages/web/src/a.ts",
+        "export const deadA = 1;\n",
+    );
+    write(
+        dir.path(),
+        "packages/web/src/b.ts",
+        "export const deadB = 2;\n",
+    );
+    git(dir.path(), &["init", "-q"]);
+    dir
+}
+
+fn diff_exports(options: AnalysisOptions) -> Value {
+    run_dead_code(&DeadCodeOptions {
+        analysis: options,
+        filters: DeadCodeFilters {
+            unused_exports: true,
+            ..DeadCodeFilters::default()
+        },
+        ..DeadCodeOptions::default()
+    })
+    .and_then(serialize_dead_code_programmatic_json)
+    .expect("analyze explicit diff scope")
+}
+
+fn export_locations(report: &Value) -> Vec<(&str, &str)> {
+    report["unused_exports"]
+        .as_array()
+        .expect("unused exports")
+        .iter()
+        .map(|item| {
+            (
+                item["path"].as_str().unwrap(),
+                item["export_name"].as_str().unwrap(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn explicit_diff_places_repository_relative_headers() {
+    let dir = nested_diff_repository();
+    let root = dir.path().join("packages/web");
+    let full = diff_exports(analysis(&root));
+    assert_eq!(
+        export_locations(&full),
+        [("src/a.ts", "deadA"), ("src/b.ts", "deadB")]
+    );
+    assert!(full["request_outcomes"].get("diff-filter").is_none());
+    write(
+        &root,
+        "input.diff",
+        &single_line_diff("packages/web/src/a.ts"),
+    );
+    for path in [
+        std::path::PathBuf::from("input.diff"),
+        root.join("input.diff"),
+    ] {
+        let report = diff_exports(AnalysisOptions {
+            diff_file: Some(path.clone()),
+            ..analysis(&root)
+        });
+        assert_eq!(export_locations(&report), [("src/a.ts", "deadA")]);
+        let outcome = &report["request_outcomes"]["diff-filter"];
+        assert_eq!(outcome["status"], "applied");
+        assert_eq!(outcome["scope_size"], 1);
+        assert_eq!(outcome["requested"], format!("diffFile {}", path.display()));
+    }
+}
+
+fn single_line_diff(header: &str) -> String {
+    format!(
+        "diff --git a/{header} b/{header}\n--- a/{header}\n+++ b/{header}\n@@ -0,0 +1 @@\n+export const deadA = 1;\n"
+    )
+}
+
+#[test]
+fn explicit_diff_stands_down_without_ambient_fallback() {
+    for (header, ambiguous, reason) in [
+        ("foreign/src/a.ts", false, "foreign-namespace"),
+        ("src/a.ts", true, "ambiguous-base"),
+    ] {
+        let dir = nested_diff_repository();
+        let root = dir.path().join("packages/web");
+        if ambiguous {
+            write(dir.path(), "src/a.ts", "export const outside = 1;\n");
+        }
+        write(
+            &root,
+            "ambient.diff",
+            &single_line_diff("packages/web/src/a.ts"),
+        );
+        let ambient = diff_exports(AnalysisOptions {
+            ambient_diff_file: Some("ambient.diff".into()),
+            ..analysis(&root)
+        });
+        assert_eq!(export_locations(&ambient), [("src/a.ts", "deadA")]);
+        write(&root, "input.diff", &single_line_diff(header));
+        let report = diff_exports(AnalysisOptions {
+            diff_file: Some("input.diff".into()),
+            ambient_diff_file: Some("ambient.diff".into()),
+            ..analysis(&root)
+        });
+        assert_eq!(
+            export_locations(&report),
+            [("src/a.ts", "deadA"), ("src/b.ts", "deadB")]
+        );
+        let outcome = &report["request_outcomes"]["diff-filter"];
+        assert_eq!(outcome["status"], "not-applied");
+        assert_eq!(outcome["reason"], reason);
+        assert_eq!(outcome["requested"], "diffFile input.diff");
+        assert_eq!(outcome["affects"], "scope");
+        assert!(outcome["message"].as_str().unwrap().contains("input.diff"));
+        assert!(outcome.get("scope_size").is_none());
+    }
+}
+
+#[test]
+fn explicit_diff_keeps_root_relative_and_empty_scopes() {
+    let dir = nested_diff_repository();
+    let root = dir.path().join("packages/web");
+    assert_eq!(
+        export_locations(&diff_exports(analysis(&root))),
+        [("src/a.ts", "deadA"), ("src/b.ts", "deadB")]
+    );
+    write(&root, "input.diff", &single_line_diff("src/a.ts"));
+    let options = AnalysisOptions {
+        diff_file: Some("input.diff".into()),
+        ..analysis(&root)
+    };
+    let root_relative = diff_exports(options.clone());
+    assert_eq!(export_locations(&root_relative), [("src/a.ts", "deadA")]);
+    assert_eq!(
+        root_relative["request_outcomes"]["diff-filter"]["status"],
+        "applied"
+    );
+    for patch in [
+        "",
+        "diff --git a/packages/web/src/removed.ts b/packages/web/src/removed.ts\n--- a/packages/web/src/removed.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const removed = 1;\n",
+    ] {
+        write(&root, "input.diff", patch);
+        let report = diff_exports(options.clone());
+        assert!(export_locations(&report).is_empty());
+        let outcome = &report["request_outcomes"]["diff-filter"];
+        assert_eq!(outcome["status"], "applied");
+        assert_eq!(outcome["scope_size"], 0);
+        assert!(outcome.get("reason").is_none());
+    }
+}
+
+#[test]
+fn explicit_diff_read_errors_ignore_valid_ambient() {
+    let dir = nested_diff_repository();
+    let root = dir.path().join("packages/web");
+    write(
+        &root,
+        "ambient.diff",
+        &single_line_diff("packages/web/src/a.ts"),
+    );
+    let options = AnalysisOptions {
+        ambient_diff_file: Some("ambient.diff".into()),
+        ..analysis(&root)
+    };
+    assert_eq!(
+        export_locations(&diff_exports(options.clone())),
+        [("src/a.ts", "deadA")]
+    );
+    std::fs::create_dir(root.join("directory.diff")).unwrap();
+    std::fs::write(root.join("non-utf8.diff"), [0xff]).unwrap();
+    let oversized = std::fs::File::create(root.join("oversize.diff")).unwrap();
+    oversized
+        .set_len(fallow_output::MAX_DIFF_BYTES + 1)
+        .unwrap();
+    for path in [
+        "missing.diff",
+        "directory.diff",
+        "non-utf8.diff",
+        "oversize.diff",
+        "-",
+    ] {
+        let error = run_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                diff_file: Some(path.into()),
+                ..options.clone()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect_err("invalid explicit input must not fall back to the ambient patch");
+        assert_eq!(error.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
+        assert_eq!(error.context.as_deref(), Some("analysis.diffFile"));
+    }
+}
+
+#[test]
+fn explicit_diff_places_the_combined_report_scope() {
+    let dir = nested_diff_repository();
+    let root = dir.path().join("packages/web");
+    let options = CombinedOptions {
+        analysis: analysis(&root),
+        duplication: false,
+        health: false,
+        ..CombinedOptions::default()
+    };
+    let full = run_combined(&options)
+        .and_then(serialize_combined_programmatic_json)
+        .unwrap();
+    assert_eq!(
+        export_locations(&full["check"]),
+        [("src/a.ts", "deadA"), ("src/b.ts", "deadB")]
+    );
+    write(
+        &root,
+        "input.diff",
+        &single_line_diff("packages/web/src/a.ts"),
+    );
+    let report = run_combined(&CombinedOptions {
+        analysis: AnalysisOptions {
+            diff_file: Some("input.diff".into()),
+            ..analysis(&root)
+        },
+        ..options
+    })
+    .and_then(serialize_combined_programmatic_json)
+    .unwrap();
+    assert_eq!(export_locations(&report["check"]), [("src/a.ts", "deadA")]);
+    assert_eq!(
+        report["request_outcomes"]["diff-filter"]["status"],
+        "applied"
+    );
+    assert_eq!(report["request_outcomes"]["diff-filter"]["scope_size"], 1);
 }

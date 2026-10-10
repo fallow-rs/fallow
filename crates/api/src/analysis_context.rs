@@ -437,15 +437,38 @@ fn default_threads() -> usize {
 /// `FALLOW_INVALID_DIFF_FILE` error. An ambient `FALLOW_DIFF_FILE` comes from
 /// the environment the caller inherited, so a bad file stands down: no diff,
 /// full scope, and a `not-applied` outcome with the CLI's reason token and
-/// sentence. The source decides the behavior, never the text of an error.
+/// sentence. A readable patch from either source stands down when its paths
+/// cannot be placed. An explicit source remains authoritative in that case.
 fn resolve_diff(
     options: &AnalysisOptions,
     root: &Path,
 ) -> ProgrammaticResult<(Option<DiffIndex>, Option<RequestOutcome>)> {
     if let Some(path) = options.diff_file.as_deref() {
         let index = load_explicit_diff_file(path, root)?;
-        let request = diff_applied(format!("diffFile {}", path.display()), &index);
-        return Ok((Some(index), Some(request)));
+        let label = format!("diffFile {}", path.display());
+        return Ok(
+            match fallow_engine::diff_source::place_diff(
+                index,
+                root,
+                &fallow_engine::diff_source::diff_base_candidates(root),
+                &label,
+            ) {
+                Ok(index) => {
+                    let request = diff_applied(label, &index);
+                    (Some(index), Some(request))
+                }
+                Err(stand_down) => {
+                    let (reason, message) = stand_down.into_parts();
+                    let request = RequestOutcome::not_applied(
+                        RequestName::DiffFilter,
+                        label,
+                        reason,
+                        message,
+                    );
+                    (None, Some(request))
+                }
+            },
+        );
     }
     let Some(path) = options.ambient_diff_file.as_deref() else {
         return Ok((None, None));
