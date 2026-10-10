@@ -132,6 +132,9 @@ ignored = [
     "miette",       # feature-only dep: activates fancy rendering for fallow-config's miette::Report
     "proc-macro2",  # feature-only dep: activates `span-locations` so syn-returned `.span().start().line` reports real source positions in the schema-drift gate (crates/cli/tests/integration/schema_tests.rs); no explicit import
 ]
+# tests/integration/main.rs includes this file with `#[path = "../common/http_stub.rs"]`.
+# cargo-shear does not follow a `#[path]` module in a test target that lives in a subdirectory.
+ignored-paths = ["tests/common/http_stub.rs"]
 
 [package.metadata.cargo-machete]
 ignored = [
