@@ -89,14 +89,6 @@ pub(super) fn post_review(
         CiProvider::Github => post_github_review(input, &envelope, &provider_state.fingerprints),
         CiProvider::Gitlab => post_gitlab_review(input, &envelope, &provider_state.fingerprints),
     };
-    if !result.post_errors.is_empty() {
-        // A failed inline-comment post cancels the whole reconcile pass, so no
-        // stale thread is resolved in this run. That is a separate defect from
-        // the per-fingerprint isolation inside the apply loops, and it is not
-        // addressed here.
-        return emit_post_review_result(&result, output, json_style);
-    }
-
     let applied = if input.dry_run {
         ApplyResult::default()
     } else {

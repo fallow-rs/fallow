@@ -7,8 +7,10 @@
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::common::{fallow_bin, parse_json};
 use crate::http_stub::read_request;
@@ -373,6 +375,14 @@ fn run_post_review_with_identity(
         .env("GITHUB_SHA", "eeeeeee123")
         .env("GITLAB_TOKEN", "test-token")
         .env("CI_COMMIT_SHA", "eeeeeee123")
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
+        .env_remove("HTTP_PROXY")
+        .env_remove("HTTPS_PROXY")
+        .env_remove("ALL_PROXY")
+        .env_remove("http_proxy")
+        .env_remove("https_proxy")
+        .env_remove("all_proxy")
         .env_remove("FALLOW_BOT_LOGIN");
     if let Some(bot_login) = bot_login {
         command.env("FALLOW_BOT_LOGIN", bot_login);
@@ -2356,4 +2366,243 @@ fn gitlab_post_review_follows_next_page_past_a_fully_filtered_page() {
     let json = parse_json(&output);
     assert_eq!(json["comments_skipped"], 1);
     assert_eq!(server.join().expect("server thread").len(), 2);
+}
+
+// The caller can exit before the expected stale writes on the broken branch.
+// Stop collecting when it exits so a missing request fails instead of hanging.
+fn run_post_review_with_trace(
+    responses: Vec<MockResponse>,
+    provider_args: &[&str],
+    envelope: &tempfile::TempDir,
+) -> (crate::common::CommandOutput, Vec<String>) {
+    const SERVER_TIMEOUT: Duration = Duration::from_secs(20);
+    const ACCEPT_POLL: Duration = Duration::from_millis(10);
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let address = listener.local_addr().unwrap();
+    assert!(address.ip().is_loopback());
+    listener.set_nonblocking(true).unwrap();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop = Arc::clone(&stopped);
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + SERVER_TIMEOUT;
+        let mut responses = responses.into_iter();
+        let mut requests = Vec::new();
+        while !stop.load(Ordering::Acquire) && Instant::now() < deadline {
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(ACCEPT_POLL);
+                    continue;
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            };
+            stream.set_read_timeout(Some(SERVER_TIMEOUT)).unwrap();
+            stream.set_write_timeout(Some(SERVER_TIMEOUT)).unwrap();
+            let request = read_request(&mut stream);
+            assert!(
+                request.lines().any(|line| line
+                    .eq_ignore_ascii_case("authorization: Bearer test-token")
+                    || line.eq_ignore_ascii_case("private-token: test-token")),
+                "dummy credentials required"
+            );
+            let response = responses.next().expect("unexpected additional request");
+            assert!(request.starts_with(response.method), "{request}");
+            assert!(request.contains(response.path_contains), "{request}");
+            requests.push(request);
+            write_response(&mut stream, response.status, "", response.body);
+        }
+        requests
+    });
+    let output = run_post_review(provider_args, &format!("http://{address}"), envelope);
+    stopped.store(true, Ordering::Release);
+    (output, server.join().expect("collector thread"))
+}
+
+#[test]
+fn github_failed_create_still_reconciles_owned_stale_thread() {
+    let envelope = write_envelope_with_review_id(&["keep", "fresh"], Some("frontend"));
+    let (output, requests) = run_post_review_with_trace(
+        vec![
+            github_comments(
+                r#"[
+            {"id":1,"line":1,"body":"<!-- fallow-fingerprint: stale -->\n<!-- fallow-review-id: frontend -->","user":{"type":"Bot"}},
+            {"id":2,"line":1,"body":"<!-- fallow-fingerprint: keep -->\n<!-- fallow-review-id: frontend -->","user":{"type":"Bot"}},
+            {"id":3,"line":1,"body":"<!-- fallow-fingerprint: foreign -->\n<!-- fallow-review-id: backend -->","user":{"type":"Bot"}},
+            {"id":4,"line":1,"body":"<!-- fallow-fingerprint: human -->\n<!-- fallow-review-id: frontend -->","user":{"type":"User"}}
+        ]"#,
+            ),
+            github_threads(
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+            {"id":"T1","isResolved":false,"comments":{"nodes":[{"databaseId":1}]}},
+            {"id":"T2","isResolved":false,"comments":{"nodes":[{"databaseId":2}]}},
+            {"id":"T3","isResolved":false,"comments":{"nodes":[{"databaseId":3}]}},
+            {"id":"T4","isResolved":false,"comments":{"nodes":[{"databaseId":4}]}}
+        ],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}"#,
+            ),
+            MockResponse {
+                method: "POST",
+                path_contains: "/pulls/7/reviews",
+                status: 422,
+                body: r#"{"message":"inline failed"}"#,
+            },
+            github_comment_preflight(1),
+            github_thread_preflight("T1", false),
+            github_thread_resolution("T1"),
+            github_resolution_reply(
+                1,
+                r#"{"id":99,"in_reply_to_id":1,"body":"Resolved in `eeeeeee`.\n\n<!-- fallow-resolved-fingerprint: stale@eeeeeee -->\n<!-- fallow-review-id: frontend -->"}"#,
+            ),
+        ],
+        &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["post_errors"].as_array().unwrap().len(), 1);
+    assert_eq!(json["comments_posted"], 0);
+    assert_eq!(
+        json["stale_fingerprints"], 1,
+        "failed create must retain the stale plan: {requests:#?}"
+    );
+    assert_eq!(json["threads_resolved"], 1);
+    assert_eq!(json["resolution_comments_posted"], 1);
+    assert_eq!(requests.len(), 7);
+    assert!(requests[2].contains("fallow-fingerprint: fresh"));
+    assert!(!requests[2].contains("fallow-fingerprint: keep"));
+    assert!(requests[5].contains("resolveReviewThread") && requests[5].contains("T1"));
+    assert!(
+        !requests[5].contains("T2") && !requests[5].contains("T3") && !requests[5].contains("T4")
+    );
+    assert!(requests[6].contains("fallow-resolved-fingerprint: stale@eeeeeee"));
+}
+
+#[test]
+fn gitlab_failed_create_keeps_partial_posts_and_reconciles_owned_stale_thread() {
+    let envelope = write_envelope_with_review_id(&["keep", "fresh1", "fresh2"], Some("frontend"));
+    let (output, requests) = run_post_review_with_trace(
+        vec![
+            MockResponse {
+                method: "GET",
+                path_contains: "/projects/group%2Frepo/merge_requests/7/discussions",
+                status: 200,
+                body: r#"[
+            {"id":"d1","notes":[{"id":1,"body":"<!-- fallow-fingerprint: stale -->\n<!-- fallow-review-id: frontend -->","resolved":false,"author":{"bot":true}}]},
+            {"id":"d2","notes":[{"id":2,"body":"<!-- fallow-fingerprint: keep -->\n<!-- fallow-review-id: frontend -->","resolved":false,"author":{"bot":true}}]},
+            {"id":"d3","notes":[{"id":3,"body":"<!-- fallow-fingerprint: foreign -->\n<!-- fallow-review-id: backend -->","resolved":false,"author":{"bot":true}}]},
+            {"id":"d4","notes":[{"id":4,"body":"<!-- fallow-fingerprint: human -->\n<!-- fallow-review-id: frontend -->","resolved":false,"author":{"bot":false}}]}
+        ]"#,
+            },
+            MockResponse {
+                method: "POST",
+                path_contains: "/merge_requests/7/discussions ",
+                status: 422,
+                body: r#"{"message":"inline failed"}"#,
+            },
+            MockResponse {
+                method: "POST",
+                path_contains: "/merge_requests/7/discussions ",
+                status: 201,
+                body: r#"{"id":"created"}"#,
+            },
+            gitlab_discussion_preflight("d1"),
+            gitlab_discussion_resolution("d1"),
+            gitlab_resolution_note(
+                "d1",
+                r#"{"id":99,"body":"Resolved in `eeeeeee`.\n\n<!-- fallow-resolved-fingerprint: stale@eeeeeee -->\n<!-- fallow-review-id: frontend -->"}"#,
+            ),
+        ],
+        &[
+            "--provider",
+            "gitlab",
+            "--mr",
+            "7",
+            "--project-id",
+            "group/repo",
+        ],
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["post_errors"].as_array().unwrap().len(), 1);
+    assert_eq!(json["comments_posted"], 1);
+    assert_eq!(
+        json["stale_fingerprints"], 1,
+        "failed create must retain the stale plan: {requests:#?}"
+    );
+    assert_eq!(json["threads_resolved"], 1);
+    assert_eq!(json["resolution_comments_posted"], 1);
+    assert_eq!(requests.len(), 6);
+    assert!(requests[1].contains("fallow-fingerprint: fresh1"));
+    assert!(requests[2].contains("fallow-fingerprint: fresh2"));
+    assert!(
+        !requests[1].contains("fallow-fingerprint: keep")
+            && !requests[2].contains("fallow-fingerprint: keep")
+    );
+    assert!(requests[4].starts_with("PUT ") && requests[4].contains("discussions/d1 "));
+    assert!(requests[5].contains("fallow-resolved-fingerprint: stale@eeeeeee"));
+}
+
+#[test]
+fn github_failed_create_preserves_apply_errors_and_stale_isolation() {
+    let envelope = write_envelope(&["fresh"]);
+    let (output, requests) = run_post_review_with_trace(
+        vec![
+            github_comments(
+                r#"[
+            {"id":1,"line":null,"body":"<!-- fallow-fingerprint: a -->","user":{"type":"Bot"}},
+            {"id":2,"line":null,"body":"<!-- fallow-fingerprint: b -->","user":{"type":"Bot"}}
+        ]"#,
+            ),
+            github_threads(
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+            {"id":"T1","isResolved":false,"comments":{"nodes":[{"databaseId":1}]}},
+            {"id":"T2","isResolved":false,"comments":{"nodes":[{"databaseId":2}]}}
+        ],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}"#,
+            ),
+            MockResponse {
+                method: "POST",
+                path_contains: "/pulls/7/reviews",
+                status: 422,
+                body: r#"{"message":"inline failed"}"#,
+            },
+            github_comment_preflight(1),
+            github_comment_preflight(2),
+            github_thread_preflight("T1", false),
+            github_thread_preflight("T2", false),
+            github_threads(r#"{"errors":[{"message":"cannot resolve thread"}]}"#),
+            github_thread_resolution("T2"),
+            github_resolution_reply(
+                2,
+                r#"{"id":99,"in_reply_to_id":2,"body":"Resolved in `eeeeeee`.\n\n<!-- fallow-resolved-fingerprint: b@eeeeeee -->"}"#,
+            ),
+        ],
+        &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["post_errors"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        json["apply_errors"]
+            .as_array()
+            .expect("apply error alongside post error")
+            .len(),
+        1
+    );
+    assert_eq!(json["comments_posted"], 0);
+    assert_eq!(json["stale_fingerprints"], 2);
+    assert_eq!(json["threads_resolved"], 1);
+    assert_eq!(json["resolution_comments_posted"], 1);
+    assert_eq!(json["failed_fingerprints"], serde_json::json!(["a"]));
+    assert_eq!(json["unapplied_fingerprints"], serde_json::json!(["a"]));
+    assert_eq!(requests.len(), 10);
+    assert!(requests[2].contains("fallow-fingerprint: fresh"));
+    assert!(requests[7].contains("resolveReviewThread") && requests[7].contains("T1"));
+    assert!(requests[8].contains("resolveReviewThread") && requests[8].contains("T2"));
+    assert!(requests[9].contains("fallow-resolved-fingerprint: b@eeeeeee"));
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.contains("/comments/1/replies"))
+    );
 }
