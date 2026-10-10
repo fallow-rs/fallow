@@ -564,18 +564,22 @@ fn tokens_equivalent_non_js_extension_is_false() {
     );
 }
 
-/// KNOWN SOUNDNESS GAP: `TokenKind::TemplateLiteral` carries no payload, so a
-/// change to the content of a template literal is invisible to the tokenizer.
-/// The test pins the current behavior for a template literal outside an
-/// import.
 #[test]
-fn tokens_equivalent_template_literal_content_change_is_equivalent_known_gap() {
-    let a = "const p = `./pages/${x}`;\n";
-    let b = "const p = `./views/${x}`;\n";
-    assert!(
-        js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "template-literal content change is CURRENTLY treated as equivalent (known gap)"
-    );
+fn tokens_equivalent_template_literal_content_change_is_not_equivalent() {
+    for (current, base) in [
+        ("const p = `./pages/${x}`;", "const p = `./views/${x}`;"),
+        (r"const p = tag`\n`;", r"const p = tag`\u000a`;"),
+    ] {
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), current, base),
+            "template content must refuse reuse: {current:?} versus {base:?}"
+        );
+    }
+    assert!(js_ts_tokens_equivalent(
+        Path::new("a.ts"),
+        "// leading comment\nconst p = `./pages/${x}`;",
+        "const p=`./pages/${x}`; // trailing comment\n"
+    ));
 }
 
 /// A dynamic import with a template literal feeds module-resolution pattern
@@ -590,16 +594,22 @@ fn tokens_equivalent_dynamic_import_template_change_is_not_equivalent() {
     );
 }
 
-/// Companion to the template-literal gap test: a regex-literal content change
-/// is also invisible to the tokenizer.
 #[test]
-fn tokens_equivalent_regex_literal_content_change_is_equivalent_known_gap() {
-    let a = "const re = /^foo/;\n";
-    let b = "const re = /^bar/;\n";
-    assert!(
-        js_ts_tokens_equivalent(Path::new("a.ts"), a, b),
-        "regex-literal content change is CURRENTLY treated as equivalent (known gap)"
-    );
+fn tokens_equivalent_regex_literal_content_change_is_not_equivalent() {
+    for (current, base) in [
+        ("const re = /^foo/;", "const re = /^bar/;"),
+        ("const re = /^foo/i;", "const re = /^foo/g;"),
+    ] {
+        assert!(
+            !js_ts_tokens_equivalent(Path::new("a.ts"), current, base),
+            "regex content must refuse reuse: {current:?} versus {base:?}"
+        );
+    }
+    assert!(js_ts_tokens_equivalent(
+        Path::new("a.ts"),
+        "// leading comment\nconst re = /^foo/i;",
+        "const re=/^foo/i; // trailing comment\n"
+    ));
 }
 
 #[test]

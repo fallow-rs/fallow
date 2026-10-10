@@ -179,10 +179,12 @@ pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
     }
 }
 
-/// Compare two JS/TS sources by duplicate-token kind sequence.
+/// Compare JS/TS sources for audit-safe reuse of the current analysis at base.
 ///
-/// This keeps CLI audit's non-behavioral change check from depending on the
-/// tokenizer module shape.
+/// Token kinds retain identifiers and ordinary literal values. Template and
+/// regex token kinds omit content, so their raw source spans must also match.
+/// Whole-template comparison conservatively rejects formatting changes inside
+/// interpolation expressions. The boolean is forwarded as tokenizer `skip_imports`.
 #[must_use]
 pub fn source_token_kinds_equivalent(
     path: &Path,
@@ -192,11 +194,32 @@ pub fn source_token_kinds_equivalent(
 ) -> bool {
     let current_tokens = detector::tokenize::tokenize_file(path, current, cross_language);
     let base_tokens = detector::tokenize::tokenize_file(path, base, cross_language);
+    if current_tokens.tokens.len() != base_tokens.tokens.len() {
+        return false;
+    }
     current_tokens
         .tokens
         .iter()
-        .map(|token| &token.kind)
-        .eq(base_tokens.tokens.iter().map(|token| &token.kind))
+        .zip(&base_tokens.tokens)
+        .all(|(current_token, base_token)| {
+            if current_token.kind != base_token.kind {
+                return false;
+            }
+            if matches!(
+                current_token.kind,
+                detector::token_types::TokenKind::TemplateLiteral
+                    | detector::token_types::TokenKind::RegExpLiteral
+            ) {
+                return match (
+                    current.get(current_token.span.start as usize..current_token.span.end as usize),
+                    base.get(base_token.span.start as usize..base_token.span.end as usize),
+                ) {
+                    (Some(current_literal), Some(base_literal)) => current_literal == base_literal,
+                    _ => false,
+                };
+            }
+            true
+        })
 }
 
 /// Run duplication detection on a discovered file set.

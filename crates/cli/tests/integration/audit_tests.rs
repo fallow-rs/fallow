@@ -8100,3 +8100,164 @@ fn an_audit_without_a_baseline_arms_no_stale_baseline_gate() {
         "the object is absent when no baseline was loaded: {envelope}"
     );
 }
+
+#[test]
+fn audit_literal_template_change_gates_new_unresolved_import() {
+    let tmp = TempDir::new().expect("fixture directory");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-template","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "export const load = () => import (`./used.ts`);\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/used.ts"), "export const value = 1;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+    let root = dir.to_str().unwrap();
+    let base = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let base_json = parse_json(&base);
+    assert_eq!(base_json["unresolved_imports"], serde_json::json!([]));
+    assert_eq!(base_json["unused_files"], serde_json::json!([]));
+
+    fs::write(
+        dir.join("src/index.ts"),
+        "export const load = () => import (`./missing.ts`);\n",
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let json = parse_json(&output);
+    let finding = json["dead_code"]["unresolved_imports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["path"] == "src/index.ts" && finding["specifier"] == "./missing.ts")
+        .expect("head must contain the unresolved template import");
+    assert_eq!(finding["effective_severity"], "error");
+    assert_eq!(
+        finding["introduced"], true,
+        "literal change must receive real base attribution"
+    );
+    assert_eq!(json["verdict"], "fail");
+    assert_eq!(output.code, 1);
+}
+
+#[test]
+fn audit_literal_regex_change_gates_new_unused_file() {
+    let tmp = TempDir::new().expect("fixture directory");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src/icons")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-regex","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "const icons = require.context('./icons', false, /\\.ts$/);\nconsole.log(icons);\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/icons/star.ts"), "export const star = 1;\n").unwrap();
+    fs::write(dir.join("src/icons/arrow.js"), "export const arrow = 1;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+    let root = dir.to_str().unwrap();
+    let base = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let base_json = parse_json(&base);
+    let base_unused = base_json["unused_files"].as_array().unwrap();
+    assert!(
+        base_unused
+            .iter()
+            .any(|finding| finding["path"] == "src/icons/arrow.js")
+    );
+    assert!(
+        !base_unused
+            .iter()
+            .any(|finding| finding["path"] == "src/icons/star.ts")
+    );
+
+    fs::write(
+        dir.join("src/index.ts"),
+        "const icons = require.context('./icons', false, /\\.js$/);\nconsole.log(icons);\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/icons/star.ts"), "export const star = 1;\n\n").unwrap();
+    let head = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        root,
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let head_json = parse_json(&head);
+    let head_unused = head_json["unused_files"].as_array().unwrap();
+    assert!(
+        head_unused
+            .iter()
+            .any(|finding| finding["path"] == "src/icons/star.ts")
+    );
+    assert!(
+        !head_unused
+            .iter()
+            .any(|finding| finding["path"] == "src/icons/arrow.js")
+    );
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    let json = parse_json(&output);
+    let finding = json["dead_code"]["unused_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["path"] == "src/icons/star.ts")
+        .expect("head must contain the newly orphaned file");
+    assert_eq!(finding["effective_severity"], "error");
+    assert_eq!(
+        finding["introduced"], true,
+        "regex change must receive real base attribution"
+    );
+    assert_eq!(json["verdict"], "fail");
+    assert_eq!(output.code, 1);
+}

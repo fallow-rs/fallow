@@ -240,8 +240,8 @@ pub(super) fn is_non_behavioral_doc(path: &Path) -> bool {
 /// Text that fallow reads outside the token stream. The token comparison
 /// skips comments, so a change to a suppression comment, a JSDoc visibility
 /// tag or a JSDoc `import()` type can change the findings with no token
-/// change. `import(` also covers a dynamic import whose template literal
-/// content the tokenizer does not keep.
+/// change. Keep `import(` for imports in comments even though executable
+/// template literals are compared by their source spans.
 const REUSE_BLOCKING_MARKERS: &[&str] = &[
     "fallow-ignore",
     "@expected-unused",
