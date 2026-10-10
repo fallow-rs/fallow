@@ -111,3 +111,5 @@ mod type_aware_degradation_tests;
 mod typeorm_datasource_tests;
 mod unresolved_gitignored_target_tests;
 mod workspace_config_patterns_tests;
+
+mod plugin_config_shapes_tests;

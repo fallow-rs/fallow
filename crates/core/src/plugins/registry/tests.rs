@@ -3579,3 +3579,131 @@ fn workspace_plugin_merge_deduplicates_semantic_framework_contracts() {
 
     assert_eq!(aggregate.framework_class_member_contracts.len(), 1);
 }
+
+#[test]
+fn registry_reads_function_config_arrays_without_seeding_siblings() {
+    for tool in ["tsup", "tsdown"] {
+        for (export, expected) in [
+            (
+                "export default () => [{ entry: 'custom/one.ts' }, { entry: ['custom/two.ts'] }]",
+                &["custom/one.ts", "custom/two.ts"][..],
+            ),
+            (
+                "export default defineConfig(() => [{ entry: 'custom/one.ts' }, { entry: ['custom/two.ts'] }])",
+                &["custom/one.ts", "custom/two.ts"][..],
+            ),
+            (
+                "export default defineConfig(() => { return [{ entry: 'custom/one.ts' }, { entry: ['custom/two.ts'] }]; })",
+                &["custom/one.ts", "custom/two.ts"][..],
+            ),
+            (
+                "export default function () { return [{ entry: 'custom/one.ts' }, { entry: ['custom/two.ts'] }]; }",
+                &["custom/one.ts", "custom/two.ts"][..],
+            ),
+            (
+                "export default defineConfig(function () { return [{ entry: 'custom/one.ts' }, { entry: ['custom/two.ts'] }]; })",
+                &["custom/one.ts", "custom/two.ts"][..],
+            ),
+            (
+                "export default () => { return { entry: 'custom/one.ts' }; return [{ entry: 'custom/dead.ts' }]; }",
+                &["custom/one.ts"][..],
+            ),
+            (
+                "export default function* () { return [{ entry: 'custom/dead.ts' }]; }",
+                &[][..],
+            ),
+            (
+                "export default async function* () { return [{ entry: 'custom/dead.ts' }]; }",
+                &[][..],
+            ),
+            (
+                "export default async () => [{ entry: 'custom/one.ts' }, { entry: ['custom/two.ts'] }]",
+                &["custom/one.ts", "custom/two.ts"][..],
+            ),
+            (
+                "export default defineConfig(function* () { return [{ entry: 'custom/dead.ts' }]; })",
+                &[][..],
+            ),
+            (
+                "export default () => () => [{ entry: 'custom/dead.ts' }]",
+                &[][..],
+            ),
+            (
+                "export default () => { return () => [{ entry: 'custom/dead.ts' }]; }",
+                &[][..],
+            ),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path();
+            std::fs::create_dir(root.join("custom")).unwrap();
+            let config = root.join(format!("{tool}.config.ts"));
+            std::fs::write(&config, export).unwrap();
+            let mut files = vec![config];
+            for name in ["one", "two", "dead"] {
+                let path = root.join(format!("custom/{name}.ts"));
+                std::fs::write(&path, "export const value = 1;").unwrap();
+                files.push(path);
+            }
+            let result = PluginRegistry::default().run(&make_pkg(&[tool]), root, &files);
+            let credited: Vec<&str> = ["custom/one.ts", "custom/two.ts", "custom/dead.ts"]
+                .into_iter()
+                .filter(|file| {
+                    result.entry_patterns.iter().any(|(rule, _)| {
+                        globset::Glob::new(&rule.pattern)
+                            .unwrap()
+                            .compile_matcher()
+                            .is_match(file)
+                    })
+                })
+                .collect();
+            assert_eq!(credited, expected, "{tool}: {export}");
+        }
+    }
+}
+
+#[test]
+fn registry_discovers_nuxt_root_config_module_extensions() {
+    for extension in ["mjs", "mts", "cjs", "cts"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join("custom")).unwrap();
+        let config = root.join(format!("nuxt.config.{extension}"));
+        let source = if matches!(extension, "cjs" | "cts") {
+            "module.exports = { plugins: ['./custom/live.ts'], modules: ['fixture-module'] };"
+        } else {
+            "export default { plugins: ['./custom/live.ts'], modules: ['fixture-module'] };"
+        };
+        std::fs::write(&config, source).unwrap();
+        std::fs::write(root.join("custom/live.ts"), "export default () => {};").unwrap();
+        std::fs::write(root.join("custom/dead.ts"), "export const dead = 1;").unwrap();
+        let files = vec![
+            config,
+            root.join("custom/live.ts"),
+            root.join("custom/dead.ts"),
+        ];
+        let result = PluginRegistry::default().run(&make_pkg(&[]), root, &files);
+        let credited: Vec<&str> = ["custom/live.ts", "custom/dead.ts"]
+            .into_iter()
+            .filter(|file| {
+                result.entry_patterns.iter().any(|(rule, _)| {
+                    globset::Glob::new(&rule.pattern)
+                        .unwrap()
+                        .compile_matcher()
+                        .is_match(file)
+                })
+            })
+            .collect();
+        assert_eq!(credited, ["custom/live.ts"], "extension: {extension}");
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"fixture-module".to_string())
+        );
+        assert!(result.always_used.iter().any(|(pattern, _)| {
+            globset::Glob::new(pattern)
+                .unwrap()
+                .compile_matcher()
+                .is_match(format!("nuxt.config.{extension}"))
+        }));
+    }
+}

@@ -2709,16 +2709,65 @@ pub(crate) fn resolve_sibling_module(
 /// Find a default-exported array config, the `defineWorkspace([...])` /
 /// `vitest.workspace.{ts,js}` shape. Handles `export default [...]` and
 /// `export default defineWorkspace([...])` / `defineConfig([...])` (the array as
-/// the call's first argument), plus parenthesised / `as` wrappers.
+/// the call's first argument), function configs with a static array return, and
+/// parenthesised / `as` wrappers.
 fn find_default_export_array<'a>(program: &'a Program<'a>) -> Option<&'a ArrayExpression<'a>> {
     for stmt in &program.body {
-        if let Statement::ExportDefaultDeclaration(decl) = stmt
-            && let Some(expr) = decl.declaration.as_expression()
-        {
-            return array_from_expression(expr);
+        if let Statement::ExportDefaultDeclaration(decl) = stmt {
+            if let ExportDefaultDeclarationKind::FunctionDeclaration(function) = &decl.declaration {
+                if function.generator {
+                    return None;
+                }
+                return function.body.as_ref().and_then(|body| returned_array(body));
+            }
+            return decl
+                .declaration
+                .as_expression()
+                .and_then(array_from_config_expression);
         }
     }
     None
+}
+
+/// Read only returns belonging to this callback, never nested helper functions.
+fn returned_array<'a>(body: &'a FunctionBody<'a>) -> Option<&'a ArrayExpression<'a>> {
+    body.statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ReturnStatement(returned) => Some(returned),
+            _ => None,
+        })
+        .and_then(|returned| returned.argument.as_ref())
+        .and_then(array_from_expression)
+}
+
+/// A config provider invokes its callback once; returned callbacks are values.
+fn array_from_config_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpression<'a>> {
+    match expr {
+        Expression::ArrowFunctionExpression(arrow) => match &arrow.body {
+            ArrowFunctionBody::FunctionBody(body) => returned_array(body),
+            body => body.as_expression().and_then(array_from_expression),
+        },
+        Expression::FunctionExpression(function) => {
+            if function.generator {
+                return None;
+            }
+            function.body.as_ref().and_then(|body| returned_array(body))
+        }
+        Expression::ParenthesizedExpression(paren) => {
+            array_from_config_expression(&paren.expression)
+        }
+        Expression::TSAsExpression(ts_as) => array_from_config_expression(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            array_from_config_expression(&ts_sat.expression)
+        }
+        Expression::CallExpression(call) => call
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(array_from_config_expression),
+        _ => array_from_expression(expr),
+    }
 }
 
 fn array_from_expression<'a>(expr: &'a Expression<'a>) -> Option<&'a ArrayExpression<'a>> {

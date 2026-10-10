@@ -130,15 +130,10 @@ const CONTENT_COMPONENT_PATTERNS: &[&str] = &[
     "app/components/content/**/*.{vue,ts,tsx,js,jsx}",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &["nuxt.config.{ts,js}", "src/module.{ts,js}"];
+const CONFIG_PATTERNS: &[&str] = &["nuxt.config.{ts,js,mjs,cjs,mts,cts}", "src/module.{ts,js}"];
 
 /// File names Nuxt reads as the config of a project or a layer.
-const NUXT_CONFIG_FILES: &[&str] = &["nuxt.config.ts", "nuxt.config.js"];
-
-/// Config file names that make a directory a Nuxt layer. Nuxt skips a layer
-/// directory without one, so fallow does too. These are the extensions c12
-/// loads, wider than the files this plugin parses.
-const LAYER_CONFIG_FILES: &[&str] = &[
+const NUXT_CONFIG_FILES: &[&str] = &[
     "nuxt.config.ts",
     "nuxt.config.js",
     "nuxt.config.mjs",
@@ -147,12 +142,15 @@ const LAYER_CONFIG_FILES: &[&str] = &[
     "nuxt.config.cts",
 ];
 
+/// Config file names that make a directory a Nuxt layer.
+const LAYER_CONFIG_FILES: &[&str] = NUXT_CONFIG_FILES;
+
 /// Directory under the project root whose children Nuxt 3.12+ registers as
 /// layers without an `extends` entry.
 const AUTO_LAYERS_DIR: &str = "layers";
 
 const ALWAYS_USED: &[&str] = &[
-    "nuxt.config.{ts,js}",
+    "nuxt.config.{ts,js,mjs,cjs,mts,cts}",
     "app.vue",
     "app.config.{ts,js}",
     "error.vue",
@@ -256,8 +254,9 @@ impl Plugin for NuxtPlugin {
     fn is_enabled_with_deps(&self, deps: &[String], root: &Path) -> bool {
         deps.iter()
             .any(|d| d == "nuxt" || d == MODULE_AUTHORING_ENABLER)
-            || root.join("nuxt.config.ts").exists()
-            || root.join("nuxt.config.js").exists()
+            || NUXT_CONFIG_FILES
+                .iter()
+                .any(|name| root.join(name).exists())
     }
 
     fn entry_patterns(&self) -> &'static [&'static str] {
