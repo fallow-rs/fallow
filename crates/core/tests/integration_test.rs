@@ -33,6 +33,8 @@ mod bundler_entry_object_map;
 mod bundler_nested_config_entry;
 #[path = "integration_test/caching.rs"]
 mod caching;
+#[path = "integration_test/callback_wrapper_provenance.rs"]
+mod callback_wrapper_provenance;
 #[path = "integration_test/class_factory_property_provenance.rs"]
 mod class_factory_property_provenance;
 #[path = "integration_test/class_value_projections.rs"]

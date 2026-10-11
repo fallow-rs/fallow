@@ -1540,6 +1540,7 @@ pub struct SemanticUsage {
     pub(crate) subclass_binding_reference_spans: rustc_hash::FxHashMap<Span, Span>,
     pub(crate) subclass_namespace_reference_spans: rustc_hash::FxHashSet<Span>,
     pub(crate) subclass_immutable_reference_spans: rustc_hash::FxHashSet<Span>,
+    pub(crate) subclass_binding_writes: rustc_hash::FxHashMap<Span, Vec<Span>>,
     pub(crate) builtin_container_reference_spans: rustc_hash::FxHashSet<Span>,
     pub(crate) imported_call_reference_spans: rustc_hash::FxHashSet<Span>,
     /// Value references to runtime ESM import bindings that are not admitted
@@ -1560,6 +1561,7 @@ pub fn compute_semantic_usage_for_extractor(
 ) -> SemanticUsage {
     let computed_enum_key_spans = extractor.computed_enum_key_reference_spans();
     let subclass_candidates = extractor.subclass_reference_candidates();
+    let callback_candidates = extractor.callback_capture_reference_candidates();
     let imported_call_candidates = extractor.imported_call_reference_candidates();
     let require_namespace_bindings = extractor.require_namespace_bindings();
     let mut semantic_usage = compute_semantic_usage_with_candidates(
@@ -1571,6 +1573,7 @@ pub fn compute_semantic_usage_for_extractor(
         SemanticReferenceCandidates {
             module_bindings: &computed_enum_key_spans,
             subclass_bindings: &subclass_candidates,
+            callback_captures: &callback_candidates,
             imported_calls: &imported_call_candidates,
         },
     );
@@ -1580,6 +1583,7 @@ pub fn compute_semantic_usage_for_extractor(
         std::mem::take(&mut semantic_usage.subclass_namespace_reference_spans),
         std::mem::take(&mut semantic_usage.subclass_immutable_reference_spans),
         std::mem::take(&mut semantic_usage.builtin_container_reference_spans),
+        std::mem::take(&mut semantic_usage.subclass_binding_writes),
     );
     extractor.resolve_imported_call_sites(&semantic_usage.imported_call_reference_spans);
     extractor.set_import_binding_references(std::mem::take(
@@ -1631,6 +1635,7 @@ fn report_unreferenced_import_equals_bindings(
 struct SemanticReferenceCandidates<'a> {
     module_bindings: &'a rustc_hash::FxHashSet<Span>,
     subclass_bindings: &'a rustc_hash::FxHashSet<Span>,
+    callback_captures: &'a rustc_hash::FxHashSet<Span>,
     imported_calls: &'a rustc_hash::FxHashSet<Span>,
 }
 
@@ -1639,19 +1644,23 @@ struct SubclassReferenceSpans {
     bindings: rustc_hash::FxHashMap<Span, Span>,
     namespaces: rustc_hash::FxHashSet<Span>,
     immutable: rustc_hash::FxHashSet<Span>,
+    writes: rustc_hash::FxHashMap<Span, Vec<Span>>,
     builtin_containers: rustc_hash::FxHashSet<Span>,
 }
 
 fn subclass_reference_spans(
     semantic: &oxc_semantic::Semantic<'_>,
     imports: &[ImportInfo],
-    candidates: &rustc_hash::FxHashSet<Span>,
+    references: SemanticReferenceCandidates<'_>,
 ) -> SubclassReferenceSpans {
     use rustc_hash::FxHashSet;
+    let candidates = references.subclass_bindings;
+    let callback_captures = references.callback_captures;
     let scoping = semantic.scoping();
     let mut subclass_binding_reference_spans = rustc_hash::FxHashMap::default();
     let mut subclass_namespace_reference_spans = FxHashSet::default();
     let mut subclass_immutable_reference_spans = FxHashSet::default();
+    let mut writes = rustc_hash::FxHashMap::default();
     if !candidates.is_empty() {
         let namespace_symbols: FxHashSet<_> = imports
             .iter()
@@ -1661,6 +1670,7 @@ fn subclass_reference_spans(
             })
             .collect();
         for symbol in scoping.symbol_ids() {
+            let mut admitted = false;
             let immutable = !scoping
                 .get_resolved_references(symbol)
                 .any(|reference| reference.is_write());
@@ -1673,6 +1683,7 @@ fn subclass_reference_spans(
                 if !candidates.contains(&identifier.span) {
                     continue;
                 }
+                admitted |= callback_captures.contains(&identifier.span);
                 subclass_binding_reference_spans
                     .insert(identifier.span, scoping.symbol_span(symbol));
                 if immutable {
@@ -1681,6 +1692,20 @@ fn subclass_reference_spans(
                 if reference.is_value() && namespace_symbols.contains(&symbol) {
                     subclass_namespace_reference_spans.insert(identifier.span);
                 }
+            }
+            if admitted && !immutable {
+                let mut spans: Vec<_> = scoping
+                    .get_resolved_references(symbol)
+                    .filter(|reference| reference.is_write())
+                    .filter_map(
+                        |reference| match semantic.nodes().kind(reference.node_id()) {
+                            AstKind::IdentifierReference(identifier) => Some(identifier.span),
+                            _ => None,
+                        },
+                    )
+                    .collect();
+                spans.sort_unstable_by_key(|span| span.start);
+                writes.insert(scoping.symbol_span(symbol), spans);
             }
         }
     }
@@ -1704,6 +1729,7 @@ fn subclass_reference_spans(
         bindings: subclass_binding_reference_spans,
         namespaces: subclass_namespace_reference_spans,
         immutable: subclass_immutable_reference_spans,
+        writes,
         builtin_containers,
     }
 }
@@ -1792,7 +1818,7 @@ fn compute_semantic_usage_with_candidates(
         }
     }
 
-    let subclass = subclass_reference_spans(&semantic, imports, candidates.subclass_bindings);
+    let subclass = subclass_reference_spans(&semantic, imports, candidates);
 
     let imported_call_reference_spans =
         imported_call_reference_spans(&semantic, imports, candidates.imported_calls);
@@ -1815,6 +1841,7 @@ fn compute_semantic_usage_with_candidates(
         subclass_binding_reference_spans: subclass.bindings,
         subclass_namespace_reference_spans: subclass.namespaces,
         subclass_immutable_reference_spans: subclass.immutable,
+        subclass_binding_writes: subclass.writes,
         builtin_container_reference_spans: subclass.builtin_containers,
         imported_call_reference_spans,
         import_binding_references,
@@ -2172,6 +2199,7 @@ pub fn compute_import_binding_usage(
         SemanticReferenceCandidates {
             module_bindings: &rustc_hash::FxHashSet::default(),
             subclass_bindings: &rustc_hash::FxHashSet::default(),
+            callback_captures: &rustc_hash::FxHashSet::default(),
             imported_calls: &rustc_hash::FxHashSet::default(),
         },
     );

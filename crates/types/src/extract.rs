@@ -2371,6 +2371,8 @@ pub enum SemanticFact {
     FactoryReturnObjectPropertySource(Box<FactoryReturnObjectPropertySourceFact>),
     /// Property read whose bound factory receiver passed source-time lexical and value checks.
     ProvenFactoryReturnObjectPropertyAccess(FactoryReturnObjectPropertyAccessFact),
+    /// Caller-owned callback origins for a source-proven returned property.
+    CallbackFactoryPropertyAccess(Box<CallbackFactoryPropertyAccessFact>),
 }
 
 /// Deferred class provenance owned by the module declaring an object factory.
@@ -2401,6 +2403,45 @@ pub enum FactoryPropertySource {
         /// Local class binding resolved relative to the factory module.
         class_local_name: String,
     },
+    /// Return of the callback at this ordinal in the proven helper declaration.
+    CallbackParameterReturn {
+        /// Zero-based formal parameter ordinal.
+        parameter_index: u32,
+    },
+}
+
+/// Callback-origin member use, joined with the callee module's property source.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CallbackFactoryPropertyAccessFact {
+    /// Callee import binding in the caller module.
+    pub callee_name: String,
+    /// Static export selected from a namespace import, if present.
+    pub callee_member: Option<String>,
+    /// Requested path in the wrapper's returned value.
+    pub property_path: String,
+    /// Requested member on the callback result.
+    pub member: String,
+    /// A property write permits only the canonical Vue getter contract.
+    pub vue_only: bool,
+    /// Ordinary assigned value, ignored by a canonical Vue setter contract.
+    pub assigned_class: Option<String>,
+    /// Callback ordinal and class origin interpreted in the caller module.
+    pub arguments: Vec<CallbackFactoryArgument>,
+}
+
+/// Proven callback result owned by a factory consumer's module.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CallbackFactoryArgument {
+    /// Zero-based actual argument ordinal.
+    pub parameter_index: u32,
+    /// Class binding resolved in the consumer module.
+    pub class_local_name: String,
+    /// This argument is an options object with a proven `get` callback.
+    pub getter: bool,
+    /// No mutable capture makes a lazy invocation select another class.
+    pub lazy_safe: bool,
 }
 
 /// An exported object factory's deferred property receiver.
@@ -2657,6 +2698,16 @@ impl<'a> SemanticFactView<'a> {
     ) -> impl Iterator<Item = &'a FactoryReturnObjectPropertyAccessFact> + 'a {
         self.semantic_facts.iter().filter_map(|fact| match fact {
             SemanticFact::ProvenFactoryReturnObjectPropertyAccess(access) => Some(access),
+            _ => None,
+        })
+    }
+
+    /// Iterate caller-owned callback property projections.
+    pub fn callback_factory_property_accesses(
+        self,
+    ) -> impl Iterator<Item = &'a CallbackFactoryPropertyAccessFact> + 'a {
+        self.semantic_facts.iter().filter_map(|fact| match fact {
+            SemanticFact::CallbackFactoryPropertyAccess(access) => Some(access.as_ref()),
             _ => None,
         })
     }

@@ -143,6 +143,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through that property now credit the members of the class. A replaced or
   unknown property value gives no credit. The parse cache version advances to
   345 so warm caches use the corrected property origins.
+- **Class members reached through callback wrappers and Vue computed values are
+  now credited.** The analysis follows synchronous helpers that return a
+  callback result in an object property, including imported helpers and aliases.
+  Vue `computed` values use the getter's result, including writable options.
+  The parse cache version advances to 346 to replace cached results without
+  these callback relationships.
 
 - **Class members accessed through known array and tuple elements are now credited.**
   The analysis tracks indexed receivers and local aliases, including inherited

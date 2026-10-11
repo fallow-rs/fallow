@@ -1637,6 +1637,9 @@ impl ModuleInfoExtractor {
             .split_once('.')
             .map_or(binding_path, |(root, _)| root);
         self.fork_outer_direct_object_binding_root(root_name);
+        if self.record_callback_value_assignment(binding_path, value, is_plain_assignment) {
+            return;
+        }
         if !is_plain_assignment {
             self.invalidate_direct_binding_path(binding_path, false);
             return;

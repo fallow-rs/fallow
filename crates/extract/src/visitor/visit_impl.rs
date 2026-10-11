@@ -47,6 +47,8 @@ use super::{
     try_extract_property_callback_import, try_extract_require,
 };
 
+#[path = "visit_impl_callback_properties.rs"]
+mod visit_callback_properties;
 #[path = "visit_impl_constructor_alternatives.rs"]
 mod visit_constructor_alternatives;
 #[path = "visit_impl_di.rs"]
@@ -269,7 +271,7 @@ impl ModuleInfoExtractor {
         // requires a terminal body, so `const ui = createUi()` cannot bind a value
         // the factory only returns on some paths. See issue #1858.
         if self.capture_factory_properties && strict_eligible && function_body_is_terminal(body) {
-            self.prepare_factory_property_observations(input.binding_span, body);
+            self.prepare_factory_property_observations(input.binding_span, input.params, body);
             self.prepare_factory_result_observation(name, input.binding_span, body);
         }
         let properties = function_body_returns_object_shape(body);
@@ -283,6 +285,14 @@ impl ModuleInfoExtractor {
                 });
         }
         self.record_factory_binding_producer(name, input, body, properties, returns_promise);
+        if strict_eligible
+            && (self.strict_factory_return_functions.contains_key(name)
+                || self.strict_alias_eligible.contains(name))
+            && let Some(callback) =
+                self.callback_body_proof(body, input.params.span, input.return_type)
+        {
+            self.retain_callback_result(name, input.binding_span, callback);
+        }
     }
 
     fn record_factory_binding_producer(
@@ -3759,7 +3769,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             _ => false,
         });
         self.capture_factory_properties =
-            visit_factory_properties::program_has_object_factory(program);
+            visit_factory_properties::program_has_object_factory(program)
+                || visit_factory_properties::program_has_captured_callback(program);
         self.prepare_factory_property_imports(program);
         self.record_program_namespace_import_locals(program);
         self.record_program_spy_api_locals(program);

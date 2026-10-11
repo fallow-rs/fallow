@@ -198,6 +198,7 @@ struct DirectBindingValue {
     proof: Option<BindingClassProof>,
     factory_property: Option<FactoryPropertyProof>,
     factory_callee: Option<(String, Span)>,
+    callback_result: Option<CallbackResultProof>,
     factory_constructed: bool,
     producer: Option<BindingProducer>,
     pending: Option<PendingBindingValue>,
@@ -231,12 +232,20 @@ impl DirectBindingValue {
 
 #[derive(Debug, Clone)]
 struct FactoryPropertyProof {
+    projection: String,
+    vue_only: bool,
+    assigned_class: Option<BindingClassProof>,
     origin: FactoryPropertyOrigin,
     requirements: BindingRequirements,
 }
 
 #[derive(Debug, Clone)]
 enum FactoryPropertyOrigin {
+    CallbackParameter {
+        parameter_index: u32,
+        declaration: Span,
+        reference: Span,
+    },
     Typed {
         proof: BindingClassProof,
         path: String,
@@ -246,7 +255,16 @@ enum FactoryPropertyOrigin {
         declaration: Span,
         reference: Span,
         method: Option<String>,
+        callbacks: std::sync::Arc<[(u32, CallbackResultProof)]>,
     },
+}
+
+#[derive(Debug, Clone)]
+struct CallbackResultProof {
+    class: BindingClassProof,
+    lazy_reference: Option<Span>,
+    capture: Option<(String, Span, Span)>,
+    getter: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -800,6 +818,7 @@ pub(crate) struct ModuleInfoExtractor {
     subclass_binding_references: FxHashMap<Span, Span>,
     subclass_namespace_references: FxHashSet<Span>,
     subclass_immutable_references: FxHashSet<Span>,
+    subclass_binding_writes: FxHashMap<Span, Vec<Span>>,
     builtin_container_references: FxHashSet<Span>,
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
     block_depth: u32,
@@ -1292,16 +1311,12 @@ impl ModuleInfoExtractor {
                 _ => {}
             }
         }
-        for (_, _, observation) in self.factory_property_observations.values() {
-            if let Some(FactoryPropertyProof {
-                origin: FactoryPropertyOrigin::Typed { proof, .. },
-                ..
-            }) = observation
-            {
-                add_proof(&mut spans, proof);
-            }
-        }
+        self.add_factory_reference_candidates(&mut spans);
         for value in &self.direct_binding_values {
+            if let Some(callback) = &value.callback_result {
+                add_proof(&mut spans, &callback.class);
+                spans.extend(callback.lazy_reference);
+            }
             if let Some(proof) = &value.proof {
                 add_proof(&mut spans, proof);
             }
@@ -1343,18 +1358,88 @@ impl ModuleInfoExtractor {
         spans
     }
 
+    fn factory_property_proofs(&self) -> impl Iterator<Item = &FactoryPropertyProof> {
+        self.factory_property_accesses
+            .iter()
+            .map(|(proof, _, _)| proof)
+            .chain(
+                self.direct_binding_values
+                    .iter()
+                    .filter_map(|value| value.factory_property.as_ref()),
+            )
+            .chain(
+                self.factory_property_observations
+                    .values()
+                    .filter_map(|(_, _, proof)| proof.as_ref()),
+            )
+    }
+
+    pub(crate) fn callback_capture_reference_candidates(&self) -> FxHashSet<Span> {
+        let mut references = FxHashSet::default();
+        for value in &self.direct_binding_values {
+            if let Some(callback) = &value.callback_result {
+                references.extend(callback.lazy_reference);
+            }
+        }
+        for proof in self.factory_property_proofs() {
+            if let FactoryPropertyOrigin::Call { callbacks, .. } = &proof.origin {
+                references.extend(
+                    callbacks
+                        .iter()
+                        .filter_map(|(_, callback)| callback.lazy_reference),
+                );
+            }
+        }
+        references
+    }
+
+    fn add_factory_reference_candidates(&self, spans: &mut FxHashSet<Span>) {
+        let add_proof = |spans: &mut FxHashSet<Span>, proof: &BindingClassProof| {
+            spans.insert(proof.target_reference_span);
+            spans.extend(proof.builtin_containers.iter().copied());
+        };
+        for (_, _, observation) in self.factory_property_observations.values() {
+            if let Some(FactoryPropertyProof {
+                origin: FactoryPropertyOrigin::Typed { proof, .. },
+                ..
+            }) = observation
+            {
+                add_proof(spans, proof);
+            }
+        }
+        for proof in self.factory_property_proofs() {
+            if let Some(class) = &proof.assigned_class {
+                add_proof(spans, class);
+            }
+            match &proof.origin {
+                FactoryPropertyOrigin::Call { callbacks, .. } => {
+                    for (_, proof) in callbacks.iter() {
+                        add_proof(spans, &proof.class);
+                        spans.extend(proof.lazy_reference);
+                    }
+                }
+                FactoryPropertyOrigin::CallbackParameter { reference, .. } => {
+                    spans.insert(*reference);
+                }
+                FactoryPropertyOrigin::Typed { .. } => {}
+            }
+        }
+    }
+
     pub(crate) fn set_subclass_binding_provenance(
         &mut self,
         references: FxHashMap<Span, Span>,
         namespace_references: FxHashSet<Span>,
         immutable_references: FxHashSet<Span>,
         builtin_container_references: FxHashSet<Span>,
+        binding_writes: FxHashMap<Span, Vec<Span>>,
     ) {
         self.subclass_binding_references = references;
         self.install_requirement_provenance();
         self.subclass_namespace_references = namespace_references;
         self.subclass_immutable_references = immutable_references;
         self.builtin_container_references = builtin_container_references;
+        self.subclass_binding_writes = binding_writes;
     }
 
     pub(crate) fn imported_call_reference_candidates(&self) -> FxHashSet<Span> {

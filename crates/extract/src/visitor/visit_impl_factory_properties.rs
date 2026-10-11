@@ -17,6 +17,43 @@ use super::visit_factory_returns::object_literal_from_return;
 use super::visit_projections::MAX_PROJECTION_VALUES;
 use crate::function_body::BodyRef;
 
+pub(super) fn program_has_captured_callback(program: &Program<'_>) -> bool {
+    use oxc_ast_visit::{Visit, walk};
+
+    struct CapturedCallback(bool);
+    impl<'a> Visit<'a> for CapturedCallback {
+        fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+            let returned = match BodyRef::arrow(&function.body) {
+                BodyRef::Concise(expression) => Some(expression),
+                BodyRef::Block(body) => {
+                    super::visit_factory_returns::first_return_arg_in_statements(&body.statements)
+                }
+            };
+            self.0 |= returned.is_some_and(|expression| {
+                matches!(unwrap_static_expr(expression), Expression::Identifier(_))
+            });
+            if !self.0 {
+                walk::walk_arrow_function_expression(self, function);
+            }
+        }
+
+        fn visit_function(&mut self, function: &Function<'a>, flags: oxc_semantic::ScopeFlags) {
+            self.0 |= function.body.as_ref().is_some_and(|body| {
+                super::visit_factory_returns::first_return_arg_in_statements(&body.statements)
+                    .is_some_and(|expression| {
+                        matches!(unwrap_static_expr(expression), Expression::Identifier(_))
+                    })
+            });
+            if !self.0 {
+                walk::walk_function(self, function, flags);
+            }
+        }
+    }
+    let mut visitor = CapturedCallback(false);
+    visitor.visit_program(program);
+    visitor.0
+}
+
 pub(super) fn program_has_object_factory(program: &Program<'_>) -> bool {
     program.body.iter().any(|statement| {
         let declaration = match statement {
@@ -139,6 +176,7 @@ impl ModuleInfoExtractor {
     pub(super) fn prepare_factory_property_observations(
         &mut self,
         declaration: Span,
+        params: &FormalParameters<'_>,
         body: BodyRef<'_, '_>,
     ) {
         let Some(object) = object_literal_from_return(body) else {
@@ -177,6 +215,7 @@ impl ModuleInfoExtractor {
             self.factory_property_observations
                 .insert(span, (declaration, path, None));
         }
+        self.prepare_callback_property_observations(object, params);
     }
 
     pub(super) fn prepare_factory_result_observation(
@@ -290,12 +329,31 @@ impl ModuleInfoExtractor {
                 &[entry.requirements, value_requirements],
                 &[(reference, binding)],
             );
+            if !self.charge_binding_conditions(call.arguments.len()) {
+                return None;
+            }
+            let callbacks = call
+                .arguments
+                .iter()
+                .take_while(|argument| !matches!(argument, Argument::SpreadElement(_)))
+                .enumerate()
+                .filter_map(|(index, argument)| {
+                    Some((
+                        u32::try_from(index).ok()?,
+                        self.callback_result_proof(argument.as_expression()?)?,
+                    ))
+                })
+                .collect();
             return Some(FactoryPropertyProof {
+                projection: String::new(),
+                vue_only: false,
+                assigned_class: None,
                 origin: FactoryPropertyOrigin::Call {
                     name,
                     declaration,
                     reference,
                     method,
+                    callbacks,
                 },
                 requirements,
             });
@@ -311,10 +369,9 @@ impl ModuleInfoExtractor {
     ) -> Option<FactoryPropertyProof> {
         if let Some((id, entry)) = self.direct_binding_value(path) {
             let value = self.projection_value_view(id);
-            if value.unknown_properties {
-                return None;
-            }
-            if let Some(mut proof) = value.factory_property.clone() {
+            if !value.unknown_properties
+                && let Some(mut proof) = value.factory_property.clone()
+            {
                 proof.requirements = self.combine_requirements(
                     &[proof.requirements, value.requirements, entry.requirements],
                     &[(reference, entry.declaration_span?)],
@@ -323,7 +380,26 @@ impl ModuleInfoExtractor {
             }
         }
         let (root, remainder) = path.split_once('.')?;
-        let (mut value, _) = self.direct_binding_value(root)?;
+        let (mut value, entry) = self.direct_binding_value(root)?;
+        if !self.projection_value_view(value).unknown_properties
+            && let Some(mut proof) = self.projection_value_view(value).factory_property.clone()
+            && let FactoryPropertyOrigin::Call { callbacks, .. } = &proof.origin
+        {
+            let written = !self.factory_property_prefix_is_unwritten(root, remainder);
+            if written && callbacks.is_empty() {
+                return None;
+            }
+            proof.vue_only |= written;
+            proof.requirements = self.combine_requirements(
+                &[proof.requirements, entry.requirements],
+                &[(reference, entry.declaration_span?)],
+            );
+            if !proof.projection.is_empty() {
+                proof.projection.push('.');
+            }
+            proof.projection.push_str(remainder);
+            return Some(proof);
+        }
         let mut prefix_end = root.len();
         for part in remainder.split('.') {
             let current = self.projection_value_view(value);
@@ -334,6 +410,9 @@ impl ModuleInfoExtractor {
                 let proof =
                     self.direct_binding_class_proof(&path[..prefix_end], Some(reference))?;
                 return Some(FactoryPropertyProof {
+                    projection: String::new(),
+                    vue_only: false,
+                    assigned_class: None,
                     requirements: proof.requirements,
                     origin: FactoryPropertyOrigin::Typed {
                         proof,
@@ -356,6 +435,17 @@ impl ModuleInfoExtractor {
         let BindingPattern::BindingIdentifier(id) = &declarator.id else {
             return;
         };
+        if matches!(
+            unwrap_static_expr(expression),
+            Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+        ) {
+            if !self.is_module_scope()
+                && let Some(callback) = self.callback_result_proof(expression)
+            {
+                self.retain_callback_result(id.name.as_str(), id.span, callback);
+            }
+            return;
+        }
         if self.has_factory_value_root(id.name.as_str()) {
             self.direct_binding_entry_mut(id.name.as_str())
                 .declaration_span = Some(id.span);
@@ -415,7 +505,18 @@ impl ModuleInfoExtractor {
         {
             return;
         }
-        let proof = self.factory_property_value(expression);
+        let callback = self
+            .factory_property_observations
+            .get(&span)
+            .and_then(|(_, _, proof)| proof.as_ref())
+            .filter(|proof| {
+                matches!(
+                    proof.origin,
+                    FactoryPropertyOrigin::CallbackParameter { .. }
+                )
+            })
+            .cloned();
+        let proof = callback.or_else(|| self.factory_property_value(expression));
         if let Some(destination) = self.factory_property_destinations.get(&span).cloned() {
             if let Some(proof) = proof {
                 let root = destination.split('.').next().unwrap_or(&destination);
@@ -464,25 +565,47 @@ impl ModuleInfoExtractor {
         if self.factory_property_accesses.len() >= MAX_PROJECTION_VALUES {
             return;
         }
+        let mut receiver = unwrap_static_expr(object);
+        let mut properties = Vec::new();
+        while let Expression::StaticMemberExpression(property) = receiver {
+            properties.push(property.property.name.as_str());
+            receiver = unwrap_static_expr(&property.object);
+        }
+        if matches!(receiver, Expression::CallExpression(_)) && !properties.is_empty() {
+            if let Some(proof) = self.factory_property_value(receiver) {
+                properties.reverse();
+                self.retain_factory_property_access(proof, properties.join("."), member);
+            }
+            return;
+        }
         let Some((path, reference)) = receiver_path(object) else {
             return;
         };
-        let Some((root, property)) = path.split_once('.') else {
+        let Some(proof) = self.factory_property_path(&path, reference) else {
             return;
         };
-        if !self.factory_property_prefix_is_unwritten(root, property) {
+        if matches!(proof.origin, FactoryPropertyOrigin::Call { .. })
+            && !proof.projection.is_empty()
+        {
+            let projection = proof.projection.clone();
+            self.retain_factory_property_access(proof, projection, member);
+        }
+    }
+
+    fn retain_factory_property_access(
+        &mut self,
+        proof: FactoryPropertyProof,
+        projection: String,
+        member: &str,
+    ) {
+        if let FactoryPropertyOrigin::Call { callbacks, .. } = &proof.origin
+            && !callbacks.is_empty()
+            && !self.charge_binding_conditions(callbacks.len())
+        {
             return;
         }
-        let Some(proof) = self.factory_property_path(root, reference) else {
-            return;
-        };
-        if matches!(
-            proof.origin,
-            FactoryPropertyOrigin::Call { method: None, .. }
-        ) {
-            self.factory_property_accesses
-                .push((proof, property.to_string(), member.to_string()));
-        }
+        self.factory_property_accesses
+            .push((proof, projection, member.to_string()));
     }
 
     fn factory_property_prefix_is_unwritten(&self, root: &str, path: &str) -> bool {
@@ -524,6 +647,7 @@ impl ModuleInfoExtractor {
         let value = self.projection_value_view(id);
         if value.factory_property.is_some()
             || value.factory_callee.is_some()
+            || value.callback_result.is_some()
             || (self.capture_factory_properties && value.proof.is_some())
         {
             return true;
@@ -548,7 +672,7 @@ impl ModuleInfoExtractor {
             let Some(proof) = observation else {
                 continue;
             };
-            if !self.admitted_requirements(proof.requirements) {
+            if !self.admitted_requirements(proof.requirements) || !proof.projection.is_empty() {
                 continue;
             }
             let source = if let Some(class) = self.resolve_factory_property_class(&proof.origin) {
@@ -612,24 +736,24 @@ impl ModuleInfoExtractor {
             if !self.admitted_requirements(proof.requirements) {
                 continue;
             }
+            if let FactoryPropertyOrigin::Call {
+                name, declaration, ..
+            } = &proof.origin
+                && self.factory_import_binding(name, *declaration)
+            {
+                self.emit_imported_callback_property_access(&proof, &path, &member);
+                continue;
+            }
             let FactoryPropertyOrigin::Call {
-                name,
                 declaration,
-                method: None,
+                method,
+                callbacks,
                 ..
             } = proof.origin
             else {
                 continue;
             };
-            if self.factory_import_binding(&name, declaration) {
-                self.semantic_facts
-                    .push(SemanticFact::ProvenFactoryReturnObjectPropertyAccess(
-                        fallow_types::extract::FactoryReturnObjectPropertyAccessFact {
-                            callee_name: name,
-                            property_path: path,
-                            member,
-                        },
-                    ));
+            if method.is_some() || proof.vue_only {
                 continue;
             }
             let Some(sources) = self.factory_property_sources.get(&declaration) else {
@@ -637,6 +761,14 @@ impl ModuleInfoExtractor {
             };
             if let Some(source) = sources.get(&path) {
                 let fact = match source {
+                    FactoryPropertySource::CallbackParameterReturn { parameter_index } => {
+                        self.emit_local_callback_property_access(
+                            &callbacks,
+                            *parameter_index,
+                            member,
+                        );
+                        continue;
+                    }
                     FactoryPropertySource::LocalClass { class_local_name } => {
                         let class_local_name = class_local_name.clone();
                         if let Some(class) = self
@@ -700,6 +832,7 @@ impl ModuleInfoExtractor {
             declaration,
             reference,
             method,
+            ..
         } = origin
         else {
             return None;
@@ -741,7 +874,7 @@ impl ModuleInfoExtractor {
         .then(|| proof.clone())
     }
 
-    fn factory_import_binding(&self, name: &str, declaration: Span) -> bool {
+    pub(super) fn factory_import_binding(&self, name: &str, declaration: Span) -> bool {
         self.imports.iter().any(|import| {
             !import.is_type_only
                 && import.local_name == name
@@ -755,6 +888,15 @@ impl ModuleInfoExtractor {
         origin: &FactoryPropertyOrigin,
     ) -> Option<FactoryPropertySource> {
         match origin {
+            FactoryPropertyOrigin::CallbackParameter {
+                parameter_index,
+                declaration,
+                reference,
+            } => (self.subclass_binding_references.get(reference) == Some(declaration)
+                && self.subclass_immutable_references.contains(reference))
+            .then_some(FactoryPropertySource::CallbackParameterReturn {
+                parameter_index: *parameter_index,
+            }),
             FactoryPropertyOrigin::Typed { proof, path } => {
                 if path.is_empty() || !self.admitted_projection_origin(proof) {
                     return None;
