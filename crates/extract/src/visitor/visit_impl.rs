@@ -47,6 +47,8 @@ use super::{
     try_extract_property_callback_import, try_extract_require,
 };
 
+#[path = "visit_impl_constructor_alternatives.rs"]
+mod visit_constructor_alternatives;
 #[path = "visit_impl_di.rs"]
 mod visit_di;
 #[path = "visit_impl_dynamic_imports.rs"]
@@ -69,6 +71,8 @@ mod visit_package_resolution;
 mod visit_pinia;
 #[path = "visit_impl_playwright.rs"]
 mod visit_playwright;
+#[path = "visit_impl_projections.rs"]
+pub(super) mod visit_projections;
 #[path = "visit_impl_reflection.rs"]
 mod visit_reflection;
 #[path = "visit_impl_scope_bindings.rs"]
@@ -288,9 +292,10 @@ impl ModuleInfoExtractor {
             let result = visit_factory_returns::function_body_returns_new_class_target(body)
                 .map(
                     |(target_name, target_reference_span)| super::BindingClassProof {
+                        builtin_containers: std::sync::Arc::default(),
                         target_name,
                         target_reference_span,
-                        requirements: Vec::new(),
+                        requirements: super::BindingRequirements::Empty,
                     },
                 )
                 .or_else(|| {
@@ -309,9 +314,10 @@ impl ModuleInfoExtractor {
                             )
                         };
                         Some(super::BindingClassProof {
+                            builtin_containers: std::sync::Arc::default(),
                             target_name,
                             target_reference_span,
-                            requirements: Vec::new(),
+                            requirements: super::BindingRequirements::Empty,
                         })
                     })
                 });
@@ -327,9 +333,10 @@ impl ModuleInfoExtractor {
                     Some((
                         path,
                         super::BindingClassProof {
+                            builtin_containers: std::sync::Arc::default(),
                             target_name,
                             target_reference_span,
-                            requirements: Vec::new(),
+                            requirements: super::BindingRequirements::Empty,
                         },
                     ))
                 })
@@ -438,7 +445,7 @@ impl ModuleInfoExtractor {
                             super::PendingSubclassMemberAccess {
                                 proof: super::SubclassAccessProof::Value {
                                     id,
-                                    requirements: Vec::new(),
+                                    requirements: super::BindingRequirements::Empty,
                                 },
                                 member: key.clone(),
                             },
@@ -1862,7 +1869,7 @@ impl ModuleInfoExtractor {
                     .push(super::PendingSubclassMemberAccess {
                         proof: super::SubclassAccessProof::Value {
                             id,
-                            requirements: Vec::new(),
+                            requirements: super::BindingRequirements::Empty,
                         },
                         member: member.to_string(),
                     });
@@ -1916,18 +1923,20 @@ impl ModuleInfoExtractor {
                     return None;
                 };
                 Some(super::BindingClassProof {
+                    builtin_containers: std::sync::Arc::default(),
                     target_name: reference.name.to_string(),
                     target_reference_span: reference.span,
-                    requirements: Vec::new(),
+                    requirements: super::BindingRequirements::Empty,
                 })
             }
             Expression::Identifier(reference) => self
                 .direct_binding_class_proof(reference.name.as_str(), Some(reference.span))
                 .or_else(|| {
                     Some(super::BindingClassProof {
+                        builtin_containers: std::sync::Arc::default(),
                         target_name: reference.name.to_string(),
                         target_reference_span: reference.span,
-                        requirements: Vec::new(),
+                        requirements: super::BindingRequirements::Empty,
                     })
                 }),
             _ => {
@@ -2335,6 +2344,12 @@ impl<'a> ModuleInfoExtractor {
             self.node_url_file_url_to_path_bindings
                 .insert(s.local.name.to_string());
         }
+        if matches!(source, "vue" | "@vue/reactivity") {
+            self.module_direct_object_binding_targets
+                .entry(s.local.name.to_string())
+                .or_default()
+                .declaration_span = Some(s.local.span);
+        }
         self.imports.push(ImportInfo {
             source: source.to_string(),
             imported_name: ImportedName::Named(s.imported.name().to_string()),
@@ -2399,6 +2414,12 @@ impl<'a> ModuleInfoExtractor {
                 .insert(local.clone());
         }
         self.record_namespace_binding_name(local.clone());
+        if matches!(source, "vue" | "@vue/reactivity") {
+            self.module_direct_object_binding_targets
+                .entry(s.local.name.to_string())
+                .or_default()
+                .declaration_span = Some(s.local.span);
+        }
         self.imports.push(ImportInfo {
             source: source.to_string(),
             imported_name: ImportedName::Namespace,
@@ -2749,6 +2770,7 @@ impl<'a> ModuleInfoExtractor {
                 && let Expression::Identifier(reference) = &expression.callee
             {
                 self.record_binding_class_proof(id.name.as_str(), class_name, Some(reference.span));
+                self.retain_new_constructor(id.name.as_str(), reference);
             }
         }
 
@@ -2986,6 +3008,7 @@ impl<'a> ModuleInfoExtractor {
 
         let Some(init) = &declarator.init else {
             self.record_uninitialized_variable_bindings(declarator);
+            self.record_projection_declarator(declarator);
             return;
         };
 
@@ -3043,6 +3066,7 @@ impl<'a> ModuleInfoExtractor {
         }
 
         self.record_declarator_instance_bindings(declarator, init);
+        self.record_projection_declarator(declarator);
 
         if let Expression::Identifier(ident) = init
             && self
@@ -3779,6 +3803,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         self.record_angular_param_inject(param);
 
+        if let BindingPattern::BindingIdentifier(id) = &param.pattern
+            && let Some(annotation) = param.type_annotation.as_deref()
+        {
+            self.record_projection_contract(id.name.as_str(), id.span, &annotation.type_annotation);
+        }
         walk::walk_formal_parameter(self, param);
     }
 
@@ -3970,6 +3999,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        let constructor_function = self.active_constructor_function.replace(func.span);
         let independent_this = self.class_method_function_span != Some(func.span);
         if independent_this {
             self.independent_this_depth += 1;
@@ -4026,9 +4056,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if independent_this {
             self.independent_this_depth -= 1;
         }
+        self.active_constructor_function = constructor_function;
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        let constructor_function = self.active_constructor_function.replace(expr.span);
         self.record_next_arrow_param_sources(expr);
         let type_parameter_scope_pushed = expr
             .type_parameters
@@ -4072,6 +4104,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.pop_function_declaration_scope();
         self.direct_object_binding_function_scopes.pop();
         self.pop_direct_object_binding_scope();
+        self.active_constructor_function = constructor_function;
     }
 
     fn visit_arrow_function_body(&mut self, body: &ArrowFunctionBody<'a>) {
@@ -4494,6 +4527,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_import_expression(self, expr);
     }
 
+    fn visit_return_statement(&mut self, statement: &ReturnStatement<'a>) {
+        walk::walk_return_statement(self, statement);
+        self.complete_projection_array_return(statement);
+    }
+
     fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
         // Pre-register named arrow / function-expression component bindings so
         // the function-body walk (below) can push the component stack with the
@@ -4891,6 +4929,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             self.handle_dynamic_import_assignment(ident, &expr.right);
         }
         walk::walk_assignment_expression(self, expr);
+        if self.invalidate_projected_assignment(&expr.left) {
+            return;
+        }
 
         let is_plain_assignment = matches!(expr.operator, AssignmentOperator::Assign);
         match &expr.left {
@@ -4934,7 +4975,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_update_expression(&mut self, expr: &UpdateExpression<'a>) {
         match &expr.argument {
             SimpleAssignmentTarget::StaticMemberExpression(member) => {
-                if let Some(path) = static_member_object_name(&member.object) {
+                if !self.invalidate_projected_property(
+                    &member.object,
+                    Some(member.property.name.as_str()),
+                ) && let Some(path) = static_member_object_name(&member.object)
+                {
                     self.invalidate_direct_binding_path(
                         &format!("{path}.{}", member.property.name),
                         false,
@@ -4942,7 +4987,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 }
             }
             SimpleAssignmentTarget::ComputedMemberExpression(member) => {
-                if let Some(path) = static_member_object_name(&member.object) {
+                if !self.invalidate_projected_computed_property(member)
+                    && let Some(path) = static_member_object_name(&member.object)
+                {
                     match member.static_property_name() {
                         Some(key) => {
                             self.invalidate_direct_binding_path(&format!("{path}.{key}"), false);
@@ -4975,7 +5022,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if matches!(expr.operator, UnaryOperator::Delete) {
             match &expr.argument {
                 Expression::StaticMemberExpression(member) => {
-                    if let Some(path) = static_member_object_name(&member.object) {
+                    if !self.invalidate_projected_property(
+                        &member.object,
+                        Some(member.property.name.as_str()),
+                    ) && let Some(path) = static_member_object_name(&member.object)
+                    {
                         self.invalidate_direct_binding_path(
                             &format!("{path}.{}", member.property.name),
                             false,
@@ -4983,7 +5034,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     }
                 }
                 Expression::ComputedMemberExpression(member) => {
-                    if let Some(path) = static_member_object_name(&member.object) {
+                    if !self.invalidate_projected_computed_property(member)
+                        && let Some(path) = static_member_object_name(&member.object)
+                    {
                         match member.static_property_name() {
                             Some(key) => {
                                 self.invalidate_direct_binding_path(
@@ -5007,6 +5060,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        self.record_projected_member_access(&expr.object, expr.property.name.as_str());
         self.record_subclass_member_access(&expr.object, expr.property.name.as_str());
         self.record_awaited_dynamic_import_member(&expr.object, expr.property.name.as_str());
         if is_import_meta_env_object(&expr.object) {
@@ -5072,9 +5126,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.pending_subclass_member_accesses
                     .push(super::PendingSubclassMemberAccess {
                         proof: super::SubclassAccessProof::Known(super::BindingClassProof {
+                            builtin_containers: std::sync::Arc::default(),
                             target_name: super_local,
                             target_reference_span,
-                            requirements: Vec::new(),
+                            requirements: super::BindingRequirements::Empty,
                         }),
                         member: expr.property.name.to_string(),
                     });

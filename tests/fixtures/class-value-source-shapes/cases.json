@@ -1,0 +1,2569 @@
+{
+  "cases": [
+    {
+      "id": "literal",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = [new C(), new C()]; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "parenthesized-source",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = ([new C()]); items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "awaited-source",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = await [new C()]; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "typed-local",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items: C[] = []; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "declared-local",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const items: C[]; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "definite-local",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nlet items!: C[]; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-typed",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder: {items: C[]} = {items: []}; holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-literal",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder = {items: [new C()]}; holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-parameter",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(holder: {items: C[]}) { holder.items[0].used(); } use({items: []});",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-inline",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(holder: {items: {widget: C}[]}) { holder.items[0].widget.used(); } use({items: []});",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "source-alias",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = [new C()]; const alias = items; alias[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "source-scalar",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = [new C()]; const saved = items[0]; items[0] = new Other(); saved.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "source-rebind",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nlet items = [new C()]; const alias=items; items=[]; alias[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "local-type-alias",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ntype Item = {widget: C}; function use(items: Item[]) { items[0].widget.used(); } use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "nested-static",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items: {nested: {widget:C}}[]) {items[0].nested.widget.used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "numeric-local",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) { const index: number=1;items[index].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "numeric-alias",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[], index:number) {const next=index; items[next].used();} use([],1);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "numeric-parens",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[], index:(number)) {items[index].used();} use([],1);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "readonly",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items: readonly C[]) {items![1].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "parenthesized-type",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items: (C[])) {items![1].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "nullable",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items: C[] | null | undefined) {items![1].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "empty",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nnew C(); const items = []; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "mixed",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = [new C(),new Other()]; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "hole",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = [,new C()];items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "spread",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = [...[new C()]];items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "unknown",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:unknown) {(items as C[])[0].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "map",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items = new Map<number,C>();items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "source-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items=[new C()];const alias=items;alias[0]=new Other();items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "parent-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nlet holder:{items:C[]}={items:[]};holder.items=[];holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "root-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nlet holder:{items:C[]}={items:[]};holder={items:[]};holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "conflicting-union",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]|Other[]) {items[0].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "numeric-replaced",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) {let index:number=1; index=\"0\"; items[index].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "catch-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items=[new C()];try {throw [];} catch(items) {items[0].used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "loop-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items=[new C()];for(const items of [[]]) {items[0].used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "rest-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items=[new C()];function use(...items: unknown[]) {items[0].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "class-type-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use<C>(items:C[]) {items[0].used();} use<Other>([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "array-type-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ntype Array<T> = Other[]; function use(items:Array<C>) {items[0].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "fraction",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) {items[0.5].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "negative",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) {items[-1].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "string",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) {items['0'].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "opaque",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) {items[Math.random()].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "as",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) {(items as C[])[0].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "satisfies",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(items:C[]) {(items satisfies C[])[0].used();} use([]);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-computed",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>[new C()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-ref",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {ref} from 'vue';const items=ref([new C()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-shallow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {shallowRef} from '@vue/reactivity';const items=shallowRef<C[]>([]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-alias",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed as derive} from 'vue';const items=derive(()=>[new C()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-namespace",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport * as vue from 'vue';const items=vue.computed(()=>[new C()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-array",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{const values:C[]=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-name",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction computed(getter:unknown) {return {value:[new Other()]};} const items=computed(()=>[new C()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-foreign",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'foreign';const items=computed(()=>[new C()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/foreign/package.json": "{\"name\":\"foreign\",\"main\":\"index.js\"}",
+        "node_modules/foreign/index.js": "export function computed(getter) {return {value:[]};}"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';function use(computed:Function) {const items=computed(()=>[new C()]);items.value[0].used();} use(()=>({value:[]}));",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-mutable-capture",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';let value = new C();const items=computed(()=>[value]);value=new Other();items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "nested-property",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(holder:{outer:{items:C[]}}) {holder.outer.items[0].used();} use({outer:{items:[]}});",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "nested-parent-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(holder:{outer:{items:C[]}}) {holder.outer={items:[]};holder.outer.items[0].used();} use({outer:{items:[]}});",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "property-array-alias",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst values=[new C()];const holder={items:values};holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-other-member",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new C()], widget:new C()};holder.widget.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-array-generic",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed<Array<C>>(()=>[]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-shadowed-array-generic",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';type Array<T>=Other[];const items=computed<Array<C>>(()=>[]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-array-generic",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{const values:Array<C>=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-shadowed-array",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';type Array<T>=Other[];const items=computed(()=>{const values:Array<C>=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-replaced-array",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{let values:C[]=[];values=[new Other()];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst items = [new Sub(), new Sub()]; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "awaited-source-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst items = await [new Sub()]; items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-typed-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder: {items: Sub[]} = {items: []}; holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-literal-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder = {items: [new Sub()]}; holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "property-parameter-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nfunction use(holder: {items: Sub[]}) { holder.items[0].used(); } use({items: []});",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "source-scalar-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst items = [new Sub()]; const saved = items[0]; items[0] = new Other(); saved.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "source-rebind-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nlet items = [new Sub()]; const alias=items; items=[]; alias[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "source-write-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst items=[new Sub()];const alias=items;alias[0]=new Other();items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-computed-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>[new Sub()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-ref-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {ref} from 'vue';const items=ref([new Sub()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-shallow-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {shallowRef} from '@vue/reactivity';const items=shallowRef<Sub[]>([]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-alias-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed as derive} from 'vue';const items=derive(()=>[new Sub()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-namespace-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport * as vue from 'vue';const items=vue.computed(()=>[new Sub()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-array-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{const values:Sub[]=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-name-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nfunction computed(getter:unknown) {return {value:[new Other()]};} const items=computed(()=>[new Sub()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-foreign-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'foreign';const items=computed(()=>[new Sub()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/foreign/package.json": "{\"name\":\"foreign\",\"main\":\"index.js\"}",
+        "node_modules/foreign/index.js": "export function computed(getter) {return {value:[]};}"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-shadow-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';function use(computed:Function) {const items=computed(()=>[new Sub()]);items.value[0].used();} use(()=>({value:[]}));",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-mutable-capture-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';let value = new Sub();const items=computed(()=>[value]);value=new Other();items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-array-generic-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed<Array<Sub>>(()=>[]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-shadowed-array-generic-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';type Array<T>=Other[];const items=computed<Array<Sub>>(()=>[]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-array-generic-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{const values:Array<Sub>=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-shadowed-array-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';type Array<T>=Other[];const items=computed(()=>{const values:Array<Sub>=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-replaced-array-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{let values:Sub[]=[];values=[new Other()];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-async-array",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(async()=>[new C()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-async-array-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(async()=>[new Sub()]);items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-early-return-array",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{if (flag) return [new Other()];return [new C()];});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-early-return-array-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{if (flag) return [new Other()];return [new Sub()];});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-slot-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{const values:C[]=[];values[0]=new Other();return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-slot-write-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{const values:Sub[]=[];values[0]=new Other();return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-untouched",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{const values:C[]=[];const unrelated=1;return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-untouched-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{const values:Sub[]=[];const unrelated=1;return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-local-alias-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{const values:C[]=[];const alias=values;alias[0]=new Other();return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-local-alias-write-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{const values:Sub[]=[];const alias=values;alias[0]=new Other();return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-function-array",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(function(){return [new C()];});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-function-array-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(function(){return [new Sub()];});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "cast-only",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst opaque = unknown(); (opaque as C[])[0].used(); new C();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "object-duplicate-last",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder = { items: [new C()], items: [new Other()] }; holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "object-spread",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder = { items: [new C()], ...unknown() }; holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "object-last-canonical",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder = { items: [new Other()], items: [new C()] }; holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-nested-function-return",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{function inner(){return [new Other()];}const values:C[]=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-nested-function-return-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{function inner(){return [new Other()];}const values:Sub[]=[];return values;});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "vue-only-nested-return",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nimport {computed} from 'vue';const items=computed(()=>{function inner(){return [new C()];}});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "vue-only-nested-return-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nimport {computed} from 'vue';const items=computed(()=>{function inner(){return [new Sub()];}});items.value[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "node_modules/vue/package.json": "{\"name\":\"vue\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/vue/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});",
+        "node_modules/@vue/reactivity/package.json": "{\"name\":\"@vue/reactivity\",\"main\":\"index.js\",\"type\":\"module\"}",
+        "node_modules/@vue/reactivity/index.js": "export const ref = value => ({value}); export const shallowRef = ref; export const computed = getter => ({get value(){return getter();}});"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "imported-owner-conflict",
+      "sources": {
+        "index.ts": "import { C } from './classes';import type { Item } from './types';function use(items: Item[]){items[0].widget.used();}use(unknown());new C();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }",
+        "types.ts": "import type { C, Other } from './classes';export interface Item { widget: C | Other }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new Other()],other:new Other()};if(flag){holder.other=new C();holder.other.used();}holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-update",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new Other()],other:new Other()};for(let i=0;i<2;holder.other=new C(),i++){holder.other.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-array-read",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new C()],other:new Other()};holder.other=new Other();holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-write-computed",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new Other()],other:new Other()};if(flag){holder['other']=new C();holder.other.used();}holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-update-computed",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new Other()],other:new Other()};for(let i=0;i<2;holder['other']=new C(),i++){holder.other.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-array-read-computed",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new C()],other:new Other()};holder['other']=new Other();holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "literal-dotted-key",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nconst holder = {'a.b':[new C()]}; holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-nested-control",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nconst holder = {a:{b:[new C()]}}; holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "typed-dotted-key",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nfunction use(holder: {'a.b': C[]}) {holder.a.b[0].used();} use(unknown());new C();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "typed-nested-control",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nfunction use(holder: {a:{b:C[]}}) {holder.a.b[0].used();} use(unknown());new C();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-bracket-delete",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new C()],other:new Other()};delete holder['other'];holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-bracket-increment",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new C()],other:0};holder['other']++;holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-bracket-array-replace",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new C()],other:new Other()};holder['items']=[new Other()];holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "mixed-unknown-key-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={items:[new C()],other:new Other()};holder[key]=unknown();holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "array-numeric-string-write",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items=[new C()];items['0']=new Other();items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "array-numeric-delete",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items=[new C()];delete items[0];items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "array-numeric-update",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst items=[new C()];items[0]++;items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-dotted-with-nested",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={'a.b':[new C()],a:{b:[new Other()]}};holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-dotted-after-nested",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={a:{b:[new Other()]},'a.b':[new C()]};holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "typed-dotted-with-nested",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(holder:{'a.b':C[],a:{b:Other[]}}){holder.a.b[0].used();}use(unknown());new C();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-quoted-key-control",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={'items':[new C()]};holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "typed-quoted-key-control",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nfunction use(holder:{'items':C[]}){holder.items[0].used();}use(unknown());new C();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-write-computed-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Other()],other:new Other()};if(flag){holder['other']=new Sub();holder.other.used();}holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-update-computed-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Other()],other:new Other()};for(let i=0;i<2;holder['other']=new Sub(),i++){holder.other.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-array-read-computed-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Sub()],other:new Other()};holder['other']=new Other();holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "literal-dotted-key-subclass",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nclass Sub extends C {}\nconst holder = {'a.b':[new Sub()]}; holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-nested-control-subclass",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nclass Sub extends C {}\nconst holder = {a:{b:[new Sub()]}}; holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "typed-dotted-key-subclass",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nclass Sub extends C {}\nfunction use(holder: {'a.b': Sub[]}) {holder.a.b[0].used();} use(unknown());new Sub();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "typed-nested-control-subclass",
+      "sources": {
+        "index.ts": "import { C } from './classes';\nclass Sub extends C {}\nfunction use(holder: {a:{b:Sub[]}}) {holder.a.b[0].used();} use(unknown());new Sub();",
+        "classes.ts": "export class C { used() {} dead() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-bracket-delete-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Sub()],other:new Other()};delete holder['other'];holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-bracket-increment-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Sub()],other:0};holder['other']++;holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-bracket-array-replace-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Sub()],other:new Other()};holder['items']=[new Other()];holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "mixed-unknown-key-write-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Sub()],other:new Other()};holder[key]=unknown();holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "array-numeric-string-write-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst items=[new Sub()];items['0']=new Other();items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "array-numeric-delete-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst items=[new Sub()];delete items[0];items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "array-numeric-update-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst items=[new Sub()];items[0]++;items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-dotted-with-nested-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={'a.b':[new Sub()],a:{b:[new Other()]}};holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-dotted-after-nested-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={a:{b:[new Other()]},'a.b':[new Sub()]};holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "typed-dotted-with-nested-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nfunction use(holder:{'a.b':Sub[],a:{b:Other[]}}){holder.a.b[0].used();}use(unknown());new Sub();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "literal-quoted-key-control-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={'items':[new Sub()]};holder.items[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "typed-quoted-key-control-subclass",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nfunction use(holder:{'items':Sub[]}){holder.items[0].used();}use(unknown());new Sub();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "mixed-ordinary-update-subclass-control",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={items:[new Other()],other:new Other()};for(let i=0;i<2;holder.other=new Sub(),i++){holder.other.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "dotted-key-write-preserves-nested",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={a:{b:[new C()]}};holder['a.b']=unknown();holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "dotted-key-delete-preserves-nested",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={a:{b:[new C()]}};delete holder['a.b'];holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "dotted-key-update-preserves-nested",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\nconst holder={a:{b:[new C()]}};holder['a.b']++;holder.a.b[0].used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alias-write-through-original",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; holder.other=new Other(); alias.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-alias-write-through-alias",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; alias.other=new Other(); holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-alias-saved-scalar-before-write",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; const saved=alias.other; holder.other=new Other(); saved.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alias-root-rebind-preserves-alias",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nlet holder={other:new Sub()}; const alias=holder; holder={other:new Other()}; alias.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alias-container-alias-without-write",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; alias.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alias-untouched-sibling",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={other:new Sub(),keep:new Sub()}; const alias=holder; holder.other=new Other(); alias.keep.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alias-observation-before-write",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; alias.other.used(); holder.other=new Other();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alias-optional-write-preserves-possible-sub",
+      "sources": {
+        "package.json": "{\"name\":\"indexed-source-shape\",\"type\":\"module\",\"main\":\"index.ts\",\"dependencies\":{\"vue\":\"*\",\"@vue/reactivity\":\"*\",\"foreign\":\"*\"}}",
+        "index.ts": "import { C, Other } from './classes';\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; if(flag){holder.other=new Other();} alias.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alternate-only",
+      "sources": {
+        "package.json": "{\"name\":\"sub-alternate-receipt\",\"type\":\"module\",\"main\":\"index.ts\"}",
+        "classes.ts": "export class C { used() {} dead() {} }\nexport class Other { used() {} }\n",
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean;\nclass Sub extends C {}\nconst holder = { other: new Sub() };\nconst alias = holder;\nif (flag) {\n  holder.other = new Other();\n} else {\n  alias.other.used();\n}\n"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-alternate-only-swapped",
+      "sources": {
+        "package.json": "{\"name\":\"sub-alternate-receipt\",\"type\":\"module\",\"main\":\"index.ts\"}",
+        "classes.ts": "export class C { used() {} dead() {} }\nexport class Other { used() {} }\n",
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean;\nclass Sub extends C {}\nconst holder = { other: new Other() };\nconst alias = holder;\nif (flag) {\n  holder.other = new Sub();\n} else {\n  alias.other.used();\n}\n"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-nested-optional",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; if(flag){if(inner){alias.other=new Other();}} holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-nested-exhaustive",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; if(flag){if(inner){alias.other=new Other();}else{holder.other=new Other();}}else{alias.other=new Other();} holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-postjoin-replacement",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; if(flag){holder.other=new Other();} alias.other=new Other(); holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-saved-joined-scalar",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; if(flag){holder.other=new Other();} const saved=alias.other; holder.other=new Other(); saved.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-unknown-key-alternate",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; if(flag){holder[key]=new Other();}else{alias.other.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-unknown-key-after",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Sub()}; const alias=holder; holder[key]=new Other(); alias.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-parent-alternate",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={parent:{other:new Sub()}}; const alias=holder; if(flag){holder.parent={other:new Other()};}else{alias.parent.other.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-parent-after",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={parent:{other:new Sub()}}; const alias=holder; holder.parent={other:new Other()}; alias.parent.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-scalar-root-optional",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nlet receiver=new Sub(); if(flag){receiver=new Other();} receiver.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-scalar-root-alternate",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nlet receiver=new Sub(); if(flag){receiver=new Other();}else{receiver.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-scalar-root-swapped",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nlet receiver=new Other(); if(flag){receiver=new Sub();}else{receiver.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-constructor-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Other()}; function run(Sub: new()=>Other){if(flag){holder.other=new Sub();}holder.other.used();} run(Other);",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-receiver-shadow",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes';\ndeclare const flag: boolean; declare const inner: boolean; declare const key: string;\nclass Sub extends C {}\nconst holder={other:new Sub()}; function run(holder:{other:Other}){if(flag){holder.other=new Other();}holder.other.used();} run({other:new Other()});",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-loop-body-outcome-after-update-rejoin",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {} const holder={other:new Other()}; for(let i=0;i<2;holder.other=new Other(),i++){holder.other=new Sub(); if(flag) break;} holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-function-local-parent",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; declare const key: string; class Sub extends C {}\nfunction run(){const holder={other:new Other()}; if(flag){holder.other=new Sub();} holder.other.used();} run();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-arrow-local-parent",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; declare const key: string; class Sub extends C {}\nconst run=()=>{const holder={other:new Other()}; if(flag){holder.other=new Sub();} holder.other.used();}; run();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-module-parent-body",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; declare const key: string; class Sub extends C {}\nconst holder={other:new Other()}; function run(){for(let i=0;i<2;holder.other=new Sub(),i++){holder.other.used();}} run();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-module-parent-no-install",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; declare const key: string; class Sub extends C {}\nconst holder={other:new Other()}; function write(){if(flag){holder.other=new Sub();}} holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-sibling-function-owners",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; declare const key: string; class Sub extends C {}\nconst holder={other:new Other()}; function write(){if(flag){holder.other=new Sub();}} function read(){holder.other.used();} read();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-nested-function-owners",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; declare const key: string; class Sub extends C {}\nfunction outer(){const holder={other:new Other()}; function inner(){if(flag){holder.other=new Sub();}} holder.other.used();} outer();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-unknown-key-after-view",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; declare const key: string; class Sub extends C {}\nconst holder={other:new Other()}; const alias=holder; if(flag){holder.other=new Sub(); holder[key]=new Other(); alias.other.used();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-module-outer-branch-inner-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nconst holder={other:new Other()}; if(flag){function inner(){if(flag){holder.other=new Sub();}}} holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-local-outer-branch-inner-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nfunction outer(){const holder={other:new Other()}; if(flag){function inner(){if(flag){holder.other=new Sub();}} holder.other.used();} holder.other.used();} outer();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-root-outer-branch-inner-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nlet value=new Other(); if(flag){function inner(){if(flag){value=new Sub();}}} value.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-loop-inner-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nconst holder={other:new Other()}; for(let i=0;i<2;holder.other=new Other(),i++){function inner(){if(flag){holder.other=new Sub();}}} holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [],
+      "unused": [
+        "C.dead",
+        "C.used"
+      ]
+    },
+    {
+      "id": "subclass-slots-earlier-scalar-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nconst holder={other:new Sub()}; const scalar=holder.other; if(flag){function inner(){if(flag){holder.other=new Other();}}} scalar.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-earlier-observation-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nconst holder={other:new Other()}; if(flag){holder.other=new Sub(); holder.other.used(); function inner(){if(flag){holder.other=new Other();}}}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-nested-local-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nif(flag){function inner(){const holder={other:new Other()};if(flag){holder.other=new Sub();}holder.other.used();}inner();}",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    },
+    {
+      "id": "subclass-slots-outer-branch-untouched-owner",
+      "sources": {
+        "index.ts": "import { C, Other } from './classes'; declare const flag: boolean; class Sub extends C {}\nconst holder={other:new Sub()}; if(flag){function inner(){const local={other:new Other()};local.other.used();}} holder.other.used();",
+        "classes.ts": "export class C { used() {} dead() {} } export class Other { used() {} }"
+      },
+      "used": [
+        "C.used"
+      ],
+      "unused": [
+        "C.dead"
+      ]
+    }
+  ]
+}

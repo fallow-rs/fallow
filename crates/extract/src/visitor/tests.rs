@@ -16060,3 +16060,470 @@ fn ordinary_for_update_observes_initially_unresolved_property() {
         assert!(!info.member_accesses.iter().any(|a| a.member == "dead"));
     }
 }
+
+#[test]
+fn indexed_projection_alias_and_write_boundaries() {
+    let cases = [
+        ("const alias = items; alias[0]!.widget.used();", true),
+        (
+            "const saved = items[0]!.widget; items[0]!.widget = unknown(); saved.used();",
+            true,
+        ),
+        (
+            "const alias = items; items = unknown(); alias[0]!.widget.used();",
+            true,
+        ),
+        (
+            "const alias = items; alias[0]!.widget = unknown(); items[0]!.widget.used();",
+            false,
+        ),
+        (
+            "const alias = items; alias[0] = unknown(); items[0]!.widget.used();",
+            false,
+        ),
+        ("delete items[0]!.widget; items[0]!.widget.used();", false),
+        ("items[opaque]!.widget.used();", false),
+        (
+            "{ const items = unknown(); items[0]!.widget.used(); }",
+            false,
+        ),
+        (
+            "((...items: unknown[]) => items[0].widget.used())();",
+            false,
+        ),
+    ];
+    for capture in ["", "class Marker extends Array {}"] {
+        for (body, expected) in cases {
+            let source = format!(
+                "import {{ C }} from './c'; {capture} function consume(items: {{widget:C}}[]) {{ {body} }}"
+            );
+            let info = parse(&source);
+            let used = info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "C" && access.member == "used");
+            assert_eq!(used, expected, "{source}");
+            assert!(
+                !info.whole_object_uses.iter().any(|name| name == "C"),
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn indexed_projection_numeric_and_type_ownership() {
+    let cases = [
+        (
+            "function consume(items: Array<{ widget: C }>, index:number) { items[index]!.widget.used(); }",
+            true,
+        ),
+        (
+            "function consume(items: ReadonlyArray<{ widget: C }>) { (items[0]!).widget.used(); }",
+            true,
+        ),
+        ("function consume(items: C[]) { items[0]!.used(); }", true),
+        (
+            "function consume(items: { widget: C }[], index:string) { items[index]!.widget.used(); }",
+            false,
+        ),
+        (
+            "function consume(items: { widget: C }[], index:number) { {const index = 'widget';items[index]!.widget.used();} }",
+            false,
+        ),
+        (
+            "function consume<C>(items: { widget: C }[]) { items[0]!.widget.used(); }",
+            false,
+        ),
+        (
+            "function consume(items: [{ widget: C },{ widget: Other }]) { items[1]!.widget.used(); }",
+            false,
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!("import {{C}} from './c'; {body}");
+        let info = parse(&source);
+        let used = info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "C" && access.member == "used");
+        assert_eq!(used, expected, "{source}");
+    }
+}
+
+const INDEXED_REVIEW_SOURCES: &[(&str, bool)] = &[
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-shadow-array-capture-off/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-shadow-array-capture-on/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-shadow-readonly-array-capture-off/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-shadow-readonly-array-capture-on/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-builtin-array-control-capture-off/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-builtin-array-control-capture-on/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-builtin-readonly-array-control-capture-off/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-builtin-readonly-array-control-capture-on/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-typed-alias-write-capture-off/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-typed-alias-write-capture-on/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-ordinary-alias-write-control-capture-off/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-ordinary-alias-write-control-capture-on/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-typed-alias-untouched-control-capture-off/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-typed-alias-untouched-control-capture-on/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-ordinary-alias-untouched-control-capture-off/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-ordinary-alias-untouched-control-capture-on/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-conditional-alternate-read-capture-off/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-conditional-alternate-read-capture-on/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-conditional-untouched-control-capture-off/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-conditional-untouched-control-capture-on/src/index.ts"
+        ),
+        true,
+    ),
+];
+
+#[test]
+fn indexed_review_exact_caller_extraction() {
+    for &(source, expected) in INDEXED_REVIEW_SOURCES {
+        let info = parse(source);
+        let used = info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "C" && access.member == "used");
+        assert_eq!(used, expected, "{source}");
+    }
+}
+
+#[test]
+fn indexed_branch_join_and_scalar_snapshot_boundaries() {
+    let cases = [
+        (
+            "if(flag) { items[0].widget = opaque(); } items[0].widget.used();",
+            false,
+        ),
+        (
+            "if(flag) { items[0].widget = opaque(); } else { items[0].widget.used(); }",
+            true,
+        ),
+        (
+            "if(flag) { items[0] = opaque(); } else { items[0].widget.used(); }",
+            true,
+        ),
+        (
+            "const saved = items[0].widget; if(flag) { items[0].widget = opaque(); } saved.used();",
+            true,
+        ),
+        (
+            "const alias: { widget: C }[] = items; if(flag) { alias[0].widget = opaque(); } items[0].widget.used();",
+            false,
+        ),
+        (
+            "if(flag) { if(other) { items[0].widget = opaque(); } else { items[0].widget.used(); } }",
+            true,
+        ),
+        (
+            "if(flag) { if(other) { items[0].widget = opaque(); } } items[0].widget.used();",
+            false,
+        ),
+    ];
+    for capture in ["", "class Marker extends Array {}"] {
+        for (body, expected) in cases {
+            let source = format!(
+                "import {{C}} from './c'; {capture} function consume(items: {{widget:C}}[], flag:boolean,other:boolean) {{ {body} }}"
+            );
+            let info = parse(&source);
+            let used = info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "C" && access.member == "used");
+            assert_eq!(used, expected, "{source}");
+        }
+    }
+}
+
+const INDEXED_SHARED_READER_SOURCES: &[(&str, bool)] = &[
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-subclass-array-shadow/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-subclass-array-builtin-control/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-subclass-readonly-array-shadow/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-subclass-readonly-array-builtin-control/src/index.ts"
+        ),
+        true,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-subclass-overlay-write/src/index.ts"
+        ),
+        false,
+    ),
+    (
+        include_str!(
+            "../../../../tests/fixtures/class-value-review-subclass-overlay-no-write-control/src/index.ts"
+        ),
+        true,
+    ),
+];
+
+#[test]
+fn indexed_shared_subclass_reader_facts() {
+    for &(source, expected) in INDEXED_SHARED_READER_SOURCES {
+        let info = parse(source);
+        let used = info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "C" && access.member == "used");
+        assert_eq!(used, expected, "{source}");
+    }
+}
+
+#[test]
+fn indexed_shared_reader_alias_snapshot_and_branch_boundaries() {
+    let cases = [
+        (
+            "const saved = items[0]; if(flag) { saved.widget = opaque(); saved.widget.used(); }",
+            false,
+        ),
+        (
+            "const saved = items[0]; if(flag) { saved.widget = opaque(); } else { saved.widget.used(); }",
+            true,
+        ),
+        (
+            "const saved = items[0]; if(flag) { saved.widget = opaque(); } saved.widget.used();",
+            false,
+        ),
+        (
+            "const saved = items[0].widget; if(flag) { items[0].widget = opaque(); } saved.used();",
+            true,
+        ),
+        (
+            "const saved = items[0]; const alias = saved; if(flag) { alias.widget = opaque(); saved.widget.used(); }",
+            false,
+        ),
+        (
+            "const saved = items[0]; if(flag) { saved.widget.used(); saved.widget = opaque(); }",
+            true,
+        ),
+        (
+            "const saved = items[0]; if(flag) { saved[key] = opaque(); saved.widget.used(); }",
+            false,
+        ),
+        (
+            "const saved = items[0]; if(flag) { saved.widget = opaque(); const {widget} = saved; widget.used(); }",
+            false,
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!(
+            "import {{C}} from './c'; class Sub extends C {{}} function opaque() {{ return {{used() {{}}}}; }} function consume(items: {{ widget: Sub }}[], flag: boolean, key: string) {{ {body} }}"
+        );
+        let info = parse(&source);
+        let used = info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "C" && access.member == "used");
+        assert_eq!(used, expected, "{source}");
+    }
+}
+
+#[test]
+fn indexed_shared_container_conditions_survive_existing_proof_conversions() {
+    for container in ["Array", "ReadonlyArray"] {
+        for shadow in [false, true] {
+            for body in [
+                "const saved = items[0]; const copied = saved; copied.used();",
+                "for (const saved of items) { saved.used(); }",
+                "items.forEach(saved => saved.used());",
+            ] {
+                let alias = if shadow {
+                    format!("type {container}<T> = Other[];")
+                } else {
+                    String::new()
+                };
+                let source = format!(
+                    "import {{C, Other}} from './c'; class Sub extends C {{}} {alias} function consume(items: {container}<Sub>) {{ {body} }}"
+                );
+                let info = parse(&source);
+                let used = info
+                    .member_accesses
+                    .iter()
+                    .any(|access| access.object == "C" && access.member == "used");
+                assert_eq!(used, !shadow, "{source}");
+            }
+        }
+    }
+}
+
+#[test]
+fn indexed_refusal_branch_barriers_do_not_share_written_properties() {
+    const PROJECTION_ARENA_BUDGET: usize = 8192;
+    let pressure = (0..PROJECTION_ARENA_BUDGET).fold(String::new(), |mut source, index| {
+        writeln!(source, "const filler{index}: number = 0;").expect("write fixture source");
+        source
+    });
+    for subclass in [false, true] {
+        let heritage = if subclass {
+            "class Sub extends C {}"
+        } else {
+            ""
+        };
+        let target = if subclass { "Sub" } else { "C" };
+        let source = format!("import {{C}} from './classes'; {heritage}
+            function opaque() {{ return {{after() {{}}}}; }}
+            function consume(left: {{ widget: {target} }}[], right: {{ widget: {target} }}[], flag: boolean) {{
+                const first = left[0]; const second = right[0]; const scalar = first.widget;
+                first.widget.before(); {pressure}
+                if(flag) {{ first.widget = opaque(); second.widget = opaque(); first.widget = new {target}(); second.widget.after(); }}
+                else {{ second.widget.alternate(); }}
+                scalar.snapshot();
+            }}
+            consume([{{widget:new {target}()}}], [{{widget:new {target}()}}], true);
+            new C().direct();");
+        let info = parse(&source);
+        for (member, expected) in [
+            ("before", true),
+            ("after", false),
+            ("alternate", true),
+            ("snapshot", true),
+            ("direct", true),
+            ("dead", false),
+        ] {
+            let actual = info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "C" && access.member == member);
+            assert_eq!(actual, expected, "subclass={subclass}, member={member}");
+        }
+        assert!(!info.whole_object_uses.iter().any(|name| name == "C"));
+    }
+}
+
+#[test]
+fn constructor_alternatives_preserve_jsx_receiver_spelling() {
+    let source = "class Widgets { Card = () => null; dead() {} } const w = new Widgets(); export const R = () => <w.Card />;";
+    for prefix in ["", "class Base {} class Sub extends Base {}\n"] {
+        let info = crate::parse_from_content(
+            FileId(0),
+            Path::new("view.tsx"),
+            &format!("{prefix}{source}"),
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "w" && access.member == "Card")
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Widgets" && access.member == "dead")
+        );
+    }
+}

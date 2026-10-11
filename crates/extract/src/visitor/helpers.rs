@@ -789,7 +789,9 @@ fn reactivity_wrapper_element_type(call: &CallExpression<'_>) -> Option<(String,
     callback_returned_array_element(call.arguments.first()?)
 }
 
-fn callback_returned_array_element(arg: &Argument<'_>) -> Option<(String, Option<Span>)> {
+pub(super) fn callback_returned_array_element(
+    arg: &Argument<'_>,
+) -> Option<(String, Option<Span>)> {
     match arg {
         Argument::ArrowFunctionExpression(arrow) => match &arrow.body {
             ArrowFunctionBody::FunctionBody(body) => function_body_returned_array_element(body),
@@ -1255,7 +1257,7 @@ pub(super) fn extract_nested_type_bindings(
     bindings
 }
 
-fn collect_nested_type_bindings(
+pub(super) fn collect_nested_type_bindings(
     ty: &TSType<'_>,
     prefix: Option<&str>,
     bindings: &mut Vec<(String, String, Option<Span>)>,

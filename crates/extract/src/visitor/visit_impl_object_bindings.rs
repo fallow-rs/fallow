@@ -27,7 +27,7 @@ use super::super::{
 /// target is recorded, matching the false-negative-preferring direction of the
 /// taint caps. Deliberately a constant, not a config knob: real hand-written
 /// modules stay far below it.
-const MAX_OBJECT_BINDING_TARGETS: usize = 4096;
+pub(super) const MAX_OBJECT_BINDING_TARGETS: usize = 4096;
 const MAX_EXPORTED_OBJECT_INSTANCE_PROPERTY_FACTS: usize = 8192;
 
 #[derive(Clone, Copy)]
@@ -61,10 +61,13 @@ impl ModuleInfoExtractor {
         if !self.capture_subclass_provenance {
             return;
         }
-        self.direct_binding_entry_mut(binding).declaration_span = Some(span);
+        let owner = self.active_constructor_function;
+        let entry = self.direct_binding_entry_mut(binding);
+        entry.declaration_span = Some(span);
+        entry.constructor_owner = owner;
     }
 
-    fn direct_binding_entry(&self, root: &str) -> Option<&DirectBindingTarget> {
+    pub(super) fn direct_binding_entry(&self, root: &str) -> Option<&DirectBindingTarget> {
         for (targets, roots) in self
             .scoped_direct_object_binding_targets
             .iter()
@@ -81,7 +84,7 @@ impl ModuleInfoExtractor {
         self.module_direct_object_binding_targets.get(root)
     }
 
-    fn direct_binding_entry_mut(&mut self, root: &str) -> &mut DirectBindingTarget {
+    pub(super) fn direct_binding_entry_mut(&mut self, root: &str) -> &mut DirectBindingTarget {
         if let Some(index) =
             self.direct_object_binding_scope_index(DirectObjectBindingScope::BindingOwner, root)
         {
@@ -95,41 +98,40 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn direct_binding_value(&self, path: &str) -> Option<(usize, &DirectBindingTarget)> {
+    pub(super) fn direct_binding_value(&self, path: &str) -> Option<(usize, &DirectBindingTarget)> {
         let mut parts = path.split('.');
         let root = self.direct_binding_entry(parts.next()?)?;
         let mut value = root.value?;
         for property in parts {
-            value = *self
-                .direct_binding_values
-                .get(value)?
-                .properties
-                .get(property)?;
+            value = *self.projection_value_view(value).properties.get(property)?;
         }
         Some((value, root))
     }
 
-    fn ensure_direct_binding_value(&mut self, path: &str) -> Option<usize> {
+    pub(super) fn ensure_direct_binding_value(&mut self, path: &str) -> Option<usize> {
         let mut parts = path.split('.');
         let mut value = self.direct_binding_entry(parts.next()?)?.value?;
         for property in parts {
-            if let Some(child) = self.direct_binding_values[value].properties.get(property) {
+            let view = self.projection_view_id(value);
+            if let Some(child) = self.direct_binding_values[view].properties.get(property) {
                 value = *child;
                 continue;
             }
-            let parent = &self.direct_binding_values[value];
+            let parent = &self.direct_binding_values[view];
+            let constructor_owner = parent.constructor_owner;
             if parent.unknown_properties {
                 return None;
             }
             if let Some(pending) = parent.pending.clone() {
                 let (result, path) = match pending {
-                    PendingBindingValue::Call { .. } => (value, property.to_string()),
+                    PendingBindingValue::Call { .. } => (view, property.to_string()),
                     PendingBindingValue::Projection { result, path } => {
                         (result, format!("{path}.{property}"))
                     }
                 };
                 let child = self.direct_binding_values.len();
                 self.direct_binding_values.push(DirectBindingValue {
+                    constructor_owner,
                     pending: Some(PendingBindingValue::Projection {
                         result,
                         path: path.clone(),
@@ -139,33 +141,43 @@ impl ModuleInfoExtractor {
                 self.direct_binding_values[result]
                     .initial_projections
                     .insert(path, child);
-                self.direct_binding_values[value]
+                self.direct_binding_values[view]
                     .properties
                     .insert(property.to_string(), child);
                 value = child;
                 continue;
             }
             let proof = parent.proof.as_ref()?;
-            let super::super::TypedPropertyExpansion::Resolved(
-                target,
-                Some(origin),
-                mut requirements,
-            ) = self.expand_typed_property_compound(
-                &format!("{}.{property}", proof.target_name),
-                Some(proof.target_reference_span),
-            )
+            let super::super::TypedPropertyExpansion::Resolved(target, Some(origin), requirements) =
+                self.expand_typed_property_compound(
+                    &format!("{}.{property}", proof.target_name),
+                    Some(proof.target_reference_span),
+                )
             else {
                 return None;
             };
-            requirements.extend(proof.requirements.iter().copied());
+            let requirements = self.import_requirements_before(&requirements, proof.requirements);
+            let condition_work = proof.builtin_containers.len();
+            if !self.charge_binding_conditions(condition_work) {
+                return None;
+            }
+            let builtin_containers = std::sync::Arc::clone(
+                &self
+                    .projection_value_view(value)
+                    .proof
+                    .as_ref()?
+                    .builtin_containers,
+            );
             let child = self.direct_binding_values.len();
             self.direct_binding_values
                 .push(DirectBindingValue::class(BindingClassProof {
+                    builtin_containers,
                     target_name: target,
                     target_reference_span: origin,
                     requirements,
                 }));
-            self.direct_binding_values[value]
+            self.direct_binding_values[child].constructor_owner = constructor_owner;
+            self.direct_binding_values[view]
                 .properties
                 .insert(property.to_string(), child);
             value = child;
@@ -173,13 +185,14 @@ impl ModuleInfoExtractor {
         Some(value)
     }
 
-    fn set_direct_binding_value(&mut self, path: &str, value: DirectBindingValue) {
+    fn set_direct_binding_value(&mut self, path: &str, mut value: DirectBindingValue) {
+        value.constructor_owner = self.active_constructor_function;
         let id = self.direct_binding_values.len();
         self.direct_binding_values.push(value);
         self.attach_direct_binding_value(path, id);
     }
 
-    fn attach_direct_binding_value(&mut self, path: &str, value: usize) {
+    pub(super) fn attach_direct_binding_value(&mut self, path: &str, value: usize) {
         let qualified = self.qualify_binding_value_path(path);
         let path = qualified.as_str();
         self.direct_object_binding_generation =
@@ -196,14 +209,23 @@ impl ModuleInfoExtractor {
         }
         if let Some((parent, property)) = path.rsplit_once('.') {
             if let Some(parent_id) = self.ensure_direct_binding_value(parent) {
+                let Some(parent_id) =
+                    self.prepare_constructor_property_write(parent_id, property, value)
+                else {
+                    return;
+                };
+                if self.is_projection_barrier(parent_id) {
+                    return;
+                }
                 self.direct_binding_values[parent_id]
                     .properties
                     .insert(property.to_string(), value);
             }
         } else {
+            self.prepare_constructor_root_write(path, value);
             let entry = self.direct_binding_entry_mut(path);
             entry.value = Some(value);
-            entry.requirements.clear();
+            entry.requirements = super::super::BindingRequirements::Empty;
         }
     }
 
@@ -218,17 +240,17 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn invalidate_direct_binding_proof(&mut self, path: &str, unknown_key: bool) {
-        if !self.capture_subclass_provenance {
+        if !self.capture_subclass_provenance && self.direct_binding_value(path).is_none() {
             return;
         }
         let qualified = self.qualify_binding_value_path(path);
         let path = qualified.as_str();
         if unknown_key {
             if let Some(id) = self.ensure_direct_binding_value(path) {
-                let value = &mut self.direct_binding_values[id];
-                value.properties.clear();
-                value.unknown_properties = true;
-                value.iteration_proof = None;
+                if self.is_projection_barrier(self.projection_view_id(id)) {
+                    return;
+                }
+                self.invalidate_projection_slot(id, None);
             }
             self.direct_object_binding_generation =
                 self.direct_object_binding_generation.saturating_add(1);
@@ -250,9 +272,10 @@ impl ModuleInfoExtractor {
         let path = qualified.as_str();
         let value = origin.map_or_else(DirectBindingValue::unknown, |span| {
             DirectBindingValue::class(BindingClassProof {
+                builtin_containers: std::sync::Arc::default(),
                 target_name: target.to_string(),
                 target_reference_span: span,
-                requirements: Vec::new(),
+                requirements: super::super::BindingRequirements::Empty,
             })
         });
         if let Some((parent, _)) = path.rsplit_once('.')
@@ -274,9 +297,10 @@ impl ModuleInfoExtractor {
         self.set_direct_binding_value(path, DirectBindingValue::default());
     }
 
-    fn record_new_binding_proof(&mut self, path: &str, expression: &NewExpression<'_>) {
+    pub(super) fn record_new_binding_proof(&mut self, path: &str, expression: &NewExpression<'_>) {
         if let Expression::Identifier(reference) = &expression.callee {
             self.record_binding_class_proof(path, reference.name.as_str(), Some(reference.span));
+            self.retain_new_constructor(path, reference);
         } else {
             self.invalidate_direct_binding_proof(path, false);
         }
@@ -288,7 +312,7 @@ impl ModuleInfoExtractor {
         target: &str,
         reference: Option<Span>,
     ) {
-        if !self.capture_subclass_provenance {
+        if !self.capture_subclass_provenance && self.direct_binding_value(source).is_none() {
             return;
         }
         let qualified = self.qualify_this_scope(source);
@@ -305,20 +329,23 @@ impl ModuleInfoExtractor {
         let Some(entry) = self.direct_binding_entry(root) else {
             return;
         };
-        let mut requirements = entry.requirements.clone();
+        let mut requirements = entry.requirements;
         if !source.starts_with("this@") {
             let (Some(reference), Some(declaration)) = (reference, entry.declaration_span) else {
                 self.invalidate_direct_binding_proof(target, false);
                 return;
             };
-            requirements.push((reference, declaration));
+            requirements = self.append_requirement(requirements, (reference, declaration));
         }
         self.attach_direct_binding_value(target, id);
         if target.contains('.') {
             // Property aliases retain source admission with the value being saved.
-            self.direct_binding_values[id]
-                .requirements
-                .extend(requirements);
+            let id = self.projection_view_id(id);
+            if self.is_projection_barrier(id) {
+                return;
+            }
+            self.direct_binding_values[id].requirements =
+                self.concat_requirements(self.direct_binding_values[id].requirements, requirements);
         } else {
             self.direct_binding_entry_mut(target).requirements = requirements;
         }
@@ -326,10 +353,10 @@ impl ModuleInfoExtractor {
 
     pub(super) fn binding_iteration_target(&self, path: &str, map_only: bool) -> Option<String> {
         let (id, _) = self.direct_binding_value(path)?;
-        if map_only && !self.direct_binding_values[id].iteration_is_map {
+        if map_only && !self.projection_value_view(id).iteration_is_map {
             return None;
         }
-        self.direct_binding_values[id]
+        self.projection_value_view(id)
             .iteration_proof
             .as_ref()
             .map(|proof| proof.target_name.clone())
@@ -349,9 +376,10 @@ impl ModuleInfoExtractor {
             binding,
             DirectBindingValue {
                 iteration_proof: origin.map(|span| BindingClassProof {
+                    builtin_containers: std::sync::Arc::default(),
                     target_name: target.to_string(),
                     target_reference_span: span,
-                    requirements: Vec::new(),
+                    requirements: super::super::BindingRequirements::Empty,
                 }),
                 iteration_is_map: is_map,
                 ..DirectBindingValue::default()
@@ -364,16 +392,19 @@ impl ModuleInfoExtractor {
         source: &str,
         reference: Option<Span>,
     ) -> Option<BindingClassProof> {
-        let (id, entry) = self.direct_binding_value(source)?;
-        let mut proof = self.direct_binding_values[id].iteration_proof.clone()?;
-        proof
-            .requirements
-            .extend(entry.requirements.iter().copied());
-        if !source.starts_with("this@") {
-            proof
-                .requirements
-                .push((reference?, entry.declaration_span?));
-        }
+        let (id, _) = self.direct_binding_value(source)?;
+        let (_, entry) = self.direct_binding_value(source)?;
+        let value = self.projection_value_view(id);
+        let mut proof = value.iteration_proof.clone()?;
+        let condition = if source.starts_with("this@") {
+            None
+        } else {
+            Some((reference?, entry.declaration_span?))
+        };
+        proof.requirements = self.combine_requirements(
+            &[proof.requirements, value.requirements, entry.requirements],
+            condition.as_slice(),
+        );
         Some(proof)
     }
 
@@ -403,9 +434,14 @@ impl ModuleInfoExtractor {
         expected: Span,
     ) {
         if let Some((id, _)) = self.direct_binding_value(path)
-            && let Some(proof) = &mut self.direct_binding_values[id].proof
+            && let id = self.projection_view_id(id)
+            && !self.is_projection_barrier(id)
+            && let Some(proof) = &self.direct_binding_values[id].proof
         {
-            proof.requirements.push((reference, expected));
+            let requirements = self.append_requirement(proof.requirements, (reference, expected));
+            if let Some(proof) = &mut self.direct_binding_values[id].proof {
+                proof.requirements = requirements;
+            }
         }
     }
 
@@ -417,18 +453,17 @@ impl ModuleInfoExtractor {
         let id = self.ensure_direct_binding_value(path)?;
         let root = path.split_once('.').map_or(path, |(root, _)| root);
         let entry = self.direct_binding_entry(root)?;
-        let mut proof = self.direct_binding_values[id].proof.clone()?;
-        proof
-            .requirements
-            .extend(self.direct_binding_values[id].requirements.iter().copied());
-        proof
-            .requirements
-            .extend(entry.requirements.iter().copied());
-        if !path.starts_with("this@") {
-            proof
-                .requirements
-                .push((reference?, entry.declaration_span?));
-        }
+        let value = self.projection_value_view(id);
+        let mut proof = value.proof.clone()?;
+        let condition = if path.starts_with("this@") {
+            None
+        } else {
+            Some((reference?, entry.declaration_span?))
+        };
+        proof.requirements = self.combine_requirements(
+            &[proof.requirements, value.requirements, entry.requirements],
+            condition.as_slice(),
+        );
         Some(proof)
     }
 
@@ -466,9 +501,11 @@ impl ModuleInfoExtractor {
         awaited: bool,
     ) -> Option<usize> {
         let (producer, _) = self.direct_binding_value(path)?;
+        let producer = self.projection_view_id(producer);
         self.direct_binding_values[producer].producer.as_ref()?;
         let id = self.direct_binding_values.len();
         self.direct_binding_values.push(DirectBindingValue {
+            constructor_owner: self.active_constructor_function,
             pending: Some(PendingBindingValue::Call {
                 producer,
                 reference,
@@ -503,9 +540,10 @@ impl ModuleInfoExtractor {
             &mut self.direct_binding_values[id].pending
         {
             *result = Some(BindingClassProof {
+                builtin_containers: std::sync::Arc::default(),
                 target_name: name.to_string(),
                 target_reference_span: reference,
-                requirements: Vec::new(),
+                requirements: super::super::BindingRequirements::Empty,
             });
         }
     }
@@ -709,6 +747,9 @@ impl ModuleInfoExtractor {
             }
         }
         let result = DirectObjectBindingBranch {
+            proof_writes: branch.proof_writes,
+            constructor_writes: branch.constructor_writes,
+            projection_writes: branch.projection_writes,
             update_overwrites: branch.update_overwrites,
             targets: std::mem::take(&mut self.scoped_direct_object_binding_targets[branch.index]),
             paths_by_root: std::mem::take(
@@ -716,19 +757,6 @@ impl ModuleInfoExtractor {
             ),
         };
         self.pop_direct_object_binding_scope();
-        // Possible ordinary targets are a union, not proof of one value identity.
-        // Never restore arena values after a branch has invalidated them.
-        for path in branch.proof_writes {
-            self.invalidate_direct_binding_proof(&path, false);
-            let root = path.split_once('.').map_or(path.as_str(), |(root, _)| root);
-            let owner = self
-                .direct_object_binding_scope_index(DirectObjectBindingScope::BindingOwner, root);
-            if let Some(parent) = self.direct_object_binding_branch_scopes.last_mut()
-                && owner == Some(parent.index)
-            {
-                parent.proof_writes.insert(path);
-            }
-        }
         result
     }
 
@@ -742,6 +770,24 @@ impl ModuleInfoExtractor {
         consequent: &DirectObjectBindingBranch,
         alternate: &DirectObjectBindingBranch,
     ) {
+        let constructors = self.join_constructor_outcomes(consequent, alternate);
+        for path in consequent
+            .proof_writes
+            .iter()
+            .chain(&alternate.proof_writes)
+        {
+            self.invalidate_direct_binding_proof(path, false);
+            let root = path.split_once('.').map_or(path.as_str(), |(root, _)| root);
+            let owner = self
+                .direct_object_binding_scope_index(DirectObjectBindingScope::BindingOwner, root);
+            if let Some(parent) = self.direct_object_binding_branch_scopes.last_mut()
+                && owner == Some(parent.index)
+            {
+                parent.proof_writes.insert(path.clone());
+            }
+        }
+        self.join_projection_writes(consequent, alternate);
+        self.install_constructor_outcomes(constructors);
         self.join_loop_update_overwrites(consequent, alternate);
         let roots: FxHashSet<_> = consequent
             .paths_by_root
@@ -862,7 +908,10 @@ impl ModuleInfoExtractor {
         reference: Option<Span>,
         member: &str,
     ) -> bool {
-        if let Some(proof) = self.direct_binding_class_proof(path, reference) {
+        let strict = self.direct_binding_class_proof(path, reference);
+        let alternatives =
+            self.capture_constructor_alternatives(path, reference, member, strict.as_ref());
+        if let Some(proof) = strict {
             self.pending_subclass_member_accesses
                 .push(PendingSubclassMemberAccess {
                     proof: SubclassAccessProof::Known(proof),
@@ -871,21 +920,22 @@ impl ModuleInfoExtractor {
             return true;
         }
         let Some(id) = self.ensure_direct_binding_value(path) else {
-            return false;
+            return alternatives;
         };
+        let id = self.projection_view_id(id);
         if self.direct_binding_values[id].pending.is_none() {
-            return false;
+            return alternatives;
         }
         let root = path.split_once('.').map_or(path, |(root, _)| root);
         let Some(entry) = self.direct_binding_entry(root) else {
             return false;
         };
-        let mut requirements = entry.requirements.clone();
+        let mut requirements = entry.requirements;
         if !path.starts_with("this@") {
             let (Some(reference), Some(declaration)) = (reference, entry.declaration_span) else {
                 return false;
             };
-            requirements.push((reference, declaration));
+            requirements = self.append_requirement(requirements, (reference, declaration));
         }
         self.pending_subclass_member_accesses
             .push(PendingSubclassMemberAccess {
@@ -918,10 +968,11 @@ impl ModuleInfoExtractor {
                     || self.factory_return_functions.get(&producer.name)
                         == Some(&proof.target_name))
             {
-                proof.requirements.push(requirement);
-                proof
-                    .requirements
-                    .extend(self.direct_binding_values[id].requirements.iter().copied());
+                proof.requirements = self.append_then_concat_requirements(
+                    proof.requirements,
+                    &[requirement],
+                    self.direct_binding_values[id].requirements,
+                );
                 self.direct_binding_values[id].proof = Some(proof);
             }
             if let Some(shape) = self.factory_return_object_shapes.get(&producer.name) {
@@ -941,12 +992,10 @@ impl ModuleInfoExtractor {
                     };
                     if matches!(&self.direct_binding_values[child].pending, Some(PendingBindingValue::Projection { result, path: original }) if *result == id && *original == path)
                     {
-                        proof.requirements.push(requirement);
-                        proof.requirements.extend(
-                            self.direct_binding_values[child]
-                                .requirements
-                                .iter()
-                                .copied(),
+                        proof.requirements = self.append_then_concat_requirements(
+                            proof.requirements,
+                            &[requirement],
+                            self.direct_binding_values[child].requirements,
                         );
                         self.direct_binding_values[child].proof = Some(proof);
                         self.direct_binding_values[child].pending = None;
@@ -1593,13 +1642,13 @@ impl ModuleInfoExtractor {
         match value {
             Expression::NewExpression(new_expression) => {
                 if let Some(class_name) = self.direct_new_expression_class_name(new_expression) {
-                    self.record_new_binding_proof(binding_path, new_expression);
                     self.record_direct_object_binding_target(
                         root_name,
                         binding_path.to_string(),
                         class_name,
                         DirectObjectBindingScope::BindingOwner,
                     );
+                    self.record_new_binding_proof(binding_path, new_expression);
                 }
             }
             Expression::ObjectExpression(object) => {

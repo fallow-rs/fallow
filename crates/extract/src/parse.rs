@@ -1540,6 +1540,7 @@ pub struct SemanticUsage {
     pub(crate) subclass_binding_reference_spans: rustc_hash::FxHashMap<Span, Span>,
     pub(crate) subclass_namespace_reference_spans: rustc_hash::FxHashSet<Span>,
     pub(crate) subclass_immutable_reference_spans: rustc_hash::FxHashSet<Span>,
+    pub(crate) builtin_container_reference_spans: rustc_hash::FxHashSet<Span>,
     pub(crate) imported_call_reference_spans: rustc_hash::FxHashSet<Span>,
     /// Value references to runtime ESM import bindings that are not admitted
     /// call sites, plus admitted calls that initialize a top-level declarator.
@@ -1578,6 +1579,7 @@ pub fn compute_semantic_usage_for_extractor(
         std::mem::take(&mut semantic_usage.subclass_binding_reference_spans),
         std::mem::take(&mut semantic_usage.subclass_namespace_reference_spans),
         std::mem::take(&mut semantic_usage.subclass_immutable_reference_spans),
+        std::mem::take(&mut semantic_usage.builtin_container_reference_spans),
     );
     extractor.resolve_imported_call_sites(&semantic_usage.imported_call_reference_spans);
     extractor.set_import_binding_references(std::mem::take(
@@ -1637,6 +1639,7 @@ struct SubclassReferenceSpans {
     bindings: rustc_hash::FxHashMap<Span, Span>,
     namespaces: rustc_hash::FxHashSet<Span>,
     immutable: rustc_hash::FxHashSet<Span>,
+    builtin_containers: rustc_hash::FxHashSet<Span>,
 }
 
 fn subclass_reference_spans(
@@ -1682,10 +1685,26 @@ fn subclass_reference_spans(
         }
     }
 
+    let mut builtin_containers = FxHashSet::default();
+    for (name, references) in scoping.root_unresolved_references() {
+        if !matches!(name.as_str(), "Array" | "ReadonlyArray") {
+            continue;
+        }
+        for reference in references {
+            let reference = scoping.get_reference(*reference);
+            if let AstKind::IdentifierReference(identifier) =
+                semantic.nodes().kind(reference.node_id())
+                && candidates.contains(&identifier.span)
+            {
+                builtin_containers.insert(identifier.span);
+            }
+        }
+    }
     SubclassReferenceSpans {
         bindings: subclass_binding_reference_spans,
         namespaces: subclass_namespace_reference_spans,
         immutable: subclass_immutable_reference_spans,
+        builtin_containers,
     }
 }
 
@@ -1773,11 +1792,7 @@ fn compute_semantic_usage_with_candidates(
         }
     }
 
-    let SubclassReferenceSpans {
-        bindings: subclass_binding_reference_spans,
-        namespaces: subclass_namespace_reference_spans,
-        immutable: subclass_immutable_reference_spans,
-    } = subclass_reference_spans(&semantic, imports, candidates.subclass_bindings);
+    let subclass = subclass_reference_spans(&semantic, imports, candidates.subclass_bindings);
 
     let imported_call_reference_spans =
         imported_call_reference_spans(&semantic, imports, candidates.imported_calls);
@@ -1797,9 +1812,10 @@ fn compute_semantic_usage_with_candidates(
         declaration_merges,
         mock_api_reference_spans,
         module_binding_reference_spans,
-        subclass_binding_reference_spans,
-        subclass_namespace_reference_spans,
-        subclass_immutable_reference_spans,
+        subclass_binding_reference_spans: subclass.bindings,
+        subclass_namespace_reference_spans: subclass.namespaces,
+        subclass_immutable_reference_spans: subclass.immutable,
+        builtin_container_reference_spans: subclass.builtin_containers,
         imported_call_reference_spans,
         import_binding_references,
         unreferenced_import_equals_bindings: import_equals.unreferenced,

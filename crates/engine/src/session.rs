@@ -1789,6 +1789,92 @@ mod tests {
         (project, session)
     }
 
+    fn class_projection_session(root: &Path) -> AnalysisSession {
+        AnalysisSession::load_default_with_config(root, |config| {
+            config.rules.unused_class_members = fallow_config::Severity::Error;
+        })
+    }
+
+    fn session_class_projection(session: &AnalysisSession) -> Vec<String> {
+        let analysis = session.analyze_dead_code().expect("class member analysis");
+        assert!(analysis.results.unresolved_imports.is_empty());
+        let mut members: Vec<_> = analysis
+            .results
+            .unused_class_members
+            .iter()
+            .filter(|finding| finding.member.parent_name == "C")
+            .map(|finding| finding.member.member_name.clone())
+            .collect();
+        members.sort();
+        members
+    }
+
+    #[test]
+    fn indexed_source_proof_removal_and_restoration_matches_fresh_sessions() {
+        for (label, present, absent, access) in [
+            (
+                "literal",
+                "const items = [new C()];",
+                "const items = [new Other()];",
+                "items[0].used();",
+            ),
+            (
+                "vue",
+                "import { computed } from 'vue';const items = computed(() => [new C()]);",
+                "import { computed } from 'foreign';const items = computed(() => [new C()]);",
+                "items.value[0].used();",
+            ),
+        ] {
+            let project = tempfile::tempdir().expect("session fixture");
+            let root = project.path();
+            std::fs::create_dir(root.join("src")).expect("source directory");
+            std::fs::write(root.join("package.json"),
+                r#"{"name":"session-array-proof","type":"module","main":"src/index.ts","dependencies":{"vue":"*","foreign":"*"}}"#)
+                .expect("package manifest");
+            std::fs::write(root.join("src/classes.ts"),
+                "export class C { control() {} used() {} dead() {} } export class Other { used() {} }")
+                .expect("classes");
+            for provider in ["vue", "foreign"] {
+                let directory = root.join("node_modules").join(provider);
+                std::fs::create_dir_all(&directory).expect("provider directory");
+                std::fs::write(
+                    directory.join("package.json"),
+                    format!(r#"{{"name":"{provider}","type":"module","main":"index.js"}}"#),
+                )
+                .expect("provider package");
+                std::fs::write(
+                    directory.join("index.js"),
+                    "export const computed = getter => ({ get value() { return getter(); } });",
+                )
+                .expect("provider source");
+            }
+            let source = |producer: &str| {
+                format!(
+                    "import {{ C, Other }} from './classes';new C().control();\n{producer}\n{access}\n"
+                )
+            };
+            let original = source(present);
+            let path = root.join("src/index.ts");
+            std::fs::write(&path, &original).expect("initial source");
+            let mut retained = class_projection_session(root);
+            for (phase, content, expected) in [
+                ("initial", original.as_str(), vec!["dead"]),
+                ("removed", source(absent).as_str(), vec!["dead", "used"]),
+                ("restored", original.as_str(), vec!["dead"]),
+            ] {
+                std::fs::write(&path, content).expect("update proof source");
+                retained.refresh_discovery();
+                let actual = session_class_projection(&retained);
+                assert_eq!(actual, expected, "{label}: {phase}");
+                assert_eq!(
+                    actual,
+                    session_class_projection(&class_projection_session(root)),
+                    "{label}: retained and fresh differ after {phase}"
+                );
+            }
+        }
+    }
+
     /// A cancelled session reports the failure and names the boundary it
     /// stopped at, so a caller can tell a stopped run from a broken one.
     #[test]

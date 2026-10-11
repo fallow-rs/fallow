@@ -33,6 +33,10 @@ mod bundler_entry_object_map;
 mod bundler_nested_config_entry;
 #[path = "integration_test/caching.rs"]
 mod caching;
+#[path = "integration_test/class_value_projections.rs"]
+mod class_value_projections;
+#[path = "integration_test/class_value_source_shapes.rs"]
+mod class_value_source_shapes;
 #[path = "integration_test/css_in_js_styled.rs"]
 mod css_in_js_styled;
 #[path = "integration_test/css_modules.rs"]

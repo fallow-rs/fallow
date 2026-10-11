@@ -1,5 +1,9 @@
 mod declarations;
 mod helpers;
+mod requirements;
+
+use requirements::{BindingRequirements, RequirementArena};
+use std::cell::{Cell, RefCell};
 pub(crate) mod react;
 mod visit_impl;
 
@@ -74,11 +78,13 @@ struct SubclassDeclaration {
     super_reference_span: Option<Span>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct BindingClassProof {
+    // Observations share admission conditions without new condition copies after refusal.
+    builtin_containers: std::sync::Arc<[Span]>,
     target_name: String,
     target_reference_span: Span,
-    requirements: Vec<(Span, Span)>,
+    requirements: BindingRequirements,
 }
 
 #[derive(Debug, Clone)]
@@ -98,11 +104,12 @@ enum DirectBindingOwner {
 struct DirectBindingTarget {
     names: FxHashSet<String>,
     declaration_span: Option<Span>,
+    constructor_owner: Option<Span>,
     value: Option<usize>,
     initial_producer_value: Option<usize>,
     /// Known function-body assignments remain possible targets for this older slot.
     possible_assignment_owner: Option<DirectBindingOwner>,
-    requirements: Vec<(Span, Span)>,
+    requirements: BindingRequirements,
 }
 
 impl FromIterator<String> for DirectBindingTarget {
@@ -135,11 +142,27 @@ impl<'a> IntoIterator for &'a DirectBindingTarget {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ConstructorWriteTarget {
+    Property { parent: usize, property: String },
+    Root { path: String, declaration: Span },
+}
+
+#[derive(Debug, Clone, Default)]
+struct ConstructorWrite {
+    refused: bool,
+    input: std::sync::Arc<[BindingClassProof]>,
+    output: std::sync::Arc<[BindingClassProof]>,
+}
+
 #[derive(Debug, Default)]
 struct DirectObjectBindingBranch {
+    proof_writes: FxHashSet<String>,
     targets: FxHashMap<String, DirectBindingTarget>,
     paths_by_root: FxHashMap<String, FxHashSet<String>>,
     update_overwrites: FxHashMap<DirectBindingOwner, FxHashSet<String>>,
+    projection_writes: FxHashMap<usize, FxHashSet<Option<String>>>,
+    constructor_writes: FxHashMap<ConstructorWriteTarget, ConstructorWrite>,
 }
 
 #[derive(Debug, Default)]
@@ -147,6 +170,9 @@ struct DirectObjectBindingBranchScope {
     index: usize,
     proof_writes: FxHashSet<String>,
     update_overwrites: FxHashMap<DirectBindingOwner, FxHashSet<String>>,
+    projection_views: FxHashMap<usize, usize>,
+    projection_writes: FxHashMap<usize, FxHashSet<Option<String>>>,
+    constructor_writes: FxHashMap<ConstructorWriteTarget, ConstructorWrite>,
 }
 
 #[derive(Debug)]
@@ -167,13 +193,19 @@ struct LoopUpdateObservations {
 
 #[derive(Debug, Clone, Default)]
 struct DirectBindingValue {
+    constructor_owner: Option<Span>,
+    constructor_alternatives: std::sync::Arc<[BindingClassProof]>,
     proof: Option<BindingClassProof>,
     producer: Option<BindingProducer>,
     pending: Option<PendingBindingValue>,
     initial_projections: FxHashMap<String, usize>,
-    requirements: Vec<(Span, Span)>,
+    requirements: BindingRequirements,
     iteration_proof: Option<BindingClassProof>,
     iteration_is_map: bool,
+    array_element: Option<usize>,
+    numeric_contract: bool,
+    projection_contract: bool,
+    projection_path: String,
     properties: FxHashMap<String, usize>,
     unknown_properties: bool,
 }
@@ -224,8 +256,15 @@ enum SubclassAccessProof {
     Known(BindingClassProof),
     Value {
         id: usize,
-        requirements: Vec<(Span, Span)>,
+        requirements: BindingRequirements,
     },
+}
+
+#[derive(Debug, Clone)]
+struct ProjectedMemberAccess {
+    proof: BindingClassProof,
+    property_path: String,
+    member: String,
 }
 
 #[derive(Debug, Clone)]
@@ -407,6 +446,8 @@ enum TypedPropertyExpansion {
     CrossModule {
         type_name: String,
         property_path: String,
+        origin: Option<Span>,
+        requirements: Vec<(Span, Span)>,
     },
     /// Not an interface/alias hop (e.g. a local-class compound handled by
     /// `instance_bindings`); leave the compound access untouched.
@@ -715,9 +756,18 @@ pub(crate) struct ModuleInfoExtractor {
     independent_this_depth: usize,
     class_method_function_span: Option<Span>,
     pending_subclass_member_accesses: Vec<PendingSubclassMemberAccess>,
+    projected_member_accesses: Vec<ProjectedMemberAccess>,
+    projection_retained_work: usize,
+    possible_constructor_work: usize,
+    active_constructor_function: Option<Span>,
+    projection_exhausted: Cell<bool>,
+    binding_requirements: RefCell<RequirementArena>,
+    projection_unknown_value: Option<usize>,
+    projection_array_returns: FxHashMap<Span, (usize, Span)>,
     subclass_binding_references: FxHashMap<Span, Span>,
     subclass_namespace_references: FxHashSet<Span>,
     subclass_immutable_references: FxHashSet<Span>,
+    builtin_container_references: FxHashSet<Span>,
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
     block_depth: u32,
     function_depth: u32,
@@ -1171,47 +1221,78 @@ pub(crate) struct SecurityPathSinkBinding {
 
 impl ModuleInfoExtractor {
     pub(crate) fn subclass_reference_candidates(&self) -> FxHashSet<Span> {
-        let mut spans = FxHashSet::default();
-        let mut add_proof = |proof: &BindingClassProof| {
+        let mut spans = self.requirement_reference_candidates();
+        let add_proof = |spans: &mut FxHashSet<Span>, proof: &BindingClassProof| {
             spans.insert(proof.target_reference_span);
-            spans.extend(proof.requirements.iter().map(|(reference, _)| *reference));
+            spans.extend(proof.builtin_containers.iter().copied());
         };
+        for access in &self.projected_member_accesses {
+            add_proof(&mut spans, &access.proof);
+            match self.expand_typed_property_compound(
+                &format!("{}.{}", access.proof.target_name, access.property_path),
+                Some(access.proof.target_reference_span),
+            ) {
+                TypedPropertyExpansion::Resolved(
+                    target_name,
+                    Some(target_reference_span),
+                    requirements,
+                )
+                | TypedPropertyExpansion::CrossModule {
+                    type_name: target_name,
+                    origin: Some(target_reference_span),
+                    requirements,
+                    ..
+                } => {
+                    add_proof(
+                        &mut spans,
+                        &BindingClassProof {
+                            builtin_containers: std::sync::Arc::clone(
+                                &access.proof.builtin_containers,
+                            ),
+                            target_name,
+                            target_reference_span,
+                            requirements: BindingRequirements::Empty,
+                        },
+                    );
+                    spans.extend(requirements.iter().map(|(reference, _)| *reference));
+                }
+                _ => {}
+            }
+        }
         for value in &self.direct_binding_values {
             if let Some(proof) = &value.proof {
-                add_proof(proof);
+                add_proof(&mut spans, proof);
+            }
+            if let Some(proof) = &value.iteration_proof {
+                add_proof(&mut spans, proof);
             }
             if let Some(PendingBindingValue::Call {
                 result: Some(proof),
                 ..
             }) = &value.pending
             {
-                add_proof(proof);
+                add_proof(&mut spans, proof);
             }
             if let Some(producer) = &value.producer {
                 if let Some(proof) = &producer.result {
-                    add_proof(proof);
+                    add_proof(&mut spans, proof);
                 }
                 for (_, proof) in &producer.shape {
-                    add_proof(proof);
+                    add_proof(&mut spans, proof);
                 }
             }
         }
         for access in &self.pending_subclass_member_accesses {
             if let SubclassAccessProof::Known(proof) = &access.proof {
-                add_proof(proof);
-            }
-        }
-        for access in &self.pending_subclass_member_accesses {
-            if let SubclassAccessProof::Value { requirements, .. } = &access.proof {
-                spans.extend(requirements.iter().map(|(reference, _)| *reference));
+                add_proof(&mut spans, proof);
             }
         }
         for value in &self.direct_binding_values {
-            spans.extend(value.requirements.iter().map(|(reference, _)| *reference));
             if let Some(PendingBindingValue::Call { reference, .. }) = &value.pending {
                 spans.insert(*reference);
             }
         }
+
         spans.extend(
             self.subclass_declarations
                 .values()
@@ -1225,10 +1306,13 @@ impl ModuleInfoExtractor {
         references: FxHashMap<Span, Span>,
         namespace_references: FxHashSet<Span>,
         immutable_references: FxHashSet<Span>,
+        builtin_container_references: FxHashSet<Span>,
     ) {
         self.subclass_binding_references = references;
+        self.install_requirement_provenance();
         self.subclass_namespace_references = namespace_references;
         self.subclass_immutable_references = immutable_references;
+        self.builtin_container_references = builtin_container_references;
     }
 
     pub(crate) fn imported_call_reference_candidates(&self) -> FxHashSet<Span> {
@@ -1812,6 +1896,7 @@ impl ModuleInfoExtractor {
                     TypedPropertyExpansion::CrossModule {
                         type_name,
                         property_path,
+                        ..
                     } => self.record_typed_property_member_fact(
                         type_name,
                         property_path,
@@ -2903,50 +2988,67 @@ impl ModuleInfoExtractor {
     /// Propagate only references admitted against the actual class or instance binding.
     fn propagate_local_subclass_member_accesses(&mut self) {
         for access in std::mem::take(&mut self.pending_subclass_member_accesses) {
-            let Some(class_name) = self.subclass_receiver_class(&access) else {
-                continue;
-            };
-            let Some((base, heritage_span)) = self.resolve_local_subclass_base(&class_name) else {
-                continue;
-            };
-            if let Some((namespace_local, class_export_name)) = base.split_once('.') {
-                if class_export_name.contains('.')
-                    || !self.subclass_namespace_references.contains(&heritage_span)
-                {
-                    continue;
-                }
-                self.semantic_facts
-                    .push(SemanticFact::QualifiedClassMemberAccess(
-                        QualifiedClassMemberAccessFact {
-                            namespace_local: namespace_local.to_string(),
-                            class_export_name: class_export_name.to_string(),
-                            member: access.member,
-                        },
-                    ));
-            } else {
-                self.member_accesses.push(MemberAccess {
-                    object: base,
-                    member: access.member,
-                });
-            }
+            self.emit_local_subclass_member_access(&access.proof, &access.member);
         }
     }
 
-    fn subclass_receiver_class(&self, access: &PendingSubclassMemberAccess) -> Option<String> {
-        let proof = match &access.proof {
+    fn emit_local_subclass_member_access(
+        &mut self,
+        proof: &SubclassAccessProof,
+        member: &str,
+    ) -> bool {
+        let Some(class_name) = self.subclass_receiver_class(proof) else {
+            return false;
+        };
+        let Some((base, heritage_span)) = self.resolve_local_subclass_base(&class_name) else {
+            return false;
+        };
+        if let Some((namespace_local, class_export_name)) = base.split_once('.') {
+            if class_export_name.contains('.')
+                || !self.subclass_namespace_references.contains(&heritage_span)
+            {
+                return false;
+            }
+            self.semantic_facts
+                .push(SemanticFact::QualifiedClassMemberAccess(
+                    QualifiedClassMemberAccessFact {
+                        namespace_local: namespace_local.to_string(),
+                        class_export_name: class_export_name.to_string(),
+                        member: member.to_string(),
+                    },
+                ));
+        } else {
+            self.member_accesses.push(MemberAccess {
+                object: base,
+                member: member.to_string(),
+            });
+        }
+        true
+    }
+
+    fn admitted_binding_containers(&self, proof: &BindingClassProof) -> bool {
+        proof
+            .builtin_containers
+            .iter()
+            .all(|span| self.builtin_container_references.contains(span))
+    }
+
+    fn subclass_receiver_class(&self, access: &SubclassAccessProof) -> Option<String> {
+        let proof = match access {
             SubclassAccessProof::Known(proof) => proof.clone(),
             SubclassAccessProof::Value { id, requirements } => {
-                let mut proof = self.direct_binding_values.get(*id)?.proof.clone()?;
-                proof.requirements.extend(requirements.iter().copied());
+                let proof = self.direct_binding_values.get(*id)?.proof.clone()?;
+                if !self.admitted_requirements(*requirements) {
+                    return None;
+                }
                 proof
             }
         };
-        if !self
-            .subclass_immutable_references
-            .contains(&proof.target_reference_span)
-            || !proof.requirements.iter().all(|(reference, expected)| {
-                self.subclass_binding_references.get(reference) == Some(expected)
-            })
+        if !self.admitted_binding_containers(&proof)
+            || !self
+                .subclass_immutable_references
+                .contains(&proof.target_reference_span)
+            || !self.admitted_requirements(proof.requirements)
         {
             return None;
         }
@@ -3020,6 +3122,7 @@ impl ModuleInfoExtractor {
                         TypedPropertyExpansion::CrossModule {
                             type_name,
                             property_path,
+                            ..
                         } => additional_typed_property_facts.push((
                             type_name,
                             property_path,
@@ -3150,6 +3253,8 @@ impl ModuleInfoExtractor {
                 return TypedPropertyExpansion::CrossModule {
                     type_name: current,
                     property_path: remaining[idx..].join("."),
+                    origin: current_origin,
+                    requirements,
                 };
             };
             current = next;
@@ -3346,6 +3451,7 @@ impl ModuleInfoExtractor {
         self.resolve_bound_member_accesses();
         self.complete_binding_producer_calls();
         self.propagate_local_subclass_member_accesses();
+        self.resolve_projected_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
         self.resolve_typed_react_props();

@@ -137,6 +137,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve, for example `{"import": {"types": "...", "default": "..."}}`. A
   `null` export target stays blocked, so a blocked subpath credits no
   plugins.
+- **Class members accessed through known array and tuple elements are now credited.**
+  The analysis tracks indexed receivers and local aliases, including inherited
+  members on local subclasses. Reassigned or shadowed bindings no longer carry
+  stale receiver information. The parse cache version advances to 344 so warm
+  caches use the corrected extraction results.
 - **Local subclasses now credit inherited members through namespace imports.**
   Proven static and instance reads resolve to the declaring class, including
   renamed re-exports. Shadowed receiver bindings no longer hide unused members
