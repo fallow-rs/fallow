@@ -15,6 +15,8 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Read one full HTTP request from `stream`: the head, then the body that the
 /// `content-length` header names.
 pub fn read_request(stream: &mut TcpStream) -> String {
+    // Accepted sockets can inherit a polling listener's nonblocking mode.
+    stream.set_nonblocking(false).expect("set blocking reads");
     stream
         .set_read_timeout(Some(READ_TIMEOUT))
         .expect("set read timeout");
@@ -73,12 +75,14 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
-    use super::{read_message, read_request};
+    use super::{READ_TIMEOUT, read_message, read_request};
 
     const HEAD: &str = "POST /v1/review HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\n";
     const BODY: &str = "{\"ok\":true}";
+    const FRAGMENT_DELAY: Duration = Duration::from_millis(100);
+    const ACCEPT_POLL: Duration = Duration::from_millis(10);
 
     /// A reader that gives back one chunk for each `read` call.
     struct Chunks(VecDeque<Vec<u8>>);
@@ -129,6 +133,56 @@ mod tests {
         );
     }
 
+    fn delayed_request_after_acceptance(explicit_nonblocking: bool) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let mut client =
+            TcpStream::connect(listener.local_addr().expect("stub addr")).expect("connect");
+        client.set_nodelay(true).expect("no delay");
+        let deadline = Instant::now() + READ_TIMEOUT;
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "client was not accepted");
+                    thread::sleep(ACCEPT_POLL);
+                }
+                Err(error) => panic!("accept connected client: {error}"),
+            }
+        };
+        if explicit_nonblocking {
+            stream.set_nonblocking(true).expect("nonblocking stream");
+        }
+        thread::scope(|scope| {
+            scope.spawn(move || {
+                // The header is withheld until acceptance, then arrives after the read starts.
+                thread::sleep(FRAGMENT_DELAY);
+                client.write_all(HEAD.as_bytes()).expect("write head");
+                thread::sleep(FRAGMENT_DELAY);
+                client.write_all(BODY.as_bytes()).expect("write body");
+            });
+            read_request(&mut stream)
+        })
+    }
+
+    #[test]
+    fn reads_a_delayed_request_from_a_nonblocking_listener() {
+        assert_eq!(
+            delayed_request_after_acceptance(false),
+            format!("{HEAD}{BODY}")
+        );
+    }
+
+    #[test]
+    fn reads_a_delayed_request_from_a_nonblocking_stream() {
+        assert_eq!(
+            delayed_request_after_acceptance(true),
+            format!("{HEAD}{BODY}")
+        );
+    }
+
     #[test]
     fn reads_a_body_sent_in_a_second_write_over_tcp() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
@@ -138,7 +192,7 @@ mod tests {
             stream.set_nodelay(true).expect("no delay");
             stream.write_all(HEAD.as_bytes()).expect("write head");
             stream.flush().expect("flush head");
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(FRAGMENT_DELAY);
             stream.write_all(BODY.as_bytes()).expect("write body");
             stream
         });
