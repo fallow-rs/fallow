@@ -3732,7 +3732,6 @@ assert_contains "$GATE_LOG" "::debug::" "gate: unreadable visibility with probe 
 
 rm -rf "$GATE_DIR"
 
-# Enforced prop chains use any touched hop and retain their source anchor.
 PROP_CHECK=$(jq -nc '{total_issues:1,prop_drilling_chains:[{prop:"user",depth:3,effective_severity:"error",hops:[{file:"src/Page.tsx",line:4,component:"Page"},{file:"src/Profile.tsx",line:3,component:"Profile"}]}]}')
 PROP_SCOPED=$(jq --argjson changed '["src/Profile.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_CHECK")
 assert_contains "$(jq -c '[.total_issues,.prop_drilling_chains[0].hops[0].file]' <<< "$PROP_SCOPED")" '[1,"src/Page.tsx"]' "prop scope: downstream changes keep enforced chain and source anchor"
@@ -5245,7 +5244,6 @@ else
   fail "baselined count: a fully baselined bare run passes fail-on-issues" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
 fi
 
-# Advisory prop chains stay outside the raw issue count used by strict jobs.
 for prop_command in dead-code ""; do
   for prop_severity in warn error; do
     prop_total=0

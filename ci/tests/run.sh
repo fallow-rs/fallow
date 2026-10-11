@@ -2173,7 +2173,6 @@ else
   fail "baselined count: a fully baselined bare run passes FALLOW_FAIL_ON_ISSUES" "exit $BASELINED_EXIT"
 fi
 
-# Keep advisory prop chains outside the raw issue count used by strict jobs.
 for prop_command in dead-code ""; do
   for prop_severity in warn error; do
     prop_total=0

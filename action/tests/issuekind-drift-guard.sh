@@ -351,7 +351,6 @@ assert_issuekind_summary_coverage() {
       # Non-dead-code kinds (security, dupes, health, flags) live on other
       # surfaces; only the suppress.rs fallback yields them. Skip, don't fail.
       #
-      # Advisory component-health families do not contribute to raw totals.
       # Native Rust reports and LSP diagnostics cover these opt-in families;
       # frozen jq adapters do not acquire newer renderer contracts.
       case "$id" in

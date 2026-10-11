@@ -1234,7 +1234,6 @@ fn check_tips(env: &Value) -> String {
     tips
 }
 
-/// Port of `summary-check.jq`.
 #[must_use]
 fn prop_drilling_section(env: &Value) -> String {
     let rows = arr(env, "prop_drilling_chains")
