@@ -13,5 +13,5 @@
 ## Not in this change
 
 <!-- Optional. List work that this change leaves for later. Link a tracking
-issue for each item, or write "No follow-up planned." for an intentional
-non-goal. CI fails on a deferral without either. -->
+issue describing each item, or write "No follow-up planned." for an intentional
+non-goal. CI verifies issue references; links to pull requests do not qualify. -->

@@ -105,3 +105,174 @@ test("the script exits 0 for a clean description", () => {
   });
   assert.equal(run.status, 0, run.stderr);
 });
+
+test("bold deferral headings require tracking and stop at the next heading", () => {
+  for (const heading of ["**Not in this change**", "**Follow-ups:**", "__Out of scope__:"]) {
+    const body = `${heading}\n\n- Regex aliases remain open.\n\n**Validation**\n\n- Parser tests pass.`;
+    assert.deepEqual(checkPrDeferrals(body), {
+      ok: false,
+      untracked: ["- Regex aliases remain open."],
+    });
+    assert.deepEqual(checkPrDeferrals(body.replace("remain open.", "remain open (#3320).")), {
+      ok: true,
+    });
+  }
+});
+
+test("work deferred to a future iteration needs tracking", () => {
+  for (const body of [
+    "Regex alias support is deferred to a future iteration.",
+    "Array configs are deferred until the next iteration.",
+  ]) {
+    assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [body] });
+    assert.deepEqual(checkPrDeferrals(`${body} See #3320.`), { ok: true });
+  }
+  assert.deepEqual(
+    checkPrDeferrals("This was deferred to an earlier iteration and is now fixed."),
+    {
+      ok: true,
+    },
+  );
+});
+
+const runWithIssueResponses = (body, responses) =>
+  spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+        import assert from 'node:assert/strict';
+        import { pathToFileURL } from 'node:url';
+        const responses = JSON.parse(process.env.ISSUE_RESPONSES);
+        globalThis.fetch = async (url, options) => {
+          assert.equal(new URL(url).origin, 'https://api.github.com');
+          assert.equal(options.headers.Authorization, 'Bearer test-token');
+          const response = responses[new URL(url).pathname];
+          assert.ok(response, 'unexpected issue request');
+          return new Response(JSON.stringify(response.body), { status: response.status });
+        };
+        process.argv[1] = process.env.CHECK_SCRIPT;
+        await import(pathToFileURL(process.env.CHECK_SCRIPT).href);
+      `,
+    ],
+    {
+      env: {
+        PR_BODY: body,
+        GITHUB_REPOSITORY: "fallow-rs/fallow",
+        GITHUB_TOKEN: "test-token",
+        CHECK_SCRIPT: SCRIPT_PATH,
+        ISSUE_RESPONSES: JSON.stringify(responses),
+      },
+      encoding: "utf8",
+    },
+  );
+
+test("the CLI distinguishes a pull request reference from a tracking issue", () => {
+  const responses = {
+    "/repos/fallow-rs/fallow/issues/3179": {
+      status: 200,
+      body: {
+        number: 3179,
+        html_url: "https://github.com/fallow-rs/fallow/pull/3179",
+        state: "closed",
+        pull_request: { url: "https://api.github.com/repos/fallow-rs/fallow/pulls/3179" },
+      },
+    },
+    "/repos/fallow-rs/fallow/issues/3317": {
+      status: 200,
+      body: {
+        number: 3317,
+        html_url: "https://github.com/fallow-rs/fallow/issues/3317",
+        state: "open",
+      },
+    },
+  };
+  const rejected = runWithIssueResponses(
+    "## Follow-up\n\nRegex aliases remain open. See #3179.",
+    responses,
+  );
+  assert.equal(rejected.status, 1, rejected.stderr);
+  assert.match(rejected.stderr, /Regex aliases remain open/u);
+  const accepted = runWithIssueResponses(
+    "## Follow-up\n\nRegex aliases remain open. See #3317.",
+    responses,
+  );
+  assert.equal(accepted.status, 0, accepted.stderr);
+});
+
+test("the CLI verifies issue URLs and cross-repository references per deferred item", () => {
+  const responses = {
+    "/repos/fallow-rs/fallow-cloud/issues/41": {
+      status: 200,
+      body: {
+        number: 41,
+        html_url: "https://github.com/fallow-rs/fallow-cloud/issues/41",
+        state: "open",
+      },
+    },
+    "/repos/fallow-rs/fallow/issues/3179": {
+      status: 200,
+      body: {
+        number: 3179,
+        html_url: "https://github.com/fallow-rs/fallow/pull/3179",
+        pull_request: {},
+      },
+    },
+  };
+  const body =
+    "## Follow-ups\n\n- Cloud support: fallow-rs/fallow-cloud#41.\n- Regex aliases: https://github.com/fallow-rs/fallow/issues/3179.";
+  const rejected = runWithIssueResponses(body, responses);
+  assert.equal(rejected.status, 1, rejected.stderr);
+  assert.match(rejected.stderr, /Regex aliases/u);
+  assert.doesNotMatch(rejected.stderr, /Cloud support/u);
+  const accepted = runWithIssueResponses(
+    body.replace(
+      "https://github.com/fallow-rs/fallow/issues/3179",
+      "https://github.com/fallow-rs/fallow-cloud/issues/41",
+    ),
+    responses,
+  );
+  assert.equal(accepted.status, 0, accepted.stderr);
+});
+
+test("the CLI distinguishes missing issues from failed verification", () => {
+  for (const [status, body, expectedExit] of [
+    [404, { message: "Not Found" }, 1],
+    [403, { message: "API rate limit exceeded" }, 2],
+    [200, { unexpected: true }, 2],
+  ]) {
+    const run = runWithIssueResponses("This is a separate change (#123).", {
+      "/repos/fallow-rs/fallow/issues/123": { status, body },
+    });
+    assert.equal(run.status, expectedExit, run.stderr);
+    assert.doesNotMatch(run.stdout, /verified issue reference/u);
+    assert.doesNotMatch(run.stderr, /test-token/u);
+  }
+  const optedOut = runWithIssueResponses("## Follow-up\n\n- No follow-up planned.", {});
+  assert.equal(optedOut.status, 0, optedOut.stderr);
+});
+
+test("nested list items need their own tracking reference", () => {
+  for (const indent of ["    ", "        ", "\t"]) {
+    const item = "- Add support for nested resolver inputs.";
+    const body = `## Follow-ups\n\n- Parser follow-up (#3320):\n${indent}${item}`;
+    assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [item] });
+    assert.deepEqual(checkPrDeferrals(`${body} See #3321.`), { ok: true });
+    assert.deepEqual(checkPrDeferrals(`${body} No follow-up planned.`), { ok: true });
+  }
+});
+
+test("deferral sections include nested headings and end at the same or higher level", () => {
+  const item = "- Add support for regex aliases.";
+  for (const nested of ["### Resolver", "### Out of scope\n\n### Resolver"]) {
+    const body = `## Follow-ups\n\n${nested}\n\n${item}`;
+    assert.deepEqual(checkPrDeferrals(body), { ok: false, untracked: [item] });
+    assert.deepEqual(checkPrDeferrals(`${body} See #3320.`), { ok: true });
+    for (const next of ["## Validation", "# Validation"]) {
+      assert.deepEqual(checkPrDeferrals(`${body} See #3320.\n\n${next}\n\n- The checks pass.`), {
+        ok: true,
+      });
+    }
+  }
+});
