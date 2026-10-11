@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command still resolves the stale threads. The result reports the post
   errors and the reconcile errors together.
 
+- **`fallow fix` preserves package.json formatting when removing dependencies.**
+  The writer retains indentation, line endings, property order and final-newline
+  style. Duplicate dependency names are removed together, including escaped JSON
+  names. New entries in empty JSONC `ignoreExports` and `rulePacks` arrays inherit
+  the parent trailing-comma style. Thanks [@motlin](https://github.com/motlin) for
+  the report.
+  (Closes [#3323](https://github.com/fallow-rs/fallow/issues/3323))
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a

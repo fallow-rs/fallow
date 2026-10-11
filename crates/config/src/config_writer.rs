@@ -3,7 +3,7 @@ use std::fmt;
 use std::io::Write;
 use std::path::Path;
 
-use jsonc_parser::cst::{CstInputValue, CstRootNode};
+use jsonc_parser::cst::{CstInputValue, CstRootNode, TrailingCommaMode};
 use rustc_hash::FxHashSet;
 use tempfile::NamedTempFile;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
@@ -184,6 +184,7 @@ fn append_json_ignore_exports(
         .ok_or_else(|| {
             ConfigWriteError::InvalidShape("ignoreExports must be an array in fallow config".into())
         })?;
+    let inherit_trailing_commas = array.elements().is_empty() && object.uses_trailing_commas();
 
     let mut seen = FxHashSet::default();
     for element in array.elements() {
@@ -215,6 +216,9 @@ fn append_json_ignore_exports(
             ]));
         }
     }
+    if inherit_trailing_commas {
+        array.set_trailing_commas(TrailingCommaMode::IfMultiline);
+    }
     Ok(root.to_string())
 }
 
@@ -227,6 +231,7 @@ fn append_json_rule_pack_path(content: &str, pack_path: &str) -> ConfigWriteResu
     let array = object.array_value_or_create("rulePacks").ok_or_else(|| {
         ConfigWriteError::InvalidShape("rulePacks must be an array in fallow config".into())
     })?;
+    let inherit_trailing_commas = array.elements().is_empty() && object.uses_trailing_commas();
 
     for element in array.elements() {
         if element
@@ -239,6 +244,9 @@ fn append_json_rule_pack_path(content: &str, pack_path: &str) -> ConfigWriteResu
     }
 
     array.append(CstInputValue::String(pack_path.to_owned()));
+    if inherit_trailing_commas {
+        array.set_trailing_commas(TrailingCommaMode::IfMultiline);
+    }
     Ok((root.to_string(), true))
 }
 
@@ -493,6 +501,56 @@ mod tests {
         assert!(output.contains("// keep this"));
         assert!(output.contains("\"rules\": {}"));
         assert!(output.contains("\"file\": \"src/a.ts\""));
+    }
+
+    #[test]
+    fn new_jsonc_ignore_exports_inherits_parent_trailing_commas() {
+        let input = "{\n\t// keep this\n\t\"rules\": {},\n}\n";
+        let output = add_ignore_exports_rule_to_string(
+            Path::new(".fallowrc.jsonc"),
+            input,
+            &[rule("src/a.ts")],
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            "{\n\t// keep this\n\t\"rules\": {},\n\t\"ignoreExports\": [\n\t\t{\n\t\t\t\"file\": \"src/a.ts\",\n\t\t\t\"exports\": [\"*\"],\n\t\t},\n\t],\n}\n"
+        );
+        let repeated = add_ignore_exports_rule_to_string(
+            Path::new(".fallowrc.jsonc"),
+            &output,
+            &[rule("src/a.ts")],
+        )
+        .unwrap();
+        assert_eq!(repeated, output);
+    }
+
+    #[test]
+    fn empty_multiline_jsonc_rule_pack_array_inherits_parent_trailing_commas() {
+        let input = "{\n  // keep this\n  \"rules\": {},\n  \"rulePacks\": [\n  ],\n}\n";
+        let (output, changed) =
+            add_rule_pack_path_to_string(Path::new(".fallowrc.jsonc"), input, "rules/custom.jsonc")
+                .unwrap();
+        assert!(changed);
+        assert_eq!(
+            output,
+            "{\n  // keep this\n  \"rules\": {},\n  \"rulePacks\": [\n    \"rules/custom.jsonc\",\n  ],\n}\n"
+        );
+    }
+
+    #[test]
+    fn empty_jsonc_ignore_exports_inherits_parent_without_restyling_other_nodes() {
+        let input = "{\r\n  \"entry\": [\r\n    \"src/index.ts\"\r\n  ],\r\n  \"ignoreExports\": [],\r\n}\r\n";
+        let output = add_ignore_exports_rule_to_string(
+            Path::new(".fallowrc.jsonc"),
+            input,
+            &[rule("src/a.ts")],
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            "{\r\n  \"entry\": [\r\n    \"src/index.ts\"\r\n  ],\r\n  \"ignoreExports\": [\r\n    {\r\n      \"file\": \"src/a.ts\",\r\n      \"exports\": [\"*\"],\r\n    },\r\n  ],\r\n}\r\n"
+        );
     }
 
     #[test]

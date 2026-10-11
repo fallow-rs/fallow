@@ -1,3 +1,5 @@
+use jsonc_parser::ParseOptions;
+use jsonc_parser::cst::{CstObject, CstObjectProp, CstRootNode};
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
@@ -97,7 +99,7 @@ fn relative_package_path(root: &Path, pkg_path: &Path) -> String {
 
 /// Read, edit, and (when not dry-run) stage one `package.json` for the
 /// queued dependency removals targeting it. Pushes a fix entry per removed
-/// package and corrects `applied` to false on a serialization failure.
+/// package while retaining the original document's formatting.
 fn process_package_dependency_removals(
     input: &mut DependencyFixInput<'_>,
     pkg_path: &Path,
@@ -106,27 +108,34 @@ fn process_package_dependency_removals(
     let Ok(content) = std::fs::read_to_string(pkg_path) else {
         return;
     };
-    let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content) else {
+    if serde_json::from_str::<serde_json::Value>(&content).is_err() {
+        return;
+    }
+    let Ok(document) = CstRootNode::parse(&content, &ParseOptions::default()) else {
+        return;
+    };
+    let Some(package) = document.object_value() else {
         return;
     };
 
     let mut changed = false;
     for removal in removals {
+        let properties = dependency_properties(&package, removal);
         if !removal.caveats.is_empty() {
             // Mirror the applied path, which only reports a removal it could
             // actually perform: a finding for a package the manifest no longer
             // declares must not be counted as a withheld write.
-            if dependency_is_declared(&pkg_value, removal) {
+            if !properties.is_empty() {
                 push_withheld_dependency_entry(input, pkg_path, removal);
             }
             continue;
         }
         let package_name = removal.package_name;
         let location = removal.location;
-        if let Some(deps) = pkg_value.get_mut(location)
-            && let Some(obj) = deps.as_object_mut()
-            && obj.remove(package_name).is_some()
-        {
+        if !properties.is_empty() {
+            for property in properties {
+                property.remove();
+            }
             let relative = relative_package_path(input.root, pkg_path);
             if input.dry_run {
                 if !matches!(input.output, OutputFormat::Json) {
@@ -153,17 +162,33 @@ fn process_package_dependency_removals(
     }
 
     if changed && !input.dry_run {
-        stage_package_dependency_edit(input, pkg_path, &content, &pkg_value);
+        input.plan.stage_existing(
+            pkg_path.to_path_buf(),
+            content.as_bytes(),
+            document.to_string().into_bytes(),
+        );
     }
 }
 
-/// Whether `package.json` still declares the queued package in the array the
-/// finding named.
-fn dependency_is_declared(pkg_value: &serde_json::Value, removal: &QueuedRemoval<'_>) -> bool {
-    pkg_value
-        .get(removal.location)
-        .and_then(serde_json::Value::as_object)
-        .is_some_and(|deps| deps.contains_key(removal.package_name))
+/// Find every declaration, since removing only the first duplicate leaves an
+/// effective dependency while reporting that it was removed.
+fn dependency_properties(package: &CstObject, removal: &QueuedRemoval<'_>) -> Vec<CstObjectProp> {
+    package
+        .properties()
+        .into_iter()
+        .filter(|property| property_has_name(property, removal.location))
+        .filter_map(|property| property.value()?.as_object())
+        .flat_map(|deps| deps.properties())
+        .filter(|property| property_has_name(property, removal.package_name))
+        .collect()
+}
+
+fn property_has_name(property: &CstObjectProp, name: &str) -> bool {
+    property.name().is_some_and(|property_name| {
+        property_name
+            .decoded_value()
+            .is_ok_and(|value| value == name)
+    })
 }
 
 /// Emit the skip entry for a dependency whose verdict the run itself flagged,
@@ -207,41 +232,6 @@ fn push_withheld_dependency_entry(
         "skip_reason": SkipReason::LowConfidenceIncompleteAnalysis.as_wire_str(),
         "reachability_caveats": tokens,
     }));
-}
-
-/// Serialize the edited `package.json` value and stage it for write, or
-/// flip the corresponding fix entries to `applied: false` on failure.
-fn stage_package_dependency_edit(
-    input: &mut DependencyFixInput<'_>,
-    pkg_path: &Path,
-    original_content: &str,
-    pkg_value: &serde_json::Value,
-) {
-    match serde_json::to_string_pretty(pkg_value) {
-        Ok(mut pkg_content) => {
-            pkg_content.push('\n');
-            input.plan.stage_existing(
-                pkg_path.to_path_buf(),
-                original_content.as_bytes(),
-                pkg_content.into_bytes(),
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "Error: failed to serialize {}: {e}",
-                relative_package_path(input.root, pkg_path)
-            );
-            for entry in input.fixes.iter_mut() {
-                let matches = entry
-                    .get("__target")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|t| t == pkg_path.display().to_string());
-                if matches {
-                    entry["applied"] = serde_json::json!(false);
-                }
-            }
-        }
-    }
 }
 
 fn queue_dependency_removal<'a>(
@@ -299,6 +289,94 @@ mod tests {
             used_in_workspaces: Vec::new(),
             declared_and_imported_in: Vec::new(),
         }
+    }
+
+    #[test]
+    fn dependency_fix_removes_target_from_every_duplicate_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let path = root.join("package.json");
+        let original = "{\"dependencies\":{\"unused-package\":\"1\",\"keep\":\"1\"},\"description\":\"preserve\",\"dependencies\":{\"keep\":\"2\",\"unused-package\":\"2\"}}";
+        let expected = "{\"dependencies\":{\"keep\":\"1\"},\"description\":\"preserve\",\"dependencies\":{\"keep\":\"2\"}}";
+        std::fs::write(&path, original).unwrap();
+        let mut results = fallow_types::results::AnalysisResults::default();
+        results.unused_dependencies.push(
+            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(unused_dep(
+                &path,
+                "unused-package",
+            )),
+        );
+        let mut preview = Vec::new();
+        run_fix_deps(root, &results, OutputFormat::Json, true, &mut preview);
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0]["package"], "unused-package");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        let mut applied = Vec::new();
+        assert!(!run_fix_deps(
+            root,
+            &results,
+            OutputFormat::Json,
+            false,
+            &mut applied
+        ));
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0]["applied"], true);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+        let mut repeated = Vec::new();
+        assert!(!run_fix_deps(
+            root,
+            &results,
+            OutputFormat::Json,
+            false,
+            &mut repeated
+        ));
+        assert!(repeated.is_empty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+    }
+
+    #[test]
+    fn dependency_removal_preserves_multiple_sections_and_empty_objects() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let path = root.join("package.json");
+        let original = "{\"name\":\"formatting\",\"dependencies\":{\"first\":\"1\",\"keep\":\"1\",\"last\":\"1\"},\"devDependencies\":{\"only\":\"1\"},\"optionalDependencies\":{\"before\":\"1\",\"middle\":\"1\",\"after\":\"1\"}}";
+        std::fs::write(&path, original).unwrap();
+        let finding = |name| {
+            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(unused_dep(
+                &path, name,
+            ))
+        };
+        let results = fallow_types::results::AnalysisResults {
+            unused_dependencies: vec![finding("first"), finding("last")],
+            unused_dev_dependencies: vec![
+                fallow_types::output_dead_code::UnusedDevDependencyFinding::with_actions(
+                    unused_dep(&path, "only"),
+                ),
+            ],
+            unused_optional_dependencies: vec![
+                fallow_types::output_dead_code::UnusedOptionalDependencyFinding::with_actions(
+                    unused_dep(&path, "middle"),
+                ),
+            ],
+            ..Default::default()
+        };
+        let mut fixes = Vec::new();
+        assert!(!run_fix_deps(
+            root,
+            &results,
+            OutputFormat::Json,
+            false,
+            &mut fixes
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{\"name\":\"formatting\",\"dependencies\":{\"keep\":\"1\"},\"devDependencies\":{},\"optionalDependencies\":{\"before\":\"1\",\"after\":\"1\"}}"
+        );
+        assert!(fixes.iter().all(|fix| fix["applied"] == true));
+        assert!(fixes.iter().any(|fix| fix["package"] == "first"));
+        assert!(fixes.iter().any(|fix| fix["package"] == "last"));
+        assert!(fixes.iter().any(|fix| fix["package"] == "only"));
+        assert!(fixes.iter().any(|fix| fix["package"] == "middle"));
     }
 
     /// `remove-dependency` is the most destructive write `fallow fix` has, and
@@ -870,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn dependency_fix_output_has_trailing_newline() {
+    fn dependency_fix_preserves_missing_trailing_newline() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let pkg_path = root.join("package.json");
@@ -898,7 +976,7 @@ mod tests {
         run_fix_deps(root, &results, OutputFormat::Human, false, &mut fixes);
 
         let content = std::fs::read_to_string(&pkg_path).unwrap();
-        assert!(content.ends_with('\n'), "output should end with newline");
+        assert_eq!(content, r#"{"dependencies": { "react": "^18.0.0"}}"#);
     }
 
     /// Every `remove_dependency` entry, in all three of its states, must report
