@@ -43,6 +43,15 @@ pub fn filter_dead_code_by_diff(results: &mut AnalysisResults, diff: &DiffIndex,
     filter_dependency_findings(results, &line_in_diff);
     filter_graph_findings(results, &touches_file, &line_in_diff);
     filter_framework_findings(results, &line_in_diff);
+    results.prop_drilling_chains.retain(|finding| {
+        finding.effective_severity != Some(fallow_types::output_dead_code::EffectiveSeverity::Error)
+            || finding.chain.hops.is_empty()
+            || finding
+                .chain
+                .hops
+                .iter()
+                .any(|hop| line_in_diff(&hop.file, hop.line))
+    });
 }
 
 /// Keep only the clone groups with at least one instance whose line range

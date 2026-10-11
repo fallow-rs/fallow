@@ -889,7 +889,8 @@ pub struct IssueResultMeta {
     pub docs_anchor: &'static str,
     /// Serialized `AnalysisResults` array key that carries this issue row.
     pub result_key: &'static str,
-    /// Whether `result_key` contributes to `AnalysisResults::total_issues()`.
+    /// Whether `result_key` can contribute to `AnalysisResults::total_issues()`.
+    /// Prop-drilling contributes only when its saved severity is `error`.
     pub counts_in_total: bool,
 }
 
@@ -1596,7 +1597,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Prop drilling",
         docs_anchor: "prop-drilling",
         result_key: "prop_drilling_chains",
-        counts_in_total: false,
+        counts_in_total: true,
     },
     IssueResultMeta {
         code: "thin-wrapper",
@@ -2136,11 +2137,7 @@ mod tests {
 
     #[test]
     fn advisory_result_keys_are_explicitly_excluded_from_total() {
-        let expected = BTreeSet::from([
-            "duplicate_prop_shapes",
-            "prop_drilling_chains",
-            "thin_wrappers",
-        ]);
+        let expected = BTreeSet::from(["duplicate_prop_shapes", "thin_wrappers"]);
         let from_meta: BTreeSet<&str> = result_issue_metas()
             .filter(|meta| !meta.counts_in_total)
             .map(|meta| meta.result_key)

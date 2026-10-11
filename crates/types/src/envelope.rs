@@ -96,6 +96,14 @@ pub struct EntryPoints {
     pub sources: BTreeMap<String, usize>,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires a reference"
+)]
+const fn zero_count(count: &usize) -> bool {
+    *count == 0
+}
+
 /// Per-category issue counts for dead-code analysis. Always present in
 /// `CheckOutput`; when `--summary` is used the individual issue arrays are
 /// omitted but this object stays populated.
@@ -104,6 +112,9 @@ pub struct EntryPoints {
 pub struct CheckSummary {
     /// Total number of issues across all categories.
     pub total_issues: usize,
+    /// Prop chains whose saved effective severity explicitly enforces error policy.
+    #[serde(default, skip_serializing_if = "zero_count")]
+    pub prop_drilling_chains: usize,
     /// Unused source files.
     pub unused_files: usize,
     /// Unused value exports.

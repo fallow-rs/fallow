@@ -1141,12 +1141,10 @@ impl FindingIgnorePolicy for PropDrillingChainFinding {
     }
 }
 
-/// Source-owned result families that are excluded from
-/// [`AnalysisResults::total_issues`] but still hidden by `ignoreFindings`.
+/// Source-owned health families hidden by `ignoreFindings`.
 ///
-/// They live outside [`counted_analysis_result_fields`] because they are opt-in
-/// health signals rather than counted issues; ownership-wise they behave exactly
-/// like the counted dead-code families.
+/// These live outside the unconditional counted table: only enforced error prop
+/// chains contribute to `total_issues`; the other families remain advisory.
 macro_rules! uncounted_source_owned_result_fields {
     ($callback:ident $(, $arg:expr)? ) => {
         $callback! {
@@ -1171,7 +1169,7 @@ macro_rules! remove_configured_ignored_findings {
 
 macro_rules! counted_result_key_slice {
     ($($field:ident => $key:literal,)+) => {
-        &[$($key),+]
+        &[$($key),+, "prop_drilling_chains"]
     };
 }
 
@@ -1376,6 +1374,25 @@ impl AnalysisResults {
     #[must_use]
     pub const fn total_issues(&self) -> usize {
         counted_analysis_result_fields!(counted_result_field_sum, self)
+            + self.enforced_prop_drilling_count()
+    }
+
+    /// Prop-drilling chains that explicitly enforce the error policy.
+    /// Advisory warnings stay outside totals used by strict CI count gates.
+    #[must_use]
+    pub const fn enforced_prop_drilling_count(&self) -> usize {
+        let mut count = 0;
+        let mut index = 0;
+        while index < self.prop_drilling_chains.len() {
+            if matches!(
+                self.prop_drilling_chains.as_slice()[index].effective_severity,
+                Some(crate::output_dead_code::EffectiveSeverity::Error)
+            ) {
+                count += 1;
+            }
+            index += 1;
+        }
+        count
     }
 
     /// Whether any issues were found.

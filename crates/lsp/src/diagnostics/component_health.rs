@@ -3,8 +3,8 @@
 //!
 //! Each rule defaults to `off`, and the analysis fills the result arrays only
 //! when the rule is on, so these diagnostics show only in a project that
-//! turned the signal on. They are `HINT` diagnostics: a signal suggests a
-//! refactor, it is never a correctness error.
+//! turned the signal on. They retain `HINT` diagnostics for editor refactoring
+//! guidance, including prop chains explicitly enforced by CI.
 
 use std::path::Path;
 
@@ -213,6 +213,7 @@ mod tests {
     };
 
     use super::*;
+    use fallow_types::output_dead_code::EffectiveSeverity;
 
     fn root() -> PathBuf {
         if cfg!(windows) {
@@ -271,6 +272,79 @@ mod tests {
             vec![(1, "Page forwards user"), (6, "Avatar consumes user")]
         );
         assert_eq!(map.len(), 1, "one diagnostic per chain, at the source");
+    }
+
+    #[test]
+    fn prop_enforcement_retains_editor_hints_and_empty_chains_have_no_location() {
+        let mut finding = PropDrillingChainFinding::with_actions(PropDrillingChain {
+            prop: "user".to_owned(),
+            depth: 3,
+            hops: vec![PropDrillHop {
+                file: root().join("Page.tsx"),
+                line: 4,
+                component: "Page".to_owned(),
+            }],
+        });
+        finding.finding_id = Some("stable-source-id".to_owned());
+        for (severity, expected) in [
+            (Some(EffectiveSeverity::Error), DiagnosticSeverity::HINT),
+            (Some(EffectiveSeverity::Warn), DiagnosticSeverity::HINT),
+            (None, DiagnosticSeverity::HINT),
+        ] {
+            finding.effective_severity = severity;
+            let results = AnalysisResults {
+                prop_drilling_chains: vec![finding.clone()],
+                ..Default::default()
+            };
+            let map = build(&results);
+            let diagnostic = &map[&Uri::from_file_path(root().join("Page.tsx")).unwrap()][0];
+            assert_eq!(diagnostic.severity, Some(expected));
+            assert_eq!(
+                diagnostic.data.as_ref().unwrap()["findingId"],
+                "stable-source-id"
+            );
+        }
+        finding.chain.hops.clear();
+        finding.effective_severity = Some(EffectiveSeverity::Error);
+        assert!(
+            build(&AnalysisResults {
+                prop_drilling_chains: vec![finding],
+                ..Default::default()
+            })
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn other_component_signals_stay_hints_even_with_saved_errors() {
+        use fallow_api::editor_results::{ThinWrapper, ThinWrapperFinding};
+        let mut wrapper = ThinWrapperFinding::with_actions(ThinWrapper {
+            file: root().join("Wrapper.tsx"),
+            line: 3,
+            component: "Wrapper".to_owned(),
+            child_component: "Button".to_owned(),
+        });
+        wrapper.effective_severity = Some(EffectiveSeverity::Error);
+        let mut shape = DuplicatePropShapeFinding::with_actions(DuplicatePropShape {
+            file: root().join("Card.tsx"),
+            line: 4,
+            component: "Card".to_owned(),
+            shape: vec!["title".to_owned()],
+            group_size: 3,
+            sharing_components: Vec::new(),
+        });
+        shape.effective_severity = Some(EffectiveSeverity::Error);
+        let map = build(&AnalysisResults {
+            thin_wrappers: vec![wrapper],
+            duplicate_prop_shapes: vec![shape],
+            ..Default::default()
+        });
+        assert_eq!(map.len(), 2);
+        assert!(
+            map.values()
+                .flatten()
+                .all(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::HINT))
+        );
     }
 
     #[test]

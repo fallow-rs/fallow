@@ -18,13 +18,16 @@ pub const UNOWNED_GROUP_LABEL: &str = "(unowned)";
 
 /// The group header part that names the opt-in component health signals of
 /// `results`, such as `; 3 health signals: 3 duplicate prop shapes`. Empty when
-/// there are none. The signals do not count toward `total_issues`, so a group
+/// there are none. Advisory signals do not count toward `total_issues`, so a group
 /// header names them next to the issue count. The human and markdown grouped
 /// reports share this text.
 #[must_use]
 pub fn health_signal_header_part(results: &AnalysisResults) -> String {
     let kinds = [
-        (results.prop_drilling_chains.len(), "prop drilling chain"),
+        (
+            results.prop_drilling_chains.len() - results.enforced_prop_drilling_count(),
+            "prop drilling chain",
+        ),
         (results.thin_wrappers.len(), "thin wrapper"),
         (results.duplicate_prop_shapes.len(), "duplicate prop shape"),
     ];
@@ -391,7 +394,7 @@ where
         }
     }
 
-    /// Group the opt-in component health signals. They do not count toward
+    /// Group the opt-in component health signals. Advisory signals do not count toward
     /// `total_issues`, but the flat report lists them, so the groups must too.
     fn group_component_health_issues(&mut self, results: &AnalysisResults) {
         // The first hop owns the drilled prop and anchors the finding, the

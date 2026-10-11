@@ -57,12 +57,11 @@ lifecycle behavior.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because
   candidates are not verified vulnerabilities.
-- The component health signals (`prop-drilling`, `thin-wrapper`,
-  `duplicate-prop-shape`) publish at hint severity. Their rules default to
-  `off`, so the diagnostics show only in a project that turned a rule on.
-  They stay out of the pull request surfaces (CodeClimate, GitHub annotations
-  and summary, PR comment, review), because those surfaces gate on changes
-  and the signals do not gate.
+- Component health rules default to `off`. Prop-drilling, thin-wrapper and
+  duplicate-prop-shape diagnostics retain hint severity for editor refactoring
+  guidance. This editor policy is separate from CI severity: explicitly
+  enforced prop-drilling chains gate CI and appear in native CI reports while
+  their source-anchored editor diagnostic remains a hint.
 - A config pattern that matched nothing (`ignoreFindings`,
   `ignoreDependencies`) is an information diagnostic with the `unnecessary`
   tag on the entry in the config file that declares the list. The code is the

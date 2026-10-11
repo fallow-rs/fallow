@@ -3,7 +3,7 @@
     reason = "integration tests use expect to keep fixture setup concise"
 )]
 
-//! Prop-drilling, thin-wrapper and duplicate-prop-shape findings never gate
+//! Thin-wrapper and duplicate-prop-shape findings never gate
 //! the exit code. Their CI level is capped at `warning`, so a CI system that
 //! reads the level never shows an error for a run that passed.
 //!
@@ -15,8 +15,7 @@ use crate::common::{CommandOutput, fixture_path, parse_json, run_fallow_raw};
 use serde_json::Value;
 
 /// The rule name, the SARIF rule id and the fixture of each type.
-const TYPES: [(&str, &str); 3] = [
-    ("prop-drilling", "fallow/prop-drilling"),
+const TYPES: [(&str, &str); 2] = [
     ("thin-wrapper", "fallow/thin-wrapper"),
     ("duplicate-prop-shape", "fallow/duplicate-prop-shape"),
 ];

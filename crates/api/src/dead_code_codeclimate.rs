@@ -1837,7 +1837,39 @@ impl CodeClimateBuilder<'_> {
         self.push_boundary_issues();
         self.push_suppression_and_catalog_issues();
         self.push_override_issues();
+        self.push_prop_drilling_issues();
         self.issues
+    }
+
+    fn push_prop_drilling_issues(&mut self) {
+        for finding in &self.results.prop_drilling_chains {
+            if finding.effective_severity != Some(EffectiveSeverity::Error) {
+                continue;
+            }
+            let Some(source) = finding.chain.hops.first() else {
+                continue;
+            };
+            let path = cc_path(&source.file, self.root);
+            let fingerprint = codeclimate_fingerprint_hash(&[
+                "fallow/prop-drilling",
+                &path,
+                &source.component,
+                &finding.chain.prop,
+            ]);
+            self.issues.push(dead_code_issue(
+                finding.finding_id.as_deref(),
+                &[],
+                CodeClimateIssueInput {
+                    check_name: "fallow/prop-drilling",
+                    description: &format!("Prop '{}' is forwarded unchanged through {} components. Review composition, colocation or context, or suppress the source prop declaration.", finding.chain.prop, finding.chain.depth),
+                    severity: CodeClimateSeverity::Major,
+                    category: "Complexity",
+                    path: &path,
+                    begin_line: Some(source.line),
+                    fingerprint: &fingerprint,
+                },
+            ));
+        }
     }
 
     fn push_file_and_export_issues(&mut self) {

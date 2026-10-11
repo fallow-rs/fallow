@@ -448,7 +448,7 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         | "unused-load-data-key" => {}
         "prop-drilling" => {
             m.note = Some(
-                "Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off.",
+                "Opt-in: error gates CI; warn remains advisory even with --fail-on-issues. Defaults to off. Source-hop overrides decide severity.",
             );
         }
         "thin-wrapper" => {
@@ -1623,11 +1623,7 @@ mod tests {
 
         assert_eq!(expected, counted);
         assert_eq!(
-            FxHashSet::from_iter([
-                "duplicate_prop_shapes",
-                "prop_drilling_chains",
-                "thin_wrappers",
-            ]),
+            FxHashSet::from_iter(["duplicate_prop_shapes", "thin_wrappers"]),
             advisory
         );
     }
@@ -1646,7 +1642,7 @@ mod tests {
             .collect();
 
         assert_eq!(
-            FxHashSet::from_iter(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]),
+            FxHashSet::from_iter(["duplicate-prop-shape", "thin-wrapper"]),
             missing
         );
 

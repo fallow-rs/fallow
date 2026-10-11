@@ -1443,7 +1443,7 @@
           "default": "warn"
         },
         "prop-drilling": {
-          "description": "React/Preact prop forwarded unchanged through `>= N` intermediate\npass-through components until a component that substantively consumes it.\nA graph-derived health signal. Defaults to `off` (opt-in), like\n`private-type-leak` / `security-*`: the located per-chain records and the\nsmall capped health penalty are dormant until the user enables the rule.",
+          "description": "React/Preact prop forwarded unchanged through `>= N` intermediate\npass-through components until a component that substantively consumes it.\nA graph-derived health signal. Defaults to `off` (opt-in), like\n`private-type-leak` / `security-*`: the located per-chain records and the\nsmall capped health penalty are dormant until the user enables the rule.\n`error` enforces the finding in CI; `warn` stays advisory even under\nstrict flags. Overrides resolve for the source hop and can enable the\nrule while the base rule is off.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },

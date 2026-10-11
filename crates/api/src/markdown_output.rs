@@ -105,10 +105,10 @@ fn push_cascade_note(out: &mut String, hidden: usize) {
     );
 }
 
-/// The number of opt-in component health signals in `results`. These do not
+/// The number of advisory component health signals in `results`. These do not
 /// count toward `total_issues`, but the report lists them.
 fn health_signal_count(results: &AnalysisResults) -> usize {
-    results.prop_drilling_chains.len()
+    results.prop_drilling_chains.len() - results.enforced_prop_drilling_count()
         + results.thin_wrappers.len()
         + results.duplicate_prop_shapes.len()
 }
@@ -326,7 +326,7 @@ fn push_markdown_graph_sections(
     push_markdown_suppression_sections(out, results, rel);
 }
 
-/// The opt-in React/Preact component health signals. They do not count
+/// The opt-in React/Preact component health signals. Advisory findings do not count
 /// toward `total_issues`, but the other full reports list them.
 fn push_markdown_component_health_sections(
     out: &mut String,

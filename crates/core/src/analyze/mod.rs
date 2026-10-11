@@ -1494,7 +1494,14 @@ fn populate_unused_component_emit_findings(input: &mut FrameworkSpecificFindings
 /// `react` / `react-dom` / `next` / `preact` inside the detector (see
 /// [`find_prop_drilling_chains`]).
 fn populate_prop_drilling_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    if input.config.rules.prop_drilling == Severity::Off {
+    if input.config.rules.prop_drilling == Severity::Off
+        && !input.config.overrides.iter().any(|override_config| {
+            override_config
+                .rules
+                .prop_drilling
+                .is_some_and(|severity| severity != Severity::Off)
+        })
+    {
         return;
     }
     // A chain is anchored at its source hop: the prop declaration where the

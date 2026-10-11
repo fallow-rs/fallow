@@ -33,6 +33,715 @@ const CONFIG: &str = r#"{
 }
 "#;
 
+fn prop_project(severity: &str) -> tempfile::TempDir {
+    let project = crate::common::copy_fixture("prop-drilling");
+    let mut rules = serde_json::to_value(fallow_config::RulesConfig::default()).unwrap();
+    for rule in rules.as_object_mut().unwrap().values_mut() {
+        *rule = Value::String("off".to_owned());
+    }
+    rules["prop-drilling"] = Value::String(severity.to_owned());
+    write(
+        project.path(),
+        ".fallowrc.json",
+        &serde_json::json!({"rules": rules}).to_string(),
+    );
+    project
+}
+
+#[test]
+fn prop_drilling_error_gates_and_warnings_remain_advisory_in_strict_runs() {
+    for (severity, extra, expected_code, expected_total) in [
+        ("error", vec![], 1, 1),
+        ("warn", vec![], 0, 0),
+        ("warn", vec!["--fail-on-issues"], 0, 0),
+        ("off", vec!["--fail-on-issues"], 0, 0),
+    ] {
+        let project = prop_project(severity);
+        let output = dead_code(project.path(), "json", &extra);
+        let report = parse_json(&output);
+        assert_eq!(output.code, expected_code, "{severity}: {}", output.stdout);
+        assert_eq!(report["total_issues"], expected_total);
+        if severity == "off" {
+            assert_eq!(
+                report["prop_drilling_chains"]
+                    .as_array()
+                    .map_or(0, Vec::len),
+                0
+            );
+        } else {
+            assert_eq!(report["prop_drilling_chains"][0]["prop"], "user");
+            assert_eq!(
+                report["prop_drilling_chains"][0]["effective_severity"],
+                severity
+            );
+        }
+    }
+}
+
+#[test]
+fn prop_drilling_source_override_can_enable_and_suppress_enforcement() {
+    for (base, source, expected_code, expected_chains) in [
+        ("off", "error", 1, 1),
+        ("error", "warn", 0, 1),
+        ("error", "off", 0, 0),
+    ] {
+        let project = prop_project(base);
+        let path = project.path().join(".fallowrc.json");
+        let mut config: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        config["overrides"] = serde_json::json!([
+            {"files": ["src/Page.tsx"], "rules": {"prop-drilling": source}},
+            {"files": ["src/Profile.tsx"], "rules": {"prop-drilling": "error"}}
+        ]);
+        std::fs::write(path, config.to_string()).unwrap();
+        let output = dead_code(project.path(), "json", &["--fail-on-issues"]);
+        let report = parse_json(&output);
+        assert_eq!(
+            output.code, expected_code,
+            "{base}/{source}: {}",
+            output.stdout
+        );
+        assert_eq!(
+            report["prop_drilling_chains"]
+                .as_array()
+                .map_or(0, Vec::len),
+            expected_chains
+        );
+        if expected_chains > 0 {
+            assert_eq!(
+                report["prop_drilling_chains"][0]["effective_severity"],
+                source
+            );
+        }
+    }
+    let project = prop_project("error");
+    assert_eq!(dead_code(project.path(), "json", &[]).code, 1);
+    let path = project.path().join("src/Page.tsx");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            "export const Page",
+            "// fallow-ignore-next-line prop-drilling\nexport const Page",
+        ),
+    )
+    .unwrap();
+    let suppressed = dead_code(project.path(), "json", &[]);
+    assert_eq!(suppressed.code, 0);
+    assert_eq!(parse_json(&suppressed)["total_issues"], 0);
+}
+
+fn add_prop_source(root: &Path) {
+    let page = root.join("src/Page.tsx");
+    let source = std::fs::read_to_string(&page).unwrap();
+    std::fs::write(&page, format!("{source}\nexport const OtherPage = ({{ user }}: {{ user: {{ name: string }} }}) => <Layout user={{user}} />;\n")).unwrap();
+    let main = root.join("src/main.tsx");
+    let source = std::fs::read_to_string(&main).unwrap();
+    std::fs::write(
+        main,
+        source.replace("{ Page }", "{ Page, OtherPage }").replace(
+            "<Page user={user} />",
+            "<><Page user={user} /><OtherPage user={user} /></>",
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn prop_drilling_baseline_roundtrip_and_prune_preserve_occurrences() {
+    let project = prop_project("error");
+    let baseline = project.path().join("baseline.json");
+    let baseline_arg = baseline.to_str().unwrap();
+    let original = dead_code(project.path(), "json", &["--save-baseline", baseline_arg]);
+    assert_eq!(
+        parse_json(&original)["prop_drilling_chains"][0]["prop"],
+        "user"
+    );
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&baseline).unwrap()).unwrap();
+    assert_eq!(
+        saved["prop_drilling_chains"].as_array().map_or(0, Vec::len),
+        1
+    );
+    let reviewed = dead_code(project.path(), "json", &["--baseline", baseline_arg]);
+    assert_eq!(reviewed.code, 0);
+    assert_eq!(parse_json(&reviewed)["total_issues"], 0);
+
+    let sidebar = project.path().join("src/Sidebar.tsx");
+    let text = std::fs::read_to_string(&sidebar).unwrap();
+    add_prop_source(project.path());
+    let branch = dead_code(project.path(), "json", &["--baseline", baseline_arg]);
+    assert_eq!(branch.code, 1);
+    assert_eq!(parse_json(&branch)["total_issues"], 1);
+
+    std::fs::write(
+        &sidebar,
+        text.replace("user={user}", "user={{ name: user.name }}"),
+    )
+    .unwrap();
+    let stale = dead_code(
+        project.path(),
+        "json",
+        &["--baseline", baseline_arg, "--fail-on-stale-baseline"],
+    );
+    assert_eq!(stale.code, 1);
+    let pruned = run_fallow_in_root(
+        "baselines",
+        project.path(),
+        &[
+            "prune",
+            "--dead-code-baseline",
+            baseline_arg,
+            "--quiet",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(pruned.code, 0, "{}", pruned.stderr);
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&baseline).unwrap()).unwrap();
+    assert!(saved["prop_drilling_chains"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn prop_drilling_enforcement_retains_downstream_changes_and_source_anchor() {
+    let project = prop_project("error");
+    git(project.path(), &["init", "-q", "-b", "main"]);
+    commit_all(project.path(), "base");
+    let profile = project.path().join("src/Profile.tsx");
+    let text = std::fs::read_to_string(&profile).unwrap();
+    std::fs::write(
+        &profile,
+        text.replace("user.name", "user.name.toUpperCase()"),
+    )
+    .unwrap();
+    let changed = dead_code(project.path(), "json", &["--changed-since", "HEAD"]);
+    assert_eq!(changed.code, 1, "{}", changed.stdout);
+    assert_eq!(
+        parse_json(&changed)["prop_drilling_chains"][0]["hops"][0]["file"],
+        "src/Page.tsx"
+    );
+    let diff = project.path().join("change.diff");
+    std::fs::write(&diff, "diff --git a/src/Profile.tsx b/src/Profile.tsx\n--- a/src/Profile.tsx\n+++ b/src/Profile.tsx\n@@ -3,1 +3,1 @@\n-old\n+new\n").unwrap();
+    let line_scoped = dead_code(
+        project.path(),
+        "json",
+        &["--diff-file", diff.to_str().unwrap()],
+    );
+    assert_eq!(line_scoped.code, 1);
+    assert_eq!(parse_json(&line_scoped)["total_issues"], 1);
+    std::fs::write(&diff, "diff --git a/src/main.tsx b/src/main.tsx\n--- a/src/main.tsx\n+++ b/src/main.tsx\n@@ -1,1 +1,1 @@\n-old\n+new\n").unwrap();
+    let irrelevant = dead_code(
+        project.path(),
+        "json",
+        &["--diff-file", diff.to_str().unwrap()],
+    );
+    assert_eq!(irrelevant.code, 0);
+    assert_eq!(parse_json(&irrelevant)["total_issues"], 0);
+    let config_path = project.path().join(".fallowrc.json");
+    let mut config: Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["rules"]["prop-drilling"] = serde_json::json!("warn");
+    std::fs::write(config_path, config.to_string()).unwrap();
+    let advisory = dead_code(
+        project.path(),
+        "json",
+        &["--changed-since", "HEAD", "--fail-on-issues"],
+    );
+    assert_eq!(advisory.code, 0);
+    assert!(
+        parse_json(&advisory)["prop_drilling_chains"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
+}
+
+#[test]
+fn prop_drilling_errors_are_actionable_in_ci_formats_and_saved_reports() {
+    let project = prop_project("error");
+    let saved = project.path().join("saved.json");
+    let output = dead_code(project.path(), "json", &[]);
+    std::fs::write(&saved, &output.stdout).unwrap();
+    for format in [
+        "sarif",
+        "codeclimate",
+        "github-annotations",
+        "github-summary",
+    ] {
+        let direct = dead_code(project.path(), format, &[]);
+        assert_eq!(direct.code, 1, "{format}: {}", direct.stdout);
+        let rendered = report_from(project.path(), &saved, format);
+        match format {
+            "sarif" => {
+                for result in [&direct, &rendered] {
+                    let json = parse_json(result);
+                    assert_eq!(json["runs"][0]["results"][0]["level"], "error");
+                    assert_eq!(
+                        json["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]
+                            ["uri"],
+                        "src/Page.tsx"
+                    );
+                }
+            }
+            "codeclimate" => {
+                for result in [&direct, &rendered] {
+                    let json = parse_json(result);
+                    assert_eq!(json[0]["check_name"], "fallow/prop-drilling");
+                    assert_eq!(json[0]["severity"], "major");
+                    assert_eq!(json[0]["location"]["path"], "src/Page.tsx");
+                }
+            }
+            "github-annotations" => {
+                assert!(
+                    direct.stdout.contains("::error file=src/Page.tsx,line=4"),
+                    "{}",
+                    direct.stdout
+                );
+                assert!(rendered.stdout.contains("Prop drilling"));
+            }
+            "github-summary" => {
+                assert!(direct.stdout.contains("Prop drilling"), "{}", direct.stdout);
+                assert!(rendered.stdout.contains("src/Page.tsx"));
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn prop_drilling_explain_defines_enforced_counter_for_flat_and_grouped_output() {
+    for severity in ["error", "warn"] {
+        let project = prop_project(severity);
+        for args in [
+            vec!["--explain"],
+            vec!["--summary", "--explain"],
+            vec!["--group-by", "directory", "--explain"],
+        ] {
+            let report = parse_json(&dead_code(project.path(), "json", &args));
+            if args.contains(&"--group-by") {
+                assert_eq!(report["total_issues"], i32::from(severity == "error"));
+            } else if severity == "error" {
+                assert_eq!(report["summary"]["prop_drilling_chains"], 1);
+            } else {
+                assert!(report["summary"].get("prop_drilling_chains").is_none());
+            }
+            let metric = &report["_meta"]["metrics"]["summary.prop_drilling_chains"];
+            assert_eq!(metric["name"], "Enforced prop-drilling chains");
+            assert_eq!(metric["range"], "Non-negative integer");
+            let definition = metric["description"]
+                .as_str()
+                .expect("emitted counter needs a definition");
+            assert!(
+                definition.contains("effective_severity")
+                    && definition.contains("error")
+                    && definition.contains("Warning chains are excluded")
+                    && definition.contains("omitted when zero")
+            );
+            assert!(
+                metric["interpretation"]
+                    .as_str()
+                    .unwrap()
+                    .contains("total_issues")
+            );
+        }
+    }
+}
+
+#[test]
+fn other_component_signals_remain_advisory_under_strict_flags() {
+    for (fixture, rule, key) in [
+        ("thin-wrapper", "thin-wrapper", "thin_wrappers"),
+        (
+            "duplicate-prop-shape",
+            "duplicate-prop-shape",
+            "duplicate_prop_shapes",
+        ),
+    ] {
+        let project = crate::common::copy_fixture(fixture);
+        let mut rules = serde_json::to_value(fallow_config::RulesConfig::default()).unwrap();
+        for rule in rules.as_object_mut().unwrap().values_mut() {
+            *rule = Value::String("off".to_owned());
+        }
+        rules[rule] = Value::String("error".to_owned());
+        write(
+            project.path(),
+            ".fallowrc.json",
+            &serde_json::json!({"rules":rules}).to_string(),
+        );
+        let output = dead_code(project.path(), "json", &["--fail-on-issues"]);
+        let report = parse_json(&output);
+        assert!(!report[key].as_array().unwrap().is_empty(), "{fixture}");
+        assert_eq!(output.code, 0, "{fixture}: {}", output.stdout);
+        assert_eq!(report["total_issues"], 0);
+        assert_eq!(
+            parse_json(&dead_code(project.path(), "sarif", &["--fail-on-issues"]))["runs"][0]["results"]
+                [0]["level"],
+            "warning"
+        );
+    }
+}
+
+// Captured from the pre-enforcement binary on the tracked prop-drilling fixture.
+// These archives genuinely excluded saved error chains from their issue totals.
+const LEGACY_PROP_REPORTS: [&str; 3] = [
+    include_str!("fixtures/prop-drilling-advisory-error.json"),
+    include_str!("fixtures/prop-drilling-advisory-grouped.json"),
+    include_str!("fixtures/prop-drilling-advisory-combined.json"),
+];
+
+#[test]
+fn historical_prop_error_reports_render_after_count_policy_migration() {
+    let project = prop_project("off");
+    let saved = project.path().join("historical.json");
+    for archive in LEGACY_PROP_REPORTS {
+        let json: Value = serde_json::from_str(archive).unwrap();
+        assert_eq!(
+            json.pointer("/total_issues")
+                .or_else(|| json.pointer("/check/total_issues")),
+            Some(&serde_json::json!(0))
+        );
+        std::fs::write(&saved, archive).unwrap();
+        for format in [
+            "sarif",
+            "codeclimate",
+            "github-annotations",
+            "github-summary",
+            "markdown",
+        ] {
+            let output = report_from(project.path(), &saved, format);
+            match format {
+                "sarif" => assert!(
+                    parse_json(&output)["runs"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .flat_map(|run| run["results"].as_array().into_iter().flatten())
+                        .any(|finding| finding["ruleId"] == "fallow/prop-drilling"
+                            && finding["level"] == "error")
+                ),
+                "codeclimate" => assert!(
+                    parse_json(&output)
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|finding| finding["check_name"] == "fallow/prop-drilling"
+                            && finding["severity"] == "major")
+                ),
+                "github-annotations" => {
+                    assert!(output.stdout.contains("::error file=src/Page.tsx,line=4"));
+                }
+                _ => {
+                    assert!(
+                        output.stdout.contains("Prop drilling"),
+                        "{format}: {}",
+                        output.stdout
+                    );
+                    if json["kind"] != "combined" {
+                        assert!(
+                            output.stdout.contains("src/Page.tsx"),
+                            "{format}: {}",
+                            output.stdout
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn historical_prop_audit_section_renders_with_archived_gate_outcome() {
+    let project = prop_project("off");
+    git(project.path(), &["init", "-q", "-b", "main"]);
+    commit_all(project.path(), "base");
+    let output = run_fallow_in_root(
+        "audit",
+        project.path(),
+        &[
+            "--base", "main", "--gate", "all", "--quiet", "--format", "json",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let mut archive = parse_json(&output);
+    archive["dead_code"] = serde_json::from_str(LEGACY_PROP_REPORTS[0]).unwrap();
+    let saved = project.path().join("historical-audit.json");
+    std::fs::write(&saved, archive.to_string()).unwrap();
+    let sarif = parse_json(&report_from(project.path(), &saved, "sarif"));
+    assert!(
+        sarif["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|run| run["results"].as_array().into_iter().flatten())
+            .any(|finding| finding["ruleId"] == "fallow/prop-drilling"
+                && finding["level"] == "error")
+    );
+    let cc = parse_json(&report_from(project.path(), &saved, "codeclimate"));
+    assert!(
+        cc.as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["check_name"] == "fallow/prop-drilling"
+                && finding["severity"] == "major")
+    );
+    assert!(
+        report_from(project.path(), &saved, "github-annotations")
+            .stdout
+            .contains("::error file=src/Page.tsx,line=4")
+    );
+    let summary = report_from(project.path(), &saved, "github-summary");
+    assert!(summary.stdout.contains("Prop drilling"));
+    assert!(summary.stdout.contains("passed"), "{}", summary.stdout);
+}
+
+#[test]
+fn historical_prop_count_migration_preserves_corruption_guards() {
+    let project = prop_project("off");
+    let original: Value = serde_json::from_str(LEGACY_PROP_REPORTS[0]).unwrap();
+    let grouped: Value = serde_json::from_str(LEGACY_PROP_REPORTS[1]).unwrap();
+    let mut corrupt = Vec::new();
+    let mut altered = original.clone();
+    altered["total_issues"] = serde_json::json!(3);
+    corrupt.push(altered);
+    let mut altered = original.clone();
+    altered.as_object_mut().unwrap().remove("unused_files");
+    corrupt.push(altered);
+    let mut altered = original.clone();
+    altered["summary"]["prop_drilling_chains"] = serde_json::json!(1);
+    corrupt.push(altered);
+    let mut altered = original.clone();
+    altered["summary"]["total_issues"] = serde_json::json!(99);
+    corrupt.push(altered);
+    let mut altered = grouped.clone();
+    altered["total_issues"] = serde_json::json!(1);
+    corrupt.push(altered);
+    let mut altered = grouped.clone();
+    altered["groups"][0]["total_issues"] = serde_json::json!(1);
+    corrupt.push(altered);
+    let mut altered = grouped.clone();
+    altered["groups"][0].as_object_mut().unwrap().remove("key");
+    corrupt.push(altered);
+    let mut altered = grouped.clone();
+    altered["summary"] = serde_json::json!({"prop_drilling_chains": 1});
+    corrupt.push(altered);
+    let mut altered = grouped;
+    let mut current_group = altered["groups"][0].clone();
+    current_group["key"] = serde_json::json!("other");
+    current_group["total_issues"] = serde_json::json!(1);
+    altered["groups"]
+        .as_array_mut()
+        .unwrap()
+        .push(current_group);
+    altered["total_issues"] = serde_json::json!(1);
+    corrupt.push(altered);
+    let saved = project.path().join("corrupt.json");
+    for archive in corrupt {
+        std::fs::write(&saved, archive.to_string()).unwrap();
+        let output = run_fallow_raw(&[
+            "report",
+            "--from",
+            saved.to_str().unwrap(),
+            "--root",
+            project.path().to_str().unwrap(),
+            "--quiet",
+            "--format",
+            "github-summary",
+        ]);
+        assert_eq!(output.code, 2, "accepted corrupt archive: {archive}");
+    }
+    for severity in [
+        serde_json::json!("warn"),
+        Value::Null,
+        serde_json::json!("future-severity"),
+    ] {
+        let mut archive = original.clone();
+        archive["prop_drilling_chains"][0]["effective_severity"] = severity;
+        std::fs::write(&saved, archive.to_string()).unwrap();
+        assert_eq!(
+            parse_json(&report_from(project.path(), &saved, "sarif"))["runs"][0]["results"][0]["level"],
+            "warning"
+        );
+        assert!(
+            parse_json(&report_from(project.path(), &saved, "codeclimate"))
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn prop_drilling_empty_saved_hops_do_not_invent_ci_locations() {
+    let project = prop_project("error");
+    let mut json = parse_json(&dead_code(project.path(), "json", &[]));
+    assert_eq!(
+        json["prop_drilling_chains"][0]["hops"][0]["component"],
+        "Page"
+    );
+    json["prop_drilling_chains"][0]["hops"] = serde_json::json!([]);
+    let saved = project.path().join("empty-hops.json");
+    std::fs::write(&saved, json.to_string()).unwrap();
+    let sarif = parse_json(&report_from(project.path(), &saved, "sarif"));
+    let result = &sarif["runs"][0]["results"][0];
+    assert_eq!(result["level"], "error");
+    assert!(result["locations"].as_array().is_none_or(Vec::is_empty));
+    assert!(
+        parse_json(&report_from(project.path(), &saved, "codeclimate"))
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let annotations = report_from(project.path(), &saved, "github-annotations");
+    assert!(!annotations.stdout.contains("file="));
+    let summary = report_from(project.path(), &saved, "github-summary");
+    assert!(!summary.stdout.contains("src/Page.tsx"));
+}
+
+#[test]
+fn prop_drilling_warnings_keep_advisory_native_placement_and_bare_counts() {
+    let project = prop_project("warn");
+    let json = parse_json(&dead_code(project.path(), "json", &["--fail-on-issues"]));
+    assert_eq!(
+        json["prop_drilling_chains"][0]["effective_severity"],
+        "warn"
+    );
+    assert!(
+        parse_json(&dead_code(
+            project.path(),
+            "codeclimate",
+            &["--fail-on-issues"]
+        ))
+        .as_array()
+        .unwrap()
+        .is_empty()
+    );
+    assert!(
+        !dead_code(project.path(), "github-annotations", &["--fail-on-issues"])
+            .stdout
+            .contains("Prop drilling")
+    );
+    assert!(
+        !dead_code(project.path(), "github-summary", &["--fail-on-issues"])
+            .stdout
+            .contains("Prop drilling")
+    );
+    assert_eq!(
+        parse_json(&dead_code(project.path(), "sarif", &["--fail-on-issues"]))["runs"][0]["results"]
+            [0]["level"],
+        "warning"
+    );
+    let bare = run_fallow_raw(&[
+        "--root",
+        project.path().to_str().unwrap(),
+        "--quiet",
+        "--format",
+        "json",
+        "--fail-on-issues",
+    ]);
+    assert_eq!(bare.code, 0, "{}", bare.stderr);
+    let json = parse_json(&bare);
+    assert_eq!(json["check"]["total_issues"], 0);
+    assert_eq!(
+        json["check"]["prop_drilling_chains"][0]["effective_severity"],
+        "warn"
+    );
+    for severity in ["warn", "error"] {
+        let project = prop_project(severity);
+        let bare = run_fallow_raw(&[
+            "--root",
+            project.path().to_str().unwrap(),
+            "--quiet",
+            "--format",
+            "json",
+            "--ci",
+        ]);
+        let expected = i32::from(severity == "error");
+        assert_eq!(bare.code, expected, "{}", bare.stderr);
+        assert_eq!(parse_json(&bare)["check"]["total_issues"], expected);
+    }
+}
+
+#[test]
+fn prop_drilling_audit_distinguishes_reviewed_and_introduced_sources() {
+    let project = prop_project("error");
+    git(project.path(), &["init", "-q", "-b", "main"]);
+    commit_all(project.path(), "base");
+    git(project.path(), &["checkout", "-q", "-b", "feat/change"]);
+    let path = project.path().join("src/Profile.tsx");
+    let source = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        source.replace("user.name", "user.name.toUpperCase()"),
+    )
+    .unwrap();
+    commit_all(project.path(), "touch consumer");
+    let args = ["--base", "main", "--quiet", "--format", "json"];
+    let inherited = run_fallow_in_root("audit", project.path(), &args);
+    let report = parse_json(&inherited);
+    assert_eq!(inherited.code, 0, "{}", inherited.stdout);
+    assert_eq!(
+        report["dead_code"]["prop_drilling_chains"][0]["introduced"],
+        false
+    );
+    assert_eq!(report["attribution"]["dead_code_inherited"], 1);
+    let all = run_fallow_in_root(
+        "audit",
+        project.path(),
+        &[
+            "--base", "main", "--gate", "all", "--quiet", "--format", "json",
+        ],
+    );
+    assert_eq!(all.code, 1);
+    add_prop_source(project.path());
+    commit_all(project.path(), "add source");
+    let introduced = run_fallow_in_root("audit", project.path(), &args);
+    let report = parse_json(&introduced);
+    assert_eq!(introduced.code, 1, "{}", introduced.stdout);
+    assert_eq!(report["attribution"]["dead_code_introduced"], 1);
+    assert_eq!(report["attribution"]["dead_code_inherited"], 1);
+    let source = report["dead_code"]["prop_drilling_chains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["hops"][0]["component"] == "OtherPage")
+        .unwrap();
+    assert_eq!(source["introduced"], true);
+    for format in ["github-annotations", "github-summary"] {
+        let output = run_fallow_in_root(
+            "audit",
+            project.path(),
+            &["--base", "main", "--quiet", "--format", format],
+        );
+        assert!(
+            output.stdout.contains("Prop drilling"),
+            "{format}: {}",
+            output.stdout
+        );
+        assert!(output.stdout.contains("src/Page.tsx"));
+    }
+    let config_path = project.path().join(".fallowrc.json");
+    let mut config: Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["rules"]["prop-drilling"] = serde_json::json!("warn");
+    std::fs::write(config_path, config.to_string()).unwrap();
+    commit_all(project.path(), "advisory policy");
+    for gate in ["new-only", "all"] {
+        let advisory = run_fallow_in_root(
+            "audit",
+            project.path(),
+            &[
+                "--base", "main", "--gate", gate, "--quiet", "--format", "json",
+            ],
+        );
+        assert_eq!(advisory.code, 0, "{}", advisory.stderr);
+        let json = parse_json(&advisory);
+        assert_eq!(json["attribution"]["dead_code_introduced"], 0);
+        assert_eq!(json["attribution"]["dead_code_inherited"], 0);
+        assert_eq!(
+            json["dead_code"]["prop_drilling_chains"][0]["effective_severity"],
+            "warn"
+        );
+    }
+}
+
 fn write(root: &Path, relative: &str, content: &str) {
     let path = root.join(relative);
     std::fs::create_dir_all(path.parent().expect("parent")).expect("create directory");

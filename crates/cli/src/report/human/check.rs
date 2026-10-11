@@ -1871,7 +1871,11 @@ fn push_react_component_health_sections(
         lines,
         items: &results.prop_drilling_chains,
         title: "Prop drilling",
-        level: severity_to_level(rules.prop_drilling),
+        level: if results.enforced_prop_drilling_count() > 0 {
+            crate::report::Level::Error
+        } else {
+            crate::report::Level::Warn
+        },
         root,
         max_files: MAX_FLAT_ITEMS,
         get_path: prop_drilling_anchor,
@@ -3669,11 +3673,11 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) architecture_layout: ArchitectureLayout,
 }
 
-/// Whether the results carry an opt-in component health signal. These do not
+/// Whether the results carry an advisory component health signal. These do not
 /// count toward `total_issues`, but the flat report shows them, so a group that
 /// holds only these signals must still render.
 fn has_component_health_signals(results: &AnalysisResults) -> bool {
-    !results.prop_drilling_chains.is_empty()
+    results.prop_drilling_chains.len() > results.enforced_prop_drilling_count()
         || !results.thin_wrappers.is_empty()
         || !results.duplicate_prop_shapes.is_empty()
 }

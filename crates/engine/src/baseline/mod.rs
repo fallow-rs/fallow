@@ -103,6 +103,7 @@ macro_rules! with_baseline_fields {
             misplaced_directives,
             route_collisions,
             dynamic_segment_name_conflicts,
+            prop_drilling_chains,
         )
     };
 }
@@ -698,6 +699,9 @@ pub struct BaselineData {
     /// Next.js dynamic-segment name conflicts, keyed by `path:position`.
     #[serde(default)]
     dynamic_segment_name_conflicts: Vec<String>,
+    /// Reviewed prop chains, keyed by source component and prop with occurrence matching.
+    #[serde(default)]
+    prop_drilling_chains: Vec<String>,
 }
 
 impl BaselineData {
@@ -824,6 +828,7 @@ impl BaselineData {
             misplaced_directives: file_exports.misplaced_directives,
             route_collisions: file_exports.route_collisions,
             dynamic_segment_name_conflicts: file_exports.dynamic_segment_name_conflicts,
+            prop_drilling_chains: Vec::new(),
         }
     }
 
@@ -880,6 +885,7 @@ impl BaselineData {
             + self.misplaced_directives.len()
             + self.route_collisions.len()
             + self.dynamic_segment_name_conflicts.len()
+            + self.prop_drilling_chains.len()
     }
 }
 
@@ -2309,18 +2315,23 @@ pub fn apply_dead_code_baseline(
     if !incompatible.is_empty() {
         return Err(DeadCodeBaselineError::IncompatibleIdentity(incompatible));
     }
-    let before = results.total_issues();
+    let before = baseline_finding_count(results);
     let hidden_matched = cascade_hidden_matches(results, &baseline, root);
     *results = filter_new_issues(std::mem::take(results), &baseline, root);
     Ok(DeadCodeBaselineOutcome::Applied {
         staleness: BaselineStaleness {
             entries: baseline.total_entries(),
-            matched: before.saturating_sub(results.total_issues()) + hidden_matched,
+            matched: before.saturating_sub(baseline_finding_count(results)) + hidden_matched,
             current_findings: before,
             change_scoped,
         },
         legacy_keys: baseline.identity.is_none(),
     })
+}
+
+fn baseline_finding_count(results: &crate::results::AnalysisResults) -> usize {
+    results.total_issues() - results.enforced_prop_drilling_count()
+        + results.prop_drilling_chains.len()
 }
 
 /// Baseline entries that match a finding of the unused-file cascade filter.
@@ -3200,6 +3211,100 @@ pub struct BaselineDeltas {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prop_baselines_match_repeated_occurrences_and_advisory_staleness() {
+        use fallow_types::output_dead_code::{EffectiveSeverity, PropDrillingChainFinding};
+        use fallow_types::results::{PropDrillHop, PropDrillingChain};
+        let root = Path::new("/project");
+        let identity = fallow_types::semantic::SemanticAnalysisIdentity::syntactic();
+        let mut chain = PropDrillingChainFinding::with_actions(PropDrillingChain {
+            prop: "user".to_owned(),
+            depth: 3,
+            hops: vec![PropDrillHop {
+                file: root.join("src/Page.tsx"),
+                line: 4,
+                component: "Page".to_owned(),
+            }],
+        });
+        chain.effective_severity = Some(EffectiveSeverity::Error);
+        let original = AnalysisResults {
+            prop_drilling_chains: vec![chain.clone()],
+            ..Default::default()
+        };
+        let baseline = BaselineData::from_results(&original, root);
+        let saved = serde_json::to_string(&baseline).unwrap();
+        let mut repeated = original.clone();
+        repeated.prop_drilling_chains.push(chain.clone());
+        let outcome =
+            apply_dead_code_baseline(&mut repeated, &saved, root, &identity, false).unwrap();
+        let DeadCodeBaselineOutcome::Applied { staleness, .. } = outcome else {
+            panic!("baseline must apply");
+        };
+        assert_eq!(
+            (
+                staleness.entries,
+                staleness.matched,
+                staleness.current_findings
+            ),
+            (1, 1, 2)
+        );
+        assert_eq!(repeated.enforced_prop_drilling_count(), 1);
+        let doubled = AnalysisResults {
+            prop_drilling_chains: vec![chain.clone(), chain.clone()],
+            ..Default::default()
+        };
+        let doubled_baseline =
+            serde_json::to_string(&BaselineData::from_results(&doubled, root)).unwrap();
+        let base_value = serde_json::from_str(&saved).unwrap();
+        let doubled_value = serde_json::from_str(&doubled_baseline).unwrap();
+        let growth = crate::baseline_growth::baseline_growth(
+            BaselineKind::DeadCode,
+            &base_value,
+            &doubled_value,
+        );
+        assert_eq!(growth.added_entries(), 1);
+        assert_eq!(growth.categories[0].category, "prop_drilling_chains");
+        assert!(
+            crate::baseline_growth::baseline_growth(
+                BaselineKind::DeadCode,
+                &doubled_value,
+                &base_value
+            )
+            .is_empty()
+        );
+        let pruned =
+            prune_dead_code_baseline(&doubled_baseline, &original, root, &identity).unwrap();
+        assert_eq!((pruned.entries_before, pruned.entries_after), (2, 1));
+        let mut old: serde_json::Value = serde_json::from_str(&saved).unwrap();
+        old.as_object_mut().unwrap().remove("prop_drilling_chains");
+        let mut unreviewed = original;
+        apply_dead_code_baseline(&mut unreviewed, &old.to_string(), root, &identity, false)
+            .unwrap();
+        assert_eq!(unreviewed.enforced_prop_drilling_count(), 1);
+
+        chain.effective_severity = Some(EffectiveSeverity::Warn);
+        let mut advisory = AnalysisResults {
+            prop_drilling_chains: vec![chain],
+            ..Default::default()
+        };
+        let saved = serde_json::to_string(&BaselineData::from_results(&advisory, root)).unwrap();
+        assert_eq!(advisory.total_issues(), 0);
+        let outcome =
+            apply_dead_code_baseline(&mut advisory, &saved, root, &identity, false).unwrap();
+        let DeadCodeBaselineOutcome::Applied { staleness, .. } = outcome else {
+            panic!("baseline must apply");
+        };
+        assert_eq!(
+            (
+                staleness.entries,
+                staleness.matched,
+                staleness.current_findings
+            ),
+            (1, 1, 1)
+        );
+        assert_eq!(advisory.prop_drilling_chains.len(), 0);
+    }
+
     use super::*;
 
     use crate::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
@@ -3589,6 +3694,7 @@ mod tests {
             misplaced_directives: vec![],
             route_collisions: vec![],
             dynamic_segment_name_conflicts: vec![],
+            prop_drilling_chains: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -3661,6 +3767,7 @@ mod tests {
             misplaced_directives: vec![],
             route_collisions: vec![],
             dynamic_segment_name_conflicts: vec![],
+            prop_drilling_chains: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline, Path::new(""));
@@ -3720,6 +3827,7 @@ mod tests {
             misplaced_directives: vec![],
             route_collisions: vec![],
             dynamic_segment_name_conflicts: vec![],
+            prop_drilling_chains: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

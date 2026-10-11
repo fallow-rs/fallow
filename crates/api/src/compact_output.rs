@@ -486,8 +486,8 @@ impl<'a> CompactLineBuilder<'a> {
         self.push_component_health_lines();
     }
 
-    /// Push compact lines for the opt-in component health signals. They do not
-    /// count toward `total_issues`, but the other full reports list them.
+    /// Push compact lines for component health findings. Advisory findings stay
+    /// outside `total_issues`; explicit prop enforcement contributes to it.
     fn push_component_health_lines(&mut self) {
         for finding in &self.results.prop_drilling_chains {
             let chain = &finding.chain;

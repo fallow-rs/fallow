@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fallow_types::envelope::{Meta, MetaRule};
+use fallow_types::envelope::{Meta, MetaMetric, MetaRule};
 pub use fallow_types::issue_meta::{CODECLIMATE_RESULT_CODES, TsAliasMeta};
 use fallow_types::issue_meta::{
     IssueResultMeta, issue_meta_by_code, issue_result_meta_by_code, result_issue_metas,
@@ -109,6 +109,15 @@ pub fn check_meta() -> Meta {
             ),
         ]),
         rules,
+        metrics: BTreeMap::from([(
+            "summary.prop_drilling_chains".to_string(),
+            MetaMetric {
+                name: Some("Enforced prop-drilling chains".to_string()),
+                description: Some("Number of prop-drilling chains with saved effective_severity set to error. Warning chains are excluded; the counter is omitted when zero.".to_string()),
+                range: Some("Non-negative integer".to_string()),
+                interpretation: Some("Each counted chain contributes to total_issues and CI error gates. The finding array can also contain advisory chains excluded from this counter.".to_string()),
+            },
+        )]),
         ..Meta::default()
     }
 }
@@ -141,6 +150,7 @@ pub fn architecture_meta() -> Meta {
         .collect();
     meta.rules
         .retain(|code, _| architecture_codes.contains(&code.as_str()));
+    meta.metrics.remove("summary.prop_drilling_chains");
     meta.docs = Some(ARCHITECTURE_DOCS.to_string());
     meta
 }
@@ -186,6 +196,7 @@ mod tests {
         assert_eq!(actual, expected);
         assert_eq!(meta.docs.as_deref(), Some(ARCHITECTURE_DOCS));
         assert_eq!(meta.field_definitions, check_meta().field_definitions);
+        assert!(!meta.metrics.contains_key("summary.prop_drilling_chains"));
     }
 
     #[test]
@@ -267,7 +278,7 @@ mod tests {
 
     #[test]
     fn codeclimate_result_exclusions_are_explicit() {
-        let expected = BTreeSet::from(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]);
+        let expected = BTreeSet::from(["duplicate-prop-shape", "thin-wrapper"]);
         let from_contracts: BTreeSet<&str> = issue_output_contracts()
             .filter(|contract| contract.codeclimate_check_names.is_empty())
             .map(|contract| contract.code)

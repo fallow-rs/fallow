@@ -206,11 +206,16 @@ pub fn build_sarif_result(input: SarifResultInput<'_>) -> Value {
         |snippet| codeclimate_fingerprint_hash(&[input.rule_id, input.uri, snippet, &col]),
     );
     let partial_fingerprint_ghas = partial_fingerprint.clone();
+    let locations = if input.uri.is_empty() {
+        Vec::new()
+    } else {
+        vec![serde_json::json!({ "physicalLocation": physical_location })]
+    };
     serde_json::json!({
         "ruleId": input.rule_id,
         "level": input.level,
         "message": { "text": input.message },
-        "locations": [{ "physicalLocation": physical_location }],
+        "locations": locations,
         "partialFingerprints": {
             SARIF_FINGERPRINT_KEY: partial_fingerprint,
             GHAS_SARIF_FINGERPRINT_KEY: partial_fingerprint_ghas

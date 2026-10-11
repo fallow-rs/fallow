@@ -15,6 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-references and explicit opt-outs. The declaration policy is unchanged.
   Thanks [@VariableVince](https://github.com/VariableVince) for the question.
   (Closes [#3325](https://github.com/fallow-rs/fallow/issues/3325))
+### Added
+
+- **Prop-drilling findings can enforce CI gates.** Set `rules.prop-drilling` to
+  `error` to enforce chains, or `warn` for advisory findings, including under
+  `--fail-on-issues`. Source-hop overrides and suppressions control each chain.
+  Baselines, audit attribution and changed-hop scopes support incremental
+  adoption, and CI reports show the source location. The rule stays off by
+  default, and editor diagnostics stay hints. Thanks
+  [@miky-mfw](https://github.com/miky-mfw) for the request.
+  (Closes [#3327](https://github.com/fallow-rs/fallow/issues/3327))
+
+### Changed
+
+- **Existing `prop-drilling: "error"` settings now enforce CI.** Change the rule
+  to `warn` to retain advisory analysis after upgrading. Archived JSON reports
+  with `effective_severity: "error"` also render as errors; changing the current
+  configuration does not rewrite those reports.
 
 ### Fixed
 

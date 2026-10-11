@@ -687,6 +687,17 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
     if let Some(root) = envelope.as_object_mut() {
         root.remove(NORMALIZED_GROUPED_DEAD_CODE_MARKER);
     }
+    if matches!(
+        envelope["kind"].as_str(),
+        Some("dead-code" | "architecture")
+    ) {
+        normalize_historical_prop_count(&mut envelope)?;
+    }
+    for key in ["check", "dead_code"] {
+        if let Some(section) = envelope.get_mut(key) {
+            normalize_historical_prop_count(section)?;
+        }
+    }
     let grouped_by = envelope
         .get("grouped_by")
         .and_then(serde_json::Value::as_str)
@@ -707,10 +718,10 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
     let grouped_by = grouped_by.ok_or_else(|| {
         "saved grouped dead-code envelope has an unsupported or missing `grouped_by`".to_owned()
     })?;
-    let groups_value = root.remove("groups").ok_or_else(|| {
+    let mut groups_value = root.remove("groups").ok_or_else(|| {
         "saved grouped dead-code envelope is missing required field `groups`".to_owned()
     })?;
-    let groups = groups_value.as_array().ok_or_else(|| {
+    let groups = groups_value.as_array_mut().ok_or_else(|| {
         "saved grouped dead-code envelope field `groups` must be an array".to_owned()
     })?;
     let current_schema = root
@@ -749,6 +760,9 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
             }
         }
     }
+    if !current_schema {
+        normalize_historical_prop_count(&mut envelope)?;
+    }
     Ok(SavedEnvelope {
         envelope,
         grouped_by: Some(grouped_by),
@@ -774,8 +788,8 @@ fn seed_required_categories(root: &mut serde_json::Map<String, serde_json::Value
 }
 
 fn validate_current_grouped_dead_code(
-    root: &serde_json::Map<String, serde_json::Value>,
-    groups: &[serde_json::Value],
+    root: &mut serde_json::Map<String, serde_json::Value>,
+    groups: &mut [serde_json::Value],
 ) -> Result<(), String> {
     let root_total = root
         .get("total_issues")
@@ -784,7 +798,9 @@ fn validate_current_grouped_dead_code(
             "saved grouped dead-code envelope is missing a non-negative integer `total_issues`"
                 .to_owned()
         })?;
-    let mut grouped_total = 0_u64;
+    let mut declared_grouped_total = 0_u64;
+    let mut current_grouped_total = 0_u64;
+    let mut historical_grouped_total = 0_u64;
     for (index, group) in groups.iter().enumerate() {
         let Some(group_object) = group.as_object() else {
             return Err(format!(
@@ -814,19 +830,93 @@ fn validate_current_grouped_dead_code(
                         "saved grouped dead-code envelope group {index} is incompatible with this Fallow version: {error}"
                     )
                 })?;
-        let actual_total = u64::try_from(results.total_issues()).unwrap_or(u64::MAX);
-        if declared_total != actual_total {
+        let (actual_total, historical_total) = saved_prop_totals(&results);
+        if declared_total != actual_total && declared_total != historical_total {
             return Err(format!(
                 "saved grouped dead-code envelope group {index} declares {declared_total} findings but contains {actual_total}"
             ));
         }
-        grouped_total = grouped_total.saturating_add(actual_total);
+        declared_grouped_total = declared_grouped_total.saturating_add(declared_total);
+        current_grouped_total = current_grouped_total.saturating_add(actual_total);
+        historical_grouped_total = historical_grouped_total.saturating_add(historical_total);
     }
-    if root_total != grouped_total {
+    if root_total != declared_grouped_total
+        || (root_total != current_grouped_total && root_total != historical_grouped_total)
+    {
         return Err(format!(
-            "saved grouped dead-code envelope declares {root_total} findings but its groups contain {grouped_total}"
+            "saved grouped dead-code envelope declares {root_total} findings but its groups contain {declared_grouped_total} under inconsistent count policies"
         ));
     }
+    if root_total != current_grouped_total {
+        reject_current_prop_counter(root.get("summary"))?;
+        for group in groups {
+            normalize_historical_prop_count(group)?;
+        }
+        root.insert("total_issues".to_owned(), current_grouped_total.into());
+    }
+    Ok(())
+}
+
+fn saved_prop_totals(results: &fallow_types::results::AnalysisResults) -> (u64, u64) {
+    let current = u64::try_from(results.total_issues()).unwrap_or(u64::MAX);
+    let errors = u64::try_from(results.enforced_prop_drilling_count()).unwrap_or(u64::MAX);
+    (current, current.saturating_sub(errors))
+}
+
+fn reject_current_prop_counter(summary: Option<&serde_json::Value>) -> Result<(), String> {
+    if summary.is_some_and(|summary| summary.get("prop_drilling_chains").is_some()) {
+        return Err("saved dead-code envelope has a current prop-drilling counter but an inconsistent finding total".to_owned());
+    }
+    Ok(())
+}
+
+/// Earlier schema-10 producers saved error severity while excluding prop chains
+/// from totals. The positive summary counter distinguishes current producers.
+fn normalize_historical_prop_count(envelope: &mut serde_json::Value) -> Result<(), String> {
+    if !envelope
+        .get("prop_drilling_chains")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|chains| {
+            chains
+                .iter()
+                .any(|chain| chain["effective_severity"].as_str() == Some("error"))
+        })
+    {
+        return Ok(());
+    }
+    let Some(declared) = envelope
+        .get("total_issues")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return Ok(());
+    };
+    let Ok(results) =
+        serde_json::from_value::<fallow_types::results::AnalysisResults>(envelope.clone())
+    else {
+        return Ok(());
+    };
+    let (current, historical) = saved_prop_totals(&results);
+    if declared == current || declared != historical {
+        return Ok(());
+    }
+    reject_current_prop_counter(envelope.get("summary"))?;
+    if let Some(summary) = envelope
+        .get_mut("summary")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        if summary
+            .get("total_issues")
+            .is_some_and(|total| total.as_u64() != Some(declared))
+        {
+            return Err("saved dead-code summary has an inconsistent finding total".to_owned());
+        }
+        summary.insert("total_issues".to_owned(), current.into());
+        summary.insert(
+            "prop_drilling_chains".to_owned(),
+            (current - historical).into(),
+        );
+    }
+    envelope["total_issues"] = current.into();
     Ok(())
 }
 
@@ -1140,6 +1230,61 @@ mod tests {
             .expect_err("malformed type-aware metadata must fail closed");
         assert!(error.contains("saved type-aware metadata at `/_meta/type_aware`"));
         assert!(error.contains("invalid type"));
+    }
+
+    #[test]
+    fn historical_prop_counts_normalize_without_recomputing_audit_gates() {
+        let section: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/integration/fixtures/prop-drilling-advisory-error.json"
+        ))
+        .unwrap();
+        let archive = serde_json::json!({
+            "kind": "audit",
+            "dead_code": section,
+            "summary": {"dead_code_issues": 0, "dead_code_has_errors": false},
+            "attribution": {"dead_code_introduced": 0, "dead_code_inherited": 0},
+            "verdict": "pass"
+        });
+        let normalized = normalize_saved_envelope(archive.clone()).unwrap().envelope;
+        assert_eq!(normalized["dead_code"]["total_issues"], 1);
+        assert_eq!(normalized["dead_code"]["summary"]["total_issues"], 1);
+        assert_eq!(
+            normalized["dead_code"]["summary"]["prop_drilling_chains"],
+            1
+        );
+        assert_eq!(
+            normalized["dead_code"]["prop_drilling_chains"],
+            archive["dead_code"]["prop_drilling_chains"]
+        );
+        for key in ["summary", "attribution", "verdict"] {
+            assert_eq!(normalized[key], archive[key]);
+        }
+        assert_eq!(
+            normalize_saved_envelope(normalized.clone())
+                .unwrap()
+                .envelope,
+            normalized
+        );
+    }
+
+    #[test]
+    fn historical_grouped_prop_counts_normalize_with_or_without_schema_metadata() {
+        let archive: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/integration/fixtures/prop-drilling-advisory-grouped.json"
+        ))
+        .unwrap();
+        for schema_present in [true, false] {
+            let mut input = archive.clone();
+            if !schema_present {
+                input.as_object_mut().unwrap().remove("schema_version");
+            }
+            let normalized = normalize_saved_envelope(input).unwrap().envelope;
+            assert_eq!(normalized["total_issues"], 1);
+            assert_eq!(
+                normalized["prop_drilling_chains"],
+                archive["groups"][0]["prop_drilling_chains"]
+            );
+        }
     }
 
     #[test]

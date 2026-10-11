@@ -55,7 +55,7 @@ fn severity_to_sarif_level(s: Severity) -> &'static str {
 
 /// The CI severity of a type that never gates the exit code.
 ///
-/// Prop-drilling, thin-wrapper and duplicate-prop-shape findings are health
+/// Thin-wrapper and duplicate-prop-shape findings are health
 /// signals: they never fail the run. An `error` rule is capped at `warn`, so
 /// a CI system that reads the level never shows an error for a run that
 /// passed. `off` stays `off`.
@@ -816,7 +816,6 @@ fn sarif_prop_drilling_fields(
     // hop; the message names the depth and the consumer at the chain tail.
     let source = chain.hops.first();
     let consumer = chain.hops.last();
-    let (path, line) = source.map_or((std::path::PathBuf::new(), 1), |h| (h.file.clone(), h.line));
     let consumer_name = consumer.map_or("a distant component", |h| h.component.as_str());
     SarifFields {
         rule_id: "fallow/prop-drilling",
@@ -825,9 +824,9 @@ fn sarif_prop_drilling_fields(
             "prop \"{}\" is forwarded unchanged through {} component(s) before \"{}\" consumes it; colocate, lift to context, or compose",
             chain.prop, chain.depth, consumer_name
         ),
-        uri: relative_uri(&path, root),
-        region: Some((line, 1)),
-        source_path: Some(path),
+        uri: source.map_or_else(String::new, |hop| relative_uri(&hop.file, root)),
+        region: source.map(|hop| (hop.line, 1)),
+        source_path: source.map(|hop| hop.file.clone()),
         properties: None,
     }
 }
@@ -1199,7 +1198,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unused-svelte-event" => rules.unused_svelte_events,
         "unused-server-action" => rules.unused_server_actions,
         "unused-load-data-key" => rules.unused_load_data_keys,
-        "prop-drilling" => non_gating_severity(rules.prop_drilling),
+        "prop-drilling" => rules.prop_drilling,
         "thin-wrapper" => non_gating_severity(rules.thin_wrapper),
         "duplicate-prop-shape" => non_gating_severity(rules.duplicate_prop_shape),
         "route-collision" => rules.route_collision,
@@ -1822,7 +1821,7 @@ fn push_component_shape_sarif_results(
         sarif_results,
         &results.prop_drilling_chains,
         snippets,
-        |c| sarif_prop_drilling_fields(&c.chain, root, non_gating_level(c, rules.prop_drilling)),
+        |c| sarif_prop_drilling_fields(&c.chain, root, finding_level(c, rules.prop_drilling)),
     );
     push_sarif_results(sarif_results, &results.thin_wrappers, snippets, |w| {
         sarif_thin_wrapper_fields(&w.wrapper, root, non_gating_level(w, rules.thin_wrapper))

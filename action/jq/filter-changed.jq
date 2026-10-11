@@ -14,6 +14,15 @@ def in_changed: . as $path | $changed | any(. == $path);
 # type_only_dependencies, test_only_dependencies, dev_dependencies_in_production) are intentionally NOT filtered: they are
 # project-wide concerns not attributable to individual changed files. They are still counted in total_issues.
 def filter_check:
+  (if .prop_drilling_chains then
+    .prop_drilling_chains |= map(select(
+      if .effective_severity == "error" then
+        ((.hops // [] | length) == 0) or (.hops | any(.file | in_changed))
+      else
+        .hops[0].file | in_changed
+      end
+    ))
+  else . end) |
   (if .unused_files         then .unused_files         |= map(select(.path | in_changed))      else . end) |
   (if .unused_exports       then .unused_exports       |= map(select(.path | in_changed))      else . end) |
   (if .unused_types         then .unused_types         |= map(select(.path | in_changed))      else . end) |
@@ -157,7 +166,8 @@ def filter_check:
       (.unused_component_outputs // [] | length) +
       (.unused_svelte_events // [] | length) +
       (.unprovided_injects // [] | length) +
-      (.unused_load_data_keys // [] | length)
+      (.unused_load_data_keys // [] | length) +
+      (.prop_drilling_chains // [] | map(select(.effective_severity == "error")) | length)
     )
   else . end);
 

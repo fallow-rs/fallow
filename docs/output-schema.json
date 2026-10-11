@@ -5972,6 +5972,10 @@
           "type": "integer",
           "description": "Total number of issues across all categories."
         },
+        "prop_drilling_chains": {
+          "type": "integer",
+          "description": "Prop chains whose saved effective severity explicitly enforces error policy."
+        },
         "unused_files": {
           "type": "integer",
           "description": "Unused source files."
@@ -18570,7 +18574,7 @@
               "type": "null"
             }
           ],
-          "description": "Rule severity of this finding. This type never gates the run, so the\nvalue does not change the exit code. `fallow report --from` reads it\nfor the SARIF level, so the level does not depend on the config at\nrender time. Absent in output from older versions. Not part of the\nfinding identity, baseline keys or fingerprints."
+          "description": "Rule severity after resolving overrides for the source hop. An explicit\n`error` enforces the chain; `warn` stays advisory under strict flags.\nSaved reports use this value for CI levels. Absent in older output.\nNot part of finding identity, baseline keys or fingerprints."
         }
       },
       "required": [

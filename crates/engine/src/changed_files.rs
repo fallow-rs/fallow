@@ -1001,6 +1001,12 @@ fn retain_prop_drilling_chains_by_anchor(
     scope: &impl ChangedPathScope,
 ) {
     chains.retain(|chain| {
+        if chain.effective_severity
+            == Some(fallow_types::output_dead_code::EffectiveSeverity::Error)
+        {
+            return chain.chain.hops.is_empty()
+                || chain.chain.hops.iter().any(|hop| scope.contains(&hop.file));
+        }
         chain
             .chain
             .hops

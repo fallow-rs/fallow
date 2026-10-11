@@ -1795,16 +1795,18 @@
       "sarif_rule_ids": [
         "fallow/prop-drilling"
       ],
-      "codeclimate_check_names": null,
+      "codeclimate_check_names": [
+        "fallow/prop-drilling"
+      ],
       "ts_alias": null,
-      "counts_in_total": false,
+      "counts_in_total": true,
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-next-line prop-drilling",
       "default_severity": "off",
       "opt_in": true,
       "frameworks": [],
-      "note": "Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off.",
+      "note": "Opt-in: error gates CI; warn remains advisory even with --fail-on-issues. Defaults to off. Source-hop overrides decide severity.",
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#prop-drilling"

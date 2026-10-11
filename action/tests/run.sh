@@ -3732,6 +3732,21 @@ assert_contains "$GATE_LOG" "::debug::" "gate: unreadable visibility with probe 
 
 rm -rf "$GATE_DIR"
 
+# Enforced prop chains use any touched hop and retain their source anchor.
+PROP_CHECK=$(jq -nc '{total_issues:1,prop_drilling_chains:[{prop:"user",depth:3,effective_severity:"error",hops:[{file:"src/Page.tsx",line:4,component:"Page"},{file:"src/Profile.tsx",line:3,component:"Profile"}]}]}')
+PROP_SCOPED=$(jq --argjson changed '["src/Profile.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_CHECK")
+assert_contains "$(jq -c '[.total_issues,.prop_drilling_chains[0].hops[0].file]' <<< "$PROP_SCOPED")" '[1,"src/Page.tsx"]' "prop scope: downstream changes keep enforced chain and source anchor"
+PROP_SCOPED=$(jq --argjson changed '["src/main.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_CHECK")
+assert_contains "$(jq -c '[.total_issues,(.prop_drilling_chains|length)]' <<< "$PROP_SCOPED")" '[0,0]' "prop scope: unrelated changes remove enforced chain"
+PROP_WARN=$(jq '.total_issues=0 | .prop_drilling_chains[0].effective_severity="warn"' <<< "$PROP_CHECK")
+PROP_SCOPED=$(jq --argjson changed '["src/Page.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_WARN")
+assert_contains "$(jq -c '[.total_issues,(.prop_drilling_chains|length)]' <<< "$PROP_SCOPED")" '[0,1]' "prop scope: source-owned warning stays advisory"
+PROP_SCOPED=$(jq --argjson changed '["src/Profile.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_WARN")
+assert_contains "$(jq -c '[.total_issues,(.prop_drilling_chains|length)]' <<< "$PROP_SCOPED")" '[0,0]' "prop scope: warnings retain source-only scope"
+PROP_EMPTY=$(jq '.prop_drilling_chains[0].hops=[]' <<< "$PROP_CHECK")
+PROP_SCOPED=$(jq --argjson changed '["src/main.tsx"]' -f "$JQ_DIR/filter-changed.jq" <<< "$PROP_EMPTY")
+assert_contains "$(jq -c '[.total_issues,(.prop_drilling_chains|length)]' <<< "$PROP_SCOPED")" '[1,1]' "prop scope: empty-hop imported error stays counted without fabricated path"
+
 # --- IssueKind summary drift guard ---
 #
 # A new fallow dead-code IssueKind must be wired into every GitHub jq surface
@@ -3752,8 +3767,7 @@ rm -rf "$GATE_DIR"
 # History: filter-changed.jq once omitted `test-only-dependency` (the key was
 # absent from the total_issues recount so a --changed-since count undercounted
 # it). That omission is now closed, so the surface gates "all" with no
-# allow-list. The `allow:<ids>` machinery in the guard remains available for any
-# future surface that legitimately carries only a documented subset.
+# allow-list.
 
 echo ""
 echo "=== IssueKind summary drift guard ==="
@@ -3761,7 +3775,7 @@ echo "=== IssueKind summary drift guard ==="
 GUARD_DIR="$DIR"
 # shellcheck source=action/tests/issuekind-drift-guard.sh
 . "$DIR/issuekind-drift-guard.sh"
-assert_issuekind_summary_coverage "github filter-changed"   "$JQ_DIR/filter-changed.jq"
+assert_issuekind_summary_coverage "github filter-changed" "$JQ_DIR/filter-changed.jq"
 
 # VS Code DIAGNOSTIC_CATEGORIES is the LSP diagnostic-code catalog the extension
 # uses to filter, count, and render editor findings. It is provider-agnostic
@@ -5230,6 +5244,27 @@ if [ "$GATE_EXIT" -eq 0 ]; then
 else
   fail "baselined count: a fully baselined bare run passes fail-on-issues" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
 fi
+
+# Advisory prop chains stay outside the raw issue count used by strict jobs.
+for prop_command in dead-code ""; do
+  for prop_severity in warn error; do
+    prop_total=0
+    [ "$prop_severity" = error ] && prop_total=1
+    if [ "$prop_command" = dead-code ]; then
+      prop_envelope=$(gate_envelope '' '')
+      prop_envelope=$(jq -c --arg level "$prop_severity" --argjson count "$prop_total" '.total_issues = $count | .summary.total_issues = $count | .prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' <<< "$prop_envelope")
+    else
+      prop_envelope=$(jq -c --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json")
+    fi
+    run_gate_analyze "$prop_envelope" INPUT_COMMAND="$prop_command" INPUT_HEALTH_BASELINE=h.json INPUT_FAIL_ON_ISSUES=true
+    assert_contains "$GATE_OUTPUTS" "issues=$prop_total" "prop gating: $prop_command $prop_severity preserves issue accounting"
+    if [ "$GATE_EXIT" -eq "$prop_total" ]; then
+      pass "prop gating: $prop_command $prop_severity strict exit"
+    else
+      fail "prop gating: $prop_command $prop_severity strict exit" "exit $GATE_EXIT: $GATE_STDOUT"
+    fi
+  done
+done
 
 rm -rf "$GATE_WORK"
 

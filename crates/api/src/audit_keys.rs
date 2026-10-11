@@ -63,12 +63,17 @@ impl DeadCodeAuditLedger {
         self.introduced_keys.len()
     }
 
-    /// Number of findings whose effective severity is not off.
+    /// Number of counted findings whose effective severity is not off.
+    /// Advisory prop chains remain available in the records.
     #[must_use]
     pub fn visible_count(&self) -> usize {
         self.records
             .iter()
-            .filter(|record| record.effective_severity != Severity::Off)
+            .filter(|record| {
+                record.effective_severity != Severity::Off
+                    && (record.collection != "prop_drilling_chains"
+                        || record.effective_severity == Severity::Error)
+            })
             .count()
     }
 
@@ -109,7 +114,10 @@ impl DeadCodeAuditLedger {
             if record.introduced && !head_syntactic.contains(&record.stable_key) {
                 record.introduced = false;
                 self.introduced_keys.remove(&record.stable_key);
-                if record.effective_severity != Severity::Off {
+                if record.effective_severity != Severity::Off
+                    && (record.collection != "prop_drilling_chains"
+                        || record.effective_severity == Severity::Error)
+                {
                     self.inherited_keys.insert(record.stable_key.clone());
                 }
             }
@@ -182,7 +190,7 @@ impl DeadCodeAuditLedger {
             security_unresolved_edge_files: _security_unresolved_edge_files,
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
-            prop_drilling_chains: _prop_drilling_chains,
+            prop_drilling_chains,
             thin_wrappers: _thin_wrappers,
             duplicate_prop_shapes: _duplicate_prop_shapes,
             export_usages: _export_usages,
@@ -205,6 +213,7 @@ impl DeadCodeAuditLedger {
             };
         }
 
+        annotate!(prop_drilling_chains, "prop_drilling_chains");
         annotate!(unused_files, "unused_files");
         annotate!(unused_exports, "unused_exports");
         annotate!(unused_types, "unused_types");
@@ -630,9 +639,7 @@ impl DeadCodeKeyCollector<'_> {
             security_unresolved_edge_files: _security_unresolved_edge_files,
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
-            // Prop-drilling is a dormant multi-file health signal (rule defaults to
-            // `off`); like security findings it has no dead-code attribution key.
-            prop_drilling_chains: _prop_drilling_chains,
+            prop_drilling_chains,
             // Thin wrappers are a dormant health signal (rule defaults to `off`); a
             // candidate-for-inlining record, not a dead-code attribution key.
             thin_wrappers: _thin_wrappers,
@@ -653,6 +660,7 @@ impl DeadCodeKeyCollector<'_> {
             semantic_framework_contracts: _semantic_framework_contracts,
         } = results;
 
+        self.add_items(AuditCollection::PropDrillingChains, prop_drilling_chains);
         self.add_core_findings(
             unused_files,
             unused_exports,
@@ -723,6 +731,7 @@ impl DeadCodeKeyCollector<'_> {
 
 #[derive(Clone, Copy)]
 enum AuditCollection {
+    PropDrillingChains,
     UnusedFiles,
     UnusedExports,
     UnusedTypes,
@@ -772,7 +781,8 @@ enum AuditCollection {
 
 impl AuditCollection {
     #[cfg(test)]
-    const ALL: [Self; 45] = [
+    const ALL: [Self; 46] = [
+        Self::PropDrillingChains,
         Self::UnusedFiles,
         Self::UnusedExports,
         Self::UnusedTypes,
@@ -822,6 +832,7 @@ impl AuditCollection {
 
     const fn json_key(self) -> &'static str {
         match self {
+            Self::PropDrillingChains => "prop_drilling_chains",
             Self::UnusedFiles => "unused_files",
             Self::UnusedExports => "unused_exports",
             Self::UnusedTypes => "unused_types",
@@ -943,7 +954,10 @@ impl<'a> DeadCodeKeyCollector<'a> {
                 self.classifications += 1;
             }
             let introduced = self.base.is_some_and(|base| !base.contains(&key));
-            if effective_severity != Severity::Off && self.base.is_some() {
+            if effective_severity != Severity::Off
+                && self.base.is_some()
+                && (collection != "prop_drilling_chains" || effective_severity == Severity::Error)
+            {
                 if introduced {
                     self.introduced_keys.insert(key.clone());
                 } else {
@@ -1478,6 +1492,7 @@ pub fn retain_introduced_dead_code(
         };
     }
     retain!(
+        prop_drilling_chains,
         unused_files,
         unused_exports,
         unused_types,
@@ -1598,8 +1613,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
-        // Prop-drilling is a dormant multi-file health signal (rule defaults to
-        // `off`); it carries no dead-code key and is not base-filtered here.
+        // Prop chains use source identities and occurrence-aware audit filtering.
         prop_drilling_chains: _prop_drilling_chains,
         // Thin wrappers are a dormant health signal (rule defaults to `off`);
         // no dead-code key and not base-filtered here.
@@ -1675,6 +1689,7 @@ pub fn annotate_dead_code_json(
         };
     }
     annotate!(
+        prop_drilling_chains,
         unused_files,
         unused_exports,
         unused_types,
@@ -1989,6 +2004,67 @@ mod tests {
 
     fn root() -> PathBuf {
         PathBuf::from("/repo")
+    }
+
+    #[test]
+    fn prop_audit_matches_source_occurrences_and_keeps_warnings_out_of_counts() {
+        let root = root();
+        let mut chain = PropDrillingChainFinding::with_actions(PropDrillingChain {
+            prop: "user".to_owned(),
+            depth: 3,
+            hops: vec![PropDrillHop {
+                file: root.join("src/Page.tsx"),
+                line: 4,
+                component: "Page".to_owned(),
+            }],
+        });
+        let original = AnalysisResults {
+            prop_drilling_chains: vec![chain.clone()],
+            ..Default::default()
+        };
+        let base = dead_code_keys(&original, &root);
+        chain.chain.hops[0].line = 12;
+        let mut repeated = AnalysisResults {
+            prop_drilling_chains: vec![chain.clone(), chain],
+            ..Default::default()
+        };
+        let config: FallowConfig =
+            serde_json::from_value(json!({"rules": {"prop-drilling": "error"}}))
+                .expect("prop policy");
+        let config = config.resolve(root.clone(), OutputFormat::Json, 1, false, true, None);
+        let ledger = dead_code_audit_ledger(&repeated, &root, &config, Some(&base));
+        assert_eq!(
+            (ledger.introduced_count(), ledger.inherited_count()),
+            (1, 1)
+        );
+        assert!(ledger.has_introduced_errors());
+        ledger.annotate_results(&mut repeated);
+        assert_eq!(
+            repeated.prop_drilling_chains[0].introduced,
+            Some(AuditIntroduced(false))
+        );
+        assert_eq!(
+            repeated.prop_drilling_chains[1].introduced,
+            Some(AuditIntroduced(true))
+        );
+        retain_introduced_dead_code(&mut repeated, &root, Some(&base));
+        assert_eq!(repeated.prop_drilling_chains.len(), 1);
+        let mut config = config;
+        config.rules.prop_drilling = Severity::Warn;
+        let ledger = dead_code_audit_ledger(&original, &root, &config, Some(&FxHashSet::default()));
+        assert_eq!((ledger.introduced_count(), ledger.visible_count()), (0, 0));
+        assert!(!ledger.has_introduced_errors());
+        assert!(ledger.records()[0].introduced);
+        let mut ledger = ledger;
+        ledger.demote_unattributable_introductions(&FxHashSet::default());
+        assert_eq!(
+            (
+                ledger.introduced_count(),
+                ledger.inherited_count(),
+                ledger.visible_count()
+            ),
+            (0, 0, 0)
+        );
     }
 
     fn export(path: &Path, name: &str) -> UnusedExportFinding {
@@ -3800,6 +3876,20 @@ mod tests {
             angular_input_output_and_policy_results(&root),
             unused_store_member_results(&root),
             production_and_directive_results(&root),
+            AnalysisResults {
+                prop_drilling_chains: vec![PropDrillingChainFinding::with_actions(
+                    PropDrillingChain {
+                        prop: "user".to_owned(),
+                        depth: 3,
+                        hops: vec![PropDrillHop {
+                            file: root.join("src/page.ts"),
+                            line: 4,
+                            component: "Page".to_owned(),
+                        }],
+                    },
+                )],
+                ..Default::default()
+            },
         ]);
         let empty_base = FxHashSet::default();
         let mut covered = std::collections::BTreeSet::new();

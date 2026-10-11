@@ -324,6 +324,33 @@ fn collect_check(env: &Value, pm: PackageManager, out: &mut Vec<Annotation>) {
     collect_check_components(env, out);
     collect_check_suppressions(env, out);
     collect_check_catalog(env, out);
+    collect_prop_drilling(env, out);
+}
+
+fn collect_prop_drilling(env: &Value, out: &mut Vec<Annotation>) {
+    for item in arr(env, "prop_drilling_chains") {
+        if s(item, "effective_severity") != "error" {
+            continue;
+        }
+        let Some(source) = arr(item, "hops").next() else {
+            continue;
+        };
+        push(
+            out,
+            AnnotationLevel::Error,
+            s(source, "file"),
+            Anchor {
+                line: Some(u(source, "line")),
+                col: None,
+            },
+            "Prop drilling".to_owned(),
+            format!(
+                "Prop '{}' is forwarded unchanged through {} components. Review composition, colocation or context, or suppress the source prop declaration.",
+                s(item, "prop"),
+                u(item, "depth")
+            ),
+        );
+    }
 }
 
 fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {

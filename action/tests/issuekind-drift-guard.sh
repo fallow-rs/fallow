@@ -351,13 +351,9 @@ assert_issuekind_summary_coverage() {
       # Non-dead-code kinds (security, dupes, health, flags) live on other
       # surfaces; only the suppress.rs fallback yields them. Skip, don't fail.
       #
-      # prop-drilling / thin-wrapper / duplicate-prop-shape are command-tagged
-      # dead-code, but they are opt-in (default-off) React/Preact advisory
-      # health signals surfaced ONLY in the CLI human report + raw JSON. They
-      # are deliberately NOT emitted by the LSP (no DIAGNOSTIC_ISSUE_TYPES
-      # entry) and not carried by the PR-summary jq surfaces, so they are
-      # classified here like complexity / coverage-gaps rather than gated for
-      # surface presence.
+      # Advisory component-health families do not contribute to raw totals.
+      # Native Rust reports and LSP diagnostics cover these opt-in families;
+      # frozen jq adapters do not acquire newer renderer contracts.
       case "$id" in
         security-*|code-duplication|complexity|coverage-gaps|feature-flag|prop-drilling|thin-wrapper|duplicate-prop-shape)
           skipped+=("$id") ;;

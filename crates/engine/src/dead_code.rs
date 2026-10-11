@@ -599,6 +599,8 @@ pub fn apply_scope(
     scope: &DeadCodeScope<'_>,
     config: &ResolvedConfig,
 ) {
+    // Chain scopes depend on source-owned enforcement, which must resolve before filtering.
+    crate::effective_severity::apply_prop_drilling_severities(results, config);
     if let Some(roots) = scope.workspace_roots {
         filter_to_workspaces(results, roots);
     }

@@ -3294,6 +3294,10 @@ export interface CheckSummary {
  */
 total_issues: number
 /**
+ * Prop chains whose saved effective severity explicitly enforces error policy.
+ */
+prop_drilling_chains?: number
+/**
  * Unused source files.
  */
 unused_files: number
@@ -6425,11 +6429,10 @@ actions: IssueAction[]
  */
 introduced?: (AuditIntroduced | null)
 /**
- * Rule severity of this finding. This type never gates the run, so the
- * value does not change the exit code. `fallow report --from` reads it
- * for the SARIF level, so the level does not depend on the config at
- * render time. Absent in output from older versions. Not part of the
- * finding identity, baseline keys or fingerprints.
+ * Rule severity after resolving overrides for the source hop. An explicit
+ * `error` enforces the chain; `warn` stays advisory under strict flags.
+ * Saved reports use this value for CI levels. Absent in older output.
+ * Not part of finding identity, baseline keys or fingerprints.
  */
 effective_severity?: (EffectiveSeverity | null)
 }

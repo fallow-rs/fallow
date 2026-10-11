@@ -2173,6 +2173,28 @@ else
   fail "baselined count: a fully baselined bare run passes FALLOW_FAIL_ON_ISSUES" "exit $BASELINED_EXIT"
 fi
 
+# Keep advisory prop chains outside the raw issue count used by strict jobs.
+for prop_command in dead-code ""; do
+  for prop_severity in warn error; do
+    prop_total=0
+    [ "$prop_severity" = error ] && prop_total=1
+    if [ "$prop_command" = dead-code ]; then
+      prop_envelope=$(gitlab_gate_envelope '' '')
+      jq --arg level "$prop_severity" --argjson count "$prop_total" '.total_issues = $count | .summary.total_issues = $count | .prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$prop_envelope" > "$GATE_WORK/prop-envelope.json"
+    else
+      jq --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/prop-envelope.json"
+    fi
+    PROP_EXIT=0
+    OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/prop-envelope.json" FALLOW_COMMAND="$prop_command" FALLOW_HEALTH_BASELINE=h.json FALLOW_FAIL_ON_ISSUES=true 2>&1) || PROP_EXIT=$?
+    assert_contains "$OUT" "Found $prop_total issues" "prop gating: $prop_command $prop_severity preserves issue accounting"
+    if [ "$PROP_EXIT" -eq "$prop_total" ]; then
+      pass "prop gating: $prop_command $prop_severity strict exit"
+    else
+      fail "prop gating: $prop_command $prop_severity strict exit" "exit $PROP_EXIT: $OUT"
+    fi
+  done
+done
+
 # A gate the variable asked for fails the pipeline even with
 # FALLOW_FAIL_ON_ISSUES false, which is the whole point of every issue here.
 ENVELOPE=$(gitlab_gate_envelope '{"regression":{"status":"fail","enforced":true}}' '"regression":{"delta":4}')

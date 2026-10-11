@@ -206,6 +206,9 @@ pub struct RulesConfig {
     /// A graph-derived health signal. Defaults to `off` (opt-in), like
     /// `private-type-leak` / `security-*`: the located per-chain records and the
     /// small capped health penalty are dormant until the user enables the rule.
+    /// `error` enforces the finding in CI; `warn` stays advisory even under
+    /// strict flags. Overrides resolve for the source hop and can enable the
+    /// rule while the base rule is off.
     #[serde(default = "Severity::default_off", alias = "prop-drilling")]
     pub prop_drilling: Severity,
     /// A React/Preact component whose entire body is `return <Child {...props}/>`

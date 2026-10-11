@@ -3379,7 +3379,7 @@ mod tests {
             .collect();
 
         assert_eq!(
-            BTreeSet::from(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]),
+            BTreeSet::from(["duplicate-prop-shape", "thin-wrapper"]),
             missing
         );
 
@@ -3388,5 +3388,6 @@ mod tests {
             .collect();
         assert!(check_names.contains("fallow/stale-suppression"));
         assert!(check_names.contains("fallow/missing-suppression-reason"));
+        assert!(check_names.contains("fallow/prop-drilling"));
     }
 }
