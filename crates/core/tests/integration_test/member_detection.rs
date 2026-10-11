@@ -1227,3 +1227,30 @@ fn map_value_type_credits_class_members_read_through_get() {
         "a member called on a Map value must credit the value class"
     );
 }
+
+#[test]
+fn map_iteration_credits_values_without_crediting_keys_or_other_receivers() {
+    let root = fixture_path("map-iteration-class-members");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+    unused.sort();
+    assert_eq!(
+        unused,
+        [
+            "Item.catchOnly",
+            "Item.forInOnly",
+            "Item.keyOnly",
+            "Item.namespaceRestOnly",
+            "Item.never",
+            "Item.restOnly",
+            "Item.unknownOnly",
+            "Item.unsupportedOnly",
+        ],
+        "Map iteration must bind the value position within its lexical scope"
+    );
+}

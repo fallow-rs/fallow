@@ -1168,7 +1168,7 @@ fn extract_binding_local_name<'a>(pattern: &'a BindingPattern<'a>) -> Option<&'a
 /// Collect `property -> class type` mappings from an object-type member list.
 pub(super) fn collect_object_type_property_types(
     members: &[TSSignature<'_>],
-) -> FxHashMap<String, String> {
+) -> FxHashMap<String, super::super::TypePropertyTarget> {
     let mut properties = FxHashMap::default();
     for member in members {
         let TSSignature::TSPropertySignature(prop) = member else {
@@ -1181,7 +1181,16 @@ pub(super) fn collect_object_type_property_types(
             continue;
         };
         if let Some(type_name) = extract_type_annotation_name(type_annotation) {
-            properties.insert(property_name.to_string(), type_name);
+            properties.insert(
+                property_name.to_string(),
+                super::super::TypePropertyTarget {
+                    name: type_name,
+                    reference_span: super::super::helpers::extract_type_reference_origin(
+                        &type_annotation.type_annotation,
+                    ),
+                    owner_span: None,
+                },
+            );
         }
     }
     properties

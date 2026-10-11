@@ -298,6 +298,7 @@ impl ModuleInfoExtractor {
                     self.record_factory_return_function(
                         id.name.as_str(),
                         FactoryReturnFunctionInput {
+                            binding_span: id.span,
                             params: &arrow.params,
                             body: Some(BodyRef::arrow(&arrow.body)),
                             is_async: arrow.r#async,
@@ -330,6 +331,7 @@ impl ModuleInfoExtractor {
                     self.record_factory_return_function(
                         id.name.as_str(),
                         FactoryReturnFunctionInput {
+                            binding_span: id.span,
                             params: &function.params,
                             body: function.body.as_deref().map(BodyRef::Block),
                             is_async: function.r#async,

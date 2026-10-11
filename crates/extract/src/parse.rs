@@ -1537,6 +1537,9 @@ pub struct SemanticUsage {
     pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
     pub(crate) mock_api_reference_spans: MockApiReferenceSpans,
     pub(crate) module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
+    pub(crate) subclass_binding_reference_spans: rustc_hash::FxHashMap<Span, Span>,
+    pub(crate) subclass_namespace_reference_spans: rustc_hash::FxHashSet<Span>,
+    pub(crate) subclass_immutable_reference_spans: rustc_hash::FxHashSet<Span>,
     pub(crate) imported_call_reference_spans: rustc_hash::FxHashSet<Span>,
     /// Value references to runtime ESM import bindings that are not admitted
     /// call sites, plus admitted calls that initialize a top-level declarator.
@@ -1555,6 +1558,7 @@ pub fn compute_semantic_usage_for_extractor(
     template_used: &rustc_hash::FxHashSet<String>,
 ) -> SemanticUsage {
     let computed_enum_key_spans = extractor.computed_enum_key_reference_spans();
+    let subclass_candidates = extractor.subclass_reference_candidates();
     let imported_call_candidates = extractor.imported_call_reference_candidates();
     let require_namespace_bindings = extractor.require_namespace_bindings();
     let mut semantic_usage = compute_semantic_usage_with_candidates(
@@ -1565,10 +1569,16 @@ pub fn compute_semantic_usage_for_extractor(
         template_used,
         SemanticReferenceCandidates {
             module_bindings: &computed_enum_key_spans,
+            subclass_bindings: &subclass_candidates,
             imported_calls: &imported_call_candidates,
         },
     );
     extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
+    extractor.set_subclass_binding_provenance(
+        std::mem::take(&mut semantic_usage.subclass_binding_reference_spans),
+        std::mem::take(&mut semantic_usage.subclass_namespace_reference_spans),
+        std::mem::take(&mut semantic_usage.subclass_immutable_reference_spans),
+    );
     extractor.resolve_imported_call_sites(&semantic_usage.imported_call_reference_spans);
     extractor.set_import_binding_references(std::mem::take(
         &mut semantic_usage.import_binding_references,
@@ -1618,7 +1628,65 @@ fn report_unreferenced_import_equals_bindings(
 #[derive(Clone, Copy)]
 struct SemanticReferenceCandidates<'a> {
     module_bindings: &'a rustc_hash::FxHashSet<Span>,
+    subclass_bindings: &'a rustc_hash::FxHashSet<Span>,
     imported_calls: &'a rustc_hash::FxHashSet<Span>,
+}
+
+#[derive(Default)]
+struct SubclassReferenceSpans {
+    bindings: rustc_hash::FxHashMap<Span, Span>,
+    namespaces: rustc_hash::FxHashSet<Span>,
+    immutable: rustc_hash::FxHashSet<Span>,
+}
+
+fn subclass_reference_spans(
+    semantic: &oxc_semantic::Semantic<'_>,
+    imports: &[ImportInfo],
+    candidates: &rustc_hash::FxHashSet<Span>,
+) -> SubclassReferenceSpans {
+    use rustc_hash::FxHashSet;
+    let scoping = semantic.scoping();
+    let mut subclass_binding_reference_spans = rustc_hash::FxHashMap::default();
+    let mut subclass_namespace_reference_spans = FxHashSet::default();
+    let mut subclass_immutable_reference_spans = FxHashSet::default();
+    if !candidates.is_empty() {
+        let namespace_symbols: FxHashSet<_> = imports
+            .iter()
+            .filter(|import| matches!(import.imported_name, ImportedName::Namespace))
+            .filter_map(|import| {
+                crate::binding_references::admitted_import_symbol(semantic, import)
+            })
+            .collect();
+        for symbol in scoping.symbol_ids() {
+            let immutable = !scoping
+                .get_resolved_references(symbol)
+                .any(|reference| reference.is_write());
+            for reference in scoping.get_resolved_references(symbol) {
+                let AstKind::IdentifierReference(identifier) =
+                    semantic.nodes().kind(reference.node_id())
+                else {
+                    continue;
+                };
+                if !candidates.contains(&identifier.span) {
+                    continue;
+                }
+                subclass_binding_reference_spans
+                    .insert(identifier.span, scoping.symbol_span(symbol));
+                if immutable {
+                    subclass_immutable_reference_spans.insert(identifier.span);
+                }
+                if reference.is_value() && namespace_symbols.contains(&symbol) {
+                    subclass_namespace_reference_spans.insert(identifier.span);
+                }
+            }
+        }
+    }
+
+    SubclassReferenceSpans {
+        bindings: subclass_binding_reference_spans,
+        namespaces: subclass_namespace_reference_spans,
+        immutable: subclass_immutable_reference_spans,
+    }
 }
 
 fn compute_semantic_usage_with_candidates(
@@ -1705,6 +1773,12 @@ fn compute_semantic_usage_with_candidates(
         }
     }
 
+    let SubclassReferenceSpans {
+        bindings: subclass_binding_reference_spans,
+        namespaces: subclass_namespace_reference_spans,
+        immutable: subclass_immutable_reference_spans,
+    } = subclass_reference_spans(&semantic, imports, candidates.subclass_bindings);
+
     let imported_call_reference_spans =
         imported_call_reference_spans(&semantic, imports, candidates.imported_calls);
     let import_binding_references = crate::binding_references::collect(
@@ -1723,6 +1797,9 @@ fn compute_semantic_usage_with_candidates(
         declaration_merges,
         mock_api_reference_spans,
         module_binding_reference_spans,
+        subclass_binding_reference_spans,
+        subclass_namespace_reference_spans,
+        subclass_immutable_reference_spans,
         imported_call_reference_spans,
         import_binding_references,
         unreferenced_import_equals_bindings: import_equals.unreferenced,
@@ -2078,6 +2155,7 @@ pub fn compute_import_binding_usage(
         template_used,
         SemanticReferenceCandidates {
             module_bindings: &rustc_hash::FxHashSet::default(),
+            subclass_bindings: &rustc_hash::FxHashSet::default(),
             imported_calls: &rustc_hash::FxHashSet::default(),
         },
     );

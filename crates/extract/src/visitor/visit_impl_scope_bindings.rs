@@ -335,6 +335,15 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn push_function_declaration_scope(&mut self, params: &FormalParameters<'_>) {
+        if let Some(rest) = &params.rest {
+            self.record_direct_object_binding_scope_roots(
+                rest.rest
+                    .argument
+                    .get_binding_identifiers()
+                    .into_iter()
+                    .map(|id| id.name.to_string()),
+            );
+        }
         if self.namespace_depth > 0 {
             return;
         }
@@ -397,7 +406,9 @@ impl ModuleInfoExtractor {
             .push(FxHashSet::default());
         self.scoped_array_binding_element_types
             .push(array_element_scope);
-        self.scoped_map_binding_value_types.push(map_value_scope);
+        if let Some(map_scope) = self.scoped_map_binding_value_types.last_mut() {
+            map_scope.extend(map_value_scope);
+        }
         self.sanitizer_binding_stack.push(sanitizer_scope);
         self.literal_allowlist_binding_stack.push(allowlist_scope);
         self.risky_regex_binding_stack.push(risky_regex_scope);
@@ -410,7 +421,6 @@ impl ModuleInfoExtractor {
             self.nested_declaration_stack.pop();
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
-            self.scoped_map_binding_value_types.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
             self.risky_regex_binding_stack.pop();
@@ -423,6 +433,8 @@ impl ModuleInfoExtractor {
         self.direct_object_binding_generation =
             self.direct_object_binding_generation.saturating_add(1);
         self.scoped_direct_object_binding_roots.push(roots);
+        self.scoped_map_binding_value_types
+            .push(FxHashMap::default());
         self.scoped_direct_object_binding_targets
             .push(FxHashMap::default());
         self.scoped_direct_object_binding_generations
@@ -439,6 +451,7 @@ impl ModuleInfoExtractor {
         self.direct_object_binding_generation =
             self.direct_object_binding_generation.saturating_add(1);
         self.scoped_direct_object_binding_roots.pop();
+        self.scoped_map_binding_value_types.pop();
         self.scoped_direct_object_binding_targets.pop();
         self.scoped_direct_object_binding_generations.pop();
         self.scoped_direct_object_binding_paths_by_root.pop();

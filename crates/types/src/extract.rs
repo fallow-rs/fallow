@@ -2354,7 +2354,7 @@ pub enum SemanticFact {
     /// A property of an exported object contains a local class instance.
     /// Appended because bitcode encodes enum variants by ordinal.
     ExportedObjectInstanceProperty(ExportedObjectInstancePropertyFact),
-    /// A member read on an instance from a namespace-qualified constructor.
+    /// A proven class member read selected through a namespace import.
     /// Appended because bitcode encodes enum variants by ordinal.
     QualifiedClassMemberAccess(QualifiedClassMemberAccessFact),
     /// A Module Federation runtime call (`registerRemotes`, `loadRemote`,
@@ -2557,7 +2557,7 @@ impl<'a> SemanticFactView<'a> {
         exported_object_instance_property_facts(self.semantic_facts)
     }
 
-    /// Iterate proven namespace-qualified class instance member accesses.
+    /// Iterate proven namespace-qualified class member accesses.
     pub fn qualified_class_member_accesses(
         self,
     ) -> impl Iterator<Item = &'a QualifiedClassMemberAccessFact> + 'a {
@@ -3189,7 +3189,7 @@ pub struct ExportedObjectInstancePropertyFact {
     pub class_local_name: String,
 }
 
-/// A member read on an instance created by a namespace-qualified constructor.
+/// A proven class member read through a namespace-qualified constructor or local subclass.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct QualifiedClassMemberAccessFact {
@@ -3197,7 +3197,7 @@ pub struct QualifiedClassMemberAccessFact {
     pub namespace_local: String,
     /// Class export selected from that namespace.
     pub class_export_name: String,
-    /// Instance member accessed through the proven object path.
+    /// Member accessed through the proven class or instance binding.
     pub member: String,
 }
 

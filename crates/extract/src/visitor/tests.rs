@@ -1,5 +1,6 @@
 #![cfg(all(test, not(miri)))]
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use super::*;
@@ -8787,6 +8788,104 @@ fn destructured_receiver_alias_respects_nested_value_shadowing() {
 }
 
 #[test]
+fn typed_this_constructor_assignment_preserves_ordinary_receiver_facts() {
+    let cases = [
+        (
+            "no assignment",
+            "",
+            "this.cacheHandler?.notify?.()",
+            "this.cacheHandler",
+        ),
+        (
+            "direct constructor",
+            "constructor(){this.cacheHandler=new Strategy();}",
+            "this.cacheHandler?.notify?.()",
+            "Strategy",
+        ),
+        (
+            "parameter optional",
+            "constructor({Current}:{Current?:typeof Strategy}){if(Current)this.cacheHandler=new Current();}",
+            "this.cacheHandler?.notify?.()",
+            "this.cacheHandler",
+        ),
+        (
+            "parameter normal",
+            "constructor({Current}:{Current?:typeof Strategy}){if(Current)this.cacheHandler=new Current();}",
+            "this.cacheHandler!.notify()",
+            "this.cacheHandler",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for capture in [false, true] {
+        for (label, constructor, call, expected) in cases {
+            let subclass = if capture {
+                "import * as ns from './base'; class Sub extends ns.Base {} Sub.live();"
+            } else {
+                ""
+            };
+            let info = parse(&format!(
+                "{subclass} export class Strategy{{notify(){{}}dead(){{}}}} export class Registry{{readonly cacheHandler?:Strategy;{constructor}call(){{{call};unknownReceiver.unbound();}}}}"
+            ));
+            if !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == expected && access.member == "notify")
+            {
+                failures.push(format!(
+                    "{label}, capture={capture}: expected {expected}.notify, got {:?}",
+                    info.member_accesses
+                ));
+            }
+            assert!(info.member_accesses.iter().any(|access| {
+                access.object == "unknownReceiver" && access.member == "unbound"
+            }));
+            assert!(
+                !info
+                    .member_accesses
+                    .iter()
+                    .any(|access| { access.object == "Strategy" && access.member == "unbound" })
+            );
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn typed_field_initializer_keeps_ordinary_this_alias_resolution() {
+    let info = parse(
+        r"
+        interface Strategy { notify(): void; }
+        export class Registry {
+          current!: Strategy;
+          flush(): void {
+            const service = this.current;
+            service.notify();
+            unknownReceiver.unbound();
+          }
+        }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Strategy" && access.member == "notify"),
+        "ordinary typed-field aliases should resolve without subclass references: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| { access.object == "unknownReceiver" && access.member == "unbound" })
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| { access.object == "Strategy" && access.member == "unbound" })
+    );
+}
+
+#[test]
 fn typed_field_initializer_binds_local_receiver() {
     let info = parse(
         r"
@@ -13977,4 +14076,1987 @@ fn import_binding_references_record_uses_of_an_exported_wrapper_in_its_module() 
         .filter(|reference| reference.through.is_none())
         .count();
     assert_eq!(direct, 3);
+}
+
+#[test]
+fn class_member_remediation_awaited_destructure_preserves_factory_boundaries() {
+    let info = parse(
+        r"
+        class Service { used() {} promiseOnly() {} generatorOnly() {} }
+        async function make() { return new Service(); }
+        function* generate() { return new Service(); }
+        const { used: alias } = await make();
+        const { promiseOnly } = make();
+        const { generatorOnly } = await generate();
+        ",
+    );
+    assert!(has_member_access(&info, "Service", "used"));
+    assert!(!has_member_access(&info, "Service", "promiseOnly"));
+    assert!(!has_member_access(&info, "Service", "generatorOnly"));
+
+    let imported = parse(
+        "import { make } from './service'; const { used } = await make(); const { promiseOnly } = make();",
+    );
+    let facts: Vec<_> = imported
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::FactoryFnMemberAccess(access) => Some((
+                access.callee_name.as_str(),
+                access.member.as_str(),
+                access.awaited,
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        facts,
+        [("make", "used", true), ("make", "promiseOnly", false)]
+    );
+}
+
+#[test]
+fn class_member_remediation_map_iteration_keeps_value_bindings_scoped() {
+    let info = parse(
+        r"
+        import { Item } from './lib';
+        const items = new Map<string, Item>();
+        for (const [, value] of items.entries()) value.entriesUsed();
+        items.forEach(value => value.callbackUsed());
+        items.forEach((other, value) => value.keyOnly());
+        for (const [value] of items.entries()) value.keyOnly();
+        function unrelated(items: unknown) {
+            items.forEach(value => value.unknownOnly());
+        }
+        ",
+    );
+    assert!(has_member_access(&info, "Item", "entriesUsed"));
+    assert!(has_member_access(&info, "Item", "callbackUsed"));
+    assert!(!has_member_access(&info, "Item", "keyOnly"));
+    assert!(!has_member_access(&info, "Item", "unknownOnly"));
+}
+
+#[test]
+fn namespace_subclass_member_facts_preserve_binding_identity() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class Sub extends ns.C {}
+        class Child extends Sub {}
+        Sub.live();
+        const value = new Child();
+        value.instance();
+        const callback = Child.passed;
+        const shadow = (Sub: { wrong(): void }): void => { Sub.wrong(); };
+        const unknown = (value: { unknown(): void }): void => { value.unknown(); };
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(
+        facts,
+        [
+            ("ns", "C", "instance"),
+            ("ns", "C", "live"),
+            ("ns", "C", "passed")
+        ]
+    );
+}
+
+#[test]
+fn namespace_subclass_unproven_heritage_and_receivers_have_no_precise_fact() {
+    for unproven in [
+        "class Bad extends mixin(ns.C) {}; Bad.wrong();",
+        "class Bad extends (condition ? ns.C : Other) {}; Bad.wrong();",
+        "class Bad extends ns[key] {}; Bad.wrong();",
+        "class Bad extends ns.deep.C {}; Bad.wrong();",
+        "class Bad extends fallback.C {}; Bad.wrong();",
+        "const fake = { C: class {} }; class Bad extends fake.C {}; Bad.wrong();",
+        "const alias = ns; class Bad extends alias.C {}; Bad.wrong();",
+        "class Bad extends types.C {}; Bad.wrong();",
+        "const shadow = (Sub: { wrong(): void }): void => { Sub.wrong(); };",
+        "const construct = (Sub: new () => { wrong(): void }): void => { const value = new Sub(); value.wrong(); };",
+        "const shadow = (): void => { const ns = { C: class {} }; class Bad extends ns.C {}; Bad.wrong(); };",
+        "const unknown = { wrong: (): void => {} }; unknown.wrong();",
+        "let value = new Sub(); value = opaque; value.wrong();",
+        "const holder = { item: new Sub() }; const shadow = (Sub: new () => { wrong(): void }): void => { holder.item = new Sub(); holder.item.wrong(); };",
+        "class A extends B {}; class B extends A {}; A.wrong();",
+    ] {
+        let info = parse(&format!(
+            r"
+            import * as ns from './base';
+            import fallback from './base';
+            import type * as types from './base';
+            class Sub extends ns.C {{}}
+            Sub.live();
+            {unproven}
+        "
+        ));
+        let facts: Vec<_> = info
+            .semantic_facts
+            .iter()
+            .filter_map(|fact| {
+                let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                    return None;
+                };
+                Some((
+                    fact.namespace_local.as_str(),
+                    fact.class_export_name.as_str(),
+                    fact.member.as_str(),
+                ))
+            })
+            .collect();
+        assert_eq!(facts, [("ns", "C", "live")], "unproven case: {unproven}");
+    }
+}
+
+#[test]
+fn local_subclass_alias_path_cycles_terminate() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class Sub extends ns.C {}
+        Sub.live();
+        const first = second.item;
+        const second = first;
+        first.wrong();
+    ",
+    );
+    let facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    assert_eq!(facts, [("ns", "C", "live")]);
+}
+
+#[test]
+fn local_subclass_property_writes_keep_source_time_provenance() {
+    for mutation in [
+        "const shadow = (Sub: new () => { wrong(): void }): void => { holder.item = new Sub(); holder.item.wrong(); };",
+        "const alias = holder; const shadow = (Sub: new () => { wrong(): void }): void => { alias.item = new Sub(); holder.item.wrong(); };",
+        "holder.item = opaque; holder.item.wrong();",
+        "holder.item += opaque; holder.item.wrong();",
+        "holder[key] = new Sub(); holder.item.wrong();",
+        "delete holder.item; holder.item.wrong();",
+        "holder.item++; holder.item.wrong();",
+        "const container = { inner: holder }; container.inner.item = opaque; holder.item.wrong();",
+    ] {
+        let info = parse(&format!(
+            r"
+            import * as ns from './base';
+            class Sub extends ns.C {{}}
+            const holder = {{ item: new Sub() }};
+            holder.item.before();
+            holder.item = new Sub();
+            holder.item.replaced();
+            {mutation}
+        "
+        ));
+        let mut facts: Vec<_> = info
+            .semantic_facts
+            .iter()
+            .filter_map(|fact| {
+                let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                    return None;
+                };
+                Some((
+                    fact.namespace_local.as_str(),
+                    fact.class_export_name.as_str(),
+                    fact.member.as_str(),
+                ))
+            })
+            .collect();
+        facts.sort_unstable();
+        assert_eq!(
+            facts,
+            [("ns", "C", "before"), ("ns", "C", "replaced")],
+            "mutation: {mutation}"
+        );
+    }
+}
+
+#[test]
+fn bare_subclass_member_facts_preserve_binding_identity() {
+    let info = parse(
+        r"
+        import { C } from './base';
+        class Sub extends C {}
+        Sub.live();
+        const value = new Sub();
+        value.instance();
+        const shadow = (Sub: { wrong(): void }): void => { Sub.wrong(); };
+        const unknown = (value: { unknown(): void }): void => { value.unknown(); };
+    ",
+    );
+    let mut members: Vec<_> = info
+        .member_accesses
+        .iter()
+        .filter(|access| access.object == "C")
+        .map(|access| access.member.as_str())
+        .collect();
+    members.sort_unstable();
+    assert_eq!(members, ["instance", "live"]);
+}
+
+#[test]
+fn local_subclass_copied_instance_retains_initial_property_target() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class Sub extends ns.C {}
+        const holder = { item: new Sub() };
+        holder.item.before();
+        const captured = holder.item;
+        holder.item = opaque;
+        captured.retained();
+        holder.item.wrong();
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(facts, [("ns", "C", "before"), ("ns", "C", "retained")]);
+}
+
+#[test]
+fn local_subclass_alias_chain_has_no_depth_cap() {
+    let mut source = String::from(
+        "import * as ns from './base'; class Sub extends ns.C {} const first = new Sub();",
+    );
+    for index in 0..128 {
+        let previous = if index == 0 {
+            String::from("first")
+        } else {
+            format!("alias{}", index - 1)
+        };
+        write!(source, "const alias{index} = {previous};").unwrap();
+    }
+    source.push_str("alias127.used(); Sub.live();");
+    let info = parse(&source);
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(facts, [("ns", "C", "live"), ("ns", "C", "used")]);
+}
+
+#[test]
+fn local_subclass_reads_before_declaration_keep_binding_identity() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        const read = (): void => {
+            Sub.staticUsed();
+            const instance = new Sub();
+            instance.instanceUsed();
+        };
+        class Sub extends ns.C {}
+        read();
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(
+        facts,
+        [("ns", "C", "instanceUsed"), ("ns", "C", "staticUsed")]
+    );
+}
+
+#[test]
+fn local_subclass_holder_rebind_keeps_old_object_alias() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class D extends ns.C {}
+        D.live();
+        let h = { item: new D() };
+        const alias = h;
+        h = { item: unknown };
+        alias.item.used();
+        h.item.wrong();
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(facts, [("ns", "C", "live"), ("ns", "C", "used")]);
+}
+
+#[test]
+fn local_subclass_object_mutation_invalidates_all_container_aliases() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class D extends ns.C {}
+        D.live();
+        const h = { item: new D() };
+        h.item.before();
+        const alias = h;
+        alias.item = unknown;
+        h.item.wrong();
+        alias.item.alsoWrong();
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(facts, [("ns", "C", "before"), ("ns", "C", "live")]);
+}
+
+#[test]
+fn local_subclass_ancestor_replacement_detaches_old_container_alias() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class D extends ns.C {}
+        D.live();
+        const h = { inner: { item: new D() } };
+        const alias = h.inner;
+        h.inner = { item: unknown };
+        alias.item.used();
+        h.inner.item.wrong();
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(facts, [("ns", "C", "live"), ("ns", "C", "used")]);
+}
+
+#[test]
+fn local_subclass_existing_type_rewrites_keep_terminal_origin() {
+    for source in [
+        "interface Options { item: Sub }; const read = (opts: Options): void => { opts.item.used(); }; read({ item: new Sub() });",
+        "type Options = { item: Sub }; const read = ({ item }: Options): void => { item.used(); }; read({ item: new Sub() });",
+        "class Holder<T extends Sub> { item: T; read(): void { this.item.used(); } }",
+    ] {
+        let info = parse(&format!(
+            r"
+            import * as ns from './base';
+            class Sub extends ns.C {{}}
+            Sub.live();
+            {source}
+        "
+        ));
+        let mut facts: Vec<_> = info
+            .semantic_facts
+            .iter()
+            .filter_map(|fact| {
+                let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                    return None;
+                };
+                Some((
+                    fact.namespace_local.as_str(),
+                    fact.class_export_name.as_str(),
+                    fact.member.as_str(),
+                ))
+            })
+            .collect();
+        facts.sort_unstable();
+        assert_eq!(
+            facts,
+            [("ns", "C", "live"), ("ns", "C", "used")],
+            "existing type route: {source}"
+        );
+    }
+}
+
+#[test]
+fn local_subclass_class_field_this_requires_lexical_ownership() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class Sub extends ns.C {}
+        Sub.live();
+        class Holder {
+            item: Sub = new Sub();
+            read(): void {
+                this.item.used();
+                const arrow = (): void => { this.item.lexical(); }; arrow();
+                function unrelated(this: { item: { wrong(): void } }): void { this.item.wrong(); }
+                unrelated.call({ item: { wrong() {} } });
+            }
+        }
+        new Holder().read();
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(
+        facts,
+        [
+            ("ns", "C", "lexical"),
+            ("ns", "C", "live"),
+            ("ns", "C", "used")
+        ]
+    );
+}
+
+#[test]
+fn local_subclass_existing_map_routes_keep_source_and_type_identity() {
+    let info = parse(
+        r"
+        import * as ns from './base';
+        class Sub extends ns.C {}
+        Sub.live();
+        const values = new Map<string, Sub>();
+        for (const item of values.values()) item.valueMember();
+        for (const [key, item] of values.entries()) { key.keyOnly(); item.entryMember(); }
+        values.forEach((item, key) => { item.callbackMember(); key.keyOnly(); });
+        values.get('one')!.getMember();
+        const shadow = (values: Map<string, { wrong(): void }>): void => {
+            for (const item of values.values()) item.wrong();
+        };
+        shadow(new Map());
+    ",
+    );
+    let mut facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                return None;
+            };
+            Some((
+                fact.namespace_local.as_str(),
+                fact.class_export_name.as_str(),
+                fact.member.as_str(),
+            ))
+        })
+        .collect();
+    facts.sort_unstable();
+    assert_eq!(
+        facts,
+        [
+            ("ns", "C", "callbackMember"),
+            ("ns", "C", "entryMember"),
+            ("ns", "C", "getMember"),
+            ("ns", "C", "live"),
+            ("ns", "C", "valueMember")
+        ]
+    );
+}
+
+fn assert_namespace_subclass_members(cases: &[(&str, &str, &[&str])]) {
+    let mut failures = Vec::new();
+    for (label, body, expected) in cases {
+        let info = parse(&format!(
+            "import * as ns from './base'; class Sub extends ns.C {{}} Sub.live(); {body}"
+        ));
+        let mut actual: Vec<_> = info
+            .semantic_facts
+            .iter()
+            .filter_map(|fact| {
+                let SemanticFact::QualifiedClassMemberAccess(fact) = fact else {
+                    return None;
+                };
+                (fact.namespace_local == "ns" && fact.class_export_name == "C")
+                    .then_some(fact.member.as_str())
+            })
+            .collect();
+        actual.sort_unstable();
+        actual.dedup();
+        if actual != *expected {
+            failures.push(format!("{label}: expected {expected:?}, got {actual:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn local_subclass_review_boundaries_keep_current_value_proof() {
+    assert_namespace_subclass_members(&[
+        (
+            "named mutation",
+            r"interface Options { item: Sub } const factory = (): Options => ({ item: new Sub() }); const opts: Options = factory(); opts.item.before(); const saved = opts.item; const alias = opts; alias.item = { wrong() {} }; opts.item.wrong(); saved.used();",
+            &["before", "live", "used"],
+        ),
+        (
+            "named dynamic mutation",
+            r"interface Options { item: Sub } const factory = (): Options => ({ item: new Sub() }); const opts: Options = factory(); opts.item.before(); const key: string = 'item'; opts[key] = { wrong() {} }; opts.item.wrong();",
+            &["before", "live"],
+        ),
+        (
+            "map rebind",
+            r"let values = new Map<string, Sub>(); for (const item of values.values()) item.before(); values = new Map<string, { wrong(): void }>(); for (const item of values.values()) item.wrong(); for (const [key, item] of values.entries()) item.wrong(); values.forEach(item => item.wrong()); values.get('one')!.wrong();",
+            &["before", "live"],
+        ),
+        (
+            "map alias and replacement",
+            r"let values = new Map<string, Sub>(); const saved = values; values = new Map<string, { wrong(): void }>(); for (const item of saved.values()) item.used(); values = new Map<string, Sub>(); for (const item of values.values()) item.after();",
+            &["after", "live", "used"],
+        ),
+        (
+            "overlap",
+            r"let holder = { item: new Sub(), inner: { item: new Sub() } }; holder.item = holder.item; holder.item.used(); holder = holder.inner; holder.item.after(); let item = new Sub(); item = item; item.scalar();",
+            &["after", "live", "scalar", "used"],
+        ),
+        (
+            "duplicate unknown",
+            r"const holder = { item: new Sub(), item: null }; holder.item?.wrong(); const valid = { item: null, item: new Sub() }; valid.item.used();",
+            &["live", "used"],
+        ),
+        (
+            "this writes",
+            r"class Holder { item: Sub = new Sub(); read(): void { this.item.before(); this['item'] = { wrong() {} }; this.item.wrong(); } } new Holder().read();",
+            &["before", "live"],
+        ),
+        (
+            "this delete",
+            r"class Holder { item: Sub = new Sub(); read(): void { this.item.before(); delete this.item; this.item.wrong(); } } new Holder().read();",
+            &["before", "live"],
+        ),
+        (
+            "this update",
+            r"class Holder { item: Sub = new Sub(); read(): void { this.item.before(); this.item++; this.item.wrong(); } } new Holder().read();",
+            &["before", "live"],
+        ),
+        (
+            "this dynamic",
+            r"class Holder { item: Sub = new Sub(); read(): void { this.item.before(); const key: string = 'item'; this[key] = null; this.item.wrong(); } } new Holder().read();",
+            &["before", "live"],
+        ),
+        (
+            "array routes",
+            r"const values: Sub[] = [new Sub()]; for (const item of values) item.iterated(); values.forEach(item => item.callback()); const unknown = [{ wrong() {} }]; for (const item of unknown) item.wrong();",
+            &["callback", "iterated", "live"],
+        ),
+        (
+            "local typed property",
+            r"class Holder { item: Sub = new Sub(); } const holder = new Holder(); holder.item.used(); const read = (holder: Holder): void => holder.item.parameter(); read(holder);",
+            &["live", "parameter", "used"],
+        ),
+    ]);
+}
+
+#[test]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "TypeScript fixture braces are source syntax, not Rust formatting arguments"
+)]
+fn local_subclass_review_boundaries_keep_current_value_proof_additional() {
+    assert_namespace_subclass_members(&[
+        (
+            "nullable map",
+            r"const values: Map<string, Sub> | null = new Map(); for (const item of values!.values()) item.used();",
+            &["live", "used"],
+        ),
+        (
+            "memo",
+            r"const useMemo = <T>(factory:()=>T, deps:unknown[]):T => factory(); const item=useMemo(()=>new Sub(),[]); item.used();",
+            &["live", "used"],
+        ),
+        (
+            "derived",
+            r"declare const $derived: {<T>(value:T):T; by<T>(factory:()=>T):T}; const item=$derived(new Sub()); item.used(); const other=$derived.by(()=>new Sub()); other.callback();",
+            &["callback", "live", "used"],
+        ),
+        (
+            "factory array",
+            r"const wrap = <T>(factory:()=>T):[T] => [factory()]; const [item]=wrap(()=>new Sub()); item.used();",
+            &["live", "used"],
+        ),
+        (
+            "nullable assertion",
+            r"const flag=true; const value:unknown=new Sub(); const item=flag ? (value as Sub) : null; item?.used();",
+            &["live", "used"],
+        ),
+        (
+            "async memo",
+            r"const useMemo=<T>(factory:()=>T,deps:unknown[]):T=>factory(); const item=useMemo(async()=>new Sub(),[]); item.wrong();",
+            &["live"],
+        ),
+        (
+            "generator wrapper",
+            r"const wrap=<T>(factory:()=>T):[T]=>[factory()]; const [item]=wrap(function*(){return new Sub();}); item.wrong();",
+            &["live"],
+        ),
+        (
+            "array literal",
+            r"const values=[new Sub()]; for(const item of values) item.used(); values.forEach(item=>item.callback());",
+            &["callback", "live", "used"],
+        ),
+        (
+            "readonly array",
+            r"const values: ReadonlyArray<Sub> | null=[new Sub()]; for(const item of values!) item.used(); values!.forEach(item=>item.callback());",
+            &["callback", "live", "used"],
+        ),
+        (
+            "object array",
+            r"const holder:{items:Sub[]}={items:[new Sub()]}; for(const item of holder.items) item.used(); holder.items.forEach(item=>item.callback());",
+            &["callback", "live", "used"],
+        ),
+        (
+            "reactive array",
+            r"const ref=<T>(value:T):{value:T}=>({value}); const values=ref<Sub[]>([new Sub()]); for(const item of values.value) item.used(); values.value.forEach(item=>item.callback());",
+            &["callback", "live", "used"],
+        ),
+        (
+            "array parameter",
+            r"const read=(values:Sub[]):void=>{for(const item of values) item.used(); values.forEach(item=>item.callback());}; read([new Sub()]);",
+            &["callback", "live", "used"],
+        ),
+    ]);
+}
+
+#[test]
+fn local_subclass_review_boundaries_keep_current_value_proof_remaining() {
+    assert_namespace_subclass_members(&[
+        (
+            "bound map result",
+            r"const values=new Map<string,Sub>(); const item=values.get('one')!; item.used();",
+            &["live", "used"],
+        ),
+        (
+            "assertion only",
+            r"declare const value:unknown; const item=true ? (value as Sub):null; item?.used();",
+            &["live", "used"],
+        ),
+    ]);
+}
+
+#[test]
+fn local_subclass_late_producers_keep_call_time_and_projection_identity() {
+    assert_namespace_subclass_members(&[
+        (
+            "bound factory",
+            r"const make=()=>new Sub(); const item=make(); item.used();",
+            &["live", "used"],
+        ),
+        (
+            "unnamed factory",
+            r"const make=()=>new Sub(); make().used();",
+            &["live", "used"],
+        ),
+        (
+            "hoisted bound factory",
+            r"const item=make(); item.used(); function make(){return new Sub();}",
+            &["live", "used"],
+        ),
+        (
+            "hoisted unnamed factory",
+            r"make().used(); function make(){return new Sub();}",
+            &["live", "used"],
+        ),
+        (
+            "hoisted unrelated factory",
+            r"const item=make(); item.wrong(); function make(){return {wrong(){}};}",
+            &["live"],
+        ),
+        (
+            "object factory",
+            r"const make=()=>({item:new Sub()}); const result=make(); result.item.used();",
+            &["live", "used"],
+        ),
+        (
+            "late box",
+            r"const make=()=>new Sub(); const item=make(); const box={item}; box.item.used();",
+            &["live", "used"],
+        ),
+        (
+            "static factory",
+            r"class FactorySub extends ns.C {static create(){return new FactorySub();}} const item=FactorySub.create(); item.used();",
+            &["create", "live", "used"],
+        ),
+        (
+            "narrowing",
+            r"const read=(item:unknown)=>{if(item instanceof Sub)item.used();}; read(new Sub());",
+            &["live", "used"],
+        ),
+        (
+            "narrowing guard boundary",
+            r"const read=(item:unknown)=>{if(item instanceof Sub){item.used();}else{item.wrong();}item.wrong();}; read(new Sub());",
+            &["live", "used"],
+        ),
+        (
+            "narrowing rebind",
+            r"const read=(item:unknown)=>{if(item instanceof Sub){item.before();item={wrong(){}};item.wrong();}item.wrong();}; read(new Sub());",
+            &["before", "live"],
+        ),
+        (
+            "member destructure",
+            r"const item=new Sub(); const {used}=item; used();",
+            &["live", "used"],
+        ),
+    ]);
+}
+
+#[test]
+fn local_subclass_late_producers_keep_call_time_and_projection_identity_additional() {
+    assert_namespace_subclass_members(&[
+        (
+            "inline assertion",
+            r"const item:unknown=new Sub(); (item as Sub).used();",
+            &["live", "used"],
+        ),
+        (
+            "super chain",
+            r"class Child extends Sub {call(){super.used();}} new Child().call();",
+            &["call", "live", "used"],
+        ),
+        (
+            "constructor field",
+            r"class Holder {item; constructor(){this.item=new Sub();} call(){this.item.used();}} new Holder().call();",
+            &["live", "used"],
+        ),
+        (
+            "factory rebind",
+            r"let make=()=>new Sub(); const saved=make(); make=()=>({wrong(){}}); const later=make(); saved.before(); later.wrong();",
+            &["before", "live"],
+        ),
+        (
+            "unnamed factory rebind",
+            r"let make=()=>new Sub(); make().before(); make=()=>({wrong(){}}); make().wrong();",
+            &["before", "live"],
+        ),
+        (
+            "static method rebind",
+            r"class FactorySub extends ns.C {static create(){return new FactorySub();}} const saved=FactorySub.create(); FactorySub.create=()=>({wrong(){}}); const later=FactorySub.create(); saved.before(); later.wrong();",
+            &["before", "create", "live"],
+        ),
+        (
+            "callee shadow",
+            r"const make=()=>new Sub(); const saved=make(); saved.before(); const read=(make:()=>{wrong():void})=>make().wrong(); read(()=>({wrong(){}}));",
+            &["before", "live"],
+        ),
+        (
+            "pending child alias mutation",
+            r"const make=()=>({item:new Sub()}); const result=make(); result.item.before(); const saved=result.item; const alias=result; alias.item={wrong(){}}; saved.retained(); result.item.wrong();",
+            &["before", "live", "retained"],
+        ),
+        (
+            "pending child dynamic mutation",
+            r"const make=()=>({item:new Sub()}); const result=make(); result.item.before(); const saved=result.item; const key:string='item'; result[key]=null; saved.retained(); result.item.wrong();",
+            &["before", "live", "retained"],
+        ),
+        (
+            "pending child replacement",
+            r"const make=()=>({item:new Sub()}); const result=make(); const saved=result.item; result.item=new Sub(); saved.before(); result.item.replacement();",
+            &["before", "live", "replacement"],
+        ),
+        (
+            "fresh object results",
+            r"const make=()=>({item:new Sub()}); const first=make(); const second=make(); first.item={wrong(){}}; first.item.wrong(); second.item.used();",
+            &["live", "used"],
+        ),
+        (
+            "pending root rebind",
+            r"const make=()=>({item:new Sub()}); let result=make(); const old=result; result={item:{wrong(){}}}; old.item.used(); result.item.wrong();",
+            &["live", "used"],
+        ),
+    ]);
+}
+
+#[test]
+fn local_subclass_late_producers_keep_call_time_and_projection_identity_remaining() {
+    assert_namespace_subclass_members(&[
+        (
+            "async eligibility",
+            r"const make=async()=>new Sub(); const read=async()=>{const item=await make(); item.used(); const promise=make(); promise.wrong();}; read();",
+            &["live", "used"],
+        ),
+        (
+            "generator ineligible",
+            r"function* make(){return new Sub();} const item=make(); item.wrong();",
+            &["live"],
+        ),
+        (
+            "baseline negative alias",
+            r"const make=()=>{const saved=new Sub(); return saved;}; const item=make(); item.wrong();",
+            &["live"],
+        ),
+        (
+            "baseline negative unbound object",
+            r"const make=()=>({item:new Sub()}); make().item.wrong();",
+            &["live"],
+        ),
+        (
+            "baseline negative structural",
+            r"const read=(item:{wrong():void})=>item.wrong(); read(new Sub());",
+            &["live"],
+        ),
+    ]);
+}
+
+#[test]
+fn local_subclass_late_review_keeps_contracts_and_assignment_identity() {
+    assert_namespace_subclass_members(&[
+        (
+            "async contract",
+            r"const held=new Sub(); async function make():Promise<Sub>{return (()=>held)();} async function read():Promise<void>{const item=await make(); item.used(); const promise=make(); promise.wrong();} read();",
+            &["live", "used"],
+        ),
+        (
+            "factory member destructure",
+            r"function make():Sub{return new Sub();} const {used}=make(); used();",
+            &["live", "used"],
+        ),
+        (
+            "destructure receiver write",
+            r"let item=new Sub(); const saved=item; item.used(); ({item}={item:{wrong(){}}}); item.wrong(); saved.retained();",
+            &["live", "retained", "used"],
+        ),
+        (
+            "destructure factory write",
+            r"let make=()=>new Sub(); const saved=make(); ({make}={make:()=>({wrong(){}})}); const item=make(); item.wrong(); saved.used();",
+            &["live", "used"],
+        ),
+        (
+            "destructure container write",
+            r"const holder={item:new Sub()}; const saved=holder.item; holder.item.used(); ({item:holder.item}={item:{wrong(){}}}); holder.item.wrong(); saved.retained();",
+            &["live", "retained", "used"],
+        ),
+        (
+            "iteration existing receiver write",
+            r"let item=new Sub(); const saved=item; item.used(); for(item of [{wrong(){}}]){item.wrong();} saved.retained();",
+            &["live", "retained", "used"],
+        ),
+        (
+            "typed getter",
+            r"class Holder{get item():Sub{return new Sub();}} const holder=new Holder(); holder.item.used();",
+            &["live", "used"],
+        ),
+        (
+            "typed field lexical this alias",
+            r"class Holder{item:Sub=new Sub();call(){const item=this.item;item.used();}}new Holder().call();",
+            &["live", "used"],
+        ),
+        (
+            "initialized field lexical this alias",
+            r"class Holder{item=new Sub();call(){const item=this.item;item.used();}}new Holder().call();",
+            &["live", "used"],
+        ),
+        (
+            "arrow lexical this alias",
+            r"class Holder{item:Sub=new Sub();call(){const read=()=>{const item=this.item;item.used();};read();}}new Holder().call();",
+            &["live", "used"],
+        ),
+        (
+            "independent this alias",
+            r"class Holder{item:Sub=new Sub();call(){const item=this.item;item.used();function read(this:{item:{wrong():void}}){const item=this.item;item.wrong();}read.call({item:{wrong(){}}});}}new Holder().call();",
+            &["live", "used"],
+        ),
+        (
+            "constructor property",
+            r"class Holder{constructor(public item:Sub){}} const holder=new Holder(new Sub()); holder.item.used();",
+            &["live", "used"],
+        ),
+    ]);
+}
+
+#[test]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "TypeScript fixture braces are source syntax, not Rust formatting arguments"
+)]
+fn local_subclass_late_review_keeps_contracts_and_assignment_identity_additional() {
+    assert_namespace_subclass_members(&[
+        (
+            "getter terminal shadow",
+            r"class Holder<Sub>{get item():Sub{return null as Sub;}} const holder=new Holder<{wrong():void}>();holder.item.wrong();",
+            &["live"],
+        ),
+        (
+            "constructor terminal shadow",
+            r"class Holder<Sub>{constructor(public item:Sub){}} const holder=new Holder({wrong(){}});holder.item.wrong();",
+            &["live"],
+        ),
+        (
+            "nested array property write",
+            r"const holder={item:new Sub()};const saved=holder.item;holder.item.used();({nested:[holder.item]}={nested:[{wrong(){}}]});holder.item.wrong();saved.retained();",
+            &["live", "retained", "used"],
+        ),
+        (
+            "array default receiver write",
+            r"let item=new Sub();const saved=item;item.used();[item={wrong(){}}]=[];item.wrong();saved.retained();",
+            &["live", "retained", "used"],
+        ),
+        (
+            "object rest receiver write",
+            r"let item=new Sub();const saved=item;item.used();({...item}={wrong(){}});item.wrong();saved.retained();",
+            &["live", "retained", "used"],
+        ),
+        (
+            "for in receiver write",
+            r"let item=new Sub();const saved=item;item.used();for(item in {key:0}){item.wrong();}saved.retained();",
+            &["live", "retained", "used"],
+        ),
+        (
+            "awaited factory member destructure",
+            r"const held=new Sub();async function make():Promise<Sub>{return (()=>held)();}async function read(){const {used}=await make();used();const {wrong}=make();wrong();}read();",
+            &["live", "used"],
+        ),
+        (
+            "factory destructure rebind",
+            r"let make=()=>new Sub();const {used}=make();used();({make}={make:()=>({wrong(){}})});const {wrong}=make();wrong();",
+            &["live", "used"],
+        ),
+        (
+            "factory destructure shadow",
+            r"function make():Sub{return new Sub();}const {used}=make();used();const read=(make:()=>{wrong():void})=>{const {wrong}=make();wrong();};read(()=>({wrong(){}}));",
+            &["live", "used"],
+        ),
+        (
+            "promise all baseline negative",
+            r"async function read():Promise<void>{const values=await Promise.all([0].map(async():Promise<Sub>=>new Sub())); for(const item of values)item.wrong();} read();",
+            &["live"],
+        ),
+    ]);
+}
+
+#[test]
+fn entry_script_iteration_preserves_original_writer_callback_facts() {
+    let source =
+        include_str!("../../../../tests/fixtures/issue-1793-entry-script-iteration/src/main.ts");
+    let info = parse(source);
+    let mut actual: Vec<_> = info
+        .member_accesses
+        .iter()
+        .filter(|access| access.object == "SyntheticSchemaWriter")
+        .map(|access| access.member.as_str())
+        .collect();
+    actual.sort_unstable();
+    actual.dedup();
+    assert_eq!(
+        actual,
+        [
+            "resetSchema",
+            "writeGraphDiagram",
+            "writeSchemaData",
+            "writeSchemaTyped"
+        ],
+        "the original entry-script's declared CreatedDb callback must retain its existing property join: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn entry_script_iteration_keeps_scoped_named_callback_targets() {
+    for capture in [false, true] {
+        let subclass = if capture {
+            "import * as ns from './base'; class Sub extends ns.Base {} Sub.live();"
+        } else {
+            ""
+        };
+        let source = format!(
+            "{subclass} {}",
+            r"
+            import { SyntheticSchemaWriter, OtherWriter } from './writer';
+            type CreatedDb = { writer: SyntheticSchemaWriter };
+            type OtherDb = { writer: OtherWriter };
+            async function createDb(): Promise<CreatedDb> { return null as CreatedDb; }
+            export async function generate() {
+                const inferred = await Promise.all(['one'].map(async () => createDb()));
+                inferred.map(dbMapped => dbMapped.writer.inferred());
+                const direct: SyntheticSchemaWriter[] = [];
+                direct.map(directWriter => directWriter.direct());
+                const declared: CreatedDb[] = [];
+                declared.map((typedDb: CreatedDb) => typedDb.writer.typed());
+                const sibling: OtherDb[] = [];
+                sibling.map(dbMapped => dbMapped.writer.otherOnly());
+                inferred.map(dbMapped => {
+                    const read = (dbMapped: { writer: { nestedShadow(): void } }) => dbMapped.writer.nestedShadow();
+                    read({ writer: { nestedShadow() {} } });
+                    dbMapped.writer.inferred();
+                });
+                const unknown = [{ writer: { unknownOnly() {} } }];
+                unknown.map(dbMapped => dbMapped.writer.unknownOnly());
+                const read = (dbMapped: { writer: { shadowOnly(): void } }) => dbMapped.writer.shadowOnly();
+                read({ writer: { shadowOnly() {} } });
+            }
+        "
+        );
+        let info = parse(&source);
+        let mut actual: Vec<_> = info
+            .member_accesses
+            .iter()
+            .filter(|access| access.object == "SyntheticSchemaWriter")
+            .map(|access| access.member.as_str())
+            .collect();
+        actual.sort_unstable();
+        actual.dedup();
+        let other: Vec<_> = info
+            .member_accesses
+            .iter()
+            .filter(|access| access.object == "OtherWriter")
+            .map(|access| access.member.as_str())
+            .collect();
+        assert_eq!(
+            other,
+            ["otherOnly"],
+            "the sibling callback retains its own target"
+        );
+        assert_eq!(
+            actual,
+            ["direct", "inferred", "typed"],
+            "capture={capture}: declared callback targets must survive scope exit without unknown or same-name parameter credit: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn entry_script_iteration_invalidates_replaced_ordinary_paths() {
+    assert_ordinary_callback_writer_members(&[
+        (
+            "property opaque",
+            "rows.map(row => { row.writer.live(); row.writer = opaque(); row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "property object",
+            "rows.map(row => { row.writer.live(); row.writer = {wrong(){}}; row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "root opaque",
+            "rows.map(row => { row.writer.live(); row = opaque(); row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "intermediate opaque",
+            "holders.map(holder => { holder.nested.writer.live(); holder.nested = opaque(); holder.nested.writer.wrong(); });",
+            false,
+        ),
+        (
+            "known property",
+            "rows.map(row => { row.writer.live(); row.writer = new Other(); row.writer.other(); });",
+            true,
+        ),
+        (
+            "known root",
+            "rows.map(row => { row.writer.live(); row = {writer:new Other()}; row.writer.other(); });",
+            true,
+        ),
+        (
+            "known intermediate",
+            "holders.map(holder => { holder.nested.writer.live(); holder.nested = new OtherRow(); holder.nested.writer.other(); });",
+            true,
+        ),
+        (
+            "property delete",
+            "rows.map(row => { row.writer.live(); delete row.writer; row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "property update",
+            "rows.map(row => { row.writer.live(); row.writer++; row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "unknown key",
+            "rows.map(row => { row.writer.live(); row[key] = opaque(); row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "destructure leaf",
+            "rows.map(row => { row.writer.live(); ({item:row.writer}={item:opaque()}); row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "loop leaf",
+            "rows.map(row => { row.writer.live(); for(row.writer of [opaque()]) row.writer.wrong(); });",
+            false,
+        ),
+        (
+            "copy barrier",
+            "rows.map(row => { row.writer.live(); row.writer=opaque(); const saved=row; saved.writer.wrong(); });",
+            false,
+        ),
+        (
+            "overlapping copy",
+            "holders.map(holder => { holder.nested.writer.live(); holder.nested.writer=opaque(); holder=holder.nested; holder.writer.wrong(); });",
+            false,
+        ),
+    ]);
+}
+
+fn assert_ordinary_callback_writer_members(cases: &[(&str, &str, bool)]) {
+    let mut failures = Vec::new();
+    for capture in [false, true] {
+        for (label, body, other_used) in cases {
+            let subclass = if capture {
+                "import * as ns from './base'; class Sub extends ns.Base {} Sub.live();"
+            } else {
+                ""
+            };
+            let source = format!(
+                "{subclass} {} {body}",
+                r"
+                import { Writer } from './writer'; import { Other } from './other';
+                type Row={writer:Writer}; type Holder={nested:Row};
+                class OtherRow{writer:Other=new Other();}
+                const opaque=()=>({writer:{wrong(){}},wrong(){}});
+                const rows:Row[]=[]; const holders:Holder[]=[];
+            "
+            );
+            let info = parse(&source);
+            let mut writer: Vec<_> = info
+                .member_accesses
+                .iter()
+                .filter(|a| a.object == "Writer")
+                .map(|a| a.member.as_str())
+                .collect();
+            writer.sort_unstable();
+            writer.dedup();
+            let mut other: Vec<_> = info
+                .member_accesses
+                .iter()
+                .filter(|a| a.object == "Other")
+                .map(|a| a.member.as_str())
+                .collect();
+            other.sort_unstable();
+            other.dedup();
+            let expected_other: &[&str] = if *other_used { &["other"] } else { &[] };
+            if writer != ["live"] || other != expected_other {
+                failures.push(format!(
+                    "{label}, capture={capture}: Writer={writer:?}, Other={other:?}"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "replaced ordinary receiver paths must not regain old terminal types: {failures:?}"
+    );
+}
+
+#[test]
+fn entry_script_iteration_invalidates_opaque_object_replacement_prefixes() {
+    assert_ordinary_callback_writer_members(&[
+        (
+            "property spread",
+            "rows.map(row=>{row.writer.live();row.writer={...opaque()};row.writer.wrong();});",
+            false,
+        ),
+        (
+            "computed object key",
+            "rows.map(row=>{row.writer.live();row.writer={[key]:opaque()};row.writer.wrong();});",
+            false,
+        ),
+        (
+            "spread after known child",
+            "rows.map(row=>{row.writer.live();row.writer={child:new Other(),...opaque()};row.writer.wrong();});",
+            false,
+        ),
+        (
+            "known child after spread",
+            "rows.map(row=>{row.writer.live();row.writer={...opaque(),child:new Other()};row.writer.child.other();});",
+            true,
+        ),
+    ]);
+}
+
+#[test]
+fn ordinary_path_barriers_preserve_initializer_and_function_ownership() {
+    type OwnershipCase<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+    let cases: &[OwnershipCase<'_>] = &[
+        (
+            "duplicate identifier initializer",
+            "const beta=new Beta(); const holder={property:new Alpha(),property:beta}; holder.property.betaOnly();",
+            &[("Beta", "betaOnly")],
+        ),
+        (
+            "function replacement",
+            "const holder={property:new Alpha()}; function mutate(){holder.property=new Beta();holder.property.betaOnly();} holder.property.alphaOnly();console.log(mutate);",
+            &[
+                ("Alpha", "alphaOnly"),
+                ("Beta", "alphaOnly"),
+                ("Beta", "betaOnly"),
+            ],
+        ),
+        (
+            "called function replacement",
+            "const holder={property:new Alpha()};function mutate(){holder.property=new Beta();}mutate();holder.property.betaOnly();",
+            &[("Alpha", "betaOnly"), ("Beta", "betaOnly")],
+        ),
+        (
+            "known candidate after root spread",
+            "let holder={property:new Alpha()};function mutate(){holder={...unknown(),property:new Beta()};}mutate();holder.property.betaOnly();",
+            &[("Alpha", "betaOnly"), ("Beta", "betaOnly")],
+        ),
+        (
+            "local shadow stays local",
+            "const holder={property:new Alpha()};function mutate(){const holder={property:new Beta()};holder.property.betaOnly();}holder.property.alphaOnly();console.log(mutate);",
+            &[("Alpha", "alphaOnly"), ("Beta", "betaOnly")],
+        ),
+        (
+            "nested block in function",
+            "const holder={property:new Alpha()}; function mutate(){{holder.property=new Beta();}holder.property.betaOnly();}holder.property.alphaOnly();console.log(mutate);",
+            &[
+                ("Alpha", "alphaOnly"),
+                ("Beta", "alphaOnly"),
+                ("Beta", "betaOnly"),
+            ],
+        ),
+        (
+            "sibling function",
+            "const holder={property:new Alpha()}; function mutate(){holder.property=new Beta();holder.property.betaOnly();}function read(){holder.property.alphaOnly();}console.log(mutate,read);",
+            &[
+                ("Alpha", "alphaOnly"),
+                ("Beta", "alphaOnly"),
+                ("Beta", "betaOnly"),
+            ],
+        ),
+        (
+            "enclosing function owner",
+            "function outer(){const holder={property:new Alpha()}; function mutate(){holder.property=new Beta();holder.property.betaOnly();}function read(){holder.property.alphaOnly();}holder.property.alphaOnly();console.log(mutate,read);}console.log(outer);",
+            &[
+                ("Alpha", "alphaOnly"),
+                ("Beta", "alphaOnly"),
+                ("Beta", "betaOnly"),
+            ],
+        ),
+        (
+            "opaque function replacement",
+            "const holder={property:new Alpha()};function mutate(){holder.property.alphaBefore();{holder.property=unknown();}holder.property.wrong();}holder.property.alphaOnly();console.log(mutate);",
+            &[("Alpha", "alphaBefore"), ("Alpha", "alphaOnly")],
+        ),
+        (
+            "module block replacement",
+            "const holder={property:new Alpha()};holder.property.alphaBefore();{holder.property=new Beta();}holder.property.betaOnly();",
+            &[("Alpha", "alphaBefore"), ("Beta", "betaOnly")],
+        ),
+    ];
+    let mut failures = Vec::new();
+    for capture in [false, true] {
+        for (label, body, expected) in cases {
+            let subclass = if capture {
+                "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+            } else {
+                ""
+            };
+            let info = parse(&format!(
+                "{subclass} import {{Alpha,Beta}} from './services';{body}"
+            ));
+            let mut actual = info
+                .member_accesses
+                .iter()
+                .filter(|a| matches!(a.object.as_str(), "Alpha" | "Beta"))
+                .map(|a| (a.object.as_str(), a.member.as_str()))
+                .collect::<Vec<_>>();
+            actual.sort_unstable();
+            actual.dedup();
+            if actual != *expected {
+                failures.push(format!("{label},capture={capture}: {actual:?}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "ordinary owner and deferred initializer preservation: {failures:?}"
+    );
+}
+
+#[test]
+fn ordinary_function_fork_keeps_subclass_value_identity() {
+    assert_namespace_subclass_members(&[
+        (
+            "root rebind keeps outer owner",
+            "let holder={item:new Sub()}; function replace(){holder={item:unknown};holder.item.wrong();}holder.item.used();console.log(replace);",
+            &["live", "used"],
+        ),
+        (
+            "saved child and local alias",
+            "const holder={item:new Sub()};function replace(){const alias=holder;const saved=holder.item;alias.item=unknown;holder.item.wrong();saved.used();}console.log(replace);",
+            &["live", "used"],
+        ),
+    ]);
+}
+
+#[test]
+fn refused_ordinary_function_fork_does_not_mutate_outer_targets() {
+    use std::fmt::Write as _;
+
+    const DENSE_OBJECT_PROPERTIES: usize = 5000;
+    let mut padding = String::new();
+    for index in 0..DENSE_OBJECT_PROPERTIES {
+        write!(&mut padding, "p{index}:new Beta(),").expect("writing to a String cannot fail");
+    }
+    for capture in [false, true] {
+        let subclass = if capture {
+            "import * as ns from './base';class Sub extends ns.Base{}Sub.live();"
+        } else {
+            ""
+        };
+        let source = format!(
+            "{subclass} import {{Alpha,Beta}} from './services';let holder={{property:new Alpha(),{padding}}};holder.property.before();function mutate(){{if(holder instanceof Object){{holder.property=new Beta();holder.property.wrong();}}holder.property=unknown();holder.property.wrong();holder.property=new Beta();holder.property.wrong();holder={{...unknown(),property:new Beta()}};holder.property.wrong();}}holder.property.after();console.log(mutate);"
+        );
+        let info = parse(&source);
+        let mut alpha = info
+            .member_accesses
+            .iter()
+            .filter(|a| a.object == "Alpha")
+            .map(|a| a.member.as_str())
+            .collect::<Vec<_>>();
+        alpha.sort_unstable();
+        alpha.dedup();
+        assert_eq!(alpha, ["after", "before"], "capture={capture}");
+        assert!(
+            !info.whole_object_uses.iter().any(|name| name == "Alpha"),
+            "function fork refusal must not globally abstain Alpha: capture={capture}"
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|a| matches!(a.object.as_str(), "Alpha" | "Beta") && a.member == "wrong"),
+            "refused current-function admission must block stale precise targets: capture={capture}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_narrowing_overlay_keeps_immediate_function_slot() {
+    let cases = [
+        (
+            "first guarded assignment",
+            "const holder={property:new Alpha()};holder.property.before();function mutate(){if(holder instanceof Object){holder.property=new Beta();}}mutate();holder.property.used();holder.property=unknown();holder.property.wrong();",
+        ),
+        (
+            "guard after fork",
+            "const holder={property:new Alpha()};holder.property.before();function mutate(){holder.property=new Alpha();if(holder instanceof Object){holder.property=new Beta();}holder.property.used();holder.property=unknown();holder.property.wrong();}console.log(mutate);",
+        ),
+        (
+            "nested owner chain",
+            "const holder={property:new Alpha()};holder.property.before();function outer(){holder.property=new Alpha();function mutate(){if(holder instanceof Object){holder.property=new Beta();}}mutate();holder.property.used();holder.property=unknown();holder.property.wrong();}outer();holder.property.used();",
+        ),
+        (
+            "sibling frame reuse",
+            "const holder={property:new Alpha()};holder.property.before();function mutate(){if(holder instanceof Object){holder.property=new Beta();}}function sibling(){const holder={property:new Alpha()};holder.property=unknown();holder.property.wrong();}mutate();sibling();holder.property.used();",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for capture in [false, true] {
+        for (label, body) in cases {
+            let subclass = if capture {
+                "import * as ns from './base';class Sub extends ns.Base{}Sub.live();"
+            } else {
+                ""
+            };
+            let info = parse(&format!(
+                "{subclass}import {{Alpha,Beta}} from './services';{body}"
+            ));
+            let alpha_before = info
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "Alpha" && a.member == "before");
+            let beta_used = info
+                .member_accesses
+                .iter()
+                .any(|a| a.object == "Beta" && a.member == "used");
+            let wrong = info
+                .member_accesses
+                .iter()
+                .any(|a| matches!(a.object.as_str(), "Alpha" | "Beta") && a.member == "wrong");
+            if !alpha_before || !beta_used || wrong {
+                failures.push(format!(
+                    "{label},capture={capture}: {:?}",
+                    info.member_accesses
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "narrowing must preserve immediate ordinary slot ownership: {failures:?}"
+    );
+}
+
+#[test]
+fn ordinary_conditional_first_write_joins_reachable_targets() {
+    let cases = [
+        (
+            "first write",
+            "if(flag){holder.property=new Beta();}",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "compound narrowing",
+            "if(flag && holder instanceof Object){holder.property=new Beta();}",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "prefork replacement",
+            "holder.property=new Gamma();if(flag){holder.property=new Beta();}",
+            vec!["Beta", "Gamma"],
+        ),
+        (
+            "exhaustive alternatives",
+            "if(flag){holder.property=new Beta();}else{holder.property=new Gamma();}",
+            vec!["Beta", "Gamma"],
+        ),
+        (
+            "nested alternative",
+            "if(flag){if(other){holder.property=new Beta();}}else{holder.property=new Gamma();}",
+            vec!["Alpha", "Beta", "Gamma"],
+        ),
+        (
+            "unknown alternative",
+            "if(flag){holder.property=unknown();}else{holder.property=new Beta();}",
+            vec!["Beta"],
+        ),
+        (
+            "unknown after join",
+            "if(flag){holder.property=new Beta();}holder.property=unknown();",
+            vec![],
+        ),
+        (
+            "unconditional replacement",
+            "holder.property=new Beta();",
+            vec!["Beta"],
+        ),
+    ];
+    assert_ordinary_conditional_targets(&cases);
+}
+
+#[test]
+fn ordinary_conditional_expressions_and_loops_join_reachable_targets() {
+    let cases = [
+        (
+            "ternary",
+            "flag ? holder.property=new Beta() : undefined;",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "and",
+            "flag && (holder.property=new Beta());",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "or",
+            "flag || (holder.property=new Beta());",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "nullish",
+            "value ?? (holder.property=new Beta());",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "while",
+            "while(flag){holder.property=new Beta();break;}",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "for",
+            "for(let i=0;i<(flag?1:0);i++){holder.property=new Beta();}",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "for-of",
+            "for(const item of (flag?[1]:[])){holder.property=new Beta();}",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "for-in",
+            "for(const key in (flag?{ x: 1 }:{})){holder.property=new Beta();}",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "switch",
+            "switch(flag){case true:holder.property=new Beta();break;}",
+            vec!["Alpha", "Beta"],
+        ),
+        (
+            "do-while replacement",
+            "do{holder.property=new Beta();}while(false);",
+            vec!["Beta"],
+        ),
+    ];
+    assert_ordinary_conditional_targets(&cases);
+}
+
+fn assert_ordinary_conditional_targets(cases: &[(&str, &str, Vec<&str>)]) {
+    let mut failures = Vec::new();
+    for capture in [false, true] {
+        for (label, body, expected) in cases {
+            let marker = if capture {
+                "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+            } else {
+                ""
+            };
+            let info = parse(&format!(
+                "{marker}import {{Alpha,Beta,Gamma}} from './services';const holder={{property:new Alpha()}};function mutate(flag:boolean,other:boolean){{{body}holder.property.used();}}mutate(flag,other);"
+            ));
+            let mut actual = info
+                .member_accesses
+                .iter()
+                .filter(|a| {
+                    a.member == "used" && matches!(a.object.as_str(), "Alpha" | "Beta" | "Gamma")
+                })
+                .map(|a| a.object.as_str())
+                .collect::<Vec<_>>();
+            actual.sort_unstable();
+            actual.dedup();
+            if actual != *expected {
+                failures.push(format!(
+                    "{label},capture={capture}: expected {expected:?}, got {actual:?}"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "conditional reachable targets: {failures:?}"
+    );
+}
+
+#[test]
+fn ordinary_conditional_writes_keep_local_order_and_outer_possibilities() {
+    let cases = [
+        (
+            "branch order",
+            "const holder={property:new Alpha()};function mutate(){if(flag){holder.property=new Beta();holder.property.inside();}holder.property.after();}console.log(mutate);",
+            vec![("Alpha", "after"), ("Beta", "after"), ("Beta", "inside")],
+        ),
+        (
+            "outer union",
+            "const holder={property:new Alpha()};function mutate(){holder.property=new Gamma();if(flag){holder.property=new Beta();}}mutate();holder.property.after();",
+            vec![("Alpha", "after"), ("Beta", "after"), ("Gamma", "after")],
+        ),
+        (
+            "lexical shadow",
+            "const holder={property:new Alpha()};function mutate(){if(flag){let holder={property:new Gamma()};holder.property=new Beta();holder.property.inside();}holder.property.after();}console.log(mutate);",
+            vec![("Alpha", "after"), ("Beta", "inside")],
+        ),
+        (
+            "unknown parent on both arms",
+            "const holder={child:{property:new Alpha()}};function mutate(){holder.child.property.before();if(flag){holder.child=unknown();}else{holder.child=unknown();}holder.child.property.wrong();}console.log(mutate);",
+            vec![("Alpha", "before")],
+        ),
+        (
+            "known and unknown parent",
+            "const holder={child:{property:new Alpha()}};function mutate(){if(flag){holder.child=unknown();}else{holder.child.property=new Beta();}holder.child.property.after();}console.log(mutate);",
+            vec![("Beta", "after")],
+        ),
+        (
+            "module conditional",
+            "const holder={property:new Alpha()};if(flag){holder.property=new Beta();}holder.property.after();",
+            vec![("Alpha", "after"), ("Beta", "after")],
+        ),
+    ];
+    for capture in [false, true] {
+        for (label, body, expected) in &cases {
+            let marker = if capture {
+                "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+            } else {
+                ""
+            };
+            let info = parse(&format!(
+                "{marker}import {{Alpha,Beta,Gamma}} from './services';{body}"
+            ));
+            let mut actual = info
+                .member_accesses
+                .iter()
+                .filter(|a| matches!(a.object.as_str(), "Alpha" | "Beta" | "Gamma"))
+                .map(|a| (a.object.as_str(), a.member.as_str()))
+                .collect::<Vec<_>>();
+            actual.sort_unstable();
+            actual.dedup();
+            assert_eq!(actual, *expected, "{label},capture={capture}");
+        }
+    }
+}
+
+#[test]
+fn ordinary_conditional_join_refusal_stays_local_and_blocks_stale_descendants() {
+    use std::fmt::Write as _;
+    const DENSE_OBJECT_PROPERTIES: usize = 1000;
+    let mut properties = String::new();
+    for index in 0..DENSE_OBJECT_PROPERTIES {
+        write!(&mut properties, "p{index}:new Alpha(),").unwrap();
+    }
+    for capture in [false, true] {
+        let marker = if capture {
+            "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+        } else {
+            ""
+        };
+        let info = parse(&format!(
+            "{marker}import {{Alpha,Beta,Gamma}} from './services';const holder={{property:new Alpha(),{properties}}};holder.property.before();function mutate(){{if(flag){{holder.property=new Beta();}}else{{holder.property=new Gamma();}}holder.property.wrong();holder.property=unknown();holder.property.wrong();}}holder.property.after();console.log(mutate);"
+        ));
+        let mut alpha = info
+            .member_accesses
+            .iter()
+            .filter(|a| a.object == "Alpha")
+            .map(|a| a.member.as_str())
+            .collect::<Vec<_>>();
+        alpha.sort_unstable();
+        alpha.dedup();
+        assert_eq!(alpha, ["after", "before"], "capture={capture}");
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|a| matches!(a.object.as_str(), "Alpha" | "Beta" | "Gamma")
+                    && a.member == "wrong"),
+            "refused joined root stays blocked, capture={capture}"
+        );
+        assert!(
+            !info.whole_object_uses.iter().any(|name| name == "Alpha"),
+            "local refusal must not abstain the outer class"
+        );
+    }
+}
+
+#[test]
+fn ordinary_for_update_reaches_later_iteration_members() {
+    let mut failures = Vec::new();
+    for capture in [false, true] {
+        let marker = if capture {
+            "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+        } else {
+            ""
+        };
+        let info = parse(&format!(
+            "{marker}import {{Alpha,Beta}} from './services';const holder={{property:new Alpha()}};function mutate(){{for(let i=0;i<2;holder.property=new Beta(),i++){{holder.property.used();}}}}mutate();"
+        ));
+        for class in ["Alpha", "Beta"] {
+            if !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == class && access.member == "used")
+            {
+                failures.push(format!(
+                    "capture={capture}, class={class}: {:?}",
+                    info.member_accesses
+                ));
+            }
+        }
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Beta" && access.member == "dead"),
+            "unused sibling stays uncredited"
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "loop update must reach the next iteration: {failures:?}"
+    );
+}
+
+#[test]
+fn nested_conditional_root_replacements_do_not_restore_subclass_proof() {
+    assert_namespace_subclass_members(&[
+        (
+            "outer replacement control",
+            "let holder={item:new Sub(),other:0};holder.item.before();if(flag){holder.other=1;if(other){holder=opaque();}else{holder=opaque();}}else{holder=opaque();}holder.item.wrong();",
+            &["before", "live"],
+        ),
+        (
+            "both nested outer arms",
+            "let holder={item:new Sub(),other:0};holder.item.before();if(flag){holder.other=1;if(other){holder=opaque();}else{holder=opaque();}}else{holder.other=1;if(other){holder=opaque();}else{holder=opaque();}}holder.item.wrong();",
+            &["before", "live"],
+        ),
+    ]);
+}
+
+#[test]
+fn ordinary_for_update_body_replacement_preserves_local_order() {
+    for capture in [false, true] {
+        let marker = if capture {
+            "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+        } else {
+            ""
+        };
+        let info = parse(&format!(
+            "{marker}import {{Alpha,Beta,Gamma}} from './services';const holder={{property:new Alpha()}};function mutate(){{for(let i=0;i<2;(holder.property.updateRead(),holder.property=new Beta(),i++)){{holder.property=new Gamma();holder.property.bodyRead();}}}}mutate();"
+        ));
+        let mut actual = info
+            .member_accesses
+            .iter()
+            .filter(|a| matches!(a.object.as_str(), "Alpha" | "Beta" | "Gamma"))
+            .map(|a| (a.object.as_str(), a.member.as_str()))
+            .collect::<Vec<_>>();
+        actual.sort_unstable();
+        actual.dedup();
+        assert!(
+            actual.contains(&("Gamma", "updateRead")),
+            "body receiver reaches the update: {actual:?}"
+        );
+        let body = actual
+            .iter()
+            .filter(|(_, member)| *member == "bodyRead")
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            body,
+            [("Gamma", "bodyRead")],
+            "body assignment replaces loop input"
+        );
+    }
+}
+
+#[test]
+fn ordinary_for_update_read_overwrite_boundaries() {
+    for capture in [false, true] {
+        for (label, update, gamma, beta) in [
+            (
+                "straight",
+                "holder.nested.property=new Beta(),holder.nested.property.updateRead()",
+                false,
+                true,
+            ),
+            (
+                "optional",
+                "flag&&(holder.nested.property=new Beta()),holder.nested.property.updateRead()",
+                true,
+                true,
+            ),
+            (
+                "unknown root",
+                "holder=opaque(),holder.nested.property.updateRead()",
+                false,
+                false,
+            ),
+            (
+                "unknown parent",
+                "holder.nested=opaque(),holder.nested.property.updateRead()",
+                false,
+                false,
+            ),
+            (
+                "optional unknown",
+                "flag&&(holder.nested=opaque()),holder.nested.property.updateRead()",
+                true,
+                false,
+            ),
+            (
+                "sibling",
+                "holder.other=1,holder.nested.property.updateRead()",
+                true,
+                false,
+            ),
+            (
+                "exhaustive",
+                "flag?(holder.nested.property=new Beta()):(holder.nested=new Beta()),holder.nested.property.updateRead()",
+                false,
+                true,
+            ),
+        ] {
+            assert_for_update_read_members(label, update, capture, gamma, beta);
+        }
+    }
+}
+
+#[test]
+fn ordinary_for_update_read_scope_and_timing_boundaries() {
+    for capture in [false, true] {
+        for (label, update, gamma, beta) in [
+            (
+                "function shadow",
+                "(()=>{const holder={nested:{property:new Beta()}};holder.nested.property.updateRead();})()",
+                false,
+                true,
+            ),
+            (
+                "parameter shadow",
+                "(holder=>{holder.nested.property=new Beta();holder.nested.property.updateRead();})(opaque())",
+                false,
+                true,
+            ),
+            (
+                "lexical shadow",
+                "(class {static {const holder={nested:{property:new Beta()}};holder.nested.property.updateRead();}})",
+                false,
+                true,
+            ),
+            (
+                "nested function write",
+                "(()=>{holder.nested.property=new Beta();}),holder.nested.property.updateRead()",
+                true,
+                true,
+            ),
+            (
+                "parent before optional",
+                "holder.nested=opaque(),flag&&(holder.other=1),holder.nested.property.updateRead()",
+                false,
+                false,
+            ),
+            (
+                "inside written arm",
+                "flag&&(holder.nested.property=new Beta(),holder.nested.property.updateRead())",
+                false,
+                true,
+            ),
+            (
+                "different siblings",
+                "flag?(holder.other=1):(holder.another=2),holder.nested.property.updateRead()",
+                true,
+                false,
+            ),
+            (
+                "right hand read",
+                "holder.nested.property=(holder.nested.property.updateRead(),new Beta())",
+                true,
+                false,
+            ),
+        ] {
+            assert_for_update_read_members(label, update, capture, gamma, beta);
+        }
+    }
+}
+
+fn assert_for_update_read_members(
+    label: &str,
+    update: &str,
+    capture: bool,
+    gamma: bool,
+    beta: bool,
+) {
+    let marker = if capture {
+        "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+    } else {
+        ""
+    };
+    let info = parse(&format!(
+        "{marker}import {{Alpha,Beta,Gamma}} from './services';let holder={{nested:{{property:new Alpha()}},other:0}};function mutate(flag){{for(let i=0;i<2;({update},i++)){{holder.nested.property=new Gamma();holder.nested.property.bodyRead();}}}}mutate(true);"
+    ));
+    for (class, expected) in [("Gamma", gamma), ("Beta", beta)] {
+        let actual = info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == class && a.member == "updateRead");
+        assert_eq!(
+            actual, expected,
+            "{label}, capture={capture}, {class}: {:?}",
+            info.member_accesses
+        );
+    }
+    assert!(
+        !info.member_accesses.iter().any(|a| a.member == "dead"),
+        "dead siblings remain uncredited"
+    );
+}
+
+#[test]
+fn ordinary_for_update_observes_initially_unresolved_property() {
+    for capture in [false, true] {
+        let marker = if capture {
+            "import * as ns from './base';class Sub extends ns.Base{}Sub.used();"
+        } else {
+            ""
+        };
+        let info = parse(&format!(
+            "{marker}import {{Gamma}} from './services';const holder={{property:opaque()}};function mutate(){{for(let i=0;i<2;(holder.property.updateRead(),i++)){{holder.property=new Gamma();}}}}mutate();"
+        ));
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|a| a.object == "Gamma" && a.member == "updateRead"),
+            "body makes unresolved ordinary path reachable, capture={capture}"
+        );
+        assert!(!info.member_accesses.iter().any(|a| a.member == "dead"));
+    }
 }

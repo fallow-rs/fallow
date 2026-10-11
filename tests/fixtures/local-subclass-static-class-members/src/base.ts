@@ -33,6 +33,22 @@ export class UrlSyncManager {
     return value
   }
 
+  public static passedViaNamespaceBase(value: string): string {
+    return value
+  }
+
+  public static viaNamespaceChain(value: string): string {
+    return value
+  }
+
+  public instanceViaNamespaceBase(): number {
+    return 3
+  }
+
+  public static viaRenamedBarrel(): number {
+    return 4
+  }
+
   public static trulyDead(value: string): string {
     return value
   }
@@ -48,4 +64,9 @@ export class UrlSyncManager {
 
 export function mixin<T>(target: T): T {
   return target
+}
+
+export class UnrelatedManager {
+  public static viaRenamedBarrel(): number { return 5 }
+  public static unrelatedDead(): number { return 6 }
 }

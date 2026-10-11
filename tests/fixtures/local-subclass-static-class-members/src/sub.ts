@@ -1,4 +1,5 @@
 import * as ns from './base'
+import * as barrel from './barrel'
 import { UrlSyncManager, mixin } from './base'
 
 class MapUrlSyncManager extends UrlSyncManager {}
@@ -41,11 +42,11 @@ class ShadowUrlSyncManager extends UrlSyncManager {
   }
 }
 
-// A namespace-qualified base. The walk re-emits the dotted `ns.UrlSyncManager`
-// verbatim, and the analyze layer resolves only bare local names, so this is inert
-// and `viaNamespaceBase` stays reported. Pre-existing: a direct
-// `ns.UrlSyncManager.viaNamespaceBase()` is equally uncredited on main.
 class NamespaceUrlSyncManager extends ns.UrlSyncManager {}
+class NamespaceChild extends NamespaceUrlSyncManager {}
+class BarrelChild extends barrel.RenamedManager {}
+
+const namespaceInstance = new NamespaceUrlSyncManager()
 
 const instance = new MapUrlSyncManager()
 
@@ -60,4 +61,9 @@ export const config = {
   h: MixedUrlSyncManager.viaMixin('mixed'),
   i: ShadowUrlSyncManager.shadowedOnSub('shadow'),
   j: NamespaceUrlSyncManager.viaNamespaceBase('ns'),
+  k: namespaceInstance.instanceViaNamespaceBase(),
+  l: NamespaceUrlSyncManager.passedViaNamespaceBase,
+  m: NamespaceChild.viaNamespaceChain('chain'),
+  n: BarrelChild.viaRenamedBarrel(),
+  o: new barrel.UnrelatedManager(),
 }

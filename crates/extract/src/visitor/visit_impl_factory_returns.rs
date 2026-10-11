@@ -5,6 +5,7 @@
     reason = "many factory-return AST types used"
 )]
 use oxc_ast::ast::*;
+use oxc_span::Span;
 
 use super::super::{FactoryAssignedValue, ObjectPropValueRef};
 use super::{new_expression_class_name, unwrap_static_expr};
@@ -12,6 +13,7 @@ use crate::function_body::BodyRef;
 
 #[derive(Clone, Copy)]
 pub(super) struct FactoryReturnFunctionInput<'site, 'ast> {
+    pub(super) binding_span: Span,
     pub(super) params: &'site FormalParameters<'ast>,
     pub(super) body: Option<BodyRef<'site, 'ast>>,
     pub(super) is_async: bool,
@@ -231,16 +233,31 @@ fn collect_self_scope_assignment_expr(
 /// block body. Conservative, only a direct `new Class()` is traced (a value
 /// first bound to one, or a non-`new` return, is out of scope). See issue #1441.
 pub(super) fn function_body_returns_new_class(body: BodyRef<'_, '_>) -> Option<String> {
-    let body = match body {
-        BodyRef::Concise(expr) => return new_expression_class_name(expr),
-        BodyRef::Block(body) => body,
-    };
-    body.statements.iter().rev().find_map(|stmt| {
-        let Statement::ReturnStatement(ret) = stmt else {
+    function_body_returns_new_class_target(body).map(|(name, _)| name)
+}
+
+pub(super) fn function_body_returns_new_class_target(
+    body: BodyRef<'_, '_>,
+) -> Option<(String, Span)> {
+    let select = |expression: &Expression<'_>| {
+        let name = new_expression_class_name(expression)?;
+        let Expression::NewExpression(expression) = unwrap_static_expr(expression) else {
             return None;
         };
-        new_expression_class_name(ret.argument.as_ref()?)
-    })
+        let Expression::Identifier(reference) = &expression.callee else {
+            return None;
+        };
+        Some((name, reference.span))
+    };
+    match body {
+        BodyRef::Concise(expression) => select(expression),
+        BodyRef::Block(body) => body.statements.iter().rev().find_map(|statement| {
+            let Statement::ReturnStatement(ret) = statement else {
+                return None;
+            };
+            select(ret.argument.as_ref()?)
+        }),
+    }
 }
 
 /// The class a function body returns when EVERY static return path resolves to
@@ -464,7 +481,14 @@ fn flatten_object_shape(
         match value {
             Expression::NewExpression(_) => {
                 if let Some(class) = new_expression_class_name(value) {
-                    out.push((path, ObjectPropValueRef::Class(class)));
+                    let origin = match value {
+                        Expression::NewExpression(expression) => match &expression.callee {
+                            Expression::Identifier(reference) => Some(reference.span),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    out.push((path, ObjectPropValueRef::Class(class, origin)));
                 }
             }
             Expression::Identifier(id) => {

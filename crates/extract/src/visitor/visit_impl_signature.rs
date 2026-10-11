@@ -555,6 +555,13 @@ impl ModuleInfoExtractor {
         } else if let Some(type_name) = extract_type_annotation_name(type_annotation)
             && let Some(resolved) = self.resolve_class_type_param(&type_name)
         {
+            let origin = self.resolve_class_type_param_origin(
+                &type_name,
+                super::super::helpers::extract_type_reference_origin(
+                    &type_annotation.type_annotation,
+                ),
+            );
+            self.record_binding_class_proof(binding_name, &resolved, origin);
             self.insert_class_binding_target(binding_name.to_string(), resolved);
         }
 
@@ -566,7 +573,9 @@ impl ModuleInfoExtractor {
         binding_name: &str,
         type_annotation: &TSTypeAnnotation<'_>,
     ) {
-        for (property_path, type_name) in extract_nested_type_bindings(type_annotation) {
+        for (property_path, type_name, origin) in
+            super::super::helpers::extract_nested_type_bindings(type_annotation)
+        {
             if let Some(factory) = self.store_factory_for_type_name(&type_name) {
                 self.insert_class_binding_target(
                     format!("{binding_name}.{property_path}"),
@@ -577,6 +586,11 @@ impl ModuleInfoExtractor {
             let Some(resolved) = self.resolve_class_type_param(&type_name) else {
                 continue;
             };
+            self.record_binding_class_proof(
+                &format!("{binding_name}.{property_path}"),
+                &resolved,
+                self.resolve_class_type_param_origin(&type_name, origin),
+            );
             self.insert_class_binding_target(format!("{binding_name}.{property_path}"), resolved);
         }
     }
@@ -597,15 +611,38 @@ impl ModuleInfoExtractor {
                 let Some(class_name) = properties.get(&key) else {
                     continue;
                 };
-                if let Some(factory) = self.store_factory_for_type_name(class_name) {
+                if let Some(factory) = self.store_factory_for_type_name(&class_name.name) {
                     self.insert_class_binding_target(local.clone(), factory);
                     self.store_instance_locals.insert(local);
                     continue;
                 }
-                self.insert_class_binding_target_if_absent(local, class_name.clone());
+                let origin = super::super::helpers::extract_nested_type_bindings(type_annotation)
+                    .into_iter()
+                    .find(|(path, _, _)| path == &key)
+                    .and_then(|(_, _, origin)| origin);
+                self.record_binding_class_proof(&local, &class_name.name, origin);
+                self.insert_class_binding_target_if_absent(local, class_name.name.clone());
             }
         } else if let Some(type_name) = extract_type_annotation_name(type_annotation) {
             for (local, key) in bindings {
+                if let Some(target) = self
+                    .interface_property_types
+                    .get(&type_name)
+                    .and_then(|properties| properties.get(&key))
+                    .cloned()
+                {
+                    let owner_reference = super::super::helpers::extract_type_reference_origin(
+                        &type_annotation.type_annotation,
+                    );
+                    if let (Some(reference), Some(owner)) = (owner_reference, target.owner_span) {
+                        self.record_binding_class_proof(
+                            &local,
+                            &target.name,
+                            target.reference_span,
+                        );
+                        self.add_direct_binding_requirement(&local, reference, owner);
+                    }
+                }
                 self.pending_typed_destructures
                     .push((local, key, type_name.clone()));
             }

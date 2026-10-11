@@ -164,3 +164,18 @@ fn awaited_async_factory_result_credits_the_class() {
         );
     }
 }
+
+#[test]
+fn awaited_factory_destructure_credits_static_keys_only() {
+    let mut unused = unused_members("awaited-factory-destructure-members");
+    unused.sort();
+    assert_eq!(
+        unused,
+        [
+            "Service.generatorOnly",
+            "Service.never",
+            "Service.promiseOnly",
+        ],
+        "awaited destructures must credit their static keys without crediting promises or generators"
+    );
+}

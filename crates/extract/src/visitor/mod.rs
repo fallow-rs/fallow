@@ -69,12 +69,180 @@ pub(crate) struct LocalImportLoader {
 }
 
 #[derive(Debug, Clone)]
+struct SubclassDeclaration {
+    binding_span: Span,
+    super_reference_span: Option<Span>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BindingClassProof {
+    target_name: String,
+    target_reference_span: Span,
+    requirements: Vec<(Span, Span)>,
+}
+
+#[derive(Debug, Clone)]
+struct TypePropertyTarget {
+    name: String,
+    reference_span: Option<Span>,
+    owner_span: Option<Span>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum DirectBindingOwner {
+    Module,
+    Scope(usize),
+}
+
+#[derive(Debug, Clone, Default)]
+struct DirectBindingTarget {
+    names: FxHashSet<String>,
+    declaration_span: Option<Span>,
+    value: Option<usize>,
+    initial_producer_value: Option<usize>,
+    /// Known function-body assignments remain possible targets for this older slot.
+    possible_assignment_owner: Option<DirectBindingOwner>,
+    requirements: Vec<(Span, Span)>,
+}
+
+impl FromIterator<String> for DirectBindingTarget {
+    fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
+        Self {
+            names: iter.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+}
+
+impl std::ops::Deref for DirectBindingTarget {
+    type Target = FxHashSet<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.names
+    }
+}
+
+impl std::ops::DerefMut for DirectBindingTarget {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.names
+    }
+}
+
+impl<'a> IntoIterator for &'a DirectBindingTarget {
+    type Item = &'a String;
+    type IntoIter = std::collections::hash_set::Iter<'a, String>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.names.iter()
+    }
+}
+
+#[derive(Debug, Default)]
+struct DirectObjectBindingBranch {
+    targets: FxHashMap<String, DirectBindingTarget>,
+    paths_by_root: FxHashMap<String, FxHashSet<String>>,
+    update_overwrites: FxHashMap<DirectBindingOwner, FxHashSet<String>>,
+}
+
+#[derive(Debug, Default)]
+struct DirectObjectBindingBranchScope {
+    index: usize,
+    proof_writes: FxHashSet<String>,
+    update_overwrites: FxHashMap<DirectBindingOwner, FxHashSet<String>>,
+}
+
+#[derive(Debug)]
+struct LoopUpdateAccess {
+    object: String,
+    member: String,
+    owner: DirectBindingOwner,
+}
+
+#[derive(Debug, Default)]
+struct LoopUpdateObservations {
+    function_scope: Option<usize>,
+    scope_index: usize,
+    accesses: Vec<LoopUpdateAccess>,
+    retained_paths: usize,
+    exhausted: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DirectBindingValue {
+    proof: Option<BindingClassProof>,
+    producer: Option<BindingProducer>,
+    pending: Option<PendingBindingValue>,
+    initial_projections: FxHashMap<String, usize>,
+    requirements: Vec<(Span, Span)>,
+    iteration_proof: Option<BindingClassProof>,
+    iteration_is_map: bool,
+    properties: FxHashMap<String, usize>,
+    unknown_properties: bool,
+}
+
+impl DirectBindingValue {
+    fn class(proof: BindingClassProof) -> Self {
+        Self {
+            proof: Some(proof),
+            ..Self::default()
+        }
+    }
+
+    fn unknown() -> Self {
+        Self {
+            unknown_properties: true,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BindingProducer {
+    name: String,
+    declaration_span: Span,
+    result: Option<BindingClassProof>,
+    shape: Vec<(String, BindingClassProof)>,
+    is_async: bool,
+    is_generator: bool,
+    is_static_method: bool,
+}
+
+#[derive(Debug, Clone)]
+enum PendingBindingValue {
+    Call {
+        producer: usize,
+        reference: Span,
+        awaited: bool,
+        result: Option<BindingClassProof>,
+    },
+    Projection {
+        result: usize,
+        path: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum SubclassAccessProof {
+    Known(BindingClassProof),
+    Value {
+        id: usize,
+        requirements: Vec<(Span, Span)>,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct PendingSubclassMemberAccess {
+    proof: SubclassAccessProof,
+    member: String,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct LocalClassExportInfo {
     members: Vec<MemberInfo>,
     super_class: Option<String>,
     implemented_interfaces: Vec<String>,
     type_parameters: Vec<String>,
     instance_bindings: Vec<(String, String)>,
+    binding_origins: FxHashMap<String, Span>,
+    binding_span: Span,
     super_class_type_args: Vec<String>,
     generic_instance_bindings: Vec<(String, usize)>,
 }
@@ -166,7 +334,7 @@ pub(crate) struct FactoryReturnCandidate {
 #[derive(Debug, Clone)]
 pub(crate) enum ObjectPropValueRef {
     /// A `new Class()` leaf: the class local name is known now.
-    Class(String),
+    Class(String, Option<Span>),
     /// A flattened identifier / member-expression leaf (`o`, `factory.ordersPage`),
     /// resolved against `binding_target_names` (+ typed-property expansion) at finalize.
     Path(String),
@@ -233,7 +401,7 @@ impl BindingTarget {
 enum TypedPropertyExpansion {
     /// Every hop resolved locally; the terminal name is an ordinary
     /// local / imported identifier the analyze layer can resolve.
-    Resolved(String),
+    Resolved(String, Option<Span>, Vec<(Span, Span)>),
     /// A hop's type name is not declared in this file (imported); the
     /// remainder must be joined cross-module at analyze time.
     CrossModule {
@@ -424,11 +592,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// the walk-order answer, which is the correct one for the scope the access
     /// was written in.
     walk_order_class_bindings: FxHashMap<String, String>,
-    /// `(binding, class, member)` for member accesses read off a binding that named
-    /// a class at that point in the walk. Only the ones whose binding ends up
-    /// `Ambiguous` are credited, so an unambiguous binding is never double-counted.
-    walk_order_member_accesses: Vec<(String, String, String)>,
-    interface_property_types: FxHashMap<String, FxHashMap<String, String>>,
+    /// A scoped target snapshot has no module-flat binding to resolve after scope
+    /// exit. Other snapshots only credit bindings that eventually become ambiguous.
+    walk_order_member_accesses: Vec<(Option<String>, String, String)>,
+    interface_property_types: FxHashMap<String, FxHashMap<String, TypePropertyTarget>>,
     pending_typed_destructures: Vec<(String, String, String)>,
     iterable_element_types: FxHashMap<String, String>,
     /// Module-scope value bindings whose type is an array (or Vue reactive array)
@@ -448,9 +615,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// binding name -> value class name. Class fields use the class-scoped
     /// `this@<id>.` key. A `<binding>.get(...)` result is then a receiver of `V`.
     map_binding_value_types: FxHashMap<String, String>,
-    /// Block/function-scoped map value types, with the same scoping as
-    /// `scoped_array_binding_element_types`.
+    /// Map value types aligned with `scoped_direct_object_binding_roots`, so
+    /// every lexical binding can hide an outer map even when its type is unknown.
     scoped_map_binding_value_types: Vec<FxHashMap<String, String>>,
+    /// Map callbacks awaiting their function scope, keyed by callback start.
+    map_callback_value_bindings: FxHashMap<u32, (String, Span, String, Option<BindingClassProof>)>,
     /// Top-level local function name -> declared return element class
     /// (`Promise<T>` / `T`, non-builtin). Populated by a `visit_program` pre-pass
     /// so `Promise.all(arr.map(cb))` can type its result from a map callback whose
@@ -465,13 +634,17 @@ pub(crate) struct ModuleInfoExtractor {
     /// Object-property paths whose value is a direct class instance. Module
     /// targets remain available throughout the walk, while scoped targets are
     /// pushed and popped with the matching declaration scopes.
-    module_direct_object_binding_targets: FxHashMap<String, FxHashSet<String>>,
+    module_direct_object_binding_targets: FxHashMap<String, DirectBindingTarget>,
     module_direct_object_binding_generations: FxHashMap<String, u64>,
     module_direct_object_binding_paths_by_root: FxHashMap<String, FxHashSet<String>>,
-    scoped_direct_object_binding_targets: Vec<FxHashMap<String, FxHashSet<String>>>,
+    scoped_direct_object_binding_targets: Vec<FxHashMap<String, DirectBindingTarget>>,
     scoped_direct_object_binding_generations: Vec<FxHashMap<String, u64>>,
     scoped_direct_object_binding_paths_by_root: Vec<FxHashMap<String, FxHashSet<String>>>,
     scoped_direct_object_binding_roots: Vec<FxHashSet<String>>,
+    /// Function frames own possible outer writes until that body exits.
+    direct_object_binding_function_scopes: Vec<usize>,
+    direct_object_binding_branch_scopes: Vec<DirectObjectBindingBranchScope>,
+    loop_update_observations: Vec<LoopUpdateObservations>,
     direct_object_binding_member_accesses: FxHashSet<(String, String)>,
     direct_object_binding_access_generations: FxHashMap<String, FxHashMap<String, u64>>,
     dynamic_direct_object_binding_access_generations: FxHashMap<(String, String), u64>,
@@ -536,6 +709,15 @@ pub(crate) struct ModuleInfoExtractor {
     public_signature_type_references: Vec<PublicSignatureTypeReference>,
     local_signature_type_references: Vec<LocalSignatureTypeReference>,
     local_class_exports: FxHashMap<String, LocalClassExportInfo>,
+    subclass_declarations: FxHashMap<String, SubclassDeclaration>,
+    direct_binding_values: Vec<DirectBindingValue>,
+    capture_subclass_provenance: bool,
+    independent_this_depth: usize,
+    class_method_function_span: Option<Span>,
+    pending_subclass_member_accesses: Vec<PendingSubclassMemberAccess>,
+    subclass_binding_references: FxHashMap<Span, Span>,
+    subclass_namespace_references: FxHashSet<Span>,
+    subclass_immutable_references: FxHashSet<Span>,
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
     block_depth: u32,
     function_depth: u32,
@@ -548,7 +730,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// templates receive raw values, so interpolation should not credit
     /// `toString` coercion for the quasi itself.
     in_tagged_template_quasi: bool,
-    class_super_stack: Vec<Option<String>>,
+    class_super_stack: Vec<Option<(String, Option<Span>)>>,
     /// Monotonic per-module class-scope id source: incremented each time a
     /// class body is entered so every class gets a unique id, paired with
     /// `class_scope_stack`. A `this.<field>` binding key is qualified with the
@@ -577,9 +759,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// Callees of a factory call destructured opaquely (`const { a, ...rest } = f()`,
     /// a computed key). The returned class must be credited wholesale.
     factory_whole_object_candidates: Vec<String>,
-    /// `(callee, member)` for a factory result read without ever being named:
-    /// `f().member`, `const { member } = f()`.
-    factory_unnamed_result_accesses: Vec<(String, String)>,
+    /// `(callee, member, awaited)` for a factory result read without being named:
+    /// `f().member`, `const { member } = await f()`.
+    factory_unnamed_result_accesses: Vec<(String, String, bool)>,
     factory_return_candidates: Vec<FactoryReturnCandidate>,
     /// Same-file functions whose body returns a bare identifier (e.g.
     /// `useApi() { return api }`). Resolved against `binding_target_names` at
@@ -658,7 +840,7 @@ pub(crate) struct ModuleInfoExtractor {
     loop_object_property_values: Vec<FxHashMap<String, FxHashMap<String, Vec<String>>>>,
     package_resolution_function_args: FxHashMap<String, usize>,
     nested_declaration_stack: Vec<FxHashSet<String>>,
-    class_type_param_constraints: Vec<FxHashMap<String, Option<String>>>,
+    class_type_param_constraints: Vec<FxHashMap<String, Option<TypePropertyTarget>>>,
     pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
     pending_playwright_factory_aliases: Vec<(String, String)>,
     /// Local `const X = base.extend<T>({...})` fixture definitions keyed by the
@@ -988,6 +1170,67 @@ pub(crate) struct SecurityPathSinkBinding {
 }
 
 impl ModuleInfoExtractor {
+    pub(crate) fn subclass_reference_candidates(&self) -> FxHashSet<Span> {
+        let mut spans = FxHashSet::default();
+        let mut add_proof = |proof: &BindingClassProof| {
+            spans.insert(proof.target_reference_span);
+            spans.extend(proof.requirements.iter().map(|(reference, _)| *reference));
+        };
+        for value in &self.direct_binding_values {
+            if let Some(proof) = &value.proof {
+                add_proof(proof);
+            }
+            if let Some(PendingBindingValue::Call {
+                result: Some(proof),
+                ..
+            }) = &value.pending
+            {
+                add_proof(proof);
+            }
+            if let Some(producer) = &value.producer {
+                if let Some(proof) = &producer.result {
+                    add_proof(proof);
+                }
+                for (_, proof) in &producer.shape {
+                    add_proof(proof);
+                }
+            }
+        }
+        for access in &self.pending_subclass_member_accesses {
+            if let SubclassAccessProof::Known(proof) = &access.proof {
+                add_proof(proof);
+            }
+        }
+        for access in &self.pending_subclass_member_accesses {
+            if let SubclassAccessProof::Value { requirements, .. } = &access.proof {
+                spans.extend(requirements.iter().map(|(reference, _)| *reference));
+            }
+        }
+        for value in &self.direct_binding_values {
+            spans.extend(value.requirements.iter().map(|(reference, _)| *reference));
+            if let Some(PendingBindingValue::Call { reference, .. }) = &value.pending {
+                spans.insert(*reference);
+            }
+        }
+        spans.extend(
+            self.subclass_declarations
+                .values()
+                .filter_map(|class| class.super_reference_span),
+        );
+        spans
+    }
+
+    pub(crate) fn set_subclass_binding_provenance(
+        &mut self,
+        references: FxHashMap<Span, Span>,
+        namespace_references: FxHashSet<Span>,
+        immutable_references: FxHashSet<Span>,
+    ) {
+        self.subclass_binding_references = references;
+        self.subclass_namespace_references = namespace_references;
+        self.subclass_immutable_references = immutable_references;
+    }
+
     pub(crate) fn imported_call_reference_candidates(&self) -> FxHashSet<Span> {
         self.pending_imported_call_sites
             .iter()
@@ -1284,7 +1527,7 @@ impl ModuleInfoExtractor {
                     .get(object)
                     .copied()
                     .unwrap_or_default();
-                return Some((targets, generation));
+                return (!targets.names.is_empty()).then_some((&targets.names, generation));
             }
             if self.scoped_direct_object_binding_roots[index].contains(root) {
                 return None;
@@ -1298,14 +1541,16 @@ impl ModuleInfoExtractor {
                     .get(object)
                     .copied()
                     .unwrap_or_default();
-                (targets, generation)
+                (&targets.names, generation)
             })
+            .filter(|(targets, _)| !targets.is_empty())
     }
 
     /// Remember the class a receiver named at this point in the walk, so an
     /// access written in one scope survives the same name being rebound to a
     /// different class in a sibling scope.
     fn record_walk_order_member_access(&mut self, object: &str, member: &str) -> bool {
+        self.observe_loop_update_access(object, member);
         if self.abstained_direct_object_binding_paths.contains(object)
             && self.direct_object_binding_targets(object).is_some()
         {
@@ -1363,9 +1608,28 @@ impl ModuleInfoExtractor {
                 .insert(member.to_string(), generation);
             return true;
         }
+        let mut prefix = object;
+        loop {
+            if let Some(targets) = self.direct_object_binding_path_targets(prefix) {
+                let suffix = &object[prefix.len()..];
+                let mut snapshots = targets
+                    .iter()
+                    .map(|target| (None, format!("{target}{suffix}"), member.to_string()))
+                    .collect::<Vec<_>>();
+                snapshots.sort_unstable();
+                self.walk_order_member_accesses.extend(snapshots);
+                // An indexed empty prefix was explicitly replaced. Neither it
+                // nor an admitted snapshot may fall through to stale flat names.
+                return true;
+            }
+            let Some((parent, _)) = prefix.rsplit_once('.') else {
+                break;
+            };
+            prefix = parent;
+        }
         if let Some(class) = self.walk_order_class_bindings.get(object) {
             self.walk_order_member_accesses.push((
-                object.to_string(),
+                Some(object.to_string()),
                 class.clone(),
                 member.to_string(),
             ));
@@ -1496,23 +1760,38 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Credit the walk-order resolution for receivers whose module-flat binding
-    /// ended up `Ambiguous`. Without this, two sibling scopes binding the same
-    /// local name to different classes credit neither, reporting genuinely used
-    /// members as unused.
+    /// Scoped compound targets survive scope exit; module-flat targets only need
+    /// walk-order credit when sibling scopes make their final binding ambiguous.
     fn resolve_ambiguous_walk_order_member_accesses(&mut self) {
-        let pending = std::mem::take(&mut self.walk_order_member_accesses);
-        let additional: Vec<MemberAccess> = pending
-            .into_iter()
-            .filter(|(binding, _, _)| {
-                matches!(
-                    self.binding_target_names.get(binding),
+        for (binding, object, member) in std::mem::take(&mut self.walk_order_member_accesses) {
+            if let Some(binding) = binding {
+                if !matches!(
+                    self.binding_target_names.get(&binding),
                     Some(BindingTarget::Ambiguous)
-                )
-            })
-            .map(|(_, object, member)| MemberAccess { object, member })
-            .collect();
-        self.member_accesses.extend(additional);
+                ) {
+                    continue;
+                }
+            } else {
+                match self.expand_typed_property_compound(&object, None) {
+                    TypedPropertyExpansion::Resolved(terminal, _, _) => {
+                        self.member_accesses.push(MemberAccess {
+                            object: terminal,
+                            member: member.clone(),
+                        });
+                    }
+                    TypedPropertyExpansion::CrossModule {
+                        type_name,
+                        property_path,
+                    } => self.record_typed_property_member_fact(
+                        type_name,
+                        property_path,
+                        member.clone(),
+                    ),
+                    TypedPropertyExpansion::Opaque => {}
+                }
+            }
+            self.member_accesses.push(MemberAccess { object, member });
+        }
     }
 
     fn record_angular_template_member_fact(&mut self, member: String) {
@@ -2336,9 +2615,9 @@ impl ModuleInfoExtractor {
             .map(|import| import.local_name.as_str())
             .collect();
         let mut deferred_facts = Vec::new();
-        for (callee_name, member) in inline_accesses {
+        for (callee_name, member, awaited) in inline_accesses {
             if let Some(class_name) = self.factory_return_functions.get(&callee_name) {
-                if !self.call_result_is_returned_value(&callee_name, false) {
+                if !self.call_result_is_returned_value(&callee_name, awaited) {
                     continue;
                 }
                 let object = class_name.clone();
@@ -2346,11 +2625,11 @@ impl ModuleInfoExtractor {
                 continue;
             }
             if imported_locals.contains(callee_name.as_str()) {
-                deferred_facts.push((callee_name, member));
+                deferred_facts.push((callee_name, member, awaited));
             }
         }
-        for (callee_name, member) in deferred_facts {
-            self.record_factory_fn_member_fact(callee_name, member, false);
+        for (callee_name, member, awaited) in deferred_facts {
+            self.record_factory_fn_member_fact(callee_name, member, awaited);
         }
     }
 
@@ -2482,7 +2761,7 @@ impl ModuleInfoExtractor {
     /// an opaque hop, or an unbound path drops. See issue #1858.
     fn resolve_object_property_value_class(&self, value: &ObjectPropValueRef) -> Option<String> {
         match value {
-            ObjectPropValueRef::Class(name) => Some(name.clone()),
+            ObjectPropValueRef::Class(name, _) => Some(name.clone()),
             ObjectPropValueRef::Path(path) => match self.resolve_bound_object_name(path)? {
                 // A bare local (`o` bound to `new X()`) resolves to a plain class
                 // name with no `.`; take it directly. Piping a no-dot name through
@@ -2492,8 +2771,8 @@ impl ModuleInfoExtractor {
                 // A compound (`OrdersInvokerFactory.ordersPage`) hops through the
                 // class's typed-property binding to the terminal property class.
                 BindingTarget::Class(compound) => {
-                    match self.expand_typed_property_compound(&compound) {
-                        TypedPropertyExpansion::Resolved(terminal) => Some(terminal),
+                    match self.expand_typed_property_compound(&compound, None) {
+                        TypedPropertyExpansion::Resolved(terminal, _, _) => Some(terminal),
                         TypedPropertyExpansion::CrossModule { .. }
                         | TypedPropertyExpansion::Opaque => None,
                     }
@@ -2548,7 +2827,7 @@ impl ModuleInfoExtractor {
                     .map(|(property, property_type)| TypeMemberTypeEntry {
                         type_name: type_name.clone(),
                         property: property.clone(),
-                        property_type: property_type.clone(),
+                        property_type: property_type.name.clone(),
                     })
             })
             .collect();
@@ -2569,7 +2848,7 @@ impl ModuleInfoExtractor {
             let Some(class_name) = properties.get(&property_key) else {
                 continue;
             };
-            self.insert_class_binding_target_if_absent(local, class_name.clone());
+            self.insert_class_binding_target_if_absent(local, class_name.name.clone());
         }
     }
 
@@ -2590,69 +2869,93 @@ impl ModuleInfoExtractor {
             .map(|(_, object_name)| object_name)
     }
 
-    /// Credit a member reached through a local subclass onto the class that declares it.
-    ///
-    /// `class Sub extends Base {}` without an `export` is never an export, so
-    /// `Sub.someStatic` names nothing the analyze layer can resolve: its import/export
-    /// map holds only imports and exports, and the heritage `parent -> children` map is
-    /// built from exports alone. The static is then reported unused even though it is
-    /// called. Exporting the subclass makes the identical code resolve, which is the
-    /// tell.
-    ///
-    /// Walk the local `extends` chain to the first name that is NOT a locally declared
-    /// class -- the imported or exported base -- and re-emit the access against it.
-    ///
-    /// `class Sub extends mixin(Base) {}` records no superclass name and abstains here,
-    /// which is correct: a mixin can redefine what the subclass exposes.
-    ///
-    /// A namespace-qualified base (`class Sub extends ns.Base {}`) re-emits the dotted
-    /// name verbatim. The analyze layer resolves only bare local names, so that access
-    /// is inert and the base's members stay reported. This is NOT a regression: a
-    /// direct `ns.Base.someStatic()` is equally uncredited today, because a
-    /// namespace-imported class is not in the import/export map either. Fixing it means
-    /// resolving namespace aliases in the analyze layer, which is a separate change.
-    ///
-    /// Crediting a base whose subclass shadows the member is a false negative, never a
-    /// false positive, which is the direction this rule must err in.
+    /// String-only accesses lose receiver identity when scopes shadow a local.
+    /// Propagate only references admitted against the actual class or instance binding.
     fn propagate_local_subclass_member_accesses(&mut self) {
-        if self.local_class_exports.is_empty() {
-            return;
-        }
-        let additional: Vec<MemberAccess> = self
-            .member_accesses
-            .iter()
-            .filter_map(|access| {
-                let base = self.resolve_local_subclass_base(&access.object)?;
-                Some(MemberAccess {
+        for access in std::mem::take(&mut self.pending_subclass_member_accesses) {
+            let Some(class_name) = self.subclass_receiver_class(&access) else {
+                continue;
+            };
+            let Some((base, heritage_span)) = self.resolve_local_subclass_base(&class_name) else {
+                continue;
+            };
+            if let Some((namespace_local, class_export_name)) = base.split_once('.') {
+                if class_export_name.contains('.')
+                    || !self.subclass_namespace_references.contains(&heritage_span)
+                {
+                    continue;
+                }
+                self.semantic_facts
+                    .push(SemanticFact::QualifiedClassMemberAccess(
+                        QualifiedClassMemberAccessFact {
+                            namespace_local: namespace_local.to_string(),
+                            class_export_name: class_export_name.to_string(),
+                            member: access.member,
+                        },
+                    ));
+            } else {
+                self.member_accesses.push(MemberAccess {
                     object: base,
-                    member: access.member.clone(),
-                })
-            })
-            .collect();
-        self.member_accesses.extend(additional);
+                    member: access.member,
+                });
+            }
+        }
     }
 
-    /// The nearest ancestor of a locally declared class that is not itself locally
-    /// declared -- the imported or exported base the members actually live on.
-    ///
-    /// `None` when `name` is not a local class, when the chain reaches a class with no
-    /// `extends`, or when it revisits a name. The `visited` set, rather than a depth
-    /// cap, is what terminates a malformed cyclic `extends`: a depth cap would silently
-    /// abstain on a legitimately deep chain and leave its members falsely reported.
-    fn resolve_local_subclass_base(&self, name: &str) -> Option<String> {
+    fn subclass_receiver_class(&self, access: &PendingSubclassMemberAccess) -> Option<String> {
+        let proof = match &access.proof {
+            SubclassAccessProof::Known(proof) => proof.clone(),
+            SubclassAccessProof::Value { id, requirements } => {
+                let mut proof = self.direct_binding_values.get(*id)?.proof.clone()?;
+                proof.requirements.extend(requirements.iter().copied());
+                proof
+            }
+        };
+        if !self
+            .subclass_immutable_references
+            .contains(&proof.target_reference_span)
+            || !proof.requirements.iter().all(|(reference, expected)| {
+                self.subclass_binding_references.get(reference) == Some(expected)
+            })
+        {
+            return None;
+        }
+        let declaration = self.subclass_declarations.get(&proof.target_name)?;
+        (self
+            .subclass_binding_references
+            .get(&proof.target_reference_span)
+            == Some(&declaration.binding_span))
+        .then(|| proof.target_name.clone())
+    }
+
+    /// Follow proven local heritage bindings without a depth cap. Cycles abstain.
+    fn resolve_local_subclass_base(&self, name: &str) -> Option<(String, Span)> {
         let mut visited: FxHashSet<&str> = FxHashSet::default();
-        visited.insert(name);
-        let mut current = self.local_class_exports.get(name)?.super_class.as_deref()?;
+        let mut current = name;
         loop {
-            let Some(info) = self.local_class_exports.get(current) else {
-                // Not locally declared, so it is the imported / exported base.
-                return Some(current.to_string());
-            };
             if !visited.insert(current) {
-                // Cyclic `extends`; malformed source, credit nothing.
                 return None;
             }
-            current = info.super_class.as_deref()?;
+            let base = self
+                .local_class_exports
+                .get(current)?
+                .super_class
+                .as_deref()?;
+            let heritage_span = self
+                .subclass_declarations
+                .get(current)?
+                .super_reference_span?;
+            if !self.subclass_immutable_references.contains(&heritage_span) {
+                return None;
+            }
+            let actual_binding = self.subclass_binding_references.get(&heritage_span)?;
+            let Some(declaration) = self.subclass_declarations.get(base) else {
+                return Some((base.to_string(), heritage_span));
+            };
+            if *actual_binding != declaration.binding_span {
+                return None;
+            }
+            current = base;
         }
     }
 
@@ -2677,8 +2980,8 @@ impl ModuleInfoExtractor {
                     // access itself is still pushed: exported-class compounds
                     // also resolve downstream via `instance_bindings`, and
                     // interface compounds are inert.
-                    match self.expand_typed_property_compound(&object) {
-                        TypedPropertyExpansion::Resolved(terminal) => {
+                    match self.expand_typed_property_compound(&object, None) {
+                        TypedPropertyExpansion::Resolved(terminal, _, _) => {
                             additional_accesses.push(MemberAccess {
                                 object: terminal,
                                 member: access.member.clone(),
@@ -2722,8 +3025,8 @@ impl ModuleInfoExtractor {
                     // `use(this.opts.c)` through a local interface hop credits the
                     // terminal class wholesale. Cross-module whole-object hops are
                     // out of scope (issue #1785 covers member accesses).
-                    let expanded = match self.expand_typed_property_compound(&name) {
-                        TypedPropertyExpansion::Resolved(terminal) => Some(terminal),
+                    let expanded = match self.expand_typed_property_compound(&name, None) {
+                        TypedPropertyExpansion::Resolved(terminal, _, _) => Some(terminal),
                         TypedPropertyExpansion::CrossModule { .. }
                         | TypedPropertyExpansion::Opaque => None,
                     };
@@ -2762,7 +3065,11 @@ impl ModuleInfoExtractor {
     /// declared here, i.e. imported) returns `CrossModule` so the caller can
     /// emit a `TypedPropertyMemberAccess` fact for the analyze-layer join. See
     /// issue #1785.
-    fn expand_typed_property_compound(&self, compound: &str) -> TypedPropertyExpansion {
+    fn expand_typed_property_compound(
+        &self,
+        compound: &str,
+        origin: Option<Span>,
+    ) -> TypedPropertyExpansion {
         let mut segments = compound.split('.');
         let Some(root) = segments.next() else {
             return TypedPropertyExpansion::Opaque;
@@ -2772,6 +3079,8 @@ impl ModuleInfoExtractor {
             return TypedPropertyExpansion::Opaque;
         }
         let mut current = root.to_string();
+        let mut current_origin = origin;
+        let mut requirements = Vec::new();
         let mut idx = 0;
         while idx < remaining.len() {
             let next = if let Some(properties) = self.interface_property_types.get(&current) {
@@ -2780,7 +3089,13 @@ impl ModuleInfoExtractor {
                     // this type (union / generic / unharvested shape): abstain.
                     return TypedPropertyExpansion::Opaque;
                 };
-                next.clone()
+                if let (Some(reference), Some(owner)) = (current_origin, next.owner_span) {
+                    requirements.push((reference, owner));
+                    current_origin = next.reference_span;
+                } else {
+                    current_origin = None;
+                }
+                next.name.clone()
             } else if let Some(local_class) = self.local_class_exports.get(&current) {
                 let Some((_, bound_type)) = local_class
                     .instance_bindings
@@ -2791,6 +3106,10 @@ impl ModuleInfoExtractor {
                     // binding (untyped, private, method): abstain.
                     return TypedPropertyExpansion::Opaque;
                 };
+                if let Some(reference) = current_origin {
+                    requirements.push((reference, local_class.binding_span));
+                    current_origin = local_class.binding_origins.get(remaining[idx]).copied();
+                }
                 bound_type.clone()
             } else {
                 if idx == 0 && self.local_declaration_names.contains(&current) {
@@ -2806,7 +3125,7 @@ impl ModuleInfoExtractor {
             current = next;
             idx += 1;
         }
-        TypedPropertyExpansion::Resolved(current)
+        TypedPropertyExpansion::Resolved(current, current_origin, requirements)
     }
 
     fn resolve_structural_class_calls(&mut self) {
@@ -2995,11 +3314,7 @@ impl ModuleInfoExtractor {
         // the same typed-property expansion as unambiguous ones.
         self.resolve_ambiguous_walk_order_member_accesses();
         self.resolve_bound_member_accesses();
-        // AFTER `resolve_bound_member_accesses`, which is what materializes the
-        // class-qualified accesses for `const s = new Sub(); s.member`. Running
-        // earlier would only see the statics written as `Sub.member` in source and
-        // would leave every instance member reached through a local subclass
-        // reported as unused.
+        self.complete_binding_producer_calls();
         self.propagate_local_subclass_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();

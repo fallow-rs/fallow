@@ -1,0 +1,32 @@
+export class C { static live():void {}
+ factoryBound():void {}
+ factoryUnnamed():void {}
+ hoistedBound():void {}
+ hoistedDirect():void {}
+ factoryObject():void {}
+ lateBox():void {}
+ staticFactory():void {}
+ narrowed():void {}
+ destructured():void {}
+ asserted():void {}
+ superUsed():void {}
+ fieldUsed():void {}
+ beforeFactoryRebind():void {}
+ beforeStaticRebind():void {}
+ beforeChildWrite():void {}
+ savedChild():void {}
+ independentResult():void {}
+ savedResult():void {}
+ replacementChild():void {}
+ awaitedFactory():void {}
+ factoryWrong():void {}
+ staticWrong():void {}
+ childWrong():void {}
+ independentWrong():void {}
+ rootWrong():void {}
+ promiseWrong():void {}
+ unsupportedAlias():void {}
+ unsupportedObject():void {}
+ unsupportedStructural():void {}
+ dead():void {}
+}
