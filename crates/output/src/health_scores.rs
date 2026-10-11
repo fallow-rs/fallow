@@ -1003,9 +1003,9 @@ pub struct FileHealthScore {
     /// Lines of code in the file.
     pub lines: u32,
     /// Highest CRAP score among the file's functions. Always the raw measured
-    /// value; threshold overrides never rewrite it.
+    /// value; threshold overrides and suppressions never rewrite it.
     pub crap_max: f64,
-    /// Functions whose rounded CRAP score meets or exceeds their effective
+    /// Unsuppressed functions whose rounded CRAP score meets or exceeds their effective
     /// ceiling, resolved from `health.thresholdOverrides` over the global
     /// `maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled
     /// (global ceiling `0`).
@@ -1018,6 +1018,24 @@ pub struct FileHealthScore {
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub crap_exempted: usize,
+    /// Concrete scored functions accepted by a complexity suppression, including
+    /// subthreshold functions and disabled-enforcement runs. Omitted when zero.
+    /// May overlap with configured exemptions; the counts are not a partition.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub crap_suppressed: usize,
+    /// Highest rounded CRAP among unsuppressed scored functions, including
+    /// subthreshold and configured-exempt functions. Present with the paired
+    /// unsuppressed threshold whenever a scored suppression exists. Explicitly
+    /// zero when every scored function is suppressed; raw crap_max is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crap_unsuppressed_max: Option<f64>,
+    /// Lowest effective ceiling among unsuppressed scored functions, or the run
+    /// global when none remain. Emitted with crap_unsuppressed_max. Consumers
+    /// receiving an absent or partial pair fall back to the complete legacy pair:
+    /// crap_max and crap_effective_threshold (or the run global when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crap_unsuppressed_effective_threshold: Option<f64>,
     /// Lowest effective CRAP ceiling among the file's functions, present only
     /// when it differs from the run global (`summary.max_crap_threshold`).
     /// Consumers fall back to `summary.max_crap_threshold` when absent.
@@ -1206,6 +1224,39 @@ pub struct HotspotSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_score_suppression_metadata_preserves_legacy_and_explicit_zero() {
+        let legacy = serde_json::json!({
+            "path": "src/legacy.ts", "fan_in": 1, "fan_out": 0,
+            "dead_code_ratio": 0.0, "complexity_density": 0.77, "maintainability_index": 88.0,
+            "total_cyclomatic": 20, "total_cognitive": 18, "function_count": 2, "lines": 26,
+            "crap_max": 110.0, "crap_above_threshold": 0
+        });
+        let restored: FileHealthScore =
+            serde_json::from_value(legacy.clone()).expect("legacy file score");
+        assert_eq!(restored.crap_suppressed, 0);
+        assert_eq!(
+            serde_json::to_value(restored).expect("serialize legacy file score"),
+            legacy
+        );
+
+        let mut suppressed = legacy;
+        suppressed["crap_suppressed"] = serde_json::json!(2);
+        suppressed["crap_unsuppressed_max"] = serde_json::json!(0.0);
+        suppressed["crap_unsuppressed_effective_threshold"] = serde_json::json!(30.0);
+        suppressed["crap_exempted"] = serde_json::json!(1);
+        suppressed["crap_effective_threshold"] = serde_json::json!(500.0);
+        let restored: FileHealthScore =
+            serde_json::from_value(suppressed.clone()).expect("suppressed file score");
+        assert_eq!(restored.crap_max, 110.0);
+        assert_eq!(restored.crap_unsuppressed_max, Some(0.0));
+        assert_eq!(restored.crap_unsuppressed_effective_threshold, Some(30.0));
+        assert_eq!(
+            serde_json::to_value(restored).expect("serialize suppressed file score"),
+            suppressed
+        );
+    }
 
     /// The three tokens are the wire contract a consumer branches on, so they
     /// are pinned here rather than left to the derive.

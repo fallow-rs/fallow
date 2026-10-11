@@ -642,6 +642,11 @@ export interface FileHealthScore {
   crap_max: number;
   crap_above_threshold: number;
   crap_exempted?: number;
+  /** Scored functions accepted by a complexity suppression, independent of configured exemptions. */
+  crap_suppressed?: number;
+  /** Remaining maximum and ceiling are supplied together; an incomplete pair uses the legacy metrics. */
+  crap_unsuppressed_max?: number;
+  crap_unsuppressed_effective_threshold?: number;
   crap_effective_threshold?: number;
   [key: string]: unknown;
 }

@@ -3664,15 +3664,33 @@
         },
         "crap_max": {
           "type": "number",
-          "description": "Highest CRAP score among the file's functions. Always the raw measured\nvalue; threshold overrides never rewrite it."
+          "description": "Highest CRAP score among the file's functions. Always the raw measured\nvalue; threshold overrides and suppressions never rewrite it."
         },
         "crap_above_threshold": {
           "type": "integer",
-          "description": "Functions whose rounded CRAP score meets or exceeds their effective\nceiling, resolved from `health.thresholdOverrides` over the global\n`maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled\n(global ceiling `0`)."
+          "description": "Unsuppressed functions whose rounded CRAP score meets or exceeds their effective\nceiling, resolved from `health.thresholdOverrides` over the global\n`maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled\n(global ceiling `0`)."
         },
         "crap_exempted": {
           "type": "integer",
           "description": "Functions whose rounded CRAP score is at or above the canonical 30.0\nbaseline but below their effective ceiling: the count the configuration\nlet through. Stays `0` when the effective ceiling is stricter than 30.\nWhen CRAP enforcement is disabled (global ceiling `0`), counts every\nfunction at or above the canonical baseline. Omitted when zero."
+        },
+        "crap_suppressed": {
+          "type": "integer",
+          "description": "Concrete scored functions accepted by a complexity suppression, including\nsubthreshold functions and disabled-enforcement runs. Omitted when zero.\nMay overlap with configured exemptions; the counts are not a partition."
+        },
+        "crap_unsuppressed_max": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Highest rounded CRAP among unsuppressed scored functions, including\nsubthreshold and configured-exempt functions. Present with the paired\nunsuppressed threshold whenever a scored suppression exists. Explicitly\nzero when every scored function is suppressed; raw crap_max is unchanged."
+        },
+        "crap_unsuppressed_effective_threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Lowest effective ceiling among unsuppressed scored functions, or the run\nglobal when none remain. Emitted with crap_unsuppressed_max. Consumers\nreceiving an absent or partial pair fall back to the complete legacy pair:\ncrap_max and crap_effective_threshold (or the run global when absent)."
         },
         "crap_effective_threshold": {
           "type": [

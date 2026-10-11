@@ -8476,11 +8476,11 @@ function_count: number
 lines: number
 /**
  * Highest CRAP score among the file's functions. Always the raw measured
- * value; threshold overrides never rewrite it.
+ * value; threshold overrides and suppressions never rewrite it.
  */
 crap_max: number
 /**
- * Functions whose rounded CRAP score meets or exceeds their effective
+ * Unsuppressed functions whose rounded CRAP score meets or exceeds their effective
  * ceiling, resolved from `health.thresholdOverrides` over the global
  * `maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled
  * (global ceiling `0`).
@@ -8494,6 +8494,26 @@ crap_above_threshold: number
  * function at or above the canonical baseline. Omitted when zero.
  */
 crap_exempted?: number
+/**
+ * Concrete scored functions accepted by a complexity suppression, including
+ * subthreshold functions and disabled-enforcement runs. Omitted when zero.
+ * May overlap with configured exemptions; the counts are not a partition.
+ */
+crap_suppressed?: number
+/**
+ * Highest rounded CRAP among unsuppressed scored functions, including
+ * subthreshold and configured-exempt functions. Present with the paired
+ * unsuppressed threshold whenever a scored suppression exists. Explicitly
+ * zero when every scored function is suppressed; raw crap_max is unchanged.
+ */
+crap_unsuppressed_max?: (number | null)
+/**
+ * Lowest effective ceiling among unsuppressed scored functions, or the run
+ * global when none remain. Emitted with crap_unsuppressed_max. Consumers
+ * receiving an absent or partial pair fall back to the complete legacy pair:
+ * crap_max and crap_effective_threshold (or the run global when absent).
+ */
+crap_unsuppressed_effective_threshold?: (number | null)
 /**
  * Lowest effective CRAP ceiling among the file's functions, present only
  * when it differs from the run global (`summary.max_crap_threshold`).

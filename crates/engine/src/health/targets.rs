@@ -11,6 +11,7 @@ const MAX_CLONE_SIBLING_EVIDENCE: usize = 5;
 pub(super) struct TargetAuxData<'a> {
     pub circular_files: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
     pub top_complex_fns: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>>,
+    pub crap_target_fns: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>>,
     pub entry_points: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
     pub value_export_counts: &'a rustc_hash::FxHashMap<std::path::PathBuf, usize>,
     pub unused_export_names: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
@@ -27,6 +28,7 @@ impl<'a> TargetAuxData<'a> {
         Self {
             circular_files: &output.circular_files,
             top_complex_fns: &output.top_complex_fns,
+            crap_target_fns: &output.crap_target_fns,
             entry_points: &output.entry_points,
             value_export_counts: &output.value_export_counts,
             unused_export_names: &output.unused_export_names,
@@ -228,7 +230,11 @@ fn build_target_for_score(
     let evidence = build_evidence(
         &category,
         &score.path,
-        top_fns,
+        if matches!(category, RecommendationCategory::AddTestCoverage) {
+            aux.crap_target_fns.get(&score.path)
+        } else {
+            top_fns
+        },
         EvidenceSources {
             unused_export_names: aux.unused_export_names,
             cycle_members: aux.cycle_members,
@@ -355,13 +361,14 @@ fn push_runtime_target_factors(
     // Gated on the effective-aware count alone: `crap_above_threshold >= 2`
     // already implies at least one function meets its ceiling, and a raw
     // `crap_max >= 30` conjunct is wrong on mixed-ceiling files. The emitted
-    // threshold is the row's lowest effective ceiling (falling back to the run
-    // global), so `value >= threshold` holds in every case (issue #2228).
+    // maximum and ceiling use the same unsuppressed population when available,
+    // so a suppressed raw maximum cannot supply the factor's value.
     if score.crap_above_threshold >= 2 {
+        let signal = super::scoring::file_score_crap_signal(score, max_crap);
         factors.push(ContributingFactor {
-            metric: "crap_max",
-            value: score.crap_max,
-            threshold: score.crap_effective_threshold.unwrap_or(max_crap),
+            metric: signal.metric(),
+            value: signal.maximum,
+            threshold: signal.threshold,
             detail: format!(
                 "{} functions with untested complexity risk",
                 score.crap_above_threshold,
@@ -786,6 +793,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         };
         overrides(&mut s);
@@ -1009,6 +1019,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &rustc_hash::FxHashSet::default(),
             top_complex_fns: &rustc_hash::FxHashMap::default(),
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &[
                 (std::path::PathBuf::from("/src/big.ts"), 10_usize),
@@ -1723,6 +1734,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &rustc_hash::FxHashSet::default(),
             top_complex_fns: &rustc_hash::FxHashMap::default(),
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
@@ -1748,6 +1760,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &rustc_hash::FxHashSet::default(),
             top_complex_fns: &rustc_hash::FxHashMap::default(),
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
@@ -1766,6 +1779,7 @@ mod tests {
     struct EmptyAuxData {
         circular_files: rustc_hash::FxHashSet<std::path::PathBuf>,
         top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>>,
+        crap_target_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>>,
         entry_points: rustc_hash::FxHashSet<std::path::PathBuf>,
         value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
         unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
@@ -1779,6 +1793,7 @@ mod tests {
             TargetAuxData {
                 circular_files: &self.circular_files,
                 top_complex_fns: &self.top_complex_fns,
+                crap_target_fns: &self.crap_target_fns,
                 entry_points: &self.entry_points,
                 value_export_counts: &self.value_export_counts,
                 unused_export_names: &self.unused_export_names,
@@ -1894,6 +1909,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &circular,
             top_complex_fns: &rustc_hash::FxHashMap::default(),
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
@@ -1920,6 +1936,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &rustc_hash::FxHashSet::default(),
             top_complex_fns: &rustc_hash::FxHashMap::default(),
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
@@ -1944,6 +1961,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &rustc_hash::FxHashSet::default(),
             top_complex_fns: &rustc_hash::FxHashMap::default(),
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
@@ -1970,6 +1988,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &rustc_hash::FxHashSet::default(),
             top_complex_fns: &top_fns,
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
@@ -2002,6 +2021,7 @@ mod tests {
         let aux = TargetAuxData {
             circular_files: &rustc_hash::FxHashSet::default(),
             top_complex_fns: &rustc_hash::FxHashMap::default(),
+            crap_target_fns: &rustc_hash::FxHashMap::default(),
             entry_points: &rustc_hash::FxHashSet::default(),
             value_export_counts: &value_exports,
             unused_export_names: &rustc_hash::FxHashMap::default(),
