@@ -141,6 +141,7 @@ jobs:
               - 'crates/core/src/plugins/mod.rs'
               - 'crates/core/tests/integration_test.rs'
               - 'crates/core/tests/integration_test/symlink_root_containment.rs'
+              - 'crates/core/tests/integration_test/issue_3324_nested_package.rs'
               - 'crates/core/src/discover/entry_points.rs'
               - 'crates/core/src/discover/mod.rs'
               - 'crates/core/src/plugins/commit_and_tag_version.rs'

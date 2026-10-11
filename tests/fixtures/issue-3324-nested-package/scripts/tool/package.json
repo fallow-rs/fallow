@@ -1,0 +1,1 @@
+{ "name": "@repro/tool", "private": true, "dependencies": { "@repro/owned": "*" } }

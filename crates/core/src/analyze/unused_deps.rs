@@ -2298,6 +2298,66 @@ fn workspace_dependency_map(
     ws_dep_map
 }
 
+/// Standalone nested packages own their declarations even when an explicit
+/// workspace list leaves them out of workspace discovery. Only dependency
+/// attribution uses these records; they do not change graph membership.
+fn add_source_package_manifests(
+    manifests: &mut Vec<WorkspaceDependencies>,
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+) {
+    let loaded: FxHashSet<PathBuf> = manifests.iter().map(|owner| owner.root.clone()).collect();
+    let mut visited = FxHashSet::default();
+    let canonical_root = dunce::canonicalize(&config.root).unwrap_or_else(|_| config.root.clone());
+
+    for module in &graph.modules {
+        let source = normalize_lexically(&module.path);
+        if !source.starts_with(&config.root) {
+            continue;
+        }
+        let Some(parent) = source.parent() else {
+            continue;
+        };
+        for directory in parent.ancestors() {
+            if directory == config.root || !directory.starts_with(&config.root) {
+                break;
+            }
+            if !visited.insert(directory.to_path_buf()) {
+                break;
+            }
+            if loaded.contains(directory) {
+                continue;
+            }
+            let path = directory.join("package.json");
+            if is_package_json_ignored(&path, config) {
+                continue;
+            }
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            let Ok(canonical) = dunce::canonicalize(&path) else {
+                continue;
+            };
+            if !canonical.starts_with(&canonical_root) {
+                continue;
+            }
+            let Ok(pkg) = PackageJson::load(&path) else {
+                continue;
+            };
+            let mut deps: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
+            deps.extend(pkg.name);
+            manifests.push(WorkspaceDependencies {
+                root: directory.to_path_buf(),
+                deps,
+                is_private: pkg.private == Some(true),
+            });
+        }
+    }
+}
+
 fn import_spans_by_file<'a>(
     resolved_modules: &'a [ResolvedModule],
     modules: &'a [ModuleInfo],
@@ -2447,7 +2507,8 @@ fn build_unlisted_dependency_context_parts<'a>(
         );
     }
 
-    let ws_dep_map = workspace_dependency_map(input.workspaces, input.config);
+    let mut ws_dep_map = workspace_dependency_map(input.workspaces, input.config);
+    add_source_package_manifests(&mut ws_dep_map, input.graph, input.config);
 
     let plugin_parts = build_unlisted_dependency_plugin_parts(input.plugin_result);
     let import_spans_by_file = import_spans_by_file(input.resolved_modules, input.modules);
@@ -2571,11 +2632,11 @@ fn collect_unlisted_import_site(
 /// Return `true` when a manifest that the importing file may use declares
 /// `package_name` or its `@types` package.
 ///
-/// A file outside every workspace uses the root manifest. A workspace file
-/// uses its own manifest first. When that manifest does not declare the
-/// package, the walk goes up through the ancestor workspaces to the root
-/// manifest, but only when [`accepts_ancestor_declaration`] allows it. Sibling
-/// workspaces are never consulted.
+/// A file uses its nearest package manifest, including standalone packages
+/// outside workspace discovery. When that manifest does not declare the
+/// package, the walk goes up through ancestor packages to the root manifest,
+/// but only when [`accepts_ancestor_declaration`] allows it. Sibling packages
+/// are never consulted.
 fn import_is_declared(
     package_name: &str,
     id: FileId,
@@ -2593,8 +2654,8 @@ fn import_is_declared(
 }
 
 /// The manifest walk behind [`import_is_declared`]. `accepts_ancestor`
-/// receives whether the owning workspace is private and decides whether the
-/// walk may continue past the owning workspace's own manifest.
+/// receives whether the owning package is private and decides whether the
+/// walk may continue past its own manifest.
 fn manifest_chain_declares(
     package_name: &str,
     id: FileId,

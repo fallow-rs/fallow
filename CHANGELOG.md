@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the parent trailing-comma style. Thanks [@motlin](https://github.com/motlin) for
   the report.
   (Closes [#3323](https://github.com/fallow-rs/fallow/issues/3323))
+- **Dependencies declared in standalone nested packages are recognized.**
+  An explicit workspace list no longer makes dependency checks overlook a nested
+  package's own manifest. Workspace membership stays the same. Thanks
+  [@VariableVince](https://github.com/VariableVince) for the report.
+  (Closes [#3324](https://github.com/fallow-rs/fallow/issues/3324))
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a
