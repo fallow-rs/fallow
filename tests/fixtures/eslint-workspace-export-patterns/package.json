@@ -1,0 +1,8 @@
+{
+  "name": "eslint-workspace-export-patterns",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

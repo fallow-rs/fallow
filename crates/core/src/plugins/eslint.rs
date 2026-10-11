@@ -401,7 +401,7 @@ fn find_package_dir(start: &Path, pkg_name: &str) -> Option<PathBuf> {
 /// tree to find it (handles hoisted deps in monorepos).
 ///
 /// When `specifier` contains a subpath (e.g., `@scope/pkg/next`), resolves that
-/// subpath via the package's `exports` map, falling back to extension probing.
+/// subpath via the package's `exports` map. Without exports, it probes extensions.
 /// Returns `None` if the package is not found, the subpath cannot be resolved,
 /// or the entry file is unreadable.
 fn read_package_entry_for_specifier(
@@ -487,19 +487,15 @@ fn credit_preset_plugin_dependencies(root: &Path, pkg_name: &str, result: &mut P
 /// Resolve a package entry path from its `package.json` for the given subpath key.
 ///
 /// Subpath key is `"."` for the main entry or `"./subpath"` for named subpaths.
-/// Returns `None` when the subpath cannot be resolved against the exports map and
-/// no `.js`/`.mjs`/`.cjs` file exists for the bare subpath name. Prefer this over
-/// returning a guessed-but-unverified path so the caller can skip the subpath
-/// cleanly rather than `read_to_string` silently swallowing the error.
+/// An exports map owns the package's public entries, including blocked subpaths.
+/// Packages without exports retain their legacy main entry and extension probes.
 fn resolve_package_entry(
     pkg_json: &serde_json::Value,
     subpath_key: &str,
     pkg_dir: &Path,
 ) -> Option<String> {
-    if let Some(exports) = pkg_json.get("exports")
-        && let Some(rel) = resolve_exports_subpath(exports, subpath_key)
-    {
-        return Some(rel);
+    if let Some(exports) = pkg_json.get("exports").filter(|exports| !exports.is_null()) {
+        return resolve_exports_subpath(exports, subpath_key);
     }
 
     if subpath_key == "." {
@@ -527,27 +523,36 @@ fn resolve_package_entry(
 
 /// Resolve a subpath key against a package's `exports` field value.
 ///
-/// Handles three export formats:
-/// - String shorthand: `"exports": "./index.js"`
-/// - Object with dot key: `"exports": { ".": "./index.js" }`
-/// - Condition object: `"exports": { ".": { "import": "./index.mjs", "default": "./index.cjs" } }`
-/// - Subpath exports: `"exports": { "./next": "./next.js" }`
+/// Supports string and conditional entries, exact subpaths, and export patterns.
 fn resolve_exports_subpath(exports: &serde_json::Value, subpath_key: &str) -> Option<String> {
     if subpath_key == "." {
-        if let Some(s) = exports.as_str() {
-            return Some(s.to_string());
-        }
-        if let Some(dot) = exports.get(".") {
-            return resolve_condition_object(dot);
-        }
-        return None;
+        return resolve_condition_object(exports.get(".").unwrap_or(exports));
     }
-
     if let Some(entry) = exports.get(subpath_key) {
         return resolve_condition_object(entry);
     }
 
-    None
+    let (_, _, entry, captured) = exports
+        .as_object()?
+        .iter()
+        .filter_map(|(pattern, entry)| {
+            let (prefix, suffix) = pattern.split_once('*')?;
+            if !prefix.starts_with("./") || suffix.contains('*') {
+                return None;
+            }
+            let captured = subpath_key.strip_prefix(prefix)?.strip_suffix(suffix)?;
+            if captured.is_empty()
+                || captured.contains('\\')
+                || captured.split('/').any(|part| {
+                    matches!(part, "." | "..") || part.eq_ignore_ascii_case("node_modules")
+                })
+            {
+                return None;
+            }
+            Some((prefix.len(), suffix.len(), entry, captured))
+        })
+        .max_by_key(|(prefix, suffix, _, _)| (*prefix, *suffix))?;
+    resolve_condition_object(entry).map(|target| target.replace('*', captured))
 }
 
 /// Resolve a condition object (or plain string) to a file path string.
@@ -1097,6 +1102,100 @@ mod tests {
             deps.contains(&"eslint-config-next".to_string()),
             "transitive dep via subpath import must be traced: {deps:?}"
         );
+    }
+
+    #[test]
+    fn null_exports_preserve_legacy_package_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("node_modules/@repo/lint");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(
+            package.join("package.json"),
+            r#"{"name":"@repo/lint","exports":null,"main":"./index.mjs"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("index.mjs"),
+            "import react from 'eslint-plugin-react'; export default react;",
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("feature.mjs"),
+            "import vue from 'eslint-plugin-vue'; export default vue;",
+        )
+        .unwrap();
+        let mut failures = Vec::new();
+        for (specifier, dependency) in [
+            ("@repo/lint", "eslint-plugin-react"),
+            ("@repo/lint/feature", "eslint-plugin-vue"),
+        ] {
+            let source = format!("import config from '{specifier}'; export default config;");
+            let result = EslintPlugin.resolve_config(
+                &dir.path().join("eslint.config.mjs"),
+                &source,
+                dir.path(),
+            );
+            let mut actual = result.referenced_dependencies;
+            actual.sort();
+            actual.dedup();
+            let expected = vec!["@repo/lint".to_string(), dependency.to_string()];
+            if actual != expected {
+                failures.push(format!(
+                    "{specifier}: expected {expected:?}, got {actual:?}"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn workspace_export_patterns_select_only_the_referenced_config() {
+        let fixture = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../tests/fixtures/eslint-workspace-export-patterns");
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("node_modules/@repo/lint");
+        let mut pending = vec![fixture.join("packages/shared")];
+        while let Some(source) = pending.pop() {
+            for entry in std::fs::read_dir(&source).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_dir() {
+                    pending.push(entry.path());
+                } else {
+                    let source = entry.path();
+                    let relative = source
+                        .strip_prefix(fixture.join("packages/shared"))
+                        .unwrap();
+                    let target = package.join(relative);
+                    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                    std::fs::copy(source, target).unwrap();
+                }
+            }
+        }
+        let app = dir.path().join("apps/app");
+        std::fs::create_dir_all(&app).unwrap();
+        let cases: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(fixture.join("cases.json")).unwrap())
+                .unwrap();
+        let mut failures = Vec::new();
+        for case in cases.as_array().unwrap() {
+            let specifier = case["specifier"].as_str().unwrap();
+            let source = format!("import config from '{specifier}'; export default config;");
+            let result = EslintPlugin.resolve_config(&app.join("eslint.config.mjs"), &source, &app);
+            let mut expected = vec!["@repo/lint".to_string()];
+            if let Some(dependency) = case["dependency"].as_str() {
+                expected.push(dependency.to_string());
+            }
+            let mut actual = result.referenced_dependencies;
+            expected.sort();
+            actual.sort();
+            actual.dedup();
+            if actual != expected {
+                failures.push(format!(
+                    "{specifier}: expected {expected:?}, got {actual:?}"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

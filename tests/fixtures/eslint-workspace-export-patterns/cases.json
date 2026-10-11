@@ -1,0 +1,30 @@
+[
+  {
+    "specifier": "@repo/lint/features/react",
+    "dependency": "eslint-plugin-react"
+  },
+  {
+    "specifier": "@repo/lint/features/nested/vue",
+    "dependency": "eslint-plugin-vue"
+  },
+  {
+    "specifier": "@repo/lint/features/special/react",
+    "dependency": "eslint-plugin-special"
+  },
+  {
+    "specifier": "@repo/lint/features/react.js",
+    "dependency": "eslint-plugin-javascript"
+  },
+  {
+    "specifier": "@repo/lint/features/exact",
+    "dependency": "eslint-plugin-exact"
+  },
+  {
+    "specifier": "@repo/lint/features/blocked/react",
+    "dependency": null
+  },
+  {
+    "specifier": "@repo/lint/features/null",
+    "dependency": null
+  }
+]

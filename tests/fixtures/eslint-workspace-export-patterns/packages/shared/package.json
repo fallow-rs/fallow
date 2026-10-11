@@ -1,0 +1,16 @@
+{
+  "name": "@repo/lint",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./features/*": "./src/general/*.mjs",
+    "./features/special/*": "./src/special/*.mjs",
+    "./features/*.js": {
+      "import": "./src/javascript/*.mjs",
+      "default": "./src/not-selected.mjs"
+    },
+    "./features/exact": "./src/exact.mjs",
+    "./features/blocked/*": null,
+    "./features/null": null
+  }
+}
