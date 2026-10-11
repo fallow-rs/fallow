@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Workspace dependency declaration guidance is clearer.** Root imports of npm
+  workspace packages need a dependency declaration; npm links resolve imports
+  without declaring them. Guidance covers private/tooling ancestor exceptions,
+  self-references and explicit opt-outs. The declaration policy is unchanged.
+  Thanks [@VariableVince](https://github.com/VariableVince) for the question.
+  (Closes [#3325](https://github.com/fallow-rs/fallow/issues/3325))
+
 ### Fixed
 
 - **The agent gate now audits the work tree that a git command names.** A

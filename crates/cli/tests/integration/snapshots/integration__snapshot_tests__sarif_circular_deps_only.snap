@@ -175,7 +175,7 @@ expression: redact_sarif_version(&json_str)
                 "text": "Dependency used but not in package.json"
               },
               "fullDescription": {
-                "text": "Packages that are imported in source code but not listed in package.json. These work by accident (hoisted from another workspace package or transitive dep) and will break in strict package managers."
+                "text": "Packages imported without an applicable dependency declaration in package.json. This includes workspace packages imported from the repository root: npm workspace links make a package resolvable, but do not declare a dependency. Package self-references are allowed. Private packages and tooling may use ancestor declarations; publishable runtime code must declare its own dependencies."
               },
               "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unlisted-dependencies",
               "defaultConfiguration": {

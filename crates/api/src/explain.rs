@@ -155,7 +155,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dependencies",
         name: "Unlisted Dependencies",
         short: "Dependency used but not in package.json",
-        full: "Packages that are imported in source code but not listed in package.json. These work by accident (hoisted from another workspace package or transitive dep) and will break in strict package managers.",
+        full: "Packages imported without an applicable dependency declaration in package.json. This includes workspace packages imported from the repository root: npm workspace links make a package resolvable, but do not declare a dependency. Package self-references are allowed. Private packages and tooling may use ancestor declarations; publishable runtime code must declare its own dependencies.",
         docs_path: "explanations/dead-code#unlisted-dependencies",
     },
     RuleDef {
@@ -776,8 +776,8 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
             how_to_fix: "Fix the specifier, restore the missing file, install the package, or align tsconfig path aliases with the runtime resolver.",
         },
         "fallow/unlisted-dependency" => RuleGuide {
-            example: "src/api.ts imports undici, but the nearest package.json does not list undici.",
-            how_to_fix: "Add the package to dependencies/devDependencies in the workspace that imports it instead of relying on hoisting or transitive deps.",
+            example: "Root src/app.ts imports @acme/shared, an npm workspace package. The root package.json lists workspaces but does not list @acme/shared as a dependency, so the import is unlisted even when npm links it into node_modules.",
+            how_to_fix: "Declare the imported package in the owning package.json, including the root manifest for root code. Use dependencies for runtime needs or devDependencies for tooling/tests, with a version accepted by your package manager. Self-references need no declaration. For deliberately ambient packages, use ignoreDependencies as an explicit opt-out.",
         },
         "fallow/duplicate-export" => RuleGuide {
             example: "Button is exported from both src/ui/button.ts and src/components/button.ts.",
