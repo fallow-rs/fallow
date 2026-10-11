@@ -1,0 +1,5 @@
+{
+  "name": "issue-3326-class-array-interface-dispatch",
+  "private": true,
+  "main": "src/index.ts"
+}

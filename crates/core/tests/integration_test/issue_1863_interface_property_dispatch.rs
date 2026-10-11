@@ -1,6 +1,43 @@
 use super::common::{create_config, fixture_path};
 
 #[test]
+fn class_owned_array_interface_dispatch_preserves_uncalled_members_and_origins() {
+    let root = fixture_path("issue-3326-class-array-interface-dispatch");
+    let mut config = create_config(root);
+    config.rules.unused_class_members = fallow_config::Severity::Error;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|member| {
+            format!(
+                "{}.{}",
+                member.member.parent_name, member.member.member_name
+            )
+        })
+        .collect();
+
+    for adapter in ["ParameterAdapter", "FieldAdapter", "FunctionAdapter"] {
+        for member in ["init", "tick"] {
+            assert!(
+                !unused.contains(&format!("{adapter}.{member}")),
+                "{adapter}.{member} is dispatched through its interface, found: {unused:?}"
+            );
+        }
+        assert!(
+            unused.contains(&format!("{adapter}.unused")),
+            "{adapter}.unused has no dispatch, found: {unused:?}"
+        );
+    }
+    for member in ["init", "tick", "unused"] {
+        assert!(
+            unused.contains(&format!("UncalledAdapter.{member}")),
+            "a same-named interface from another module must not receive credit: {unused:?}"
+        );
+    }
+}
+
+#[test]
 fn interface_typed_property_dispatch_credits_implementer_member() {
     // Issue #1863: a member reached through a PROPERTY whose declared type is an
     // interface (`deps.greeter.greet()` where `deps: Deps`, `Deps.greeter:

@@ -6056,6 +6056,147 @@ fn parameter_property_maps_this_field_member_access() {
 }
 
 #[test]
+fn class_array_parameter_properties_credit_iterated_members_before_constructor() {
+    for declaration in [
+        "private layers: Controller[]",
+        "public layers: Array<Controller>",
+        "protected layers: readonly Controller[]",
+        "readonly layers: ReadonlyArray<Controller>",
+        "private readonly layers: (Controller[] | null)",
+    ] {
+        let info = parse(&format!(
+            "import {{ Controller }} from './controller';
+             class Runner {{
+                 run() {{
+                     this.layers?.forEach(layer => layer.init?.());
+                     for (const layer of this.layers!) layer.tick?.();
+                 }}
+                 constructor({declaration}) {{}}
+             }}"
+        ));
+        for member in ["init", "tick"] {
+            assert!(
+                info.member_accesses
+                    .iter()
+                    .any(|access| access.object == "Controller" && access.member == member),
+                "{declaration} should credit Controller.{member}, found: {:?}",
+                info.member_accesses
+            );
+        }
+    }
+}
+
+#[test]
+fn class_array_fields_credit_iterated_members_before_field_declaration() {
+    for (field, annotation) in [
+        ("layers", "Controller[]"),
+        ("layers", "readonly Controller[]"),
+        ("layers", "ReadonlyArray<Controller>"),
+        ("#layers", "(Controller[] | null | undefined)"),
+    ] {
+        let info = parse(&format!(
+            "import {{ Controller }} from './controller';
+             class Runner {{
+                 run() {{
+                     this.{field}?.forEach(layer => layer.init?.());
+                     for (const layer of this.{field}!) layer.tick?.();
+                 }}
+                 {field}: {annotation};
+             }}"
+        ));
+        for member in ["init", "tick"] {
+            assert!(
+                info.member_accesses
+                    .iter()
+                    .any(|access| access.object == "Controller" && access.member == member),
+                "{field}: {annotation} should credit Controller.{member}, found: {:?}",
+                info.member_accesses
+            );
+        }
+    }
+}
+
+#[test]
+fn class_array_fields_keep_sibling_and_nested_receivers_isolated() {
+    let info = parse(
+        r"
+        import { OuterPort, InnerPort, SiblingPort } from './ports';
+        class Outer {
+            run() {
+                this.layers.forEach(layer => layer.before());
+                class Inner {
+                    run() { this.layers.forEach(layer => layer.inner()); }
+                    readonly layers: InnerPort[];
+                }
+                new Inner().run();
+                for (const layer of this.layers) layer.after();
+            }
+            readonly layers: OuterPort[];
+        }
+        class Sibling {
+            run() { this.layers.forEach(layer => layer.sibling()); }
+            constructor(readonly layers: SiblingPort[]) {}
+        }
+        ",
+    );
+    for (object, member) in [
+        ("OuterPort", "before"),
+        ("OuterPort", "after"),
+        ("InnerPort", "inner"),
+        ("SiblingPort", "sibling"),
+    ] {
+        let receivers: Vec<&str> = info
+            .member_accesses
+            .iter()
+            .filter(|access| access.member == member && access.object.ends_with("Port"))
+            .map(|access| access.object.as_str())
+            .collect();
+        assert_eq!(receivers, [object], "{member} must use its enclosing class");
+    }
+}
+
+#[test]
+fn class_array_fields_abstain_on_local_parameters_static_and_ambiguous_types() {
+    let info = parse(
+        r"
+        import { LocalPort, StaticPort, AmbiguousPort, OtherPort, ControlPort } from './ports';
+        class Local {
+            constructor(layers: LocalPort[]) {}
+            run() { this.layers.forEach(layer => layer.local()); }
+        }
+        class Static {
+            run() { this.layers.forEach(layer => layer.staticOnly()); }
+            static layers: StaticPort[];
+        }
+        class Ambiguous {
+            run() { this.layers.forEach(layer => layer.ambiguous()); }
+            layers: AmbiguousPort[] | OtherPort[];
+        }
+        class Control {
+            run() { this.layers.forEach(layer => layer.control()); }
+            layers: ControlPort[];
+        }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "ControlPort" && access.member == "control"),
+        "the valid instance field must still receive credit"
+    );
+    for object in ["LocalPort", "StaticPort", "AmbiguousPort", "OtherPort"] {
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == object),
+            "{object} has no proven instance array, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn this_field_builtin_constructor_not_tracked() {
     let info = parse(
         r"

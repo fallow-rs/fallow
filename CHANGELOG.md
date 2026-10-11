@@ -62,6 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package's own manifest. Workspace membership stays the same. Thanks
   [@VariableVince](https://github.com/VariableVince) for the report.
   (Closes [#3324](https://github.com/fallow-rs/fallow/issues/3324))
+- **Interface calls through typed class arrays credit the implementing members.**
+  Instance fields and constructor parameter properties provide array element types
+  before methods are read, including readonly and private fields. Uncalled members
+  remain findings. The parse cache rebuilds once after upgrade to replace the old
+  member evidence. Thanks [@VariableVince](https://github.com/VariableVince) for the
+  reproduction. (Closes [#3326](https://github.com/fallow-rs/fallow/issues/3326))
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a
