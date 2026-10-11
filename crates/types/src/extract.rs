@@ -2366,6 +2366,53 @@ pub enum SemanticFact {
     /// `DynamicPattern` for `dynamic_import_patterns`.
     /// Appended because bitcode encodes enum variants by ordinal.
     ImportLoadKindOverride(ImportLoadKindOverrideFact),
+    /// A source-owned class-producing property of an exported object factory.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    FactoryReturnObjectPropertySource(Box<FactoryReturnObjectPropertySourceFact>),
+    /// Property read whose bound factory receiver passed source-time lexical and value checks.
+    ProvenFactoryReturnObjectPropertyAccess(FactoryReturnObjectPropertyAccessFact),
+}
+
+/// Deferred class provenance owned by the module declaring an object factory.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum FactoryPropertySource {
+    /// A property path through a named type in the factory's module.
+    TypedProperty {
+        /// Named receiver type in the producer module.
+        type_name: String,
+        /// Remaining path through the receiver type.
+        property_path: String,
+    },
+    /// A synchronous function call in the factory's module.
+    FunctionReturn {
+        /// Function binding in the producer module.
+        callee_name: String,
+    },
+    /// A proven instance-returning static class method.
+    StaticFactoryReturn {
+        /// Class binding in the producer module.
+        callee_object: String,
+        /// Statically named instance-returning method.
+        callee_method: String,
+    },
+    /// A class proven in the object factory's own module.
+    LocalClass {
+        /// Local class binding resolved relative to the factory module.
+        class_local_name: String,
+    },
+}
+
+/// An exported object factory's deferred property receiver.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FactoryReturnObjectPropertySourceFact {
+    /// Public factory export name.
+    pub factory_export_name: String,
+    /// Path within the returned object, separate from any source property path.
+    pub property_path: String,
+    /// Names interpreted relative to this fact's owning module.
+    pub source: FactoryPropertySource,
 }
 
 /// The load kind of the dynamic imports or patterns that start at `span_start`.
@@ -2592,6 +2639,26 @@ impl<'a> SemanticFactView<'a> {
         factory_return_object_property_access_facts(self.semantic_facts)
             .cloned()
             .collect()
+    }
+
+    /// Iterate deferred object-factory property sources without copying their names.
+    pub fn factory_return_object_property_sources(
+        self,
+    ) -> impl Iterator<Item = &'a FactoryReturnObjectPropertySourceFact> + 'a {
+        self.semantic_facts.iter().filter_map(|fact| match fact {
+            SemanticFact::FactoryReturnObjectPropertySource(source) => Some(source.as_ref()),
+            _ => None,
+        })
+    }
+
+    /// Property accesses with source-owned receiver admission.
+    pub fn proven_factory_return_object_property_accesses(
+        self,
+    ) -> impl Iterator<Item = &'a FactoryReturnObjectPropertyAccessFact> + 'a {
+        self.semantic_facts.iter().filter_map(|fact| match fact {
+            SemanticFact::ProvenFactoryReturnObjectPropertyAccess(access) => Some(access),
+            _ => None,
+        })
     }
 
     /// Collect typed-property-hop member facts.

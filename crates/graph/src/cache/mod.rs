@@ -1066,6 +1066,46 @@ mod tests {
     }
 
     #[test]
+    fn cached_graph_restores_current_factory_property_sources() {
+        use fallow_types::extract::{
+            FactoryPropertySource, FactoryReturnObjectPropertySourceFact, SemanticFact,
+        };
+        let files = vec![file(0, "/project/src/app.ts")];
+        let project = ResolvedProject {
+            modules: vec![ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/app.ts"),
+                ..ResolvedModule::default()
+            }],
+            ..ResolvedProject::default()
+        };
+        let cached = cache_resolved_project(Path::new("/project"), &files, &project)
+            .expect("stable graph cache");
+        let fact = SemanticFact::FactoryReturnObjectPropertySource(Box::new(
+            FactoryReturnObjectPropertySourceFact {
+                factory_export_name: "createUi".into(),
+                property_path: "page".into(),
+                source: FactoryPropertySource::FunctionReturn {
+                    callee_name: "make".into(),
+                },
+            },
+        ));
+        for current in [vec![fact], Vec::new()] {
+            let module = ModuleInfo {
+                semantic_facts: current.clone().into(),
+                ..ModuleInfo::empty(FileId(0))
+            };
+            let restored =
+                restore_resolved_project(Path::new("/project"), &[module], &files, &cached)
+                    .expect("current parsed facts with cached resolution");
+            assert_eq!(
+                restored.modules[0].semantic_facts.as_ref(),
+                current.as_slice()
+            );
+        }
+    }
+
+    #[test]
     fn cached_dynamic_pattern_targets_preserve_empty_rows() {
         let files = vec![file(0, "/project/src/app.ts")];
         let pattern = DynamicImportPattern {

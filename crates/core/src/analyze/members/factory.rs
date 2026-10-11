@@ -2,6 +2,9 @@ use super::*;
 
 const MAX_EXPORTED_OBJECT_INSTANCE_MEMBER_ASSOCIATIONS: usize = 8192;
 
+type FactoryPropertySources<'a> =
+    FxHashMap<(FileId, &'a str, &'a str), &'a fallow_types::extract::FactoryPropertySource>;
+
 /// Credit member accesses produced by static-factory call bindings on the
 /// originating class export.
 pub(super) fn propagate_factory_call_accesses(
@@ -122,34 +125,59 @@ pub(super) fn propagate_factory_return_object_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     indexes: &MemberPassIndexes<'_>,
+    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
+    let sources: FactoryPropertySources<'_> = resolved_modules
+        .iter()
+        .flat_map(|module| {
+            SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                .factory_return_object_property_sources()
+                .map(move |fact| {
+                    (
+                        (
+                            module.file_id,
+                            fact.factory_export_name.as_str(),
+                            fact.property_path.as_str(),
+                        ),
+                        &fact.source,
+                    )
+                })
+        })
+        .collect();
+    let mut classes_by_path = FxHashMap::default();
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
-        for access in factory_return_object_property_accesses(resolved) {
+        let legacy = factory_return_object_property_accesses(resolved);
+        let proven = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .proven_factory_return_object_property_accesses();
+        for (access, source_owned) in legacy
+            .iter()
+            .map(|access| (access, false))
+            .chain(proven.map(|access| (access, true)))
+        {
             let Some(seed_keys) = local_to_export_keys.get(access.callee_name.as_str()) else {
                 continue;
             };
-            let classes = seed_keys.iter().flat_map(|seed_key| {
-                factory_return_object_property_classes(
-                    graph,
-                    indexes,
-                    seed_key,
-                    access.property_path.as_str(),
-                )
-            });
-            let mut context = FactoryReturnCreditContext {
-                graph,
-                indexes,
-                accessed_members,
-            };
-            for (factory_origin_file_id, class_local_name) in classes {
-                credit_factory_return_class_member(
-                    &mut context,
-                    factory_origin_file_id,
-                    &class_local_name,
-                    access.member.as_str(),
-                );
+            for seed in seed_keys {
+                let classes = classes_by_path
+                    .entry((seed.clone(), access.property_path.clone(), source_owned))
+                    .or_insert_with(|| {
+                        factory_return_object_property_classes(
+                            graph,
+                            indexes,
+                            seed,
+                            &access.property_path,
+                            class_heritage_by_file,
+                            source_owned.then_some(&sources),
+                        )
+                    });
+                for class in classes {
+                    accessed_members
+                        .entry(class.clone())
+                        .or_default()
+                        .insert(access.member.clone());
+                }
             }
         }
     }
@@ -264,15 +292,17 @@ pub(super) fn propagate_exported_object_instance_accesses(
     }
 }
 
-/// The `(factory-module, class-local-name)` pairs a callee's exported object-literal
-/// factory exposes at `property_path`, resolved across re-export barrels. Empty for
+/// Class exports a callee's object-literal factory exposes at `property_path`,
+/// resolved through the factory's declaring module and re-export barrels. Empty for
 /// any callee that is not an internal exported object-factory declaring that path.
 fn factory_return_object_property_classes(
     graph: &ModuleGraph,
     indexes: &MemberPassIndexes<'_>,
     seed_key: &ExportKey,
     property_path: &str,
-) -> Vec<(FileId, String)> {
+    class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
+    sources: Option<&FactoryPropertySources<'_>>,
+) -> Vec<ExportKey> {
     let mut out = Vec::new();
     for factory_origin in
         walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
@@ -280,20 +310,127 @@ fn factory_return_object_property_classes(
         let Some(factory_module) = indexes.module_by_id.get(&factory_origin.file_id) else {
             continue;
         };
-        let Some(shape) = factory_module
+        for shape in factory_module
             .exported_factory_return_object_shapes
             .iter()
-            .find(|shape| shape.export_name.as_str() == factory_origin.export_name.as_str())
-        else {
-            continue;
-        };
-        for property in &shape.properties {
-            if property.property_path == property_path {
-                out.push((factory_origin.file_id, property.class_local_name.clone()));
+            .filter(|_| sources.is_none())
+        {
+            if shape.export_name != factory_origin.export_name.as_str() {
+                continue;
+            }
+            for property in &shape.properties {
+                if property.property_path == property_path {
+                    out.extend(factory_return_class_origins(
+                        graph,
+                        indexes,
+                        factory_origin.file_id,
+                        &property.class_local_name,
+                    ));
+                }
+            }
+        }
+        if let Some(sources) = sources
+            && let Some(source) = sources.get(&(
+                factory_origin.file_id,
+                factory_origin.export_name.as_str(),
+                property_path,
+            ))
+        {
+            use fallow_types::extract::FactoryPropertySource;
+            match source {
+                FactoryPropertySource::LocalClass { class_local_name } => {
+                    out.extend(factory_return_class_origins(
+                        graph,
+                        indexes,
+                        factory_origin.file_id,
+                        class_local_name,
+                    ));
+                }
+                FactoryPropertySource::TypedProperty {
+                    type_name,
+                    property_path,
+                } => out.extend(
+                    super::typed_property::typed_property_terminals(
+                        graph,
+                        indexes,
+                        class_heritage_by_file,
+                        factory_module,
+                        type_name,
+                        property_path,
+                    )
+                    .into_iter()
+                    .flat_map(|(file, name)| {
+                        factory_return_class_origins(graph, indexes, file, &name)
+                    }),
+                ),
+                FactoryPropertySource::FunctionReturn { callee_name } => {
+                    if let Some(seeds) = indexes
+                        .local_keys(factory_origin.file_id)
+                        .get(callee_name.as_str())
+                    {
+                        for seed in seeds {
+                            for class in
+                                factory_return_classes_for_callee(graph, indexes, seed, false)
+                            {
+                                out.push(class);
+                            }
+                        }
+                    }
+                }
+                FactoryPropertySource::StaticFactoryReturn {
+                    callee_object,
+                    callee_method,
+                } => {
+                    out.extend(static_factory_classes(
+                        graph,
+                        indexes,
+                        factory_origin.file_id,
+                        callee_object,
+                        callee_method,
+                    ));
+                }
             }
         }
     }
+    out.sort_unstable_by(|left, right| {
+        left.file_id
+            .0
+            .cmp(&right.file_id.0)
+            .then_with(|| left.export_name.cmp(&right.export_name))
+    });
+    out.dedup();
     out
+}
+
+fn static_factory_classes(
+    graph: &ModuleGraph,
+    indexes: &MemberPassIndexes<'_>,
+    file: FileId,
+    object: &str,
+    method: &str,
+) -> Vec<ExportKey> {
+    let Some(seeds) = indexes.local_keys(file).get(object) else {
+        return Vec::new();
+    };
+    seeds
+        .iter()
+        .flat_map(|seed| export_key_with_origins(graph, seed))
+        .filter(|class| {
+            indexes
+                .module_by_id
+                .get(&class.file_id)
+                .is_some_and(|module| {
+                    module.exports.iter().any(|export| {
+                        export.name.matches_str(class.export_name.as_str())
+                            && export.members.iter().any(|member| {
+                                member.name == method
+                                    && member.kind == MemberKind::ClassMethod
+                                    && member.is_instance_returning_static
+                            })
+                    })
+                })
+        })
+        .collect()
 }
 
 /// The class exports a proven exported factory returns, resolved from the factory's

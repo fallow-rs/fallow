@@ -142,6 +142,20 @@ impl ModuleInfoExtractor {
         path: &str,
         reference: &IdentifierReference<'_>,
     ) {
+        if self.capture_factory_properties
+            && let Some((id, _)) = self.direct_binding_value(path)
+            && let id = self.projection_view_id(id)
+            && !self.is_projection_barrier(id)
+            && self.direct_binding_values[id]
+                .proof
+                .as_ref()
+                .is_some_and(|proof| {
+                    proof.target_name == reference.name.as_str()
+                        && proof.target_reference_span == reference.span
+                })
+        {
+            self.direct_binding_values[id].factory_constructed = true;
+        }
         if !self.capture_subclass_provenance
             || self.direct_binding_values.len() >= MAX_PROJECTION_VALUES
             || !self.charge_constructor_work(1)
@@ -245,6 +259,11 @@ impl ModuleInfoExtractor {
         if self.is_projection_barrier(view) {
             return None;
         }
+        let view = if self.is_factory_property_value(parent) {
+            self.prepare_projection_slot_write(parent, Some(property))?
+        } else {
+            view
+        };
         if !self.capture_subclass_provenance {
             return Some(view);
         }

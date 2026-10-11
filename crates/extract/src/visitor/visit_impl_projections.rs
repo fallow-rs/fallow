@@ -250,7 +250,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn prepare_projection_path(&mut self, name: &str, span: Span) -> bool {
+    pub(super) fn prepare_projection_path(&mut self, name: &str, span: Span) -> bool {
         let Some((parent, _)) = name.rsplit_once('.') else {
             return true;
         };
@@ -799,17 +799,21 @@ impl ModuleInfoExtractor {
         Some(copy)
     }
 
-    pub(super) fn invalidate_projection_slot(&mut self, parent: usize, property: Option<&str>) {
+    pub(super) fn prepare_projection_slot_write(
+        &mut self,
+        parent: usize,
+        property: Option<&str>,
+    ) -> Option<usize> {
         if self.is_projection_barrier(self.projection_view_id(parent)) {
-            return;
+            return None;
         }
         let Some(view) = self.writable_projection_view(parent) else {
             self.refuse_projection_mutation(parent);
-            return;
+            return None;
         };
         if !self.charge_projection_work(1) {
             self.refuse_projection_mutation(parent);
-            return;
+            return None;
         }
         if let Some(branch) = self.direct_object_binding_branch_scopes.last_mut() {
             branch
@@ -818,6 +822,13 @@ impl ModuleInfoExtractor {
                 .or_default()
                 .insert(property.map(str::to_string));
         }
+        Some(view)
+    }
+
+    pub(super) fn invalidate_projection_slot(&mut self, parent: usize, property: Option<&str>) {
+        let Some(view) = self.prepare_projection_slot_write(parent, property) else {
+            return;
+        };
         if let Some(property) = property
             && let Some(unknown) = self.allocate_projection_value(DirectBindingValue::unknown())
         {
@@ -838,6 +849,15 @@ impl ModuleInfoExtractor {
         self.projection_unknown_value == Some(id)
     }
 
+    pub(super) fn reserved_projection_unknown(&mut self) -> usize {
+        *self.projection_unknown_value.get_or_insert_with(|| {
+            let id = self.direct_binding_values.len();
+            self.direct_binding_values
+                .push(DirectBindingValue::unknown());
+            id
+        })
+    }
+
     pub(super) fn refuse_projection_mutation(&mut self, parent: usize) {
         if self.direct_object_binding_branch_scopes.is_empty() {
             let value = &mut self.direct_binding_values[parent];
@@ -850,12 +870,7 @@ impl ModuleInfoExtractor {
         }
         // Refusal must survive the join without changing the alternate's input.
         // This one reserved value is immutable; shared writers must reject it.
-        let unknown = *self.projection_unknown_value.get_or_insert_with(|| {
-            let id = self.direct_binding_values.len();
-            self.direct_binding_values
-                .push(DirectBindingValue::unknown());
-            id
-        });
+        let unknown = self.reserved_projection_unknown();
         if let Some(branch) = self.direct_object_binding_branch_scopes.last_mut() {
             branch.projection_views.insert(parent, unknown);
             let writes = branch.projection_writes.entry(parent).or_default();
@@ -946,7 +961,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn admitted_projection_origin(&self, proof: &BindingClassProof) -> bool {
+    pub(super) fn admitted_projection_origin(&self, proof: &BindingClassProof) -> bool {
         if !self.admitted_binding_containers(proof)
             || !self.admitted_requirements(proof.requirements)
         {

@@ -394,7 +394,9 @@ pub(super) fn function_body_returns_object_shape(
 /// The object literal a function returns: the sole expression of an
 /// expression-bodied arrow, the argument of a block body's single `return`, or
 /// the same-scope `const <id> = { ... }` initializer of a returned identifier.
-fn object_literal_from_return<'a>(body: BodyRef<'a, 'a>) -> Option<&'a ObjectExpression<'a>> {
+pub(super) fn object_literal_from_return<'a>(
+    body: BodyRef<'a, 'a>,
+) -> Option<&'a ObjectExpression<'a>> {
     let body = match body {
         BodyRef::Concise(expr) => return object_expression_of(expr),
         BodyRef::Block(body) => body,
@@ -522,7 +524,7 @@ fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
 /// The argument of the single `return` reachable in `statements` (through
 /// control flow, not into nested functions). The caller guarantees exactly one
 /// return exists; a leading bare `return;` (no argument) is skipped. See #1441.
-fn first_return_arg_in_statements<'b, 'a>(
+pub(super) fn first_return_arg_in_statements<'b, 'a>(
     statements: &'b [Statement<'a>],
 ) -> Option<&'b Expression<'a>> {
     let mut first = None;

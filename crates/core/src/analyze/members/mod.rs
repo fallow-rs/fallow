@@ -1250,6 +1250,7 @@ fn propagate_common_member_accesses(
         input.graph,
         input.resolved_modules,
         indexes,
+        class_heritage_by_file,
         accessed_members,
     );
     propagate_exported_object_instance_accesses(

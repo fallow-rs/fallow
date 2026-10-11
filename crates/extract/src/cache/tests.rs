@@ -2013,3 +2013,85 @@ fn cache_roundtrip_preserves_import_binding_references() {
         module.import_binding_references
     );
 }
+
+#[test]
+fn factory_property_sources_roundtrip_with_declaring_module_names() {
+    let module = parse_from_content(
+        FileId(8),
+        Path::new("src/factory.ts"),
+        r"
+        import { Owner, make, Service, externalUi } from './producer';
+        export class Local { static build(): Local { return new Local(); } }
+        const remote = externalUi(); remote.page.go();
+        export function createUi() {
+            const owner = new Owner();
+            return { typed: owner.widget, called: make(), staticCall: Service.create(), local: Local.build() };
+        }
+    ",
+    );
+    let sources = |module: &ModuleInfo| {
+        fallow_types::extract::SemanticFactView::new(
+            &module.semantic_facts,
+            &module.member_accesses,
+        )
+        .factory_return_object_property_sources()
+        .map(|fact| (fact.property_path.clone(), fact.source.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let expected = std::collections::BTreeMap::from([
+        (
+            "local".to_string(),
+            FactoryPropertySource::LocalClass {
+                class_local_name: "Local".to_string(),
+            },
+        ),
+        (
+            "typed".to_string(),
+            FactoryPropertySource::TypedProperty {
+                type_name: "Owner".to_string(),
+                property_path: "widget".to_string(),
+            },
+        ),
+        (
+            "called".to_string(),
+            FactoryPropertySource::FunctionReturn {
+                callee_name: "make".to_string(),
+            },
+        ),
+        (
+            "staticCall".to_string(),
+            FactoryPropertySource::StaticFactoryReturn {
+                callee_object: "Service".to_string(),
+                callee_method: "create".to_string(),
+            },
+        ),
+    ]);
+    assert_eq!(sources(&module), expected);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let bytes = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&bytes).expect("cache decode");
+    let restored = cached_to_module(&decoded, FileId(8));
+    assert_eq!(sources(&restored), expected);
+    let accesses = |module: &ModuleInfo| {
+        fallow_types::extract::SemanticFactView::new(
+            &module.semantic_facts,
+            &module.member_accesses,
+        )
+        .proven_factory_return_object_property_accesses()
+        .map(|fact| {
+            (
+                fact.callee_name.clone(),
+                fact.property_path.clone(),
+                fact.member.clone(),
+            )
+        })
+        .collect::<Vec<_>>()
+    };
+    let expected = vec![(
+        "externalUi".to_string(),
+        "page".to_string(),
+        "go".to_string(),
+    )];
+    assert_eq!(accesses(&module), expected);
+    assert_eq!(accesses(&restored), expected);
+}

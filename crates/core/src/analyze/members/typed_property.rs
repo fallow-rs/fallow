@@ -123,50 +123,15 @@ pub(super) fn propagate_typed_property_accesses(
     let mut terminals: FxHashSet<(FileId, String, String)> = FxHashSet::default();
     for resolved in resolved_modules {
         for fact in typed_property_member_accesses(resolved) {
-            let segments: Vec<&str> = fact
-                .property_path
-                .split('.')
-                .filter(|segment| !segment.is_empty())
-                .collect();
-            if segments.is_empty() {
-                continue;
-            }
-            let mut frontier: Vec<(&ResolvedModule, String)> =
-                vec![(resolved, fact.type_name.clone())];
-            for (idx, segment) in segments.iter().enumerate() {
-                let mut next: Vec<(&ResolvedModule, String)> = Vec::new();
-                let mut seen: FxHashSet<(FileId, String)> = FxHashSet::default();
-                for (module, name) in frontier {
-                    for (declaring, declared_name) in typed_property_declaring_sites(
-                        graph,
-                        indexes,
-                        class_heritage_by_file,
-                        module,
-                        &name,
-                    ) {
-                        let Some(property_type) = typed_property_type(
-                            declaring,
-                            class_heritage_by_file,
-                            &declared_name,
-                            segment,
-                        ) else {
-                            continue;
-                        };
-                        if idx + 1 == segments.len() {
-                            terminals.insert((
-                                declaring.file_id,
-                                property_type,
-                                fact.member.clone(),
-                            ));
-                        } else if seen.insert((declaring.file_id, property_type.clone())) {
-                            next.push((declaring, property_type));
-                        }
-                    }
-                }
-                frontier = next;
-                if frontier.is_empty() {
-                    break;
-                }
+            for (file, name) in typed_property_terminals(
+                graph,
+                indexes,
+                class_heritage_by_file,
+                resolved,
+                &fact.type_name,
+                &fact.property_path,
+            ) {
+                terminals.insert((file, name, fact.member.clone()));
             }
         }
     }
@@ -240,4 +205,50 @@ fn credit_typed_property_interface_terminal(
             }
         }
     }
+}
+
+/// Walk a typed property path while keeping each declaring module.
+pub(super) fn typed_property_terminals<'a>(
+    graph: &ModuleGraph,
+    indexes: &MemberPassIndexes<'a>,
+    class_heritage_by_file: &FxHashMap<FileId, &'a [fallow_types::extract::ClassHeritageInfo]>,
+    resolved: &'a ResolvedModule,
+    type_name: &str,
+    property_path: &str,
+) -> Vec<(FileId, String)> {
+    let segments: Vec<&str> = property_path
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let mut terminals = Vec::new();
+    let mut frontier = vec![(resolved, type_name.to_string())];
+    for (idx, segment) in segments.iter().enumerate() {
+        let mut next = Vec::new();
+        let mut seen = FxHashSet::default();
+        for (module, name) in frontier {
+            for (declaring, declared_name) in typed_property_declaring_sites(
+                graph,
+                indexes,
+                class_heritage_by_file,
+                module,
+                &name,
+            ) {
+                let Some(property_type) =
+                    typed_property_type(declaring, class_heritage_by_file, &declared_name, segment)
+                else {
+                    continue;
+                };
+                if idx + 1 == segments.len() {
+                    terminals.push((declaring.file_id, property_type));
+                } else if seen.insert((declaring.file_id, property_type.clone())) {
+                    next.push((declaring, property_type));
+                }
+            }
+        }
+        frontier = next;
+        if frontier.is_empty() {
+            break;
+        }
+    }
+    terminals
 }

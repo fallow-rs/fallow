@@ -53,6 +53,8 @@ mod visit_constructor_alternatives;
 mod visit_di;
 #[path = "visit_impl_dynamic_imports.rs"]
 mod visit_dynamic_imports;
+#[path = "visit_impl_factory_properties.rs"]
+mod visit_factory_properties;
 #[path = "visit_impl_factory_returns.rs"]
 mod visit_factory_returns;
 #[path = "visit_impl_helpers.rs"]
@@ -266,6 +268,10 @@ impl ModuleInfoExtractor {
         // is checked unconditionally. Strict (cross-module) eligibility additionally
         // requires a terminal body, so `const ui = createUi()` cannot bind a value
         // the factory only returns on some paths. See issue #1858.
+        if self.capture_factory_properties && strict_eligible && function_body_is_terminal(body) {
+            self.prepare_factory_property_observations(input.binding_span, body);
+            self.prepare_factory_result_observation(name, input.binding_span, body);
+        }
         let properties = function_body_returns_object_shape(body);
         if let Some(properties) = &properties {
             let is_strict_eligible = strict_eligible && function_body_is_terminal(body);
@@ -287,7 +293,7 @@ impl ModuleInfoExtractor {
         properties: Option<Vec<(String, super::ObjectPropValueRef)>>,
         returns_promise: bool,
     ) {
-        if self.capture_subclass_provenance {
+        if self.capture_subclass_provenance || self.capture_factory_properties {
             self.record_binding_declaration(name, input.binding_span);
             let result = visit_factory_returns::function_body_returns_new_class_target(body)
                 .map(
@@ -1529,6 +1535,7 @@ impl ModuleInfoExtractor {
                     },
                 );
             let members = extract_class_members(class, is_angular);
+            self.record_factory_property_class(id);
             if self.capture_subclass_provenance {
                 self.record_binding_declaration(id.name.as_str(), id.span);
                 for member in &members {
@@ -3067,6 +3074,7 @@ impl<'a> ModuleInfoExtractor {
 
         self.record_declarator_instance_bindings(declarator, init);
         self.record_projection_declarator(declarator);
+        self.record_factory_property_declarator(declarator, init);
 
         if let Expression::Identifier(ident) = init
             && self
@@ -3750,6 +3758,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             Statement::ExportDeclaration(export) => matches!(&export.declaration, Declaration::ClassDeclaration(class) if class.heritage.is_some()),
             _ => false,
         });
+        self.capture_factory_properties =
+            visit_factory_properties::program_has_object_factory(program);
+        self.prepare_factory_property_imports(program);
         self.record_program_namespace_import_locals(program);
         self.record_program_spy_api_locals(program);
         self.record_program_function_type_aliases(program);
@@ -4530,6 +4541,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_return_statement(&mut self, statement: &ReturnStatement<'a>) {
         walk::walk_return_statement(self, statement);
         self.complete_projection_array_return(statement);
+        self.complete_factory_property_return(statement);
     }
 
     fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
@@ -4548,6 +4560,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_object_property(&mut self, prop: &ObjectProperty<'a>) {
+        self.capture_factory_property_observation(&prop.value);
         self.record_graphql_resolver_args_source(&prop.value);
 
         if let Some((import_expr, sources)) = try_extract_property_callback_import(prop) {
@@ -5060,6 +5073,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        self.capture_factory_property_access(&expr.object, expr.property.name.as_str());
         self.record_projected_member_access(&expr.object, expr.property.name.as_str());
         self.record_subclass_member_access(&expr.object, expr.property.name.as_str());
         self.record_awaited_dynamic_import_member(&expr.object, expr.property.name.as_str());
@@ -5503,6 +5517,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
+        self.complete_factory_result_observation(ident);
         self.record_bare_namespace_reference(ident);
         self.count_local_import_loader_reference(ident.name.as_str());
         walk::walk_identifier_reference(self, ident);

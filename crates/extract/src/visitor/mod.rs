@@ -196,6 +196,9 @@ struct DirectBindingValue {
     constructor_owner: Option<Span>,
     constructor_alternatives: std::sync::Arc<[BindingClassProof]>,
     proof: Option<BindingClassProof>,
+    factory_property: Option<FactoryPropertyProof>,
+    factory_callee: Option<(String, Span)>,
+    factory_constructed: bool,
     producer: Option<BindingProducer>,
     pending: Option<PendingBindingValue>,
     initial_projections: FxHashMap<String, usize>,
@@ -224,6 +227,26 @@ impl DirectBindingValue {
             ..Self::default()
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct FactoryPropertyProof {
+    origin: FactoryPropertyOrigin,
+    requirements: BindingRequirements,
+}
+
+#[derive(Debug, Clone)]
+enum FactoryPropertyOrigin {
+    Typed {
+        proof: BindingClassProof,
+        path: String,
+    },
+    Call {
+        name: String,
+        declaration: Span,
+        reference: Span,
+        method: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -753,6 +776,16 @@ pub(crate) struct ModuleInfoExtractor {
     subclass_declarations: FxHashMap<String, SubclassDeclaration>,
     direct_binding_values: Vec<DirectBindingValue>,
     capture_subclass_provenance: bool,
+    capture_factory_properties: bool,
+    factory_property_observations: FxHashMap<Span, (Span, String, Option<FactoryPropertyProof>)>,
+    factory_property_result_observations: FxHashMap<Span, (String, Span)>,
+    factory_completed_value_results: FxHashSet<Span>,
+    factory_property_destinations: FxHashMap<Span, String>,
+    factory_property_return_reads: FxHashMap<Span, Vec<(Span, String, Span)>>,
+    factory_property_accesses: Vec<(FactoryPropertyProof, String, String)>,
+    factory_property_sources:
+        FxHashMap<Span, FxHashMap<String, fallow_types::extract::FactoryPropertySource>>,
+    factory_property_classes: FxHashMap<Span, FxHashMap<String, BindingClassProof>>,
     independent_this_depth: usize,
     class_method_function_span: Option<Span>,
     pending_subclass_member_accesses: Vec<PendingSubclassMemberAccess>,
@@ -1257,6 +1290,15 @@ impl ModuleInfoExtractor {
                     spans.extend(requirements.iter().map(|(reference, _)| *reference));
                 }
                 _ => {}
+            }
+        }
+        for (_, _, observation) in self.factory_property_observations.values() {
+            if let Some(FactoryPropertyProof {
+                origin: FactoryPropertyOrigin::Typed { proof, .. },
+                ..
+            }) = observation
+            {
+                add_proof(&mut spans, proof);
             }
         }
         for value in &self.direct_binding_values {
@@ -3436,6 +3478,8 @@ impl ModuleInfoExtractor {
         // arm. Needs `enrich_local_class_exports` (above) for the typed-property
         // hop on `factory.prop` values. See issue #1858.
         self.resolve_factory_return_object_shapes();
+        self.resolve_factory_property_observations();
+        self.resolve_factory_property_accesses();
         self.resolve_factory_return_candidates();
         // Separate from the candidate pass, which early-returns when no member
         // candidate exists: an unnamed factory result records no member candidate.

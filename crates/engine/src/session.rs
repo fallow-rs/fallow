@@ -1810,6 +1810,52 @@ mod tests {
     }
 
     #[test]
+    fn factory_property_proof_refresh_matches_fresh_sessions() {
+        for (present, absent) in [
+            (
+                "import { C } from './classes'; const make = (): C => new C(); export const createUi = () => ({ page: make() });",
+                "export const createUi = () => ({ page: { used() {} } });",
+            ),
+            (
+                "import { Owner } from './owner'; export const createUi = () => { const owner = new Owner(); return { page: owner.widget }; };",
+                "export const createUi = () => ({ page: { used() {} } });",
+            ),
+        ] {
+            let project = tempfile::tempdir().expect("session fixture");
+            let root = project.path();
+            std::fs::write(
+                root.join("package.json"),
+                r#"{"name":"producer-refresh","type":"module","main":"index.ts"}"#,
+            )
+            .expect("package");
+            std::fs::write(
+                root.join("classes.ts"),
+                "export class C { control() {} used() {} dead() {} }",
+            )
+            .expect("class");
+            std::fs::write(
+                root.join("owner.ts"),
+                "import { C } from './classes'; export class Owner { widget: C = new C(); }",
+            )
+            .expect("owner");
+            std::fs::write(root.join("index.ts"), "import { createUi } from './factory'; const ui = createUi(); ui.page.used(); import { C } from './classes'; new C().control();").expect("consumer");
+            let path = root.join("factory.ts");
+            std::fs::write(&path, present).expect("initial producer");
+            let mut session = class_projection_session(root);
+            assert_eq!(session_class_projection(&session), ["dead"]);
+            for (source, expected) in [(absent, vec!["dead", "used"]), (present, vec!["dead"])] {
+                std::fs::write(&path, source).expect("producer update");
+                session.refresh_discovery();
+                assert_eq!(session_class_projection(&session), expected);
+                assert_eq!(
+                    session_class_projection(&session),
+                    session_class_projection(&class_projection_session(root))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn indexed_source_proof_removal_and_restoration_matches_fresh_sessions() {
         for (label, present, absent, access) in [
             (

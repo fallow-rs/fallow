@@ -58,7 +58,7 @@ fn has_loop_update_overwrite(
 
 impl ModuleInfoExtractor {
     pub(super) fn record_binding_declaration(&mut self, binding: &str, span: Span) {
-        if !self.capture_subclass_provenance {
+        if !self.capture_subclass_provenance && !self.capture_factory_properties {
             return;
         }
         let owner = self.active_constructor_function;
@@ -185,11 +185,23 @@ impl ModuleInfoExtractor {
         Some(value)
     }
 
-    fn set_direct_binding_value(&mut self, path: &str, mut value: DirectBindingValue) {
+    fn set_direct_binding_value(&mut self, path: &str, mut value: DirectBindingValue) -> bool {
+        if !self.capture_subclass_provenance
+            && (self.capture_factory_properties || self.has_factory_value_root(path))
+        {
+            let Some(id) = self.allocate_projection_value(value) else {
+                let unknown = self.reserved_projection_unknown();
+                self.attach_direct_binding_value(path, unknown);
+                return false;
+            };
+            self.attach_direct_binding_value(path, id);
+            return true;
+        }
         value.constructor_owner = self.active_constructor_function;
         let id = self.direct_binding_values.len();
         self.direct_binding_values.push(value);
         self.attach_direct_binding_value(path, id);
+        true
     }
 
     pub(super) fn attach_direct_binding_value(&mut self, path: &str, value: usize) {
@@ -240,7 +252,10 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn invalidate_direct_binding_proof(&mut self, path: &str, unknown_key: bool) {
-        if !self.capture_subclass_provenance && self.direct_binding_value(path).is_none() {
+        if !self.capture_subclass_provenance
+            && self.direct_binding_value(path).is_none()
+            && !self.has_factory_value_root(path)
+        {
             return;
         }
         let qualified = self.qualify_binding_value_path(path);
@@ -265,7 +280,7 @@ impl ModuleInfoExtractor {
         target: &str,
         origin: Option<Span>,
     ) {
-        if !self.capture_subclass_provenance {
+        if !self.capture_subclass_provenance && !self.capture_factory_properties {
             return;
         }
         let qualified = self.qualify_binding_value_path(path);
@@ -468,7 +483,7 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn register_binding_producer(&mut self, path: &str, producer: BindingProducer) {
-        if !self.capture_subclass_provenance {
+        if !self.capture_subclass_provenance && !self.capture_factory_properties {
             return;
         }
         let existing = self
@@ -484,14 +499,15 @@ impl ModuleInfoExtractor {
             self.record_binding_container(parent);
         }
         let id = self.direct_binding_values.len();
-        self.set_direct_binding_value(
+        if self.set_direct_binding_value(
             path,
             DirectBindingValue {
                 producer: Some(producer),
                 ..DirectBindingValue::default()
             },
-        );
-        self.direct_binding_entry_mut(path).initial_producer_value = Some(id);
+        ) {
+            self.direct_binding_entry_mut(path).initial_producer_value = Some(id);
+        }
     }
 
     pub(super) fn capture_binding_producer_call(
@@ -1224,7 +1240,7 @@ impl ModuleInfoExtractor {
                     self.preseed_direct_object_binding_declaration(declaration);
                 }
                 Some(Declaration::FunctionDeclaration(function))
-                    if self.capture_subclass_provenance =>
+                    if self.capture_subclass_provenance || self.capture_factory_properties =>
                 {
                     if let Some(id) = &function.id {
                         self.record_binding_declaration(id.name.as_str(), id.span);
