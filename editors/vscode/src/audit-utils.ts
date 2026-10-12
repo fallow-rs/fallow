@@ -89,6 +89,13 @@ const stylingGatingCount = (audit: AuditOutput): number => {
 };
 
 /**
+ * Diff-risk findings are all introduced by the change, so both gates count
+ * them. A binary older than the diff-risk rules does not emit the field.
+ */
+const diffRiskGatingCount = (audit: AuditOutput): number =>
+  audit.attribution.diff_risk_introduced ?? 0;
+
+/**
  * Map a verdict to its status-bar icon, label, and (theme-color) background.
  * `pass` carries no background tint; `warn` and `fail` map to the built-in
  * status-bar warning / error theme colors.
@@ -119,14 +126,16 @@ export const gatingCount = (audit: AuditOutput): number => {
       audit.summary.dead_code_issues +
       audit.summary.complexity_findings +
       audit.summary.duplication_clone_groups +
-      stylingGatingCount(audit)
+      stylingGatingCount(audit) +
+      diffRiskGatingCount(audit)
     );
   }
   return (
     audit.attribution.dead_code_introduced +
     audit.attribution.complexity_introduced +
     audit.attribution.duplication_introduced +
-    stylingGatingCount(audit)
+    stylingGatingCount(audit) +
+    diffRiskGatingCount(audit)
   );
 };
 
@@ -216,6 +225,11 @@ const gatingRows = (audit: AuditOutput): readonly GatingRow[] => {
       count: stylingGatingCount(audit),
       icon: "$(symbol-color)",
       label: "styling candidate",
+    },
+    {
+      count: diffRiskGatingCount(audit),
+      icon: "$(git-compare)",
+      label: "diff-risk finding",
     },
   ];
 };

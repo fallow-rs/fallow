@@ -51,6 +51,7 @@ const passAudit: AuditOutput = {
     styling_introduced: 0,
     styling_inherited: 0,
     duplication_demoted: 0,
+    diff_risk_introduced: 0,
   },
 };
 
@@ -84,6 +85,7 @@ const failAudit: AuditOutput = {
     styling_introduced: 0,
     styling_inherited: 0,
     duplication_demoted: 0,
+    diff_risk_introduced: 0,
   },
 };
 
@@ -243,6 +245,7 @@ describe("gatingCount", () => {
         styling_introduced: 2,
         styling_inherited: 5,
         duplication_demoted: 0,
+        diff_risk_introduced: 0,
       },
     };
     expect(gatingCount(audit)).toBe(6);
@@ -276,6 +279,7 @@ describe("gatingCount", () => {
         styling_introduced: 0,
         styling_inherited: 3,
         duplication_demoted: 0,
+        diff_risk_introduced: 0,
       },
     };
     expect(gatingCount(audit)).toBe(0);
@@ -320,6 +324,32 @@ describe("gatingCount", () => {
   });
 });
 
+describe("gatingCount with diff risk", () => {
+  it("counts diff-risk findings under the new-only gate", () => {
+    const audit: AuditOutput = {
+      ...passAudit,
+      verdict: "warn",
+      attribution: { ...passAudit.attribution, diff_risk_introduced: 2 },
+    };
+    expect(gatingCount(audit)).toBe(2);
+  });
+
+  it("counts diff-risk findings under the all gate", () => {
+    const audit: AuditOutput = {
+      ...failAudit,
+      summary: { ...failAudit.summary, dead_code_issues: 0, dead_code_has_errors: false },
+      attribution: { ...failAudit.attribution, diff_risk_introduced: 1 },
+    };
+    expect(gatingCount(audit)).toBe(1);
+  });
+
+  it("counts zero when an older binary does not emit the field", () => {
+    const { diff_risk_introduced: _omitted, ...attribution } = passAudit.attribution;
+    const audit = { ...passAudit, attribution } as unknown as AuditOutput;
+    expect(gatingCount(audit)).toBe(0);
+  });
+});
+
 describe("auditGatingSuffix", () => {
   it("is empty when nothing is gating", () => {
     expect(auditGatingSuffix(passAudit)).toBe("");
@@ -342,6 +372,7 @@ describe("auditGatingSuffix", () => {
         styling_introduced: 0,
         styling_inherited: 0,
         duplication_demoted: 0,
+        diff_risk_introduced: 0,
       },
     };
     expect(auditGatingSuffix(warnAudit)).toBe(" (3)");
@@ -446,6 +477,16 @@ describe("buildAuditTooltipMarkdown", () => {
     };
     const md = buildAuditTooltipMarkdown(audit);
     expect(md).toContain("1 styling candidate");
+  });
+
+  it("lists a diff-risk-only gating category", () => {
+    const audit: AuditOutput = {
+      ...passAudit,
+      verdict: "warn",
+      attribution: { ...passAudit.attribution, diff_risk_introduced: 2 },
+    };
+    const md = buildAuditTooltipMarkdown(audit);
+    expect(md).toContain("2 diff-risk findings");
   });
 
   it("includes both command links", () => {
