@@ -389,8 +389,60 @@ pub struct CoChangeGap {
     pub degree: f64,
 }
 
-/// Hidden pairs with exactly one file in `changed`. Sorted by changed file,
-/// then by degree (descending), then by partner.
+/// Scope filters for hidden pairs: `health.ignore`, the workspace filter, and
+/// an optional diff.
+pub struct PairScope<'a> {
+    /// Project root. The ignore globs and the diff keys are relative to it.
+    pub root: &'a Path,
+    /// Compiled `health.ignore` globs, from [`health_ignore_set`].
+    pub ignore_set: &'a globset::GlobSet,
+    /// Workspace roots of `--workspace` or `--changed-workspaces`.
+    pub ws_roots: Option<&'a [PathBuf]>,
+    /// Changed lines of the diff, when the run is diff-scoped.
+    pub diff_index: Option<&'a fallow_output::DiffIndex>,
+}
+
+impl PairScope<'_> {
+    /// Keep a pair when neither file is ignored, at least one file is in the
+    /// workspace scope, and (with a diff) at least one file is in the diff.
+    #[must_use]
+    pub fn contains(&self, path_a: &Path, path_b: &Path) -> bool {
+        let ignored = |path: &Path| {
+            !self.ignore_set.is_empty()
+                && self
+                    .ignore_set
+                    .is_match(path.strip_prefix(self.root).unwrap_or(path))
+        };
+        if ignored(path_a) || ignored(path_b) {
+            return false;
+        }
+        let in_workspace = |path: &Path| {
+            self.ws_roots
+                .is_none_or(|roots| roots.iter().any(|root| path.starts_with(root)))
+        };
+        if !in_workspace(path_a) && !in_workspace(path_b) {
+            return false;
+        }
+        let Some(diff_index) = self.diff_index else {
+            return true;
+        };
+        let in_diff = |path: &Path| match diff_index.key_for(path, self.root) {
+            Some(rel) => diff_index.touches_file(&rel),
+            None => true,
+        };
+        in_diff(path_a) || in_diff(path_b)
+    }
+}
+
+/// Compile the `health.ignore` globs that [`PairScope`] applies.
+#[must_use]
+pub fn health_ignore_set(patterns: &[String]) -> globset::GlobSet {
+    crate::health::ignore::build_ignore_set(patterns)
+}
+
+/// Hidden pairs with exactly one file in `changed`. Sorted by degree and then
+/// shared revisions (both descending), then by changed file and partner, so a
+/// cap keeps the strongest gaps.
 #[must_use]
 #[allow(
     clippy::implicit_hasher,
@@ -421,13 +473,11 @@ pub fn co_change_gaps(
         })
         .collect();
     gaps.sort_by(|a, b| {
-        a.changed
-            .cmp(&b.changed)
-            .then_with(|| {
-                b.degree
-                    .partial_cmp(&a.degree)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+        b.degree
+            .partial_cmp(&a.degree)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.shared_revisions.cmp(&a.shared_revisions))
+            .then_with(|| a.changed.cmp(&b.changed))
             .then_with(|| a.partner.cmp(&b.partner))
     });
     gaps

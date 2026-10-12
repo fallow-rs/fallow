@@ -67,11 +67,13 @@ pub struct FileScoreOutput {
         rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>,
     /// Static edges between analyzed files. Change coupling reads it to tell a
     /// hidden co-change pair from a pair that an import already explains.
-    pub(crate) static_links: crate::change_coupling::StaticLinkIndex,
+    /// `None` when the run reads no commit history.
+    pub(crate) static_links: Option<crate::change_coupling::StaticLinkIndex>,
 }
 
 struct FileScoreOutputParts<'a> {
     graph: &'a fallow_graph::graph::ModuleGraph,
+    with_static_links: bool,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     results: &'a crate::results::AnalysisResults,
     scores: Vec<FileHealthScore>,
@@ -2446,6 +2448,9 @@ pub(super) struct FileScoreComputeInput<'a> {
     pub(super) istanbul_coverage: Option<&'a IstanbulCoverage>,
     pub(super) root: &'a std::path::Path,
     pub(super) crap_thresholds: CrapScoreThresholds<'a>,
+    /// Build the static edge index for change coupling. Only a run that reads
+    /// the commit history needs it, so other runs skip the graph walk.
+    pub(super) with_static_links: bool,
 }
 
 /// Compute per-file health scores using a pre-computed analysis output.
@@ -2464,6 +2469,7 @@ pub(super) fn compute_file_scores(
         istanbul_coverage,
         root,
         crap_thresholds,
+        with_static_links,
     } = input;
     let retained_graph = analysis_output.graph.ok_or("graph not available")?;
     let test_coverage = retained_graph.static_test_coverage();
@@ -2515,6 +2521,7 @@ pub(super) fn compute_file_scores(
 
     Ok(build_file_score_output(FileScoreOutputParts {
         graph,
+        with_static_links,
         file_paths,
         results,
         scores: acc.scores,
@@ -2757,7 +2764,9 @@ fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
         coverage_input_format: parts.coverage_input_format,
         per_function_crap: parts.per_function_crap,
         template_inherit_provenance,
-        static_links: crate::change_coupling::StaticLinkIndex::from_graph(parts.graph),
+        static_links: parts
+            .with_static_links
+            .then(|| crate::change_coupling::StaticLinkIndex::from_graph(parts.graph)),
     }
 }
 
@@ -3335,6 +3344,7 @@ mod tests {
                     resolver: &resolver,
                     enforce_crap: true,
                 },
+                with_static_links: false,
             },
             analysis_output,
         )
@@ -5697,6 +5707,7 @@ mod tests {
                     resolver: &resolver,
                     enforce_crap: true,
                 },
+                with_static_links: false,
             },
             output,
         )
@@ -5765,6 +5776,7 @@ mod tests {
                     resolver: &resolver,
                     enforce_crap: true,
                 },
+                with_static_links: false,
             },
             output,
         )

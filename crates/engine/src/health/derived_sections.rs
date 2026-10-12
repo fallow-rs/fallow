@@ -8,9 +8,7 @@ use crate::baseline::{HealthBaselineData, filter_new_health_targets};
 use crate::duplicates::{DuplicationReport, DuplicationStats};
 
 use super::HealthExecutionOptions;
-use super::change_coupling_section::{
-    ChangeCouplingOutcome, ChangeCouplingScope, compute_change_coupling,
-};
+use super::change_coupling_section::{ChangeCouplingOutcome, compute_change_coupling};
 use super::filters::{
     collect_candidate_paths, filter_files_to_paths, filter_hotspots_by_diff,
     filter_refactoring_targets_by_diff,
@@ -148,13 +146,13 @@ fn prepare_change_coupling(
     input: &HealthDerivedSectionInput<'_>,
 ) -> Option<ChangeCouplingOutcome> {
     let churn_fetch = input.churn_fetch.as_ref()?;
-    let links = &input.score_output?.static_links;
+    let links = input.score_output?.static_links.as_ref()?;
     Some(compute_change_coupling(
         opts,
         input.config,
         churn_fetch,
         links,
-        &ChangeCouplingScope {
+        &crate::change_coupling::PairScope {
             root: &input.config.root,
             ignore_set: input.ignore_set,
             ws_roots: input.ws_roots,

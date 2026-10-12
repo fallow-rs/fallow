@@ -43,7 +43,7 @@ mod grouping;
 pub use grouping::validate_group_filter;
 mod health_error;
 mod hotspots;
-mod ignore;
+pub(crate) mod ignore;
 mod inline;
 pub use inline::{InlineComplexity, inline_complexity};
 mod large_functions;
