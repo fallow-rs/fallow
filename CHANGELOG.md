@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the patch paths are foreign or ambiguous, the call now returns the full
   report with a `not-applied` `diff-filter` outcome. Before, it returned an
   applied empty scope.
+- **`fallow ci review post` now resolves stale review threads when an inline
+  comment fails to post.** Before, one failed post skipped the stale-thread
+  reconcile, so all stale fallow threads stayed open for that run. Now the
+  command still resolves the stale threads. The result reports the post
+  errors and the reconcile errors together.
 
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
