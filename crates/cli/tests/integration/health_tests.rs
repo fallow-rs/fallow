@@ -10429,3 +10429,28 @@ fn health_css_credits_vue_transition_classes_in_global_styles() {
         "literal transition names credit their classes; a bound name credits nothing"
     );
 }
+
+#[test]
+fn health_css_invalid_animation_value_adds_no_undefined_keyframe() {
+    // An invalid `animation` value is kept as raw tokens, like a `var()` value.
+    // Its identifiers must not become undefined keyframe references.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-invalid-animation"}"#,
+    );
+    write_file(&root.join("src/main.ts"), "import \"./style.css\";\n");
+    write_file(
+        &root.join("src/style.css"),
+        ".a { animation: spin 1s smooth; }\n\
+         .b { animation: x var(--d) replace add accumulate; }\n\
+         @keyframes spin { from { opacity: 0; } }\n\
+         @keyframes x { from { opacity: 0; } }\n",
+    );
+
+    assert!(
+        css_list_names(root, "undefined_keyframes", "name").is_empty(),
+        "invalid values and composition keywords are not keyframe references"
+    );
+}
