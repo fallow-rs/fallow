@@ -19992,7 +19992,11 @@
           "items": {
             "$ref": "#/definitions/CoChangeGapFact"
           },
-          "description": "Co-change gaps: a changed file has a hidden change-coupling partner\nthat is absent from the diff. The two files changed together in most\ncommits of the history window, but no import or re-export chain\nconnects them, so the graph facts above cannot point at the partner.\nAdvisory, never gates. Omitted when empty."
+          "description": "Co-change gaps: a changed file has a hidden change-coupling partner\nthat is absent from the diff. The two files changed together in most\ncommits of the history window, but no import or re-export chain\nconnects them, so the graph facts above cannot point at the partner.\nAdvisory, never gates. Omitted when empty.\nAt most 10 entries (`CO_CHANGE_GAP_CAP`), strongest degree first."
+        },
+        "co_change_gap_count": {
+          "type": "integer",
+          "description": "All co-change gaps, before the cap cuts `co_change_gap`. Omitted\nwhen zero."
         }
       },
       "required": [

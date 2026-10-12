@@ -17042,8 +17042,14 @@ coordination_gap: CoordinationGapFact[]
  * commits of the history window, but no import or re-export chain
  * connects them, so the graph facts above cannot point at the partner.
  * Advisory, never gates. Omitted when empty.
+ * At most 10 entries (`CO_CHANGE_GAP_CAP`), strongest degree first.
  */
 co_change_gap?: CoChangeGapFact[]
+/**
+ * All co-change gaps, before the cap cuts `co_change_gap`. Omitted
+ * when zero.
+ */
+co_change_gap_count?: number
 }
 /**
  * One directory of the blast radius and how many affected files it holds.

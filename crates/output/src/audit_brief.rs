@@ -28,6 +28,10 @@ pub const AFFECTED_SAMPLE_CAP: usize = 10;
 /// [`ImpactClosureFacts::affected_by_dir_omitted`].
 pub const AFFECTED_DIR_CAP: usize = 25;
 
+/// Maximum number of entries in [`ImpactClosureFacts::co_change_gap`]. The
+/// full count is in [`ImpactClosureFacts::co_change_gap_count`].
+pub const CO_CHANGE_GAP_CAP: usize = 10;
+
 /// Independently-versioned wire-version newtype for the brief envelope.
 /// Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -162,11 +166,31 @@ pub struct ImpactClosureFacts {
     /// commits of the history window, but no import or re-export chain
     /// connects them, so the graph facts above cannot point at the partner.
     /// Advisory, never gates. Omitted when empty.
+    /// At most 10 entries (`CO_CHANGE_GAP_CAP`), strongest degree first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub co_change_gap: Vec<CoChangeGapFact>,
+    /// All co-change gaps, before the cap cuts `co_change_gap`. Omitted
+    /// when zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub co_change_gap_count: usize,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if passes a reference"
+)]
+const fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 impl ImpactClosureFacts {
+    /// Set the co-change gaps: keep the first [`CO_CHANGE_GAP_CAP`] entries
+    /// and record the full count.
+    pub fn set_co_change_gaps(&mut self, gaps: &[CoChangeGapFact]) {
+        self.co_change_gap_count = gaps.len();
+        self.co_change_gap = gaps.iter().take(CO_CHANGE_GAP_CAP).cloned().collect();
+    }
+
     /// Build the facts from the full closure, capping the file sample and the
     /// directory rollup while preserving the exact total.
     ///
@@ -182,6 +206,7 @@ impl ImpactClosureFacts {
             affected_by_dir_omitted,
             coordination_gap,
             co_change_gap: Vec::new(),
+            co_change_gap_count: 0,
         }
     }
 }
@@ -900,6 +925,31 @@ mod tests {
             (heaviest.dir.as_str(), heaviest.count),
             ("src/zzz_heavy", 90)
         );
+    }
+
+    #[test]
+    fn co_change_gaps_beyond_the_cap_are_counted() {
+        let gaps: Vec<CoChangeGapFact> = (0..CO_CHANGE_GAP_CAP + 3)
+            .map(|index| CoChangeGapFact {
+                changed_file: format!("src/changed{index}.ts"),
+                partner_file: format!("src/partner{index}.ts"),
+                shared_revisions: 5,
+                degree: 0.5,
+                note: String::new(),
+            })
+            .collect();
+        let mut facts = ImpactClosureFacts::new(&[], Vec::new());
+        facts.set_co_change_gaps(&gaps);
+
+        assert_eq!(facts.co_change_gap.len(), CO_CHANGE_GAP_CAP);
+        assert_eq!(facts.co_change_gap_count, CO_CHANGE_GAP_CAP + 3);
+        assert_eq!(facts.co_change_gap[0].changed_file, "src/changed0.ts");
+
+        let mut empty = ImpactClosureFacts::new(&[], Vec::new());
+        empty.set_co_change_gaps(&[]);
+        let json = serde_json::to_value(&empty).expect("facts serialize");
+        assert!(json.get("co_change_gap").is_none());
+        assert!(json.get("co_change_gap_count").is_none());
     }
 
     #[test]

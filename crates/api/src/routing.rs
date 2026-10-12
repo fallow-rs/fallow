@@ -50,10 +50,24 @@ pub fn compute_routing(
     config: &ResolvedConfig,
     changed_files: &FxHashSet<PathBuf>,
 ) -> RoutingFacts {
-    let Some(churn_result) = audit_churn(root, config) else {
-        return RoutingFacts::default();
-    };
+    audit_churn(root, config).map_or_else(RoutingFacts::default, |churn| {
+        compute_routing_from_churn(root, config, changed_files, &churn)
+    })
+}
 
+/// [`compute_routing`] over a churn pass that the caller already read with
+/// [`audit_churn`], so the audit brief reads the history once.
+#[must_use]
+#[allow(
+    clippy::implicit_hasher,
+    reason = "callers always pass the audit changed-file FxHashSet; generalizing the hasher adds noise"
+)]
+pub fn compute_routing_from_churn(
+    root: &Path,
+    config: &ResolvedConfig,
+    changed_files: &FxHashSet<PathBuf>,
+    churn_result: &ChurnResult,
+) -> RoutingFacts {
     let ownership_cfg = &config.health.ownership;
     let Ok(bot_globs) = compile_bot_globs(&ownership_cfg.bot_patterns) else {
         return RoutingFacts::default();
@@ -81,7 +95,7 @@ pub fn compute_routing(
 
     let mut units: Vec<RoutingUnit> = changed_files
         .iter()
-        .filter_map(|abs| route_one(abs, root, &churn_result, &ctx, &self_ids))
+        .filter_map(|abs| route_one(abs, root, churn_result, &ctx, &self_ids))
         .collect();
     units.sort_by(|a, b| a.file.cmp(&b.file));
     RoutingFacts { units }

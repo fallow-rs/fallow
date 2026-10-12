@@ -140,7 +140,7 @@ pub fn derive_graph_facts(results: &AnalysisResults) -> GraphFacts {
 fn build_impact_closure_facts(result: &AuditResult) -> ImpactClosureFacts {
     let mut facts = build_graph_impact_closure_facts(result);
     if let Some(check) = result.check.as_ref() {
-        facts.co_change_gap.clone_from(&check.co_change_gaps);
+        facts.set_co_change_gaps(&check.co_change_gaps);
     }
     facts
 }
@@ -946,17 +946,16 @@ fn symbols_taken(sources: &[&CoordinationGapFact]) -> usize {
     sources.iter().map(|g| g.consumed_symbols.len()).sum()
 }
 
-/// Print the Stage 3 impact-closure summary on the human brief: the blast
-/// radius and its heaviest directory, then the coordination gaps (the precise
-/// inter-module attention pointer). Caller has already gated on `!quiet`.
-/// Human lines for the co-change gaps: one header plus one line per gap.
-fn co_change_gap_lines(gaps: &[fallow_output::CoChangeGapFact]) -> Vec<String> {
+/// Human lines for the co-change gaps: one header, one line per listed gap,
+/// and a note for the gaps that the cap cut.
+fn co_change_gap_lines(closure: &ImpactClosureFacts) -> Vec<String> {
+    let gaps = &closure.co_change_gap;
     if gaps.is_empty() {
         return Vec::new();
     }
+    let total = closure.co_change_gap_count.max(gaps.len());
     let mut lines = vec![format!(
-        "  co-change gaps ({}): files that usually change together, no import between them",
-        gaps.len()
+        "  co-change gaps ({total}): files that usually change together, no import between them"
     )];
     for gap in gaps {
         lines.push(format!(
@@ -967,9 +966,16 @@ fn co_change_gap_lines(gaps: &[fallow_output::CoChangeGapFact]) -> Vec<String> {
             gap.degree * 100.0
         ));
     }
+    let hidden = total - gaps.len();
+    if hidden > 0 {
+        lines.push(format!("    {hidden} more not shown"));
+    }
     lines
 }
 
+/// Print the Stage 3 impact-closure summary on the human brief: the blast
+/// radius and its heaviest directory, then the coordination gaps (the precise
+/// inter-module attention pointer). Caller has already gated on `!quiet`.
 fn print_impact_closure_human(closure: &ImpactClosureFacts) {
     for line in affected_lines(closure) {
         eprintln!("{line}");
@@ -977,7 +983,7 @@ fn print_impact_closure_human(closure: &ImpactClosureFacts) {
     for line in coordination_gap_lines(&closure.coordination_gap) {
         eprintln!("{line}");
     }
-    for line in co_change_gap_lines(&closure.co_change_gap) {
+    for line in co_change_gap_lines(closure) {
         eprintln!("{line}");
     }
 }

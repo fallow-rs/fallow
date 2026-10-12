@@ -92,11 +92,11 @@ pub use audit_branching::{
     BranchingSnapshot, CognitiveAttribution, DEFAULT_BRANCHING_TOLERANCE, SplitInPlace,
 };
 pub use audit_brief::{
-    AFFECTED_DIR_CAP, AFFECTED_SAMPLE_CAP, AffectedDirectory, CoChangeGapFact, CoordinationGapFact,
-    DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts, REVIEW_BRIEF_SCHEMA_VERSION,
-    ReviewBriefHeader, ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewBriefSubtractSections,
-    ReviewBriefWireOutput, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
-    StandardReviewBriefOutput, build_review_brief_json_output,
+    AFFECTED_DIR_CAP, AFFECTED_SAMPLE_CAP, AffectedDirectory, CO_CHANGE_GAP_CAP, CoChangeGapFact,
+    CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
+    REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefHeader, ReviewBriefOutput, ReviewBriefSchemaVersion,
+    ReviewBriefSubtractSections, ReviewBriefWireOutput, ReviewDeltas, ReviewEffort, ReviewUnitFact,
+    RiskClass, StandardReviewBriefOutput, build_review_brief_json_output,
     serialize_decision_surface_json_output, serialize_review_brief_json_output,
     serialize_walkthrough_guide_json_output, serialize_walkthrough_validation_json_output,
 };
