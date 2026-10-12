@@ -84,8 +84,8 @@ pub use combined_output::{
     serialize_combined_health_json, serialize_combined_json,
 };
 pub use compact_output::{
-    build_compact_lines, build_duplication_compact_lines, build_grouped_compact_lines,
-    build_health_compact_lines,
+    build_compact_lines, build_diff_risk_compact_lines, build_duplication_compact_lines,
+    build_grouped_compact_lines, build_health_compact_lines,
 };
 pub use coverage::{
     CoverageInputError, CoverageInputSource, CoverageInputs, resolve_coverage_inputs,
@@ -163,8 +163,8 @@ pub use list_runtime::{
     serialize_list_boundaries_programmatic_json, serialize_project_info_programmatic_json,
 };
 pub use markdown_output::{
-    ComplexityListing, build_duplication_markdown, build_grouped_markdown, build_health_markdown,
-    build_markdown, build_walkthrough_markdown,
+    ComplexityListing, build_diff_risk_markdown, build_duplication_markdown,
+    build_grouped_markdown, build_health_markdown, build_markdown, build_walkthrough_markdown,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,

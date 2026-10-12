@@ -84,6 +84,19 @@ pub enum WeakenedTestsKind {
     CoverageThreshold,
 }
 
+impl WeakenedTestsKind {
+    /// The stable wire value, the same as the serialized form.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::SkipOnly => "skip-only",
+            Self::RemovedTests => "removed-tests",
+            Self::AssertionDrop => "assertion-drop",
+            Self::CoverageThreshold => "coverage-threshold",
+        }
+    }
+}
+
 /// The severity of a diff-risk finding, from its rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -93,6 +106,17 @@ pub enum DiffRiskSeverity {
     Error,
     /// The rule is `warn`: the finding gives a `warn` verdict.
     Warn,
+}
+
+impl DiffRiskSeverity {
+    /// The stable wire value, the same as the serialized form.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+        }
+    }
 }
 
 /// A location that relates to a diff-risk finding, such as an unchanged clone
@@ -194,6 +218,21 @@ impl DiffRiskReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codes_match_the_serialized_values() {
+        for kind in [
+            WeakenedTestsKind::SkipOnly,
+            WeakenedTestsKind::RemovedTests,
+            WeakenedTestsKind::AssertionDrop,
+            WeakenedTestsKind::CoverageThreshold,
+        ] {
+            assert_eq!(serde_json::json!(kind), kind.code());
+        }
+        for severity in [DiffRiskSeverity::Error, DiffRiskSeverity::Warn] {
+            assert_eq!(serde_json::json!(severity), severity.code());
+        }
+    }
 
     #[test]
     fn finding_serializes_with_kebab_case_and_skips_empty_fields() {

@@ -346,3 +346,79 @@ fn sarif_carries_diff_risk_rule_ids() {
         "fallow/weakened-tests"
     );
 }
+
+/// A change whose only finding is a diff-risk `it.skip` marker.
+fn skip_only_change() -> TempDir {
+    let tmp = fixture(None);
+    fs::write(
+        tmp.path().join("src/index.test.ts"),
+        "import { price } from './index';\n\nit.skip('doubles', () => {\n  expect(price(1)).toBe(2);\n});\n\nit('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n",
+    )
+    .unwrap();
+    tmp
+}
+
+fn audit_text(dir: &Path, format: &str) -> crate::common::CommandOutput {
+    let root = dir.to_str().unwrap();
+    run_fallow_raw(&[
+        "audit", "--root", root, "--base", "main", "--format", format,
+    ])
+}
+
+#[test]
+fn human_status_line_names_diff_risk_when_it_sets_the_verdict() {
+    let tmp = skip_only_change();
+    let output = audit_text(tmp.path(), "human");
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        output
+            .stderr
+            .contains("diff risk: 1 finding (warn) \u{00b7} 1 changed file"),
+        "stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn compact_prints_diff_risk_records_in_the_compact_grammar() {
+    let tmp = skip_only_change();
+    let output = audit_text(tmp.path(), "compact");
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let lines: Vec<&str> = output
+        .stdout
+        .lines()
+        .filter(|line| line.starts_with("weakened-tests:"))
+        .collect();
+    assert_eq!(
+        lines,
+        vec!["weakened-tests:src/index.test.ts:3:it.skip,severity=warn,kind=skip-only"],
+        "stdout: {}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("[warn]"),
+        "compact must not print the human line: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn markdown_prints_a_diff_risk_table() {
+    let tmp = skip_only_change();
+    let output = audit_text(tmp.path(), "markdown");
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        output.stdout.contains(
+            "## Fallow: 1 diff-risk finding\n\n| Location | Rule | Severity | Evidence |"
+        ),
+        "stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains(
+            "| `src/index.test.ts:3` | `weakened-tests` / `skip-only` | warn | `it.skip` |"
+        ),
+        "stdout: {}",
+        output.stdout
+    );
+}

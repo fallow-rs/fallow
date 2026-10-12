@@ -725,6 +725,32 @@ fn push_styling_findings_compact(
     }
 }
 
+/// Compact records for the diff-risk findings of `fallow audit`.
+///
+/// Format: `<rule>:<path>:<line>:<evidence>,severity=<severity>[,kind=<kind>]`.
+/// The paths are already root-relative. The line is `0` when the finding is
+/// about the whole file.
+#[must_use]
+pub fn build_diff_risk_compact_lines(report: &fallow_output::DiffRiskReport) -> Vec<String> {
+    report
+        .findings
+        .iter()
+        .map(|finding| {
+            let kind = finding
+                .kind
+                .map_or_else(String::new, |kind| format!(",kind={}", kind.code()));
+            format!(
+                "{}:{}:{}:{},severity={}{kind}",
+                finding.rule.code(),
+                normalize_uri(&finding.path),
+                finding.line.unwrap_or(0),
+                compact_field_value(&finding.evidence),
+                finding.severity.code(),
+            )
+        })
+        .collect()
+}
+
 fn compact_field_value(value: &str) -> String {
     value
         .replace([':', ',', '\n', '\r'], " ")
@@ -1195,6 +1221,70 @@ mod tests {
     use fallow_types::results::{AnalysisResults, UnusedFile};
 
     use super::*;
+
+    fn diff_risk_finding(
+        rule: fallow_output::DiffRiskRule,
+        kind: Option<fallow_output::WeakenedTestsKind>,
+        path: &str,
+        line: Option<u32>,
+        evidence: &str,
+        severity: fallow_output::DiffRiskSeverity,
+    ) -> fallow_output::DiffRiskFinding {
+        fallow_output::DiffRiskFinding {
+            rule,
+            kind,
+            path: path.to_owned(),
+            line,
+            message: "m".to_owned(),
+            evidence: evidence.to_owned(),
+            severity,
+            introduced: true,
+            related: Vec::new(),
+            actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn diff_risk_compact_lines_follow_the_tag_path_line_subject_grammar() {
+        let report = fallow_output::DiffRiskReport {
+            findings: vec![
+                diff_risk_finding(
+                    fallow_output::DiffRiskRule::WeakenedTests,
+                    Some(fallow_output::WeakenedTestsKind::SkipOnly),
+                    "src/a.test.ts",
+                    Some(4),
+                    "it.skip",
+                    fallow_output::DiffRiskSeverity::Warn,
+                ),
+                diff_risk_finding(
+                    fallow_output::DiffRiskRule::WeakenedTests,
+                    Some(fallow_output::WeakenedTestsKind::RemovedTests),
+                    "src/b.test.ts",
+                    None,
+                    "test cases: 3 -> 1",
+                    fallow_output::DiffRiskSeverity::Error,
+                ),
+                diff_risk_finding(
+                    fallow_output::DiffRiskRule::AddedDependency,
+                    None,
+                    "package.json",
+                    Some(7),
+                    "left-pad@^1.3.0 (dependencies)",
+                    fallow_output::DiffRiskSeverity::Warn,
+                ),
+            ],
+        };
+        assert_eq!(
+            build_diff_risk_compact_lines(&report),
+            vec![
+                "weakened-tests:src/a.test.ts:4:it.skip,severity=warn,kind=skip-only".to_owned(),
+                "weakened-tests:src/b.test.ts:0:test cases 3 -> 1,severity=error,kind=removed-tests"
+                    .to_owned(),
+                "added-dependency:package.json:7:left-pad@^1.3.0 (dependencies),severity=warn"
+                    .to_owned(),
+            ]
+        );
+    }
 
     #[test]
     fn compact_cycles_preserve_empty_self_loop_and_cross_package_output() {

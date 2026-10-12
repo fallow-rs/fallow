@@ -1537,6 +1537,44 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
     out
 }
 
+/// Markdown section for the diff-risk findings of `fallow audit`: one table
+/// row for each finding. Every finding is introduced by the change and can set
+/// the verdict, so the table has no cap. Empty when there is no finding.
+#[must_use]
+pub fn build_diff_risk_markdown(report: &fallow_output::DiffRiskReport) -> String {
+    if report.findings.is_empty() {
+        return String::new();
+    }
+    let count = report.findings.len();
+    let mut out = format!("## Fallow: {count} diff-risk finding{}\n\n", plural(count));
+    out.push_str("| Location | Rule | Severity | Evidence |\n");
+    out.push_str("|:---------|:-----|:---------|:---------|\n");
+    for finding in &report.findings {
+        let location = finding.line.map_or_else(
+            || finding.path.clone(),
+            |line| format!("{}:{line}", finding.path),
+        );
+        let rule = finding.kind.map_or_else(
+            || markdown_table_code_span(finding.rule.code()),
+            |kind| {
+                format!(
+                    "{} / {}",
+                    markdown_table_code_span(finding.rule.code()),
+                    markdown_table_code_span(kind.code())
+                )
+            },
+        );
+        let _ = writeln!(
+            out,
+            "| {} | {rule} | {} | {} |",
+            markdown_table_code_span(&location),
+            finding.severity.code(),
+            markdown_table_code_span(&finding.evidence),
+        );
+    }
+    out
+}
+
 fn write_styling_findings_section(
     out: &mut String,
     report: &fallow_output::HealthReport,
@@ -3674,5 +3712,69 @@ mod walkthrough_markdown_tests {
         );
         assert!(md.contains("`package.json`"), "got: {md}");
         assert!(!md.contains("orientation only"), "got: {md}");
+    }
+}
+
+#[cfg(test)]
+mod diff_risk_markdown_tests {
+    use super::build_diff_risk_markdown;
+    use fallow_output::{
+        DiffRiskFinding, DiffRiskReport, DiffRiskRule, DiffRiskSeverity, WeakenedTestsKind,
+    };
+
+    fn finding(
+        rule: DiffRiskRule,
+        kind: Option<WeakenedTestsKind>,
+        location: (&str, u32),
+        evidence: &str,
+        severity: DiffRiskSeverity,
+    ) -> DiffRiskFinding {
+        DiffRiskFinding {
+            rule,
+            kind,
+            path: location.0.to_owned(),
+            line: Some(location.1),
+            message: "m".to_owned(),
+            evidence: evidence.to_owned(),
+            severity,
+            introduced: true,
+            related: Vec::new(),
+            actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn diff_risk_markdown_is_empty_without_findings() {
+        assert_eq!(build_diff_risk_markdown(&DiffRiskReport::default()), "");
+    }
+
+    #[test]
+    fn diff_risk_markdown_lists_each_finding_in_a_table() {
+        let report = DiffRiskReport {
+            findings: vec![
+                finding(
+                    DiffRiskRule::WeakenedTests,
+                    Some(WeakenedTestsKind::SkipOnly),
+                    ("src/a.test.ts", 4),
+                    "it.skip",
+                    DiffRiskSeverity::Warn,
+                ),
+                finding(
+                    DiffRiskRule::AddedSuppression,
+                    None,
+                    ("src/b.ts", 9),
+                    "eslint-disable | x",
+                    DiffRiskSeverity::Error,
+                ),
+            ],
+        };
+        assert_eq!(
+            build_diff_risk_markdown(&report),
+            "## Fallow: 2 diff-risk findings\n\n\
+             | Location | Rule | Severity | Evidence |\n\
+             |:---------|:-----|:---------|:---------|\n\
+             | `src/a.test.ts:4` | `weakened-tests` / `skip-only` | warn | `it.skip` |\n\
+             | `src/b.ts:9` | `added-suppression` | error | `eslint-disable \\| x` |\n"
+        );
     }
 }

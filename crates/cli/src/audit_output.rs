@@ -466,12 +466,27 @@ fn print_audit_diff_risk_section(result: &AuditResult, show_headers: bool) {
     if result.diff_risk.is_empty() {
         return;
     }
-    print_audit_section_header(
-        show_headers,
-        "── Diff risk ──────────────────────────────────────",
-    );
-    for line in diff_risk_lines(&result.diff_risk) {
-        outln!("{line}");
+    match result.output {
+        OutputFormat::Compact => {
+            for line in fallow_api::build_diff_risk_compact_lines(&result.diff_risk) {
+                outln!("{line}");
+            }
+        }
+        OutputFormat::Markdown => {
+            outln!(
+                "{}",
+                fallow_api::build_diff_risk_markdown(&result.diff_risk)
+            );
+        }
+        _ => {
+            print_audit_section_header(
+                show_headers,
+                "── Diff risk ──────────────────────────────────────",
+            );
+            for line in diff_risk_lines(&result.diff_risk) {
+                outln!("{line}");
+            }
+        }
     }
 }
 
@@ -487,19 +502,13 @@ fn diff_risk_lines(report: &fallow_output::DiffRiskReport) -> Vec<String> {
             );
             let label = finding.kind.map_or_else(
                 || finding.rule.code().to_owned(),
-                |kind| {
-                    let kind = serde_json::to_value(kind)
-                        .ok()
-                        .and_then(|value| value.as_str().map(str::to_owned))
-                        .unwrap_or_default();
-                    format!("{} ({kind})", finding.rule.code())
-                },
+                |kind| format!("{} ({})", finding.rule.code(), kind.code()),
             );
-            let severity = match finding.severity {
-                fallow_output::DiffRiskSeverity::Error => "error",
-                fallow_output::DiffRiskSeverity::Warn => "warn",
-            };
-            format!("  {location}  {label} [{severity}]  {}", finding.evidence)
+            format!(
+                "  {location}  {label} [{}]  {}",
+                finding.severity.code(),
+                finding.evidence
+            )
         })
         .collect()
 }
@@ -971,7 +980,10 @@ fn build_vital_sign_parts(summary: &AuditSummary) -> Vec<String> {
 }
 
 /// Build summary parts for the status line (shared between warn and fail).
-fn build_status_parts(summary: &AuditSummary) -> Vec<String> {
+fn build_status_parts(
+    summary: &AuditSummary,
+    diff_risk: &fallow_output::DiffRiskReport,
+) -> Vec<String> {
     let mut parts = Vec::new();
     if summary.dead_code_issues > 0 {
         let n = summary.dead_code_issues;
@@ -984,6 +996,10 @@ fn build_status_parts(summary: &AuditSummary) -> Vec<String> {
     if summary.duplication_clone_groups > 0 {
         let n = summary.duplication_clone_groups;
         parts.push(format!("duplication: {n} clone group{}", plural(n)));
+    }
+    if !diff_risk.is_empty() {
+        let n = diff_risk.findings.len();
+        parts.push(format!("diff risk: {n} finding{}", plural(n)));
     }
     parts
 }
@@ -1009,7 +1025,7 @@ fn print_audit_status_line(result: &AuditResult) {
             AuditVerdict::Pass => format!("0 issues in {files_str}"),
             AuditVerdict::Warn | AuditVerdict::Fail => format!(
                 "{} \u{00b7} {files_str}",
-                build_status_parts(&result.summary).join(" \u{00b7} ")
+                build_status_parts(&result.summary, &result.diff_risk).join(" \u{00b7} ")
             ),
         };
         eprintln!(
@@ -1038,7 +1054,7 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
             );
         }
         AuditVerdict::Warn => {
-            let summary = build_status_parts(&result.summary).join(" \u{00b7} ");
+            let summary = build_status_parts(&result.summary, &result.diff_risk).join(" \u{00b7} ");
             eprintln!(
                 "{}",
                 format!("\u{26a0} {summary} (warn) \u{00b7} {files_str} ({elapsed_str})")
@@ -1047,7 +1063,7 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
             );
         }
         AuditVerdict::Fail => {
-            let summary = build_status_parts(&result.summary).join(" \u{00b7} ");
+            let summary = build_status_parts(&result.summary, &result.diff_risk).join(" \u{00b7} ");
             eprintln!(
                 "{}",
                 format!("\u{2717} {summary} \u{00b7} {files_str} ({elapsed_str})")
@@ -1567,8 +1583,9 @@ mod tests {
             duplication_clone_groups: 3,
         };
 
+        let no_diff_risk = fallow_output::DiffRiskReport::default();
         assert_eq!(
-            build_status_parts(&summary),
+            build_status_parts(&summary, &no_diff_risk),
             vec![
                 "dead code: 1 issue".to_string(),
                 "complexity: 2 findings".to_string(),
@@ -1583,7 +1600,44 @@ mod tests {
             max_cyclomatic: None,
             duplication_clone_groups: 0,
         };
-        assert!(build_status_parts(&empty).is_empty());
+        assert!(build_status_parts(&empty, &no_diff_risk).is_empty());
+    }
+
+    #[test]
+    fn build_status_parts_names_diff_risk_when_it_is_the_only_signal() {
+        let empty = AuditSummary {
+            dead_code_issues: 0,
+            dead_code_has_errors: false,
+            complexity_findings: 0,
+            max_cyclomatic: None,
+            duplication_clone_groups: 0,
+        };
+        let finding = fallow_output::DiffRiskFinding {
+            rule: fallow_output::DiffRiskRule::AddedSuppression,
+            kind: None,
+            path: "src/b.ts".to_owned(),
+            line: Some(2),
+            message: "m".to_owned(),
+            evidence: "@ts-ignore".to_owned(),
+            severity: fallow_output::DiffRiskSeverity::Warn,
+            introduced: true,
+            related: Vec::new(),
+            actions: Vec::new(),
+        };
+        let one = fallow_output::DiffRiskReport {
+            findings: vec![finding.clone()],
+        };
+        assert_eq!(
+            build_status_parts(&empty, &one),
+            vec!["diff risk: 1 finding".to_string()]
+        );
+        let two = fallow_output::DiffRiskReport {
+            findings: vec![finding.clone(), finding],
+        };
+        assert_eq!(
+            build_status_parts(&empty, &two),
+            vec!["diff risk: 2 findings".to_string()]
+        );
     }
 
     #[test]
