@@ -37,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconcile, so all stale fallow threads stayed open for that run. Now the
   command still resolves the stale threads. The result reports the post
   errors and the reconcile errors together.
+- **Vite SSR modules keep their consumed exports through TypeScript assertions.**
+  `ssrLoadModule` results wrapped in `as`, `satisfies`, non-null or angle
+  assertions retain their module bindings. Literal `./src/...` entry URLs
+  resolve from the Vite root. Unconsumed sibling exports remain unused.
+  The parse and graph cache versions are bumped because these extraction
+  and resolution facts changed. Existing caches rebuild automatically.
+- **Runtime peers of production dependencies stay in production dependencies.**
+  Test-only and type-only checks now follow installed peer declarations from
+  packages imported as runtime values in production code or invoked by
+  production startup scripts with `next start`. Test, development, build-only
+  and type-only hosts do not give runtime credit. Optional peer chains and workspace
+  declaration ownership keep their existing rules.
 
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>

@@ -1,0 +1,13 @@
+import { createServer } from "vite";
+const server = await createServer();
+const page = (await server.ssrLoadModule("/src/server/render.ts")) as { render: () => string };
+console.log(page.render());
+const relative = (await server.ssrLoadModule("./src/server/relative.ts")) satisfies { renderRelative: () => string };
+console.log(relative.renderRelative());
+const asserted = <{ renderAsserted: () => string }>(await server.ssrLoadModule("/src/server/asserted.ts"));
+console.log(asserted.renderAsserted());
+const nonnull = (await server.ssrLoadModule("/src/server/nonnull.ts"))!;
+console.log(nonnull.renderNonnull());
+await server.ssrLoadModule("/src/server/missing.ts");
+const custom = { loadModule: async (_path: string) => ({ custom: 1 }) };
+console.log(await custom.loadModule("/src/server/unrelated.ts"));

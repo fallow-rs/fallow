@@ -1,0 +1,10 @@
+import "vitest";
+import "react-dom";
+import "workspace-shared-test-peer";
+import "workspace-owned-test-peer";
+import "dev-peer";
+import "build-peer";
+import "test-peer";
+import "genuine-test";
+import "test-mode-peer";
+import "build-mode-peer";

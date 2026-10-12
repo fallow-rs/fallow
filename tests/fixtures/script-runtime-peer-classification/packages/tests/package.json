@@ -1,0 +1,1 @@
+{"name": "tests", "private": true, "scripts": {"test": "next start"}, "dependencies": {"next": "1.0.0", "react": "1.0.0"}}

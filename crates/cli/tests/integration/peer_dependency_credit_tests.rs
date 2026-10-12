@@ -194,3 +194,118 @@ fn a_required_peer_credits_its_own_optional_peer() {
         json!(["mid"])
     );
 }
+
+fn classified_names(output: &Value, field: &str) -> Vec<String> {
+    let mut names: Vec<String> = output[field]
+        .as_array()
+        .expect("dependency findings")
+        .iter()
+        .map(|dep| {
+            dep["package_name"]
+                .as_str()
+                .expect("package name")
+                .to_string()
+        })
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+#[test]
+fn production_peers_are_not_demoted_to_test_only() {
+    let output = parse_json(&run_fallow(
+        "dead-code",
+        "runtime-peer-classification",
+        &["--format", "json", "--quiet", "--no-cache"],
+    ));
+    assert_eq!(
+        classified_names(&output, "test_only_dependencies"),
+        [
+            "genuine-test",
+            "leaf-unlisted",
+            "test-host",
+            "test-peer",
+            "type-host-peer",
+            "unused-peer"
+        ]
+    );
+    assert_eq!(
+        classified_names(&output, "unused_dependencies"),
+        ["unused-host"]
+    );
+}
+
+#[test]
+fn production_peers_are_not_demoted_to_type_only() {
+    let output = parse_json(&run_fallow(
+        "dead-code",
+        "runtime-peer-classification",
+        &["--format", "json", "--quiet", "--no-cache", "--production"],
+    ));
+    assert_eq!(
+        classified_names(&output, "type_only_dependencies"),
+        ["genuine-type", "type-host"]
+    );
+    assert!(classified_names(&output, "unused_dependencies").contains(&"unused-host".to_string()));
+}
+
+#[test]
+fn production_peer_credit_respects_the_nearest_workspace_manifest() {
+    let fixture = "runtime-peer-workspace-classification";
+    let output = parse_json(&run_fallow(
+        "dead-code",
+        fixture,
+        &["--format", "json", "--quiet", "--no-cache"],
+    ));
+    assert_eq!(
+        classified_names(&output, "test_only_dependencies"),
+        ["genuine-test", "workspace-test-peer"]
+    );
+    let production = parse_json(&run_fallow(
+        "dead-code",
+        fixture,
+        &["--format", "json", "--quiet", "--no-cache", "--production"],
+    ));
+    assert_eq!(
+        classified_names(&production, "type_only_dependencies"),
+        ["genuine-type", "workspace-type-peer"]
+    );
+}
+
+#[test]
+fn script_runtime_hosts_protect_their_production_peers() {
+    let fixture = "script-runtime-peer-classification";
+    let output = parse_json(&run_fallow(
+        "dead-code",
+        fixture,
+        &["--format", "json", "--quiet", "--no-cache"],
+    ));
+    assert_eq!(
+        classified_names(&output, "test_only_dependencies"),
+        [
+            "build-mode-peer",
+            "build-peer",
+            "dev-peer",
+            "genuine-test",
+            "test-mode-peer",
+            "test-peer",
+            "workspace-owned-test-peer"
+        ]
+    );
+    let production = parse_json(&run_fallow(
+        "dead-code",
+        fixture,
+        &["--format", "json", "--quiet", "--no-cache", "--production"],
+    ));
+    assert_eq!(
+        classified_names(&production, "type_only_dependencies"),
+        [
+            "build-mode-type-peer",
+            "build-type-peer",
+            "dev-type-peer",
+            "genuine-type",
+            "test-mode-type-peer",
+            "workspace-owned-type-peer"
+        ]
+    );
+}

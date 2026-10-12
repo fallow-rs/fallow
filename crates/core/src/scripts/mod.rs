@@ -1381,6 +1381,8 @@ pub struct ScriptCommand {
     /// Packages this command names through a flag value rather than by
     /// importing them or invoking them as the binary.
     pub flag_packages: Vec<String>,
+    /// A package whose CLI subcommand runs the production application.
+    pub production_runtime_host: Option<&'static str>,
 }
 
 impl ScriptCommand {
@@ -1411,6 +1413,47 @@ pub fn filter_production_scripts(scripts: &HashMap<String, String>) -> HashMap<S
         .filter(|(name, _)| is_production_script(name))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect()
+}
+
+/// Runtime hosts reached from production startup scripts, including local
+/// script indirection and environment/package-manager wrappers.
+pub fn production_runtime_hosts(pkg: &fallow_config::PackageJson) -> FxHashSet<String> {
+    let Some(scripts) = &pkg.scripts else {
+        return FxHashSet::default();
+    };
+    let catalog = ScriptCatalog::from_scripts(scripts);
+    let declared = pkg.all_dependency_names();
+    let mut queue: Vec<String> = scripts
+        .keys()
+        .filter(|name| {
+            let name = name.split(':').next().unwrap_or(name);
+            let base = name
+                .strip_prefix("pre")
+                .or_else(|| name.strip_prefix("post"))
+                .unwrap_or(name);
+            matches!(base, "start" | "serve")
+        })
+        .cloned()
+        .collect();
+    let mut visited = FxHashSet::default();
+    let mut hosts = FxHashSet::default();
+    while let Some(name) = queue.pop() {
+        if !visited.insert(name.clone()) {
+            continue;
+        }
+        let Some(script) = scripts.get(&name) else {
+            continue;
+        };
+        queue.extend(referenced_package_scripts(script, &catalog));
+        hosts.extend(
+            parse_script_with_catalog(script, &catalog)
+                .into_iter()
+                .filter_map(|command| command.production_runtime_host)
+                .filter(|package| declared.iter().any(|name| name == package))
+                .map(str::to_string),
+        );
+    }
+    hosts
 }
 
 /// Check if a script name is production-relevant.
@@ -1646,7 +1689,7 @@ pub fn referenced_package_scripts(command: &str, catalog: &ScriptCatalog) -> FxH
     for segment in shell::split_shell_operators(command) {
         let words = shell::split_words(segment);
         let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
-        let Some(idx) = shell::skip_initial_wrappers(&tokens, 0) else {
+        let Some(idx) = skip_command_wrappers(&tokens) else {
             continue;
         };
         if let Some(binary) = tokens.get(idx).copied()
@@ -2144,10 +2187,7 @@ pub fn declared_script_call(
     tokens: &[&str],
     catalog: &ScriptCatalog,
 ) -> Option<DeclaredScriptCall> {
-    let mut idx = shell::skip_initial_wrappers(tokens, 0)?;
-    while let Some(child_idx) = command_wrapper_child_index(tokens, idx) {
-        idx = shell::skip_initial_wrappers(tokens, child_idx)?;
-    }
+    let idx = skip_command_wrappers(tokens)?;
     let ScriptCallArguments {
         name,
         forwarded,
@@ -2696,6 +2736,23 @@ fn command_wrapper_child_index(tokens: &[&str], idx: usize) -> Option<usize> {
     (child_idx < tokens.len()).then_some(child_idx)
 }
 
+fn skip_command_wrappers(tokens: &[&str]) -> Option<usize> {
+    let mut idx = shell::skip_initial_wrappers(tokens, 0)?;
+    while let Some(child_idx) = command_wrapper_child_index(tokens, idx) {
+        idx = shell::skip_initial_wrappers(tokens, child_idx)?;
+    }
+    Some(idx)
+}
+
+fn command_runtime_host(
+    binary: &str,
+    args: &[&str],
+    location: &RunLocation,
+) -> Option<&'static str> {
+    (location == &RunLocation::Here && binary == "next" && args.first() == Some(&"start"))
+        .then_some("next")
+}
+
 /// Parse a single command segment (after splitting on shell operators).
 fn parse_command_segment(
     segment: &str,
@@ -2743,6 +2800,7 @@ fn parse_command_segment(
             file_args: location.resolve_all(file_args, catalog),
             file_args_command: child.to_string(),
             flag_packages: Vec::new(),
+            production_runtime_host: None,
         }));
         let Some(next) = shell::skip_initial_wrappers(&tokens, command_start) else {
             return outcomes;
@@ -2764,6 +2822,7 @@ fn parse_command_segment(
             config_args: Vec::new(),
             file_args: Vec::new(),
             flag_packages: Vec::new(),
+            production_runtime_host: None,
         }));
         outcomes.extend(
             inline_commands
@@ -2792,12 +2851,14 @@ fn parse_command_segment(
     ));
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
+    let production_runtime_host = command_runtime_host(&binary, &tokens[idx + 1..], &location);
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
         file_args_command: binary.clone(),
         binary,
         config_args: location.resolve_all(config_args, catalog),
         file_args: location.resolve_all(file_args, catalog),
         flag_packages,
+        production_runtime_host,
     }));
     outcomes
 }
@@ -5211,6 +5272,35 @@ mod tests {
         let referenced = referenced_package_scripts(&scripts["start"], &catalog);
 
         assert_eq!(referenced, FxHashSet::from_iter(["serve".to_string()]));
+    }
+
+    #[test]
+    fn referenced_scripts_follow_complete_command_wrappers() {
+        let scripts = HashMap::from([("launch".to_string(), "next start".to_string())]);
+        let catalog = ScriptCatalog::from_scripts(&scripts);
+        for command in [
+            "varlock run -- npm run launch",
+            "varlock run -- cross-env NODE_ENV=production npm run launch",
+            "varlock run -- varlock run -- pnpm run launch",
+        ] {
+            assert_eq!(
+                referenced_package_scripts(command, &catalog),
+                FxHashSet::from_iter(["launch".to_string()]),
+                "{command}"
+            );
+        }
+        for command in [
+            "varlock check -- npm run launch",
+            "varlock run npm run launch",
+            "varlock run -- pnpm --filter app run launch",
+            "varlock run -- npm --prefix packages/app run launch",
+        ] {
+            assert_eq!(
+                referenced_package_scripts(command, &catalog),
+                FxHashSet::default(),
+                "{command}"
+            );
+        }
     }
 
     #[test]

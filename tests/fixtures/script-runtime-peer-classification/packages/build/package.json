@@ -1,0 +1,1 @@
+{"name": "build", "private": true, "scripts": {"build": "next build"}, "dependencies": {"next": "1.0.0", "react": "1.0.0"}}

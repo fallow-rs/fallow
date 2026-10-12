@@ -1,0 +1,1 @@
+{"name":"vite-ssr-assertions","private":true,"type":"module","main":"scripts/render.ts","devDependencies":{"vite":"^7.0.0"}}

@@ -17,6 +17,13 @@ node_modules/
 !tests/fixtures/peer-chain-through-required-peer/node_modules/
 !tests/fixtures/peer-chain-through-unlisted-peer/node_modules/
 !tests/fixtures/peer-chain-through-workspace-peer/node_modules/
+!tests/fixtures/runtime-peer-classification/node_modules/
+!tests/fixtures/runtime-peer-workspace-classification/packages/app/node_modules/
+!tests/fixtures/script-runtime-peer-classification/node_modules/
+!tests/fixtures/script-runtime-peer-classification/packages/app/node_modules/
+!tests/fixtures/script-runtime-peer-classification/packages/dev/node_modules/
+!tests/fixtures/script-runtime-peer-classification/packages/tests/node_modules/
+!tests/fixtures/script-runtime-peer-classification/packages/build/node_modules/
 .DS_Store
 # macOS Spotlight index control markers (written into build output dirs)
 .metadata_never_index

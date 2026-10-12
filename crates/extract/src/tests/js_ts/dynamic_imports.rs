@@ -1950,3 +1950,26 @@ const literal = await server.ssrLoadModule('/src/known.ts');
     );
     assert!(info.dynamic_import_patterns.is_empty());
 }
+
+#[test]
+fn ssr_load_module_type_wrappers_preserve_namespace_bindings() {
+    let info = parse_source(
+        r"
+const server = await createServer();
+const asserted = (await server.ssrLoadModule('/src/a.ts')) as Module;
+const satisfied = (await server.ssrLoadModule(`./src/b.ts`)) satisfies Module;
+const nonnull = (await server.ssrLoadModule('/src/c.ts'))!;
+const angle = <Module>(await server.ssrLoadModule('/src/d.ts'));
+const unrelated = (await server.loadModule('/src/unused.ts')) as Module;
+",
+    );
+    assert_eq!(
+        dynamic_import_bindings(&info),
+        [
+            ("/src/a.ts", vec![], Some("asserted")),
+            ("/src/b.ts", vec![], Some("satisfied")),
+            ("/src/c.ts", vec![], Some("nonnull")),
+            ("/src/d.ts", vec![], Some("angle")),
+        ]
+    );
+}

@@ -3611,9 +3611,9 @@ const SSR_LOAD_MODULE_METHOD: &str = "ssrLoadModule";
 /// `/` is relative to the Vite root, not to the file system. A computed
 /// argument is not a static edge, so it returns `None`.
 pub(crate) fn ssr_load_module_call(expr: &Expression<'_>) -> Option<(Span, String)> {
-    let call = match expr.without_parentheses() {
+    let call = match expr.get_inner_expression() {
         Expression::AwaitExpression(await_expr) => {
-            match await_expr.argument.without_parentheses() {
+            match await_expr.argument.get_inner_expression() {
                 Expression::CallExpression(call) => call,
                 _ => return None,
             }
@@ -3633,13 +3633,19 @@ pub(crate) fn ssr_load_module_source(call: &CallExpression<'_>) -> Option<String
     if member.property.name != SSR_LOAD_MODULE_METHOD {
         return None;
     }
-    match call.arguments.first()?.as_expression()? {
-        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+    let source = match call.arguments.first()?.as_expression()? {
+        Expression::StringLiteral(lit) => lit.value.to_string(),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().map(|quasi| quasi.value.raw.to_string())
+            tpl.quasis.first()?.value.raw.to_string()
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    // Vite resolves relative entry URLs from its root, not the caller's directory.
+    Some(
+        source
+            .strip_prefix("./")
+            .map_or_else(|| source.clone(), |relative| format!("/{relative}")),
+    )
 }
 
 fn try_extract_arrow_wrapped_import<'a, 'b>(

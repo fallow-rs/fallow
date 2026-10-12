@@ -394,6 +394,8 @@ struct WorkspaceManifest<'a> {
     /// files for the esbuild `packages: 'external'` signal. The paths resolve
     /// only for a workspace with a file that imports esbuild.
     script_programs: Vec<String>,
+    /// Runtime packages invoked by this workspace's production startup scripts.
+    runtime_hosts: FxHashSet<String>,
 }
 
 /// The program file arguments that the scripts of `pkg` run with a node
@@ -509,6 +511,7 @@ fn read_workspace_manifests<'a>(
                         .any(|script| crate::scripts::script_externalizes_packages(script))
                 }),
                 script_programs: script_program_args(&pkg),
+                runtime_hosts: crate::scripts::production_runtime_hosts(&pkg),
             })
         })
         .collect()
@@ -871,6 +874,15 @@ fn workspace_chain_installer<'a>(
     id: FileId,
 ) -> Option<&'a Path> {
     let index = ownership.workspace_index_for_file(id)?;
+    workspace_chain_installer_for_owner(manifests, ownership, package_name, index)
+}
+
+fn workspace_chain_installer_for_owner<'a>(
+    manifests: &[WorkspaceManifest<'a>],
+    ownership: &WorkspaceOwnershipIndex,
+    package_name: &str,
+    index: usize,
+) -> Option<&'a Path> {
     std::iter::once(index)
         .chain(ownership.ancestors_of(index).iter().copied())
         .filter_map(|workspace| manifests.get(workspace))
@@ -918,6 +930,64 @@ impl<'a> RootImporters<'a> {
             self.graph.type_only_package_usage.get(package_name),
             package_name,
         )
+    }
+
+    /// Peers loaded by production packages through the root installation.
+    /// Workspace-owned peers belong to the nearer manifest, even when a root
+    /// test imports another copy of the same package.
+    fn production_peers(&self, pkg: &PackageJson, config: &ResolvedConfig) -> FxHashSet<String> {
+        let root_declared = pkg.all_dependency_names();
+        let listed = closure_listed_names(
+            &root_declared,
+            self.manifests
+                .iter()
+                .flat_map(|manifest| manifest.declared.iter()),
+        );
+        let mut seeds_by_owner: FxHashMap<Option<usize>, FxHashSet<&str>> = FxHashMap::default();
+        for package_name in self.graph.package_usage.keys() {
+            for id in production_value_importers(package_name, self.graph, config) {
+                let owner = self.ownership.workspace_index_for_file(id);
+                seeds_by_owner
+                    .entry(owner)
+                    .or_default()
+                    .insert(package_name.as_str());
+            }
+        }
+        let root_hosts = crate::scripts::production_runtime_hosts(pkg);
+        seeds_by_owner
+            .entry(None)
+            .or_default()
+            .extend(root_hosts.iter().map(String::as_str));
+        for (index, manifest) in self.manifests.iter().enumerate() {
+            seeds_by_owner
+                .entry(Some(index))
+                .or_default()
+                .extend(manifest.runtime_hosts.iter().map(String::as_str));
+        }
+        let mut peers = FxHashSet::default();
+        let mut resolver = PeerDependencyResolver::new();
+        for (owner, seeds) in seeds_by_owner {
+            let package_root = owner
+                .and_then(|index| self.manifests.get(index))
+                .map_or(config.root.as_path(), |manifest| manifest.root);
+            for peer in resolver
+                .peer_dependency_closure(package_root, seeds, &listed)
+                .into_keys()
+            {
+                if owner.is_none_or(|index| {
+                    workspace_chain_installer_for_owner(
+                        &self.manifests,
+                        &self.ownership,
+                        &peer,
+                        index,
+                    )
+                    .is_none()
+                }) {
+                    peers.insert(peer);
+                }
+            }
+        }
+        peers
     }
 
     fn filter(&self, file_ids: Option<&Vec<FileId>>, package_name: &str) -> Vec<FileId> {
@@ -1790,6 +1860,7 @@ pub fn find_type_only_dependencies(
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     let root_importers = RootImporters::new(graph, config, workspaces);
+    let production_peers = root_importers.production_peers(pkg, config);
 
     let mut type_only_deps = Vec::new();
 
@@ -1797,7 +1868,7 @@ pub fn find_type_only_dependencies(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if config.ignore_dependencies.is_ignored(&dep) {
+        if config.ignore_dependencies.is_ignored(&dep) || production_peers.contains(&dep) {
             continue;
         }
 
@@ -1929,6 +2000,7 @@ pub fn find_test_only_dependencies(
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     let ignore_deps = &config.ignore_dependencies;
     let root_importers = RootImporters::new(graph, config, workspaces);
+    let production_peers = root_importers.production_peers(pkg, config);
 
     let mut test_only_deps = Vec::new();
 
@@ -1936,7 +2008,7 @@ pub fn find_test_only_dependencies(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if ignore_deps.is_ignored(&dep) {
+        if ignore_deps.is_ignored(&dep) || production_peers.contains(&dep) {
             continue;
         }
 
@@ -1955,8 +2027,7 @@ pub fn find_test_only_dependencies(
     test_only_deps
 }
 
-/// Return `true` when at least one PRODUCTION (non-test, non-config) file
-/// imports `dep` via a runtime/value import.
+/// Files that import `dep` as a runtime value from production entry points.
 ///
 /// `package_usage` records one entry per import statement,
 /// `type_only_package_usage` one entry per `import type` statement and
@@ -1969,13 +2040,6 @@ pub fn find_test_only_dependencies(
 /// production file that imports `dep` ONLY via `import type` or through an
 /// asset loader is not flagged.
 ///
-/// Files owned by a workspace package are skipped: this rule reasons about the
-/// ROOT manifest only, and a workspace file's runtime resolution is governed by
-/// the workspace's own `package.json` (a package hoisted into root
-/// `devDependencies` but declared in the workspace's `dependencies` would
-/// otherwise be a false positive). Per-workspace detection is the shared
-/// follow-up with the sibling dependency-family detectors.
-///
 /// Only files reachable from a RUNTIME entry point count as production
 /// evidence (`is_runtime_reachable`, the graph's production scope). Repo
 /// tooling the test globs do not cover (`scripts/`, `benchmarks/`, `.github/`,
@@ -1983,14 +2047,13 @@ pub fn find_test_only_dependencies(
 /// entry such as a rollup config chain) is not part of the shipped artifact,
 /// so a devDependency imported only there must not be promoted. The rule lives
 /// in [`is_production_module`].
-fn dependency_has_prod_value_import(
+fn production_value_importers(
     dep: &str,
     graph: &ModuleGraph,
     config: &ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> bool {
+) -> Vec<FileId> {
     let Some(file_ids) = graph.package_usage.get(dep) else {
-        return false;
+        return Vec::new();
     };
 
     let mut per_file: FxHashMap<FileId, (u32, u32)> = FxHashMap::default();
@@ -2007,19 +2070,47 @@ fn dependency_has_prod_value_import(
         per_file.entry(*id).or_default().1 += 1;
     }
 
-    per_file.iter().any(|(id, (total, build_time))| {
-        // No runtime value import in this file: every occurrence was
-        // `import type` or a read through an asset loader.
-        if total <= build_time {
-            return false;
-        }
-        graph.modules.get(id.0 as usize).is_some_and(|module| {
-            is_production_module(module, config)
-                && !workspaces
+    per_file
+        .into_iter()
+        .filter_map(|(id, (total, build_time))| {
+            // No runtime value import in this file: every occurrence was
+            // `import type` or a read through an asset loader.
+            if total <= build_time {
+                return None;
+            }
+            graph
+                .modules
+                .get(id.0 as usize)
+                .filter(|module| is_production_module(module, config))
+                .map(|_| id)
+        })
+        .collect()
+}
+
+/// Whether the root manifest supplies a runtime value import.
+///
+/// Files owned by a workspace package are skipped: this rule reasons about the
+/// ROOT manifest only, and a workspace file's runtime resolution is governed by
+/// the workspace's own `package.json` (a package hoisted into root
+/// `devDependencies` but declared in the workspace's `dependencies` would
+/// otherwise be a false positive). Per-workspace detection is the shared
+/// follow-up with the sibling dependency-family detectors.
+///
+fn dependency_has_prod_value_import(
+    dep: &str,
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> bool {
+    production_value_importers(dep, graph, config)
+        .into_iter()
+        .any(|id| {
+            graph.modules.get(id.0 as usize).is_some_and(|module| {
+                !workspaces
                     .iter()
                     .any(|ws| module.path.starts_with(&ws.root))
+            })
         })
-    })
 }
 
 /// Find `devDependencies` imported by production code with a runtime/value

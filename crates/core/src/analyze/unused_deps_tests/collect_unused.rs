@@ -582,6 +582,7 @@ fn manifest<'a>(
         declared,
         externalizes_packages: false,
         script_programs: Vec::new(),
+        runtime_hosts: FxHashSet::default(),
     }
 }
 

@@ -67,3 +67,33 @@ fn ssr_load_module_credits_only_the_members_in_use() {
         ]
     );
 }
+
+#[test]
+fn ssr_load_module_type_wrappers_preserve_consumed_exports() {
+    let root = fixture_path("vite-ssr-assertions");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        unused_file_paths(&results, &root),
+        ["src/server/unrelated.ts"]
+    );
+    assert_eq!(
+        unused_exports(&results, &root),
+        [
+            (
+                "src/server/asserted.ts".to_string(),
+                "deadAsserted".to_string()
+            ),
+            (
+                "src/server/nonnull.ts".to_string(),
+                "deadNonnull".to_string()
+            ),
+            (
+                "src/server/relative.ts".to_string(),
+                "deadRelative".to_string()
+            ),
+            ("src/server/render.ts".to_string(), "dead".to_string()),
+        ]
+    );
+}

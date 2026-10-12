@@ -1,0 +1,1 @@
+{"name": "app", "private": true, "scripts": {"serve": "pnpm exec next start"}, "dependencies": {"next": "1.0.0", "react": "1.0.0", "workspace-owned-test-peer": "1.0.0", "workspace-owned-type-peer": "1.0.0"}}
