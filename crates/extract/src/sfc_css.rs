@@ -211,6 +211,22 @@ pub fn vue_transition_classes(source: &str) -> FxHashSet<String> {
     out
 }
 
+/// Returns `true` for an attribute that binds `name` to an expression:
+/// `:name`, `v-bind:name`, either with modifiers such as `.camel`, or a
+/// `v-bind` object that can carry `name`.
+fn is_bound_name_attr(key: &str) -> bool {
+    if key == "v-bind" {
+        return true;
+    }
+    let Some(arg) = key
+        .strip_prefix(':')
+        .or_else(|| key.strip_prefix("v-bind:"))
+    else {
+        return false;
+    };
+    arg.split('.').next() == Some("name")
+}
+
 fn collect_transition_tag_classes(attrs: &str, is_group: bool, out: &mut FxHashSet<String>) {
     let mut name = TransitionName::Absent;
     for caps in TAG_ATTR_RE.captures_iter(attrs) {
@@ -222,7 +238,7 @@ fn collect_transition_tag_classes(attrs: &str, is_group: bool, out: &mut FxHashS
             .map(|m| m.as_str());
         match (key, value) {
             ("name", Some(value)) => name = TransitionName::Literal(value.trim()),
-            (":name" | "v-bind:name" | "v-bind", _) => name = TransitionName::Bound,
+            (key, _) if is_bound_name_attr(key) => name = TransitionName::Bound,
             (key, Some(value)) if TRANSITION_CLASS_PROPS.contains(&key) => {
                 out.extend(value.split_whitespace().map(str::to_string));
             }
@@ -517,6 +533,16 @@ mod tests {
              <style scoped>.v-enter-active {} .v-move {} .fade-enter-active {}</style>",
         );
         assert_eq!(dead, vec!["fade-enter-active".to_string()]);
+    }
+
+    #[test]
+    fn bound_transition_name_with_modifier_credits_nothing() {
+        let dead = scoped_unused_classes(
+            "<template><Transition :name.camel=\"kind\"><div/></Transition>\
+             <Transition v-bind:name.prop=\"kind\"><div/></Transition></template>\n\
+             <style scoped>.v-enter-active {}</style>",
+        );
+        assert_eq!(dead, vec!["v-enter-active".to_string()]);
     }
 
     #[test]
