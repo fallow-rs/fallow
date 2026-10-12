@@ -44,7 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report. (Closes [#3350](https://github.com/fallow-rs/fallow/issues/3350))
 - **`unused-store-member` no longer reports live Pinia setup-store members in
   two cases.** A helper can read a member through a parameter typed
-  `ReturnType<typeof useCounterStore>`, or through a type alias of that form.
+  `ReturnType<typeof useCounterStore>`, or through a type alias of that form that the same file declares before
+  the helper.
   Fallow now credits that read to the store, also when the import is
   type-only. A setup store can also read returned state in its own body, for
   example `count.value` inside a `computed` getter. Pinia needs returned state
