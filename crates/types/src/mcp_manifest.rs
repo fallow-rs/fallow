@@ -392,7 +392,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "audit",
         kind: "analysis",
-        description: "Combined dead-code, complexity, duplication, and styling audit for changed files with a pass/warn/fail verdict",
+        description: "Combined dead-code, complexity, duplication, styling, and diff-risk audit for changed files with a pass/warn/fail verdict. The diff-risk rules are weakened-tests, added-suppression, test-only-branch, diverged-clone-sibling, and added-dependency",
         cli_command: Some("fallow audit --format json --quiet"),
         key_params: &[
             "gate",

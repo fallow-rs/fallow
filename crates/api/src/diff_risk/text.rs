@@ -522,6 +522,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explain_text_names_every_detected_suppression_token() {
+        let full = crate::explain::AUDIT_RULES
+            .iter()
+            .find(|rule| rule.id == "fallow/added-suppression")
+            .map(|rule| rule.full)
+            .unwrap_or_default();
+        for token in SUPPRESSION_TOKENS.iter().chain([&FALLOW_IGNORE_TOKEN]) {
+            assert!(
+                full.contains(&format!("`{token}`")),
+                "the added-suppression explain text must name `{token}`"
+            );
+        }
+    }
+
+    #[test]
     fn added_lines_ignore_moved_lines() {
         let base = "a\nb\nc\n";
         let head = "c\na\nb\nd\n";

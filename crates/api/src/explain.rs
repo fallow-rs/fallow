@@ -1242,7 +1242,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         category: "Audit",
         name: "Added Suppressions",
         short: "The change adds a suppression comment",
-        full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Defaults to `warn`.",
+        full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `deno-lint-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Defaults to `warn`.",
         docs_path: "cli/audit#diff-risk-rules",
     },
     RuleDef {

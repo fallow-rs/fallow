@@ -82,7 +82,7 @@ The `generated:issue-types` table below is regenerated from `fallow schema` by s
 | `added-suppression` | - | - | `// fallow-ignore-next-line added-suppression` | The change adds a suppression comment |
 | `test-only-branch` | - | - | `// fallow-ignore-next-line test-only-branch` | The change adds a test-environment branch to source code |
 | `diverged-clone-sibling` | - | - | `// fallow-ignore-next-line diverged-clone-sibling` | The change edits one copy of duplicated code but not its siblings |
-| `added-dependency` | - | - | `// fallow-ignore-next-line added-dependency` | The change adds a dependency |
+| `added-dependency` | - | - | - | The change adds a dependency. Config suppression only, because `package.json` cannot hold a comment: set `added-dependency` to `off` for the path in an `overrides` entry. |
 
 Runtime-coverage verdicts and the full security sink catalogue are listed by `fallow schema` (`issue_types`).
 <!-- generated:issue-types:end -->

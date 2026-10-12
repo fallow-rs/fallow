@@ -927,7 +927,9 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         config_key: Some("added-dependency"),
         filter_flag: None,
         mcp_issue_type: None,
-        suppress_token: Some("added-dependency"),
+        // `package.json` cannot hold a comment, so the only suppression is
+        // an `overrides` entry that sets the rule to `off`.
+        suppress_token: None,
         suppress_file_level: false,
         lsp: false,
         docs_category: "audit",

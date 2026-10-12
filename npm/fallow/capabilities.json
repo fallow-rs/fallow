@@ -6665,8 +6665,8 @@
       "ts_alias": null,
       "counts_in_total": false,
       "fixable": false,
-      "suppressible": true,
-      "suppress_comment": "// fallow-ignore-next-line added-dependency",
+      "suppressible": false,
+      "suppress_comment": null,
       "default_severity": "off",
       "opt_in": true,
       "frameworks": [],
@@ -7564,7 +7564,7 @@
       {
         "name": "audit",
         "kind": "analysis",
-        "description": "Combined dead-code, complexity, duplication, and styling audit for changed files with a pass/warn/fail verdict",
+        "description": "Combined dead-code, complexity, duplication, styling, and diff-risk audit for changed files with a pass/warn/fail verdict. The diff-risk rules are weakened-tests, added-suppression, test-only-branch, diverged-clone-sibling, and added-dependency",
         "cli_command": "fallow audit --format json --quiet",
         "key_params": [
           "gate",
