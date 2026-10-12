@@ -191,6 +191,18 @@ fn merge_base(root: &Path, base_ref: &str) -> String {
         .unwrap_or_else(|| base_ref.to_owned())
 }
 
+/// Whether a diff-risk rule can read this file. The rules read discovered
+/// source files (every clone group member is one), test files, test-runner
+/// and coverage configs, and package manifests. Other changed files, such as
+/// a lockfile or an image, are not read.
+fn is_rule_relevant(root: &Path, rel: &str) -> bool {
+    fallow_engine::discover::SOURCE_EXTENSIONS.contains(&extension(rel))
+        || takes_suppression_comments(rel)
+        || fallow_engine::test_paths::is_test_code_path_str(root, rel)
+        || text::is_coverage_config_path(rel)
+        || crate::dependency_deltas::is_manifest_path(rel)
+}
+
 fn read_files(input: &DiffRiskInput<'_>, source: &mut BaseSource) -> Vec<FileTexts> {
     let rename_sources: FxHashSet<&Path> = input
         .renames
@@ -222,6 +234,10 @@ fn read_files(input: &DiffRiskInput<'_>, source: &mut BaseSource) -> Vec<FileTex
         if !base_abs.starts_with(&source.git_root) {
             continue;
         }
+        let rel = relative_key_path(abs, input.root);
+        if !is_rule_relevant(input.root, &rel) {
+            continue;
+        }
         let head = match std::fs::read(abs) {
             Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -236,7 +252,7 @@ fn read_files(input: &DiffRiskInput<'_>, source: &mut BaseSource) -> Vec<FileTex
             continue;
         }
         files.push(FileTexts {
-            rel: relative_key_path(abs, input.root),
+            rel,
             abs: abs.clone(),
             base,
             head,
@@ -687,6 +703,35 @@ mod tests {
         raw.iter()
             .map(|finding| (finding.rule, finding.evidence.as_str()))
             .collect()
+    }
+
+    #[test]
+    fn only_files_a_rule_reads_are_relevant() {
+        let root = Path::new("/project");
+        for rel in [
+            "src/a.ts",
+            "src/a.test.ts",
+            "src/page.mdx",
+            "src/query.graphql",
+            "styles/app.css",
+            "package.json",
+            "packages/ui/package.json",
+            "vitest.config.ts",
+            ".nycrc",
+            ".fallowrc.json",
+        ] {
+            assert!(is_rule_relevant(root, rel), "{rel} must be read");
+        }
+        for rel in [
+            "pnpm-lock.yaml",
+            "package-lock.json",
+            "yarn.lock",
+            "assets/logo.png",
+            "fonts/inter.woff2",
+            "README.md",
+        ] {
+            assert!(!is_rule_relevant(root, rel), "{rel} must not be read");
+        }
     }
 
     #[test]
