@@ -25,14 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `line`, `search_visibility` (`found`, `renamed`, `missed`), `reason`, and
   `search_as`. `search_as` is the name to search for instead. A class member
   trace has the same fields on `owner_direct_references[]`, checked against the
-  owner export name. Each
-  `--impact-closure` coordination gap has the same fields. The MCP
-  `trace_export` and `impact_closure` tools return them too. `fallow audit
-  --brief` adds `impact_closure.search_gap`. It lists the `missed` and `renamed`
-  consumers of each export whose declaration the diff changes, with at most 10
-  consumers per export and a total. A trace reads the consumer sources of the
-  traced export only. The audit brief reads the consumer sources of the exports
-  in the changed files.
+  owner export name. Each `--impact-closure` coordination gap has the same
+  fields. The MCP `trace_export` and `impact_closure` tools return them too.
+  `fallow audit --brief` adds `impact_closure.search_gap`. It lists the
+  `missed` and `renamed` consumers of each export whose declaration the diff
+  changes, with at most 10 consumers per export and a total. A trace reads the
+  consumer sources of the traced export only. The audit brief reads the
+  consumer sources of the exports in the changed files.
 
 ### Changed
 

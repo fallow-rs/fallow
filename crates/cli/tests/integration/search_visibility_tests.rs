@@ -154,7 +154,10 @@ fn class_member_trace_checks_owner_references_by_owner_name() {
             "package.json",
             r#"{"name":"member-probe","type":"module","main":"src/index.ts"}"#,
         ),
-        ("src/index.ts", "import './direct';\nimport './alias';\n"),
+        (
+            "src/index.ts",
+            "import './direct';\nimport './alias';\nimport './via-barrel';\n",
+        ),
         (
             "src/service.ts",
             "export class Service {\n  run(): number {\n    return 1;\n  }\n}\n",
@@ -166,6 +169,14 @@ fn class_member_trace_checks_owner_references_by_owner_name() {
         (
             "src/alias.ts",
             "import { Service as Svc } from './service';\nconsole.log(new Svc().run());\n",
+        ),
+        (
+            "src/barrel.ts",
+            "export { Service as Worker } from './service';\n",
+        ),
+        (
+            "src/via-barrel.ts",
+            "import { Worker } from './barrel';\nconsole.log(new Worker().run());\n",
         ),
     ];
     for (path, content) in files {
@@ -184,6 +195,11 @@ fn class_member_trace_checks_owner_references_by_owner_name() {
     assert_eq!(alias["search_visibility"], "renamed", "{alias}");
     assert_eq!(alias["reason"], "import-alias", "{alias}");
     assert_eq!(alias["search_as"], "Svc", "{alias}");
+
+    let via_barrel = reference(references, "src/via-barrel.ts");
+    assert_eq!(via_barrel["search_visibility"], "missed", "{via_barrel}");
+    assert_eq!(via_barrel["reason"], "re-export-alias", "{via_barrel}");
+    assert_eq!(via_barrel["search_as"], "Worker", "{via_barrel}");
 }
 
 #[test]
