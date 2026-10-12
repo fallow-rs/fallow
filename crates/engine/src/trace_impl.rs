@@ -1052,11 +1052,35 @@ fn format_reference_kind(kind: ReferenceKind) -> String {
 /// chains to the transitive affected set, and reports the coordination gap (the
 /// seed's exported contracts consumed by modules outside the seed). Returns
 /// `None` when the file is not in the module graph.
+///
+/// Each coordination gap carries the literal-search check, so this reads the
+/// source of each consumer of the seed exports.
 #[must_use]
 pub fn trace_impact_closure(
     graph: &ModuleGraph,
     root: &Path,
     file_path: &str,
+) -> Option<ImpactClosureTrace> {
+    impact_closure_trace(graph, root, file_path, true)
+}
+
+/// Compute the impact closure like [`trace_impact_closure`], without the
+/// literal-search check. The coordination gaps have no search fields, and no
+/// consumer source is read. Use it when only the affected set is needed.
+#[must_use]
+pub fn trace_impact_closure_without_search(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+) -> Option<ImpactClosureTrace> {
+    impact_closure_trace(graph, root, file_path, false)
+}
+
+fn impact_closure_trace(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    check_search: bool,
 ) -> Option<ImpactClosureTrace> {
     let module = find_module(graph, root, file_path)?;
 
@@ -1069,23 +1093,24 @@ pub fn trace_impact_closure(
         .cloned()
         .unwrap_or_else(|| file_path.replace('\\', "/"));
 
-    let mut checks: FxHashMap<String, SearchCheck> = if paths.coordination_gap.is_empty() {
-        FxHashMap::default()
-    } else {
-        consumer_search_checks(graph, module.file_id)
-            .into_iter()
-            .filter_map(|(file_id, check)| {
-                let consumer = graph.modules.get(file_id.0 as usize)?;
-                let path = consumer
-                    .path
-                    .strip_prefix(root)
-                    .unwrap_or(&consumer.path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                Some((path, check))
-            })
-            .collect()
-    };
+    let mut checks: FxHashMap<String, SearchCheck> =
+        if !check_search || paths.coordination_gap.is_empty() {
+            FxHashMap::default()
+        } else {
+            consumer_search_checks(graph, module.file_id)
+                .into_iter()
+                .filter_map(|(file_id, check)| {
+                    let consumer = graph.modules.get(file_id.0 as usize)?;
+                    let path = consumer
+                        .path
+                        .strip_prefix(root)
+                        .unwrap_or(&consumer.path)
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    Some((path, check))
+                })
+                .collect()
+        };
     let coordination_gap = paths
         .coordination_gap
         .into_iter()
@@ -1474,33 +1499,39 @@ mod tests {
     }
 
     fn build_test_graph() -> ModuleGraph {
+        build_test_graph_at(Path::new("/project"))
+    }
+
+    /// The `entry -> utils` graph with module paths under `root`.
+    fn build_test_graph_at(root: &Path) -> ModuleGraph {
+        let src = |name: &str| root.join("src").join(name);
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
-                path: PathBuf::from("/project/src/entry.ts"),
+                path: src("entry.ts"),
                 size_bytes: 100,
             },
             DiscoveredFile {
                 id: FileId(1),
-                path: PathBuf::from("/project/src/utils.ts"),
+                path: src("utils.ts"),
                 size_bytes: 50,
             },
             DiscoveredFile {
                 id: FileId(2),
-                path: PathBuf::from("/project/src/unused.ts"),
+                path: src("unused.ts"),
                 size_bytes: 30,
             },
         ];
 
         let entry_points = vec![EntryPoint {
-            path: PathBuf::from("/project/src/entry.ts"),
+            path: src("entry.ts"),
             source: EntryPointSource::PackageJsonMain,
         }];
 
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
-                path: PathBuf::from("/project/src/entry.ts"),
+                path: src("entry.ts"),
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./utils".to_string(),
@@ -1518,7 +1549,7 @@ mod tests {
             },
             ResolvedModule {
                 file_id: FileId(1),
-                path: PathBuf::from("/project/src/utils.ts"),
+                path: src("utils.ts"),
                 exports: vec![
                     ExportInfo {
                         name: ExportName::Named("foo".to_string()),
@@ -1552,7 +1583,7 @@ mod tests {
             },
             ResolvedModule {
                 file_id: FileId(2),
-                path: PathBuf::from("/project/src/unused.ts"),
+                path: src("unused.ts"),
                 exports: vec![ExportInfo {
                     name: ExportName::Named("baz".to_string()),
                     local_name: Some("baz".to_string()),
@@ -1624,6 +1655,65 @@ mod tests {
 
         let trace = trace_export(&graph, root, "src/utils.ts", "nonexistent");
         assert!(trace.is_none());
+    }
+
+    fn assert_no_search_fields(reference: &ExportReference) {
+        assert_eq!(reference.line, None);
+        assert_eq!(reference.search_visibility, None);
+        assert_eq!(reference.reason, None);
+        assert_eq!(reference.search_as, None);
+    }
+
+    fn assert_gap_has_no_search_fields(gap: &ImpactClosureGap) {
+        assert_eq!(gap.search_visibility, None);
+        assert_eq!(gap.reason, None);
+        assert_eq!(gap.search_as, None);
+    }
+
+    #[test]
+    fn unreadable_consumer_leaves_the_search_fields_absent() {
+        // The paths under `/project` do not exist, so no consumer source can be read.
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_export(&graph, root, "src/utils.ts", "foo").unwrap();
+        assert_eq!(trace.direct_references.len(), 1);
+        assert_no_search_fields(&trace.direct_references[0]);
+
+        let impact = trace_impact_closure(&graph, root, "src/utils.ts").unwrap();
+        assert_eq!(impact.coordination_gap.len(), 1);
+        assert_gap_has_no_search_fields(&impact.coordination_gap[0]);
+    }
+
+    #[test]
+    fn impact_closure_without_search_reads_no_consumer_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("entry.ts"),
+            "import { foo } from './utils';\nfoo();\n",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("utils.ts"),
+            "export const foo = 1;\nexport const bar = 2;\n",
+        )
+        .unwrap();
+        let graph = build_test_graph_at(dir.path());
+
+        let checked = trace_impact_closure(&graph, dir.path(), "src/utils.ts").unwrap();
+        assert_eq!(checked.coordination_gap.len(), 1);
+        assert_eq!(
+            checked.coordination_gap[0].search_visibility,
+            Some(fallow_types::trace::SearchVisibility::Found)
+        );
+
+        let unchecked =
+            trace_impact_closure_without_search(&graph, dir.path(), "src/utils.ts").unwrap();
+        assert_eq!(unchecked.coordination_gap.len(), 1);
+        assert_gap_has_no_search_fields(&unchecked.coordination_gap[0]);
+        assert_eq!(unchecked.affected_not_shown, checked.affected_not_shown);
     }
 
     #[test]
