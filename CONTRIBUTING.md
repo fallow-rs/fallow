@@ -331,7 +331,7 @@ npm run generate:contracts:check
 4. Ensure `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass
 5. Open a pull request against `main`
 
-When the description leaves work for later ("Not in this change", "a separate change", "out of scope"), link an issue that describes each deferred task. For an intentional non-goal, write "No follow-up planned." instead. CI verifies that references identify existing GitHub issues; pull request references do not qualify. Reviewers check that each linked issue covers the deferred work.
+When the description leaves work for later ("Not in this change", "a separate change", "out of scope"), link an issue that describes each deferred task. For an intentional non-goal, write "No follow-up planned." instead. CI verifies that references to this repository identify existing issues; pull request references do not qualify. CI accepts a reference to another repository on its syntax. Reviewers check that each linked issue covers the deferred work.
 
 ## Reporting issues
 

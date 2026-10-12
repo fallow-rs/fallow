@@ -14,4 +14,5 @@
 
 <!-- Optional. List work that this change leaves for later. Link a tracking
 issue describing each item, or write "No follow-up planned." for an intentional
-non-goal. CI verifies issue references; links to pull requests do not qualify. -->
+non-goal. CI verifies references to issues in this repository; links to pull
+requests do not qualify. -->

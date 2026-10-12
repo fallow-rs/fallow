@@ -201,16 +201,8 @@ test("the CLI distinguishes a pull request reference from a tracking issue", () 
   assert.equal(accepted.status, 0, accepted.stderr);
 });
 
-test("the CLI verifies issue URLs and cross-repository references per deferred item", () => {
+test("the CLI verifies same-repository issue URLs per deferred item", () => {
   const responses = {
-    "/repos/fallow-rs/fallow-cloud/issues/41": {
-      status: 200,
-      body: {
-        number: 41,
-        html_url: "https://github.com/fallow-rs/fallow-cloud/issues/41",
-        state: "open",
-      },
-    },
     "/repos/fallow-rs/fallow/issues/3179": {
       status: 200,
       body: {
@@ -219,21 +211,39 @@ test("the CLI verifies issue URLs and cross-repository references per deferred i
         pull_request: {},
       },
     },
+    "/repos/fallow-rs/fallow/issues/3317": {
+      status: 200,
+      body: {
+        number: 3317,
+        html_url: "https://github.com/fallow-rs/fallow/issues/3317",
+        state: "open",
+      },
+    },
   };
   const body =
-    "## Follow-ups\n\n- Cloud support: fallow-rs/fallow-cloud#41.\n- Regex aliases: https://github.com/fallow-rs/fallow/issues/3179.";
+    "## Follow-ups\n\n- Parser support: #3317.\n- Regex aliases: https://github.com/fallow-rs/fallow/issues/3179.";
   const rejected = runWithIssueResponses(body, responses);
   assert.equal(rejected.status, 1, rejected.stderr);
   assert.match(rejected.stderr, /Regex aliases/u);
-  assert.doesNotMatch(rejected.stderr, /Cloud support/u);
+  assert.doesNotMatch(rejected.stderr, /Parser support/u);
   const accepted = runWithIssueResponses(
     body.replace(
       "https://github.com/fallow-rs/fallow/issues/3179",
-      "https://github.com/fallow-rs/fallow-cloud/issues/41",
+      "https://github.com/FALLOW-RS/FALLOW/issues/3317",
     ),
     responses,
   );
   assert.equal(accepted.status, 0, accepted.stderr);
+});
+
+test("the CLI accepts cross-repository references without a lookup", () => {
+  // The workflow token cannot read other repositories, and a private
+  // repository answers 404. The mock fails on any request.
+  const run = runWithIssueResponses(
+    "## Follow-ups\n\n- Cloud support: fallow-rs/fallow-cloud#41.\n- Cloud quota: https://github.com/fallow-rs/fallow-cloud/issues/42.",
+    {},
+  );
+  assert.equal(run.status, 0, run.stderr);
 });
 
 test("the CLI distinguishes missing issues from failed verification", () => {
@@ -246,7 +256,7 @@ test("the CLI distinguishes missing issues from failed verification", () => {
       "/repos/fallow-rs/fallow/issues/123": { status, body },
     });
     assert.equal(run.status, expectedExit, run.stderr);
-    assert.doesNotMatch(run.stdout, /verified issue reference/u);
+    assert.doesNotMatch(run.stdout, /has an issue reference/u);
     assert.doesNotMatch(run.stderr, /test-token/u);
   }
   const optedOut = runWithIssueResponses("## Follow-up\n\n- No follow-up planned.", {});
