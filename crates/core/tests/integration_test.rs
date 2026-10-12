@@ -13,6 +13,8 @@ mod common;
 
 #[path = "integration_test/ag_ui_agent_hooks.rs"]
 mod ag_ui_agent_hooks;
+#[path = "integration_test/alchemy_plugin.rs"]
+mod alchemy_plugin;
 #[path = "integration_test/angular_ng_package.rs"]
 mod angular_ng_package;
 #[path = "integration_test/angular_unrendered_component.rs"]

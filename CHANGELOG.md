@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [@miky-mfw](https://github.com/miky-mfw) for the request.
   (Closes [#3327](https://github.com/fallow-rs/fallow/issues/3327))
 
+- **Alchemy projects no longer report their stacks and deployed Workers as
+  unused.** A new built-in `alchemy` plugin activates on the `alchemy`
+  dependency. Each `alchemy.run.{ts,mts,cts,js,mjs,cjs}` file is an entry
+  point, so the Worker modules that a stack imports stay reachable. The file
+  that a resource names in `main` stays reachable from the file that declares
+  it. Fallow reads `new URL("./x.ts", import.meta.url)`,
+  `${import.meta.dirname}/x.ts`, `path.join(import.meta.dirname, ...)`, a
+  string next to such a `rootDir`, and a string in a stack file. When `main`
+  names its own file, the `default` export and the exported Durable Object,
+  Workflow and Container classes count as used. The CLI loads
+  `@effect/platform-node` and `@effect/platform-bun` at runtime, so these
+  packages are credited. The extraction cache version changes, so the first
+  run after the upgrade parses each file again.
+
 ### Changed
 
 - **Workspace dependency declaration guidance is clearer.** Root imports of npm

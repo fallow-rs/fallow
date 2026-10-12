@@ -144,6 +144,10 @@ pub fn parse_source_to_module_with_flags(
             .chain(federation_facts)
             .collect();
     }
+    apply_alchemy_mains(
+        &mut module,
+        crate::alchemy::extract_alchemy_mains(path, source),
+    );
     // Keep this post-parse guard as defense in depth. The extractor is also
     // mode-gated before the AST walk, so incompatible route producer names never
     // enter the shared cached field in the first place.
@@ -152,6 +156,66 @@ pub fn parse_source_to_module_with_flags(
         module.has_unharvestable_load = false;
     }
     module
+}
+
+/// The local name prefix of the synthetic namespace binding that loads an
+/// Alchemy `main` target. A `#` cannot start a JavaScript identifier, so the
+/// name never collides with a binding of the source.
+const ALCHEMY_MAIN_BINDING_PREFIX: &str = "#alchemy-main-";
+
+/// Record the Alchemy bundle entries that a file declares.
+///
+/// Each other target becomes a speculative namespace import whose whole
+/// object is used, so the target and every value export of it stay reachable
+/// from the declaring file. The platform reads no type, so a type export of
+/// the target stays reportable. The edge loads out of thread, because the
+/// target runs as its own deployed program. A missing target is dropped, not
+/// reported. When the file names itself, the exports that the platform reads
+/// are marked as used by a runtime side effect, which counts only while the
+/// file is reachable.
+fn apply_alchemy_mains(module: &mut ModuleInfo, mains: crate::alchemy::AlchemyMains) {
+    if mains.is_empty() {
+        return;
+    }
+    if !mains.own_exports.is_empty() {
+        let mut exports = module.exports.to_vec();
+        for export in &mut exports {
+            if mains
+                .own_exports
+                .iter()
+                .any(|name| export.name.matches_str(name))
+            {
+                export.is_side_effect_used = true;
+            }
+        }
+        module.exports = exports.into();
+    }
+    if mains.targets.is_empty() {
+        return;
+    }
+    let mut whole_object_uses = module.whole_object_uses.to_vec();
+    let mut semantic_facts = module.semantic_facts.to_vec();
+    for (index, (source, span)) in mains.targets.into_iter().enumerate() {
+        let local_name = format!("{ALCHEMY_MAIN_BINDING_PREFIX}{index}");
+        whole_object_uses.push(local_name.clone());
+        semantic_facts.push(fallow_types::extract::SemanticFact::ImportLoadKindOverride(
+            fallow_types::extract::ImportLoadKindOverrideFact {
+                span_start: span.start,
+                kind: fallow_types::extract::ImportLoadKind::OutOfThread,
+            },
+        ));
+        module
+            .dynamic_imports
+            .push(fallow_types::extract::DynamicImportInfo {
+                source,
+                span,
+                destructured_names: Vec::new(),
+                local_name: Some(local_name),
+                is_speculative: true,
+            });
+    }
+    module.whole_object_uses = whole_object_uses.into();
+    module.semantic_facts = semantic_facts.into();
 }
 
 /// Whether a file is a SvelteKit page-load producer:

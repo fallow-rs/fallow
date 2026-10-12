@@ -15,6 +15,7 @@
     )
 )]
 
+pub mod alchemy;
 mod asset_url;
 pub mod astro;
 mod binding_references;

@@ -1,0 +1,16 @@
+{
+  "name": "alchemy-plugin-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "alchemy deploy",
+    "deploy:infra": "alchemy deploy ./stacks/infra.ts"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0",
+    "@effect/platform-node": "4.0.0",
+    "alchemy": "2.0.0",
+    "effect": "4.0.0",
+    "unused-control": "1.0.0"
+  }
+}
