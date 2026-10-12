@@ -11488,7 +11488,8 @@ kind: string
 line?: (number | null)
 /**
  * Whether a whole-word text search for the export name finds this
- * consumer. Absent when the consumer source cannot be read.
+ * consumer. Absent when no check applies, for example when the consumer
+ * source cannot be read.
  */
 search_visibility?: (SearchVisibility | null)
 /**
@@ -11589,7 +11590,8 @@ owner_file_reachable: boolean
  */
 owner_is_entry_point: boolean
 /**
- * Files that reference the owning export directly.
+ * Files that reference the owning export directly. The search visibility
+ * fields on each entry check the owner export name, not the member name.
  */
 owner_direct_references: ExportReference[]
 /**
@@ -12162,8 +12164,8 @@ note: string
 /**
  * Whether a whole-word text search for the consumed symbol names finds
  * this consumer. When the consumer uses more than one symbol, the worst
- * level wins (`missed`, then `renamed`, then `found`). Absent when the
- * consumer source cannot be read.
+ * level wins (`missed`, then `renamed`, then `found`). Absent when no
+ * check applies, for example when the consumer source cannot be read.
  */
 search_visibility?: (SearchVisibility | null)
 /**
@@ -16979,8 +16981,8 @@ note: string
  */
 export interface SearchGapFacts {
 /**
- * Number of `missed` and `renamed` consumers over all exports, before
- * the per-export cap.
+ * Sum of the per-export totals, before the per-export cap. A consumer of
+ * two changed exports counts once for each export.
  */
 total: number
 /**

@@ -24263,7 +24263,7 @@
               "type": "null"
             }
           ],
-          "description": "Whether a whole-word text search for the export name finds this\nconsumer. Absent when the consumer source cannot be read."
+          "description": "Whether a whole-word text search for the export name finds this\nconsumer. Absent when no check applies, for example when the consumer\nsource cannot be read."
         },
         "reason": {
           "anyOf": [
@@ -24353,7 +24353,7 @@
           "items": {
             "$ref": "#/definitions/ExportReference"
           },
-          "description": "Files that reference the owning export directly."
+          "description": "Files that reference the owning export directly. The search visibility\nfields on each entry check the owner export name, not the member name."
         },
         "owner_re_export_chains": {
           "type": "array",
@@ -24740,7 +24740,7 @@
               "type": "null"
             }
           ],
-          "description": "Whether a whole-word text search for the consumed symbol names finds\nthis consumer. When the consumer uses more than one symbol, the worst\nlevel wins (`missed`, then `renamed`, then `found`). Absent when the\nconsumer source cannot be read."
+          "description": "Whether a whole-word text search for the consumed symbol names finds\nthis consumer. When the consumer uses more than one symbol, the worst\nlevel wins (`missed`, then `renamed`, then `found`). Absent when no\ncheck applies, for example when the consumer source cannot be read."
         },
         "reason": {
           "anyOf": [
@@ -31023,7 +31023,7 @@
       "properties": {
         "total": {
           "type": "integer",
-          "description": "Number of `missed` and `renamed` consumers over all exports, before\nthe per-export cap."
+          "description": "Sum of the per-export totals, before the per-export cap. A consumer of\ntwo changed exports counts once for each export."
         },
         "exports": {
           "type": "array",

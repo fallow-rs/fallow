@@ -1028,7 +1028,7 @@ fn search_gap_lines(facts: Option<&fallow_output::SearchGapFacts>) -> Vec<String
         return Vec::new();
     };
     let mut lines = vec![format!(
-        "  search gap: {} consumer{} of changed exports hide{} from a name search",
+        "  search gap: {} consumer use{} of changed exports hide{} from a name search",
         facts.total,
         crate::report::plural(facts.total),
         if facts.total == 1 { "s" } else { "" },
@@ -2250,7 +2250,7 @@ mod tests {
         let lines = search_gap_lines(Some(&facts));
         assert_eq!(
             lines[0],
-            "  search gap: 5 consumers of changed exports hide from a name search"
+            "  search gap: 5 consumer uses of changed exports hide from a name search"
         );
         assert!(
             lines

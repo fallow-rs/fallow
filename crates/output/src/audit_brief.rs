@@ -173,8 +173,8 @@ pub const SEARCH_GAP_CONSUMER_CAP: usize = 10;
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SearchGapFacts {
-    /// Number of `missed` and `renamed` consumers over all exports, before
-    /// the per-export cap.
+    /// Sum of the per-export totals, before the per-export cap. A consumer of
+    /// two changed exports counts once for each export.
     pub total: usize,
     /// One entry per changed export with at least one such consumer, sorted
     /// by file and line.

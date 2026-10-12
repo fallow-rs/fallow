@@ -145,6 +145,48 @@ fn trace_default_export_searches_for_the_declaration_name() {
 }
 
 #[test]
+fn class_member_trace_checks_owner_references_by_owner_name() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).expect("create source directory");
+    let files: &[(&str, &str)] = &[
+        (
+            "package.json",
+            r#"{"name":"member-probe","type":"module","main":"src/index.ts"}"#,
+        ),
+        ("src/index.ts", "import './direct';\nimport './alias';\n"),
+        (
+            "src/service.ts",
+            "export class Service {\n  run(): number {\n    return 1;\n  }\n}\n",
+        ),
+        (
+            "src/direct.ts",
+            "import { Service } from './service';\nconsole.log(new Service().run());\n",
+        ),
+        (
+            "src/alias.ts",
+            "import { Service as Svc } from './service';\nconsole.log(new Svc().run());\n",
+        ),
+    ];
+    for (path, content) in files {
+        fs::write(root.join(path), content).expect("write probe file");
+    }
+
+    let trace = trace(root, "src/service.ts:run");
+    assert_eq!(trace["owner_export"], "Service", "{trace}");
+    let references = &trace["owner_direct_references"];
+
+    let direct = reference(references, "src/direct.ts");
+    assert_eq!(direct["search_visibility"], "found", "{direct}");
+    assert_eq!(direct["line"], 1, "{direct}");
+
+    let alias = reference(references, "src/alias.ts");
+    assert_eq!(alias["search_visibility"], "renamed", "{alias}");
+    assert_eq!(alias["reason"], "import-alias", "{alias}");
+    assert_eq!(alias["search_as"], "Svc", "{alias}");
+}
+
+#[test]
 fn impact_closure_gaps_report_search_visibility() {
     let dir = tempfile::tempdir().expect("temporary project");
     let root = dir.path();
@@ -273,7 +315,12 @@ fn audit_brief_omits_search_gap_when_every_consumer_is_found() {
         "json",
         "--quiet",
     ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     let brief = parse_json(&output);
+    assert!(
+        brief["impact_closure"].is_object(),
+        "the brief still has an impact closure: {brief}"
+    );
     assert!(
         brief["impact_closure"].get("search_gap").is_none(),
         "{}",

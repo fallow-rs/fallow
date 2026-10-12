@@ -99,7 +99,8 @@ pub struct ClassMemberTrace {
     pub owner_file_reachable: bool,
     /// Whether the file is an entry point.
     pub owner_is_entry_point: bool,
-    /// Files that reference the owning export directly.
+    /// Files that reference the owning export directly. The search visibility
+    /// fields on each entry check the owner export name, not the member name.
     pub owner_direct_references: Vec<ExportReference>,
     /// Re-export chains through which the owning export is reachable. Populated
     /// so a machine consumer can tell "used via a barrel" (empty direct refs but
@@ -128,7 +129,8 @@ pub struct ExportReference {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
     /// Whether a whole-word text search for the export name finds this
-    /// consumer. Absent when the consumer source cannot be read.
+    /// consumer. Absent when no check applies, for example when the consumer
+    /// source cannot be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_visibility: Option<SearchVisibility>,
     /// Why a text search does not find the uses in this consumer. Absent when
@@ -747,8 +749,8 @@ pub struct ImpactClosureGap {
     pub note: String,
     /// Whether a whole-word text search for the consumed symbol names finds
     /// this consumer. When the consumer uses more than one symbol, the worst
-    /// level wins (`missed`, then `renamed`, then `found`). Absent when the
-    /// consumer source cannot be read.
+    /// level wins (`missed`, then `renamed`, then `found`). Absent when no
+    /// check applies, for example when the consumer source cannot be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_visibility: Option<SearchVisibility>,
     /// Why a text search does not find the uses of the worst symbol. Absent
