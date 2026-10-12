@@ -473,11 +473,14 @@ fn saved_audit_sarif(
         )),
         None => None,
     };
+    let diff_risk =
+        parse_optional_section::<fallow_output::DiffRiskReport>(envelope, "/diff_risk").ok()?;
     Some(fallow_api::build_audit_sarif(
         fallow_api::AuditSarifOutputInput {
             dead_code: dead_code.as_ref(),
             duplication: duplication.as_ref(),
             health: health.as_ref(),
+            diff_risk: diff_risk.as_ref(),
         },
     ))
 }

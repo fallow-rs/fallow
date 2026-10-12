@@ -23,8 +23,9 @@ use crate::error::emit_error;
 /// gave the per-file branching payload a field, version 8 introduced that
 /// payload, and version 7 rebased Istanbul coverage paths onto the base
 /// worktree (#2347), so snapshots computed by the coverage-blind base pass must
-/// not be reused.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 11;
+/// not be reused. Version 12 added the clone-group instance locations that
+/// the `diverged-clone-sibling` rule reads.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 12;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {
@@ -63,6 +64,16 @@ pub(super) struct CachedAuditKeySnapshot {
     /// Branching totals per root-relative path, sorted by path so the encoded
     /// bytes are stable for identical input.
     pub(super) branching: Vec<CachedFileBranching>,
+    /// Instance locations of each base clone group, in snapshot order.
+    pub(super) dupe_groups: Vec<Vec<CachedCloneSpan>>,
+}
+
+/// One clone instance location in the cached snapshot.
+#[derive(bitcode::Encode, bitcode::Decode)]
+pub(super) struct CachedCloneSpan {
+    pub(super) path: String,
+    pub(super) start_line: u32,
+    pub(super) end_line: u32,
 }
 
 /// One base complexity finding in the cached snapshot.
@@ -116,6 +127,20 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
             .into_iter()
             .map(|entry| (entry.path, entry.totals))
             .collect(),
+        dupe_groups: cached
+            .dupe_groups
+            .into_iter()
+            .map(|instances| fallow_api::diff_risk::clones::BaseCloneGroup {
+                instances: instances
+                    .into_iter()
+                    .map(|span| fallow_api::diff_risk::clones::CloneSpan {
+                        path: span.path,
+                        start_line: span.start_line,
+                        end_line: span.end_line,
+                    })
+                    .collect(),
+            })
+            .collect(),
     })
 }
 
@@ -147,6 +172,21 @@ pub(super) fn cached_from_snapshot(
         cycles: sorted_keys(&snapshot.cycles),
         public_api: sorted_keys(&snapshot.public_api),
         branching: sorted_branching(&snapshot.branching),
+        dupe_groups: snapshot
+            .dupe_groups
+            .iter()
+            .map(|group| {
+                group
+                    .instances
+                    .iter()
+                    .map(|span| CachedCloneSpan {
+                        path: span.path.clone(),
+                        start_line: span.start_line,
+                        end_line: span.end_line,
+                    })
+                    .collect()
+            })
+            .collect(),
     })
 }
 

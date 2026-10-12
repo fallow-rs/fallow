@@ -193,6 +193,7 @@ pub fn serialize_audit_programmatic_json(
             dead_code,
             duplication,
             complexity,
+            diff_risk: output.diff_risk,
             next_steps: output.next_steps,
         },
         output.telemetry_analysis_run_id.as_deref(),

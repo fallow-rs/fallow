@@ -238,15 +238,23 @@ fn saved_native_codeclimate_issues(
             annotate_health_groups(&mut issues, resolver);
             Ok(issues)
         }
-        EnvelopeKind::Audit => saved_multi_analysis_codeclimate(
-            envelope,
-            root,
-            &rules,
-            "/dead_code",
-            "/duplication",
-            "/complexity",
-            resolver,
-        ),
+        EnvelopeKind::Audit => {
+            let mut issues = saved_multi_analysis_codeclimate(
+                envelope,
+                root,
+                &rules,
+                "/dead_code",
+                "/duplication",
+                "/complexity",
+                resolver,
+            )?;
+            if let Some(diff_risk) =
+                parse_optional_section::<fallow_output::DiffRiskReport>(envelope, "/diff_risk")?
+            {
+                issues.extend(fallow_api::build_diff_risk_codeclimate(&diff_risk));
+            }
+            Ok(issues)
+        }
         EnvelopeKind::Combined => saved_multi_analysis_codeclimate(
             envelope, root, &rules, "/check", "/dupes", "/health", resolver,
         ),

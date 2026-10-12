@@ -277,6 +277,23 @@ pub struct AuditOutcome {
     /// The warning of a degraded type-aware comparison, already recorded on
     /// the head analyses.
     pub type_aware_degrade_warning: Option<String>,
+    /// Diff-risk findings. Every one is introduced by the change. Empty until
+    /// [`run`] computes them, and in [`attribute`] alone.
+    pub diff_risk: fallow_output::DiffRiskReport,
+}
+
+impl AuditOutcome {
+    /// Store the diff-risk findings and fold their severity into the verdict:
+    /// an `error` finding fails the audit, a `warn` finding turns a pass into
+    /// a warn.
+    pub fn apply_diff_risk(&mut self, report: fallow_output::DiffRiskReport) {
+        if report.has_errors() {
+            self.verdict = AuditVerdict::Fail;
+        } else if !report.is_empty() && self.verdict == AuditVerdict::Pass {
+            self.verdict = AuditVerdict::Warn;
+        }
+        self.diff_risk = report;
+    }
 }
 
 /// The base snapshot of the typed audit output. When the head keys stood in
@@ -325,7 +342,9 @@ pub fn run<B: AuditBackend>(
 
     let needs_real_base = matches!(gate, AuditGate::NewOnly)
         && !can_reuse_current_as_base(root, cache_dir, base_ref, &changed_files);
-    let renames = if needs_real_base {
+    // The diff-risk pass also needs the renames under `--gate all`, so a moved
+    // test file does not read as removed tests.
+    let renames = if needs_real_base || !matches!(gate, AuditGate::NewOnly) {
         renamed_files(root, base_ref)
     } else {
         Vec::new()
@@ -378,7 +397,7 @@ pub fn run<B: AuditBackend>(
         }
     };
 
-    let outcome = attribute(
+    let mut outcome = attribute(
         &mut analyses,
         AuditAttributionInput {
             root,
@@ -389,6 +408,15 @@ pub fn run<B: AuditBackend>(
             shared_diff: backend.shared_diff(),
         },
     );
+    let diff_risk = diff_risk_of(
+        &analyses,
+        &outcome,
+        root,
+        base_ref,
+        &changed_files,
+        &renames,
+    );
+    outcome.apply_diff_risk(diff_risk);
     Ok(Some(AuditRun {
         analyses,
         changed_files,
@@ -470,7 +498,57 @@ pub fn attribute<A: AuditAnalyses>(
         base_snapshot_skipped: skipped,
         dupe_demotion_diff_source,
         type_aware_degrade_warning,
+        diff_risk: fallow_output::DiffRiskReport::default(),
     }
+}
+
+/// Run the diff-risk rules over the changed files of one audit.
+fn diff_risk_of<A: AuditAnalyses>(
+    analyses: &A,
+    outcome: &AuditOutcome,
+    root: &Path,
+    base_ref: &str,
+    changed_files: &FxHashSet<PathBuf>,
+    renames: &[RenamedFile],
+) -> fallow_output::DiffRiskReport {
+    let view = analyses.view();
+    let default_rules = RulesConfig::default();
+    let rules = if let Some(dead_code) = view.dead_code.as_ref() {
+        crate::diff_risk::DiffRiskRules::Config(dead_code.config)
+    } else if let Some(health) = view.health.as_ref() {
+        crate::diff_risk::DiffRiskRules::Rules(health.rules)
+    } else {
+        crate::diff_risk::DiffRiskRules::Rules(&default_rules)
+    };
+    let head_clone_groups = view
+        .duplication
+        .as_ref()
+        .map(|duplication| {
+            duplication
+                .clone_groups
+                .iter()
+                .map(|group| crate::diff_risk::clone_spans(group, duplication.root))
+                .collect()
+        })
+        .unwrap_or_default();
+    // A skipped base pass reuses the head keys, so no clone copy can differ.
+    let base_clone_groups = if outcome.base_snapshot_skipped || view.duplication.is_none() {
+        None
+    } else {
+        outcome
+            .base_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.dupe_groups.as_slice())
+    };
+    crate::diff_risk::detect(&crate::diff_risk::DiffRiskInput {
+        root,
+        base_ref,
+        changed_files,
+        renames,
+        rules,
+        base_clone_groups,
+        head_clone_groups,
+    })
 }
 
 /// Analyze the base checkout and take its attribution keys.

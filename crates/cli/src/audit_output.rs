@@ -410,7 +410,9 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                 .is_some_and(|c| fallow_output::styling_candidate_count(&c.summary) > 0)
     });
 
-    if has_check_issues || has_health_findings || has_dupe_groups || has_styling {
+    let has_diff_risk = !result.diff_risk.is_empty();
+
+    if has_check_issues || has_health_findings || has_dupe_groups || has_styling || has_diff_risk {
         print_audit_findings(result, quiet, explain, show_headers);
     }
 
@@ -455,6 +457,51 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
     }
 
     print_audit_styling_summary(result, show_headers);
+    print_audit_diff_risk_section(result, show_headers);
+}
+
+/// Diff-risk section: one line for each finding, with its rule, location and
+/// evidence. The rules report facts about the change itself.
+fn print_audit_diff_risk_section(result: &AuditResult, show_headers: bool) {
+    if result.diff_risk.is_empty() {
+        return;
+    }
+    print_audit_section_header(
+        show_headers,
+        "── Diff risk ──────────────────────────────────────",
+    );
+    for line in diff_risk_lines(&result.diff_risk) {
+        outln!("{line}");
+    }
+}
+
+/// The human lines of the diff-risk section, without color.
+fn diff_risk_lines(report: &fallow_output::DiffRiskReport) -> Vec<String> {
+    report
+        .findings
+        .iter()
+        .map(|finding| {
+            let location = finding.line.map_or_else(
+                || finding.path.clone(),
+                |line| format!("{}:{line}", finding.path),
+            );
+            let label = finding.kind.map_or_else(
+                || finding.rule.code().to_owned(),
+                |kind| {
+                    let kind = serde_json::to_value(kind)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_owned))
+                        .unwrap_or_default();
+                    format!("{} ({kind})", finding.rule.code())
+                },
+            );
+            let severity = match finding.severity {
+                fallow_output::DiffRiskSeverity::Error => "error",
+                fallow_output::DiffRiskSeverity::Warn => "warn",
+            };
+            format!("  {location}  {label} [{severity}]  {}", finding.evidence)
+        })
+        .collect()
 }
 
 fn print_audit_dead_code_section(
@@ -1114,6 +1161,7 @@ pub(super) fn build_audit_json_output(result: &AuditResult) -> Result<serde_json
             dead_code,
             duplication,
             complexity,
+            diff_risk: result.diff_risk.clone(),
             next_steps: audit_next_steps(result),
         },
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
@@ -1350,6 +1398,7 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
         dead_code: check_sarif.as_ref(),
         duplication: result.dupes.as_ref().map(|dupes| &dupes.report),
         health: health_sarif.as_ref(),
+        diff_risk: Some(&result.diff_risk),
     });
 
     report::emit_json(&combined, "SARIF audit")
@@ -1377,6 +1426,7 @@ fn build_audit_codeclimate_issues(result: &AuditResult) -> Vec<fallow_output::Co
         health: result.health.as_ref().map_or_else(Vec::new, |health| {
             fallow_api::build_health_codeclimate(&health.report, &health.config.root)
         }),
+        diff_risk: fallow_api::build_diff_risk_codeclimate(&result.diff_risk),
     })
 }
 
@@ -1392,8 +1442,8 @@ mod tests {
 
     use super::{
         audit_decision_conclusion, build_audit_codeclimate, build_audit_json_output,
-        build_status_parts, build_vital_sign_parts, format_scope_line_parts, print_audit_result,
-        short_base_ref, styling_finding_audit_context_label,
+        build_status_parts, build_vital_sign_parts, diff_risk_lines, format_scope_line_parts,
+        print_audit_result, short_base_ref, styling_finding_audit_context_label,
     };
 
     fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
@@ -1427,6 +1477,7 @@ mod tests {
             elapsed: Duration::ZERO,
             review_deltas: None,
             weakening_signals: Vec::new(),
+            diff_risk: fallow_output::DiffRiskReport::default(),
             routing: None,
             ownership: None,
             decision_surface: None,
@@ -1729,5 +1780,44 @@ mod tests {
 
         // Fail maps to exit 1 and renders the red status line via build_status_parts.
         assert_eq!(print_audit_result(&result, false, false), ExitCode::from(1));
+    }
+
+    #[test]
+    fn diff_risk_lines_show_location_rule_kind_and_evidence() {
+        let report = fallow_output::DiffRiskReport {
+            findings: vec![
+                fallow_output::DiffRiskFinding {
+                    rule: fallow_output::DiffRiskRule::WeakenedTests,
+                    kind: Some(fallow_output::WeakenedTestsKind::SkipOnly),
+                    path: "src/a.test.ts".to_owned(),
+                    line: Some(4),
+                    message: "m".to_owned(),
+                    evidence: "it.skip".to_owned(),
+                    severity: fallow_output::DiffRiskSeverity::Warn,
+                    introduced: true,
+                    related: Vec::new(),
+                    actions: Vec::new(),
+                },
+                fallow_output::DiffRiskFinding {
+                    rule: fallow_output::DiffRiskRule::AddedSuppression,
+                    kind: None,
+                    path: "src/b.ts".to_owned(),
+                    line: None,
+                    message: "m".to_owned(),
+                    evidence: "@ts-ignore".to_owned(),
+                    severity: fallow_output::DiffRiskSeverity::Error,
+                    introduced: true,
+                    related: Vec::new(),
+                    actions: Vec::new(),
+                },
+            ],
+        };
+        assert_eq!(
+            diff_risk_lines(&report),
+            vec![
+                "  src/a.test.ts:4  weakened-tests (skip-only) [warn]  it.skip".to_owned(),
+                "  src/b.ts  added-suppression [error]  @ts-ignore".to_owned(),
+            ]
+        );
     }
 }

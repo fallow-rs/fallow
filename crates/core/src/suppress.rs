@@ -42,6 +42,13 @@ const NON_CORE_KINDS: &[IssueKind] = &[
     IssueKind::UnusedDependencyOverride,
     IssueKind::MisconfiguredDependencyOverride,
     IssueKind::StaleSuppression,
+    // The diff-risk rules: `fallow audit` consumes these tokens from the head
+    // text of changed files, so no core detector checks them.
+    IssueKind::WeakenedTests,
+    IssueKind::AddedSuppression,
+    IssueKind::TestOnlyBranch,
+    IssueKind::DivergedCloneSibling,
+    IssueKind::AddedDependency,
 ];
 
 /// Suppression context that tracks which suppressions are consumed by detectors.

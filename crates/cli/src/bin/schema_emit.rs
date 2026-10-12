@@ -1183,6 +1183,7 @@ fn augment_audit_wire_definitions(definitions: &mut Map<String, Value>) -> Resul
         "styling_introduced",
         "styling_inherited",
         "duplication_demoted",
+        "diff_risk_introduced",
     ] {
         properties.insert(name.to_string(), serde_json::json!({"type": "integer"}));
     }
@@ -1194,6 +1195,7 @@ fn augment_audit_wire_definitions(definitions: &mut Map<String, Value>) -> Resul
         "styling_introduced",
         "styling_inherited",
         "duplication_demoted",
+        "diff_risk_introduced",
     ] {
         if !required.iter().any(|item| item.as_str() == Some(name)) {
             required.push(Value::String(name.to_string()));

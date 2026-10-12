@@ -3059,6 +3059,11 @@ mod tests {
             misplaced_directive: Severity::Off,
             route_collision: Severity::Off,
             dynamic_segment_name_conflict: Severity::Off,
+            weakened_tests: Severity::Off,
+            added_suppression: Severity::Off,
+            test_only_branch: Severity::Off,
+            diverged_clone_sibling: Severity::Off,
+            added_dependency: Severity::Off,
         };
 
         /// Build a two-module graph: an entry `index.ts` and a reachable

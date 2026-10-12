@@ -2364,6 +2364,20 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         boundary_edges: std::iter::once("ui->-db".to_string()).collect(),
         cycles: std::iter::once("a.ts|b.ts".to_string()).collect(),
         public_api: std::iter::once("src/index.ts::foo".to_string()).collect(),
+        dupe_groups: vec![fallow_api::diff_risk::clones::BaseCloneGroup {
+            instances: vec![
+                fallow_api::diff_risk::clones::CloneSpan {
+                    path: "src/a.ts".to_string(),
+                    start_line: 3,
+                    end_line: 12,
+                },
+                fallow_api::diff_risk::clones::CloneSpan {
+                    path: "src/b.ts".to_string(),
+                    start_line: 7,
+                    end_line: 16,
+                },
+            ],
+        }],
     };
 
     let cached = cached_from_snapshot(&key, &snapshot).expect("snapshot should serialize");
@@ -2398,6 +2412,10 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     );
     assert_eq!(decoded.syntactic_dead_code, snapshot.syntactic_dead_code);
     assert_eq!(decoded.dead_code, snapshot.dead_code);
+    assert_eq!(
+        decoded.dupe_groups, snapshot.dupe_groups,
+        "clone instance locations survive the cache round trip"
+    );
     assert_eq!(decoded.health, snapshot.health);
     assert_eq!(decoded.styling, snapshot.styling);
     assert_eq!(decoded.dupes, snapshot.dupes);
@@ -2549,6 +2567,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         boundary_edges: FxHashSet::default(),
         cycles: FxHashSet::default(),
         public_api: FxHashSet::default(),
+        dupe_groups: Vec::new(),
     };
 
     save_cached_base_snapshot(&opts, &key, &snapshot);
@@ -2621,6 +2640,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
     };
     let cached = CachedAuditKeySnapshot {
         branching: Vec::new(),
+        dupe_groups: Vec::new(),
         version: AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
         key_hash: key.hash,

@@ -9,6 +9,13 @@ pub use fallow_types::extract::{ModuleInfo, ParseResult, SourceReadFailure};
 
 type CacheStore = fallow_extract::cache::CacheStore;
 
+/// Parse the `fallow-ignore-next-line` and `fallow-ignore-file` comments of
+/// raw source text, without a parse. Unknown tokens are dropped.
+#[must_use]
+pub fn suppressions_from_text(source: &str) -> Vec<fallow_types::suppress::Suppression> {
+    fallow_extract::suppress::parse_suppressions_from_source(source).suppressions
+}
+
 /// On-demand, transient function extraction for local similar-code inference.
 pub mod similar_code {
     use std::path::Path;

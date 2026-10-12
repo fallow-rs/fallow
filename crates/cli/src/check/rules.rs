@@ -307,6 +307,11 @@ mod tests {
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
+            weakened_tests: Severity::Warn,
+            added_suppression: Severity::Warn,
+            test_only_branch: Severity::Warn,
+            diverged_clone_sibling: Severity::Warn,
+            added_dependency: Severity::Warn,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -461,6 +466,11 @@ mod tests {
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
+            weakened_tests: Severity::Warn,
+            added_suppression: Severity::Warn,
+            test_only_branch: Severity::Warn,
+            diverged_clone_sibling: Severity::Warn,
+            added_dependency: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None, false));
     }
@@ -534,6 +544,11 @@ mod tests {
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
+            weakened_tests: Severity::Warn,
+            added_suppression: Severity::Warn,
+            test_only_branch: Severity::Warn,
+            diverged_clone_sibling: Severity::Warn,
+            added_dependency: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None, false));
 
@@ -1133,6 +1148,11 @@ mod tests {
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
+            weakened_tests: Severity::Warn,
+            added_suppression: Severity::Warn,
+            test_only_branch: Severity::Warn,
+            diverged_clone_sibling: Severity::Warn,
+            added_dependency: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -1220,6 +1240,11 @@ mod tests {
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
+            weakened_tests: Severity::Warn,
+            added_suppression: Severity::Warn,
+            test_only_branch: Severity::Warn,
+            diverged_clone_sibling: Severity::Warn,
+            added_dependency: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -3241,6 +3266,11 @@ mod tests {
             misplaced_directive: Severity::Warn,
             route_collision: Severity::Warn,
             dynamic_segment_name_conflict: Severity::Warn,
+            weakened_tests: Severity::Warn,
+            added_suppression: Severity::Warn,
+            test_only_branch: Severity::Warn,
+            diverged_clone_sibling: Severity::Warn,
+            added_dependency: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &all_warn, None, false));
     }

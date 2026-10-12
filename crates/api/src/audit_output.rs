@@ -102,6 +102,8 @@ pub struct AuditJsonOutputInput<DeadCode, Duplication, Complexity> {
     pub duplication: Option<Duplication>,
     /// Complexity (health) section payload; `None` omits the section.
     pub complexity: Option<Complexity>,
+    /// Diff-risk findings; an empty report omits the section.
+    pub diff_risk: fallow_output::DiffRiskReport,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
 }
@@ -116,6 +118,9 @@ pub struct AuditSarifOutputInput<'a> {
     pub duplication: Option<&'a DuplicationReport>,
     /// Prebuilt health SARIF document whose runs are merged in.
     pub health: Option<&'a serde_json::Value>,
+    /// Diff-risk findings, converted into a dedicated SARIF run; skipped when
+    /// empty.
+    pub diff_risk: Option<&'a fallow_output::DiffRiskReport>,
 }
 
 /// Typed audit CodeClimate assembly input.
@@ -124,8 +129,10 @@ pub struct AuditCodeClimateOutputInput {
     pub dead_code: Vec<CodeClimateIssue>,
     /// Duplication issues, emitted after dead code.
     pub duplication: Vec<CodeClimateIssue>,
-    /// Health issues, emitted last.
+    /// Health issues, emitted after duplication.
     pub health: Vec<CodeClimateIssue>,
+    /// Diff-risk issues, emitted last.
+    pub diff_risk: Vec<CodeClimateIssue>,
 }
 
 #[derive(Serialize)]
@@ -247,6 +254,7 @@ where
         dead_code: input.dead_code,
         duplication: input.duplication,
         complexity,
+        diff_risk: (!input.diff_risk.is_empty()).then_some(input.diff_risk),
         next_steps: input.next_steps,
     };
     let mut value = fallow_output::serialize_audit_json_output(output, analysis_run_id)?;
@@ -263,6 +271,31 @@ where
 pub fn attach_audit_wire_attribution(value: &mut serde_json::Value) {
     attach_audit_styling_attribution(value);
     attach_audit_duplication_demotion_attribution(value);
+    attach_audit_diff_risk_attribution(value);
+}
+
+/// Add `attribution.diff_risk_introduced`, the number of serialized
+/// `diff_risk.findings[]` entries.
+///
+/// Every diff-risk finding is introduced by construction: the rules compare
+/// the base and head text of the change. Always inserted when an
+/// `attribution` object is present: an integer, `0` when the section is
+/// absent. Wire-only, like the styling counts.
+pub fn attach_audit_diff_risk_attribution(value: &mut serde_json::Value) {
+    let introduced = value
+        .get("diff_risk")
+        .and_then(|section| section.get("findings"))
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    if let Some(attribution) = value
+        .get_mut("attribution")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        attribution.insert(
+            "diff_risk_introduced".to_string(),
+            serde_json::json!(introduced),
+        );
+    }
 }
 
 /// Add `attribution.duplication_demoted`, derived from serialized clone
@@ -355,6 +388,12 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
         extend_sarif_runs(&mut all_runs, sarif);
     }
 
+    if let Some(diff_risk) = input.diff_risk
+        && !diff_risk.is_empty()
+    {
+        all_runs.push(build_audit_diff_risk_sarif_run(diff_risk));
+    }
+
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -395,13 +434,118 @@ fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_j
     })
 }
 
+fn build_audit_diff_risk_sarif_run(report: &fallow_output::DiffRiskReport) -> serde_json::Value {
+    let mut rules: Vec<fallow_output::DiffRiskRule> =
+        report.findings.iter().map(|finding| finding.rule).collect();
+    rules.sort();
+    rules.dedup();
+    let rule_defs: Vec<serde_json::Value> = rules
+        .iter()
+        .map(|rule| {
+            serde_json::json!({
+                "id": rule.sarif_rule_id(),
+                "shortDescription": { "text": rule.description() },
+                "helpUri": fallow_output::rule_docs_url("cli/audit#diff-risk-rules"),
+            })
+        })
+        .collect();
+    let results: Vec<serde_json::Value> = report
+        .findings
+        .iter()
+        .map(|finding| {
+            let level = match finding.severity {
+                fallow_output::DiffRiskSeverity::Error => "error",
+                fallow_output::DiffRiskSeverity::Warn => "warning",
+            };
+            let mut physical = serde_json::json!({
+                "artifactLocation": { "uri": finding.path },
+            });
+            if let Some(line) = finding.line {
+                physical["region"] = serde_json::json!({ "startLine": line });
+            }
+            let mut result = serde_json::json!({
+                "ruleId": finding.rule.sarif_rule_id(),
+                "level": level,
+                "message": { "text": format!("{} ({})", finding.message, finding.evidence) },
+                "locations": [{ "physicalLocation": physical }],
+            });
+            if !finding.related.is_empty() {
+                result["relatedLocations"] = finding
+                    .related
+                    .iter()
+                    .map(|location| {
+                        serde_json::json!({
+                            "physicalLocation": {
+                                "artifactLocation": { "uri": location.path },
+                                "region": { "startLine": location.line },
+                            }
+                        })
+                    })
+                    .collect();
+            }
+            result
+        })
+        .collect();
+    serde_json::json!({
+        "tool": {
+            "driver": {
+                "name": "fallow",
+                "version": env!("CARGO_PKG_VERSION"),
+                "informationUri": "https://github.com/fallow-rs/fallow",
+                "rules": rule_defs,
+            }
+        },
+        "automationDetails": { "id": "fallow/audit/diff-risk" },
+        "results": results,
+    })
+}
+
 /// Build combined CodeClimate issues for `fallow audit`.
 #[must_use]
 pub fn build_audit_codeclimate_issues(input: AuditCodeClimateOutputInput) -> Vec<CodeClimateIssue> {
     let mut all_issues = input.dead_code;
     all_issues.extend(input.duplication);
     all_issues.extend(input.health);
+    all_issues.extend(input.diff_risk);
     all_issues
+}
+
+/// Build CodeClimate issues for the diff-risk findings of an audit. Finding
+/// paths are already root-relative.
+#[must_use]
+pub fn build_diff_risk_codeclimate(
+    report: &fallow_output::DiffRiskReport,
+) -> Vec<CodeClimateIssue> {
+    report
+        .findings
+        .iter()
+        .map(|finding| {
+            let check_name = finding.rule.sarif_rule_id();
+            let line = finding.line.unwrap_or(1);
+            let fingerprint = fallow_output::codeclimate_fingerprint_hash(&[
+                &check_name,
+                &finding.path,
+                &line.to_string(),
+                &finding.evidence,
+            ]);
+            fallow_output::build_codeclimate_issue(fallow_output::CodeClimateIssueInput {
+                check_name: &check_name,
+                description: &format!("{} ({})", finding.message, finding.evidence),
+                severity: match finding.severity {
+                    fallow_output::DiffRiskSeverity::Error => {
+                        fallow_output::CodeClimateSeverity::Major
+                    }
+                    fallow_output::DiffRiskSeverity::Warn => {
+                        fallow_output::CodeClimateSeverity::Minor
+                    }
+                },
+                category: "Bug Risk",
+                path: &finding.path,
+                begin_line: finding.line,
+                fingerprint: &fingerprint,
+            })
+        })
+        .collect()
 }
 
 /// Build the combined CodeClimate JSON array for `fallow audit`.
@@ -475,6 +619,7 @@ mod tests {
                 dead_code: Some(serde_json::json!({"total_issues": 0})),
                 duplication: None::<serde_json::Value>,
                 complexity: None::<serde_json::Value>,
+                diff_risk: fallow_output::DiffRiskReport::default(),
                 next_steps: Vec::new(),
             },
             Some("run-1"),
@@ -523,6 +668,7 @@ mod tests {
             dead_code: Some(&dead_code),
             duplication: Some(&duplication),
             health: Some(&health),
+            diff_risk: None,
         });
 
         assert_eq!(value["version"], "2.1.0");
@@ -558,9 +704,10 @@ mod tests {
         let value = build_audit_codeclimate(AuditCodeClimateOutputInput {
             dead_code: vec![issue.clone()],
             duplication: vec![issue.clone()],
-            health: vec![issue],
+            health: vec![issue.clone()],
+            diff_risk: vec![issue],
         });
 
-        assert_eq!(value.as_array().expect("issues").len(), 3);
+        assert_eq!(value.as_array().expect("issues").len(), 4);
     }
 }

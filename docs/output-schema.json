@@ -240,6 +240,17 @@
           ],
           "description": "Complexity findings scoped to the audit changeset."
         },
+        "diff_risk": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DiffRiskReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Diff-risk findings: facts about the change itself, such as weakened\ntests or added suppressions. Every finding is introduced. Absent when\nthe change has no diff-risk finding."
+        },
         "next_steps": {
           "type": "array",
           "items": {
@@ -8437,6 +8448,9 @@
         },
         "duplication_demoted": {
           "type": "integer"
+        },
+        "diff_risk_introduced": {
+          "type": "integer"
         }
       },
       "required": [
@@ -8449,7 +8463,8 @@
         "duplication_inherited",
         "styling_introduced",
         "styling_inherited",
-        "duplication_demoted"
+        "duplication_demoted",
+        "diff_risk_introduced"
       ],
       "description": "New-vs-inherited issue counts for audit."
     },
@@ -30886,6 +30901,231 @@
         "depth"
       ],
       "description": "One file of a [`ConsumerClosure`]."
+    },
+    "DiffRiskReport": {
+      "type": "object",
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DiffRiskFinding"
+          },
+          "description": "Findings, ordered by path, line, rule and kind."
+        }
+      },
+      "required": [
+        "findings"
+      ],
+      "description": "The diff-risk section of `fallow audit` JSON."
+    },
+    "DiffRiskFinding": {
+      "type": "object",
+      "properties": {
+        "rule": {
+          "description": "The rule that owns the finding.",
+          "$ref": "#/definitions/DiffRiskRule"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WeakenedTestsKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the tests were weakened. Present only on `weakened-tests`."
+        },
+        "path": {
+          "type": "string",
+          "description": "Root-relative path of the changed file, with forward slashes."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based head line. Absent when the finding is about the whole file,\nfor example removed tests or a deleted file."
+        },
+        "message": {
+          "type": "string",
+          "description": "One-sentence statement of the fact."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "The token, the count change, or the value change that supports the\nfinding."
+        },
+        "severity": {
+          "description": "The severity from the rule config.",
+          "$ref": "#/definitions/DiffRiskSeverity"
+        },
+        "introduced": {
+          "type": "boolean",
+          "description": "Always `true`: the change introduced the finding."
+        },
+        "related": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DiffRiskLocation"
+          },
+          "description": "Related locations, such as the unchanged siblings of a clone group."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DiffRiskAction"
+          },
+          "description": "Suppression actions."
+        }
+      },
+      "required": [
+        "rule",
+        "path",
+        "message",
+        "evidence",
+        "severity",
+        "introduced",
+        "actions"
+      ],
+      "description": "One diff-risk finding."
+    },
+    "DiffRiskRule": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "weakened-tests",
+          "description": "The diff weakened tests. The `kind` field tells how."
+        },
+        {
+          "type": "string",
+          "const": "added-suppression",
+          "description": "The diff added a lint, type-check, coverage or Fallow suppression."
+        },
+        {
+          "type": "string",
+          "const": "test-only-branch",
+          "description": "The diff added a test-environment branch to a non-test source file."
+        },
+        {
+          "type": "string",
+          "const": "diverged-clone-sibling",
+          "description": "The diff edited one copy of a base clone group, and no sibling changed."
+        },
+        {
+          "type": "string",
+          "const": "added-dependency",
+          "description": "The diff added a dependency to a `package.json`."
+        }
+      ],
+      "description": "The rule that owns a diff-risk finding."
+    },
+    "WeakenedTestsKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "skip-only",
+          "description": "A new skip or focus marker (`it.skip`, `xit`, `it.only`)."
+        },
+        {
+          "type": "string",
+          "const": "removed-tests",
+          "description": "Fewer test cases across the changed test files."
+        },
+        {
+          "type": "string",
+          "const": "assertion-drop",
+          "description": "Fewer assertions in a test file, with no test case removed."
+        },
+        {
+          "type": "string",
+          "const": "coverage-threshold",
+          "description": "A coverage threshold that the change made less strict."
+        }
+      ],
+      "description": "How a `weakened-tests` finding weakened the tests."
+    },
+    "DiffRiskSeverity": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "error",
+          "description": "The rule is `error`: the finding fails the audit verdict."
+        },
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "The rule is `warn`: the finding gives a `warn` verdict."
+        }
+      ],
+      "description": "The severity of a diff-risk finding, from its rule."
+    },
+    "DiffRiskLocation": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Root-relative path, with forward slashes."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line."
+        }
+      },
+      "required": [
+        "path",
+        "line"
+      ],
+      "description": "A location that relates to a diff-risk finding, such as an unchanged clone\nsibling."
+    },
+    "DiffRiskAction": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Action discriminator.",
+          "$ref": "#/definitions/DiffRiskActionType"
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Always `false`: Fallow does not apply a suppression for you."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the action."
+        },
+        "comment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The suppression comment to insert. Absent on `suppress-in-config`."
+        }
+      },
+      "required": [
+        "type",
+        "auto_fixable",
+        "description"
+      ],
+      "description": "One action on a diff-risk finding."
+    },
+    "DiffRiskActionType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "suppress-line",
+          "description": "Put the `comment` on the line above the finding."
+        },
+        {
+          "type": "string",
+          "const": "suppress-file",
+          "description": "Put the `comment` at the top of the file."
+        },
+        {
+          "type": "string",
+          "const": "suppress-in-config",
+          "description": "The file cannot hold a comment. Set the rule to `off` for this path in\nan `overrides` entry of the Fallow config."
+        }
+      ],
+      "description": "The type of a diff-risk action. Every type is a suppression."
     }
   }
 }

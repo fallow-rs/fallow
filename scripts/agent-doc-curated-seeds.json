@@ -2038,6 +2038,18 @@
     },
     {
       "section": "issue-types",
+      "row": "added-dependency",
+      "column": "Description",
+      "seed": "The change adds a dependency"
+    },
+    {
+      "section": "issue-types",
+      "row": "added-suppression",
+      "column": "Description",
+      "seed": "The change adds a suppression comment"
+    },
+    {
+      "section": "issue-types",
       "row": "boundary-call-violation",
       "column": "Description",
       "seed": "Zoned file calls a callee its zone forbids; Requires boundaries.calls.forbidden patterns"
@@ -2113,6 +2125,12 @@
       "row": "dev-dependency-in-production",
       "column": "Description",
       "seed": "devDependency imported by production code with a runtime import"
+    },
+    {
+      "section": "issue-types",
+      "row": "diverged-clone-sibling",
+      "column": "Description",
+      "seed": "The change edits one copy of duplicated code but not its siblings"
     },
     {
       "section": "issue-types",
@@ -2263,6 +2281,12 @@
       "row": "tainted-sink",
       "column": "Description",
       "seed": "Syntactic security sink candidates require verification"
+    },
+    {
+      "section": "issue-types",
+      "row": "test-only-branch",
+      "column": "Description",
+      "seed": "The change adds a test-environment branch to source code"
     },
     {
       "section": "issue-types",
@@ -2431,6 +2455,12 @@
       "row": "unused-type",
       "column": "Description",
       "seed": "Type export is never imported"
+    },
+    {
+      "section": "issue-types",
+      "row": "weakened-tests",
+      "column": "Description",
+      "seed": "The change weakens tests or a coverage threshold"
     },
     {
       "section": "mcp-resources",

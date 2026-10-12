@@ -433,12 +433,13 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
         .chain(DUPES_RULES.iter())
         .chain(FLAGS_RULES.iter())
         .chain(SECURITY_RULES.iter())
+        .chain(AUDIT_RULES.iter())
         .find(|r| r.id == id)
 }
 
 /// Every registered rule in registry order: dead-code, health, duplication,
-/// flags, then security. The order is the `fallow schema` `issue_types` order
-/// and the `fallow://issue-types` resource order.
+/// flags, security, then audit. The order is the `fallow schema`
+/// `issue_types` order and the `fallow://issue-types` resource order.
 pub fn all_rules() -> impl Iterator<Item = &'static RuleDef> {
     CHECK_RULES
         .iter()
@@ -446,10 +447,11 @@ pub fn all_rules() -> impl Iterator<Item = &'static RuleDef> {
         .chain(DUPES_RULES.iter())
         .chain(FLAGS_RULES.iter())
         .chain(SECURITY_RULES.iter())
+        .chain(AUDIT_RULES.iter())
 }
 
 /// The command family a rule reports under (`dead-code`, `health`, `dupes`,
-/// `flags`, or `security`), derived from the registry array that owns it.
+/// `flags`, `security`, or `audit`), derived from the registry array that owns it.
 /// Membership is by id (unique across registries); the registries are
 /// `const` slices, so pointer identity is not stable across uses.
 #[must_use]
@@ -463,6 +465,8 @@ pub fn rule_command(rule: &RuleDef) -> &'static str {
         "flags"
     } else if owns(SECURITY_RULES) {
         "security"
+    } else if owns(AUDIT_RULES) {
+        "audit"
     } else {
         "dead-code"
     }
@@ -561,6 +565,9 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
     if let Some(rule) = dead_code_registry_rule(&normalized) {
         return Some(rule);
     }
+    if let Some(rule) = rule_by_id(&format!("fallow/{normalized}")) {
+        return Some(rule);
+    }
     let alias = health_alias_id(&normalized).or_else(|| security_alias_id(&normalized));
     if let Some(id) = alias
         && let Some(rule) = rule_by_id(id)
@@ -589,6 +596,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
             .chain(DUPES_RULES.iter())
             .chain(FLAGS_RULES.iter())
             .chain(SECURITY_RULES.iter())
+            .chain(AUDIT_RULES.iter())
             .find(|rule| {
                 rule.docs_path.ends_with(&normalized)
                     || rule.docs_path.ends_with(singular)
@@ -658,7 +666,34 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         .or_else(|| health_runtime_rule_guide(rule.id))
         .or_else(|| duplication_rule_guide(rule.id))
         .or_else(|| security_rule_guide(rule.id))
+        .or_else(|| audit_rule_guide(rule.id))
         .unwrap_or_else(fallback_rule_guide)
+}
+
+fn audit_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
+        "fallow/weakened-tests" => RuleGuide {
+            example: "A change turns `it('charges tax', ...)` into `it.skip('charges tax', ...)`, or lowers `coverage.thresholds.lines` from 90 to 70.",
+            how_to_fix: "Decide if the weaker test or threshold is intended. If it is, suppress the finding with `// fallow-ignore-next-line weakened-tests` (or `fallow-ignore-file` for a file-level kind), or set the rule to `off` for the path in `overrides`.",
+        },
+        "fallow/added-suppression" => RuleGuide {
+            example: "A change adds `// @ts-expect-error` above a call instead of a correct type.",
+            how_to_fix: "Decide if the suppression is necessary. If it is, keep it and suppress the finding with `// fallow-ignore-next-line added-suppression`, or turn the rule off for the path.",
+        },
+        "fallow/test-only-branch" => RuleGuide {
+            example: "A change adds `if (process.env.NODE_ENV === 'test') return cached;` to `src/pricing.ts`.",
+            how_to_fix: "Prefer a seam that tests can inject, such as a parameter or a module mock. If the branch is intended, suppress it with `// fallow-ignore-next-line test-only-branch`.",
+        },
+        "fallow/diverged-clone-sibling" => RuleGuide {
+            example: "`src/a/total.ts` and `src/b/total.ts` held the same function. The change fixes a bug in the first copy only.",
+            how_to_fix: "Check the unchanged copies in `related`. Apply the same change there, or extract a shared function. If the copies must differ, suppress with `// fallow-ignore-next-line diverged-clone-sibling`.",
+        },
+        "fallow/added-dependency" => RuleGuide {
+            example: "A change adds `\"left-pad\": \"^1.3.0\"` to `dependencies`.",
+            how_to_fix: "Check that the package exists, is maintained, and is not already covered by a dependency of the project. Suppress through `overrides` because `package.json` cannot hold a comment.",
+        },
+        _ => return None,
+    })
 }
 
 fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
@@ -1192,6 +1227,50 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     docs_path: "explanations/duplication#clone-groups",
 }];
 
+/// Rule definitions for the diff-risk rules of `fallow audit`.
+pub const AUDIT_RULES: &[RuleDef] = &[
+    RuleDef {
+        id: "fallow/weakened-tests",
+        category: "Audit",
+        name: "Weakened Tests",
+        short: "The change weakens tests or a coverage threshold",
+        full: "`fallow audit` compares the base and head text of each changed file. The `kind` field tells how the change weakened the tests: `skip-only` (a new `.skip`, `.only`, `xit` or `fit` marker), `removed-tests` (fewer test cases in a file, while the total of all changed test files also dropped), `assertion-drop` (fewer `expect`, `assert` or `should` calls in a test file with no test case removed), or `coverage-threshold` (a coverage or quality threshold that is less strict). The finding is a fact about the change, not a proof that coverage dropped. Defaults to `warn`.",
+        docs_path: "cli/audit#diff-risk-rules",
+    },
+    RuleDef {
+        id: "fallow/added-suppression",
+        category: "Audit",
+        name: "Added Suppressions",
+        short: "The change adds a suppression comment",
+        full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Defaults to `warn`.",
+        docs_path: "cli/audit#diff-risk-rules",
+    },
+    RuleDef {
+        id: "fallow/test-only-branch",
+        category: "Audit",
+        name: "Test-Only Branches",
+        short: "The change adds a test-environment branch to source code",
+        full: "`fallow audit` reports a line that the change adds to a non-test source file and that checks the test environment: `process.env.NODE_ENV` compared with `'test'`, `process.env.VITEST`, `process.env.JEST_WORKER_ID` or `import.meta.vitest`. Such a branch lets the tests take a path that production does not take. Tool config files are skipped. Defaults to `warn`.",
+        docs_path: "cli/audit#diff-risk-rules",
+    },
+    RuleDef {
+        id: "fallow/diverged-clone-sibling",
+        category: "Audit",
+        name: "Diverged Clone Siblings",
+        short: "The change edits one copy of duplicated code but not its siblings",
+        full: "`fallow audit` reports a base clone group where the change edited exactly one copy, the edit broke the clone, and every other copy kept its text. The siblings can need the same change. A cosmetic edit that keeps the clone, a removed copy and a change that edits every copy do not report. Needs the base snapshot of `--gate new-only`. Defaults to `warn`.",
+        docs_path: "cli/audit#diff-risk-rules",
+    },
+    RuleDef {
+        id: "fallow/added-dependency",
+        category: "Audit",
+        name: "Added Dependencies",
+        short: "The change adds a dependency",
+        full: "`fallow audit` reports a dependency that the change adds to a `package.json`. A new dependency is often correct, so the rule defaults to `off`. Set it to `warn` or `error` to review every new package. An invented package name already fails as an unresolved import or an unlisted dependency.",
+        docs_path: "cli/audit#diff-risk-rules",
+    },
+];
+
 /// Rule definitions for feature-flag findings.
 pub const FLAGS_RULES: &[RuleDef] = &[
     RuleDef {
@@ -1417,6 +1496,16 @@ mod tests {
     }
 
     #[test]
+    fn audit_rules_resolve_by_bare_token_and_report_under_audit() {
+        for rule in AUDIT_RULES {
+            let bare = bare_rule_id(rule);
+            assert_eq!(rule_by_token(bare).map(|found| found.id), Some(rule.id));
+            assert_eq!(rule_command(rule), "audit");
+            assert_eq!(rule_severity_key(rule), Some(bare));
+        }
+    }
+
+    #[test]
     fn all_rules_walks_every_registry_in_order() {
         let ids: Vec<&str> = all_rules().map(|rule| rule.id).collect();
         let expected: Vec<&str> = CHECK_RULES
@@ -1425,6 +1514,7 @@ mod tests {
             .chain(DUPES_RULES)
             .chain(FLAGS_RULES)
             .chain(SECURITY_RULES)
+            .chain(AUDIT_RULES)
             .map(|rule| rule.id)
             .collect();
         assert_eq!(ids, expected);

@@ -211,6 +211,11 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     /// Complexity findings scoped to the audit changeset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complexity: Option<Complexity>,
+    /// Diff-risk findings: facts about the change itself, such as weakened
+    /// tests or added suppressions. Every finding is introduced. Absent when
+    /// the change has no diff-risk finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_risk: Option<crate::DiffRiskReport>,
     /// Read-only follow-up commands computed from this run's findings. See
     /// `CheckOutput::next_steps` for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -599,6 +604,7 @@ mod tests {
                 dead_code: Some(json!({ "summary": { "total_issues": 0 } })),
                 duplication: None::<serde_json::Value>,
                 complexity: None::<serde_json::Value>,
+                diff_risk: None,
                 next_steps: Vec::new(),
             },
             Some("run-audit"),

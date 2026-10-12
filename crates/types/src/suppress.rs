@@ -208,6 +208,23 @@ pub enum IssueKind {
     /// A dependency cycle between workspace packages, built from resolved
     /// cross-package imports. Reported even when no file-level cycle exists.
     PackageCycle,
+    /// An audit diff that weakens tests: a new skip or focus marker, removed
+    /// test cases, fewer assertions, or a lowered coverage threshold.
+    /// Audit-only, computed from the base and head text of changed files.
+    WeakenedTests,
+    /// An audit diff that adds a lint, type-check, coverage or Fallow
+    /// suppression comment. Audit-only.
+    AddedSuppression,
+    /// An audit diff that adds a test-environment branch, such as
+    /// `process.env.NODE_ENV === 'test'`, to a non-test source file.
+    /// Audit-only.
+    TestOnlyBranch,
+    /// An audit diff that edits one instance of a base clone group so that it
+    /// no longer matches its siblings, while no sibling changed. Audit-only.
+    DivergedCloneSibling,
+    /// An audit diff that adds a dependency to a `package.json`. Audit-only
+    /// and off by default.
+    AddedDependency,
 }
 
 impl IssueKind {
@@ -269,6 +286,11 @@ impl IssueKind {
         Self::DevDependencyInProduction,
         Self::DeprecatedExportInUse,
         Self::PackageCycle,
+        Self::WeakenedTests,
+        Self::AddedSuppression,
+        Self::TestOnlyBranch,
+        Self::DivergedCloneSibling,
+        Self::AddedDependency,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -337,6 +359,11 @@ impl IssueKind {
             Self::DeprecatedExportInUse => 54,
             Self::PackageCycle => 55,
             Self::AbsentComponentProp => 56,
+            Self::WeakenedTests => 57,
+            Self::AddedSuppression => 58,
+            Self::TestOnlyBranch => 59,
+            Self::DivergedCloneSibling => 60,
+            Self::AddedDependency => 61,
         }
     }
 
@@ -400,6 +427,11 @@ impl IssueKind {
             54 => Some(Self::DeprecatedExportInUse),
             55 => Some(Self::PackageCycle),
             56 => Some(Self::AbsentComponentProp),
+            57 => Some(Self::WeakenedTests),
+            58 => Some(Self::AddedSuppression),
+            59 => Some(Self::TestOnlyBranch),
+            60 => Some(Self::DivergedCloneSibling),
+            61 => Some(Self::AddedDependency),
             _ => None,
         }
     }
@@ -736,6 +768,21 @@ mod tests {
     }
 
     #[test]
+    fn issue_kind_parse_accepts_diff_risk_tokens() {
+        let cases = [
+            ("weakened-tests", IssueKind::WeakenedTests),
+            ("added-suppression", IssueKind::AddedSuppression),
+            ("test-only-branch", IssueKind::TestOnlyBranch),
+            ("diverged-clone-sibling", IssueKind::DivergedCloneSibling),
+            ("added-dependency", IssueKind::AddedDependency),
+        ];
+        for (token, kind) in cases {
+            assert_eq!(IssueKind::parse(token), Some(kind), "{token}");
+            assert_eq!(issue_kind_to_kebab(kind), token);
+        }
+    }
+
+    #[test]
     fn issue_kind_from_str_unknown() {
         assert_eq!(IssueKind::parse("foo"), None);
         assert_eq!(IssueKind::parse(""), None);
@@ -812,6 +859,11 @@ mod tests {
             (54, IssueKind::DeprecatedExportInUse),
             (55, IssueKind::PackageCycle),
             (56, IssueKind::AbsentComponentProp),
+            (57, IssueKind::WeakenedTests),
+            (58, IssueKind::AddedSuppression),
+            (59, IssueKind::TestOnlyBranch),
+            (60, IssueKind::DivergedCloneSibling),
+            (61, IssueKind::AddedDependency),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

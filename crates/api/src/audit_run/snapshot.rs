@@ -40,6 +40,9 @@ pub struct AuditKeySnapshot {
     pub styling: FxHashSet<String>,
     /// Clone-group keys.
     pub dupes: FxHashSet<String>,
+    /// Instance locations of the clone groups, for the `diverged-clone-sibling`
+    /// rule. The paths stay base paths: the rename remap does not move them.
+    pub dupe_groups: Vec<crate::diff_risk::clones::BaseCloneGroup>,
     /// Cross-zone boundary edge keys (`<from_zone>->-<to_zone>`), one for each
     /// zone pair.
     pub boundary_edges: FxHashSet<String>,
@@ -83,6 +86,13 @@ impl AuditKeySnapshot {
                 .clone_groups
                 .iter()
                 .map(|group| crate::audit_keys::dupe_group_key(group, duplication.root))
+                .collect();
+            snapshot.dupe_groups = duplication
+                .clone_groups
+                .iter()
+                .map(|group| crate::diff_risk::clones::BaseCloneGroup {
+                    instances: crate::diff_risk::clone_spans(group, duplication.root),
+                })
                 .collect();
         }
         snapshot

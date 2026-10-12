@@ -431,6 +431,20 @@ after every gate set the exit code.
   as inherited and are also reported through
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
+- Audit diff-risk rules: `crates/api/src/diff_risk/` computes `weakened-tests`,
+  `added-suppression`, `test-only-branch`, `diverged-clone-sibling` and
+  `added-dependency` inside `audit_run::run`, so the CLI, the MCP `audit` tool
+  and `run_audit` share one result. The pass reads base text at the merge
+  base through one `git cat-file --batch` process. It does not use the base
+  snapshot, except `diverged-clone-sibling`, which reads the clone-group
+  instance locations of the snapshot (`dupe_groups`, base paths, not
+  remapped). A skipped base pass or `--gate all` turns that rule off. Rename
+  sources are skipped, and a rename target reads its base text at the old
+  path. `removed-tests` and `assertion-drop` report a file only when the total
+  over all changed test files also dropped. An `added-suppression` finding
+  honors only a suppression that names its rule, so a new blanket
+  `fallow-ignore` comment cannot hide itself. The rule tokens are in
+  `NON_CORE_KINDS`, so the dead-code stale-suppression pass ignores them.
 - Audit dependency scope: a dependency-level finding (unused, type-only,
   test-only or misplaced dependency, unused catalog entry) is in audit scope
   only when the changeset touches the manifest or catalog file that declares

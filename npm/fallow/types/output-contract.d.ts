@@ -1098,6 +1098,22 @@ export type StylingFindingConfidence = ("high" | "low")
  */
 export type StylingAgentDisposition = ("fix-confidently" | "verify-first")
 /**
+ * The rule that owns a diff-risk finding.
+ */
+export type DiffRiskRule = ("weakened-tests" | "added-suppression" | "test-only-branch" | "diverged-clone-sibling" | "added-dependency")
+/**
+ * How a `weakened-tests` finding weakened the tests.
+ */
+export type WeakenedTestsKind = ("skip-only" | "removed-tests" | "assertion-drop" | "coverage-threshold")
+/**
+ * The severity of a diff-risk finding, from its rule.
+ */
+export type DiffRiskSeverity = ("error" | "warn")
+/**
+ * The type of a diff-risk action. Every type is a suppression.
+ */
+export type DiffRiskActionType = ("suppress-line" | "suppress-file" | "suppress-in-config")
+/**
  * `target` block of [`InspectOutput`], tagged by `type`.
  */
 export type InspectTargetDescriptor = ({
@@ -1679,6 +1695,12 @@ duplication?: (DupesReportPayload | null)
  */
 complexity?: (HealthReport | null)
 /**
+ * Diff-risk findings: facts about the change itself, such as weakened
+ * tests or added suppressions. Every finding is introduced. Absent when
+ * the change has no diff-risk finding.
+ */
+diff_risk?: (DiffRiskReport | null)
+/**
  * Read-only follow-up commands computed from this run's findings. See
  * `CheckOutput::next_steps` for the contract.
  */
@@ -1742,6 +1764,7 @@ duplication_inherited: number
 styling_introduced: number
 styling_inherited: number
 duplication_demoted: number
+diff_risk_introduced: number
 }
 /**
  * The verdict of every gate a run evaluated, keyed by name.
@@ -11225,6 +11248,88 @@ actions: CssCandidateAction[]
  * Audit-mode flag indicating whether the finding is new versus the base snapshot.
  */
 introduced?: (boolean | null)
+}
+/**
+ * The diff-risk section of `fallow audit` JSON.
+ */
+export interface DiffRiskReport {
+/**
+ * Findings, ordered by path, line, rule and kind.
+ */
+findings: DiffRiskFinding[]
+}
+/**
+ * One diff-risk finding.
+ */
+export interface DiffRiskFinding {
+rule: DiffRiskRule
+/**
+ * How the tests were weakened. Present only on `weakened-tests`.
+ */
+kind?: (WeakenedTestsKind | null)
+/**
+ * Root-relative path of the changed file, with forward slashes.
+ */
+path: string
+/**
+ * 1-based head line. Absent when the finding is about the whole file,
+ * for example removed tests or a deleted file.
+ */
+line?: (number | null)
+/**
+ * One-sentence statement of the fact.
+ */
+message: string
+/**
+ * The token, the count change, or the value change that supports the
+ * finding.
+ */
+evidence: string
+severity: DiffRiskSeverity
+/**
+ * Always `true`: the change introduced the finding.
+ */
+introduced: boolean
+/**
+ * Related locations, such as the unchanged siblings of a clone group.
+ */
+related?: DiffRiskLocation[]
+/**
+ * Suppression actions.
+ */
+actions: DiffRiskAction[]
+}
+/**
+ * A location that relates to a diff-risk finding, such as an unchanged clone
+ * sibling.
+ */
+export interface DiffRiskLocation {
+/**
+ * Root-relative path, with forward slashes.
+ */
+path: string
+/**
+ * 1-based line.
+ */
+line: number
+}
+/**
+ * One action on a diff-risk finding.
+ */
+export interface DiffRiskAction {
+type: DiffRiskActionType
+/**
+ * Always `false`: Fallow does not apply a suppression for you.
+ */
+auto_fixable: boolean
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * The suppression comment to insert. Absent on `suppress-in-config`.
+ */
+comment?: (string | null)
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.

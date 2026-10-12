@@ -266,7 +266,12 @@
         "mixed-client-server-barrel": "warn",
         "misplaced-directive": "warn",
         "route-collision": "error",
-        "dynamic-segment-name-conflict": "error"
+        "dynamic-segment-name-conflict": "error",
+        "weakened-tests": "warn",
+        "added-suppression": "warn",
+        "test-only-branch": "warn",
+        "diverged-clone-sibling": "warn",
+        "added-dependency": "off"
       }
     },
     "unusedComponentProps": {
@@ -1631,6 +1636,31 @@
           "description": "Sibling Next.js dynamic route segments at one tree position using\ndifferent param spellings (`[id]` vs `[slug]`). Next.js throws \"You\ncannot use different slug names for the same dynamic path\" at dev and\nproduction runtime when the position is hit; `next build` does NOT catch\nit (the build succeeds), so CI passes while the route crashes on its\nfirst request. fallow catches it statically. Defaults to `error`: the\nroute is a deterministic runtime crash on first request, so failing CI\nis the honest signal even though `next build` stays green (this is the\n\"error-runtime\" severity tier, shared with `route-collision`).",
           "$ref": "#/$defs/Severity",
           "default": "error"
+        },
+        "weakened-tests": {
+          "description": "An audit diff that weakens tests: a new skip or focus marker, removed\ntest cases, fewer assertions, or a lowered coverage threshold.\n`fallow audit` only. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "added-suppression": {
+          "description": "An audit diff that adds a lint, type-check, coverage or Fallow\nsuppression comment. `fallow audit` only. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "test-only-branch": {
+          "description": "An audit diff that adds a test-environment branch to a non-test source\nfile. `fallow audit` only. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "diverged-clone-sibling": {
+          "description": "An audit diff that edits one copy of a base clone group so that it no\nlonger matches its siblings, while no sibling changed. `fallow audit`\nonly. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "added-dependency": {
+          "description": "An audit diff that adds a dependency to a `package.json`. `fallow\naudit` only. Opt-in; defaults to `off`.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
         }
       }
     },
@@ -2740,6 +2770,61 @@
         },
         "dynamic-segment-name-conflict": {
           "description": "Optional override for [`RulesConfig::dynamic_segment_name_conflict`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "weakened-tests": {
+          "description": "Optional override for [`RulesConfig::weakened_tests`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "added-suppression": {
+          "description": "Optional override for [`RulesConfig::added_suppression`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "test-only-branch": {
+          "description": "Optional override for [`RulesConfig::test_only_branch`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diverged-clone-sibling": {
+          "description": "Optional override for [`RulesConfig::diverged_clone_sibling`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "added-dependency": {
+          "description": "Optional override for [`RulesConfig::added_dependency`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

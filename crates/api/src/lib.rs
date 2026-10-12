@@ -40,6 +40,7 @@ pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
 pub mod decision_surface;
 pub mod dependency_deltas;
+pub mod diff_risk;
 pub mod doctor;
 pub mod dupes_output;
 pub mod editor;
@@ -72,11 +73,11 @@ mod type_aware;
 pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
-    AuditSarifOutputInput, AuditSummary, AuditVerdict,
+    AuditSarifOutputInput, AuditSummary, AuditVerdict, attach_audit_diff_risk_attribution,
     attach_audit_duplication_demotion_attribution, attach_audit_styling_attribution,
     attach_audit_wire_attribution, build_audit_codeclimate, build_audit_codeclimate_issues,
-    build_audit_header_json, build_audit_header_map, build_audit_sarif, build_review_brief_header,
-    serialize_audit_json,
+    build_audit_header_json, build_audit_header_map, build_audit_sarif,
+    build_diff_risk_codeclimate, build_review_brief_header, serialize_audit_json,
 };
 pub use combined_output::{
     CombinedCheckJsonSection, CombinedJsonOutputInput, serialize_combined_dupes_json,
@@ -109,10 +110,10 @@ pub use editor::{
     try_get_changed_files_with_toplevel,
 };
 pub use explain::{
-    CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
-    all_rules, bare_rule_id, coverage_analyze_meta, coverage_setup_meta, explain_issue_type,
-    rule_by_id, rule_by_token, rule_command, rule_docs_url, rule_guide, rule_severity_key,
-    security_meta, serialize_explain_programmatic_json, unknown_explain_error,
+    AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide,
+    SECURITY_RULES, all_rules, bare_rule_id, coverage_analyze_meta, coverage_setup_meta,
+    explain_issue_type, rule_by_id, rule_by_token, rule_command, rule_docs_url, rule_guide,
+    rule_severity_key, security_meta, serialize_explain_programmatic_json, unknown_explain_error,
 };
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};

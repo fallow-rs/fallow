@@ -78,6 +78,11 @@ The `generated:issue-types` table below is regenerated from `fallow schema` by s
 | `tainted-sink` | - | - | `// fallow-ignore-next-line security-sink` | Syntactic security sink candidates require verification |
 | `client-server-leak` | - | - | `// fallow-ignore-file security-client-server-leak` | Client-bound code reaches a non-public env read |
 | `hardcoded-secret` | - | - | `// fallow-ignore-next-line security-sink` | Provider-prefixed or contextual secret literals require verification; Include-required category: enable via security.categories.include |
+| `weakened-tests` | - | - | `// fallow-ignore-next-line weakened-tests` | The change weakens tests or a coverage threshold |
+| `added-suppression` | - | - | `// fallow-ignore-next-line added-suppression` | The change adds a suppression comment |
+| `test-only-branch` | - | - | `// fallow-ignore-next-line test-only-branch` | The change adds a test-environment branch to source code |
+| `diverged-clone-sibling` | - | - | `// fallow-ignore-next-line diverged-clone-sibling` | The change edits one copy of duplicated code but not its siblings |
+| `added-dependency` | - | - | `// fallow-ignore-next-line added-dependency` | The change adds a dependency |
 
 Runtime-coverage verdicts and the full security sink catalogue are listed by `fallow schema` (`issue_types`).
 <!-- generated:issue-types:end -->

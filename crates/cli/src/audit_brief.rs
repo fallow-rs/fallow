@@ -1838,6 +1838,7 @@ mod tests {
             elapsed: Duration::ZERO,
             review_deltas: None,
             weakening_signals: Vec::new(),
+            diff_risk: fallow_output::DiffRiskReport::default(),
             routing: None,
             ownership: None,
             decision_surface: None,

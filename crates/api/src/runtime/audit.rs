@@ -129,6 +129,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         dead_code: Some(head.dead_code),
         duplication: Some(head.duplication),
         complexity: Some(head.complexity),
+        diff_risk: outcome.diff_risk,
         next_steps,
         telemetry_analysis_run_id: None,
     })
@@ -395,6 +396,7 @@ fn empty_audit_output(
         dead_code: None,
         duplication: None,
         complexity: None,
+        diff_risk: fallow_output::DiffRiskReport::default(),
         next_steps: Vec::new(),
         telemetry_analysis_run_id: None,
     }
@@ -931,6 +933,37 @@ mod tests {
             "src/feature.ts"
         );
         assert_eq!(json["dead_code"]["unused_files"][0]["introduced"], true);
+    }
+
+    #[test]
+    fn run_audit_reports_diff_risk_findings_on_the_typed_route() {
+        let project = audit_fixture();
+        std::fs::write(
+            project.path().join("src/index.ts"),
+            "// eslint-disable-next-line no-console\nconsole.log('entry');\n",
+        )
+        .expect("write changed entry");
+        let output = run_audit(&AuditOptions {
+            analysis: AnalysisOptions {
+                root: Some(project.path().to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            base: Some("HEAD".to_string()),
+            gate: AuditGate::NewOnly,
+            ..AuditOptions::default()
+        })
+        .expect("audit output");
+
+        assert_eq!(output.diff_risk.findings.len(), 1);
+        let json = crate::serialize_audit_programmatic_json(output).expect("audit json");
+        assert_eq!(
+            json["diff_risk"]["findings"][0]["rule"],
+            "added-suppression"
+        );
+        assert_eq!(json["diff_risk"]["findings"][0]["path"], "src/index.ts");
+        assert_eq!(json["diff_risk"]["findings"][0]["line"], 1);
+        assert_eq!(json["attribution"]["diff_risk_introduced"], 1);
     }
 
     #[test]

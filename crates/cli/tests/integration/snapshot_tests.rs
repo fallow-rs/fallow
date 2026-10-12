@@ -943,6 +943,11 @@ fn sarif_mixed_severity_snapshot() {
         misplaced_directive: fallow_config::Severity::Warn,
         route_collision: fallow_config::Severity::Warn,
         dynamic_segment_name_conflict: fallow_config::Severity::Warn,
+        weakened_tests: fallow_config::Severity::Warn,
+        added_suppression: fallow_config::Severity::Warn,
+        test_only_branch: fallow_config::Severity::Warn,
+        diverged_clone_sibling: fallow_config::Severity::Warn,
+        added_dependency: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1894,6 +1899,11 @@ fn codeclimate_mixed_severity_snapshot() {
         misplaced_directive: fallow_config::Severity::Warn,
         route_collision: fallow_config::Severity::Warn,
         dynamic_segment_name_conflict: fallow_config::Severity::Warn,
+        weakened_tests: fallow_config::Severity::Warn,
+        added_suppression: fallow_config::Severity::Warn,
+        test_only_branch: fallow_config::Severity::Warn,
+        diverged_clone_sibling: fallow_config::Severity::Warn,
+        added_dependency: fallow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

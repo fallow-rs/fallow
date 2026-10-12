@@ -59,6 +59,10 @@ pub struct AuditResult {
     /// computed from git over the changed files. `None` off the brief path.
     pub review_deltas: Option<crate::audit_brief::ReviewDeltas>,
     pub weakening_signals: Vec<weakening::WeakeningSignal>,
+    /// Diff-risk findings of the audit rules (`weakened-tests`,
+    /// `added-suppression`, `test-only-branch`, `diverged-clone-sibling`,
+    /// `added-dependency`). Computed on every audit, not only the brief path.
+    pub diff_risk: fallow_output::DiffRiskReport,
     pub routing: Option<routing::RoutingFacts>,
     /// Owner-group reach of the change, computed from the CODEOWNERS file.
     /// Populated only on the brief path when a CODEOWNERS file exists.
@@ -652,6 +656,7 @@ struct AuditResultParts {
     elapsed: Duration,
     review_deltas: Option<crate::audit_brief::ReviewDeltas>,
     weakening_signals: Vec<weakening::WeakeningSignal>,
+    diff_risk: fallow_output::DiffRiskReport,
     routing: Option<routing::RoutingFacts>,
     ownership: Option<fallow_output::OwnershipFacts>,
     decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
@@ -1097,6 +1102,7 @@ fn finish_audit_result(
         elapsed: input.start.elapsed(),
         review_deltas: brief.review_deltas,
         weakening_signals: brief.weakening_signals,
+        diff_risk: outcome.diff_risk,
         routing: brief.routing,
         ownership: brief.ownership,
         decision_surface: brief.decision_surface,
@@ -2064,6 +2070,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         elapsed: parts.elapsed,
         review_deltas: parts.review_deltas,
         weakening_signals: parts.weakening_signals,
+        diff_risk: parts.diff_risk,
         routing: parts.routing,
         ownership: parts.ownership,
         decision_surface: parts.decision_surface,
@@ -2130,6 +2137,7 @@ fn empty_audit_result(
         elapsed,
         review_deltas: None,
         weakening_signals: Vec::new(),
+        diff_risk: fallow_output::DiffRiskReport::default(),
         routing: None,
         ownership: None,
         decision_surface: None,

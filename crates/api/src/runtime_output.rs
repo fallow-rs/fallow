@@ -520,6 +520,8 @@ pub struct AuditProgrammaticOutput {
     pub duplication: Option<DuplicationProgrammaticOutput>,
     /// Complexity (health) section; `None` when the audit skipped it.
     pub complexity: Option<HealthProgrammaticOutput>,
+    /// Diff-risk findings. Every one is introduced by the change.
+    pub diff_risk: fallow_output::DiffRiskReport,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
     /// Analysis run id stamped into telemetry metadata when present.

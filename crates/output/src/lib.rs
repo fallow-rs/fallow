@@ -19,6 +19,7 @@ mod analysis_sarif;
 mod audit_branching;
 mod audit_brief;
 mod audit_decision_surface;
+mod audit_diff_risk;
 mod audit_focus;
 mod audit_ownership;
 mod audit_render;
@@ -103,6 +104,10 @@ pub use audit_decision_surface::{
     DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
     DecisionCategory, DecisionSurface, DecisionSurfaceOutput, DecisionSurfaceSchemaVersion,
     DecisionWithActions, TruncationNote, build_decision_surface_output, suppress_comment,
+};
+pub use audit_diff_risk::{
+    DiffRiskAction, DiffRiskActionType, DiffRiskFinding, DiffRiskLocation, DiffRiskReport,
+    DiffRiskRule, DiffRiskSeverity, WeakenedTestsKind,
 };
 pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 pub use audit_ownership::{OWNER_GROUP_CAP, OwnerGroupFact, OwnershipFacts, OwnershipSliceFact};
