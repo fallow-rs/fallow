@@ -967,6 +967,22 @@ cd "$DIR"
 ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
 [ "$ISSUES" = "2" ] && pass "analyze: all-gate audit counts every styling finding" || fail "analyze: all-gate styling issues" "expected 2, got '$ISSUES'"
 
+# Diff-risk findings are introduced by the change, so both gates count them.
+for diff_risk_gate in new-only all; do
+  cat > "$ANALYZE_TMP/bin/fallow" <<SH
+#!/usr/bin/env bash
+printf '%s\n' '{"command":"audit","verdict":"warn","attribution":{"gate":"$diff_risk_gate","dead_code_introduced":0,"complexity_introduced":0,"duplication_introduced":0,"styling_introduced":0,"diff_risk_introduced":2},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}'
+SH
+  chmod +x "$ANALYZE_TMP/bin/fallow"
+  cd "$ANALYZE_TMP/work" && rm -f "$ANALYZE_TMP/output"
+  OUT=$(PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" \
+    INPUT_ROOT="." INPUT_COMMAND="audit" INPUT_FORMAT="json" \
+    bash "$DIR/../scripts/analyze.sh" 2>&1) || true
+  cd "$DIR"
+  ISSUES=$(grep '^issues=' "$ANALYZE_TMP/output" | cut -d= -f2)
+  [ "$ISSUES" = "2" ] && pass "analyze: $diff_risk_gate audit counts diff-risk findings" || fail "analyze: $diff_risk_gate diff-risk issues" "expected 2, got '$ISSUES'"
+done
+
 cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
 #!/usr/bin/env bash
 case "$*" in

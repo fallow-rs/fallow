@@ -2173,6 +2173,18 @@ else
   fail "baselined count: a fully baselined bare run passes FALLOW_FAIL_ON_ISSUES" "exit $BASELINED_EXIT"
 fi
 
+# Diff-risk findings are introduced by the change, so both gates count them.
+for diff_risk_gate in new-only all; do
+  printf '{"command":"audit","verdict":"warn","attribution":{"gate":"%s","dead_code_introduced":0,"complexity_introduced":0,"duplication_introduced":0,"diff_risk_introduced":2},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}\n' \
+    "$diff_risk_gate" > "$GATE_WORK/audit-diff-risk.json"
+  OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+    MOCK_GATE_ENVELOPE="$GATE_WORK/audit-diff-risk.json" \
+    FALLOW_COMMAND=audit \
+    FALLOW_FAIL_ON_ISSUES=false)
+  assert_contains "$OUT" "Found 2 issues" \
+    "audit count: the $diff_risk_gate gate counts diff-risk findings"
+done
+
 for prop_command in dead-code ""; do
   for prop_severity in warn error; do
     prop_total=0
