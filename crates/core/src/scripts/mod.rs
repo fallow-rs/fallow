@@ -1387,10 +1387,10 @@ pub struct ScriptCommand {
     pub flag_packages: Vec<String>,
     /// A package whose CLI subcommand runs the production application.
     pub production_runtime_host: Option<&'static str>,
-    /// Whether `file_args_command` runs `file_args` as tests with the
-    /// built-in test runner of a runtime (`node --test`, `bun test`,
-    /// `deno test`). Then the file arguments are test entry points.
-    pub runs_tests: bool,
+    /// The subset of `file_args` that `file_args_command` runs as tests with
+    /// the built-in test runner of a runtime (`node --test`, `bun test`,
+    /// `deno test`). These files are test entry points.
+    pub test_file_args: Vec<String>,
 }
 
 impl ScriptCommand {
@@ -1403,6 +1403,24 @@ impl ScriptCommand {
         } else {
             &self.file_args
         }
+    }
+
+    /// Return the test file arguments that become test entry points: none
+    /// when `ignored` lists the command that receives them.
+    #[must_use]
+    pub fn test_entry_files(&self, ignored: IgnoredCommandEntries<'_>) -> &[String] {
+        if ignored.contains(&self.file_args_command) {
+            &[]
+        } else {
+            &self.test_file_args
+        }
+    }
+
+    /// Apply `map` to every path argument of the command.
+    fn map_paths(&mut self, map: impl Fn(Vec<String>) -> Vec<String>) {
+        self.config_args = map(std::mem::take(&mut self.config_args));
+        self.file_args = map(std::mem::take(&mut self.file_args));
+        self.test_file_args = map(std::mem::take(&mut self.test_file_args));
     }
 }
 
@@ -1632,11 +1650,12 @@ fn accumulate_parsed_commands(
             }
         }
 
-        let entry_files = cmd.entry_files(ignored);
-        if cmd.runs_tests {
-            result.test_entry_files.extend_from_slice(entry_files);
-        }
-        result.entry_files.extend_from_slice(entry_files);
+        result
+            .test_entry_files
+            .extend_from_slice(cmd.test_entry_files(ignored));
+        result
+            .entry_files
+            .extend_from_slice(cmd.entry_files(ignored));
         result.used_packages.extend(cmd.flag_packages);
         result
             .binary_config_files
@@ -1670,8 +1689,8 @@ pub fn parse_script_with_catalog(script: &str, catalog: &ScriptCatalog) -> Vec<S
     parse_script_internal(
         script,
         &|tokens, idx, catalog| {
-            script_invocation_target(tokens, idx, catalog)
-                .or_else(|| bun_file_runner_target(tokens, idx, catalog))
+            bun_file_runner_target(tokens, idx, catalog)
+                .or_else(|| script_invocation_target(tokens, idx, catalog))
                 .or_else(|| {
                     package_manager_exec_binary(tokens, idx).map(|(binary_idx, location)| {
                         PackageManagerTarget::Binary(binary_idx, location)
@@ -1820,6 +1839,7 @@ fn parse_script_internal(
                     if !state.local_paths {
                         cmd.config_args.clear();
                         cmd.file_args.clear();
+                        cmd.test_file_args.clear();
                     }
                     commands.push(cmd);
                 }
@@ -1841,9 +1861,7 @@ fn parse_script_internal(
                             commands,
                         );
                         for cmd in &mut commands[start..] {
-                            cmd.config_args =
-                                rebase_all(std::slice::from_ref(&dir), &cmd.config_args);
-                            cmd.file_args = rebase_all(std::slice::from_ref(&dir), &cmd.file_args);
+                            cmd.map_paths(|paths| rebase_all(std::slice::from_ref(&dir), &paths));
                         }
                     }
                 }
@@ -1857,10 +1875,7 @@ fn parse_script_internal(
                         commands,
                     );
                     for cmd in &mut commands[start..] {
-                        cmd.config_args =
-                            location.resolve_all(std::mem::take(&mut cmd.config_args), catalog);
-                        cmd.file_args =
-                            location.resolve_all(std::mem::take(&mut cmd.file_args), catalog);
+                        cmd.map_paths(|paths| location.resolve_all(paths, catalog));
                     }
                 }
                 SegmentOutcome::ScriptCall {
@@ -1962,6 +1977,11 @@ fn extract_args_for_binary(
             continue;
         }
 
+        if is_node_runner && node_test::takes_non_module_value(token) {
+            idx += 2;
+            continue;
+        }
+
         if let Some(config) = extract_config_arg(token, tokens.get(idx + 1).copied()) {
             config_args.push(config);
             if token.contains('=') || token.starts_with("--config=") || token.starts_with("-c=") {
@@ -2009,11 +2029,13 @@ fn advance_past_package_manager_with_context(
     context: &ScriptCommandContext<'_>,
     catalog: &ScriptCatalog,
 ) -> Option<PackageManagerTarget> {
-    if let Some(target) = script_invocation_target(tokens, idx, catalog) {
+    // `bun test` runs the built-in test runner also when a script named
+    // `test` exists, so the Bun forms come before the script calls.
+    if let Some(target) = bun_file_runner_target(tokens, idx, catalog) {
         return Some(target);
     }
 
-    if let Some(target) = bun_file_runner_target(tokens, idx, catalog) {
+    if let Some(target) = script_invocation_target(tokens, idx, catalog) {
         return Some(target);
     }
 
@@ -2816,7 +2838,7 @@ fn parse_command_segment(
             file_args_command: wrapped.command.to_string(),
             flag_packages: Vec::new(),
             production_runtime_host: None,
-            runs_tests: wrapped.runs_tests,
+            test_file_args: location.resolve_all(wrapped.test_file_args, catalog),
         }));
         let Some(next) = shell::skip_initial_wrappers(&tokens, command_start) else {
             return outcomes;
@@ -2839,7 +2861,7 @@ fn parse_command_segment(
             file_args: Vec::new(),
             flag_packages: Vec::new(),
             production_runtime_host: None,
-            runs_tests: false,
+            test_file_args: Vec::new(),
         }));
         outcomes.extend(
             inline_commands
@@ -2852,25 +2874,13 @@ fn parse_command_segment(
         return outcomes;
     }
 
-    let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
-    let (mut file_args, mut config_args) =
-        extract_args_for_binary(&tokens, idx + 1, is_node_runner);
-    if is_file_target_tool(&binary) {
-        file_args = file_target_tool_loaded_files(&binary, &tokens[idx + 1..]);
-    }
-    if is_task_runner(&binary) {
-        file_args.clear();
-        config_args.clear();
-    }
-    file_args.extend(node_test::default_test_patterns(
-        &binary,
-        &tokens[idx + 1..],
-    ));
+    let (file_args, config_args) = binary_path_args(&binary, &tokens, idx);
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     let production_runtime_host = command_runtime_host(&binary, &tokens[idx + 1..], &location);
+    let test_file_args = node_test::test_file_args(&binary, &tokens[idx + 1..], &file_args);
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
-        runs_tests: node_test::runs_tests(&binary, &tokens[idx + 1..]),
+        test_file_args: location.resolve_all(test_file_args, catalog),
         file_args_command: binary.clone(),
         binary,
         config_args: location.resolve_all(config_args, catalog),
@@ -2881,6 +2891,22 @@ fn parse_command_segment(
     outcomes
 }
 
+/// Return the file and config arguments of `binary` at `idx` in `tokens`.
+fn binary_path_args(binary: &str, tokens: &[&str], idx: usize) -> (Vec<String>, Vec<String>) {
+    let args = &tokens[idx + 1..];
+    let (mut file_args, mut config_args) =
+        extract_args_for_binary(tokens, idx + 1, NODE_RUNNERS.contains(&binary));
+    if is_file_target_tool(binary) {
+        file_args = file_target_tool_loaded_files(binary, args);
+    }
+    if is_task_runner(binary) {
+        file_args.clear();
+        config_args.clear();
+    }
+    file_args.extend(node_test::default_test_patterns(binary, args));
+    (file_args, config_args)
+}
+
 /// The file and config arguments that a command wrapper records for the
 /// command it runs.
 struct WrappedCommandArgs<'a> {
@@ -2888,8 +2914,8 @@ struct WrappedCommandArgs<'a> {
     config_args: Vec<String>,
     /// The name of the command that the wrapper runs.
     command: &'a str,
-    /// Whether that command runs `file_args` as tests.
-    runs_tests: bool,
+    /// The subset of `file_args` that the command runs as tests.
+    test_file_args: Vec<String>,
 }
 
 impl<'a> WrappedCommandArgs<'a> {
@@ -2898,7 +2924,7 @@ impl<'a> WrappedCommandArgs<'a> {
             file_args: Vec::new(),
             config_args: Vec::new(),
             command,
-            runs_tests: false,
+            test_file_args: Vec::new(),
         }
     }
 }
@@ -2947,10 +2973,10 @@ fn wrapped_command_args<'a>(
         &tokens[child_idx + 1..],
     ));
     WrappedCommandArgs {
+        test_file_args: node_test::test_file_args(child, &tokens[child_idx + 1..], &file_args),
         file_args,
         config_args,
         command: child,
-        runs_tests: node_test::runs_tests(child, &tokens[child_idx + 1..]),
     }
 }
 
@@ -5336,6 +5362,79 @@ mod tests {
                 result.entry_files
             );
         }
+    }
+
+    #[test]
+    fn node_flag_values_are_not_test_entry_files() {
+        for (script, tests) in [
+            (
+                "node --test --test-coverage-include 'src/**/*.mjs' test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --test-reporter ./test/reporter.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --experimental-loader ./loader.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --test-global-setup ./test/global.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --import ./test/setup.mjs test/a.test.mjs",
+                vec!["./test/setup.mjs", "test/a.test.mjs"],
+            ),
+            (
+                "cross-env CI=1 node --test --test-reporter ./test/reporter.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+        ] {
+            let result = analyze_command(script, Path::new("/nonexistent"), &FxHashMap::default());
+            assert_eq!(result.test_entry_files, tests, "`{script}`");
+        }
+    }
+
+    #[test]
+    fn node_flag_values_that_name_no_module_are_not_entry_files() {
+        let result = analyze_command(
+            "node --test --test-coverage-include 'src/**/*.mjs' --test-coverage-exclude test/fixtures/a.mjs test/a.test.mjs",
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+        );
+        assert_eq!(result.entry_files, vec!["test/a.test.mjs"]);
+    }
+
+    #[test]
+    fn node_flag_values_that_name_a_module_stay_entry_files() {
+        let result = analyze_command(
+            "node --test --test-reporter ./test/reporter.mjs --experimental-loader ./loader.mjs test/a.test.mjs",
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+        );
+        for file in ["./test/reporter.mjs", "./loader.mjs", "test/a.test.mjs"] {
+            assert!(
+                result.entry_files.contains(&file.to_string()),
+                "{file} in {:?}",
+                result.entry_files
+            );
+        }
+    }
+
+    #[test]
+    fn bun_test_in_a_script_named_test_runs_the_test_runner() {
+        let scripts =
+            HashMap::from([("test".to_string(), "bun test ./test/a.test.ts".to_string())]);
+        let result = analyze_scripts_with_dependencies(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &FxHashSet::default(),
+        );
+        assert_eq!(result.test_entry_files, vec!["./test/a.test.ts"]);
+        assert!(result.entry_files.contains(&"./test/a.test.ts".to_string()));
     }
 
     #[test]

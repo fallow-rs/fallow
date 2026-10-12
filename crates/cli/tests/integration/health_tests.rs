@@ -11207,4 +11207,35 @@ fn node_test_file_arguments_credit_imported_code_with_static_coverage() {
     assert_ne!(tier_of("formatCount"), "none", "{findings:#?}");
     // `node scripts/build.mjs` is not a test run.
     assert_eq!(tier_of("releaseChannel"), "none", "{findings:#?}");
+    // A reporter runs in the parent process, not as a test.
+    assert_eq!(tier_of("describeEvent"), "none", "{findings:#?}");
+    // A `--test-coverage-include` glob names no test file.
+    assert_eq!(tier_of("lonely"), "none", "{findings:#?}");
+}
+
+#[test]
+fn bun_test_in_a_script_named_test_credits_imported_code() {
+    let output = run_fallow(
+        "health",
+        "bun-test-script-entries",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "9999",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let total = findings
+        .iter()
+        .find(|finding| finding["name"] == "total")
+        .unwrap_or_else(|| panic!("expected a total finding, got: {findings:#?}"));
+    assert_ne!(total["coverage_tier"], "none", "{findings:#?}");
 }

@@ -53,6 +53,53 @@ const NODE_VALUE_FLAGS: &[&str] = &[
     "--watch-path",
 ];
 
+/// Node flags whose value names a module that Node loads. The value is an
+/// entry file of the command.
+const NODE_MODULE_VALUE_FLAGS: &[&str] = &[
+    "-r",
+    "--experimental-loader",
+    "--import",
+    "--loader",
+    "--require",
+    "--test-global-setup",
+    "--test-reporter",
+];
+
+/// Node flags whose module runs in the same process as the test files. Only
+/// the values of these flags are test entry points. A reporter and a global
+/// setup module run in the parent process, and a loader runs in its own
+/// thread.
+const NODE_TEST_PROCESS_FLAGS: &[&str] = &["-r", "--import", "--require"];
+
+/// Return `true` when the Node flag `token` takes the next token as a value
+/// that names no module, such as a glob of `--test-coverage-include`. That
+/// value is not a file argument.
+pub(super) fn takes_non_module_value(token: &str) -> bool {
+    NODE_VALUE_FLAGS.contains(&token) && !NODE_MODULE_VALUE_FLAGS.contains(&token)
+}
+
+/// Return the files of `file_args` that the command runs as tests.
+///
+/// The result is empty when `binary` with `args` does not run the built-in
+/// test runner. The value of a flag is not a test file, unless the module
+/// runs in the test process (`--import`, `--require`).
+pub(super) fn test_file_args(binary: &str, args: &[&str], file_args: &[String]) -> Vec<String> {
+    if !runs_tests(binary, args) {
+        return Vec::new();
+    }
+    let flag_values: Vec<&str> = args
+        .windows(2)
+        .filter(|pair| NODE_VALUE_FLAGS.contains(&pair[0]))
+        .filter(|pair| !NODE_TEST_PROCESS_FLAGS.contains(&pair[0]))
+        .map(|pair| pair[1])
+        .collect();
+    file_args
+        .iter()
+        .filter(|file| !flag_values.contains(&file.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// Return the default test file patterns when `binary` is `node`, `args`
 /// contain the `--test` flag, and no argument names a test file.
 ///
@@ -74,50 +121,67 @@ pub(super) fn default_test_patterns(binary: &str, args: &[&str]) -> Vec<String> 
 /// the script path, because later tokens go to the script.
 pub(super) fn runs_tests(binary: &str, args: &[&str]) -> bool {
     match binary {
-        "node" => node_test_flag_precedes_script(args),
+        // tsx gives the Node flags before the script path to Node.
+        "node" | "tsx" => scan_leading_node_flags(args).test_flag,
         "bun" | "deno" => first_positional(args) == Some("test"),
         _ => false,
     }
 }
 
-fn node_test_flag_precedes_script(args: &[&str]) -> bool {
+/// The result of a scan of the Node flags before the script path.
+struct LeadingNodeFlags {
+    /// The flags contain `--test`.
+    test_flag: bool,
+    /// A script path or a test file argument follows the flags.
+    positional: bool,
+}
+
+fn scan_leading_node_flags(args: &[&str]) -> LeadingNodeFlags {
+    let mut test_flag = false;
     let mut idx = 0;
     while idx < args.len() {
         let token = args[idx];
         if token == "--test" {
-            return true;
-        }
-        if NODE_VALUE_FLAGS.contains(&token) {
-            idx += 1;
-        } else if !token.starts_with('-') {
-            return false;
-        }
-        idx += 1;
-    }
-    false
-}
-
-/// The first token that is not a flag. Bun and Deno runtime flags before
-/// the subcommand take no separate value.
-fn first_positional<'a>(args: &[&'a str]) -> Option<&'a str> {
-    args.iter().copied().find(|token| !token.starts_with('-'))
-}
-
-fn runs_default_test_files(args: &[&str]) -> bool {
-    let mut test_mode = false;
-    let mut idx = 0;
-    while idx < args.len() {
-        let token = args[idx];
-        if token == "--test" {
-            test_mode = true;
+            test_flag = true;
         } else if NODE_VALUE_FLAGS.contains(&token) {
             idx += 1;
         } else if !token.starts_with('-') {
-            return false;
+            return LeadingNodeFlags {
+                test_flag,
+                positional: true,
+            };
         }
         idx += 1;
     }
-    test_mode
+    LeadingNodeFlags {
+        test_flag,
+        positional: false,
+    }
+}
+
+/// Bun and Deno flags that take their value from the next token before the
+/// subcommand.
+const BUN_DENO_VALUE_FLAGS: &[&str] = &["-c", "--config", "--cwd"];
+
+/// The first token that is not a flag or the value of a flag.
+fn first_positional<'a>(args: &[&'a str]) -> Option<&'a str> {
+    let mut idx = 0;
+    while let Some(&token) = args.get(idx) {
+        if !token.starts_with('-') {
+            return Some(token);
+        }
+        idx += if BUN_DENO_VALUE_FLAGS.contains(&token) {
+            2
+        } else {
+            1
+        };
+    }
+    None
+}
+
+fn runs_default_test_files(args: &[&str]) -> bool {
+    let flags = scan_leading_node_flags(args);
+    flags.test_flag && !flags.positional
 }
 
 #[cfg(test)]
@@ -211,6 +275,19 @@ mod tests {
         assert!(!runs_tests("bun", &["scripts/test.ts"]));
         assert!(!runs_tests("deno", &["run", "test.ts"]));
         assert!(!runs_tests("tsx", &["test"]));
+    }
+
+    #[test]
+    fn subcommand_after_a_flag_value_marks_a_test_run() {
+        assert!(runs_tests("bun", &["--cwd", ".", "test", "./a.test.mjs"]));
+        assert!(runs_tests("deno", &["--config", "deno.json", "test"]));
+        assert!(!runs_tests("bun", &["--cwd", "test", "run", "a.ts"]));
+    }
+
+    #[test]
+    fn tsx_test_flag_marks_a_test_run() {
+        assert!(runs_tests("tsx", &["--test", "test/a.test.ts"]));
+        assert!(!runs_tests("tsx", &["scripts/run.ts", "--test"]));
     }
 
     #[test]
