@@ -749,6 +749,7 @@ fn run_audit_head_analyses(
         && let Some(ref mut check) = check
     {
         check.impact_closure = compute_brief_impact_closure(opts.root, check, changed_files);
+        check.co_change_gaps = compute_brief_co_change_gaps(opts.root, check, changed_files);
         check.public_api_keys = Some(public_api_keys_from_check(Some(check), opts.root));
         check.partition_order = compute_brief_partition_order(opts.root, check, changed_files);
         check.focus_facts = compute_brief_focus_facts(opts.root, check, changed_files);
@@ -795,6 +796,58 @@ fn compute_brief_impact_closure(
         .and_then(|out| out.graph.as_ref())?;
 
     fallow_engine::module_graph::impact_closure_for_changed_paths(graph, root, changed_files)
+}
+
+/// Scope note on every co-change gap fact.
+const CO_CHANGE_GAP_NOTE: &str = "history evidence, not a proof that the partner must change";
+
+/// Compute the co-change gaps for the review brief: changed files whose
+/// hidden change-coupling partner is not in the diff.
+///
+/// Reads the cached churn pass that routing also reads, and the retained graph
+/// for the static edges. Empty off the brief path, without git history, and on
+/// a shallow clone, whose history cannot show coupling.
+fn compute_brief_co_change_gaps(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Vec<fallow_output::CoChangeGapFact> {
+    let Some(graph) = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())
+    else {
+        return Vec::new();
+    };
+    let Some(churn) = fallow_api::routing::audit_churn(root, &check.config) else {
+        return Vec::new();
+    };
+    if churn.shallow_clone {
+        return Vec::new();
+    }
+    let links = fallow_engine::change_coupling::StaticLinkIndex::from_retained_graph(graph);
+    let settings = fallow_engine::change_coupling::ChangeCouplingSettings::from(
+        &check.config.health.change_coupling,
+    );
+    let analysis =
+        fallow_engine::change_coupling::analyze_change_history(&churn.commits, &links, &settings);
+    let relative = |path: &std::path::Path| {
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    fallow_engine::change_coupling::co_change_gaps(&analysis, changed_files)
+        .into_iter()
+        .map(|gap| fallow_output::CoChangeGapFact {
+            changed_file: relative(&gap.changed),
+            partner_file: relative(&gap.partner),
+            shared_revisions: gap.shared_revisions,
+            degree: gap.degree,
+            note: CO_CHANGE_GAP_NOTE.to_owned(),
+        })
+        .collect()
 }
 
 /// Compute the partition + order for the review brief's stage 2 from the

@@ -11,9 +11,9 @@ use crate::{GroupByMode, attach_telemetry_meta, strip_root_prefix};
 
 /// Current schema version for the standalone health JSON envelope.
 ///
-/// Version 11 expands the required semantic omission reason-code enum embedded
-/// by type-aware metadata.
-pub const HEALTH_SCHEMA_VERSION: u32 = 11;
+/// Version 12 adds `resolve_hidden_coupling` to the required
+/// `targets[].category` enum.
+pub const HEALTH_SCHEMA_VERSION: u32 = 12;
 
 /// Exact schema version for [`HealthOutput`].
 #[cfg(feature = "schema")]

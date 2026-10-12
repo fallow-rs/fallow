@@ -8,6 +8,9 @@ use crate::baseline::{HealthBaselineData, filter_new_health_targets};
 use crate::duplicates::{DuplicationReport, DuplicationStats};
 
 use super::HealthExecutionOptions;
+use super::change_coupling_section::{
+    ChangeCouplingOutcome, ChangeCouplingScope, compute_change_coupling,
+};
 use super::filters::{
     collect_candidate_paths, filter_files_to_paths, filter_hotspots_by_diff,
     filter_refactoring_targets_by_diff,
@@ -46,6 +49,9 @@ pub struct HealthDerivedSections {
     pub(crate) targets: Vec<RefactoringTarget>,
     pub(crate) target_thresholds: Option<fallow_output::TargetThresholds>,
     pub(crate) targets_ms: f64,
+    /// The `change_coupling` section after `--top`. `None` when the
+    /// hotspots section did not run or the run read no git history.
+    pub(crate) change_coupling: Option<fallow_output::ChangeCouplingReport>,
     /// Hotspots before `--top` for scoring, plus complete grouped targets.
     /// Each group applies `--top` to its own displayed lists.
     pub(crate) group_lists: GroupUntruncatedLists,
@@ -66,6 +72,7 @@ pub fn prepare_health_derived_sections(
     let pre_computed_duplication = input.pre_computed_duplication.take();
     let (candidate_paths, dupes_report, duplication_ms) =
         prepare_health_section_dupes(opts, &input, pre_computed_duplication);
+    let coupling = prepare_change_coupling(opts, &input);
     let (hotspots, group_hotspots, hotspot_summary, hotspots_ms) = prepare_health_section_hotspots(
         opts,
         HealthHotspotSectionInput {
@@ -75,6 +82,9 @@ pub fn prepare_health_derived_sections(
             ws_roots: input.ws_roots,
             churn_fetch: input.churn_fetch,
             diff_index: input.diff_index,
+            dispersion: coupling
+                .as_ref()
+                .map(|outcome| &outcome.analysis.dispersion),
         },
     );
     let target_input = HealthTargetSectionInput {
@@ -86,6 +96,7 @@ pub fn prepare_health_derived_sections(
         diff_index: input.diff_index,
         dupes_report: dupes_report.as_ref(),
         max_crap: input.max_crap,
+        co_change: coupling.as_ref().map(|outcome| &outcome.analysis),
     };
     let (targets, group_targets, target_thresholds, targets_ms) =
         prepare_health_section_targets(opts, &target_input, group_hotspots.as_deref());
@@ -100,6 +111,7 @@ pub fn prepare_health_derived_sections(
         targets,
         target_thresholds,
         targets_ms,
+        change_coupling: coupling.and_then(|outcome| report_change_coupling(opts, outcome)),
         group_lists: GroupUntruncatedLists {
             hotspots: group_hotspots,
             targets: group_targets,
@@ -129,6 +141,44 @@ fn prepare_health_section_dupes(
     })
 }
 
+/// Run change coupling over the churn commits when the run read git history
+/// and built the static edge index.
+fn prepare_change_coupling(
+    opts: &HealthExecutionOptions<'_>,
+    input: &HealthDerivedSectionInput<'_>,
+) -> Option<ChangeCouplingOutcome> {
+    let churn_fetch = input.churn_fetch.as_ref()?;
+    let links = &input.score_output?.static_links;
+    Some(compute_change_coupling(
+        opts,
+        input.config,
+        churn_fetch,
+        links,
+        &ChangeCouplingScope {
+            root: &input.config.root,
+            ignore_set: input.ignore_set,
+            ws_roots: input.ws_roots,
+            diff_index: input.diff_index,
+        },
+    ))
+}
+
+/// The section as the report carries it: only with the hotspots section,
+/// never in score-only output, and cut to `--top`.
+fn report_change_coupling(
+    opts: &HealthExecutionOptions<'_>,
+    outcome: ChangeCouplingOutcome,
+) -> Option<fallow_output::ChangeCouplingReport> {
+    if !opts.hotspots || opts.score_only_output {
+        return None;
+    }
+    let mut report = outcome.report;
+    if let Some(top) = opts.top {
+        report.pairs.truncate(top);
+    }
+    Some(report)
+}
+
 struct HealthHotspotSectionInput<'a> {
     config: &'a ResolvedConfig,
     file_scores: &'a [FileHealthScore],
@@ -136,6 +186,9 @@ struct HealthHotspotSectionInput<'a> {
     ws_roots: Option<&'a [std::path::PathBuf]>,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
     diff_index: Option<&'a fallow_output::DiffIndex>,
+    dispersion: Option<
+        &'a rustc_hash::FxHashMap<std::path::PathBuf, crate::change_coupling::FileDispersion>,
+    >,
 }
 
 fn prepare_health_section_hotspots(
@@ -155,6 +208,7 @@ fn prepare_health_section_hotspots(
         ws_roots: input.ws_roots,
         churn_fetch: input.churn_fetch,
         diff_index: input.diff_index,
+        dispersion: input.dispersion,
     })
 }
 
@@ -167,6 +221,7 @@ struct HealthTargetSectionInput<'a> {
     diff_index: Option<&'a fallow_output::DiffIndex>,
     dupes_report: Option<&'a crate::duplicates::DuplicationReport>,
     max_crap: f64,
+    co_change: Option<&'a crate::change_coupling::ChangeHistoryAnalysis>,
 }
 
 /// Compute the project targets, plus the complete group list of a grouped run
@@ -197,6 +252,7 @@ fn prepare_health_section_targets(
                 diff_index: input.diff_index,
                 dupes_report: input.dupes_report,
                 max_crap: input.max_crap,
+                co_change: input.co_change,
             },
             top,
         )
@@ -215,6 +271,9 @@ struct FilteredHotspotInput<'a> {
     ws_roots: Option<&'a [std::path::PathBuf]>,
     churn_fetch: Option<hotspots::ChurnFetchResult>,
     diff_index: Option<&'a fallow_output::DiffIndex>,
+    dispersion: Option<
+        &'a rustc_hash::FxHashMap<std::path::PathBuf, crate::change_coupling::FileDispersion>,
+    >,
 }
 
 fn compute_filtered_hotspots(
@@ -234,6 +293,7 @@ fn compute_filtered_hotspots(
             ignore_set: input.ignore_set,
             ws_roots: input.ws_roots,
             churn_fetch: churn_data,
+            dispersion: input.dispersion,
         })
     } else {
         (Vec::new(), None)
@@ -271,6 +331,7 @@ struct FilteredTargetInput<'a> {
     diff_index: Option<&'a fallow_output::DiffIndex>,
     dupes_report: Option<&'a crate::duplicates::DuplicationReport>,
     max_crap: f64,
+    co_change: Option<&'a crate::change_coupling::ChangeHistoryAnalysis>,
 }
 
 fn compute_filtered_targets(
@@ -513,7 +574,7 @@ fn compute_targets(
         .map_or_else(rustc_hash::FxHashMap::default, |report| {
             targets::build_clone_sibling_evidence(report)
         });
-    let target_aux = TargetAuxData::from_output(output, &clone_siblings);
+    let target_aux = TargetAuxData::from_output(output, &clone_siblings, input.co_change);
     let (mut tgts, thresholds) = compute_refactoring_targets(
         input.file_scores_slice,
         &target_aux,

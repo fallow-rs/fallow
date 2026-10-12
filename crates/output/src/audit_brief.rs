@@ -6,7 +6,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 12;
+///
+/// Version 13 tracks the embedded health contract: the required
+/// `targets[].category` enum gained `resolve_hidden_coupling`.
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 13;
 
 /// Maximum number of affected-but-not-in-diff paths sampled into
 /// [`ImpactClosureFacts::affected_not_shown`].
@@ -154,6 +157,13 @@ pub struct ImpactClosureFacts {
     /// subset of [`affected_not_shown`](Self::affected_not_shown): the gap
     /// deliberately skips story and test consumers that the affected set counts.
     pub coordination_gap: Vec<CoordinationGapFact>,
+    /// Co-change gaps: a changed file has a hidden change-coupling partner
+    /// that is absent from the diff. The two files changed together in most
+    /// commits of the history window, but no import or re-export chain
+    /// connects them, so the graph facts above cannot point at the partner.
+    /// Advisory, never gates. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub co_change_gap: Vec<CoChangeGapFact>,
 }
 
 impl ImpactClosureFacts {
@@ -171,8 +181,26 @@ impl ImpactClosureFacts {
             affected_by_dir,
             affected_by_dir_omitted,
             coordination_gap,
+            co_change_gap: Vec::new(),
         }
     }
+}
+
+/// One co-change gap: `changed_file` is in the diff, `partner_file` is not,
+/// and history shows that the two files usually change together.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoChangeGapFact {
+    /// Root-relative path of the changed file.
+    pub changed_file: String,
+    /// Root-relative path of the hidden partner that the diff does not touch.
+    pub partner_file: String,
+    /// Commits in the history window that changed both files.
+    pub shared_revisions: u32,
+    /// Coupling degree from 0 to 1.
+    pub degree: f64,
+    /// Scope note: history evidence, not a proof that the partner must change.
+    pub note: String,
 }
 
 /// One directory of the blast radius and how many affected files it holds.

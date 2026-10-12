@@ -138,6 +138,15 @@ pub fn derive_graph_facts(results: &AnalysisResults) -> GraphFacts {
 /// was retained (the closure is `None`).
 #[must_use]
 fn build_impact_closure_facts(result: &AuditResult) -> ImpactClosureFacts {
+    let mut facts = build_graph_impact_closure_facts(result);
+    if let Some(check) = result.check.as_ref() {
+        facts.co_change_gap.clone_from(&check.co_change_gaps);
+    }
+    facts
+}
+
+/// The graph part of the Stage 3 facts: affected set and coordination gaps.
+fn build_graph_impact_closure_facts(result: &AuditResult) -> ImpactClosureFacts {
     let Some(closure) = result
         .check
         .as_ref()
@@ -940,11 +949,35 @@ fn symbols_taken(sources: &[&CoordinationGapFact]) -> usize {
 /// Print the Stage 3 impact-closure summary on the human brief: the blast
 /// radius and its heaviest directory, then the coordination gaps (the precise
 /// inter-module attention pointer). Caller has already gated on `!quiet`.
+/// Human lines for the co-change gaps: one header plus one line per gap.
+fn co_change_gap_lines(gaps: &[fallow_output::CoChangeGapFact]) -> Vec<String> {
+    if gaps.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "  co-change gaps ({}): files that usually change together, no import between them",
+        gaps.len()
+    )];
+    for gap in gaps {
+        lines.push(format!(
+            "    {} -> {} ({} shared commits, {:.0}%)",
+            gap.changed_file,
+            gap.partner_file,
+            gap.shared_revisions,
+            gap.degree * 100.0
+        ));
+    }
+    lines
+}
+
 fn print_impact_closure_human(closure: &ImpactClosureFacts) {
     for line in affected_lines(closure) {
         eprintln!("{line}");
     }
     for line in coordination_gap_lines(&closure.coordination_gap) {
+        eprintln!("{line}");
+    }
+    for line in co_change_gap_lines(&closure.co_change_gap) {
         eprintln!("{line}");
     }
 }

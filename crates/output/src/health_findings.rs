@@ -713,7 +713,13 @@ fn build_refactoring_target_actions(target: &RefactoringTarget) -> Vec<Refactori
         comment: None,
     }];
 
-    if target.evidence.is_some() {
+    // A hidden-coupling target has no complexity finding to suppress.
+    if target.evidence.is_some()
+        && !matches!(
+            target.category,
+            RecommendationCategory::ResolveHiddenCoupling
+        )
+    {
         actions.push(RefactoringTargetAction {
             kind: RefactoringTargetActionType::SuppressLine,
             auto_fixable: false,
@@ -748,6 +754,7 @@ const fn category_snake_case(cat: &RecommendationCategory) -> &'static str {
         RecommendationCategory::ExtractComplexFunctions => "extract_complex_functions",
         RecommendationCategory::ExtractDependencies => "extract_dependencies",
         RecommendationCategory::AddTestCoverage => "add_test_coverage",
+        RecommendationCategory::ResolveHiddenCoupling => "resolve_hidden_coupling",
     }
 }
 
@@ -772,6 +779,8 @@ mod hotspot_target_tests {
             complexity_density: 1.5,
             fan_in: 3,
             trend: ChurnTrend::Stable,
+            median_files_per_commit: None,
+            median_lines_per_commit: None,
             ownership: None,
             is_test_path: false,
         }
@@ -1095,6 +1104,7 @@ mod hotspot_target_tests {
             RecommendationCategory::ExtractComplexFunctions,
             RecommendationCategory::ExtractDependencies,
             RecommendationCategory::AddTestCoverage,
+            RecommendationCategory::ResolveHiddenCoupling,
         ];
         for cat in &variants {
             let via_serde = serde_json::to_value(cat).expect("category should serialize");

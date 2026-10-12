@@ -366,6 +366,15 @@ pub enum WorkspaceDiagnosticKind {
         /// remedy for all four.
         cause: String,
     },
+    /// Change coupling found no pairs because the history cannot show them.
+    /// The `change_coupling` section is present with an empty `pairs` list,
+    /// and this entry tells why the list is empty.
+    ChangeCouplingSkipped {
+        /// Kebab-case token: `shallow-clone` (the fetched history is
+        /// incomplete) or `too-few-commits` (fewer analyzed commits than the
+        /// minimum revisions of one file). The set is open.
+        cause: String,
+    },
     /// The repository is a shallow clone, so churn is measured over the fetched
     /// history only and every hotspot figure is incomplete.
     ShallowClone {
@@ -562,6 +571,7 @@ impl WorkspaceDiagnosticKind {
             Self::NoSourceFilesAnalyzed { .. } => "no-source-files-analyzed",
             Self::FileScoresUnavailable { .. } => "file-scores-unavailable",
             Self::HotspotsSkipped { .. } => "hotspots-skipped",
+            Self::ChangeCouplingSkipped { .. } => "change-coupling-skipped",
             Self::ShallowClone { .. } => "shallow-clone",
             Self::UnpinnedClock => "unpinned-clock",
             Self::OwnershipUnavailable { .. } => "ownership-unavailable",
@@ -630,6 +640,7 @@ impl WorkspaceDiagnosticKind {
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
             | Self::TrendGroupBaselineUnavailable { .. }
+            | Self::ChangeCouplingSkipped { .. }
             | Self::IgnoreDependenciesGlobUnmatched { .. }
             | Self::IgnoreFindingsPatternUnmatched { .. } => false,
             Self::UndeclaredWorkspace
@@ -778,6 +789,7 @@ impl WorkspaceDiagnosticKind {
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
             | Self::HotspotsSkipped { .. }
+            | Self::ChangeCouplingSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -834,6 +846,7 @@ impl WorkspaceDiagnosticKind {
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
             | Self::HotspotsSkipped { .. }
+            | Self::ChangeCouplingSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -870,6 +883,7 @@ impl WorkspaceDiagnosticKind {
         match self {
             Self::FileScoresUnavailable { .. }
             | Self::HotspotsSkipped { .. }
+            | Self::ChangeCouplingSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -953,6 +967,7 @@ impl WorkspaceDiagnosticKind {
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
             | Self::HotspotsSkipped { .. }
+            | Self::ChangeCouplingSkipped { .. }
             | Self::ShallowClone { .. }
             | Self::UnpinnedClock
             | Self::OwnershipUnavailable { .. }
@@ -1528,6 +1543,16 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                   project root, so the hotspots, churn and ownership sections report nothing \
                   rather than zero. Run fallow inside the repository, or pass --churn-file with \
                   exported change history."
+                .to_owned(),
+        },
+        WorkspaceDiagnosticKind::ChangeCouplingSkipped { cause } => match cause.as_str() {
+            "shallow-clone" => "Change coupling was not measured because the repository is a \
+                 shallow clone, so the change_coupling section lists no pairs. Fetch the full \
+                 history with `git fetch --unshallow` to measure it."
+                .to_owned(),
+            _ => "Change coupling found no pairs because the history window has fewer \
+                  analyzed commits than the minimum revisions of one file. Widen the window \
+                  with --since, or lower health.changeCoupling.minRevisions."
                 .to_owned(),
         },
         WorkspaceDiagnosticKind::ShallowClone {

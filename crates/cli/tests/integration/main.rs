@@ -28,6 +28,7 @@ mod baseline_growth_tests;
 mod baselines_prune_tests;
 mod cascade_tests;
 mod caveat_surface_tests;
+mod change_coupling_tests;
 mod changed_since_added_files_tests;
 mod changed_workspaces_tests;
 mod check_tests;

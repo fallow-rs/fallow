@@ -1,11 +1,18 @@
 use crate::duplicates::{self, DuplicationReport};
 use fallow_output::{
-    COGNITIVE_EXTRACTION_THRESHOLD, CloneSiblingEvidence, Confidence, ContributingFactor,
-    DirectCallerEvidence, EffortEstimate, EvidenceFunction, FileHealthScore, HotspotEntry,
-    RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
+    COGNITIVE_EXTRACTION_THRESHOLD, CloneSiblingEvidence, CoChangePartnerEvidence, Confidence,
+    ContributingFactor, DirectCallerEvidence, EffortEstimate, EvidenceFunction, FileHealthScore,
+    HotspotEntry, RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
 };
 
 const MAX_CLONE_SIBLING_EVIDENCE: usize = 5;
+const MAX_CO_CHANGE_PARTNER_EVIDENCE: usize = 5;
+
+/// The strongest hidden change-coupling partner of a file and its pair.
+type StrongPair<'a> = (
+    &'a std::path::Path,
+    &'a crate::change_coupling::CoChangePair,
+);
 
 /// Auxiliary data used by `compute_refactoring_targets` to generate evidence and apply rules.
 pub(super) struct TargetAuxData<'a> {
@@ -17,12 +24,15 @@ pub(super) struct TargetAuxData<'a> {
     pub cycle_members: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
     pub direct_callers: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
     pub clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+    /// Hidden change coupling, when the run read git history.
+    pub co_change: Option<&'a crate::change_coupling::ChangeHistoryAnalysis>,
 }
 
 impl<'a> TargetAuxData<'a> {
     pub(super) fn from_output(
         output: &'a super::scoring::FileScoreOutput,
         clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+        co_change: Option<&'a crate::change_coupling::ChangeHistoryAnalysis>,
     ) -> Self {
         Self {
             circular_files: &output.circular_files,
@@ -33,6 +43,7 @@ impl<'a> TargetAuxData<'a> {
             cycle_members: &output.cycle_members,
             direct_callers: &output.direct_callers,
             clone_siblings,
+            co_change,
         }
     }
 }
@@ -194,9 +205,11 @@ fn build_target_for_score(
         .copied()
         .unwrap_or(0);
 
+    let strong_pair = strongest_hidden_partner(aux.co_change, &score.path);
     let mut factors = Vec::new();
 
     push_structural_target_factors(&mut factors, score, value_exports, is_circular, thresholds);
+    push_hidden_coupling_factor(&mut factors, strong_pair);
     push_runtime_target_factors(
         &mut factors,
         score,
@@ -217,6 +230,7 @@ fn build_target_for_score(
             is_entry,
             top_fns,
             value_exports,
+            strong_pair,
         },
         thresholds,
     )?;
@@ -234,6 +248,7 @@ fn build_target_for_score(
             cycle_members: aux.cycle_members,
             direct_callers: aux.direct_callers,
             clone_siblings: aux.clone_siblings,
+            co_change: aux.co_change,
         },
     );
 
@@ -313,6 +328,44 @@ fn push_structural_target_factors(
             detail: "participates in an import cycle".into(),
         });
     }
+}
+
+/// The strongest hidden partner of `path`, when it reaches the strong degree.
+/// Hidden pairs arrive sorted by degree, so the first strong pair wins.
+fn strongest_hidden_partner<'a>(
+    co_change: Option<&'a crate::change_coupling::ChangeHistoryAnalysis>,
+    path: &'a std::path::Path,
+) -> Option<StrongPair<'a>> {
+    co_change?
+        .partners_of(path)
+        .find(|(_, pair)| pair.is_strong())
+}
+
+fn push_hidden_coupling_factor(
+    factors: &mut Vec<ContributingFactor>,
+    strong_pair: Option<StrongPair<'_>>,
+) {
+    let Some((partner, pair)) = strong_pair else {
+        return;
+    };
+    factors.push(ContributingFactor {
+        metric: "hidden_coupling",
+        value: pair.degree,
+        threshold: crate::change_coupling::STRONG_COUPLING_DEGREE,
+        detail: format!(
+            "changes with {} in {} commits, no import connects them",
+            display_name(partner),
+            pair.shared_revisions
+        ),
+    });
+}
+
+/// File name for a human detail line. The full path is in the evidence.
+fn display_name(path: &std::path::Path) -> String {
+    path.file_name().map_or_else(
+        || path.to_string_lossy().into_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 fn push_runtime_target_factors(
@@ -407,6 +460,7 @@ struct RuleMatchContext<'a> {
     is_entry: bool,
     top_fns: Option<&'a Vec<(String, u32, u16)>>,
     value_exports: usize,
+    strong_pair: Option<StrongPair<'a>>,
 }
 
 fn try_match_rules(
@@ -420,11 +474,13 @@ fn try_match_rules(
         is_entry,
         top_fns,
         value_exports,
+        strong_pair,
     } = ctx;
     match_churn_complexity(score, hotspot)
         .or_else(|| match_circular_impact(score, is_circular))
         .or_else(|| match_high_impact_split(score, thresholds))
         .or_else(|| match_dead_code(score, value_exports))
+        .or_else(|| match_hidden_coupling(strong_pair))
         .or_else(|| match_complex_function_extraction(score, top_fns))
         .or_else(|| match_dependency_extraction(score, thresholds, is_entry))
         .or_else(|| match_coverage_gap(score))
@@ -515,6 +571,22 @@ fn match_dead_code(
     ))
 }
 
+fn match_hidden_coupling(
+    strong_pair: Option<StrongPair<'_>>,
+) -> Option<(RecommendationCategory, String)> {
+    let (partner, pair) = strong_pair?;
+    Some((
+        RecommendationCategory::ResolveHiddenCoupling,
+        format!(
+            "Changes with {} in {} commits ({:.0}% coupling) without an import, \
+             make the dependency explicit or move the shared logic into one module",
+            display_name(partner),
+            pair.shared_revisions,
+            pair.degree * 100.0
+        ),
+    ))
+}
+
 fn match_complex_function_extraction(
     score: &FileHealthScore,
     top_fns: Option<&Vec<(String, u32, u16)>>,
@@ -591,9 +663,9 @@ const fn confidence_for_category(category: &RecommendationCategory) -> Confidenc
         | RecommendationCategory::BreakCircularDependency
         | RecommendationCategory::ExtractComplexFunctions
         | RecommendationCategory::AddTestCoverage => Confidence::High,
-        RecommendationCategory::SplitHighImpact | RecommendationCategory::ExtractDependencies => {
-            Confidence::Medium
-        }
+        RecommendationCategory::SplitHighImpact
+        | RecommendationCategory::ExtractDependencies
+        | RecommendationCategory::ResolveHiddenCoupling => Confidence::Medium,
         RecommendationCategory::UrgentChurnComplexity => Confidence::Low,
     }
 }
@@ -636,6 +708,7 @@ struct EvidenceSources<'a> {
     cycle_members: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
     direct_callers: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>>,
     clone_siblings: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>>,
+    co_change: Option<&'a crate::change_coupling::ChangeHistoryAnalysis>,
 }
 
 fn build_evidence(
@@ -649,6 +722,7 @@ fn build_evidence(
         cycle_members,
         direct_callers,
         clone_siblings,
+        co_change,
     } = sources;
     let mut evidence = TargetEvidence {
         direct_callers: direct_callers.get(path).cloned().unwrap_or_default(),
@@ -668,6 +742,9 @@ fn build_evidence(
         }
         RecommendationCategory::AddTestCoverage => {
             evidence.complex_functions = evidence_functions(top_fns, false);
+        }
+        RecommendationCategory::ResolveHiddenCoupling => {
+            evidence.co_change_partners = co_change_partner_evidence(co_change, path);
         }
         _ => {}
     }
@@ -715,12 +792,31 @@ fn cycle_path_evidence(
         .unwrap_or_default()
 }
 
+/// Hidden change-coupling partners of `path`, strongest first, capped.
+fn co_change_partner_evidence(
+    co_change: Option<&crate::change_coupling::ChangeHistoryAnalysis>,
+    path: &std::path::Path,
+) -> Vec<CoChangePartnerEvidence> {
+    co_change.map_or_else(Vec::new, |analysis| {
+        analysis
+            .partners_of(path)
+            .take(MAX_CO_CHANGE_PARTNER_EVIDENCE)
+            .map(|(partner, pair)| CoChangePartnerEvidence {
+                path: partner.to_path_buf(),
+                shared_revisions: pair.shared_revisions,
+                degree: pair.degree,
+            })
+            .collect()
+    })
+}
+
 fn target_evidence_is_empty(evidence: &TargetEvidence) -> bool {
     evidence.unused_exports.is_empty()
         && evidence.complex_functions.is_empty()
         && evidence.cycle_path.is_empty()
         && evidence.direct_callers.is_empty()
         && evidence.clone_siblings.is_empty()
+        && evidence.co_change_partners.is_empty()
 }
 
 pub(super) fn build_clone_sibling_evidence(
@@ -1020,6 +1116,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _thresholds) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(targets.len() >= 2, "expected at least 2 targets");
@@ -1068,6 +1165,7 @@ mod tests {
                 cycle_members: &rustc_hash::FxHashMap::default(),
                 direct_callers: &direct_callers,
                 clone_siblings: &clone_siblings,
+                co_change: None,
             },
         )
         .expect("generic evidence should keep target evidence present");
@@ -1135,6 +1233,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1153,6 +1252,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1176,6 +1276,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1203,6 +1304,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1228,6 +1330,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1249,6 +1352,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1273,6 +1377,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 5,
+                strong_pair: None,
             },
             &t,
         );
@@ -1293,6 +1398,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 2,
+                strong_pair: None,
             },
             &t,
         );
@@ -1312,6 +1418,7 @@ mod tests {
                 is_entry: false,
                 top_fns: Some(&fns),
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1343,6 +1450,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1370,6 +1478,7 @@ mod tests {
                 is_entry: true,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1389,6 +1498,8 @@ mod tests {
             complexity_density: 0.8,
             fan_in: 5,
             trend: crate::churn::ChurnTrend::Accelerating,
+            median_files_per_commit: None,
+            median_lines_per_commit: None,
             ownership: None,
             is_test_path: false,
         };
@@ -1401,6 +1512,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1487,6 +1599,7 @@ mod tests {
                 cycle_members: &cycle_members,
                 direct_callers: &rustc_hash::FxHashMap::default(),
                 clone_siblings: &rustc_hash::FxHashMap::default(),
+                co_change: None,
             },
         );
         assert!(ev.is_some());
@@ -1509,6 +1622,7 @@ mod tests {
                 cycle_members: &cycle_members,
                 direct_callers: &rustc_hash::FxHashMap::default(),
                 clone_siblings: &rustc_hash::FxHashMap::default(),
+                co_change: None,
             },
         );
         assert!(ev.is_none());
@@ -1532,6 +1646,7 @@ mod tests {
                 cycle_members: &cycle_members,
                 direct_callers: &rustc_hash::FxHashMap::default(),
                 clone_siblings: &rustc_hash::FxHashMap::default(),
+                co_change: None,
             },
         );
         assert!(ev.is_some());
@@ -1562,6 +1677,7 @@ mod tests {
                 cycle_members: &cycle_members,
                 direct_callers: &rustc_hash::FxHashMap::default(),
                 clone_siblings: &rustc_hash::FxHashMap::default(),
+                co_change: None,
             },
         );
         assert!(ev.is_some());
@@ -1584,6 +1700,7 @@ mod tests {
                 cycle_members: &cycle_members,
                 direct_callers: &rustc_hash::FxHashMap::default(),
                 clone_siblings: &rustc_hash::FxHashMap::default(),
+                co_change: None,
             },
         );
         assert!(ev.is_some());
@@ -1605,6 +1722,7 @@ mod tests {
                 cycle_members: &cycle_members,
                 direct_callers: &rustc_hash::FxHashMap::default(),
                 clone_siblings: &rustc_hash::FxHashMap::default(),
+                co_change: None,
             },
         );
         assert!(ev.is_none());
@@ -1643,6 +1761,8 @@ mod tests {
             complexity_density: 0.8,
             fan_in: 10,
             trend: crate::churn::ChurnTrend::Accelerating,
+            median_files_per_commit: None,
+            median_lines_per_commit: None,
             ownership: None,
             is_test_path: false,
         };
@@ -1655,6 +1775,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1682,6 +1803,7 @@ mod tests {
                 is_entry: false,
                 top_fns: Some(&fns),
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );
@@ -1715,6 +1837,8 @@ mod tests {
             complexity_density: 0.5,
             fan_in: 15,
             trend: crate::churn::ChurnTrend::Stable,
+            median_files_per_commit: None,
+            median_lines_per_commit: None,
             ownership: None,
             is_test_path: false,
         }];
@@ -1729,6 +1853,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &hotspots, 30.0);
         assert!(!targets.is_empty());
@@ -1754,6 +1879,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
@@ -1785,6 +1911,7 @@ mod tests {
                 cycle_members: &self.cycle_members,
                 direct_callers: &self.direct_callers,
                 clone_siblings: &self.clone_siblings,
+                co_change: None,
             }
         }
     }
@@ -1900,6 +2027,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
@@ -1926,6 +2054,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
@@ -1950,6 +2079,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
@@ -1976,6 +2106,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(!targets.is_empty());
@@ -2008,6 +2139,7 @@ mod tests {
             cycle_members: &rustc_hash::FxHashMap::default(),
             direct_callers: &rustc_hash::FxHashMap::default(),
             clone_siblings: &rustc_hash::FxHashMap::default(),
+            co_change: None,
         };
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[], 30.0);
         assert!(targets.is_empty());
@@ -2029,6 +2161,7 @@ mod tests {
                 is_entry: false,
                 top_fns: None,
                 value_exports: 0,
+                strong_pair: None,
             },
             &t,
         );

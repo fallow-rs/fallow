@@ -1048,6 +1048,17 @@ pub struct HotspotEntry {
     pub fan_in: usize,
     /// Whether churn is rising, falling, or steady over the window.
     pub trend: fallow_types::churn::ChurnTrend,
+    /// Change dispersion: the median number of analyzed files in the commits
+    /// that changed this file, over the change coupling history window. Bulk
+    /// commits above the coupling file cap are not counted. Absent when the
+    /// history has no commit ids (for example imported churn without them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub median_files_per_commit: Option<f64>,
+    /// Change dispersion: the median number of changed lines (added plus
+    /// deleted, analyzed files only) in the commits that changed this file.
+    /// Same window and rules as `median_files_per_commit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub median_lines_per_commit: Option<f64>,
     /// Ownership metrics, when ownership analysis ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership: Option<OwnershipMetrics>,

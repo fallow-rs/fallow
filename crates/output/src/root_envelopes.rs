@@ -6,13 +6,16 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 /// Current schema version for `fallow audit --format json`.
-pub const AUDIT_SCHEMA_VERSION: u32 = 12;
+///
+/// Version 13 tracks the embedded health contract: the required
+/// `targets[].category` enum gained `resolve_hidden_coupling`.
+pub const AUDIT_SCHEMA_VERSION: u32 = 13;
 
 /// Current schema version for bare combined JSON output.
 ///
-/// Version 13 adds `gdp-proof-producer` to the required policy rule kind enum
-/// in the embedded check contract.
-pub const COMBINED_SCHEMA_VERSION: u32 = 13;
+/// Version 14 tracks the embedded health contract: the required
+/// `targets[].category` enum gained `resolve_hidden_coupling`.
+pub const COMBINED_SCHEMA_VERSION: u32 = 14;
 
 /// Schema projection for the audit envelope's exact version.
 #[cfg(feature = "schema")]

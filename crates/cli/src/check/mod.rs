@@ -574,6 +574,10 @@ pub struct CheckResult {
     /// `None` outside the brief path. Holds root-relative paths so it survives
     /// the graph drop and serializes directly.
     pub impact_closure: Option<fallow_engine::module_graph::ImpactClosurePaths>,
+    /// Co-change gaps for the review brief: changed files whose hidden
+    /// change-coupling partner is not in the diff. Computed on the brief path
+    /// from the retained graph and the cached churn pass; empty elsewhere.
+    pub co_change_gaps: Vec<fallow_output::CoChangeGapFact>,
     /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
@@ -1188,6 +1192,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         explain_skipped: opts.explain_skipped,
         syntactic_dead_code_keys,
         impact_closure: None,
+        co_change_gaps: Vec::new(),
         public_api_keys: None,
         partition_order: None,
         focus_facts: None,

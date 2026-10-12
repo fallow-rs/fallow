@@ -1038,6 +1038,8 @@ mod tests {
                 complexity_density: 0.5,
                 fan_in: 3,
                 trend: crate::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: Some(OwnershipMetrics {
                     bus_factor: 1,
                     contributor_count: 1,

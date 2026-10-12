@@ -1,11 +1,11 @@
 //! Top-level health report contract.
 
 use crate::{
-    CoverageGaps, CoverageIntelligenceReport, CssAnalyticsReport, FileHealthScore,
-    FrameworkHealthDiagnostics, HealthActionsMeta, HealthFinding, HealthScore, HealthSummary,
-    HealthTrend, HotspotFinding, HotspotSummary, LargeFunctionEntry, RefactoringTargetFinding,
-    RuntimeCoverageReport, StylingFinding, StylingHealth, TargetThresholds, ThresholdOverrideState,
-    VitalSigns,
+    ChangeCouplingReport, CoverageGaps, CoverageIntelligenceReport, CssAnalyticsReport,
+    FileHealthScore, FrameworkHealthDiagnostics, HealthActionsMeta, HealthFinding, HealthScore,
+    HealthSummary, HealthTrend, HotspotFinding, HotspotSummary, LargeFunctionEntry,
+    RefactoringTargetFinding, RuntimeCoverageReport, StylingFinding, StylingHealth,
+    TargetThresholds, ThresholdOverrideState, VitalSigns,
 };
 use fallow_types::output_dead_code::PropDrillingChainFinding;
 
@@ -37,6 +37,9 @@ pub enum HealthSection {
     /// `hotspots`. The list can be empty when the run could not read the git
     /// history; `workspace_diagnostics` then tells why.
     Hotspots,
+    /// `change_coupling`. The pair list can be empty when the history cannot
+    /// show coupling; `workspace_diagnostics` then tells why.
+    ChangeCoupling,
     /// `targets`.
     Targets,
     /// `health_trend`.
@@ -114,6 +117,12 @@ pub struct HealthReport {
     /// beside it rather than gating this summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
+    /// Hidden change coupling: file pairs that change together in the git
+    /// history without an import or re-export chain between them. Present
+    /// when the hotspots section ran and the run read the git history.
+    /// Advisory: no health score weight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_coupling: Option<ChangeCouplingReport>,
     /// Runtime coverage findings from the paid sidecar (only populated with
     /// `--runtime-coverage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]

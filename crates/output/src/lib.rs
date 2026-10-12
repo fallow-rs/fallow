@@ -42,6 +42,7 @@ mod fix;
 mod gate_outcomes;
 mod health;
 mod health_actions;
+mod health_change_coupling;
 mod health_coverage;
 mod health_coverage_gaps;
 mod health_coverage_intelligence;
@@ -91,9 +92,9 @@ pub use audit_branching::{
     BranchingSnapshot, CognitiveAttribution, DEFAULT_BRANCHING_TOLERANCE, SplitInPlace,
 };
 pub use audit_brief::{
-    AFFECTED_DIR_CAP, AFFECTED_SAMPLE_CAP, AffectedDirectory, CoordinationGapFact, DiffTriage,
-    GraphFacts, ImpactClosureFacts, PartitionFacts, REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefHeader,
-    ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewBriefSubtractSections,
+    AFFECTED_DIR_CAP, AFFECTED_SAMPLE_CAP, AffectedDirectory, CoChangeGapFact, CoordinationGapFact,
+    DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts, REVIEW_BRIEF_SCHEMA_VERSION,
+    ReviewBriefHeader, ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewBriefSubtractSections,
     ReviewBriefWireOutput, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
     StandardReviewBriefOutput, build_review_brief_json_output,
     serialize_decision_surface_json_output, serialize_review_brief_json_output,
@@ -194,6 +195,9 @@ pub use health::{
     serialize_health_json_output,
 };
 pub use health_actions::HealthActionsMeta;
+pub use health_change_coupling::{
+    ChangeCouplingReport, ChangeCouplingThresholds, HiddenCouplingPair,
+};
 pub use health_coverage::{CoverageInputFormat, CoverageModel};
 pub use health_coverage_gaps::{
     CoverageGapSummary, CoverageGaps, UntestedExport, UntestedExportFinding, UntestedFile,
@@ -253,9 +257,9 @@ pub use health_scores::{
     compute_finding_severity, letter_grade, summarize_coverage_source_consistency,
 };
 pub use health_targets::{
-    CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,
-    DirectCallerSymbolEvidence, EffortEstimate, EvidenceFunction, RecommendationCategory,
-    RefactoringTarget, TargetEvidence, TargetThresholds,
+    CloneSiblingEvidence, CoChangePartnerEvidence, Confidence, ContributingFactor,
+    DirectCallerEvidence, DirectCallerSymbolEvidence, EffortEstimate, EvidenceFunction,
+    RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
 };
 pub use health_trends::{
     HealthTrend, TrendCount, TrendDirection, TrendMetric, TrendPoint, health_score_comparison_note,

@@ -65,6 +65,9 @@ pub struct FileScoreOutput {
     /// non-template files and for templates with no `.ts` owner.
     pub(crate) template_inherit_provenance:
         rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>,
+    /// Static edges between analyzed files. Change coupling reads it to tell a
+    /// hidden co-change pair from a pair that an import already explains.
+    pub(crate) static_links: crate::change_coupling::StaticLinkIndex,
 }
 
 struct FileScoreOutputParts<'a> {
@@ -2754,6 +2757,7 @@ fn build_file_score_output(parts: FileScoreOutputParts<'_>) -> FileScoreOutput {
         coverage_input_format: parts.coverage_input_format,
         per_function_crap: parts.per_function_crap,
         template_inherit_provenance,
+        static_links: crate::change_coupling::StaticLinkIndex::from_graph(parts.graph),
     }
 }
 

@@ -4213,7 +4213,7 @@ fn adding_baseline_staleness_moved_no_schema_version() {
         "json",
         "--quiet",
     ]);
-    assert_eq!(parse_json(&health)["schema_version"], 11);
+    assert_eq!(parse_json(&health)["schema_version"], 12);
     let combined = run_fallow_raw(&[
         "--root",
         project.path().to_str().expect("temp path is UTF-8"),
@@ -4228,7 +4228,7 @@ fn adding_baseline_staleness_moved_no_schema_version() {
             .to_str()
             .expect("temp path is UTF-8"),
     ]);
-    assert_eq!(parse_json(&combined)["schema_version"], 13);
+    assert_eq!(parse_json(&combined)["schema_version"], 14);
 }
 
 /// The bare combined run is the action's default shape.

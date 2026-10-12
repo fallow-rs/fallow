@@ -21,6 +21,7 @@ mod assembly;
 mod baseline_io;
 mod branching;
 pub use branching::{BranchingByFile, branching_by_file};
+mod change_coupling_section;
 mod churn_file;
 mod component_rollup;
 mod core_pipeline;

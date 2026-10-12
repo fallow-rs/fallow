@@ -371,6 +371,7 @@ fn health_metrics() -> BTreeMap<String, MetaMetric> {
     metrics.extend(health_complexity_metrics());
     metrics.extend(health_population_metrics());
     metrics.extend(health_churn_and_target_metrics());
+    metrics.extend(health_change_history_metrics());
     metrics.extend(health_ownership_metrics());
     metrics.extend(health_runtime_metrics());
     metrics.extend(health_styling_metrics());
@@ -577,6 +578,32 @@ fn health_churn_and_target_metrics() -> [(String, MetaMetric); 10] {
             "Formula version saved with the historical score; absent on legacy or unscored snapshots.",
             Some("[1, infinity)"),
             "the score delta is omitted when formula versions are unknown or different; available raw metric trends remain comparable",
+        ),
+    ]
+}
+
+fn health_change_history_metrics() -> [(String, MetaMetric); 3] {
+    [
+        health_metric(
+            "median_files_per_commit",
+            "Change Dispersion (Files)",
+            "Median number of analyzed files in the commits that changed this file. Bulk commits above the change coupling file cap are not counted.",
+            Some("[1, infinity)"),
+            "higher means a change to this file usually spreads over more files",
+        ),
+        health_metric(
+            "median_lines_per_commit",
+            "Change Dispersion (Lines)",
+            "Median number of added plus deleted lines, analyzed files only, in the commits that changed this file.",
+            Some("[0, infinity)"),
+            "higher means a change to this file is usually large",
+        ),
+        health_metric(
+            "degree",
+            "Change Coupling Degree",
+            "Shared commits of two files divided by the mean commit count of the two files.",
+            Some("[0, 1]"),
+            "higher means the two files change together more often; a hidden pair has no import between the files",
         ),
     ]
 }

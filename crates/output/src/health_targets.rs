@@ -40,6 +40,9 @@ pub enum RecommendationCategory {
     ExtractDependencies,
     /// Multiple complex functions lack test dependency path.
     AddTestCoverage,
+    /// File changes together with another file in most commits, but no import
+    /// or re-export chain connects them.
+    ResolveHiddenCoupling,
 }
 
 impl RecommendationCategory {
@@ -54,6 +57,7 @@ impl RecommendationCategory {
             Self::ExtractComplexFunctions => "complexity",
             Self::ExtractDependencies => "coupling",
             Self::AddTestCoverage => "untested risk",
+            Self::ResolveHiddenCoupling => "hidden coupling",
         }
     }
 
@@ -68,6 +72,7 @@ impl RecommendationCategory {
             Self::ExtractComplexFunctions => "complexity",
             Self::ExtractDependencies => "coupling",
             Self::AddTestCoverage => "untested_risk",
+            Self::ResolveHiddenCoupling => "hidden_coupling",
         }
     }
 }
@@ -192,6 +197,23 @@ pub struct TargetEvidence {
     /// Other duplicate-code instances that share a clone group with this target.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub clone_siblings: Vec<CloneSiblingEvidence>,
+    /// Files that change together with this target without a static edge
+    /// (populated for `ResolveHiddenCoupling` targets), strongest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub co_change_partners: Vec<CoChangePartnerEvidence>,
+}
+
+/// A hidden change-coupling partner referenced in target evidence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoChangePartnerEvidence {
+    /// File that changes together with the target.
+    #[serde(serialize_with = "fallow_types::serde_path::serialize")]
+    pub path: std::path::PathBuf,
+    /// Commits that changed both files.
+    pub shared_revisions: u32,
+    /// Coupling degree from 0 to 1.
+    pub degree: f64,
 }
 
 /// A direct importer referenced in target evidence.
@@ -294,6 +316,7 @@ mod tests {
             RecommendationCategory::ExtractComplexFunctions,
             RecommendationCategory::ExtractDependencies,
             RecommendationCategory::AddTestCoverage,
+            RecommendationCategory::ResolveHiddenCoupling,
         ];
         let labels: Vec<&str> = categories
             .iter()
@@ -372,6 +395,7 @@ mod tests {
             RecommendationCategory::ExtractComplexFunctions,
             RecommendationCategory::ExtractDependencies,
             RecommendationCategory::AddTestCoverage,
+            RecommendationCategory::ResolveHiddenCoupling,
         ];
         let labels: Vec<&str> = categories
             .iter()
@@ -391,6 +415,7 @@ mod tests {
             RecommendationCategory::ExtractComplexFunctions,
             RecommendationCategory::ExtractDependencies,
             RecommendationCategory::AddTestCoverage,
+            RecommendationCategory::ResolveHiddenCoupling,
         ];
         for cat in &categories {
             assert!(
@@ -426,6 +451,7 @@ mod tests {
             cycle_path: vec![],
             direct_callers: vec![],
             clone_siblings: vec![],
+            co_change_partners: vec![],
         };
         let json = serde_json::to_string(&evidence).unwrap();
         assert!(!json.contains("unused_exports"));
@@ -459,6 +485,7 @@ mod tests {
                 end_line: 20,
                 fingerprint: "dup:12345678".into(),
             }],
+            co_change_partners: vec![],
         };
         let json = serde_json::to_string(&evidence).unwrap();
         assert!(json.contains("unused_exports"));

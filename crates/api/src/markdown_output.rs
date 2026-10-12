@@ -3042,6 +3042,8 @@ mod health_markdown_tests {
                     complexity_density: 0.5,
                     fan_in: 1,
                     trend: fallow_types::churn::ChurnTrend::Stable,
+                    median_files_per_commit: None,
+                    median_lines_per_commit: None,
                     ownership: None,
                     is_test_path: false,
                 }

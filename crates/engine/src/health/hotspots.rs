@@ -13,6 +13,10 @@ use crate::test_paths::is_test_path;
 pub struct ChurnFetchResult {
     pub result: crate::churn::ChurnResult,
     pub since: crate::churn::SinceDuration,
+    /// Window of [`crate::churn::ChurnResult::commits`], which change
+    /// coupling and change dispersion read. Without `--since` it is wider
+    /// than `since`.
+    pub history: crate::churn::SinceDuration,
     pub cache_hit: bool,
     pub git_log_ms: f64,
 }
@@ -187,6 +191,7 @@ pub(super) fn fetch_churn_data(
         return Some(ChurnFetchResult {
             result,
             since: imported_since(),
+            history: imported_since(),
             cache_hit: false,
             git_log_ms: t.elapsed().as_secs_f64() * 1000.0,
         });
@@ -208,7 +213,7 @@ pub(super) fn fetch_churn_data(
         return None;
     }
 
-    let since_input = opts.since.unwrap_or("6m");
+    let since_input = opts.since.unwrap_or(DEFAULT_HOTSPOT_WINDOW);
     if let Err(e) = crate::validate::validate_no_control_chars(since_input, "--since") {
         // A malformed `--since` degrades to "no churn, continue" like the
         // missing-git-repo branch above: route the error text to `tracing` and
@@ -229,10 +234,27 @@ pub(super) fn fetch_churn_data(
         }
     };
 
+    // Change coupling and change dispersion need more commits than hotspots,
+    // so without `--since` they read a wider window. The same `git log` pass
+    // feeds both windows.
+    let history = if opts.since.is_some() {
+        since.clone()
+    } else {
+        crate::churn::SinceDuration::relative(
+            DEFAULT_HISTORY_MONTHS,
+            crate::churn::ChurnWindowUnit::Months,
+            format!("{DEFAULT_HISTORY_MONTHS} months"),
+        )
+    };
+
     let t = std::time::Instant::now();
-    let Some((churn_result, cache_hit)) =
-        crate::churn::analyze_churn_cached(opts.root, &since, cache_dir, opts.no_cache)
-    else {
+    let Some((churn_result, cache_hit)) = crate::churn::analyze_churn_cached_with_history(
+        opts.root,
+        &since,
+        &history,
+        cache_dir,
+        opts.no_cache,
+    ) else {
         record_unborn_head(opts);
         return None;
     };
@@ -241,10 +263,18 @@ pub(super) fn fetch_churn_data(
     Some(ChurnFetchResult {
         result: churn_result,
         since,
+        history,
         cache_hit,
         git_log_ms,
     })
 }
+
+/// Hotspot window when `--since` is absent.
+const DEFAULT_HOTSPOT_WINDOW: &str = "6m";
+
+/// Change coupling and change dispersion window, in months, when `--since` is
+/// absent.
+const DEFAULT_HISTORY_MONTHS: u64 = 12;
 
 /// Record a branch without a commit, where churn has no history to read.
 ///
@@ -316,7 +346,7 @@ fn compute_normalization_maxima(
 
 /// Check whether a file should be excluded from hotspot results
 /// based on workspace filter and ignore patterns.
-fn is_excluded_from_hotspots(
+pub(super) fn is_excluded_from_hotspots(
     path: &std::path::Path,
     root: &std::path::Path,
     ignore_set: &globset::GlobSet,
@@ -366,6 +396,10 @@ pub(super) struct HotspotComputationInput<'a> {
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
     pub(super) churn_fetch: ChurnFetchResult,
+    /// Change dispersion per file, when change coupling ran.
+    pub(super) dispersion: Option<
+        &'a rustc_hash::FxHashMap<std::path::PathBuf, crate::change_coupling::FileDispersion>,
+    >,
 }
 
 /// Compute hotspot entries by combining pre-fetched churn data with file health scores.
@@ -382,6 +416,7 @@ pub(super) fn compute_hotspots(
         ignore_set,
         ws_roots,
         churn_fetch,
+        dispersion,
     } = input;
     let churn_result = churn_fetch.result;
     let since = churn_fetch.since;
@@ -419,6 +454,7 @@ pub(super) fn compute_hotspots(
         max_weighted,
         max_density,
         ownership_ctx: ownership_ctx.as_ref(),
+        dispersion,
     });
 
     hotspot_entries.sort_by(|a, b| {
@@ -574,6 +610,9 @@ struct HotspotEntryCtx<'a> {
     max_weighted: f64,
     max_density: f64,
     ownership_ctx: Option<&'a OwnershipContext<'a>>,
+    dispersion: Option<
+        &'a rustc_hash::FxHashMap<std::path::PathBuf, crate::change_coupling::FileDispersion>,
+    >,
 }
 
 /// Build hotspot entries for eligible files; returns the entries plus the count
@@ -599,6 +638,7 @@ fn collect_hotspot_entries(ctx: &HotspotEntryCtx<'_>) -> (Vec<HotspotEntry>, usi
         let ownership = ctx
             .ownership_ctx
             .and_then(|own| compute_ownership(churn, relative, own));
+        let dispersion = ctx.dispersion.and_then(|map| map.get(&score.path));
 
         hotspot_entries.push(HotspotEntry {
             path: score.path.clone(),
@@ -615,12 +655,20 @@ fn collect_hotspot_entries(ctx: &HotspotEntryCtx<'_>) -> (Vec<HotspotEntry>, usi
             complexity_density: score.complexity_density,
             fan_in: score.fan_in,
             trend: churn.trend,
+            median_files_per_commit: dispersion
+                .map(|d| round_one_decimal(d.median_files_per_commit)),
+            median_lines_per_commit: dispersion
+                .map(|d| round_one_decimal(d.median_lines_per_commit)),
             ownership,
             is_test_path: is_test_path(ctx.root, relative),
         });
     }
 
     (hotspot_entries, files_excluded)
+}
+
+fn round_one_decimal(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
 }
 
 #[cfg(test)]
@@ -659,6 +707,7 @@ mod tests {
             author_pool: Vec::new(),
             clock: crate::clock::AnalysisClock::pinned(1_788_782_400),
             git_log_bytes: 0,
+            commits: Vec::new(),
         }
     }
 

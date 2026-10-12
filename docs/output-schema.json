@@ -1655,6 +1655,17 @@
           ],
           "description": "Hotspot analysis summary.\n\nSet whenever the run measured churn, which needs readable git history;\n`--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing\nbeside it rather than gating this summary."
         },
+        "change_coupling": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChangeCouplingReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Hidden change coupling: file pairs that change together in the git\nhistory without an import or re-export chain between them. Present\nwhen the hotspots section ran and the run read the git history.\nAdvisory: no health score weight."
+        },
         "runtime_coverage": {
           "anyOf": [
             {
@@ -2895,6 +2906,17 @@
           ],
           "description": "Hotspot analysis summary.\n\nSet whenever the run measured churn, which needs readable git history;\n`--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing\nbeside it rather than gating this summary."
         },
+        "change_coupling": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChangeCouplingReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Hidden change coupling: file pairs that change together in the git\nhistory without an import or re-export chain between them. Present\nwhen the hotspots section ran and the run read the git history.\nAdvisory: no health score weight."
+        },
         "runtime_coverage": {
           "anyOf": [
             {
@@ -3736,6 +3758,20 @@
         "trend": {
           "description": "Whether churn is rising, falling, or steady over the window.",
           "$ref": "#/definitions/ChurnTrend"
+        },
+        "median_files_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of analyzed files in the commits\nthat changed this file, over the change coupling history window. Bulk\ncommits above the coupling file cap are not counted. Absent when the\nhistory has no commit ids (for example imported churn without them)."
+        },
+        "median_lines_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of changed lines (added plus\ndeleted, analyzed files only) in the commits that changed this file.\nSame window and rules as `median_files_per_commit`."
         },
         "ownership": {
           "anyOf": [
@@ -7919,6 +7955,11 @@
           "type": "string",
           "const": "add_test_coverage",
           "description": "Multiple complex functions lack test dependency path."
+        },
+        {
+          "type": "string",
+          "const": "resolve_hidden_coupling",
+          "description": "File changes together with another file in most commits, but no import\nor re-export chain connects them."
         }
       ],
       "description": "Category of refactoring recommendation."
@@ -8028,6 +8069,13 @@
             "$ref": "#/definitions/CloneSiblingEvidence"
           },
           "description": "Other duplicate-code instances that share a clone group with this target."
+        },
+        "co_change_partners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoChangePartnerEvidence"
+          },
+          "description": "Files that change together with this target without a static edge\n(populated for `ResolveHiddenCoupling` targets), strongest first."
         }
       },
       "description": "Evidence linking a target back to specific analysis data.\n\nProvides enough detail for an AI agent to act on a recommendation\nwithout a second tool call."
@@ -12064,6 +12112,20 @@
           "description": "Whether churn is rising, falling, or steady over the window.",
           "$ref": "#/definitions/ChurnTrend"
         },
+        "median_files_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of analyzed files in the commits\nthat changed this file, over the change coupling history window. Bulk\ncommits above the coupling file cap are not counted. Absent when the\nhistory has no commit ids (for example imported churn without them)."
+        },
+        "median_lines_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of changed lines (added plus\ndeleted, analyzed files only) in the commits that changed this file.\nSame window and rules as `median_files_per_commit`."
+        },
         "ownership": {
           "anyOf": [
             {
@@ -12848,6 +12910,24 @@
             "cause"
           ],
           "description": "Churn-based hotspot analysis was skipped, so the hotspots, churn and\nownership sections report nothing at all. The remaining health sections\nare unaffected."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cause": {
+              "type": "string",
+              "description": "Kebab-case token: `shallow-clone` (the fetched history is\nincomplete) or `too-few-commits` (fewer analyzed commits than the\nminimum revisions of one file). The set is open."
+            },
+            "kind": {
+              "type": "string",
+              "const": "change-coupling-skipped"
+            }
+          },
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "description": "Change coupling found no pairs because the history cannot show them.\nThe `change_coupling` section is present with an empty `pairs` list,\nand this entry tells why the list is empty."
         },
         {
           "type": "object",
@@ -19769,7 +19849,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "const": 12,
+      "const": 13,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -19906,6 +19986,13 @@
             "$ref": "#/definitions/CoordinationGapFact"
           },
           "description": "Coordination gaps: a changed file exports a contract consumed by a module\nabsent from the diff. One entry per (changed file, consumer) pair. NOT a\nsubset of [`affected_not_shown`](Self::affected_not_shown): the gap\ndeliberately skips story and test consumers that the affected set counts."
+        },
+        "co_change_gap": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoChangeGapFact"
+          },
+          "description": "Co-change gaps: a changed file has a hidden change-coupling partner\nthat is absent from the diff. The two files changed together in most\ncommits of the history window, but no import or re-export chain\nconnects them, so the graph facts above cannot point at the partner.\nAdvisory, never gates. Omitted when empty."
         }
       },
       "required": [
@@ -25006,12 +25093,12 @@
     },
     "HealthSchemaVersion": {
       "type": "integer",
-      "const": 11,
+      "const": 12,
       "description": "Exact schema version for [`HealthOutput`]."
     },
     "AuditSchemaVersion": {
       "type": "integer",
-      "const": 12,
+      "const": 13,
       "description": "Schema projection for the audit envelope's exact version."
     },
     "CheckSchemaVersion": {
@@ -25021,7 +25108,7 @@
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 13,
+      "const": 14,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {
@@ -29697,6 +29784,11 @@
         },
         {
           "type": "string",
+          "const": "change-coupling",
+          "description": "`change_coupling`. The pair list can be empty when the history cannot\nshow coupling; `workspace_diagnostics` then tells why."
+        },
+        {
+          "type": "string",
           "const": "targets",
           "description": "`targets`."
         },
@@ -30886,6 +30978,178 @@
         "depth"
       ],
       "description": "One file of a [`ConsumerClosure`]."
+    },
+    "CoChangePartnerEvidence": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that changes together with the target."
+        },
+        "shared_revisions": {
+          "type": "integer",
+          "description": "Commits that changed both files."
+        },
+        "degree": {
+          "type": "number",
+          "description": "Coupling degree from 0 to 1."
+        }
+      },
+      "required": [
+        "path",
+        "shared_revisions",
+        "degree"
+      ],
+      "description": "A hidden change-coupling partner referenced in target evidence."
+    },
+    "ChangeCouplingReport": {
+      "type": "object",
+      "properties": {
+        "since": {
+          "type": "string",
+          "description": "History window that the section reads, for example `\"12 months\"`.\nWithout `--since` the window is 12 months, wider than the hotspot\nwindow."
+        },
+        "commits_analyzed": {
+          "type": "integer",
+          "description": "Commits that changed at least one analyzed file and were not skipped."
+        },
+        "commits_skipped": {
+          "type": "integer",
+          "description": "Commits skipped because they changed more analyzed files than\n`thresholds.max_files_per_commit`."
+        },
+        "total_pairs": {
+          "type": "integer",
+          "description": "Hidden pairs in scope before `--top` cuts `pairs`."
+        },
+        "thresholds": {
+          "description": "Thresholds that this run applied.",
+          "$ref": "#/definitions/ChangeCouplingThresholds"
+        },
+        "pairs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HiddenCouplingPair"
+          },
+          "description": "Hidden pairs, sorted by `degree` and then `shared_revisions` (both\ndescending), then by path. Empty when the history cannot show\ncoupling; `workspace_diagnostics` then tells why."
+        }
+      },
+      "required": [
+        "since",
+        "commits_analyzed",
+        "commits_skipped",
+        "total_pairs",
+        "thresholds",
+        "pairs"
+      ],
+      "description": "Hidden change coupling: pairs of files that change together in the git\nhistory while no import or re-export chain connects them.\n\nAn agent that follows the import graph cannot find the second file of a\nhidden pair. The section is advisory: it has no health score weight and\nnever gates."
+    },
+    "ChangeCouplingThresholds": {
+      "type": "object",
+      "properties": {
+        "max_files_per_commit": {
+          "type": "integer",
+          "description": "Commits with more analyzed files than this are skipped."
+        },
+        "min_revisions": {
+          "type": "integer",
+          "description": "Minimum commits for each file of a pair."
+        },
+        "min_shared_revisions": {
+          "type": "integer",
+          "description": "Minimum commits that change both files of a pair."
+        },
+        "min_degree": {
+          "type": "number",
+          "description": "Minimum coupling degree, from 0 to 1."
+        },
+        "strong_degree": {
+          "type": "number",
+          "description": "Degree at or above which a pair is `strong`."
+        }
+      },
+      "required": [
+        "max_files_per_commit",
+        "min_revisions",
+        "min_shared_revisions",
+        "min_degree",
+        "strong_degree"
+      ],
+      "description": "Thresholds that a hidden pair met."
+    },
+    "HiddenCouplingPair": {
+      "type": "object",
+      "properties": {
+        "path_a": {
+          "type": "string",
+          "description": "First file, relative to the project root. Sorts before `path_b`."
+        },
+        "path_b": {
+          "type": "string",
+          "description": "Second file, relative to the project root."
+        },
+        "revisions_a": {
+          "type": "integer",
+          "description": "Commits that changed `path_a` in the window."
+        },
+        "revisions_b": {
+          "type": "integer",
+          "description": "Commits that changed `path_b` in the window."
+        },
+        "shared_revisions": {
+          "type": "integer",
+          "description": "Commits that changed both files."
+        },
+        "degree": {
+          "type": "number",
+          "description": "Coupling degree from 0 to 1: `shared_revisions` divided by the mean of\n`revisions_a` and `revisions_b`."
+        },
+        "strong": {
+          "type": "boolean",
+          "description": "True when `degree` reaches `thresholds.strong_degree`. A strong pair\nalso appears as a `resolve_hidden_coupling` refactoring target."
+        }
+      },
+      "required": [
+        "path_a",
+        "path_b",
+        "revisions_a",
+        "revisions_b",
+        "shared_revisions",
+        "degree"
+      ],
+      "description": "Two files that change together without a static edge between them."
+    },
+    "CoChangeGapFact": {
+      "type": "object",
+      "properties": {
+        "changed_file": {
+          "type": "string",
+          "description": "Root-relative path of the changed file."
+        },
+        "partner_file": {
+          "type": "string",
+          "description": "Root-relative path of the hidden partner that the diff does not touch."
+        },
+        "shared_revisions": {
+          "type": "integer",
+          "description": "Commits in the history window that changed both files."
+        },
+        "degree": {
+          "type": "number",
+          "description": "Coupling degree from 0 to 1."
+        },
+        "note": {
+          "type": "string",
+          "description": "Scope note: history evidence, not a proof that the partner must change."
+        }
+      },
+      "required": [
+        "changed_file",
+        "partner_file",
+        "shared_revisions",
+        "degree",
+        "note"
+      ],
+      "description": "One co-change gap: `changed_file` is in the diff, `partner_file` is not,\nand history shows that the two files usually change together."
     }
   }
 }

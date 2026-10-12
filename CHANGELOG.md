@@ -17,6 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default, and editor diagnostics stay hints. Thanks
   [@miky-mfw](https://github.com/miky-mfw) for the request.
   (Closes [#3327](https://github.com/fallow-rs/fallow/issues/3327))
+- **`fallow health` now reports hidden change coupling and change
+  dispersion.** A hidden pair is two files that change together in most
+  commits while no import or re-export chain connects them. An agent that
+  follows imports does not find the second file. The new `change_coupling`
+  section lists these pairs with the Code Maat defaults: 5 commits per file,
+  5 shared commits, a coupling degree of at least 30%, and commits with more
+  than 30 analyzed files skipped. `health.changeCoupling` changes the
+  thresholds. Each hotspot also gets `median_files_per_commit` and
+  `median_lines_per_commit`. Without `--since`, these values read 12 months
+  of history. A strong pair becomes a `resolve_hidden_coupling` refactoring
+  target. This new category value moves `schema_version` to 12 for health,
+  13 for audit, 14 for the combined report and 13 for the audit brief.
+  `fallow audit --brief` shows an advisory `co_change_gap` fact when
+  a diff changes one file of a hidden pair and not the other. The health
+  score does not change. The churn cache moves to version 8 and is rebuilt
+  once. The `fallow-churn/v1` import accepts an optional `commit` field.
 
 ### Changed
 

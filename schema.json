@@ -197,6 +197,12 @@
           ],
           "emailMode": "handle"
         },
+        "changeCoupling": {
+          "maxFilesPerCommit": 30,
+          "minRevisions": 5,
+          "minSharedRevisions": 5,
+          "minDegree": 0.3
+        },
         "suggestInlineSuppression": true
       }
     },
@@ -1168,6 +1174,16 @@
             "emailMode": "handle"
           }
         },
+        "changeCoupling": {
+          "description": "Change coupling thresholds for the `change_coupling` section and the\nhidden-coupling refactoring targets.",
+          "$ref": "#/$defs/ChangeCouplingConfig",
+          "default": {
+            "maxFilesPerCommit": 30,
+            "minRevisions": 5,
+            "minSharedRevisions": 5,
+            "minDegree": 0.3
+          }
+        },
         "suggestInlineSuppression": {
           "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// fallow-ignore-*` comments authored by hand or\nthrough the `fallow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
           "type": "boolean",
@@ -1294,6 +1310,40 @@
           "const": "hash"
         }
       ]
+    },
+    "ChangeCouplingConfig": {
+      "description": "Thresholds for change coupling (`change_coupling` in `fallow health`).\n\nThe defaults are the Code Maat defaults. A pair of files is hidden coupling\nwhen each file has `minRevisions` commits, the pair shares\n`minSharedRevisions` commits, the coupling degree reaches `minDegree`, and\nno import or re-export chain connects the two files.",
+      "type": "object",
+      "properties": {
+        "maxFilesPerCommit": {
+          "description": "Skip a commit that changes more analyzed files than this (default:\n30). Bulk commits (renames, format passes) create false pairs.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 30
+        },
+        "minRevisions": {
+          "description": "Minimum commits for each file of a pair (default: 5).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 5
+        },
+        "minSharedRevisions": {
+          "description": "Minimum commits that change both files of a pair (default: 5).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 5
+        },
+        "minDegree": {
+          "description": "Minimum coupling degree, from 0 to 1 (default: 0.3). The degree is the\nnumber of shared commits divided by the mean commit count of the two\nfiles.",
+          "type": "number",
+          "format": "double",
+          "default": 0.3
+        }
+      },
+      "additionalProperties": false
     },
     "TypeAwareConfig": {
       "description": "Shared opt-in configuration for TypeScript semantic analysis.",

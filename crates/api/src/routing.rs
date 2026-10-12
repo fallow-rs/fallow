@@ -15,12 +15,26 @@ pub use fallow_output::{RoutingFacts, RoutingUnit};
 use rustc_hash::FxHashSet;
 
 use fallow_config::ResolvedConfig;
-use fallow_engine::churn::{ChurnResult, ChurnWindowUnit, SinceDuration, analyze_churn};
+use fallow_engine::churn::{ChurnResult, ChurnWindowUnit, SinceDuration, analyze_churn_cached};
 use fallow_engine::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
 
-/// Default churn window for routing: one year of history is enough to identify
-/// the per-file experts without an unbounded `git log`.
-const ROUTING_CHURN_WINDOW_YEARS: u64 = 1;
+/// Churn window of the audit brief, in months: enough history to name the
+/// per-file experts and to find hidden change coupling. It matches the
+/// default change coupling window of `fallow health`, so both commands share
+/// one churn cache entry.
+const AUDIT_CHURN_WINDOW_MONTHS: u64 = 12;
+
+/// Read the audit brief churn through the shared churn cache. `None` when git
+/// history is unavailable (not a repository, or a branch without commits).
+#[must_use]
+pub fn audit_churn(root: &Path, config: &ResolvedConfig) -> Option<ChurnResult> {
+    let since = SinceDuration::relative(
+        AUDIT_CHURN_WINDOW_MONTHS,
+        ChurnWindowUnit::Months,
+        format!("{AUDIT_CHURN_WINDOW_MONTHS} months"),
+    );
+    analyze_churn_cached(root, &since, &config.cache_dir, config.no_cache).map(|(churn, _)| churn)
+}
 
 /// Compute the routing section for the changed files. Best-effort: returns an
 /// empty `RoutingFacts` when churn is unavailable (non-git repo, shallow clone
@@ -36,9 +50,7 @@ pub fn compute_routing(
     config: &ResolvedConfig,
     changed_files: &FxHashSet<PathBuf>,
 ) -> RoutingFacts {
-    let since =
-        SinceDuration::relative(ROUTING_CHURN_WINDOW_YEARS, ChurnWindowUnit::Years, "1 year");
-    let Some(churn_result) = analyze_churn(root, &since) else {
+    let Some(churn_result) = audit_churn(root, config) else {
         return RoutingFacts::default();
     };
 

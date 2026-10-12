@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use colored::Colorize;
 
-use super::health_hotspots::render_hotspots;
+use super::health_hotspots::{render_change_coupling, render_hotspots};
 use super::health_runtime::render_runtime_coverage;
 use super::health_targets::render_refactoring_targets;
 use super::{
@@ -274,6 +274,7 @@ fn build_health_human_lines_with_explain(
     render_coverage_gaps(&mut lines, report, root);
     render_file_scores(&mut lines, report, root);
     render_hotspots(&mut lines, report, root);
+    render_change_coupling(&mut lines, report, root);
     render_refactoring_targets(&mut lines, report, root);
     render_css_analytics(&mut lines, report, css_requested);
     if explain {
@@ -5318,6 +5319,8 @@ mod tests {
                 complexity_density: 0.85,
                 fan_in: 10,
                 trend: fallow_engine::churn::ChurnTrend::Accelerating,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5350,6 +5353,8 @@ mod tests {
                 complexity_density: 0.3,
                 fan_in: 2,
                 trend: fallow_engine::churn::ChurnTrend::Cooling,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5376,6 +5381,8 @@ mod tests {
                 complexity_density: 0.5,
                 fan_in: 5,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5402,6 +5409,8 @@ mod tests {
                 complexity_density: 0.4,
                 fan_in: 3,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5436,6 +5445,8 @@ mod tests {
                 complexity_density: 0.4,
                 fan_in: 3,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5469,6 +5480,8 @@ mod tests {
                 complexity_density: 0.4,
                 fan_in: 3,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5861,6 +5874,8 @@ mod tests {
                 complexity_density: 0.5,
                 fan_in: 5,
                 trend: fallow_engine::churn::ChurnTrend::Accelerating,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -6099,6 +6114,8 @@ mod tests {
                 complexity_density: 0.9,
                 fan_in: 8,
                 trend: fallow_engine::churn::ChurnTrend::Accelerating,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -6113,6 +6130,8 @@ mod tests {
                 complexity_density: 0.5,
                 fan_in: 4,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -6127,6 +6146,8 @@ mod tests {
                 complexity_density: 0.2,
                 fan_in: 1,
                 trend: fallow_engine::churn::ChurnTrend::Cooling,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }

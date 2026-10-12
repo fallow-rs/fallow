@@ -35,7 +35,9 @@ pub use entry_span::ConfigEntrySpan;
 pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
-pub use health::{EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig};
+pub use health::{
+    ChangeCouplingConfig, EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig,
+};
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
 pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions};
 pub use resolution::{

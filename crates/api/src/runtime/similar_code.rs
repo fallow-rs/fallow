@@ -2636,6 +2636,7 @@ mod tests {
             author_pool: Vec::new(),
             clock: fallow_engine::clock::AnalysisClock::pinned(1_788_782_400),
             git_log_bytes: 0,
+            commits: Vec::new(),
         };
 
         assert_eq!(churn_commits_for(&churn, Path::new(r"C:\repo\src\a.ts")), 7);

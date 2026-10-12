@@ -120,7 +120,7 @@ kind: "similar-code-cache-clear"
 /**
  * Schema projection for the audit envelope's exact version.
  */
-export type AuditSchemaVersion = 12
+export type AuditSchemaVersion = 13
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -680,6 +680,14 @@ cause: string
 kind: "hotspots-skipped"
 } | {
 /**
+ * Kebab-case token: `shallow-clone` (the fetched history is
+ * incomplete) or `too-few-commits` (fewer analyzed commits than the
+ * minimum revisions of one file). The set is open.
+ */
+cause: string
+kind: "change-coupling-skipped"
+} | {
+/**
  * `true` when the run also asked for ownership attribution, which a
  * shallow clone skews further by inflating single-author dominance.
  */
@@ -874,7 +882,7 @@ export type CoverageSourceConsistency = ("uniform" | "mixed")
  * set is OPEN: a later release can add a section, so a consumer must accept
  * a token that it does not know.
  */
-export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "targets" | "trend" | "runtime-coverage" | "css")
+export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "change-coupling" | "targets" | "trend" | "runtime-coverage" | "css")
 /**
  * Lifecycle state for a configured threshold override.
  */
@@ -1014,7 +1022,7 @@ export type CoverageIntelligenceMatchConfidence = ("path-function-line" | "path-
 /**
  * Category of refactoring recommendation.
  */
-export type RecommendationCategory = ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies" | "add_test_coverage")
+export type RecommendationCategory = ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies" | "add_test_coverage" | "resolve_hidden_coupling")
 /**
  * A ranked refactoring recommendation for a file.
  *
@@ -1244,7 +1252,7 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 /**
  * Exact schema version for [`HealthOutput`].
  */
-export type HealthSchemaVersion = 11
+export type HealthSchemaVersion = 12
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
@@ -1382,7 +1390,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 13
+export type CombinedSchemaVersion = 14
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */
@@ -1427,7 +1435,7 @@ export type VendorFlagState = ("on" | "off" | "rolled_out" | "archived" | "exper
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 12
+export type ReviewBriefSchemaVersion = 13
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -7485,6 +7493,13 @@ hotspots?: HotspotFinding[]
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
+ * Hidden change coupling: file pairs that change together in the git
+ * history without an import or re-export chain between them. Present
+ * when the hotspots section ran and the run read the git history.
+ * Advisory: no health score weight.
+ */
+change_coupling?: (ChangeCouplingReport | null)
+/**
  * Runtime coverage findings from the paid sidecar (only populated with
  * `--runtime-coverage`).
  */
@@ -8716,6 +8731,19 @@ complexity_density: number
 fan_in: number
 trend: ChurnTrend
 /**
+ * Change dispersion: the median number of analyzed files in the commits
+ * that changed this file, over the change coupling history window. Bulk
+ * commits above the coupling file cap are not counted. Absent when the
+ * history has no commit ids (for example imported churn without them).
+ */
+median_files_per_commit?: (number | null)
+/**
+ * Change dispersion: the median number of changed lines (added plus
+ * deleted, analyzed files only) in the commits that changed this file.
+ * Same window and rules as `median_files_per_commit`.
+ */
+median_lines_per_commit?: (number | null)
+/**
  * Ownership metrics, when ownership analysis ran.
  */
 ownership?: (OwnershipMetrics | null)
@@ -8887,6 +8915,102 @@ epoch_secs: number
  * False only for `wall_clock`, where the numbers drift between runs.
  */
 reproducible: boolean
+}
+/**
+ * Hidden change coupling: pairs of files that change together in the git
+ * history while no import or re-export chain connects them.
+ *
+ * An agent that follows the import graph cannot find the second file of a
+ * hidden pair. The section is advisory: it has no health score weight and
+ * never gates.
+ */
+export interface ChangeCouplingReport {
+/**
+ * History window that the section reads, for example `"12 months"`.
+ * Without `--since` the window is 12 months, wider than the hotspot
+ * window.
+ */
+since: string
+/**
+ * Commits that changed at least one analyzed file and were not skipped.
+ */
+commits_analyzed: number
+/**
+ * Commits skipped because they changed more analyzed files than
+ * `thresholds.max_files_per_commit`.
+ */
+commits_skipped: number
+/**
+ * Hidden pairs in scope before `--top` cuts `pairs`.
+ */
+total_pairs: number
+thresholds: ChangeCouplingThresholds
+/**
+ * Hidden pairs, sorted by `degree` and then `shared_revisions` (both
+ * descending), then by path. Empty when the history cannot show
+ * coupling; `workspace_diagnostics` then tells why.
+ */
+pairs: HiddenCouplingPair[]
+}
+/**
+ * Thresholds that a hidden pair met.
+ */
+export interface ChangeCouplingThresholds {
+/**
+ * Commits with more analyzed files than this are skipped.
+ */
+max_files_per_commit: number
+/**
+ * Minimum commits for each file of a pair.
+ */
+min_revisions: number
+/**
+ * Minimum commits that change both files of a pair.
+ */
+min_shared_revisions: number
+/**
+ * Minimum coupling degree, from 0 to 1.
+ */
+min_degree: number
+/**
+ * Degree at or above which a pair is `strong`.
+ */
+strong_degree: number
+}
+/**
+ * Two files that change together without a static edge between them.
+ */
+export interface HiddenCouplingPair {
+/**
+ * First file, relative to the project root. Sorts before `path_b`.
+ */
+path_a: string
+/**
+ * Second file, relative to the project root.
+ */
+path_b: string
+/**
+ * Commits that changed `path_a` in the window.
+ */
+revisions_a: number
+/**
+ * Commits that changed `path_b` in the window.
+ */
+revisions_b: number
+/**
+ * Commits that changed both files.
+ */
+shared_revisions: number
+/**
+ * Coupling degree from 0 to 1: `shared_revisions` divided by the mean of
+ * `revisions_a` and `revisions_b`.
+ */
+degree: number
+/**
+ * True when `degree` reaches `thresholds.strong_degree`. A strong pair
+ * also appears as a `resolve_hidden_coupling` refactoring target.
+ */
+strong?: boolean
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by
@@ -9698,6 +9822,11 @@ direct_callers?: DirectCallerEvidence[]
  * Other duplicate-code instances that share a clone group with this target.
  */
 clone_siblings?: CloneSiblingEvidence[]
+/**
+ * Files that change together with this target without a static edge
+ * (populated for `ResolveHiddenCoupling` targets), strongest first.
+ */
+co_change_partners?: CoChangePartnerEvidence[]
 }
 /**
  * A function referenced in target evidence.
@@ -9766,6 +9895,23 @@ end_line: number
  * Stable duplicate-group handle, matching `dupes --trace dup:<id>`.
  */
 fingerprint: string
+}
+/**
+ * A hidden change-coupling partner referenced in target evidence.
+ */
+export interface CoChangePartnerEvidence {
+/**
+ * File that changes together with the target.
+ */
+path: string
+/**
+ * Commits that changed both files.
+ */
+shared_revisions: number
+/**
+ * Coupling degree from 0 to 1.
+ */
+degree: number
 }
 /**
  * Suggested action attached to a [`RefactoringTarget`].
@@ -13087,6 +13233,13 @@ hotspots?: HotspotFinding[]
  * beside it rather than gating this summary.
  */
 hotspot_summary?: (HotspotSummary | null)
+/**
+ * Hidden change coupling: file pairs that change together in the git
+ * history without an import or re-export chain between them. Present
+ * when the hotspots section ran and the run read the git history.
+ * Advisory: no health score weight.
+ */
+change_coupling?: (ChangeCouplingReport | null)
 /**
  * Runtime coverage findings from the paid sidecar (only populated with
  * `--runtime-coverage`).
@@ -16880,6 +17033,14 @@ affected_by_dir_omitted: number
  * deliberately skips story and test consumers that the affected set counts.
  */
 coordination_gap: CoordinationGapFact[]
+/**
+ * Co-change gaps: a changed file has a hidden change-coupling partner
+ * that is absent from the diff. The two files changed together in most
+ * commits of the history window, but no import or re-export chain
+ * connects them, so the graph facts above cannot point at the partner.
+ * Advisory, never gates. Omitted when empty.
+ */
+co_change_gap?: CoChangeGapFact[]
 }
 /**
  * One directory of the blast radius and how many affected files it holds.
@@ -16916,6 +17077,32 @@ consumer_file: string
 consumed_symbols: string[]
 /**
  * Honest scope note: this is a syntactic attention pointer, not a proof.
+ */
+note: string
+}
+/**
+ * One co-change gap: `changed_file` is in the diff, `partner_file` is not,
+ * and history shows that the two files usually change together.
+ */
+export interface CoChangeGapFact {
+/**
+ * Root-relative path of the changed file.
+ */
+changed_file: string
+/**
+ * Root-relative path of the hidden partner that the diff does not touch.
+ */
+partner_file: string
+/**
+ * Commits in the history window that changed both files.
+ */
+shared_revisions: number
+/**
+ * Coupling degree from 0 to 1.
+ */
+degree: number
+/**
+ * Scope note: history evidence, not a proof that the partner must change.
  */
 note: string
 }
