@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `commit` or `push` also counts as a git write now, for example `bash -c
   'git commit'`. Run `fallow hooks install --target agent` again to update an
   installed gate script.
+- **The tsup and tsdown plugins now credit the entry files of a function
+  config.** A config can export a function that returns a static array, for
+  example `export default () => [{ entry: ['src/cli.ts'] }]`. Fallow did not
+  read entries from this shape, so it reported the entry files as unused. Now
+  each entry file in the returned array counts as an entry point.
+- **The Nuxt plugin now detects and reads `nuxt.config.mjs`, `.cjs`, `.mts`
+  and `.cts`.** Fallow read only `nuxt.config.ts` and `nuxt.config.js`, so a
+  project with another config extension lost the Nuxt entry points and
+  modules.
 
 ## [3.33.1] - 2026-10-09
 
