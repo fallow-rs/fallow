@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fallow audit` now reports a new error in a changed template or regex as
+  introduced.** Audit treated a change inside a template literal or a regex
+  literal as non-behavioral. It then reused the current findings as the
+  baseline, so a new error looked inherited and the audit could pass. Now
+  audit compares the source text of these literals. A new error from such a
+  change is introduced and fails the audit with exit code 1.
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a
