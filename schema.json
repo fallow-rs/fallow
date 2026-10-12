@@ -20,11 +20,18 @@
       ]
     },
     "extends": {
-      "description": "An ordered array of parent config sources to inherit before this file's own keys apply; each entry is a file-relative path, an `npm:<package>` specifier, or an `https://` URL (`http://` is rejected), deep-merged in order so objects merge field-by-field while arrays and scalars in this file replace the parent's, with cycle and depth guards. Set it to share a base config across a monorepo or team; it is consumed at load and stripped before serialization (serde skip_serializing).",
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
+      "description": "A single parent config source, or an ordered array of them, to inherit before this file's own keys apply; each source is a file-relative path, an `npm:<package>` specifier, or an `https://` URL (`http://` is rejected), deep-merged in order so objects merge field-by-field while arrays and scalars in this file replace the parent's, with cycle and depth guards. Set it to share a base config across a monorepo or team; it is consumed at load and stripped before serialization (serde skip_serializing).",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ],
       "writeOnly": true
     },
     "entry": {

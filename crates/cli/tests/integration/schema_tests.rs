@@ -867,3 +867,33 @@ fn config_schema_advertises_jsonc_dialect() {
         "config-schema should advertise comment support"
     );
 }
+
+/// The loader accepts `extends` as a string and as an array of strings, so
+/// the shipped schema must accept both (#3351).
+#[test]
+fn config_schema_accepts_extends_as_string_and_array() {
+    let output = run_fallow_raw(&["config-schema"]);
+    let schema = parse_json(&output);
+    let validator = jsonschema::validator_for(&schema).expect("compile config schema");
+
+    for config in [
+        serde_json::json!({ "extends": "./base.json" }),
+        serde_json::json!({ "extends": ["./base.json"] }),
+        serde_json::json!({ "extends": [] }),
+    ] {
+        assert!(
+            validator.is_valid(&config),
+            "config schema should accept {config}"
+        );
+    }
+    for config in [
+        serde_json::json!({ "extends": 1 }),
+        serde_json::json!({ "extends": [1] }),
+        serde_json::json!({ "extends": null }),
+    ] {
+        assert!(
+            !validator.is_valid(&config),
+            "config schema should reject {config}"
+        );
+    }
+}

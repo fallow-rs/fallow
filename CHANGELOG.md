@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The config JSON Schema now accepts `extends` as a single string.** The
+  loader already accepted `"extends": "./base.json"` and the array form. The
+  schema allowed only the array, so editors flagged a valid config. The
+  schema now allows both forms.
+  Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report.
+  (Closes [#3351](https://github.com/fallow-rs/fallow/issues/3351))
 - **`fallow audit` now reports a new error in a changed template or regex as
   introduced.** Audit treated a change inside a template literal or a regex
   literal as non-behavioral. It then reused the current findings as the

@@ -277,6 +277,17 @@ impl TypeAwareConfig {
     }
 }
 
+/// Schema for `extends`. The loader accepts one string or an array of strings
+/// and normalizes both to a list before it deserializes the config (#3351).
+fn extends_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "anyOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+        ]
+    })
+}
+
 /// The user-facing fallow configuration as authored in `.fallowrc.json` /
 /// `.fallowrc.jsonc` / `fallow.toml` / `.fallow.toml`.
 ///
@@ -302,8 +313,9 @@ pub struct FallowConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimum_version: Option<String>,
 
-    /// An ordered array of parent config sources to inherit before this file's own keys apply; each entry is a file-relative path, an `npm:<package>` specifier, or an `https://` URL (`http://` is rejected), deep-merged in order so objects merge field-by-field while arrays and scalars in this file replace the parent's, with cycle and depth guards. Set it to share a base config across a monorepo or team; it is consumed at load and stripped before serialization (serde skip_serializing).
+    /// A single parent config source, or an ordered array of them, to inherit before this file's own keys apply; each source is a file-relative path, an `npm:<package>` specifier, or an `https://` URL (`http://` is rejected), deep-merged in order so objects merge field-by-field while arrays and scalars in this file replace the parent's, with cycle and depth guards. Set it to share a base config across a monorepo or team; it is consumed at load and stripped before serialization (serde skip_serializing).
     #[serde(default, skip_serializing)]
+    #[schemars(schema_with = "extends_schema")]
     pub extends: Vec<String>,
 
     /// An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `["src/main.ts"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files.
