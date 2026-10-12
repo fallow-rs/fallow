@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `var()` in the name position stays unresolved. Thanks
   [@Smrtnyk](https://github.com/Smrtnyk) for the report.
   (Closes [#3349](https://github.com/fallow-rs/fallow/issues/3349))
+- **CSS health now recognizes the classes of Vue `<Transition>` and
+  `<TransitionGroup>`.** A literal `name="fade"` credits `fade-enter-from`,
+  `fade-enter-active`, `fade-enter-to`, `fade-leave-from`, `fade-leave-active`
+  and `fade-leave-to`. A `<TransitionGroup>` also credits `fade-move`. A tag
+  without `name` credits the same classes with the `v` prefix. Literal custom
+  class props such as `enter-active-class` also count. A bound `:name` credits
+  no generated class, because the name is not known before run time. Scoped
+  styles get the credit only from the same component. Global styles get it
+  from any Vue component. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the
+  report. (Closes [#3350](https://github.com/fallow-rs/fallow/issues/3350))
 - **`fallow audit` now reports a new error in a changed template or regex as
   introduced.** Audit treated a change inside a template literal or a regex
   literal as non-behavioral. It then reused the current findings as the

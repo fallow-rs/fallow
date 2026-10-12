@@ -10350,3 +10350,82 @@ fn health_css_credits_keyframes_in_animation_shorthand_with_var() {
         "literal names next to var() are credited; a var() name stays unresolved"
     );
 }
+
+#[test]
+fn health_css_credits_vue_transition_classes_in_scoped_styles() {
+    // Issue #3350: Vue applies `<name>-enter-active` and the other transition
+    // classes at runtime for a literal `name`.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-repro-transition-literal","dependencies":{"vue":"^3.4.0"}}"#,
+    );
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"entry":["src/main.ts"],"rules":{"css-dead-surface":"warn"}}"#,
+    );
+    write_file(
+        &root.join("src/main.ts"),
+        "import { createApp } from \"vue\";\nimport App from \"./App.vue\";\ncreateApp(App).mount(\"#app\");\n",
+    );
+    write_file(
+        &root.join("src/App.vue"),
+        "<template>\n  <button @click=\"visible = !visible\">Toggle</button>\n  \
+         <Transition name=\"fade\"><div v-if=\"visible\" class=\"panel\">Panel</div></Transition>\n\
+         </template>\n\
+         <script setup lang=\"ts\">\nimport { ref } from \"vue\";\nconst visible = ref(true);\n</script>\n\
+         <style scoped>\n.panel { color: red; }\n.fade-enter-active { transition: opacity 200ms ease; }\n\
+         .fade-move { color: blue; }\n</style>\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &["--css", "--no-cache", "--format", "json", "--quiet"],
+    );
+    let json = parse_json(&out);
+    let scoped = json["css_analytics"]["scoped_unused"]
+        .as_array()
+        .expect("scoped_unused array");
+    let classes: Vec<&str> = scoped
+        .iter()
+        .flat_map(|entry| entry["classes"].as_array().unwrap().iter())
+        .filter_map(|class| class.as_str())
+        .collect();
+    assert_eq!(
+        classes,
+        vec!["fade-move"],
+        "`fade-enter-active` is credited; `fade-move` needs a TransitionGroup"
+    );
+}
+
+#[test]
+fn health_css_credits_vue_transition_classes_in_global_styles() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"vue-global-transition","dependencies":{"vue":"^3.4.0"}}"#,
+    );
+    write_file(
+        &root.join("src/main.ts"),
+        "import \"./app.css\";\nimport App from \"./App.vue\";\nexport { App };\n",
+    );
+    write_file(
+        &root.join("src/app.css"),
+        ".panel-shell{}\n.slide-leave-active{}\n.list-move{}\n.v-enter-from{}\n.really-dead-class{}\n",
+    );
+    write_file(
+        &root.join("src/App.vue"),
+        "<template>\n  <Transition name=\"slide\"><div class=\"panel-shell\"/></Transition>\n  \
+         <transition-group name=\"list\" tag=\"ul\"><li/></transition-group>\n  \
+         <Transition :name=\"dynamicName\"><p/></Transition>\n</template>\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["really-dead-class".to_string(), "v-enter-from".to_string()],
+        "literal transition names credit their classes; a bound name credits nothing"
+    );
+}

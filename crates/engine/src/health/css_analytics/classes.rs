@@ -959,6 +959,11 @@ fn collect_css_reference_surface_file(
         surface.static_tokens.insert(token.value);
     }
     collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
+    if extension == Some("vue") {
+        surface
+            .static_tokens
+            .extend(crate::css::vue_transition_classes(&source));
+    }
     if scan.has_dynamic {
         collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
         surface.dynamic_corpus.push_str(&source);

@@ -62,6 +62,13 @@ pub fn scoped_unused_classes(source: &str) -> Vec<String> {
     fallow_extract::sfc_css::scoped_unused_classes(source)
 }
 
+/// Return the classes that Vue applies through `<Transition>` and
+/// `<TransitionGroup>` tags in one source.
+#[must_use]
+pub fn vue_transition_classes(source: &str) -> rustc_hash::FxHashSet<String> {
+    fallow_extract::sfc_css::vue_transition_classes(source)
+}
+
 /// Build a virtual stylesheet from SFC style blocks.
 #[must_use]
 pub fn sfc_virtual_stylesheet(source: &str) -> Option<String> {

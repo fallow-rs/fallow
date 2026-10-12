@@ -109,12 +109,140 @@ pub fn scoped_unused_classes(source: &str) -> Vec<String> {
     }
 
     let search = blank_ranges(source, &style_ranges);
+    let transition_classes = vue_transition_classes(&search);
     let mut candidates: Vec<String> = scoped_classes
         .into_iter()
-        .filter(|class| !class_token_appears(&search, class))
+        .filter(|class| !transition_classes.contains(class) && !class_token_appears(&search, class))
         .collect();
     candidates.sort_unstable();
     candidates
+}
+
+/// Matches an opening Vue `<Transition>` / `<TransitionGroup>` tag in
+/// PascalCase or kebab-case. The caller rejects a longer tag name such as
+/// `<TransitionWrapper>`, because the regex crate has no look-ahead.
+static TRANSITION_TAG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r#"<(?P<tag>TransitionGroup|transition-group|Transition|transition)(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#,
+    )
+});
+
+/// Matches one attribute of an opening tag. Quoted values are consumed whole,
+/// so an attribute-like text inside a value is never read as an attribute.
+static TAG_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r#"(?P<key>[^\s=/>"']+)(?:\s*=\s*(?:"(?P<dq>[^"]*)"|'(?P<sq>[^']*)'|(?P<uq>[^\s>"']+)))?"#,
+    )
+});
+
+/// Class suffixes that Vue applies for every `<Transition>` name.
+const TRANSITION_CLASS_SUFFIXES: [&str; 6] = [
+    "enter-from",
+    "enter-active",
+    "enter-to",
+    "leave-from",
+    "leave-active",
+    "leave-to",
+];
+
+/// The class suffix that Vue adds for a `<TransitionGroup>` move.
+const TRANSITION_GROUP_MOVE_SUFFIX: &str = "move";
+
+/// The name prefix that Vue uses when a transition has no `name` attribute.
+const DEFAULT_TRANSITION_NAME: &str = "v";
+
+/// Props that give literal custom transition classes, in kebab-case and
+/// camelCase.
+const TRANSITION_CLASS_PROPS: [&str; 20] = [
+    "enter-from-class",
+    "enter-active-class",
+    "enter-to-class",
+    "leave-from-class",
+    "leave-active-class",
+    "leave-to-class",
+    "appear-from-class",
+    "appear-active-class",
+    "appear-to-class",
+    "move-class",
+    "enterFromClass",
+    "enterActiveClass",
+    "enterToClass",
+    "leaveFromClass",
+    "leaveActiveClass",
+    "leaveToClass",
+    "appearFromClass",
+    "appearActiveClass",
+    "appearToClass",
+    "moveClass",
+];
+
+/// How a transition tag sets its `name`.
+enum TransitionName<'a> {
+    Absent,
+    Literal(&'a str),
+    Bound,
+}
+
+/// Returns the classes that Vue applies through the `<Transition>` and
+/// `<TransitionGroup>` tags in `source` (issue #3350).
+///
+/// A literal `name="fade"` gives `fade-enter-from` through `fade-leave-to`, and
+/// a TransitionGroup also gives `fade-move`. A tag without `name` gives the
+/// same classes with the `v` prefix. A bound `:name` or a `v-bind` object gives
+/// no generated classes, because the name is not known statically. Literal
+/// custom class props such as `enter-active-class="a b"` give their classes.
+#[must_use]
+pub fn vue_transition_classes(source: &str) -> FxHashSet<String> {
+    let mut out = FxHashSet::default();
+    for caps in TRANSITION_TAG_RE.captures_iter(source) {
+        let attrs = caps.name("attrs").map_or("", |m| m.as_str());
+        if attrs
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace() && c != '/')
+        {
+            continue;
+        }
+        let is_group = caps
+            .name("tag")
+            .is_some_and(|m| matches!(m.as_str(), "TransitionGroup" | "transition-group"));
+        collect_transition_tag_classes(attrs, is_group, &mut out);
+    }
+    out
+}
+
+fn collect_transition_tag_classes(attrs: &str, is_group: bool, out: &mut FxHashSet<String>) {
+    let mut name = TransitionName::Absent;
+    for caps in TAG_ATTR_RE.captures_iter(attrs) {
+        let key = caps.name("key").map_or("", |m| m.as_str());
+        let value = caps
+            .name("dq")
+            .or_else(|| caps.name("sq"))
+            .or_else(|| caps.name("uq"))
+            .map(|m| m.as_str());
+        match (key, value) {
+            ("name", Some(value)) => name = TransitionName::Literal(value.trim()),
+            (":name" | "v-bind:name" | "v-bind", _) => name = TransitionName::Bound,
+            (key, Some(value)) if TRANSITION_CLASS_PROPS.contains(&key) => {
+                out.extend(value.split_whitespace().map(str::to_string));
+            }
+            _ => {}
+        }
+    }
+    let prefix = match name {
+        TransitionName::Bound => return,
+        TransitionName::Absent | TransitionName::Literal("") => DEFAULT_TRANSITION_NAME,
+        TransitionName::Literal(value) if value.contains(char::is_whitespace) => return,
+        TransitionName::Literal(value) => value,
+    };
+    out.extend(
+        TRANSITION_CLASS_SUFFIXES
+            .iter()
+            .map(|suffix| format!("{prefix}-{suffix}")),
+    );
+    if is_group {
+        out.insert(format!("{prefix}-{TRANSITION_GROUP_MOVE_SUFFIX}"));
+    }
 }
 
 /// Build a "virtual stylesheet" from an SFC's plain-CSS `<style>` blocks (any
@@ -360,5 +488,84 @@ mod tests {
              <style scoped>.foo { color: red; } .foo-bar { color: blue; }</style>",
         );
         assert_eq!(dead, vec!["foo".to_string()]);
+    }
+
+    #[test]
+    fn literal_transition_name_credits_generated_classes() {
+        let dead = scoped_unused_classes(
+            "<template><Transition name=\"fade\"><div v-if=\"v\" class=\"panel\"/></Transition></template>\n\
+             <style scoped>.panel {} .fade-enter-active { transition: opacity 1s; } \
+             .fade-enter-from, .fade-leave-to { opacity: 0; } .fade-move {} .stale {}</style>",
+        );
+        // `fade-move` belongs to TransitionGroup only.
+        assert_eq!(dead, vec!["fade-move".to_string(), "stale".to_string()]);
+    }
+
+    #[test]
+    fn kebab_transition_group_credits_move_class() {
+        let dead = scoped_unused_classes(
+            "<template><transition-group name='list' tag=\"ul\"><li/></transition-group></template>\n\
+             <style scoped>.list-move {} .list-leave-active {} .other-move {}</style>",
+        );
+        assert_eq!(dead, vec!["other-move".to_string()]);
+    }
+
+    #[test]
+    fn unnamed_transition_credits_v_prefix() {
+        let dead = scoped_unused_classes(
+            "<template><TransitionGroup><li/></TransitionGroup></template>\n\
+             <style scoped>.v-enter-active {} .v-move {} .fade-enter-active {}</style>",
+        );
+        assert_eq!(dead, vec!["fade-enter-active".to_string()]);
+    }
+
+    #[test]
+    fn bound_transition_name_credits_nothing() {
+        let dead = scoped_unused_classes(
+            "<template><Transition :name=\"kind\"><div/></Transition></template>\n\
+             <style scoped>.fade-enter-active {} .v-enter-active {}</style>",
+        );
+        assert_eq!(
+            dead,
+            vec![
+                "fade-enter-active".to_string(),
+                "v-enter-active".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn transition_prefixed_component_is_not_a_transition() {
+        let dead = scoped_unused_classes(
+            "<template><TransitionWrapper name=\"fade\"/></template>\n\
+             <style scoped>.fade-enter-active {}</style>",
+        );
+        assert_eq!(dead, vec!["fade-enter-active".to_string()]);
+    }
+
+    #[test]
+    fn vue_transition_classes_reads_custom_class_props() {
+        let classes = vue_transition_classes(
+            "<Transition name=\"x\" enter-active-class=\"animate__animated animate__bounce\" \
+             leaveToClass=\"gone\"><p/></Transition>\
+             <TransitionGroup :name=\"n\" move-class=\"shuffle\"/>",
+        );
+        let mut sorted: Vec<&str> = classes.iter().map(String::as_str).collect();
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted,
+            vec![
+                "animate__animated",
+                "animate__bounce",
+                "gone",
+                "shuffle",
+                "x-enter-active",
+                "x-enter-from",
+                "x-enter-to",
+                "x-leave-active",
+                "x-leave-from",
+                "x-leave-to",
+            ]
+        );
     }
 }
