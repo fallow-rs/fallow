@@ -480,11 +480,13 @@ fn try_match_rules(
         .or_else(|| match_circular_impact(score, is_circular))
         .or_else(|| match_high_impact_split(score, thresholds))
         .or_else(|| match_dead_code(score, value_exports))
-        .or_else(|| match_hidden_coupling(strong_pair))
         .or_else(|| match_complex_function_extraction(score, top_fns))
         .or_else(|| match_dependency_extraction(score, thresholds, is_entry))
         .or_else(|| match_coverage_gap(score))
         .or_else(|| match_circular_fallback(is_circular))
+        // Last on purpose: hidden coupling only claims files that no earlier
+        // rule claims, so existing target categories and baseline keys stay.
+        .or_else(|| match_hidden_coupling(strong_pair))
 }
 
 fn match_churn_complexity(
@@ -1433,6 +1435,64 @@ mod tests {
             rec.contains("100-LOC"),
             "recommendation should include LOC: {rec}"
         );
+    }
+
+    fn strong_pair_fixture() -> crate::change_coupling::CoChangePair {
+        crate::change_coupling::CoChangePair {
+            path_a: std::path::PathBuf::from("/project/src/file.ts"),
+            path_b: std::path::PathBuf::from("/project/src/partner.ts"),
+            revisions_a: 10,
+            revisions_b: 10,
+            shared_revisions: 8,
+            degree: 0.8,
+        }
+    }
+
+    #[test]
+    fn rule_existing_category_wins_over_hidden_coupling() {
+        let score = make_score(|_| {});
+        let fns = vec![("handleSubmit".to_string(), 10u32, 35u16)];
+        let pair = strong_pair_fixture();
+        let t = default_thresholds();
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: Some(&fns),
+                value_exports: 0,
+                strong_pair: Some((pair.path_b.as_path(), &pair)),
+            },
+            &t,
+        );
+        let (cat, _) = result.expect("a rule matches");
+        assert!(matches!(
+            cat,
+            RecommendationCategory::ExtractComplexFunctions
+        ));
+    }
+
+    #[test]
+    fn rule_hidden_coupling_when_no_other_rule_matches() {
+        let score = make_score(|_| {});
+        let pair = strong_pair_fixture();
+        let t = default_thresholds();
+        let result = try_match_rules(
+            RuleMatchContext {
+                score: &score,
+                hotspot: None,
+                is_circular: false,
+                is_entry: false,
+                top_fns: None,
+                value_exports: 0,
+                strong_pair: Some((pair.path_b.as_path(), &pair)),
+            },
+            &t,
+        );
+        let (cat, rec) = result.expect("a rule matches");
+        assert!(matches!(cat, RecommendationCategory::ResolveHiddenCoupling));
+        assert!(rec.contains("partner.ts"), "{rec}");
     }
 
     #[test]

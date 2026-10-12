@@ -322,6 +322,24 @@ fn audit_brief_points_at_a_hidden_partner_missing_from_the_diff() {
 #[test]
 fn audit_brief_has_no_gap_when_the_diff_changes_both_sides() {
     let dir = audit_repo();
+    // Control: the same repository reports the gap while only one side changed,
+    // so the assertion below cannot pass because gaps are never computed.
+    let before = run_fallow_raw(&[
+        "review",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(before.code, 0, "stderr: {}", before.stderr);
+    assert!(
+        parse_json(&before)["impact_closure"]["co_change_gap"].is_array(),
+        "control run has no gap"
+    );
     write_file(
         &dir.path().join("src/b.ts"),
         "export const b = (n: number): number => n * 9;\n",

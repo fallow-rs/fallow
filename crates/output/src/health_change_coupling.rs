@@ -63,8 +63,11 @@ pub struct HiddenCouplingPair {
     /// Coupling degree from 0 to 1: `shared_revisions` divided by the mean of
     /// `revisions_a` and `revisions_b`.
     pub degree: f64,
-    /// True when `degree` reaches `thresholds.strong_degree`. A strong pair
-    /// also appears as a `resolve_hidden_coupling` refactoring target.
+    /// True when `degree` reaches `thresholds.strong_degree`. The check uses
+    /// the rounded `degree` that the report shows, so 0.495 counts as 0.5.
+    /// A strong pair gives each file the `hidden_coupling` target factor. A
+    /// file that no other target rule claims becomes a
+    /// `resolve_hidden_coupling` refactoring target.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub strong: bool,

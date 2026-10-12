@@ -1547,7 +1547,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         },
         WorkspaceDiagnosticKind::ChangeCouplingSkipped { cause } => match cause.as_str() {
             "shallow-clone" => "Change coupling was not measured because the repository is a \
-                 shallow clone, so the change_coupling section lists no pairs. Fetch the full \
+                 shallow clone, so no change coupling pairs are reported. Fetch the full \
                  history with `git fetch --unshallow` to measure it."
                 .to_owned(),
             _ => "Change coupling found no pairs because the history window has fewer \

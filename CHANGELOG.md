@@ -26,10 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than 30 analyzed files skipped. `health.changeCoupling` changes the
   thresholds. Each hotspot also gets `median_files_per_commit` and
   `median_lines_per_commit`. Without `--since`, these values read 12 months
-  of history. A strong pair becomes a `resolve_hidden_coupling` refactoring
-  target. This new category value moves `schema_version` to 12 for health,
-  13 for audit, 14 for the combined report and 13 for the audit brief.
-  `fallow audit --brief` shows an advisory `co_change_gap` fact when
+  of history. A strong pair adds the `hidden_coupling` factor to the
+  refactoring targets of its files. A file that no other target rule claims
+  becomes a `resolve_hidden_coupling` refactoring target, so existing targets
+  keep their category. This new category value moves `schema_version` to 12
+  for health, 13 for audit, 14 for the combined report and 13 for the audit
+  brief. `fallow audit --brief` shows an advisory `co_change_gap` fact when
   a diff changes one file of a hidden pair and not the other. The health
   score does not change. The churn cache moves to version 8 and is rebuilt
   once. The `fallow-churn/v1` import accepts an optional `commit` field.

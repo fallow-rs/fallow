@@ -9007,8 +9007,11 @@ shared_revisions: number
  */
 degree: number
 /**
- * True when `degree` reaches `thresholds.strong_degree`. A strong pair
- * also appears as a `resolve_hidden_coupling` refactoring target.
+ * True when `degree` reaches `thresholds.strong_degree`. The check uses
+ * the rounded `degree` that the report shows, so 0.495 counts as 0.5.
+ * A strong pair gives each file the `hidden_coupling` target factor. A
+ * file that no other target rule claims becomes a
+ * `resolve_hidden_coupling` refactoring target.
  */
 strong?: boolean
 }

@@ -31105,7 +31105,7 @@
         },
         "strong": {
           "type": "boolean",
-          "description": "True when `degree` reaches `thresholds.strong_degree`. A strong pair\nalso appears as a `resolve_hidden_coupling` refactoring target."
+          "description": "True when `degree` reaches `thresholds.strong_degree`. The check uses\nthe rounded `degree` that the report shows, so 0.495 counts as 0.5.\nA strong pair gives each file the `hidden_coupling` target factor. A\nfile that no other target rule claims becomes a\n`resolve_hidden_coupling` refactoring target."
         }
       },
       "required": [

@@ -126,6 +126,7 @@ pub struct ChangeCouplingConfig {
     /// Skip a commit that changes more analyzed files than this (default:
     /// 30). Bulk commits (renames, format passes) create false pairs.
     #[serde(default = "default_coupling_max_files_per_commit")]
+    #[schemars(range(min = 2))]
     pub max_files_per_commit: usize,
     /// Minimum commits for each file of a pair (default: 5).
     #[serde(default = "default_coupling_min_revisions")]
@@ -137,6 +138,7 @@ pub struct ChangeCouplingConfig {
     /// number of shared commits divided by the mean commit count of the two
     /// files.
     #[serde(default = "default_coupling_min_degree")]
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub min_degree: f64,
 }
 

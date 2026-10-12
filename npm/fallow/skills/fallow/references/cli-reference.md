@@ -608,7 +608,7 @@ Angular templates contribute synthetic `<template>` complexity findings whenever
 | `--hotspots` | `bool` | `false` | Show only hotspots: files that are both complex and frequently changing. Combines git churn history with complexity data. Requires a git repository. When no section flags are set, all sections are shown by default. |
 | `--ownership` | `bool` | `false` | Attach ownership signals to hotspot entries: bus factor (Avelino truck factor), contributor count, top contributor with stale-days, recent contributors (top-3), `suggested_reviewers`, declared CODEOWNERS owner, `ownership_state`, ownership drift, unowned-hotspot detection. Human output gains a project-level summary line. JSON adds `low-bus-factor`, `unowned-hotspot`, `ownership-drift` action types. Test files get a `[test]` tag. Implies `--hotspots`. Requires git. |
 | `--ownership-emails` | `raw\|handle\|anonymized\|hash` | - | Privacy mode for author emails. `handle` shows the local-part only (default, with GitHub noreply unwrap and deterministic same-handle disambiguation). `anonymized` emits stable `xxh3:` pseudonyms; `hash` remains accepted as the legacy spelling. `raw` shows full addresses. Use `anonymized` in regulated environments. Implies `--ownership`. Configure default via `health.ownership.emailMode`. |
-| `--targets` | `bool` | `false` | Show only refactoring targets: ranked recommendations based on complexity, coupling, churn, and dead code signals. Categories: churn+complexity, circular dep, high impact, dead code, complexity, coupling. When no section flags are set, all sections are shown by default. Each target's JSON can include `direct_callers[]` (direct importers with the symbols they import) and `clone_siblings[]` (duplicate-code siblings with stable `dup:<8hex>` fingerprints for `fallow dupes --trace`); both omitted when empty. Human output adds `importers:` / `clones:` lines only when that evidence is present. |
+| `--targets` | `bool` | `false` | Show only refactoring targets: ranked recommendations based on complexity, coupling, churn, and dead code signals. Categories: churn+complexity, circular dep, high impact, dead code, complexity, coupling, test coverage, hidden coupling. When no section flags are set, all sections are shown by default. Each target's JSON can include `direct_callers[]` (direct importers with the symbols they import) and `clone_siblings[]` (duplicate-code siblings with stable `dup:<8hex>` fingerprints for `fallow dupes --trace`); both omitted when empty. Human output adds `importers:` / `clones:` lines only when that evidence is present. |
 | `--type-coupling` | `bool` | `false` | Show advisory project-local public-signature type coupling. Requires type-aware analysis and does not change the health score |
 | `--css` | `bool` | `false` | Add structural CSS analytics: specificity hotspots, !important density, over-complex selectors, deep nesting, and conservative cleanup candidates. Standard CSS is parsed structurally; preprocessor sources are scanned only where fallow can avoid expanding Sass/Less semantics. Also derives `styling_health`, a descriptive A-F grade for CSS quality scored separately from the code `health_score` (never gates); it weights design-token drift (hardcoded value sprawl) over byte-identical repetition. |
 | `--effort` | `low\|medium\|high` | - | Filter refactoring targets by effort level. Implies `--targets`. |
@@ -834,11 +834,48 @@ With `--hotspots`, the JSON output includes a `hotspots` array and `hotspot_summ
       "lines_deleted": 180,
       "complexity_density": 0.22,
       "fan_in": 8,
-      "trend": "Accelerating"
+      "trend": "Accelerating",
+      "median_files_per_commit": 3,
+      "median_lines_per_commit": 42
     }
   ]
 }
 ```
+
+`median_files_per_commit` and `median_lines_per_commit` measure change dispersion. They are the medians over the commits that changed the file, and they count analyzed files only. A commit with more analyzed files than `health.changeCoupling.maxFilesPerCommit` (default 30) is not counted. Both fields are absent when the history has no commit ids, for example imported churn without the `commit` field. Without `--since`, they read 12 months of history, while the hotspot score keeps 6 months.
+
+When the hotspots section runs on git history, the JSON output also includes a `change_coupling` object. It lists hidden pairs: two files that change together while no import or re-export chain connects them. An agent that follows imports does not find the second file of such a pair.
+
+```json
+{
+  "change_coupling": {
+    "since": "12 months",
+    "commits_analyzed": 640,
+    "commits_skipped": 12,
+    "total_pairs": 4,
+    "thresholds": {
+      "max_files_per_commit": 30,
+      "min_revisions": 5,
+      "min_shared_revisions": 5,
+      "min_degree": 0.3,
+      "strong_degree": 0.5
+    },
+    "pairs": [
+      {
+        "path_a": "src/api/orders.ts",
+        "path_b": "src/ui/order-form.ts",
+        "revisions_a": 12,
+        "revisions_b": 10,
+        "shared_revisions": 9,
+        "degree": 0.82,
+        "strong": true
+      }
+    ]
+  }
+}
+```
+
+`degree` is `shared_revisions` divided by the mean of `revisions_a` and `revisions_b`, rounded to two decimals. A pair is `strong` when the rounded `degree` reaches `strong_degree` (0.5). `pairs` is cut to `--top`, and `total_pairs` keeps the full count. The `health.changeCoupling` config object changes the thresholds: `minRevisions` (default 5), `minSharedRevisions` (default 5), `minDegree` (from 0 to 1, default 0.3) and `maxFilesPerCommit` (default 30). Without `--since`, the section reads 12 months of history. The section is advisory: it has no weight in the health score and never gates. A shallow clone, or a window with fewer analyzed commits than `minRevisions`, gives an empty `pairs` list and a `workspace_diagnostics[]` entry with kind `change-coupling-skipped` and `cause` `shallow-clone` or `too-few-commits`.
 
 Hotspot score formula: `normalized_churn × normalized_complexity × 100`, scaled 0–100. Higher means more urgent to refactor. The `trend` field indicates recent change velocity: `Accelerating` (increasing churn), `Stable` (constant), or `Cooling` (decreasing). Files below `--min-commits` are excluded. The `shallow_clone` field warns when git history is truncated (shallow clone), which may undercount commits. The `clock` object reports the single instant `weighted_commits` and ownership `stale_days` were measured against: `source` is `head_commit` (the default, identical for every run over one commit), `environment` (pinned with `FALLOW_CLOCK_EPOCH`), or `wall_clock` (no commit timestamp was readable, so the numbers drift between runs and `reproducible` is false). Pass `epoch_secs` back as `FALLOW_CLOCK_EPOCH` to reproduce a run's churn-derived numbers.
 
@@ -880,9 +917,11 @@ With `--targets`, the JSON output includes a `targets` array with ranked refacto
 }
 ```
 
-Targets are sorted by `efficiency` (priority / effort_numeric) descending, surfacing quick wins first. The `target_thresholds` object exposes the adaptive percentile-based thresholds used for scoring. Priority formula: `min(complexity_density, 1) x 30 + hotspot_boost x 25 + dead_code_ratio x 20 + fan_in_norm x 15 + fan_out_norm x 10`, clamped to 0-100. Fan-in and fan-out normalization uses the project's p95 values (with floors). Categories: `urgent_churn_complexity`, `break_circular_dependency`, `split_high_impact`, `remove_dead_code`, `extract_complex_functions`, `extract_dependencies`, `add_test_coverage`. Each target includes `efficiency`, `effort` (low/medium/high), `confidence` (high/medium/low, data source reliability), and contributing `factors`.
+Targets are sorted by `efficiency` (priority / effort_numeric) descending, surfacing quick wins first. The `target_thresholds` object exposes the adaptive percentile-based thresholds used for scoring. Priority formula: `min(complexity_density, 1) x 30 + hotspot_boost x 25 + dead_code_ratio x 20 + fan_in_norm x 15 + fan_out_norm x 10`, clamped to 0-100. Fan-in and fan-out normalization uses the project's p95 values (with floors). Categories: `urgent_churn_complexity`, `break_circular_dependency`, `split_high_impact`, `remove_dead_code`, `extract_complex_functions`, `extract_dependencies`, `add_test_coverage`, `resolve_hidden_coupling`. Each target includes `efficiency`, `effort` (low/medium/high), `confidence` (high/medium/low, data source reliability), and contributing `factors`.
 
 The `add_test_coverage` category fires when a file has 2+ functions whose rounded CRAP meets or exceeds their effective ceiling (`health.thresholdOverrides` over the global `maxCrap` / `--max-crap`, default 30) and complexity density > 0.3. A file whose breaching functions are all exempted by configuration produces no target. The `crap_max` metric appears in contributing factors for these targets, with `threshold` set to the file's lowest effective ceiling (the run global when no override applies).
+
+The `resolve_hidden_coupling` category fires for a file that has a strong hidden pair (degree at least 0.5) and that no other category claims. The rule runs last, so a file keeps its existing category. The target lists the partner files in `evidence.co_change_partners`, strongest first. Every target of a file with a strong hidden pair also gets the `hidden_coupling` factor.
 
 ### Vital Signs
 
@@ -1106,6 +1145,8 @@ An unchanged or decreased metric keeps the finding inherited, also when the exce
 | Per-finding `introduced` | no | Whether each finding was introduced by the changeset |
 
 For CI gating and any "did this PR pass?" question, read `verdict` (or exit code). Counting introduced findings ignores severity and breaks projects with `unused-exports: warn`. For agent triage, read `verdict` first, then `attribution` for new-vs-inherited counts, then the per-category finding arrays for actionable details.
+
+The review brief (`fallow audit --brief --format json` and `fallow review --format json`) adds `impact_closure.co_change_gap[]` when a changed file has a hidden change-coupling partner that the diff does not touch. Each entry has `changed_file`, `partner_file`, `shared_revisions`, `degree` and a scope `note`. The pairs use the `health.changeCoupling` thresholds over 12 months of history. The fact is advisory: it is history evidence, not proof that the partner must change, and it never gates. The array is absent when it is empty.
 
 ### Examples
 

@@ -1319,7 +1319,7 @@
           "description": "Skip a commit that changes more analyzed files than this (default:\n30). Bulk commits (renames, format passes) create false pairs.",
           "type": "integer",
           "format": "uint",
-          "minimum": 0,
+          "minimum": 2,
           "default": 30
         },
         "minRevisions": {
@@ -1340,6 +1340,8 @@
           "description": "Minimum coupling degree, from 0 to 1 (default: 0.3). The degree is the\nnumber of shared commits divided by the mean commit count of the two\nfiles.",
           "type": "number",
           "format": "double",
+          "minimum": 0.0,
+          "maximum": 1.0,
           "default": 0.3
         }
       },
