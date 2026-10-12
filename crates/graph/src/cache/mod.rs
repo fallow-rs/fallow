@@ -1090,7 +1090,30 @@ mod tests {
                 },
             },
         ));
-        for current in [vec![fact], Vec::new()] {
+        let callback_source = SemanticFact::FactoryReturnObjectPropertySource(Box::new(
+            FactoryReturnObjectPropertySourceFact {
+                factory_export_name: "wrap".into(),
+                property_path: "value".into(),
+                source: FactoryPropertySource::CallbackParameterReturn { parameter_index: 0 },
+            },
+        ));
+        let callback_access = SemanticFact::CallbackFactoryPropertyAccess(Box::new(
+            fallow_types::extract::CallbackFactoryPropertyAccessFact {
+                callee_name: "wrap".into(),
+                callee_member: None,
+                property_path: "value".into(),
+                member: "go".into(),
+                vue_only: false,
+                assigned_class: Some("Assigned".into()),
+                arguments: vec![fallow_types::extract::CallbackFactoryArgument {
+                    parameter_index: 0,
+                    class_local_name: "C".into(),
+                    getter: true,
+                    lazy_safe: true,
+                }],
+            },
+        ));
+        for current in [vec![fact, callback_source, callback_access], Vec::new()] {
             let module = ModuleInfo {
                 semantic_facts: current.clone().into(),
                 ..ModuleInfo::empty(FileId(0))

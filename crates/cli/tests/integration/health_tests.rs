@@ -764,6 +764,660 @@ fn legacy_file_score(json: &serde_json::Value) -> &serde_json::Value {
         .expect("legacy.ts file score row")
 }
 
+#[test]
+fn health_crap_suppression_preserves_the_unsuppressed_sibling() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_exemption_fixture(dir.path(), None);
+    let args = [
+        "--complexity",
+        "--file-scores",
+        "--targets",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    let before = parse_json(&run_fallow_in_root("health", dir.path(), &args));
+    assert_eq!(legacy_file_score(&before)["crap_above_threshold"], 2);
+    assert!(
+        before["targets"]
+            .as_array()
+            .expect("targets")
+            .iter()
+            .any(|target| {
+                target["category"] == "add_test_coverage" && target["path"] == "src/legacy.ts"
+            })
+    );
+
+    write_file(
+        &dir.path().join("src/legacy.ts"),
+        &format!(
+            "// fallow-ignore-next-line complexity\n{}",
+            untested_complexity_pair_source()
+        ),
+    );
+    let after = parse_json(&run_fallow_in_root("health", dir.path(), &args));
+    let names: Vec<_> = after["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|finding| finding["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(names, ["legacyB"]);
+    let row = legacy_file_score(&after);
+    assert_eq!(row["crap_max"], 110.0);
+    assert!(row["crap_exempted"].is_null());
+    assert_eq!(
+        row["crap_above_threshold"], 1,
+        "an accepted complexity suppression must also govern CRAP enforcement: {row:#?}"
+    );
+    assert!(
+        after["targets"]
+            .as_array()
+            .is_none_or(|targets| targets.iter().all(|target| {
+                target["category"] != "add_test_coverage" || target["path"] != "src/legacy.ts"
+            }))
+    );
+}
+
+fn write_crap_suppression_fixture(
+    root: &Path,
+    functions: &[(&str, usize, Option<&str>)],
+    file_prefix: &str,
+) {
+    write_crap_exemption_fixture(root, None);
+    let mut source = file_prefix.to_string();
+    let mut fn_map = serde_json::Map::new();
+    let mut hits = serde_json::Map::new();
+    let mut statements = serde_json::Map::new();
+    let mut statement_hits = serde_json::Map::new();
+    for (id, (name, branches, suppression)) in functions.iter().enumerate() {
+        if let Some(kind) = suppression {
+            writeln!(source, "// fallow-ignore-next-line {kind}").expect("suppression source");
+        }
+        let start = source.lines().count() + 1;
+        let header = format!("export function {name}(v: number): number {{");
+        source.push_str(&header);
+        source.push('\n');
+        for branch in 1..=*branches {
+            writeln!(source, "  if (v === {branch}) return {branch};").expect("branch source");
+        }
+        source.push_str("  return 0;\n}\n");
+        let end = source.lines().count();
+        fn_map.insert(id.to_string(), serde_json::json!({
+            "name": name,
+            "decl": {"start": {"line": start, "column": 16}, "end": {"line": start, "column": 16 + name.len()}},
+            "loc": {"start": {"line": start, "column": header.len() - 1}, "end": {"line": end, "column": 1}}
+        }));
+        hits.insert(id.to_string(), serde_json::json!(0));
+        for (offset, line) in source.lines().enumerate().take(end - 1).skip(start) {
+            let key = statements.len().to_string();
+            statements.insert(key.clone(), serde_json::json!({
+                "start": {"line": offset + 1, "column": 2}, "end": {"line": offset + 1, "column": line.len()}
+            }));
+            statement_hits.insert(key, serde_json::json!(0));
+        }
+    }
+    let file = root.join("src/legacy.ts");
+    write_file(&file, &source);
+    let names = functions
+        .iter()
+        .map(|(name, _, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let calls = functions
+        .iter()
+        .map(|(name, _, _)| format!("{name}(1)"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    write_file(
+        &root.join("src/main.ts"),
+        &format!("import {{ {names} }} from './legacy';\nconsole.log({calls});\n"),
+    );
+    let coverage = serde_json::json!({file.to_str().expect("fixture path"): {
+        "path": file, "fnMap": fn_map, "f": hits, "statementMap": statements,
+        "s": statement_hits, "branchMap": {}, "b": {}
+    }});
+    write_file(
+        &root.join("coverage.json"),
+        &serde_json::to_string(&coverage).expect("coverage JSON"),
+    );
+}
+
+fn crap_finding_names(report: &serde_json::Value) -> Vec<&str> {
+    report["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|finding| finding["name"].as_str().expect("name"))
+        .collect()
+}
+
+fn crap_suppression_report(root: &Path, measured: bool) -> serde_json::Value {
+    let coverage = root.join("coverage.json");
+    let mut args = vec![
+        "--complexity",
+        "--file-scores",
+        "--targets",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    if measured {
+        args.extend(["--coverage", coverage.to_str().expect("coverage path")]);
+    }
+    let output = run_fallow_in_root("health", root, &args);
+    assert!(matches!(output.code, 0 | 1), "{}", output.stderr);
+    parse_json(&output)
+}
+
+#[test]
+fn health_crap_suppression_uses_remaining_risk_and_evidence() {
+    for measured in [false, true] {
+        let dir = tempdir().expect("create temp dir");
+        write_crap_suppression_fixture(
+            dir.path(),
+            &[
+                ("suppressedHigh", 13, Some("complexity")),
+                ("legacyB", 5, None),
+                ("legacyC", 5, None),
+            ],
+            "",
+        );
+        let json = crap_suppression_report(dir.path(), measured);
+        let findings = json["findings"].as_array().expect("findings");
+        let names = crap_finding_names(&json);
+        assert_eq!(names, ["legacyB", "legacyC"]);
+        if measured {
+            assert_eq!(json["summary"]["istanbul_matched"], 3);
+            assert_eq!(json["summary"]["istanbul_total"], 3);
+            for finding in findings {
+                assert_eq!(finding["coverage_source"], "istanbul");
+                assert_eq!(finding["coverage_pct"], 0.0);
+            }
+        }
+        let target = json["targets"]
+            .as_array()
+            .expect("targets")
+            .iter()
+            .find(|target| target["category"] == "add_test_coverage")
+            .expect("coverage target");
+        let factor = target["factors"]
+            .as_array()
+            .expect("factors")
+            .iter()
+            .find(|factor| {
+                factor["metric"]
+                    .as_str()
+                    .is_some_and(|metric| metric.starts_with("crap_"))
+            })
+            .expect("CRAP factor");
+        assert_eq!(
+            factor["value"], 42.0,
+            "suppressed raw maximum must not supply risk: {factor:#?}"
+        );
+        assert_eq!(factor["metric"], "crap_unsuppressed_max");
+        assert_eq!(factor["threshold"], 30.0);
+        let evidence = target["evidence"]["complex_functions"]
+            .as_array()
+            .expect("evidence")
+            .iter()
+            .map(|function| function["name"].as_str().expect("name"))
+            .collect::<Vec<_>>();
+        assert_eq!(evidence, ["legacyB", "legacyC"]);
+        let row = legacy_file_score(&json);
+        assert_eq!(row["crap_max"], 210.0);
+        assert_eq!(row["crap_above_threshold"], 2);
+        assert_eq!(row["crap_suppressed"], 1);
+        assert_eq!(row["crap_unsuppressed_max"], 42.0);
+        assert_eq!(row["crap_unsuppressed_effective_threshold"], 30.0);
+    }
+}
+
+#[test]
+fn health_crap_suppression_human_discloses_remaining_risk() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_suppression_fixture(
+        dir.path(),
+        &[
+            ("suppressedHigh", 13, Some("complexity")),
+            ("legacyB", 5, None),
+        ],
+        "",
+    );
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--file-scores", "--no-cache", "--quiet"],
+    );
+    assert!(
+        !output.stdout.contains('\u{1b}'),
+        "NO_COLOR must be preserved"
+    );
+    let risk_line = output
+        .stdout
+        .lines()
+        .find(|line| line.contains("risk") && line.contains("42.0"));
+    assert!(
+        risk_line.is_some(),
+        "the human row must show remaining CRAP risk: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("complexity suppression"),
+        "{}",
+        output.stdout
+    );
+
+    write_crap_suppression_fixture(
+        dir.path(),
+        &[
+            ("suppressedHigh", 13, Some("complexity")),
+            ("legacyB", 5, Some("complexity")),
+        ],
+        "",
+    );
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--file-scores", "--targets", "--no-cache", "--quiet"],
+    );
+    let path_line = output
+        .stdout
+        .lines()
+        .find(|line| line.contains("legacy.ts"))
+        .expect("file score row");
+    assert!(path_line.trim_end().ends_with("structure"), "{path_line}");
+    assert!(
+        output.stdout.contains("complexity suppression"),
+        "{}",
+        output.stdout
+    );
+    assert!(!output.stdout.contains("210.0 risk"), "{}", output.stdout);
+    assert!(
+        !output.stdout.contains("exempt (raised threshold)"),
+        "{}",
+        output.stdout
+    );
+}
+
+#[test]
+fn health_crap_suppression_markdown_uses_remaining_risk() {
+    let dir = tempdir().expect("create temp dir");
+    let args = [
+        "--file-scores",
+        "--format",
+        "markdown",
+        "--no-cache",
+        "--quiet",
+    ];
+    write_crap_suppression_fixture(
+        dir.path(),
+        &[("high", 13, None), ("remaining", 5, None)],
+        "",
+    );
+    let before = run_fallow_in_root("health", dir.path(), &args);
+    assert!(before.stdout.contains("| 210.0 |"), "{}", before.stdout);
+    for (remaining_suppression, risk) in [(None, 42.0), (Some("complexity"), 0.0)] {
+        write_crap_suppression_fixture(
+            dir.path(),
+            &[
+                ("high", 13, Some("complexity")),
+                ("remaining", 5, remaining_suppression),
+            ],
+            "",
+        );
+        let output = run_fallow_in_root("health", dir.path(), &args);
+        assert!(matches!(output.code, 0 | 1), "{}", output.stderr);
+        let row = output
+            .stdout
+            .lines()
+            .find(|line| line.starts_with("| `src/legacy.ts`"))
+            .expect("Markdown file score row");
+        assert!(
+            row.contains(&format!("| {risk:.1}")),
+            "Markdown must show remaining risk: {row}"
+        );
+        assert!(!row.contains("210.0"), "{row}");
+        assert!(row.contains("complexity suppression"), "{row}");
+    }
+}
+
+#[test]
+fn health_crap_suppression_controls_measured_and_estimated() {
+    for measured in [false, true] {
+        for (first, second, prefix, expected_names, suppressed, above, remaining) in [
+            (None, None, "", vec!["legacyA", "legacyB"], 0, 2, None),
+            (
+                Some("unused-export"),
+                None,
+                "",
+                vec!["legacyA", "legacyB"],
+                0,
+                2,
+                None,
+            ),
+            (
+                Some("complexity"),
+                None,
+                "",
+                vec!["legacyB"],
+                1,
+                1,
+                Some(110.0),
+            ),
+            (
+                Some("complexity"),
+                Some("complexity"),
+                "",
+                vec![],
+                2,
+                0,
+                Some(0.0),
+            ),
+            (
+                None,
+                None,
+                "// fallow-ignore-file complexity\n",
+                vec![],
+                2,
+                0,
+                Some(0.0),
+            ),
+        ] {
+            let dir = tempdir().expect("create temp dir");
+            write_crap_suppression_fixture(
+                dir.path(),
+                &[("legacyA", 9, first), ("legacyB", 9, second)],
+                prefix,
+            );
+            let json = crap_suppression_report(dir.path(), measured);
+            let findings = json["findings"].as_array().expect("findings");
+            let names = crap_finding_names(&json);
+            assert_eq!(names, expected_names);
+            let row = legacy_file_score(&json);
+            assert_eq!(row["crap_max"], 110.0);
+            assert_eq!(row["total_cyclomatic"], 20);
+            assert_eq!(row["crap_above_threshold"], above);
+            assert!(row.get("crap_exempted").is_none());
+            if suppressed == 0 {
+                assert!(row.get("crap_suppressed").is_none());
+                assert!(row.get("crap_unsuppressed_max").is_none());
+                assert!(row.get("crap_unsuppressed_effective_threshold").is_none());
+            } else {
+                assert_eq!(row["crap_suppressed"], suppressed);
+                assert_eq!(row["crap_unsuppressed_max"].as_f64(), remaining);
+                assert_eq!(row["crap_unsuppressed_effective_threshold"], 30.0);
+            }
+            let has_target = json["targets"].as_array().is_some_and(|targets| {
+                targets
+                    .iter()
+                    .any(|target| target["category"] == "add_test_coverage")
+            });
+            assert_eq!(has_target, above == 2);
+            if measured {
+                assert_eq!(json["summary"]["istanbul_matched"], 2);
+                assert_eq!(json["summary"]["istanbul_total"], 2);
+                assert!(
+                    findings
+                        .iter()
+                        .all(|f| f["coverage_source"] == "istanbul" && f["coverage_pct"] == 0.0)
+                );
+            } else {
+                assert!(findings.iter().all(|f| f["coverage_source"] == "estimated"));
+            }
+            if !prefix.is_empty() {
+                let human = run_fallow_in_root(
+                    "health",
+                    dir.path(),
+                    &["--file-scores", "--targets", "--no-cache", "--quiet"],
+                );
+                let row = human
+                    .stdout
+                    .lines()
+                    .find(|line| line.contains("legacy.ts"))
+                    .expect("row");
+                assert!(row.trim_end().ends_with("structure"), "{row}");
+                assert!(human.stdout.contains("complexity suppression"));
+            }
+        }
+    }
+}
+
+#[test]
+fn health_crap_suppression_filters_evidence_before_capping() {
+    let dir = tempdir().expect("create temp dir");
+    write_crap_suppression_fixture(
+        dir.path(),
+        &[
+            ("highA", 13, None),
+            ("highB", 13, None),
+            ("highC", 13, None),
+            ("legacyB", 5, None),
+            ("legacyC", 5, None),
+        ],
+        "",
+    );
+    let before = crap_suppression_report(dir.path(), true);
+    assert_eq!(legacy_file_score(&before)["crap_above_threshold"], 5);
+    write_crap_suppression_fixture(
+        dir.path(),
+        &[
+            ("highA", 13, Some("complexity")),
+            ("highB", 13, Some("complexity")),
+            ("highC", 13, Some("complexity")),
+            ("legacyB", 5, None),
+            ("legacyC", 5, None),
+        ],
+        "",
+    );
+    let after = crap_suppression_report(dir.path(), true);
+    assert_eq!(after["summary"]["istanbul_matched"], 5);
+    let target = after["targets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .find(|target| target["category"] == "add_test_coverage")
+        .expect("coverage target");
+    let evidence = target["evidence"]["complex_functions"]
+        .as_array()
+        .expect("evidence")
+        .iter()
+        .map(|function| function["name"].as_str().expect("name"))
+        .collect::<Vec<_>>();
+    assert_eq!(evidence, ["legacyB", "legacyC"]);
+    assert!(
+        target["recommendation"]
+            .as_str()
+            .expect("recommendation")
+            .starts_with("2 complex functions")
+    );
+    let row = legacy_file_score(&after);
+    assert_eq!(row["crap_suppressed"], 3);
+    assert_eq!(row["crap_above_threshold"], 2);
+    assert_eq!(row["crap_max"], 210.0);
+    assert_eq!(row["crap_unsuppressed_max"], 42.0);
+
+    write_crap_suppression_fixture(
+        dir.path(),
+        &[
+            ("highA", 13, Some("complexity")),
+            ("highB", 13, Some("complexity")),
+            ("highC", 13, None),
+            ("legacyB", 5, None),
+            ("legacyC", 5, None),
+        ],
+        "",
+    );
+    write_file(
+        &dir.path().join(".fallowrc.json"),
+        r#"{"health":{"thresholdOverrides":[{
+        "files":["src/legacy.ts"],"functions":["highC"],"maxCrap":500,"reason":"fixture ceiling"
+    }]}}"#,
+    );
+    let mixed = crap_suppression_report(dir.path(), true);
+    let target = mixed["targets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .find(|target| target["category"] == "add_test_coverage")
+        .expect("coverage target");
+    let evidence = target["evidence"]["complex_functions"]
+        .as_array()
+        .expect("evidence")
+        .iter()
+        .map(|function| function["name"].as_str().expect("name"))
+        .collect::<Vec<_>>();
+    assert_eq!(evidence, ["legacyB", "legacyC"]);
+    let row = legacy_file_score(&mixed);
+    assert_eq!(row["crap_suppressed"], 2);
+    assert_eq!(row["crap_exempted"], 1);
+    assert_eq!(row["crap_above_threshold"], 2);
+    assert_eq!(row["crap_unsuppressed_max"], 210.0);
+}
+
+fn assert_suppressed_crap_human(
+    root: &Path,
+    axis: &str,
+    remaining: f64,
+    exempted: u64,
+    global: u32,
+) {
+    let human = run_fallow_in_root("health", root, &["--file-scores", "--no-cache", "--quiet"]);
+    let scores = human
+        .stdout
+        .split_once("File health scores")
+        .expect("scores section")
+        .1;
+    let path_line = scores
+        .lines()
+        .find(|line| line.contains("legacy.ts"))
+        .expect("row");
+    assert!(path_line.trim_end().ends_with(axis), "{path_line}");
+    assert!(human.stdout.contains("complexity suppression"));
+    if exempted > 0 {
+        assert!(
+            human.stdout.contains("configured exemptions"),
+            "{}",
+            human.stdout
+        );
+    }
+    if global == 30 && exempted > 0 {
+        assert!(
+            !human.stdout.contains("raised threshold"),
+            "an override must not claim the default global was raised: {}",
+            human.stdout
+        );
+    }
+    if axis == "risk" {
+        assert!(
+            human.stdout.contains(&format!("{remaining:.1} risk")),
+            "{}",
+            human.stdout
+        );
+    }
+}
+
+#[test]
+fn health_crap_suppression_preserves_configuration_and_subthreshold_bands() {
+    for measured in [false, true] {
+        for (
+            suppressed_branches,
+            remaining_branches,
+            global,
+            override_name,
+            override_ceiling,
+            raw,
+            remaining,
+            threshold,
+            above,
+            exempted,
+            axis,
+        ) in [
+            (
+                13,
+                3,
+                30,
+                Some("suppressed"),
+                500,
+                210.0,
+                20.0,
+                30.0,
+                0,
+                1,
+                "risk",
+            ),
+            (
+                1,
+                3,
+                30,
+                Some("suppressed"),
+                5,
+                20.0,
+                20.0,
+                30.0,
+                0,
+                0,
+                "risk",
+            ),
+            (
+                1,
+                13,
+                30,
+                Some("remaining"),
+                500,
+                210.0,
+                210.0,
+                500.0,
+                0,
+                1,
+                "structure",
+            ),
+            (13, 5, 0, None, 0, 210.0, 42.0, 0.0, 0, 2, "structure"),
+            (1, 3, 5, None, 0, 20.0, 20.0, 5.0, 1, 0, "risk"),
+            (13, 5, 500, None, 0, 210.0, 42.0, 500.0, 0, 2, "structure"),
+        ] {
+            let dir = tempdir().expect("create temp dir");
+            write_crap_suppression_fixture(
+                dir.path(),
+                &[
+                    ("suppressed", suppressed_branches, Some("complexity")),
+                    ("remaining", remaining_branches, None),
+                ],
+                "",
+            );
+            let overrides = override_name.map_or_else(Vec::new, |name| vec![serde_json::json!({
+                "files": ["src/legacy.ts"], "functions": [name], "maxCrap": override_ceiling, "reason": "fixture ceiling"
+            })]);
+            let config =
+                serde_json::json!({"health": {"maxCrap": global, "thresholdOverrides": overrides}});
+            write_file(
+                &dir.path().join(".fallowrc.json"),
+                &serde_json::to_string(&config).expect("config"),
+            );
+            let json = crap_suppression_report(dir.path(), measured);
+            let row = legacy_file_score(&json);
+            assert_eq!(row["crap_max"], raw);
+            assert_eq!(row["crap_suppressed"], 1);
+            assert_eq!(row["crap_unsuppressed_max"], remaining);
+            assert_eq!(row["crap_unsuppressed_effective_threshold"], threshold);
+            assert_eq!(row["crap_above_threshold"], above);
+            assert_eq!(row["crap_exempted"].as_u64().unwrap_or(0), exempted);
+            if override_name == Some("suppressed") && override_ceiling == 5 {
+                assert_eq!(row["crap_effective_threshold"], 5.0);
+            }
+            let names = crap_finding_names(&json);
+            let expected_names: &[&str] = if above == 1 { &["remaining"] } else { &[] };
+            assert_eq!(names, expected_names);
+            if measured {
+                assert_eq!(json["summary"]["istanbul_matched"], 2);
+            }
+            assert_suppressed_crap_human(dir.path(), axis, remaining, exempted, global);
+        }
+    }
+}
+
 /// An override that exempts every breaching function must reach the scoring
 /// surfaces too: no above-threshold count, no `add_test_coverage` target, and
 /// the exemption disclosed on the row (issue #2228).

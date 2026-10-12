@@ -332,6 +332,36 @@ without a `**/` rewrite, so it covers a root-level file only. A plugin that
 reads a config at any depth must push the resolved path onto
 `always_used_files` itself, or the file it just consumed is reported as unused.
 
+## Entries that a source file declares
+
+Some tools name a bundle entry in an ordinary source file, not in a config
+file. Alchemy is one: a Worker or a function names its entry in a `main`
+property, and a Worker module declares it as often as a stack file does. The
+plugin stage reads only config files, so it cannot see these declarations.
+
+Extraction reads them instead (`crates/extract/src/alchemy.rs`), in a file
+that imports `alchemy` or an `alchemy/*` subpath. A form counts only when its
+target is certain from the source alone: `new URL(..., import.meta.url)`,
+`import.meta.dirname` or `__dirname` joined with a literal, a literal next to
+a `rootDir` of one of these forms, or a literal in a stack file. A literal in
+another file is relative to the working directory of the CLI, so it is not
+read.
+
+Extraction records each target as a speculative namespace import whose whole
+object is used, with an out-of-thread load kind. Thus the target and its value
+exports stay reachable only while the declaring file is reachable. A type
+export of the target stays reportable, because the platform reads no type. A
+missing target is dropped without an `unresolved-import` finding. A `main`
+that names the declaring file
+(`import.meta.url`) marks the `default` export and the exported classes with a
+platform base class as used by a side effect. A class counts when the root of
+its `extends` expression is a binding imported from Alchemy,
+`cloudflare:workers` or `@cloudflare/containers`. An exported error class stays
+reportable.
+
+The plugin itself makes each `alchemy.run.*` file a support entry, because a
+stack runs at deploy time.
+
 ## Built-in plugins on the manifest engine
 
 A built-in plugin can declare its manifest rules in the external

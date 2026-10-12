@@ -144,9 +144,9 @@ const checkSignature = (checks) =>
  * Returns `{ status, checks }` where `status` is `pass`, `settled`, `fail`,
  * `conflict`, `timeout` or `error`. After a failed read of the checks, the
  * delay to the next read doubles from `intervalMs` up to `READ_RETRY_MAX_MS`.
- * The status is `error` (with `readErrors` and `errorMs`) when the reads fail
- * for `errorWindowMs`, or when the deadline comes during failed reads. A
- * failed read of the mergeable state only warns.
+ * The status is `error` (with `readErrors` and `errorMs`) when the planned
+ * delays of the failed reads reach `errorWindowMs`, or when the deadline
+ * comes during failed reads. A failed read of the mergeable state only warns.
  */
 export const waitForChecks = async ({
   readChecks,
@@ -163,7 +163,9 @@ export const waitForChecks = async ({
   const deadline = now() + timeoutMs;
   let checks = [];
   let readErrors = 0;
-  let errorSince = 0;
+  // The sum of the planned delays since the first failed read. A wall-clock
+  // difference would count the time of a machine in sleep mode as failed reads.
+  let errorMs = 0;
   let signature = "";
   let changedAt = now();
   for (;;) {
@@ -171,6 +173,7 @@ export const waitForChecks = async ({
     const read = readChecks();
     if (read.ok) {
       readErrors = 0;
+      errorMs = 0;
       checks = read.checks;
       const nextSignature = checkSignature(checks);
       if (nextSignature !== signature) {
@@ -189,10 +192,6 @@ export const waitForChecks = async ({
       }
     } else {
       readErrors += 1;
-      if (readErrors === 1) {
-        errorSince = now();
-      }
-      const errorMs = now() - errorSince;
       const windowLeftMs = errorWindowMs - errorMs;
       delayMs = Math.min(intervalMs * 2 ** (readErrors - 1), READ_RETRY_MAX_MS, windowLeftMs);
       if (windowLeftMs <= 0 || now() + delayMs > deadline) {
@@ -213,6 +212,9 @@ export const waitForChecks = async ({
       return { status: "timeout", checks };
     }
     await sleep(delayMs);
+    if (readErrors > 0) {
+      errorMs += delayMs;
+    }
   }
 };
 

@@ -1,0 +1,13 @@
+import * as Cloudflare from "alchemy/Cloudflare";
+import * as Schema from "effect/Schema";
+
+export const LocalOnly = Cloudflare.KV.Namespace("local-only");
+
+export class Counter extends Cloudflare.DurableObject<Counter>()("Counter", {}) {}
+
+export class RequestFailed extends Schema.TaggedError<RequestFailed>()("RequestFailed", {}) {}
+
+export default class Api extends Cloudflare.Worker<Api>()("Api", {
+  main: import.meta.url,
+  env: { CACHE: LocalOnly },
+}) {}

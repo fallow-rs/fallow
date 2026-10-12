@@ -845,6 +845,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
@@ -886,6 +889,9 @@ mod tests {
             crap_max: 110.0,
             crap_above_threshold: 2,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         };
         let exempt = FileHealthScore {
@@ -930,6 +936,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
@@ -968,6 +977,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
@@ -1037,6 +1049,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
             FileHealthScore {
@@ -1053,6 +1068,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
             FileHealthScore {
@@ -1069,6 +1087,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
         ];
@@ -1133,6 +1154,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
             FileHealthScore {
@@ -1149,6 +1173,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
         ];
@@ -1200,6 +1227,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
@@ -1226,6 +1256,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
@@ -1264,6 +1297,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =

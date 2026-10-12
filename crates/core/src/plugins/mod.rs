@@ -82,6 +82,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
 
 #[cfg(test)]
 const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
+    "alchemy",
     "content-collections",
     "contentlayer",
     "danger",
@@ -1981,6 +1982,7 @@ fn canonical_test_environment(environment: &str) -> &str {
 
 mod adonis;
 mod ag_ui;
+mod alchemy;
 mod angular;
 mod astro;
 mod ava;

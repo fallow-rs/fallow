@@ -35,6 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consumers per export and a total. A trace reads the consumer sources of the
   traced export only. The audit brief reads the consumer sources of the
   exports in the changed files.
+- **Alchemy projects no longer report their stacks and deployed Workers as
+  unused.** A new built-in `alchemy` plugin activates on the `alchemy`
+  dependency. Each `alchemy.run.{ts,mts,cts,js,mjs,cjs}` file is an entry
+  point, so the Worker modules that a stack imports stay reachable. The file
+  that a resource names in `main` stays reachable from the file that declares
+  it. Fallow reads `new URL("./x.ts", import.meta.url)`,
+  `${import.meta.dirname}/x.ts`, `path.join(import.meta.dirname, ...)`, a
+  string next to such a `rootDir`, and a string in a stack file. When `main`
+  names its own file, the `default` export and the exported Durable Object,
+  Workflow and Container classes count as used. The CLI loads
+  `@effect/platform-node` and `@effect/platform-bun` at runtime, so these
+  packages are credited. The extraction cache version changes, so the first
+  run after the upgrade parses each file again.
 
 ### Changed
 
@@ -161,6 +174,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through that property now credit the members of the class. A replaced or
   unknown property value gives no credit. The parse cache version advances to
   345 so warm caches use the corrected property origins.
+- **Class members reached through callback wrappers and Vue computed values are
+  now credited.** The analysis follows synchronous helpers that return a
+  callback result in an object property, including imported helpers and aliases.
+  Vue `computed` values use the getter's result, including writable options.
+  The parse cache version advances to 346 to replace cached results without
+  these callback relationships.
 
 - **Class members accessed through known array and tuple elements are now credited.**
   The analysis tracks indexed receivers and local aliases, including inherited
@@ -182,6 +201,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `const { a } = await factory()`, a literal key such as `a` now counts as a
   read of that member on the class that the factory returns. A promise without
   `await` and a generator result credit no members.
+- **Complexity suppressions now apply to CRAP file scores.** Before, a
+  `fallow-ignore-next-line complexity` comment did not change the CRAP part
+  of `fallow health`. A suppressed function still set the file-score order,
+  the risk tag, `crap_above_threshold`, and the `AddTestCoverage` targets
+  and their evidence. Now these values use only unsuppressed functions. The
+  raw `crap_max` does not change: it is always the highest measured value.
+  File scores get three optional fields: `crap_suppressed`,
+  `crap_unsuppressed_max` and `crap_unsuppressed_effective_threshold`. For a
+  file with a suppressed function, the `AddTestCoverage` contributing factor
+  can now have `metric: "crap_unsuppressed_max"` instead of
+  `metric: "crap_max"`. A consumer that filters on `crap_max` must also
+  accept the new metric name.
 
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>

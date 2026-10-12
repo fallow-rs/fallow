@@ -13,6 +13,8 @@ mod common;
 
 #[path = "integration_test/ag_ui_agent_hooks.rs"]
 mod ag_ui_agent_hooks;
+#[path = "integration_test/alchemy_plugin.rs"]
+mod alchemy_plugin;
 #[path = "integration_test/angular_ng_package.rs"]
 mod angular_ng_package;
 #[path = "integration_test/angular_unrendered_component.rs"]
@@ -33,6 +35,8 @@ mod bundler_entry_object_map;
 mod bundler_nested_config_entry;
 #[path = "integration_test/caching.rs"]
 mod caching;
+#[path = "integration_test/callback_wrapper_provenance.rs"]
+mod callback_wrapper_provenance;
 #[path = "integration_test/class_factory_property_provenance.rs"]
 mod class_factory_property_provenance;
 #[path = "integration_test/class_value_projections.rs"]

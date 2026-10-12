@@ -2295,16 +2295,25 @@ fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthRep
 
     for score in &report.file_scores {
         let file_str = rel(&score.path);
+        let signal = fallow_engine::health::scoring::file_score_crap_signal(
+            score,
+            report.summary.max_crap_threshold,
+        );
+        let suppression = if score.crap_suppressed > 0 {
+            " (complexity suppression)"
+        } else {
+            ""
+        };
         let _ = writeln!(
             out,
-            "| {} | {mi:.1} | {fi} | {fan_out} | {dead:.0}% | {density:.2} | {crap:.1} |",
+            "| {} | {mi:.1} | {fi} | {fan_out} | {dead:.0}% | {density:.2} | {crap:.1}{suppression} |",
             markdown_table_code_span(&file_str),
             mi = score.maintainability_index,
             fi = score.fan_in,
             fan_out = score.fan_out,
             dead = score.dead_code_ratio * 100.0,
             density = score.complexity_density,
-            crap = score.crap_max,
+            crap = signal.maximum,
         );
     }
 
@@ -3029,6 +3038,9 @@ mod health_markdown_tests {
                 crap_max: 4.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             }],
             hotspots: vec![
