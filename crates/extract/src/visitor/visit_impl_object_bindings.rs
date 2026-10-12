@@ -409,7 +409,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn direct_binding_class_proof(
+    pub(in crate::visitor) fn direct_binding_class_proof(
         &mut self,
         path: &str,
         reference: Option<Span>,

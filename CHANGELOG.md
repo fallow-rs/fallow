@@ -143,6 +143,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a bare imported base. The parse cache version advances to 343 so warm
   caches use the corrected receiver provenance and qualified member facts.
 
+- **Map value iteration now credits the members of the value class.** A read in
+  `for (const [, v] of map.entries())` or in `map.forEach(v => ...)` now marks
+  that member as used on the class of the map values. Keys, rest elements, and
+  unsupported shapes stay reported.
+
+- **Awaited factory destructuring now credits class members.** In
+  `const { a } = await factory()`, a literal key such as `a` now counts as a
+  read of that member on the class that the factory returns. A promise without
+  `await` and a generator result credit no members.
+
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a

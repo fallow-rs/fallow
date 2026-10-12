@@ -657,3 +657,18 @@ fn assert_for_update_read_members(
         "body read remains reachable"
     );
 }
+
+#[test]
+fn local_subclass_jsx_member_tag_credits_declaring_class() {
+    let unused = unused_members("local-subclass-jsx-member-tag");
+    assert!(
+        !unused.contains(&"Base.Item".to_string()),
+        "`<Sub.Item />` must credit the static on the imported base: {unused:?}"
+    );
+    for member in ["Base.Shadowed", "Base.Dead"] {
+        assert!(
+            unused.contains(&member.to_string()),
+            "a shadowed `Sub` tag and an unread static stay reported: {unused:?}"
+        );
+    }
+}

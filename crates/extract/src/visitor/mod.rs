@@ -1754,10 +1754,40 @@ impl ModuleInfoExtractor {
             }
             match &current.object {
                 JSXMemberExpressionObject::MemberExpression(inner) => current = inner,
-                JSXMemberExpressionObject::IdentifierReference(_)
-                | JSXMemberExpressionObject::ThisExpression(_) => break,
+                JSXMemberExpressionObject::IdentifierReference(reference) => {
+                    self.record_jsx_subclass_member_access(
+                        reference,
+                        current.property.name.as_str(),
+                    );
+                    break;
+                }
+                JSXMemberExpressionObject::ThisExpression(_) => break,
             }
         }
+    }
+
+    /// `<Sub.Item />` reads `Item` through the tag root. Record it with the same
+    /// identifier proof as `Sub.Item`, so a local subclass credits its base.
+    fn record_jsx_subclass_member_access(
+        &mut self,
+        reference: &oxc_ast::ast::IdentifierReference<'_>,
+        member: &str,
+    ) {
+        if !self.capture_subclass_provenance {
+            return;
+        }
+        let proof = self
+            .direct_binding_class_proof(reference.name.as_str(), Some(reference.span))
+            .unwrap_or_else(|| BindingClassProof {
+                target_name: reference.name.to_string(),
+                target_reference_span: reference.span,
+                requirements: Vec::new(),
+            });
+        self.pending_subclass_member_accesses
+            .push(PendingSubclassMemberAccess {
+                proof: SubclassAccessProof::Known(proof),
+                member: member.to_string(),
+            });
     }
 
     /// Scoped compound targets survive scope exit; module-flat targets only need
