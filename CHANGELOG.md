@@ -137,6 +137,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve, for example `{"import": {"types": "...", "default": "..."}}`. A
   `null` export target stays blocked, so a blocked subpath credits no
   plugins.
+- **Class members read through object-factory properties are now credited.**
+  A property value of a returned object can come from a local class, an
+  imported typed owner, an inner factory call or a static factory. Reads
+  through that property now credit the members of the class. A replaced or
+  unknown property value gives no credit. The parse cache version advances to
+  345 so warm caches use the corrected property origins.
+
 - **Class members accessed through known array and tuple elements are now credited.**
   The analysis tracks indexed receivers and local aliases, including inherited
   members on local subclasses. Reassigned or shadowed bindings no longer carry
