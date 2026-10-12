@@ -1160,7 +1160,7 @@ fn collect_propagated_member_accesses(
         mut accessed_members,
         mut self_accessed_members,
         mut whole_object_used_exports,
-    } = collect_direct_member_accesses(input.resolved_modules, indexes);
+    } = collect_direct_member_accesses(input.graph, input.resolved_modules, indexes);
 
     propagate_common_member_accesses(
         input,
@@ -1605,7 +1605,100 @@ struct MemberAccessCollections {
     whole_object_used_exports: FxHashSet<ExportKey>,
 }
 
+/// Project files that a namespace import (`import * as local`) of this module
+/// resolves to.
+fn namespace_import_targets<'r>(
+    resolved: &'r ResolvedModule,
+    local: &'r str,
+) -> impl Iterator<Item = FileId> + 'r {
+    resolved
+        .all_resolved_imports()
+        .filter(move |import| {
+            import.info.local_name == local
+                && matches!(
+                    import.info.imported_name,
+                    crate::extract::ImportedName::Namespace
+                )
+        })
+        .filter_map(|import| import.target.internal_file_id())
+}
+
+/// Project files that an imported binding names through a namespace re-export
+/// (`export * as Ns from "./x"`), also behind a chain of named re-exports.
+fn namespace_re_export_targets(graph: &ModuleGraph, key: &ExportKey) -> Vec<FileId> {
+    export_key_with_origins(graph, key)
+        .iter()
+        .filter_map(|origin| {
+            graph
+                .modules
+                .get(origin.file_id.0 as usize)
+                .map(|m| (m, origin))
+        })
+        .flat_map(|(module, origin)| {
+            module.re_exports.iter().filter(move |edge| {
+                edge.imported_name == "*" && edge.exported_name == origin.export_name
+            })
+        })
+        .map(|edge| edge.source_file)
+        .collect()
+}
+
+/// Resolves the root of a dotted receiver `Ns.Class` to the project files
+/// that `Ns` names: a namespace import, or an imported `export * as Ns from`
+/// binding. One level only: `Ns.Inner.Class` is not resolved. Results are
+/// cached per root because the same root repeats across accesses in a file.
+struct NamespaceRootTargets<'g, 'r> {
+    graph: &'g ModuleGraph,
+    resolved: &'r ResolvedModule,
+    local_to_export_keys: &'g FxHashMap<&'g str, Vec<ExportKey>>,
+    cache: FxHashMap<&'r str, Vec<FileId>>,
+}
+
+impl<'g, 'r> NamespaceRootTargets<'g, 'r> {
+    fn new(
+        graph: &'g ModuleGraph,
+        resolved: &'r ResolvedModule,
+        local_to_export_keys: &'g FxHashMap<&'g str, Vec<ExportKey>>,
+    ) -> Self {
+        Self {
+            graph,
+            resolved,
+            local_to_export_keys,
+            cache: FxHashMap::default(),
+        }
+    }
+
+    /// Export keys for a dotted receiver, or an empty list when the receiver
+    /// is not `Ns.Class` with a resolvable `Ns`.
+    fn export_keys(&mut self, object: &'r str) -> Vec<ExportKey> {
+        let Some((root, export_name)) = object.split_once('.') else {
+            return Vec::new();
+        };
+        if root == "this" || export_name.contains('.') {
+            return Vec::new();
+        }
+        let (graph, resolved, local_to_export_keys) =
+            (self.graph, self.resolved, self.local_to_export_keys);
+        self.cache
+            .entry(root)
+            .or_insert_with(|| {
+                let re_export_targets = local_to_export_keys
+                    .get(root)
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|key| namespace_re_export_targets(graph, key));
+                namespace_import_targets(resolved, root)
+                    .chain(re_export_targets)
+                    .collect()
+            })
+            .iter()
+            .map(|file_id| ExportKey::new(*file_id, export_name.to_string()))
+            .collect()
+    }
+}
+
 fn collect_direct_member_accesses(
+    graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     indexes: &MemberPassIndexes<'_>,
 ) -> MemberAccessCollections {
@@ -1615,6 +1708,7 @@ fn collect_direct_member_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
+        let mut namespace_roots = NamespaceRootTargets::new(graph, resolved, local_to_export_keys);
         for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
             .ordinary_member_accesses()
         {
@@ -1632,22 +1726,20 @@ fn collect_direct_member_accesses(
                         .or_default()
                         .insert(access.member.clone());
                 }
+                continue;
+            }
+            for export_key in namespace_roots.export_keys(&access.object) {
+                accessed_members
+                    .entry(export_key)
+                    .or_default()
+                    .insert(access.member.clone());
             }
         }
 
         for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
             .qualified_class_member_accesses()
         {
-            for import in resolved.all_resolved_imports().filter(|import| {
-                import.info.local_name == access.namespace_local
-                    && matches!(
-                        import.info.imported_name,
-                        crate::extract::ImportedName::Namespace
-                    )
-            }) {
-                let Some(target_file_id) = import.target.internal_file_id() else {
-                    continue;
-                };
+            for target_file_id in namespace_import_targets(resolved, &access.namespace_local) {
                 accessed_members
                     .entry(ExportKey::new(
                         target_file_id,
@@ -1665,29 +1757,12 @@ fn collect_direct_member_accesses(
             if let Some((namespace_local, export_name)) = local_name.split_once('.')
                 && !export_name.contains('.')
             {
-                for import in resolved.all_resolved_imports().filter(|import| {
-                    import.info.local_name == namespace_local
-                        && matches!(
-                            import.info.imported_name,
-                            crate::extract::ImportedName::Namespace
-                        )
-                }) {
-                    if let Some(target_file_id) = import.target.internal_file_id() {
-                        whole_object_used_exports
-                            .insert(ExportKey::new(target_file_id, export_name.to_string()));
-                    }
+                for target_file_id in namespace_import_targets(resolved, namespace_local) {
+                    whole_object_used_exports
+                        .insert(ExportKey::new(target_file_id, export_name.to_string()));
                 }
             }
-            for import in resolved.all_resolved_imports().filter(|import| {
-                import.info.local_name == *local_name
-                    && matches!(
-                        import.info.imported_name,
-                        crate::extract::ImportedName::Namespace
-                    )
-            }) {
-                let Some(target_file_id) = import.target.internal_file_id() else {
-                    continue;
-                };
+            for target_file_id in namespace_import_targets(resolved, local_name) {
                 let Some(target) = indexes.module_by_id.get(&target_file_id) else {
                     continue;
                 };
