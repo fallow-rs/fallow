@@ -282,7 +282,7 @@ impl FallowMcp {
         run_trace_error_tool(params.0).await
     }
 
-    /// Trace the impact closure for a file. Runs `fallow dead-code --impact-closure <path> --format json --quiet` and returns the transitive affected-but-not-in-diff set plus coordination gaps for consumers of the file contract. This is evidence for review planning, not proof that the affected files are wrong. Gaps carry `search_visibility`. Supports root, config, production, workspace, no_cache, and threads.
+    /// Trace a file's impact closure. Runs `fallow dead-code --impact-closure <path> --format json --quiet` and returns the transitive affected-but-not-in-diff set plus coordination gaps for file-contract consumers. Evidence for review planning, not proof that affected files are wrong. Gaps carry `search_visibility`; see fallow://tools/impact_closure. Supports root, config, production, workspace, no_cache, and threads.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn impact_closure(
         &self,
