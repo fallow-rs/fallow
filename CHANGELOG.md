@@ -31,7 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `warn` by default. Set a rule to `error` to fail the audit, or suppress one
   finding with `// fallow-ignore-next-line <rule>`. The findings are in the new
   `diff_risk` JSON section, in SARIF, in CodeClimate, in GitHub annotations,
-  in the GitHub job summary and in the MCP `audit` tool.
+  in the GitHub job summary and in the MCP `audit` tool. Compact output adds
+  one record for each finding and markdown output adds a table. The human
+  status line, the issue count of the GitHub Action and the GitLab template,
+  and the VS Code audit status bar count the findings too. `added-dependency`
+  has no suppression comment, because `package.json` cannot hold one: set the
+  rule to `off` for the path in an `overrides` entry.
 
 ### Changed
 
