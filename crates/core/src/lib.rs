@@ -2268,6 +2268,10 @@ fn analyze_all_scripts(
         .entry_point_roles
         .entry("scripts".to_string())
         .or_insert(EntryPointRole::Support);
+    plugin_result
+        .entry_point_roles
+        .entry(SCRIPT_TEST_ENTRY_SOURCE.to_string())
+        .or_insert(EntryPointRole::Test);
 }
 
 /// Gather sorted, deduped dependency names across the root and workspace packages.
@@ -2417,13 +2421,12 @@ fn analyze_root_scripts(
                 .push((path, "scripts".to_string()));
         }
     }
-    for entry in &script_analysis.entry_files {
-        if let Some(pat) = scripts::normalize_script_entry_pattern("", entry) {
-            plugin_result
-                .entry_patterns
-                .push((plugins::PathRule::new(pat), "scripts".to_string()));
-        }
-    }
+    push_script_entry_patterns(
+        &mut plugin_result.entry_patterns,
+        "",
+        &script_analysis.entry_files,
+        &script_analysis.test_entry_files,
+    );
 }
 
 /// Analyze each workspace package's scripts in parallel and merge the results.
@@ -2505,11 +2508,12 @@ fn analyze_one_workspace_scripts(
             discovered_always_used.push((path, "scripts".to_string()));
         }
     }
-    for entry in &ws_analysis.entry_files {
-        if let Some(pat) = scripts::normalize_script_entry_pattern(&ws_prefix, entry) {
-            entry_patterns.push((plugins::PathRule::new(pat), "scripts".to_string()));
-        }
-    }
+    push_script_entry_patterns(
+        &mut entry_patterns,
+        &ws_prefix,
+        &ws_analysis.entry_files,
+        &ws_analysis.test_entry_files,
+    );
     (
         used_packages,
         discovered_always_used,
@@ -2536,11 +2540,37 @@ fn analyze_ci_scripts(
     plugin_result
         .script_used_packages
         .extend(ci_analysis.used_packages);
-    for entry in &ci_analysis.entry_files {
-        if let Some(pat) = scripts::normalize_script_entry_pattern("", entry) {
-            plugin_result
-                .entry_patterns
-                .push((plugins::PathRule::new(pat), "scripts".to_string()));
+    push_script_entry_patterns(
+        &mut plugin_result.entry_patterns,
+        "",
+        &ci_analysis.entry_files,
+        &ci_analysis.test_entry_files,
+    );
+}
+
+/// The entry-pattern source of the files that a built-in test runner runs
+/// from a script or CI command (`node --test`, `bun test`, `deno test`).
+/// Its entries have the test role.
+const SCRIPT_TEST_ENTRY_SOURCE: &str = "script-tests";
+
+/// Push the entry patterns of script file arguments. A file that a built-in
+/// test runner runs is also a test entry, so the code that it imports counts
+/// as reached by tests. The `scripts` rule comes first, so it stays the
+/// reported source of the entry.
+fn push_script_entry_patterns(
+    entry_patterns: &mut Vec<(plugins::PathRule, String)>,
+    prefix: &str,
+    entry_files: &[String],
+    test_entry_files: &[String],
+) {
+    let sources = entry_files.iter().map(|entry| (entry, "scripts")).chain(
+        test_entry_files
+            .iter()
+            .map(|entry| (entry, SCRIPT_TEST_ENTRY_SOURCE)),
+    );
+    for (entry, source) in sources {
+        if let Some(pat) = scripts::normalize_script_entry_pattern(prefix, entry) {
+            entry_patterns.push((plugins::PathRule::new(pat), source.to_string()));
         }
     }
 }

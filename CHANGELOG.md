@@ -156,6 +156,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An `override` gets no new credit when the base is a project class, a mixin
   call that takes a class (`extends Mixin(LocalBase)`), an unresolved import,
   or a local class with the name of a global.
+- **Files that `node --test`, `bun test` or `deno test` runs are now test
+  entry points.** A package.json script or a CI `run` line such as
+  `node --test scripts/*.test.mjs` made these files entry points with the
+  support role only. So the code that they import got coverage tier `none` in
+  `fallow health` and `fallow audit` CRAP scores. Now the file and glob
+  arguments of these runners have the test role, and the imported code gets
+  the static coverage estimate. A flag value such as `--test-reporter spec`
+  is not a test file. A setup file such as `--import ./setup.mjs` runs in
+  the test process, so it is test code too.
 - **The config JSON Schema now accepts `extends` as a single string.** The
   loader already accepted `"extends": "./base.json"` and the array form. The
   schema allowed only the array, so editors flagged a valid config. The

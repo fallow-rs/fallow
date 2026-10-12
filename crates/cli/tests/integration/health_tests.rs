@@ -11171,3 +11171,40 @@ fn health_css_invalid_animation_value_adds_no_undefined_keyframe() {
         "invalid values and composition keywords are not keyframe references"
     );
 }
+
+#[test]
+fn node_test_file_arguments_credit_imported_code_with_static_coverage() {
+    let output = run_fallow(
+        "health",
+        "node-test-script-entries",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "9999",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let tier_of = |name: &str| -> String {
+        findings
+            .iter()
+            .find(|finding| finding["name"] == name)
+            .and_then(|finding| finding["coverage_tier"].as_str())
+            .unwrap_or_else(|| panic!("expected a {name} finding, got: {findings:#?}"))
+            .to_owned()
+    };
+
+    // `node --test ... test/math.test.mjs` in a package.json script.
+    assert_ne!(tier_of("clamp"), "none", "{findings:#?}");
+    // `node --test ... ci-tests/*.test.mjs` in a GitHub Actions run line.
+    assert_ne!(tier_of("formatCount"), "none", "{findings:#?}");
+    // `node scripts/build.mjs` is not a test run.
+    assert_eq!(tier_of("releaseChannel"), "none", "{findings:#?}");
+}

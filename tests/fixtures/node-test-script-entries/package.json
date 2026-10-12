@@ -1,0 +1,9 @@
+{
+  "name": "node-test-script-entries",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test --test-reporter=spec --import ./test/setup.mjs test/math.test.mjs"
+  }
+}
