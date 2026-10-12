@@ -208,6 +208,16 @@ pub enum IssueKind {
     /// A dependency cycle between workspace packages, built from resolved
     /// cross-package imports. Reported even when no file-level cycle exists.
     PackageCycle,
+    /// An Effect layer whose every reference sits inside other layers that
+    /// nothing uses. A layer with zero references stays an `unused-export` or
+    /// an `unused-class-member`.
+    UnusedEffectLayer,
+    /// An Effect tagged error class that type positions or `catchTag` handlers
+    /// reference, but that no code constructs, fails with, or reads as a value.
+    UnusedTaggedError,
+    /// A `catchTag("X")` / `catchTags({ X })` handler whose project tag `X` no
+    /// code produces, when no `unused-tagged-error` finding already covers it.
+    UnproducedCatchTag,
 }
 
 impl IssueKind {
@@ -269,6 +279,9 @@ impl IssueKind {
         Self::DevDependencyInProduction,
         Self::DeprecatedExportInUse,
         Self::PackageCycle,
+        Self::UnusedEffectLayer,
+        Self::UnusedTaggedError,
+        Self::UnproducedCatchTag,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -337,6 +350,9 @@ impl IssueKind {
             Self::DeprecatedExportInUse => 54,
             Self::PackageCycle => 55,
             Self::AbsentComponentProp => 56,
+            Self::UnusedEffectLayer => 57,
+            Self::UnusedTaggedError => 58,
+            Self::UnproducedCatchTag => 59,
         }
     }
 
@@ -400,6 +416,9 @@ impl IssueKind {
             54 => Some(Self::DeprecatedExportInUse),
             55 => Some(Self::PackageCycle),
             56 => Some(Self::AbsentComponentProp),
+            57 => Some(Self::UnusedEffectLayer),
+            58 => Some(Self::UnusedTaggedError),
+            59 => Some(Self::UnproducedCatchTag),
             _ => None,
         }
     }
@@ -812,6 +831,9 @@ mod tests {
             (54, IssueKind::DeprecatedExportInUse),
             (55, IssueKind::PackageCycle),
             (56, IssueKind::AbsentComponentProp),
+            (57, IssueKind::UnusedEffectLayer),
+            (58, IssueKind::UnusedTaggedError),
+            (59, IssueKind::UnproducedCatchTag),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

@@ -547,6 +547,7 @@ fn assemble_module_info(input: ModuleAssemblyInput) -> ModuleInfo {
     {
         info.component_contracts = Some(Box::new(contracts));
     }
+    info.effect_facts = semantic_usage.effect_facts;
     info.parse_error_count = degradation.error_count;
     info.parse_panicked = degradation.panicked;
     info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
@@ -1616,6 +1617,7 @@ pub struct SemanticUsage {
     /// which of them the exported form declares.
     pub(crate) unreferenced_import_equals_bindings: Vec<String>,
     pub(crate) component_contracts: fallow_types::extract::ComponentContractFacts,
+    pub(crate) effect_facts: Option<Box<fallow_types::extract::EffectFacts>>,
 }
 
 pub fn compute_semantic_usage_for_extractor(
@@ -1911,6 +1913,7 @@ fn compute_semantic_usage_with_candidates(
         import_binding_references,
         unreferenced_import_equals_bindings: import_equals.unreferenced,
         component_contracts: crate::component_contracts::collect(&semantic, imports, exports),
+        effect_facts: crate::effect_facts::collect(&semantic, program, imports, exports),
     }
 }
 

@@ -175,6 +175,9 @@ impl DeadCodeAuditLedger {
             unused_component_inputs,
             unused_component_outputs,
             unused_svelte_events,
+            unused_effect_layers,
+            unused_tagged_errors,
+            unproduced_catch_tags,
             unused_server_actions,
             unused_load_data_keys,
             unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -268,6 +271,9 @@ impl DeadCodeAuditLedger {
         annotate!(unused_component_inputs, "unused_component_inputs");
         annotate!(unused_component_outputs, "unused_component_outputs");
         annotate!(unused_svelte_events, "unused_svelte_events");
+        annotate!(unused_effect_layers, "unused_effect_layers");
+        annotate!(unused_tagged_errors, "unused_tagged_errors");
+        annotate!(unproduced_catch_tags, "unproduced_catch_tags");
         annotate!(unused_server_actions, "unused_server_actions");
         annotate!(unused_load_data_keys, "unused_load_data_keys");
     }
@@ -536,6 +542,9 @@ struct ComponentContractFindingSlices<'a> {
     unused_component_inputs: &'a [fallow_types::output_dead_code::UnusedComponentInputFinding],
     unused_component_outputs: &'a [fallow_types::output_dead_code::UnusedComponentOutputFinding],
     unused_svelte_events: &'a [fallow_types::output_dead_code::UnusedSvelteEventFinding],
+    unused_effect_layers: &'a [fallow_types::output_dead_code::UnusedEffectLayerFinding],
+    unused_tagged_errors: &'a [fallow_types::output_dead_code::UnusedTaggedErrorFinding],
+    unproduced_catch_tags: &'a [fallow_types::output_dead_code::UnproducedCatchTagFinding],
 }
 
 /// `dead_code_keys`, `retain_introduced_dead_code`.
@@ -621,6 +630,9 @@ impl DeadCodeKeyCollector<'_> {
             unused_component_inputs,
             unused_component_outputs,
             unused_svelte_events,
+            unused_effect_layers,
+            unused_tagged_errors,
+            unproduced_catch_tags,
             unused_server_actions,
             unused_load_data_keys,
             unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -698,6 +710,9 @@ impl DeadCodeKeyCollector<'_> {
             unused_component_inputs,
             unused_component_outputs,
             unused_svelte_events,
+            unused_effect_layers,
+            unused_tagged_errors,
+            unproduced_catch_tags,
         });
         self.add_graph_findings(
             unresolved_imports,
@@ -775,13 +790,16 @@ enum AuditCollection {
     UnusedComponentInputs,
     UnusedComponentOutputs,
     UnusedSvelteEvents,
+    UnusedEffectLayers,
+    UnusedTaggedErrors,
+    UnproducedCatchTags,
     UnusedServerActions,
     UnusedLoadDataKeys,
 }
 
 impl AuditCollection {
     #[cfg(test)]
-    const ALL: [Self; 46] = [
+    const ALL: [Self; 49] = [
         Self::PropDrillingChains,
         Self::UnusedFiles,
         Self::UnusedExports,
@@ -826,6 +844,9 @@ impl AuditCollection {
         Self::UnusedComponentInputs,
         Self::UnusedComponentOutputs,
         Self::UnusedSvelteEvents,
+        Self::UnusedEffectLayers,
+        Self::UnusedTaggedErrors,
+        Self::UnproducedCatchTags,
         Self::UnusedServerActions,
         Self::UnusedLoadDataKeys,
     ];
@@ -876,6 +897,9 @@ impl AuditCollection {
             Self::UnusedComponentInputs => "unused_component_inputs",
             Self::UnusedComponentOutputs => "unused_component_outputs",
             Self::UnusedSvelteEvents => "unused_svelte_events",
+            Self::UnusedEffectLayers => "unused_effect_layers",
+            Self::UnusedTaggedErrors => "unused_tagged_errors",
+            Self::UnproducedCatchTags => "unproduced_catch_tags",
             Self::UnusedServerActions => "unused_server_actions",
             Self::UnusedLoadDataKeys => "unused_load_data_keys",
         }
@@ -1074,6 +1098,9 @@ impl<'a> DeadCodeKeyCollector<'a> {
             unused_component_inputs,
             unused_component_outputs,
             unused_svelte_events,
+            unused_effect_layers,
+            unused_tagged_errors,
+            unproduced_catch_tags,
         } = *components;
         self.add_unused_component_props(unused_component_props);
         self.add_items(
@@ -1084,6 +1111,9 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_unused_component_inputs(unused_component_inputs);
         self.add_unused_component_outputs(unused_component_outputs);
         self.add_unused_svelte_events(unused_svelte_events);
+        self.add_unused_effect_layers(unused_effect_layers);
+        self.add_unused_tagged_errors(unused_tagged_errors);
+        self.add_unproduced_catch_tags(unproduced_catch_tags);
     }
 
     fn add_graph_findings(
@@ -1241,6 +1271,24 @@ impl<'a> DeadCodeKeyCollector<'a> {
         items: &[fallow_types::output_dead_code::UnusedSvelteEventFinding],
     ) {
         self.add_items(AuditCollection::UnusedSvelteEvents, items);
+    }
+    fn add_unused_effect_layers(
+        &mut self,
+        items: &[fallow_types::output_dead_code::UnusedEffectLayerFinding],
+    ) {
+        self.add_items(AuditCollection::UnusedEffectLayers, items);
+    }
+    fn add_unused_tagged_errors(
+        &mut self,
+        items: &[fallow_types::output_dead_code::UnusedTaggedErrorFinding],
+    ) {
+        self.add_items(AuditCollection::UnusedTaggedErrors, items);
+    }
+    fn add_unproduced_catch_tags(
+        &mut self,
+        items: &[fallow_types::output_dead_code::UnproducedCatchTagFinding],
+    ) {
+        self.add_items(AuditCollection::UnproducedCatchTags, items);
     }
 
     fn add_unused_server_actions(
@@ -1533,6 +1581,9 @@ pub fn retain_introduced_dead_code(
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
         route_collisions,
@@ -1593,6 +1644,9 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
         unused_svelte_events: _unused_svelte_events,
+        unused_effect_layers: _unused_effect_layers,
+        unused_tagged_errors: _unused_tagged_errors,
+        unproduced_catch_tags: _unproduced_catch_tags,
         unused_server_actions: _unused_server_actions,
         unused_load_data_keys: _unused_load_data_keys,
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -1730,6 +1784,9 @@ pub fn annotate_dead_code_json(
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         route_collisions,
         dynamic_segment_name_conflicts,
@@ -2558,6 +2615,43 @@ mod tests {
     }
 
     // --- key-building coverage for lines 68-177 (framework-specific key fns) ---
+
+    fn effect_results(root: &Path) -> AnalysisResults {
+        use fallow_types::output_dead_code::{
+            UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
+        };
+        use fallow_types::results::{
+            EffectLayerKind, UnproducedCatchTag, UnusedEffectLayer, UnusedTaggedError,
+        };
+        AnalysisResults {
+            unused_effect_layers: vec![UnusedEffectLayerFinding::with_actions(UnusedEffectLayer {
+                path: root.join("src/services.ts"),
+                name: "CacheLive".to_owned(),
+                kind: EffectLayerKind::TopLevel,
+                line: 3,
+                col: 0,
+                dead_consumers: vec!["OrphanLive".to_owned()],
+            })],
+            unused_tagged_errors: vec![UnusedTaggedErrorFinding::with_actions(UnusedTaggedError {
+                path: root.join("src/errors.ts"),
+                name: "Expired".to_owned(),
+                tag: "Expired".to_owned(),
+                line: 4,
+                col: 0,
+                catch_sites: Vec::new(),
+            })],
+            unproduced_catch_tags: vec![UnproducedCatchTagFinding::with_actions(
+                UnproducedCatchTag {
+                    path: root.join("src/main.ts"),
+                    tag: "Expired".to_owned(),
+                    line: 5,
+                    col: 0,
+                    candidate_classes: vec!["Expired".to_owned()],
+                },
+            )],
+            ..Default::default()
+        }
+    }
 
     fn framework_inject_and_render_results(root: &Path) -> AnalysisResults {
         let src = root.join("src/App.vue");
@@ -3866,12 +3960,16 @@ mod tests {
     #[test]
     fn audit_ledger_errors_match_the_exit_code_rule_for_every_collection() {
         let root = root();
-        let findings = isolated_findings(&[
+        // Two arrays keep each stack array under the large-array lint limit.
+        let fixtures: Vec<AnalysisResults> = [
             sample_results(&root),
             graph_boundary_catalog_override_results(&root),
             type_member_and_dependency_results(&root),
             framework_inject_and_render_results(&root),
             absent_component_prop_results(&root),
+        ]
+        .into_iter()
+        .chain([
             server_action_load_data_and_route_results(&root),
             angular_input_output_and_policy_results(&root),
             unused_store_member_results(&root),
@@ -3888,9 +3986,11 @@ mod tests {
                         }],
                     },
                 )],
-                ..Default::default()
+                ..effect_results(&root)
             },
-        ]);
+        ])
+        .collect();
+        let findings = isolated_findings(&fixtures);
         let empty_base = FxHashSet::default();
         let mut covered = std::collections::BTreeSet::new();
         let mut mismatches = Vec::new();

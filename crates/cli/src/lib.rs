@@ -909,6 +909,18 @@ enum Command {
         #[arg(long)]
         unused_svelte_events: bool,
 
+        /// Only report Effect layers composed only into unused layers
+        #[arg(long)]
+        unused_effect_layers: bool,
+
+        /// Only report Effect tagged errors that no code produces
+        #[arg(long)]
+        unused_tagged_errors: bool,
+
+        /// Only report catchTag handlers for a tag that no code produces
+        #[arg(long)]
+        unproduced_catch_tags: bool,
+
         /// Only report unused server actions
         #[arg(long)]
         unused_server_actions: bool,
@@ -4847,6 +4859,9 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
         unused_catalog_entries,
@@ -4871,6 +4886,9 @@ fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> Issu
         ("--unused-component-inputs", *unused_component_inputs),
         ("--unused-component-outputs", *unused_component_outputs),
         ("--unused-svelte-events", *unused_svelte_events),
+        ("--unused-effect-layers", *unused_effect_layers),
+        ("--unused-tagged-errors", *unused_tagged_errors),
+        ("--unproduced-catch-tags", *unproduced_catch_tags),
         ("--unused-server-actions", *unused_server_actions),
         ("--unused-load-data-keys", *unused_load_data_keys),
         ("--unused-catalog-entries", *unused_catalog_entries),

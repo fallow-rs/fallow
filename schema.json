@@ -233,6 +233,9 @@
         "unused-component-inputs": "warn",
         "unused-component-outputs": "warn",
         "unused-svelte-events": "warn",
+        "unused-effect-layers": "warn",
+        "unused-tagged-errors": "warn",
+        "unproduced-catch-tags": "warn",
         "unused-server-actions": "warn",
         "unused-load-data-keys": "warn",
         "prop-drilling": "off",
@@ -1485,6 +1488,21 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "unused-effect-layers": {
+          "description": "Effect layer composed only into other layers that nothing uses. Gated\non the project declaring `effect`. Defaults to `warn`: code outside the\nanalyzed project can still compose the layer.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unused-tagged-errors": {
+          "description": "Effect tagged error class that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Defaults\nto `warn`: consumers outside the project can construct the error.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unproduced-catch-tags": {
+          "description": "`catchTag` handler for a project tag that no code produces, when no\n`unused-tagged-errors` finding covers it. Gated on the project\ndeclaring `effect`. Defaults to `warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unused-server-actions": {
           "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified out\nof `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer; warn encodes that\nwithout failing CI until corpus-validated.",
           "$ref": "#/$defs/Severity",
@@ -2353,6 +2371,39 @@
         },
         "unused-svelte-events": {
           "description": "Optional override for [`RulesConfig::unused_svelte_events`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-effect-layers": {
+          "description": "Optional override for [`RulesConfig::unused_effect_layers`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-tagged-errors": {
+          "description": "Optional override for [`RulesConfig::unused_tagged_errors`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unproduced-catch-tags": {
+          "description": "Optional override for [`RulesConfig::unproduced_catch_tags`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

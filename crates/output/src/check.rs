@@ -669,6 +669,19 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.unused_svelte_events {
             $visit(&finding.event.path, finding.event.line, &finding.actions);
         }
+        for finding in &results.unused_effect_layers {
+            $visit(&finding.layer.path, finding.layer.line, &finding.actions);
+        }
+        for finding in &results.unused_tagged_errors {
+            $visit(&finding.error.path, finding.error.line, &finding.actions);
+        }
+        for finding in &results.unproduced_catch_tags {
+            $visit(
+                &finding.catch_tag.path,
+                finding.catch_tag.line,
+                &finding.actions,
+            );
+        }
         for finding in &results.unused_server_actions {
             $visit(&finding.action.path, finding.action.line, &finding.actions);
         }
@@ -915,6 +928,27 @@ macro_rules! visit_suppress_line_findings_mut {
             $visit(
                 &finding.event.path,
                 finding.event.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.unused_effect_layers {
+            $visit(
+                &finding.layer.path,
+                finding.layer.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.unused_tagged_errors {
+            $visit(
+                &finding.error.path,
+                finding.error.line,
+                &mut finding.actions,
+            );
+        }
+        for finding in &mut results.unproduced_catch_tags {
+            $visit(
+                &finding.catch_tag.path,
+                finding.catch_tag.line,
                 &mut finding.actions,
             );
         }
@@ -1227,6 +1261,9 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unused_component_inputs: results.unused_component_inputs.len(),
         unused_component_outputs: results.unused_component_outputs.len(),
         unused_svelte_events: results.unused_svelte_events.len(),
+        unused_effect_layers: results.unused_effect_layers.len(),
+        unused_tagged_errors: results.unused_tagged_errors.len(),
+        unproduced_catch_tags: results.unproduced_catch_tags.len(),
         unused_server_actions: results.unused_server_actions.len(),
         unused_load_data_keys: results.unused_load_data_keys.len(),
         route_collisions: results.route_collisions.len(),

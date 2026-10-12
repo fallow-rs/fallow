@@ -251,6 +251,15 @@ pub enum FixActionType {
     /// Add or forward a Svelte custom-event listener, or remove the dispatch
     /// (manual; used by unused-svelte-event findings).
     WireSvelteEvent,
+    /// Compose an Effect layer into a layer that reaches a runtime, or remove
+    /// it (manual; used by unused-effect-layer findings).
+    ComposeEffectLayer,
+    /// Fail with an Effect tagged error from project code, or remove the class
+    /// and its handlers (manual; used by unused-tagged-error findings).
+    FailTaggedError,
+    /// Remove a `catchTag` handler for a tag that nothing produces, or add the
+    /// producer (manual; used by unproduced-catch-tag findings).
+    RemoveCatchTagHandler,
     /// Resolve a Next.js App Router route collision by moving or merging one of
     /// the files that own the same URL (manual; suppressing a guaranteed build
     /// error is never the right fix, so this is the primary action).

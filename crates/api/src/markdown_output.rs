@@ -470,6 +470,55 @@ fn push_markdown_framework_sections(
     );
 }
 
+/// Push the Effect sections: unused layers, unused tagged errors and
+/// unproduced catch tags.
+fn push_markdown_effect_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
+    markdown_section(
+        out,
+        &results.unused_effect_layers,
+        "Unused Effect layers",
+        |f| {
+            vec![format!(
+                "- {}:{} {} is composed only into layers that nothing uses ({})",
+                markdown_code_span(&rel(&f.layer.path)),
+                f.layer.line,
+                markdown_code_span(&f.layer.name),
+                f.layer.dead_consumers.join(", "),
+            )]
+        },
+    );
+    markdown_section(
+        out,
+        &results.unused_tagged_errors,
+        "Unused tagged errors",
+        |f| {
+            vec![format!(
+                "- {}:{} {} is never constructed or failed with (remove it or fail with it)",
+                markdown_code_span(&rel(&f.error.path)),
+                f.error.line,
+                markdown_code_span(&f.error.name),
+            )]
+        },
+    );
+    markdown_section(
+        out,
+        &results.unproduced_catch_tags,
+        "Unproduced catch tags",
+        |f| {
+            vec![format!(
+                "- {}:{} catchTag {} handles a tag that no code produces",
+                markdown_code_span(&rel(&f.catch_tag.path)),
+                f.catch_tag.line,
+                markdown_code_span(&f.catch_tag.tag),
+            )]
+        },
+    );
+}
+
 fn push_markdown_component_sections(
     out: &mut String,
     results: &AnalysisResults,
@@ -538,6 +587,7 @@ fn push_markdown_component_sections(
         "Unused Svelte events",
         |e| format_markdown_unused_svelte_event(e, rel),
     );
+    push_markdown_effect_sections(out, results, rel);
     markdown_section(
         out,
         &results.unused_server_actions,

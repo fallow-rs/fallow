@@ -1478,6 +1478,30 @@ assert_contains "$OUT_USE_ANN" "::warning file=src/Child.svelte,line=6,col=5,tit
 OUT_USE_FILTERED=$(jq '.unused_svelte_events = [{"path": "src/Child.svelte", "line": 6, "col": 0, "component_name": "Child", "event_name": "dead", "actions": []}, {"path": "src/Other.svelte", "line": 5, "col": 0, "component_name": "Other", "event_name": "gone", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/Child.svelte"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
 assert_json_value "$OUT_USE_FILTERED" '.unused_svelte_events | length' "1" "use: filter-changed keeps only changed-file findings"
 
+OUT_UEL=$(jq '.unused_effect_layers = [{"path": "src/services.ts", "line": 3, "col": 0, "name": "CacheLive", "kind": "top_level", "dead_consumers": ["OrphanLive"], "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UEL" "Unused Effect layers" "uel: shows summary row and section"
+assert_contains "$OUT_UEL" "CacheLive" "uel: shows layer name in section"
+OUT_UEL_ANN=$(jq '.unused_effect_layers = [{"path": "src/services.ts", "line": 3, "col": 6, "name": "CacheLive", "kind": "top_level", "dead_consumers": ["OrphanLive"], "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_UEL_ANN" "::warning file=src/services.ts,line=3,col=7,title=Unused Effect layer::" "uel: warning-severity annotation"
+OUT_UEL_FILTERED=$(jq '.unused_effect_layers = [{"path": "src/services.ts", "line": 3, "col": 0, "name": "CacheLive", "actions": []}, {"path": "src/other.ts", "line": 5, "col": 0, "name": "OtherLive", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/services.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_UEL_FILTERED" '.unused_effect_layers | length' "1" "uel: filter-changed keeps only changed-file findings"
+
+OUT_UTE=$(jq '.unused_tagged_errors = [{"path": "src/errors.ts", "line": 4, "col": 0, "name": "Expired", "tag": "Expired", "catch_sites": [], "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UTE" "Unused tagged errors" "ute: shows summary row and section"
+assert_contains "$OUT_UTE" "Expired" "ute: shows class name in section"
+OUT_UTE_ANN=$(jq '.unused_tagged_errors = [{"path": "src/errors.ts", "line": 4, "col": 13, "name": "Expired", "tag": "Expired", "catch_sites": [], "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_UTE_ANN" "::warning file=src/errors.ts,line=4,col=14,title=Unused tagged error::" "ute: warning-severity annotation"
+OUT_UTE_FILTERED=$(jq '.unused_tagged_errors = [{"path": "src/errors.ts", "line": 4, "col": 0, "name": "Expired", "tag": "Expired", "actions": []}, {"path": "src/other.ts", "line": 2, "col": 0, "name": "Gone", "tag": "Gone", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/errors.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_UTE_FILTERED" '.unused_tagged_errors | length' "1" "ute: filter-changed keeps only changed-file findings"
+
+OUT_UCT=$(jq '.unproduced_catch_tags = [{"path": "src/main.ts", "line": 9, "col": 0, "tag": "Expired", "candidate_classes": ["Expired"], "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_UCT" "Unproduced catch tags" "uct: shows summary row and section"
+assert_contains "$OUT_UCT" "Expired" "uct: shows tag in section"
+OUT_UCT_ANN=$(jq '.unproduced_catch_tags = [{"path": "src/main.ts", "line": 9, "col": 20, "tag": "Expired", "candidate_classes": ["Expired"], "actions": []}]' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_UCT_ANN" "::warning file=src/main.ts,line=9,col=21,title=Unproduced catch tag::" "uct: warning-severity annotation"
+OUT_UCT_FILTERED=$(jq '.unproduced_catch_tags = [{"path": "src/main.ts", "line": 9, "col": 0, "tag": "Expired", "actions": []}, {"path": "src/other.ts", "line": 2, "col": 0, "tag": "Gone", "actions": []}]' "$FIXTURES/check.json" | jq --argjson changed '["src/main.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT_UCT_FILTERED" '.unproduced_catch_tags | length' "1" "uct: filter-changed keeps only changed-file findings"
+
 OUT_UPI=$(jq '.unprovided_injects =[{"path": "src/useTheme.ts", "line": 7, "col": 0, "key_name": "themeKey", "framework": "vue", "actions": []}] | .total_issues = (.total_issues + 1)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_UPI" "Unprovided injects" "upi: shows summary row and section"
 assert_contains "$OUT_UPI" "themeKey" "upi: shows inject key in section"
@@ -1488,7 +1512,7 @@ assert_json_value "$OUT_UPI_FILTERED" '.unprovided_injects | length' "1" "upi: f
 
 # Missing keys must never crash jq (defensive `// []` / null-safe helpers). Strip every
 # framework array and confirm the summary still renders.
-OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_emits, .unused_component_inputs, .unused_component_outputs, .unused_svelte_events, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+OUT_NO_FRAMEWORK_KEYS=$(jq 'del(.unused_server_actions, .unrendered_components, .unused_component_props, .unused_component_emits, .unused_component_inputs, .unused_component_outputs, .unused_svelte_events, .unused_effect_layers, .unused_tagged_errors, .unproduced_catch_tags, .unprovided_injects, .route_collisions, .dynamic_segment_name_conflicts, .invalid_client_exports, .mixed_client_server_barrels, .misplaced_directives)' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
 assert_contains "$OUT_NO_FRAMEWORK_KEYS" "Fallow Analysis" "missing-keys: summary-check survives absent framework keys"
 
 # filter-changed recalculates total_issues from the surviving arrays (synthetic minimal input

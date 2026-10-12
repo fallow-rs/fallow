@@ -519,6 +519,9 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
       ? result.unused_component_outputs
       : [],
     unused_svelte_events: types["unused-svelte-events"] ? result.unused_svelte_events : [],
+    unused_effect_layers: types["unused-effect-layers"] ? result.unused_effect_layers : [],
+    unused_tagged_errors: types["unused-tagged-errors"] ? result.unused_tagged_errors : [],
+    unproduced_catch_tags: types["unproduced-catch-tags"] ? result.unproduced_catch_tags : [],
     unrendered_components: types["unrendered-components"] ? result.unrendered_components : [],
     unprovided_injects: types["unprovided-injects"] ? result.unprovided_injects : [],
     invalid_client_exports: types["invalid-client-export"] ? result.invalid_client_exports : [],

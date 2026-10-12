@@ -582,7 +582,8 @@ impl<'a> CompactLineBuilder<'a> {
         }
     }
 
-    /// Push compact lines for Svelte events, server actions, and load-data keys.
+    /// Push compact lines for Svelte events, Effect findings, server actions,
+    /// and load-data keys.
     fn push_component_framework_lines(&mut self) {
         for finding in &self.results.unused_svelte_events {
             self.lines.push(format!(
@@ -590,6 +591,30 @@ impl<'a> CompactLineBuilder<'a> {
                 self.rel(&finding.event.path),
                 finding.event.line,
                 finding.event.event_name,
+            ));
+        }
+        for finding in &self.results.unused_effect_layers {
+            self.lines.push(format!(
+                "unused-effect-layer:{}:{}:{}",
+                self.rel(&finding.layer.path),
+                finding.layer.line,
+                finding.layer.name,
+            ));
+        }
+        for finding in &self.results.unused_tagged_errors {
+            self.lines.push(format!(
+                "unused-tagged-error:{}:{}:{}",
+                self.rel(&finding.error.path),
+                finding.error.line,
+                finding.error.name,
+            ));
+        }
+        for finding in &self.results.unproduced_catch_tags {
+            self.lines.push(format!(
+                "unproduced-catch-tag:{}:{}:{}",
+                self.rel(&finding.catch_tag.path),
+                finding.catch_tag.line,
+                finding.catch_tag.tag,
             ));
         }
         for finding in &self.results.unused_server_actions {

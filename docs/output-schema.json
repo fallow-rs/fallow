@@ -858,6 +858,27 @@
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -1482,6 +1503,27 @@
             "$ref": "#/definitions/UnusedSvelteEventFinding"
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
+        },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
         },
         "unused_server_actions": {
           "type": "array",
@@ -6098,6 +6140,18 @@
           "type": "integer",
           "description": "Svelte components dispatching a custom event via `createEventDispatcher`\nwhose name is listened to nowhere in the project."
         },
+        "unused_effect_layers": {
+          "type": "integer",
+          "description": "Effect layers composed only into layers that nothing uses."
+        },
+        "unused_tagged_errors": {
+          "type": "integer",
+          "description": "Effect tagged error classes that no code constructs or fails with."
+        },
+        "unproduced_catch_tags": {
+          "type": "integer",
+          "description": "`catchTag` handlers for a project tag that no code produces."
+        },
         "unused_server_actions": {
           "type": "integer",
           "description": "Next.js Server Actions (exports of `\"use server\"` files) referenced by no\ncode in the project."
@@ -7100,6 +7154,27 @@
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -7686,6 +7761,21 @@
           "type": "string",
           "const": "wire-svelte-event",
           "description": "Add or forward a Svelte custom-event listener, or remove the dispatch\n(manual; used by unused-svelte-event findings)."
+        },
+        {
+          "type": "string",
+          "const": "compose-effect-layer",
+          "description": "Compose an Effect layer into a layer that reaches a runtime, or remove\nit (manual; used by unused-effect-layer findings)."
+        },
+        {
+          "type": "string",
+          "const": "fail-tagged-error",
+          "description": "Fail with an Effect tagged error from project code, or remove the class\nand its handlers (manual; used by unused-tagged-error findings)."
+        },
+        {
+          "type": "string",
+          "const": "remove-catch-tag-handler",
+          "description": "Remove a `catchTag` handler for a tag that nothing produces, or add the\nproducer (manual; used by unproduced-catch-tag findings)."
         },
         {
           "type": "string",
@@ -30524,6 +30614,27 @@
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -31403,6 +31514,273 @@
         "note"
       ],
       "description": "One co-change gap: `changed_file` is in the diff, `partner_file` is not,\nand history shows that the two files usually change together."
+    },
+    "UnusedEffectLayerFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that defines the layer."
+        },
+        "name": {
+          "type": "string",
+          "description": "`FooLive`, or `FooService.layer` for a static member."
+        },
+        "kind": {
+          "description": "Whether the layer is a module-scope const or a class static member.",
+          "$ref": "#/definitions/EffectLayerKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the layer name."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the layer name."
+        },
+        "dead_consumers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The unused layers that compose this layer, sorted by name."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "line",
+        "col",
+        "dead_consumers",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedEffectLayer`] finding. There is no safe auto-fix: a test or a script outside the project graph can still use the layer. Actions are manual\nremediation guidance plus a line-level suppress."
+    },
+    "EffectLayerKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "top_level",
+          "description": "A module-scope `const` whose initializer is a layer."
+        },
+        {
+          "type": "string",
+          "const": "static_member",
+          "description": "A class static property whose initializer is a layer."
+        }
+      ],
+      "description": "Kind of an Effect layer definition."
+    },
+    "UnusedTaggedErrorFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that declares the class."
+        },
+        "name": {
+          "type": "string",
+          "description": "The class name."
+        },
+        "tag": {
+          "type": "string",
+          "description": "The `_tag` value of the class."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the class name."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the class name."
+        },
+        "catch_sites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EffectCatchSite"
+          },
+          "description": "The `catchTag` / `catchTags` handlers that name the tag."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "tag",
+        "line",
+        "col",
+        "catch_sites",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedTaggedError`] finding. There is no safe auto-fix: the error can be part of a public API contract. Actions are manual\nremediation guidance plus a line-level suppress."
+    },
+    "EffectCatchSite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that contains the handler."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the handled tag."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the handled tag."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "A source location of a `catchTag` or `catchTags` handler."
+    },
+    "UnproducedCatchTagFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that contains the handler."
+        },
+        "tag": {
+          "type": "string",
+          "description": "The handled tag."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the handled tag."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the handled tag."
+        },
+        "candidate_classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The project classes that declare the tag, sorted by name."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "tag",
+        "line",
+        "col",
+        "candidate_classes",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnproducedCatchTag`] finding. There is no safe auto-fix: the handler can guard against a future producer. Actions are manual\nremediation guidance plus a line-level suppress."
     }
   }
 }

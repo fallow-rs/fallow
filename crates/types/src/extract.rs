@@ -263,6 +263,9 @@ pub struct ModuleInfo {
     pub component_props: Vec<ComponentProp>,
     /// Cached framework-neutral component input contracts and inspected callers.
     pub component_contracts: Option<Box<ComponentContractFacts>>,
+    /// Effect layer, tagged error and `catchTag` facts. Set only for a module
+    /// that imports `effect` or an `@effect/*` package.
+    pub effect_facts: Option<Box<EffectFacts>>,
     /// `true` when the template spreads the whole props/attrs object
     /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the props
     /// return is destructured with a rest element. Either form can consume a prop
@@ -486,6 +489,7 @@ impl ModuleInfo {
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             component_contracts: None,
+            effect_facts: None,
             has_props_attrs_fallthrough: false,
             has_define_expose: false,
             has_define_model: false,
@@ -4003,7 +4007,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1456);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1464);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
@@ -4643,6 +4647,7 @@ mod tests {
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             component_contracts: None,
+            effect_facts: None,
             has_props_attrs_fallthrough: false,
             has_define_expose: false,
             has_define_model: false,
@@ -5237,6 +5242,65 @@ pub struct ComponentInvocation {
     pub unknown_props: bool,
     /// Framework syntax of this caller.
     pub framework: ComponentFramework,
+}
+
+/// Persisted syntactic Effect evidence for one module.
+///
+/// The layer keys, their `dependencies` and `layer_root_keys` use one
+/// format: a plain binding name (`FooLive`) or a class static member
+/// (`FooService.layer`). Import aliases resolve to the imported name, and a
+/// namespace member (`Ns.FooLive`) resolves to the member name.
+#[derive(Debug, Clone, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectFacts {
+    /// Module-scope classes that extend a tagged error constructor.
+    pub tagged_errors: Vec<EffectTaggedError>,
+    /// `catchTag("X")` arguments and `catchTags({ X })` keys.
+    pub caught_tags: Vec<EffectCaughtTag>,
+    /// Tags written as an object literal `_tag: "X"` property.
+    pub literal_tags: Vec<String>,
+    /// Layer definitions: module-scope consts and class static properties.
+    pub layers: Vec<EffectLayer>,
+    /// Keys that a value reference outside every layer definition reads.
+    pub layer_root_keys: Vec<String>,
+}
+
+/// A module-scope class that extends a tagged error constructor.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectTaggedError {
+    /// Class binding name.
+    pub name: String,
+    /// The `_tag` string literal.
+    pub tag: String,
+    /// Byte offset of the class name.
+    pub span_start: u32,
+    /// The class is exported from its module.
+    pub exported: bool,
+    /// The module reads the class as a value outside its own declaration.
+    pub local_value_reference: bool,
+    /// The module reads the class in a type position outside its own declaration.
+    pub local_type_reference: bool,
+}
+
+/// One tag that a `catchTag` or `catchTags` handler names.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectCaughtTag {
+    /// The handled tag.
+    pub tag: String,
+    /// Byte offset of the tag string or object key.
+    pub span_start: u32,
+}
+
+/// A layer definition and the layer keys its initializer reads.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectLayer {
+    /// `FooLive` or `FooService.layer`.
+    pub key: String,
+    /// Byte offset of the binding name or static property key.
+    pub span_start: u32,
+    /// The const, or the class of a static property, is exported.
+    pub exported: bool,
+    /// Keys that value references inside the initializer read.
+    pub dependencies: Vec<String>,
 }
 
 /// Persisted syntactic evidence for conservative component-input analysis.

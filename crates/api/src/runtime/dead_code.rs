@@ -949,6 +949,9 @@ fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
         || filters.unused_component_inputs
         || filters.unused_component_outputs
         || filters.unused_svelte_events
+        || filters.unused_effect_layers
+        || filters.unused_tagged_errors
+        || filters.unproduced_catch_tags
         || filters.unused_server_actions
         || filters.unused_load_data_keys
         || filters.unresolved_imports
@@ -1034,6 +1037,15 @@ fn apply_dead_code_component_filters(filters: &DeadCodeFilters, results: &mut An
     }
     if !filters.unused_svelte_events {
         results.unused_svelte_events.clear();
+    }
+    if !filters.unused_effect_layers {
+        results.unused_effect_layers.clear();
+    }
+    if !filters.unused_tagged_errors {
+        results.unused_tagged_errors.clear();
+    }
+    if !filters.unproduced_catch_tags {
+        results.unproduced_catch_tags.clear();
     }
     if !filters.unused_server_actions {
         results.unused_server_actions.clear();

@@ -367,6 +367,30 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-svelte-events",
     },
     RuleDef {
+        id: "fallow/unused-effect-layer",
+        category: "Dead code",
+        name: "Unused Effect layers",
+        short: "An Effect layer is composed only into layers that nothing uses",
+        full: "An Effect `Layer` definition (a module-scope const or a class static property such as `static layer = Layer.effect(this, make)`) whose every reference sits inside other layer definitions that are themselves unused. The layer never reaches `Effect.provide`, `ManagedRuntime.make`, `Layer.launch` or any other runtime use. fallow builds a layer graph from `Layer.*` initializers and `.pipe(Layer.*)` chains. Any value reference outside a layer definition is a root, including references in functions and tests. A layer with zero references is not reported here: `unused-export` or `unused-class-member` reports it, so the rule reports the tail of a dead composition and names the unused consumers. Default warn. The check runs only when the project declares `effect`.",
+        docs_path: "explanations/dead-code#unused-effect-layers",
+    },
+    RuleDef {
+        id: "fallow/unused-tagged-error",
+        category: "Dead code",
+        name: "Unused tagged errors",
+        short: "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it",
+        full: "A class that extends `Data.TaggedError(\"X\")` or `Schema.TaggedError<Self>()(\"X\", ...)` that type positions or `catchTag(\"X\")` handlers reference, but that no code reads as a value. Any value reference counts as a producer: `new X()`, `X.make`, `Schema.Union(X)`, an API or RPC error declaration that decodes the error at a boundary, or passing the class to a function. Only type positions and catch-tag strings do not count. A class with zero references is left to `unused-export`. The finding lists the `catchTag` handlers of the tag. Default warn. The check runs only when the project declares `effect`.",
+        docs_path: "explanations/dead-code#unused-tagged-errors",
+    },
+    RuleDef {
+        id: "fallow/unproduced-catch-tag",
+        category: "Dead code",
+        name: "Unproduced catch tags",
+        short: "A catchTag handler names a project error tag that no code produces",
+        full: "A `catchTag(\"X\", ...)` or `catchTags({ X: ... })` handler where every project class with tag `X` is never constructed or failed with, and no object literal `_tag: \"X\"` or tagged constructor produces the tag. A tag that no project class declares can come from a package, so the rule abstains. Effect built-in tags such as `TimeoutException` are never reported. The rule reports a handler only when no `unused-tagged-error` finding covers its classes: the error rule is off, or its finding is suppressed. Default warn. The check runs only when the project declares `effect`.",
+        docs_path: "explanations/dead-code#unproduced-catch-tags",
+    },
+    RuleDef {
         id: "fallow/unused-server-action",
         category: "Dead code",
         name: "Unused server actions",
@@ -750,6 +774,18 @@ fn member_import_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-svelte-event" => RuleGuide {
             example: "Child.svelte calls const dispatch = createEventDispatcher(); dispatch('dead'), but no parent listens for it (no <Child on:dead> anywhere in the project).",
             how_to_fix: "Remove the dispatched event, or listen for it on the component (<Child on:dead={...}> or forward it via <Child on:dead>). If the event is dispatched reflectively (a dynamic name) or is part of a deliberately-stable public component API, suppress the line with // fallow-ignore-next-line unused-svelte-event.",
+        },
+        "fallow/unused-effect-layer" => RuleGuide {
+            example: "services.ts defines const CacheLive = Cache.layer.pipe(Layer.provide(Db.layer)) and export const OrphanLive = Layer.mergeAll(CacheLive), but nothing provides OrphanLive.",
+            how_to_fix: "Remove the unused consumer layers first, then this layer, or compose the layer into a layer that reaches a runtime. If code outside the analyzed project composes it, suppress the line with // fallow-ignore-next-line unused-effect-layer.",
+        },
+        "fallow/unused-tagged-error" => RuleGuide {
+            example: "errors.ts declares class Expired extends Data.TaggedError(\"Expired\"), signatures list it in the error channel and a handler calls catchTag(\"Expired\"), but no code constructs Expired or fails with it.",
+            how_to_fix: "Fail with the error where the condition occurs, or remove the class, its type references and its catchTag handlers. If consumers outside the project construct or decode it, suppress the line with // fallow-ignore-next-line unused-tagged-error.",
+        },
+        "fallow/unproduced-catch-tag" => RuleGuide {
+            example: "main.ts calls Effect.catchTag(\"Expired\", ...), the only class with tag Expired is never constructed, and the unused-tagged-error finding for it is suppressed.",
+            how_to_fix: "Remove the handler, or fail with the error where the condition occurs. If a package or code outside the project produces the tag, suppress the line with // fallow-ignore-next-line unproduced-catch-tag.",
         },
         "fallow/unused-server-action" => RuleGuide {
             example: "app/actions.ts has \"use server\" and exports submitForm, but no component imports it, binds it via action={submitForm}, or uses it in <form action={submitForm}>.",
@@ -2123,7 +2159,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 49);
+        assert_eq!(CHECK_RULES.len(), 52);
     }
 
     #[test]

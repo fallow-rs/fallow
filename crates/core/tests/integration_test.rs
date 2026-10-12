@@ -63,6 +63,8 @@ mod duplicate_prop_shape;
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]
 mod dynamic_imports;
+#[path = "integration_test/effect_dead_code.rs"]
+mod effect_dead_code;
 #[path = "integration_test/entry_load_closure.rs"]
 mod entry_load_closure;
 #[path = "integration_test/entry_output_mapping.rs"]

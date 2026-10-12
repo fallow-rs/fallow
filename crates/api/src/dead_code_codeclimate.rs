@@ -1238,6 +1238,119 @@ fn push_unused_component_emit_issues(
     }
 }
 
+fn push_unused_effect_layer_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnusedEffectLayerFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    for entry in findings {
+        let level = finding_codeclimate(entry, severity);
+        let f = &entry.layer;
+        let path = cc_path(&f.path, root);
+        let fp = codeclimate_fingerprint_hash(&[
+            "fallow/unused-effect-layer",
+            &path,
+            &f.line.to_string(),
+            &f.name,
+        ]);
+        let line = if f.line > 0 { Some(f.line) } else { None };
+        let message = format!(
+            "layer `{}` is composed only into layers that nothing uses ({}); compose it into a live layer or remove it",
+            f.name,
+            f.dead_consumers.join(", ")
+        );
+        issues.push(dead_code_issue(
+            entry.finding_id.as_deref(),
+            &[],
+            CodeClimateIssueInput {
+                check_name: "fallow/unused-effect-layer",
+                description: &message,
+                severity: level,
+                category: "Bug Risk",
+                path: &path,
+                begin_line: line,
+                fingerprint: &fp,
+            },
+        ));
+    }
+}
+
+fn push_unused_tagged_error_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnusedTaggedErrorFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    for entry in findings {
+        let level = finding_codeclimate(entry, severity);
+        let f = &entry.error;
+        let path = cc_path(&f.path, root);
+        let fp = codeclimate_fingerprint_hash(&[
+            "fallow/unused-tagged-error",
+            &path,
+            &f.line.to_string(),
+            &f.name,
+        ]);
+        let line = if f.line > 0 { Some(f.line) } else { None };
+        let message = format!(
+            "tagged error `{}` (tag `{}`) is never constructed or failed with; fail with it or remove it",
+            f.name, f.tag
+        );
+        issues.push(dead_code_issue(
+            entry.finding_id.as_deref(),
+            &[],
+            CodeClimateIssueInput {
+                check_name: "fallow/unused-tagged-error",
+                description: &message,
+                severity: level,
+                category: "Bug Risk",
+                path: &path,
+                begin_line: line,
+                fingerprint: &fp,
+            },
+        ));
+    }
+}
+
+fn push_unproduced_catch_tag_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    findings: &[fallow_types::output_dead_code::UnproducedCatchTagFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    for entry in findings {
+        let level = finding_codeclimate(entry, severity);
+        let f = &entry.catch_tag;
+        let path = cc_path(&f.path, root);
+        let fp = codeclimate_fingerprint_hash(&[
+            "fallow/unproduced-catch-tag",
+            &path,
+            &f.line.to_string(),
+            &f.tag,
+        ]);
+        let line = if f.line > 0 { Some(f.line) } else { None };
+        let message = format!(
+            "catchTag handler for `{}` never runs: no code produces {}",
+            f.tag,
+            f.candidate_classes.join(", ")
+        );
+        issues.push(dead_code_issue(
+            entry.finding_id.as_deref(),
+            &[],
+            CodeClimateIssueInput {
+                check_name: "fallow/unproduced-catch-tag",
+                description: &message,
+                severity: level,
+                category: "Bug Risk",
+                path: &path,
+                begin_line: line,
+                fingerprint: &fp,
+            },
+        ));
+    }
+}
+
 fn push_unused_svelte_event_issues(
     issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_types::output_dead_code::UnusedSvelteEventFinding],
@@ -2179,6 +2292,24 @@ impl CodeClimateBuilder<'_> {
             &self.results.unused_svelte_events,
             self.root,
             self.rules.unused_svelte_events,
+        );
+        push_unused_effect_layer_issues(
+            &mut self.issues,
+            &self.results.unused_effect_layers,
+            self.root,
+            self.rules.unused_effect_layers,
+        );
+        push_unused_tagged_error_issues(
+            &mut self.issues,
+            &self.results.unused_tagged_errors,
+            self.root,
+            self.rules.unused_tagged_errors,
+        );
+        push_unproduced_catch_tag_issues(
+            &mut self.issues,
+            &self.results.unproduced_catch_tags,
+            self.root,
+            self.rules.unproduced_catch_tags,
         );
     }
 

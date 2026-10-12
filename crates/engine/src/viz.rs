@@ -1401,6 +1401,42 @@ fn build_frameworks(
     }
 }
 
+/// Push the Effect framework findings and return how many were seen.
+fn push_effect_findings(
+    findings: &mut Vec<VizFinding>,
+    results: &AnalysisResults,
+    index: &FileIndex<'_>,
+    root: &Path,
+) -> usize {
+    push_findings(
+        findings,
+        "unused-effect-layer",
+        "Unused Effect layer",
+        &results.unused_effect_layers,
+        root,
+        index,
+    );
+    push_findings(
+        findings,
+        "unused-tagged-error",
+        "Unused tagged error",
+        &results.unused_tagged_errors,
+        root,
+        index,
+    );
+    push_findings(
+        findings,
+        "unproduced-catch-tag",
+        "Unproduced catch tag",
+        &results.unproduced_catch_tags,
+        root,
+        index,
+    );
+    results.unused_effect_layers.len()
+        + results.unused_tagged_errors.len()
+        + results.unproduced_catch_tags.len()
+}
+
 fn build_framework_findings(
     results: &AnalysisResults,
     index: &FileIndex<'_>,
@@ -1475,6 +1511,7 @@ fn build_framework_findings(
         "unused-svelte-event",
         "Unused Svelte event"
     );
+    count += push_effect_findings(&mut findings, results, index, root);
     add!(
         unused_server_actions,
         "unused-server-action",

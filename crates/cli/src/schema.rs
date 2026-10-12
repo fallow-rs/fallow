@@ -444,6 +444,9 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         | "unused-component-input"
         | "unused-component-output"
         | "unused-svelte-event"
+        | "unused-effect-layer"
+        | "unused-tagged-error"
+        | "unproduced-catch-tag"
         | "unused-server-action"
         | "unused-load-data-key" => {}
         "prop-drilling" => {

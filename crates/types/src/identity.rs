@@ -50,6 +50,9 @@ use crate::output_dead_code::{
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
+use crate::output_dead_code::{
+    UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
+};
 use crate::results::{
     AnalysisResults, DependencyOverrideSource, ReExportCycleKind, StaleSuppression,
     SuppressionOrigin,
@@ -482,6 +485,9 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
         prop_drilling_chains,
@@ -552,6 +558,9 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(unused_component_inputs);
     visitor.visit(unused_component_outputs);
     visitor.visit(unused_svelte_events);
+    visitor.visit(unused_effect_layers);
+    visitor.visit(unused_tagged_errors);
+    visitor.visit(unproduced_catch_tags);
     visitor.visit(unused_server_actions);
     visitor.visit(unused_load_data_keys);
     visitor.visit(prop_drilling_chains);
@@ -1072,6 +1081,31 @@ identified!(
         f.event.event_name.clone(),
     ],
     position: |g| (g.event.line, g.event.col, 0),
+);
+
+identified!(
+    UnusedEffectLayerFinding,
+    token: |_t| "unused-effect-layer",
+    parts: |f, p| vec![p.key(&f.layer.path), f.layer.name.clone()],
+    position: |g| (g.layer.line, g.layer.col, 0),
+);
+
+identified!(
+    UnusedTaggedErrorFinding,
+    token: |_t| "unused-tagged-error",
+    parts: |f, p| vec![
+        p.key(&f.error.path),
+        f.error.name.clone(),
+        f.error.tag.clone(),
+    ],
+    position: |g| (g.error.line, g.error.col, 0),
+);
+
+identified!(
+    UnproducedCatchTagFinding,
+    token: |_t| "unproduced-catch-tag",
+    parts: |f, p| vec![p.key(&f.catch_tag.path), f.catch_tag.tag.clone()],
+    position: |g| (g.catch_tag.line, g.catch_tag.col, 0),
 );
 
 identified!(

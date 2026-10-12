@@ -269,7 +269,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -445,6 +445,10 @@ export type DependencyOverrideSource = ("pnpm-workspace.yaml" | "package.json")
  * surfacing them statically catches the issue first.
  */
 export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value")
+/**
+ * Kind of an Effect layer definition.
+ */
+export type EffectLayerKind = ("top_level" | "static_member")
 /**
  * Which advisory a loaded baseline earned on this run.
  *
@@ -3105,6 +3109,23 @@ unused_component_outputs?: UnusedComponentOutputFinding[]
  */
 unused_svelte_events?: UnusedSvelteEventFinding[]
 /**
+ * Effect layers composed only into other layers that nothing uses.
+ * Gated on the project declaring `effect`. Default severity is `warn`.
+ */
+unused_effect_layers?: UnusedEffectLayerFinding[]
+/**
+ * Effect tagged error classes that only type positions or `catchTag`
+ * handlers reference. Gated on the project declaring `effect`. Default
+ * severity is `warn`.
+ */
+unused_tagged_errors?: UnusedTaggedErrorFinding[]
+/**
+ * `catchTag` / `catchTags` handlers for a project tag that no code
+ * produces and that no `unused_tagged_errors` entry covers. Gated on the
+ * project declaring `effect`. Default severity is `warn`.
+ */
+unproduced_catch_tags?: UnproducedCatchTagFinding[]
+/**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for
  * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -3386,6 +3407,18 @@ unused_component_outputs?: number
  * whose name is listened to nowhere in the project.
  */
 unused_svelte_events?: number
+/**
+ * Effect layers composed only into layers that nothing uses.
+ */
+unused_effect_layers?: number
+/**
+ * Effect tagged error classes that no code constructs or fails with.
+ */
+unused_tagged_errors?: number
+/**
+ * `catchTag` handlers for a project tag that no code produces.
+ */
+unproduced_catch_tags?: number
 /**
  * Next.js Server Actions (exports of `"use server"` files) referenced by no
  * code in the project.
@@ -6275,6 +6308,181 @@ line: number
  * 0-based byte column offset of the `dispatch('<name>')` call.
  */
 col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedEffectLayer`] finding. There is no safe auto-fix: a test or a script outside the project graph can still use the layer. Actions are manual
+ * remediation guidance plus a line-level suppress.
+ */
+export interface UnusedEffectLayerFinding {
+/**
+ * The module that defines the layer.
+ */
+path: string
+/**
+ * `FooLive`, or `FooService.layer` for a static member.
+ */
+name: string
+kind: EffectLayerKind
+/**
+ * 1-based line number of the layer name.
+ */
+line: number
+/**
+ * 0-based byte column offset of the layer name.
+ */
+col: number
+/**
+ * The unused layers that compose this layer, sorted by name.
+ */
+dead_consumers: string[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedTaggedError`] finding. There is no safe auto-fix: the error can be part of a public API contract. Actions are manual
+ * remediation guidance plus a line-level suppress.
+ */
+export interface UnusedTaggedErrorFinding {
+/**
+ * The module that declares the class.
+ */
+path: string
+/**
+ * The class name.
+ */
+name: string
+/**
+ * The `_tag` value of the class.
+ */
+tag: string
+/**
+ * 1-based line number of the class name.
+ */
+line: number
+/**
+ * 0-based byte column offset of the class name.
+ */
+col: number
+/**
+ * The `catchTag` / `catchTags` handlers that name the tag.
+ */
+catch_sites: EffectCatchSite[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * A source location of a `catchTag` or `catchTags` handler.
+ */
+export interface EffectCatchSite {
+/**
+ * The module that contains the handler.
+ */
+path: string
+/**
+ * 1-based line number of the handled tag.
+ */
+line: number
+/**
+ * 0-based byte column offset of the handled tag.
+ */
+col: number
+}
+/**
+ * Wire-shape envelope for an [`UnproducedCatchTag`] finding. There is no safe auto-fix: the handler can guard against a future producer. Actions are manual
+ * remediation guidance plus a line-level suppress.
+ */
+export interface UnproducedCatchTagFinding {
+/**
+ * The module that contains the handler.
+ */
+path: string
+/**
+ * The handled tag.
+ */
+tag: string
+/**
+ * 1-based line number of the handled tag.
+ */
+line: number
+/**
+ * 0-based byte column offset of the handled tag.
+ */
+col: number
+/**
+ * The project classes that declare the tag, sorted by name.
+ */
+candidate_classes: string[]
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
@@ -14220,6 +14428,23 @@ unused_component_outputs?: UnusedComponentOutputFinding[]
  */
 unused_svelte_events?: UnusedSvelteEventFinding[]
 /**
+ * Effect layers composed only into other layers that nothing uses.
+ * Gated on the project declaring `effect`. Default severity is `warn`.
+ */
+unused_effect_layers?: UnusedEffectLayerFinding[]
+/**
+ * Effect tagged error classes that only type positions or `catchTag`
+ * handlers reference. Gated on the project declaring `effect`. Default
+ * severity is `warn`.
+ */
+unused_tagged_errors?: UnusedTaggedErrorFinding[]
+/**
+ * `catchTag` / `catchTags` handlers for a project tag that no code
+ * produces and that no `unused_tagged_errors` entry covers. Gated on the
+ * project declaring `effect`. Default severity is `warn`.
+ */
+unproduced_catch_tags?: UnproducedCatchTagFinding[]
+/**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for
  * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -15930,6 +16155,23 @@ unused_component_outputs?: UnusedComponentOutputFinding[]
  * `warn`.
  */
 unused_svelte_events?: UnusedSvelteEventFinding[]
+/**
+ * Effect layers composed only into other layers that nothing uses.
+ * Gated on the project declaring `effect`. Default severity is `warn`.
+ */
+unused_effect_layers?: UnusedEffectLayerFinding[]
+/**
+ * Effect tagged error classes that only type positions or `catchTag`
+ * handlers reference. Gated on the project declaring `effect`. Default
+ * severity is `warn`.
+ */
+unused_tagged_errors?: UnusedTaggedErrorFinding[]
+/**
+ * `catchTag` / `catchTags` handlers for a project tag that no code
+ * produces and that no `unused_tagged_errors` entry covers. Gated on the
+ * project declaring `effect`. Default severity is `warn`.
+ */
+unproduced_catch_tags?: UnproducedCatchTagFinding[]
 /**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for

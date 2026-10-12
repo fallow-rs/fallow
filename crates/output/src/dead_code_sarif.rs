@@ -18,10 +18,10 @@ use fallow_types::{
         DynamicSegmentNameConflict, InvalidClientExport, MisplacedDirective,
         MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak,
         PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency, ThinWrapper,
-        TypeOnlyDependency, UnprovidedInject, UnrenderedComponent, UnresolvedImport,
-        UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
-        UnusedDependency, UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
-        UnusedSvelteEvent,
+        TypeOnlyDependency, UnproducedCatchTag, UnprovidedInject, UnrenderedComponent,
+        UnresolvedImport, UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput,
+        UnusedComponentProp, UnusedDependency, UnusedEffectLayer, UnusedExport, UnusedFile,
+        UnusedMember, UnusedServerAction, UnusedSvelteEvent, UnusedTaggedError,
     },
 };
 
@@ -712,6 +712,83 @@ fn sarif_unused_component_emit_fields(
     }
 }
 
+fn sarif_unused_effect_layer_fields(
+    layer: &UnusedEffectLayer,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-effect-layer",
+        level,
+        message: format!(
+            "layer \"{}\" is composed only into layers that nothing uses ({}); compose it into a live layer or remove it",
+            layer.name,
+            layer.dead_consumers.join(", ")
+        ),
+        uri: relative_uri(&layer.path, root),
+        region: Some((layer.line, layer.col + 1)),
+        source_path: Some(layer.path.clone()),
+        properties: Some(serde_json::json!({
+            "dead_consumers": layer.dead_consumers,
+        })),
+    }
+}
+
+fn sarif_unused_tagged_error_fields(
+    error: &UnusedTaggedError,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unused-tagged-error",
+        level,
+        message: format!(
+            "tagged error \"{}\" (tag \"{}\") is never constructed or failed with; fail with it or remove it and its {} catchTag handler(s)",
+            error.name,
+            error.tag,
+            error.catch_sites.len()
+        ),
+        uri: relative_uri(&error.path, root),
+        region: Some((error.line, error.col + 1)),
+        source_path: Some(error.path.clone()),
+        properties: Some(serde_json::json!({
+            "tag": error.tag,
+            "catch_sites": error
+                .catch_sites
+                .iter()
+                .map(|site| serde_json::json!({
+                    "uri": relative_uri(&site.path, root),
+                    "line": site.line,
+                    "column": site.col + 1,
+                }))
+                .collect::<Vec<_>>(),
+        })),
+    }
+}
+
+fn sarif_unproduced_catch_tag_fields(
+    catch_tag: &UnproducedCatchTag,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/unproduced-catch-tag",
+        level,
+        message: format!(
+            "catchTag handler for \"{}\" never runs: no code produces {}; remove the handler or fail with the error",
+            catch_tag.tag,
+            catch_tag.candidate_classes.join(", ")
+        ),
+        uri: relative_uri(&catch_tag.path, root),
+        region: Some((catch_tag.line, catch_tag.col + 1)),
+        source_path: Some(catch_tag.path.clone()),
+        properties: Some(serde_json::json!({
+            "tag": catch_tag.tag,
+            "candidate_classes": catch_tag.candidate_classes,
+        })),
+    }
+}
+
 fn sarif_unused_svelte_event_fields(
     event: &UnusedSvelteEvent,
     root: &Path,
@@ -1196,6 +1273,9 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unused-component-input" => rules.unused_component_inputs,
         "unused-component-output" => rules.unused_component_outputs,
         "unused-svelte-event" => rules.unused_svelte_events,
+        "unused-effect-layer" => rules.unused_effect_layers,
+        "unused-tagged-error" => rules.unused_tagged_errors,
+        "unproduced-catch-tag" => rules.unproduced_catch_tags,
         "unused-server-action" => rules.unused_server_actions,
         "unused-load-data-key" => rules.unused_load_data_keys,
         "prop-drilling" => rules.prop_drilling,
@@ -1776,6 +1856,42 @@ fn push_component_framework_sarif_results(
                 &e.event,
                 root,
                 finding_level(e, rules.unused_svelte_events),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_effect_layers,
+        snippets,
+        |e| {
+            sarif_unused_effect_layer_fields(
+                &e.layer,
+                root,
+                finding_level(e, rules.unused_effect_layers),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_tagged_errors,
+        snippets,
+        |e| {
+            sarif_unused_tagged_error_fields(
+                &e.error,
+                root,
+                finding_level(e, rules.unused_tagged_errors),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.unproduced_catch_tags,
+        snippets,
+        |e| {
+            sarif_unproduced_catch_tag_fields(
+                &e.catch_tag,
+                root,
+                finding_level(e, rules.unproduced_catch_tags),
             )
         },
     );

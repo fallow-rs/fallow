@@ -81,6 +81,9 @@ macro_rules! with_baseline_fields {
             unused_component_inputs,
             unused_component_outputs,
             unused_svelte_events,
+            unused_effect_layers,
+            unused_tagged_errors,
+            unproduced_catch_tags,
             unused_server_actions,
             unused_load_data_keys,
             unresolved_imports,
@@ -626,6 +629,15 @@ pub struct BaselineData {
     /// Unused Svelte dispatched events, keyed by `file:event_name`.
     #[serde(default)]
     unused_svelte_events: Vec<String>,
+    /// Unused Effect layers, keyed by `file:layer_name`.
+    #[serde(default)]
+    unused_effect_layers: Vec<String>,
+    /// Unused tagged errors, keyed by `file:class_name`.
+    #[serde(default)]
+    unused_tagged_errors: Vec<String>,
+    /// Unproduced catch tags, keyed by `file:tag`.
+    #[serde(default)]
+    unproduced_catch_tags: Vec<String>,
     /// Unused server actions, keyed by `file:action_name`.
     #[serde(default)]
     unused_server_actions: Vec<String>,
@@ -806,6 +818,9 @@ impl BaselineData {
             unused_component_inputs: member_imports.unused_component_inputs,
             unused_component_outputs: member_imports.unused_component_outputs,
             unused_svelte_events: member_imports.unused_svelte_events,
+            unused_effect_layers: member_imports.unused_effect_layers,
+            unused_tagged_errors: member_imports.unused_tagged_errors,
+            unproduced_catch_tags: member_imports.unproduced_catch_tags,
             unused_server_actions: member_imports.unused_server_actions,
             unused_load_data_keys: member_imports.unused_load_data_keys,
             unresolved_imports: member_imports.unresolved_imports,
@@ -863,6 +878,9 @@ impl BaselineData {
             + self.unused_component_inputs.len()
             + self.unused_component_outputs.len()
             + self.unused_svelte_events.len()
+            + self.unused_effect_layers.len()
+            + self.unused_tagged_errors.len()
+            + self.unproduced_catch_tags.len()
             + self.unused_server_actions.len()
             + self.unused_load_data_keys.len()
             + self.unresolved_imports.len()
@@ -1082,6 +1100,9 @@ struct BaselineMemberImportKeys {
     unused_component_inputs: Vec<String>,
     unused_component_outputs: Vec<String>,
     unused_svelte_events: Vec<String>,
+    unused_effect_layers: Vec<String>,
+    unused_tagged_errors: Vec<String>,
+    unproduced_catch_tags: Vec<String>,
     unused_server_actions: Vec<String>,
     unused_load_data_keys: Vec<String>,
     unresolved_imports: Vec<String>,
@@ -1115,6 +1136,9 @@ fn baseline_member_import_keys(
             root,
         ),
         unused_svelte_events: svelte_event_baseline_keys(&results.unused_svelte_events, root),
+        unused_effect_layers: effect_layer_baseline_keys(&results.unused_effect_layers, root),
+        unused_tagged_errors: tagged_error_baseline_keys(&results.unused_tagged_errors, root),
+        unproduced_catch_tags: catch_tag_baseline_keys(&results.unproduced_catch_tags, root),
         unused_server_actions: server_action_baseline_keys(&results.unused_server_actions, root),
         unused_load_data_keys: load_data_key_baseline_keys(&results.unused_load_data_keys, root),
         unresolved_imports: unresolved_import_baseline_keys(&results.unresolved_imports, root),
@@ -1286,6 +1310,42 @@ fn component_output_baseline_keys(
                 "{}:{}",
                 relative_path(&o.output.path, root),
                 o.output.output_name
+            )
+        })
+        .collect()
+}
+
+fn effect_layer_baseline_keys(
+    items: &[crate::results::UnusedEffectLayerFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|f| format!("{}:{}", relative_path(&f.layer.path, root), f.layer.name))
+        .collect()
+}
+
+fn tagged_error_baseline_keys(
+    items: &[crate::results::UnusedTaggedErrorFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|f| format!("{}:{}", relative_path(&f.error.path, root), f.error.name))
+        .collect()
+}
+
+fn catch_tag_baseline_keys(
+    items: &[crate::results::UnproducedCatchTagFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|f| {
+            format!(
+                "{}:{}",
+                relative_path(&f.catch_tag.path, root),
+                f.catch_tag.tag
             )
         })
         .collect()
@@ -1761,6 +1821,24 @@ impl BaselineFilterContext<'_> {
             &self.baseline.unused_svelte_events,
             self.root,
             svelte_event_baseline_keys,
+        );
+        retain_new_by_keys(
+            &mut results.unused_effect_layers,
+            &self.baseline.unused_effect_layers,
+            self.root,
+            effect_layer_baseline_keys,
+        );
+        retain_new_by_keys(
+            &mut results.unused_tagged_errors,
+            &self.baseline.unused_tagged_errors,
+            self.root,
+            tagged_error_baseline_keys,
+        );
+        retain_new_by_keys(
+            &mut results.unproduced_catch_tags,
+            &self.baseline.unproduced_catch_tags,
+            self.root,
+            catch_tag_baseline_keys,
         );
     }
 
@@ -3780,6 +3858,9 @@ mod tests {
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
             unused_svelte_events: vec![],
+            unused_effect_layers: vec![],
+            unused_tagged_errors: vec![],
+            unproduced_catch_tags: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],
@@ -3853,6 +3934,9 @@ mod tests {
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
             unused_svelte_events: vec![],
+            unused_effect_layers: vec![],
+            unused_tagged_errors: vec![],
+            unproduced_catch_tags: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],
@@ -3913,6 +3997,9 @@ mod tests {
             unused_component_inputs: vec![],
             unused_component_outputs: vec![],
             unused_svelte_events: vec![],
+            unused_effect_layers: vec![],
+            unused_tagged_errors: vec![],
+            unproduced_catch_tags: vec![],
             unused_server_actions: vec![],
             unused_load_data_keys: vec![],
             unresolved_imports: vec![],

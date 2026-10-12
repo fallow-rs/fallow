@@ -711,6 +711,15 @@ fn filter_workspace_source_findings(
         .unused_svelte_events
         .retain(|finding| any_under(&finding.event.path));
     results
+        .unused_effect_layers
+        .retain(|finding| any_under(&finding.layer.path));
+    results
+        .unused_tagged_errors
+        .retain(|finding| any_under(&finding.error.path));
+    results
+        .unproduced_catch_tags
+        .retain(|finding| any_under(&finding.catch_tag.path));
+    results
         .unused_server_actions
         .retain(|finding| any_under(&finding.action.path));
     results
@@ -1076,6 +1085,24 @@ fn apply_component_dead_code_override_rules(
             .unused_svelte_events
             != Severity::Off
     });
+    results.unused_effect_layers.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.layer.path)
+            .unused_effect_layers
+            != Severity::Off
+    });
+    results.unused_tagged_errors.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.error.path)
+            .unused_tagged_errors
+            != Severity::Off
+    });
+    results.unproduced_catch_tags.retain(|e| {
+        config
+            .resolve_rules_for_path(&e.catch_tag.path)
+            .unproduced_catch_tags
+            != Severity::Off
+    });
     results.unused_server_actions.retain(|a| {
         config
             .resolve_rules_for_path(&a.action.path)
@@ -1229,6 +1256,15 @@ fn clear_base_component_dead_code(results: &mut AnalysisResults, rules: &RulesCo
     }
     if rules.unused_svelte_events == Severity::Off {
         results.unused_svelte_events.clear();
+    }
+    if rules.unused_effect_layers == Severity::Off {
+        results.unused_effect_layers.clear();
+    }
+    if rules.unused_tagged_errors == Severity::Off {
+        results.unused_tagged_errors.clear();
+    }
+    if rules.unproduced_catch_tags == Severity::Off {
+        results.unproduced_catch_tags.clear();
     }
     if rules.unused_server_actions == Severity::Off {
         results.unused_server_actions.clear();

@@ -142,6 +142,9 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 | `--unused-component-inputs` | An Angular @Input() / signal input() / model() is read nowhere in its own component (class body or template); needs `@angular/core` dep |
 | `--unused-component-outputs` | An Angular @Output() / signal output() is emitted (.emit()) nowhere in its own component; needs `@angular/core` dep |
 | `--unused-svelte-events` | A Svelte createEventDispatcher event is listened to nowhere in the project |
+| `--unused-effect-layers` | An Effect layer is composed only into layers that nothing uses |
+| `--unused-tagged-errors` | An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it |
+| `--unproduced-catch-tags` | A catchTag handler names a project error tag that no code produces |
 | `--unused-server-actions` | A Next.js Server Action exported from a "use server" file is referenced by no code in the project |
 | `--unused-load-data-keys` | A SvelteKit load() return-object key is read by no consumer |
 | `--unresolved-imports` | Unresolved imports |

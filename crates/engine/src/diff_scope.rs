@@ -130,6 +130,15 @@ fn filter_source_findings(
         .unused_svelte_events
         .retain(|finding| line_in_diff(&finding.event.path, finding.event.line));
     results
+        .unused_effect_layers
+        .retain(|finding| line_in_diff(&finding.layer.path, finding.layer.line));
+    results
+        .unused_tagged_errors
+        .retain(|finding| line_in_diff(&finding.error.path, finding.error.line));
+    results
+        .unproduced_catch_tags
+        .retain(|finding| line_in_diff(&finding.catch_tag.path, finding.catch_tag.line));
+    results
         .unused_server_actions
         .retain(|finding| line_in_diff(&finding.action.path, finding.action.line));
     results

@@ -189,6 +189,21 @@ const DEAD_CODE_WIRING = {
     category: "unused-svelte-event",
     finding: { ...loc, component_name: "Btn", event_name: "change", actions: [] },
   },
+  "unused-effect-layer": {
+    field: "unused_effect_layers",
+    category: "unused-effect-layer",
+    finding: { ...loc, name: "CacheLive", kind: "top_level", dead_consumers: ["OrphanLive"], actions: [] },
+  },
+  "unused-tagged-error": {
+    field: "unused_tagged_errors",
+    category: "unused-tagged-error",
+    finding: { ...loc, name: "Expired", tag: "Expired", catch_sites: [], actions: [] },
+  },
+  "unproduced-catch-tag": {
+    field: "unproduced_catch_tags",
+    category: "unproduced-catch-tag",
+    finding: { ...loc, tag: "Expired", candidate_classes: ["Expired"], actions: [] },
+  },
   "unrendered-component": {
     field: "unrendered_components",
     category: "unrendered-component",

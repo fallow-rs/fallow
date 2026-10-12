@@ -113,6 +113,15 @@ def filter_check:
   (if .unused_svelte_events then
     .unused_svelte_events |= map(select(.path | in_changed))
   else . end) |
+  (if .unused_effect_layers then
+    .unused_effect_layers |= map(select(.path | in_changed))
+  else . end) |
+  (if .unused_tagged_errors then
+    .unused_tagged_errors |= map(select(.path | in_changed))
+  else . end) |
+  (if .unproduced_catch_tags then
+    .unproduced_catch_tags |= map(select(.path | in_changed))
+  else . end) |
   (if .unprovided_injects then
     .unprovided_injects |= map(select(.path | in_changed))
   else . end) |
@@ -165,6 +174,9 @@ def filter_check:
       (.unused_component_inputs // [] | length) +
       (.unused_component_outputs // [] | length) +
       (.unused_svelte_events // [] | length) +
+      (.unused_effect_layers // [] | length) +
+      (.unused_tagged_errors // [] | length) +
+      (.unproduced_catch_tags // [] | length) +
       (.unprovided_injects // [] | length) +
       (.unused_load_data_keys // [] | length) +
       (.prop_drilling_chains // [] | map(select(.effective_severity == "error")) | length)

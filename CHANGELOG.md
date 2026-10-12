@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Effect dead-code findings.** Projects that declare `effect` get three new
+  rules, each at `warn` by default:
+  - `unused-effect-layer` reports a layer that only unused layers compose.
+    A layer with zero references stays an `unused-export` or an
+    `unused-class-member`.
+  - `unused-tagged-error` reports a `Data.TaggedError` or
+    `Schema.TaggedError` class that types or `catchTag` handlers reference,
+    but that no code constructs, fails with, or decodes.
+  - `unproduced-catch-tag` reports a `catchTag` handler for a project tag
+    that no code produces, when no `unused-tagged-error` finding covers it.
+
+  Any value reference to an error class counts as a producer, so errors that
+  an API or RPC schema decodes are not reported. Tags that no project class
+  declares, and Effect built-in tags, are never reported.
+
 - **Prop-drilling findings can enforce CI gates.** Set `rules.prop-drilling` to
   `error` to enforce chains, or `warn` for advisory findings, including under
   `--fail-on-issues`. Source-hop overrides and suppressions control each chain.

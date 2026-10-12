@@ -45,6 +45,9 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unused-svelte-events": true,
   "unused-server-actions": true,
   "unused-load-data-keys": true,
+  "unused-effect-layers": true,
+  "unused-tagged-errors": true,
+  "unproduced-catch-tags": true,
   "route-collision": true,
   "dynamic-segment-name-conflict": true,
   "stale-suppressions": true,
@@ -95,6 +98,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "thin-wrappers": "thin-wrapper",
   "type-only-dependency": "type-only-dependencies",
   "unlisted-dependency": "unlisted-dependencies",
+  "unproduced-catch-tag": "unproduced-catch-tags",
   "unprovided-inject": "unprovided-injects",
   "unrendered-component": "unrendered-components",
   "unresolved-catalog": "unresolved-catalog-references",
@@ -110,6 +114,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "unused-dependency-override": "unused-dependency-overrides",
   "unused-dev-dependency": "unused-dev-dependencies",
   "unused-dev-deps": "unused-dev-dependencies",
+  "unused-effect-layer": "unused-effect-layers",
   "unused-enum-member": "unused-enum-members",
   "unused-export": "unused-exports",
   "unused-file": "unused-files",
@@ -121,6 +126,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "unused-server-action": "unused-server-actions",
   "unused-store-member": "unused-store-members",
   "unused-svelte-event": "unused-svelte-events",
+  "unused-tagged-error": "unused-tagged-errors",
   "unused-type": "unused-types"
 };
 
@@ -269,6 +275,18 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "unused-load-data-key",
     "label": "Unused Load Data Keys"
+  },
+  {
+    "code": "unused-effect-layer",
+    "label": "Unused Effect Layers"
+  },
+  {
+    "code": "unused-tagged-error",
+    "label": "Unused Tagged Errors"
+  },
+  {
+    "code": "unproduced-catch-tag",
+    "label": "Unproduced Catch Tags"
   },
   {
     "code": "route-collision",

@@ -321,6 +321,9 @@
             "unused-svelte-events": true,
             "unused-server-actions": true,
             "unused-load-data-keys": true,
+            "unused-effect-layers": true,
+            "unused-tagged-errors": true,
+            "unproduced-catch-tags": true,
             "route-collision": true,
             "dynamic-segment-name-conflict": true,
             "stale-suppressions": true,
@@ -435,6 +438,15 @@
               "type": "boolean"
             },
             "unused-load-data-keys": {
+              "type": "boolean"
+            },
+            "unused-effect-layers": {
+              "type": "boolean"
+            },
+            "unused-tagged-errors": {
+              "type": "boolean"
+            },
+            "unproduced-catch-tags": {
               "type": "boolean"
             },
             "route-collision": {

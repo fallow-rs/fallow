@@ -680,6 +680,7 @@ pub fn push_member_diagnostics(
     push_unused_component_input_diagnostics(map, results, mapper);
     push_unused_component_output_diagnostics(map, results, mapper);
     push_unused_svelte_event_diagnostics(map, results, mapper);
+    push_effect_diagnostics(map, results, mapper);
     push_unused_server_action_diagnostics(map, results, mapper);
     push_unused_load_data_key_diagnostics(map, results, mapper);
 }
@@ -907,6 +908,80 @@ fn push_unused_component_output_diagnostics(
     }
 }
 
+/// Push HINT diagnostics for the Effect rules: layers composed only into
+/// unused layers, tagged errors that no code produces, and `catchTag`
+/// handlers for a tag that no code produces.
+fn push_effect_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    mapper: &mut PositionMapper,
+) {
+    for finding in &results.unused_effect_layers {
+        let layer = &finding.layer;
+        let anchor = NamedAnchor {
+            path: &layer.path,
+            line: layer.line,
+            col: layer.col,
+            name: layer.name.rsplit('.').next().unwrap_or(&layer.name),
+        };
+        let message = format!(
+            "Layer '{}' is composed only into layers that nothing uses: {}",
+            layer.name,
+            layer.dead_consumers.join(", ")
+        );
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-effect-layer",
+            message,
+            finding.finding_id.as_deref(),
+        );
+    }
+    for finding in &results.unused_tagged_errors {
+        let error = &finding.error;
+        let anchor = NamedAnchor {
+            path: &error.path,
+            line: error.line,
+            col: error.col,
+            name: &error.name,
+        };
+        let message = format!(
+            "Tagged error '{}' is never constructed or failed with in this project",
+            error.name
+        );
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unused-tagged-error",
+            message,
+            finding.finding_id.as_deref(),
+        );
+    }
+    for finding in &results.unproduced_catch_tags {
+        let catch_tag = &finding.catch_tag;
+        let anchor = NamedAnchor {
+            path: &catch_tag.path,
+            line: catch_tag.line,
+            col: catch_tag.col,
+            name: &catch_tag.tag,
+        };
+        let message = format!(
+            "catchTag handler for '{}' never runs: no code in this project produces the tag",
+            catch_tag.tag
+        );
+        push_anchor_diagnostic(
+            map,
+            mapper,
+            &anchor,
+            "unproduced-catch-tag",
+            message,
+            finding.finding_id.as_deref(),
+        );
+    }
+}
+
 fn push_unused_svelte_event_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -1047,6 +1122,46 @@ mod tests {
         }
     }
 
+    /// The Effect findings of [`named_anchor_results`], at line 3 and column 4.
+    fn push_effect_named_anchor_results(root: &std::path::Path, results: &mut AnalysisResults) {
+        use fallow_api::editor_results as r;
+        results
+            .unused_effect_layers
+            .push(r::UnusedEffectLayerFinding::with_actions(
+                r::UnusedEffectLayer {
+                    path: root.join("services.ts"),
+                    name: "Cache.layer".to_string(),
+                    kind: r::EffectLayerKind::StaticMember,
+                    line: 3,
+                    col: 4,
+                    dead_consumers: vec!["CacheLive".to_string()],
+                },
+            ));
+        results
+            .unused_tagged_errors
+            .push(r::UnusedTaggedErrorFinding::with_actions(
+                r::UnusedTaggedError {
+                    path: root.join("errors.ts"),
+                    name: "Expired".to_string(),
+                    tag: "Expired".to_string(),
+                    line: 3,
+                    col: 4,
+                    catch_sites: Vec::new(),
+                },
+            ));
+        results
+            .unproduced_catch_tags
+            .push(r::UnproducedCatchTagFinding::with_actions(
+                r::UnproducedCatchTag {
+                    path: root.join("main.ts"),
+                    tag: "Gone".to_string(),
+                    line: 3,
+                    col: 4,
+                    candidate_classes: vec!["Gone".to_string()],
+                },
+            ));
+    }
+
     /// One finding per named-anchor kind, each in its own file, at 1-based
     /// line 3 and column 4.
     fn named_anchor_results(root: &std::path::Path) -> AnalysisResults {
@@ -1140,6 +1255,7 @@ mod tests {
                     route_dir: None,
                 },
             ));
+        push_effect_named_anchor_results(root, &mut results);
         results
     }
 
@@ -1200,6 +1316,24 @@ mod tests {
                 "posts",
                 "unused-load-data-key",
                 "load() return key 'posts' is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
+            ),
+            (
+                "services.ts",
+                "layer",
+                "unused-effect-layer",
+                "Layer 'Cache.layer' is composed only into layers that nothing uses: CacheLive",
+            ),
+            (
+                "errors.ts",
+                "Expired",
+                "unused-tagged-error",
+                "Tagged error 'Expired' is never constructed or failed with in this project",
+            ),
+            (
+                "main.ts",
+                "Gone",
+                "unproduced-catch-tag",
+                "catchTag handler for 'Gone' never runs: no code in this project produces the tag",
             ),
         ];
         for (file, name, code, message) in cases {

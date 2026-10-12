@@ -14,6 +14,9 @@ pub use fallow_types::output_dead_code::{
     UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
     UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
+pub use fallow_types::output_dead_code::{
+    UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
+};
 pub use fallow_types::results::{
     AbsentComponentProp, ActiveSuppression, AnalysisResults, BoundaryCallViolation,
     BoundaryCoverageViolation, BoundaryViolation, CircularDependency, CircularDependencyEdge,
@@ -37,4 +40,7 @@ pub use fallow_types::results::{
     UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp, UnusedDependency,
     UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember,
     UnusedServerAction, UnusedSvelteEvent,
+};
+pub use fallow_types::results::{
+    EffectCatchSite, EffectLayerKind, UnproducedCatchTag, UnusedEffectLayer, UnusedTaggedError,
 };

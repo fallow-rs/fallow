@@ -101,6 +101,12 @@ def dependency_action(pkg):
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused component input::Input '\(.input_name | san)' on component '\(.component_name | san)' is read nowhere in its own component (neither class body nor template).\(nl)\(nl)Remove the input, or use it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unused_component_outputs[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused component output::Output '\(.output_name | san)' on component '\(.component_name | san)' is emitted nowhere in its own component.\(nl)\(nl)Remove the output, or emit it. If it is part of a deliberately-stable public API, suppress this finding."),
+  (.unused_effect_layers[]? |
+    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused Effect layer::Layer '\(.name | san)' is composed only into layers that nothing uses.\(nl)\(nl)Remove the unused consumer layers first, then this layer, or compose it into a layer that reaches a runtime."),
+  (.unused_tagged_errors[]? |
+    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused tagged error::Tagged error '\(.name | san)' (tag '\(.tag | san)') is never constructed or failed with in the project.\(nl)\(nl)Fail with it where the condition occurs, or remove the class and its catchTag handlers."),
+  (.unproduced_catch_tags[]? |
+    "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unproduced catch tag::No code in the project produces tag '\(.tag | san)', so this catchTag handler never runs.\(nl)\(nl)Remove the handler, or fail with the error where the condition occurs."),
   (.unused_svelte_events[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused Svelte event::Event '\(.event_name | san)' dispatched by component '\(.component_name | san)' is listened to nowhere in the project.\(nl)\(nl)Remove the dispatched event, or listen for it. If it is part of a deliberately-stable public API, suppress this finding."),
   (.unprovided_injects[]? |

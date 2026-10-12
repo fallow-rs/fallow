@@ -967,6 +967,46 @@ fn collect_check_component_wiring(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
         out,
         env,
+        "unused_effect_layers",
+        "Unused Effect layer",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "Layer '{}' is composed only into layers that nothing uses.\n\nRemove the unused consumer layers first, then this layer, or compose it into a layer that reaches a runtime.",
+                s(it, "name"),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
+        "unused_tagged_errors",
+        "Unused tagged error",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "Tagged error '{}' (tag '{}') is never constructed or failed with in the project.\n\nFail with it where the condition occurs, or remove the class and its catchTag handlers.",
+                s(it, "name"),
+                s(it, "tag"),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
+        "unproduced_catch_tags",
+        "Unproduced catch tag",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "No code in the project produces tag '{}', so this catchTag handler never runs.\n\nRemove the handler, or fail with the error where the condition occurs.",
+                s(it, "tag"),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
         "unprovided_injects",
         "Unprovided inject",
         Anchor::line_col,

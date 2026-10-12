@@ -383,6 +383,21 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "unused-svelte-events",
     ),
     (
+        "Unused Effect layers",
+        "unused_effect_layers",
+        "unused-effect-layers",
+    ),
+    (
+        "Unused tagged errors",
+        "unused_tagged_errors",
+        "unused-tagged-errors",
+    ),
+    (
+        "Unproduced catch tags",
+        "unproduced_catch_tags",
+        "unproduced-catch-tags",
+    ),
+    (
         "Unprovided injects",
         "unprovided_injects",
         "unprovided-injects",
@@ -1046,6 +1061,31 @@ fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
             key: "unused_svelte_events",
             header: "Svelte components dispatching a `createEventDispatcher` event listened to nowhere in the project (cross-file dead-output direction).\n\n| File | Component | Event |\n|------|-----------|-------|\n",
             row: |it| component_detail_row(it, "event_name"),
+        },
+        SectionSpec {
+            name: "Unused Effect layers",
+            key: "unused_effect_layers",
+            header: "Effect layers composed only into layers that nothing uses.\n\n| File | Layer |\n|------|-------|\n",
+            row: |it| format!("| {} | {} |", path_line_cell(it), code_cell(it, "name")),
+        },
+        SectionSpec {
+            name: "Unused tagged errors",
+            key: "unused_tagged_errors",
+            header: "Effect tagged errors that no code constructs or fails with.\n\n| File | Class | Tag |\n|------|-------|-----|\n",
+            row: |it| {
+                format!(
+                    "| {} | {} | {} |",
+                    path_line_cell(it),
+                    code_cell(it, "name"),
+                    code_cell(it, "tag")
+                )
+            },
+        },
+        SectionSpec {
+            name: "Unproduced catch tags",
+            key: "unproduced_catch_tags",
+            header: "`catchTag` handlers for a project tag that no code produces.\n\n| File | Tag |\n|------|-----|\n",
+            row: |it| format!("| {} | {} |", path_line_cell(it), code_cell(it, "tag")),
         },
         SectionSpec {
             name: "Unprovided injects",
@@ -2068,6 +2108,15 @@ const AUDIT_COMPONENT_ROWS: &[AuditRowSpec] = &[
             code_cell(it, "component_name"),
             code_cell(it, "event_name")
         )
+    }),
+    ("Unused Effect layer", "unused_effect_layers", |it| {
+        format!("layer {}", code_cell(it, "name"))
+    }),
+    ("Unused tagged error", "unused_tagged_errors", |it| {
+        format!("{} tag {}", code_cell(it, "name"), code_cell(it, "tag"))
+    }),
+    ("Unproduced catch tag", "unproduced_catch_tags", |it| {
+        format!("catchTag {}", code_cell(it, "tag"))
     }),
     ("Unprovided inject", "unprovided_injects", |it| {
         format!(

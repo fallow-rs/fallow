@@ -27,6 +27,7 @@ pub mod css;
 pub mod css_classes;
 pub mod css_in_js;
 pub mod css_metrics;
+pub mod effect_facts;
 pub mod federation_runtime;
 pub mod flags;
 mod function_body;

@@ -755,6 +755,9 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
         unused_svelte_events: _unused_svelte_events,
+        unused_effect_layers: _unused_effect_layers,
+        unused_tagged_errors: _unused_tagged_errors,
+        unproduced_catch_tags: _unproduced_catch_tags,
         unused_server_actions: _unused_server_actions,
         unused_load_data_keys: _unused_load_data_keys,
         unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
@@ -889,6 +892,9 @@ fn retain_component_contract_findings_by_changed_files(
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
         ..
@@ -902,6 +908,9 @@ fn retain_component_contract_findings_by_changed_files(
     retain_by_changed_path(unused_component_inputs, scope, |i| &i.input.path);
     retain_by_changed_path(unused_component_outputs, scope, |o| &o.output.path);
     retain_by_changed_path(unused_svelte_events, scope, |e| &e.event.path);
+    retain_by_changed_path(unused_effect_layers, scope, |e| &e.layer.path);
+    retain_by_changed_path(unused_tagged_errors, scope, |e| &e.error.path);
+    retain_by_changed_path(unproduced_catch_tags, scope, |e| &e.catch_tag.path);
     retain_by_changed_path(unused_server_actions, scope, |a| &a.action.path);
     retain_by_changed_path(unused_load_data_keys, scope, |k| &k.key.path);
 }

@@ -1402,6 +1402,114 @@
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-load-data-keys"
     },
     {
+      "id": "unused-effect-layer",
+      "rule_id": "fallow/unused-effect-layer",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "An Effect layer is composed only into layers that nothing uses",
+      "label": "Unused Effect Layers",
+      "config_key": "unused-effect-layers",
+      "registry_index": 38,
+      "aliases": [
+        "unused-effect-layers"
+      ],
+      "lsp": true,
+      "filter_flag": "--unused-effect-layers",
+      "result_key": "unused_effect_layers",
+      "summary_label": "Unused Effect layers",
+      "summary_docs_anchor": "unused-effect-layers",
+      "sarif_rule_ids": [
+        "fallow/unused-effect-layer"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-effect-layer"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-effect-layer",
+      "default_severity": "warn",
+      "opt_in": false,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-effect-layers"
+    },
+    {
+      "id": "unused-tagged-error",
+      "rule_id": "fallow/unused-tagged-error",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it",
+      "label": "Unused Tagged Errors",
+      "config_key": "unused-tagged-errors",
+      "registry_index": 39,
+      "aliases": [
+        "unused-tagged-errors"
+      ],
+      "lsp": true,
+      "filter_flag": "--unused-tagged-errors",
+      "result_key": "unused_tagged_errors",
+      "summary_label": "Unused tagged errors",
+      "summary_docs_anchor": "unused-tagged-errors",
+      "sarif_rule_ids": [
+        "fallow/unused-tagged-error"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-tagged-error"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-tagged-error",
+      "default_severity": "warn",
+      "opt_in": false,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unused-tagged-errors"
+    },
+    {
+      "id": "unproduced-catch-tag",
+      "rule_id": "fallow/unproduced-catch-tag",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A catchTag handler names a project error tag that no code produces",
+      "label": "Unproduced Catch Tags",
+      "config_key": "unproduced-catch-tags",
+      "registry_index": 40,
+      "aliases": [
+        "unproduced-catch-tags"
+      ],
+      "lsp": true,
+      "filter_flag": "--unproduced-catch-tags",
+      "result_key": "unproduced_catch_tags",
+      "summary_label": "Unproduced catch tags",
+      "summary_docs_anchor": "unproduced-catch-tags",
+      "sarif_rule_ids": [
+        "fallow/unproduced-catch-tag"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unproduced-catch-tag"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unproduced-catch-tag",
+      "default_severity": "warn",
+      "opt_in": false,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#unproduced-catch-tags"
+    },
+    {
       "id": "route-collision",
       "rule_id": "fallow/route-collision",
       "command": "dead-code",
@@ -1409,7 +1517,7 @@
       "description": "Two or more Next.js App Router route files resolve to the same URL",
       "label": "Route Collisions",
       "config_key": "route-collision",
-      "registry_index": 38,
+      "registry_index": 41,
       "aliases": [
         "route-collisions"
       ],
@@ -1447,7 +1555,7 @@
       "description": "Sibling Next.js dynamic route segments use different slug names at the same position",
       "label": "Dynamic Segment Conflicts",
       "config_key": "dynamic-segment-name-conflict",
-      "registry_index": 39,
+      "registry_index": 42,
       "aliases": [
         "dynamic-segment-name-conflicts"
       ],
@@ -1485,7 +1593,7 @@
       "description": "Suppression comment or tag no longer matches any issue",
       "label": "Stale Suppressions",
       "config_key": "stale-suppressions",
-      "registry_index": 40,
+      "registry_index": 43,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--stale-suppressions",
@@ -1521,7 +1629,7 @@
       "description": "Suppression comment omits a required reason",
       "label": "Missing Suppression Reasons",
       "config_key": "require-suppression-reason",
-      "registry_index": 41,
+      "registry_index": 44,
       "aliases": [
         "missing-suppression-reasons"
       ],
@@ -1553,7 +1661,7 @@
       "description": "Catalog entry not referenced by any workspace package",
       "label": "Unused Catalog Entries",
       "config_key": "unused-catalog-entries",
-      "registry_index": 42,
+      "registry_index": 45,
       "aliases": [
         "catalog",
         "unused-catalog-entries"
@@ -1593,7 +1701,7 @@
       "description": "Named catalog group has no entries",
       "label": "Empty Catalog Groups",
       "config_key": "empty-catalog-groups",
-      "registry_index": 43,
+      "registry_index": 46,
       "aliases": [
         "empty-catalog",
         "empty-catalog-groups"
@@ -1633,7 +1741,7 @@
       "description": "package.json references a catalog that does not declare the package",
       "label": "Unresolved Catalog References",
       "config_key": "unresolved-catalog-references",
-      "registry_index": 44,
+      "registry_index": 47,
       "aliases": [
         "unresolved-catalog",
         "unresolved-catalog-references"
@@ -1673,7 +1781,7 @@
       "description": "Package-manager override target is not declared or resolved",
       "label": "Unused Dependency Overrides",
       "config_key": "unused-dependency-overrides",
-      "registry_index": 45,
+      "registry_index": 48,
       "aliases": [
         "unused-dependency-overrides",
         "unused-override",
@@ -1714,7 +1822,7 @@
       "description": "Package-manager override has an unparsable key or value",
       "label": "Misconfigured Dependency Overrides",
       "config_key": "misconfigured-dependency-overrides",
-      "registry_index": 46,
+      "registry_index": 49,
       "aliases": [
         "misconfigured-dependency-overrides",
         "misconfigured-override",
@@ -1755,7 +1863,7 @@
       "description": "Detected feature flag pattern",
       "label": "Feature Flags",
       "config_key": "feature-flags",
-      "registry_index": 50,
+      "registry_index": 53,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -1785,7 +1893,7 @@
       "description": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
       "label": "Prop Drilling",
       "config_key": "prop-drilling",
-      "registry_index": 52,
+      "registry_index": 55,
       "aliases": [],
       "lsp": true,
       "filter_flag": null,
@@ -1819,7 +1927,7 @@
       "description": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
       "label": "Thin Wrappers",
       "config_key": "thin-wrapper",
-      "registry_index": 53,
+      "registry_index": 56,
       "aliases": [
         "thin-wrappers"
       ],
@@ -1853,7 +1961,7 @@
       "description": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
       "label": "Duplicate Prop Shapes",
       "config_key": "duplicate-prop-shape",
-      "registry_index": 54,
+      "registry_index": 57,
       "aliases": [
         "duplicate-prop-shapes"
       ],
@@ -1887,7 +1995,7 @@
       "description": "CSS or CSS-in-JS hardcoded styling value bypasses the design token system",
       "label": "CSS Token Drift",
       "config_key": "css-token-drift",
-      "registry_index": 55,
+      "registry_index": 58,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -1917,7 +2025,7 @@
       "description": "CSS or CSS-in-JS declaration block is duplicated across rules",
       "label": "CSS Duplicate Block",
       "config_key": "css-duplicate-block",
-      "registry_index": 56,
+      "registry_index": 59,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -1947,7 +2055,7 @@
       "description": "CSS selector, nesting, or important usage is structurally complex",
       "label": "CSS Selector Complexity",
       "config_key": "css-selector-complexity",
-      "registry_index": 57,
+      "registry_index": 60,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -1977,7 +2085,7 @@
       "description": "CSS or CSS-in-JS surface appears unused",
       "label": "CSS Dead Surface",
       "config_key": "css-dead-surface",
-      "registry_index": 58,
+      "registry_index": 61,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -2007,7 +2115,7 @@
       "description": "CSS or CSS-in-JS reference resolves to no stylesheet definition",
       "label": "CSS Broken Reference",
       "config_key": "css-broken-reference",
-      "registry_index": 59,
+      "registry_index": 62,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,

@@ -161,6 +161,15 @@ pub struct CheckSummary {
     /// whose name is listened to nowhere in the project.
     #[serde(default)]
     pub unused_svelte_events: usize,
+    /// Effect layers composed only into layers that nothing uses.
+    #[serde(default)]
+    pub unused_effect_layers: usize,
+    /// Effect tagged error classes that no code constructs or fails with.
+    #[serde(default)]
+    pub unused_tagged_errors: usize,
+    /// `catchTag` handlers for a project tag that no code produces.
+    #[serde(default)]
+    pub unproduced_catch_tags: usize,
     /// Next.js Server Actions (exports of `"use server"` files) referenced by no
     /// code in the project.
     #[serde(default)]
