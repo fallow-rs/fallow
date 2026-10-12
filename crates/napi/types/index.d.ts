@@ -671,6 +671,44 @@ export interface RefactoringTarget {
   [key: string]: unknown;
 }
 
+export interface HotspotEntry {
+  path: string;
+  score: number;
+  commits: number;
+  /** Median analyzed files per commit that changed this file. Absent without commit ids. */
+  median_files_per_commit?: number;
+  /** Median changed lines per commit that changed this file. Absent without commit ids. */
+  median_lines_per_commit?: number;
+  [key: string]: unknown;
+}
+
+export interface HiddenCouplingPair {
+  path_a: string;
+  path_b: string;
+  revisions_a: number;
+  revisions_b: number;
+  shared_revisions: number;
+  /** Coupling degree from 0 to 1. */
+  degree: number;
+  /** Present and true when `degree` reaches `thresholds.strong_degree`. */
+  strong?: boolean;
+}
+
+export interface ChangeCouplingReport {
+  since: string;
+  commits_analyzed: number;
+  commits_skipped: number;
+  total_pairs: number;
+  thresholds: {
+    max_files_per_commit: number;
+    min_revisions: number;
+    min_shared_revisions: number;
+    min_degree: number;
+    strong_degree: number;
+  };
+  pairs: HiddenCouplingPair[];
+}
+
 export interface HealthReport {
   schema_version: number;
   version: string;
@@ -681,8 +719,10 @@ export interface HealthReport {
   health_score?: Record<string, unknown>;
   file_scores?: FileHealthScore[];
   coverage_gaps?: CoverageGaps;
-  hotspots?: Array<Record<string, unknown>>;
+  hotspots?: HotspotEntry[];
   hotspot_summary?: Record<string, unknown>;
+  /** Hidden change coupling. Present when the hotspots section ran and the run read the commit history. */
+  change_coupling?: ChangeCouplingReport;
   runtime_coverage?: Record<string, unknown>;
   large_functions?: Array<Record<string, unknown>>;
   targets?: RefactoringTarget[];

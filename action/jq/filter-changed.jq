@@ -201,6 +201,12 @@ def filter_health:
   (if .hotspots then
     .hotspots |= map(select(.path | in_changed))
   else . end) |
+  # Keep a hidden coupling pair when either file changed. The partner file
+  # outside the diff is the point of the pair.
+  (if .change_coupling.pairs then
+    .change_coupling.pairs |= map(select((.path_a | in_changed) or (.path_b | in_changed))) |
+    .change_coupling.total_pairs = (.change_coupling.pairs | length)
+  else . end) |
   (if .targets then
     .targets |= map(select(.path | in_changed))
   else . end);

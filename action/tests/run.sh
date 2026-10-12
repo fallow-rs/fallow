@@ -2216,6 +2216,12 @@ assert_valid_json "$OUT" "valid JSON"
 assert_json_value "$OUT" '.file_scores | length' "1" "keeps only changed file scores"
 assert_json_value "$OUT" '.file_scores[0].path' "src/helpers/content-parser.ts" "correct file retained"
 
+echo "  health change coupling:"
+OUT=$(jq '.change_coupling = {"since": "12 months", "commits_analyzed": 9, "commits_skipped": 0, "total_pairs": 3, "thresholds": {"max_files_per_commit": 30, "min_revisions": 5, "min_shared_revisions": 5, "min_degree": 0.3, "strong_degree": 0.5}, "pairs": [{"path_a": "src/a.ts", "path_b": "src/b.ts", "revisions_a": 6, "revisions_b": 6, "shared_revisions": 6, "degree": 1.0, "strong": true}, {"path_a": "src/c.ts", "path_b": "src/x.ts", "revisions_a": 6, "revisions_b": 6, "shared_revisions": 5, "degree": 0.8}, {"path_a": "src/d.ts", "path_b": "src/e.ts", "revisions_a": 6, "revisions_b": 6, "shared_revisions": 5, "degree": 0.8}]}' "$FIXTURES/health.json" | jq --argjson changed '["src/b.ts", "src/c.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_valid_json "$OUT" "valid JSON"
+assert_json_value "$OUT" '[.change_coupling.pairs[].path_a] | join(",")' "src/a.ts,src/c.ts" "keeps pairs with either file changed"
+assert_json_value "$OUT" '.change_coupling.total_pairs' "2" "recounts total_pairs"
+
 echo "  dupes format:"
 DUPES_PATH=$(jq -r '.clone_groups[0].instances[0].file' "$FIXTURES/dupes.json")
 OUT=$(jq --argjson changed "[\"$DUPES_PATH\"]" -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/dupes.json" 2>&1)
