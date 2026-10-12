@@ -215,20 +215,111 @@ test("complete checks win over a conflict", async () => {
   assert.equal(states.reads(), 0);
 });
 
-test("read errors in a row stop the wait, and a good read resets the count", async () => {
-  const failure = { ok: false, error: "network" };
-  const passing = { ok: true, checks: [check("lint", "pass")] };
-  const pending = { ok: true, checks: [check("lint", "pending")] };
+const MINUTE_MS = 60 * 1000;
+const failure = { ok: false, error: "HTTP 504" };
+// More failures than any error window allows.
+const ENDLESS = 100;
 
-  const recovered = await wait(scripted([failure, failure, pending, failure, failure, passing]));
-  const stopped = await wait(scripted([failure, failure, failure, passing]));
+// Fail `failures` times, then pass. Record each sleep and each warning.
+const outage = (failures, { intervalMs = 30 * 1000, timeoutMs = 60 * MINUTE_MS } = {}) => {
+  const script = scripted([
+    ...Array.from({ length: failures }, () => failure),
+    { ok: true, checks: [check("lint", "pass")] },
+  ]);
+  const sleeps = [];
+  const warnings = [];
+  const result = waitForChecks({
+    ...script,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      await script.sleep(ms);
+    },
+    minChecks: 1,
+    intervalMs,
+    timeoutMs,
+    warn: (line) => warnings.push(line),
+  });
+  return { script, sleeps, warnings, result };
+};
 
-  assert.equal(recovered.status, "pass");
+test("a short outage backs off and the wait goes on", async () => {
+  const { script, sleeps, warnings, result } = outage(4);
+
+  assert.equal((await result).status, "pass");
+  assert.equal(script.reads(), 5);
+  assert.deepEqual(
+    sleeps,
+    [30, 60, 120, 240].map((seconds) => seconds * 1000),
+  );
+  assert.deepEqual(warnings, [
+    "Read of the checks failed: HTTP 504. Next read in 30 seconds.",
+    "Read of the checks failed: HTTP 504. Next read in 60 seconds.",
+    "Read of the checks failed: HTTP 504. Next read in 120 seconds.",
+    "Read of the checks failed: HTTP 504. Next read in 240 seconds.",
+  ]);
+});
+
+test("the backoff stops at the cap and the error window stops the wait", async () => {
+  const { sleeps, warnings, result } = outage(ENDLESS);
+  const stopped = await result;
+
   assert.equal(stopped.status, "error");
+  assert.equal(stopped.readErrors, 6);
+  assert.equal(stopped.errorMs, 10 * MINUTE_MS);
+  // The last delay is cut to the end of the 10-minute window.
+  assert.deepEqual(
+    sleeps,
+    [30, 60, 120, 240, 150].map((seconds) => seconds * 1000),
+  );
+  assert.equal(warnings.at(-1), "Read of the checks failed: HTTP 504");
   const lines = [];
   const code = reportChecks(stopped, { label: "PR 7", minChecks: 1 }, (line) => lines.push(line));
   assert.equal(code, 2);
-  assert.deepEqual(lines, ["PR 7: stopped after 3 failed reads of the checks."]);
+  assert.deepEqual(lines, ["PR 7: stopped after 6 failed reads of the checks in 600 seconds."]);
+});
+
+test("the delay never grows above 5 minutes", async () => {
+  const { sleeps, result } = outage(ENDLESS, { intervalMs: 4 * MINUTE_MS });
+
+  assert.equal((await result).status, "error");
+  assert.deepEqual(
+    sleeps,
+    [4, 5, 1].map((minutes) => minutes * MINUTE_MS),
+  );
+});
+
+test("the deadline stops failed reads before the error window", async () => {
+  const { sleeps, result } = outage(ENDLESS, { timeoutMs: 2 * MINUTE_MS });
+  const stopped = await result;
+
+  assert.equal(stopped.status, "error");
+  assert.deepEqual(sleeps, [30 * 1000, 60 * 1000]);
+});
+
+test("a good read resets the backoff and the error window", async () => {
+  const passing = { ok: true, checks: [check("lint", "pass")] };
+  const pending = { ok: true, checks: [check("lint", "pending")] };
+  const script = scripted([failure, failure, failure, pending, failure, failure, passing]);
+  const sleeps = [];
+
+  const result = await waitForChecks({
+    ...script,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      await script.sleep(ms);
+    },
+    minChecks: 1,
+    intervalMs: INTERVAL_MS,
+    timeoutMs: MINUTE_MS,
+    errorWindowMs: 5 * INTERVAL_MS,
+    warn: () => {},
+  });
+
+  assert.equal(result.status, "pass");
+  assert.deepEqual(
+    sleeps,
+    [1, 2, 2, 1, 1, 2].map((seconds) => seconds * INTERVAL_MS),
+  );
 });
 
 test("parseGhChecks reads the JSON when gh exits with 0 or with 8 for a pending check", () => {
@@ -360,7 +451,7 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns() }, args = []) 
     );
     const result = spawnSync(
       process.execPath,
-      [SCRIPT, "--pr", "7", "--interval", "1", "--timeout", "1", ...args],
+      [SCRIPT, "--pr", "7", "--interval", "1", "--timeout", "1", "--error-window", "1", ...args],
       { env: { ...process.env, PATH: `${root}${delimiter}${process.env.PATH}` }, encoding: "utf8" },
     );
     const calls = existsSync(join(root, "calls.json"))

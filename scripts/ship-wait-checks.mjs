@@ -22,7 +22,6 @@ const GITHUB_RUN_URL_PATTERN =
 // gh prints "no required checks reported" for `--required` when no required
 // check exists yet.
 const NO_CHECKS_PATTERN = /no (?:required )?checks reported/iu;
-const MAX_READ_ERRORS = 3;
 const FAILED_BUCKETS = new Set(["fail", "cancel"]);
 // gh run list matches --commit only against the full SHA. A short SHA gives
 // an empty list and no error, so the wait would never see a run.
@@ -58,6 +57,11 @@ const MINUTE = 60 * SECOND;
 // start fewer runs than --min-checks. When the runs of a commit stay complete
 // and unchanged this long, no further run comes, and the wait ends.
 const COMMIT_SETTLE_MS = 10 * MINUTE;
+// A GitHub API outage of a few minutes must not stop the wait. After a failed
+// read, the delay doubles from the interval up to this cap. The wait stops
+// when the reads fail for the whole error window.
+const READ_RETRY_MAX_MS = 5 * MINUTE;
+const READ_ERROR_WINDOW_SECONDS = 600;
 
 const USAGE = `Usage: node scripts/ship-wait-checks.mjs (--pr <number> | --commit <sha>) [options]
 
@@ -80,6 +84,11 @@ Options:
   --interval <seconds>    The time between two reads (default: 30).
   --timeout <minutes>     The maximum wait (default: 60). With
                           --follow-main, the maximum wait for all commits.
+  --error-window <seconds>
+                          The maximum time of failed reads in a row
+                          (default: ${READ_ERROR_WINDOW_SECONDS}). After each failed read, the
+                          delay to the next read doubles, from --interval
+                          up to ${READ_RETRY_MAX_MS / MINUTE} minutes.
   -h, --help              Show this help.
 
 With --pr, the wait stops when the pull request conflicts with its base
@@ -95,10 +104,14 @@ runs of a commit that contains the given commit pass or skip.
 
 Exit codes: 0 when all checks pass or skip, 1 when a check fails or is
 cancelled, or when --follow-main reaches the maximum count of moves, 2 for
-invalid input, ${MAX_READ_ERRORS} failed reads in a row, a timeout, a failed read
+invalid input, failed reads for the full --error-window, a timeout, a failed read
 of ${FOLLOW_REF}, or an ${FOLLOW_REF} that does not contain the given commit,
 3 when the pull request conflicts with its base branch.`;
 
+const formatSeconds = (ms) => {
+  const seconds = Math.round(ms / SECOND);
+  return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+};
 const shortSha = (sha) => sha.slice(0, SHORT_SHA_LENGTH);
 const commitLabel = (sha) => `Commit ${shortSha(sha)}`;
 
@@ -129,8 +142,11 @@ const checkSignature = (checks) =>
  * the wait below `minChecks` with the status `settled`. Without it, too few
  * checks wait until the timeout.
  * Returns `{ status, checks }` where `status` is `pass`, `settled`, `fail`,
- * `conflict`, `timeout` or `error`. The loop stops after `MAX_READ_ERRORS` read errors of
- * the checks in a row. A failed read of the mergeable state only warns.
+ * `conflict`, `timeout` or `error`. After a failed read of the checks, the
+ * delay to the next read doubles from `intervalMs` up to `READ_RETRY_MAX_MS`.
+ * The status is `error` (with `readErrors` and `errorMs`) when the reads fail
+ * for `errorWindowMs`, or when the deadline comes during failed reads. A
+ * failed read of the mergeable state only warns.
  */
 export const waitForChecks = async ({
   readChecks,
@@ -139,6 +155,7 @@ export const waitForChecks = async ({
   minChecks,
   intervalMs,
   timeoutMs,
+  errorWindowMs = READ_ERROR_WINDOW_SECONDS * SECOND,
   sleep = sleepMs,
   now = Date.now,
   warn = console.error,
@@ -146,9 +163,11 @@ export const waitForChecks = async ({
   const deadline = now() + timeoutMs;
   let checks = [];
   let readErrors = 0;
+  let errorSince = 0;
   let signature = "";
   let changedAt = now();
   for (;;) {
+    let delayMs = intervalMs;
     const read = readChecks();
     if (read.ok) {
       readErrors = 0;
@@ -170,10 +189,17 @@ export const waitForChecks = async ({
       }
     } else {
       readErrors += 1;
-      warn(`Read of the checks failed: ${read.error}`);
-      if (readErrors >= MAX_READ_ERRORS) {
-        return { status: "error", checks };
+      if (readErrors === 1) {
+        errorSince = now();
       }
+      const errorMs = now() - errorSince;
+      const windowLeftMs = errorWindowMs - errorMs;
+      delayMs = Math.min(intervalMs * 2 ** (readErrors - 1), READ_RETRY_MAX_MS, windowLeftMs);
+      if (windowLeftMs <= 0 || now() + delayMs > deadline) {
+        warn(`Read of the checks failed: ${read.error}`);
+        return { status: "error", checks, readErrors, errorMs };
+      }
+      warn(`Read of the checks failed: ${read.error}. Next read in ${formatSeconds(delayMs)}.`);
     }
     if (readMergeable !== null) {
       const state = readMergeable();
@@ -183,10 +209,10 @@ export const waitForChecks = async ({
         return { status: "conflict", checks };
       }
     }
-    if (now() + intervalMs > deadline) {
+    if (now() + delayMs > deadline) {
       return { status: "timeout", checks };
     }
-    await sleep(intervalMs);
+    await sleep(delayMs);
   }
 };
 
@@ -742,6 +768,7 @@ const parseOptions = (argv) => {
       "follow-main": { type: "boolean", default: false },
       interval: { type: "string", default: "30" },
       timeout: { type: "string", default: "60" },
+      "error-window": { type: "string", default: String(READ_ERROR_WINDOW_SECONDS) },
       help: { type: "boolean", short: "h", default: false },
     },
     strict: true,
@@ -782,6 +809,7 @@ const parseOptions = (argv) => {
     minChecks: positiveInteger("--min-checks", values["min-checks"]),
     intervalMs: positiveInteger("--interval", values.interval) * SECOND,
     timeoutMs: positiveInteger("--timeout", values.timeout) * MINUTE,
+    errorWindowMs: positiveInteger("--error-window", values["error-window"]) * SECOND,
   };
 };
 
@@ -802,7 +830,16 @@ const EXIT_CODES = {
  * code.
  */
 export const reportChecks = (
-  { status, checks, origin = "", head = "", error = "", maxHops = MAX_FOLLOW_HOPS },
+  {
+    status,
+    checks,
+    origin = "",
+    head = "",
+    error = "",
+    maxHops = MAX_FOLLOW_HOPS,
+    readErrors = 0,
+    errorMs = 0,
+  },
   { label, minChecks, settleMs = COMMIT_SETTLE_MS, commit = null, followMain: following = false },
   log = console.log,
 ) => {
@@ -812,7 +849,7 @@ export const reportChecks = (
     settled: `${label}: all ${checks.length} runs passed, fewer than --min-checks ${minChecks}, and no run started or changed for ${settleMs / MINUTE} minutes (${summary}).`,
     fail: `${label}: checks failed (${summary}).`,
     timeout: `${label}: timed out with ${checks.length} of at least ${minChecks} checks (${summary}).`,
-    error: `${label}: stopped after ${MAX_READ_ERRORS} failed reads of the checks.`,
+    error: `${label}: stopped after ${readErrors} failed reads of the checks in ${formatSeconds(errorMs)}.`,
     hops: `${label}: runs cancelled again after ${maxHops} moves to a newer commit (${summary}).`,
     "head-error": `${label}: read of ${FOLLOW_REF} failed: ${error}`,
     diverged: `${label}: ${FOLLOW_REF} at ${shortSha(head)} does not contain commit ${shortSha(origin)}, so the wait stops.`,
