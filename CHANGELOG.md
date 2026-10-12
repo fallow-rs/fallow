@@ -92,6 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remain findings. The parse cache rebuilds once after upgrade to replace the old
   member evidence. Thanks [@VariableVince](https://github.com/VariableVince) for the
   reproduction. (Closes [#3326](https://github.com/fallow-rs/fallow/issues/3326))
+- **ESLint configs now credit the plugins of a shared config that a package
+  exports through a subpath pattern.** A flat config can import a shared
+  config through an `exports` pattern such as `"./*": "./src/*.mjs"`. Fallow
+  now reads the target that the pattern selects and credits the plugins that
+  this file imports. Nested condition objects and fallback arrays also
+  resolve, for example `{"import": {"types": "...", "default": "..."}}`. A
+  `null` export target stays blocked, so a blocked subpath credits no
+  plugins.
+
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a

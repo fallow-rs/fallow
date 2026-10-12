@@ -555,17 +555,54 @@ fn resolve_exports_subpath(exports: &serde_json::Value, subpath_key: &str) -> Op
     resolve_condition_object(entry).map(|target| target.replace('*', captured))
 }
 
-/// Resolve a condition object (or plain string) to a file path string.
+/// Condition keys tried in order when an export target is a condition object.
+const EXPORT_CONDITIONS: [&str; 4] = ["import", "node", "default", "require"];
+
+/// Resolve an export target to a file path string.
+///
+/// Strings resolve to themselves. Arrays resolve to their first resolvable
+/// element. Condition objects recurse into the supported conditions, so nested
+/// shapes such as `{"import": {"types": ..., "default": ...}}` resolve. An
+/// explicit `null` target stays blocked.
 fn resolve_condition_object(value: &serde_json::Value) -> Option<String> {
-    if let Some(s) = value.as_str() {
-        return Some(s.to_string());
+    match resolve_export_target(value) {
+        ExportTarget::Path(target) => Some(target),
+        ExportTarget::Blocked | ExportTarget::Unmatched => None,
     }
-    for key in &["import", "default", "require"] {
-        if let Some(s) = value.get(key).and_then(|v| v.as_str()) {
-            return Some(s.to_string());
-        }
+}
+
+/// Outcome of one export target, following Node's resolution rules.
+enum ExportTarget {
+    /// The target resolves to this path.
+    Path(String),
+    /// A matched condition is `null`, so the subpath is blocked.
+    Blocked,
+    /// No supported condition matched, so the caller tries the next candidate.
+    Unmatched,
+}
+
+/// Resolve one export target to an [`ExportTarget`].
+fn resolve_export_target(value: &serde_json::Value) -> ExportTarget {
+    match value {
+        serde_json::Value::Null => ExportTarget::Blocked,
+        serde_json::Value::String(target) => ExportTarget::Path(target.clone()),
+        serde_json::Value::Array(targets) => targets
+            .iter()
+            .find_map(|target| match resolve_export_target(target) {
+                ExportTarget::Path(path) => Some(ExportTarget::Path(path)),
+                ExportTarget::Blocked | ExportTarget::Unmatched => None,
+            })
+            .unwrap_or(ExportTarget::Unmatched),
+        serde_json::Value::Object(conditions) => EXPORT_CONDITIONS
+            .iter()
+            .filter_map(|key| conditions.get(*key))
+            .find_map(|target| match resolve_export_target(target) {
+                ExportTarget::Unmatched => None,
+                resolved => Some(resolved),
+            })
+            .unwrap_or(ExportTarget::Unmatched),
+        _ => ExportTarget::Unmatched,
     }
-    None
 }
 
 #[cfg(test)]
@@ -1102,6 +1139,78 @@ mod tests {
             deps.contains(&"eslint-config-next".to_string()),
             "transitive dep via subpath import must be traced: {deps:?}"
         );
+    }
+
+    #[test]
+    fn nested_export_conditions_credit_entry_plugins() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("node_modules/@repo/lint");
+        std::fs::create_dir_all(package.join("dist/configs")).unwrap();
+        std::fs::write(
+            package.join("package.json"),
+            r#"{
+                "name": "@repo/lint",
+                "main": "./dist/index.cjs",
+                "exports": {
+                    ".": {
+                        "import": {
+                            "types": "./dist/index.d.mts",
+                            "default": "./dist/index.mjs"
+                        }
+                    },
+                    "./*": [
+                        { "import": { "types": "./dist/configs/*.d.mts", "default": "./dist/configs/*.mjs" } },
+                        "./dist/configs/*.cjs"
+                    ],
+                    "./blocked": { "import": null, "default": "./dist/configs/blocked.mjs" }
+                }
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("dist/index.cjs"),
+            "module.exports = require('eslint-plugin-unused-main');",
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("dist/index.mjs"),
+            "import react from 'eslint-plugin-react'; export default react;",
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("dist/configs/vue.mjs"),
+            "import vue from 'eslint-plugin-vue'; export default vue;",
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("dist/configs/blocked.mjs"),
+            "import svelte from 'eslint-plugin-svelte'; export default svelte;",
+        )
+        .unwrap();
+        let mut failures = Vec::new();
+        for (specifier, dependency) in [
+            ("@repo/lint", Some("eslint-plugin-react")),
+            ("@repo/lint/vue", Some("eslint-plugin-vue")),
+            ("@repo/lint/blocked", None),
+        ] {
+            let source = format!("import config from '{specifier}'; export default config;");
+            let result = EslintPlugin.resolve_config(
+                &dir.path().join("eslint.config.mjs"),
+                &source,
+                dir.path(),
+            );
+            let mut actual = result.referenced_dependencies;
+            actual.sort();
+            actual.dedup();
+            let mut expected = vec!["@repo/lint".to_string()];
+            expected.extend(dependency.map(str::to_string));
+            if actual != expected {
+                failures.push(format!(
+                    "{specifier}: expected {expected:?}, got {actual:?}"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]
