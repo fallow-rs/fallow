@@ -1227,7 +1227,7 @@ fn module_to_cached_roundtrip_complexity() {
             FunctionComplexity {
                 name: "complex".to_string(),
                 is_private_member: true,
-                name_from_context: false,
+                context_named: None,
                 line: 5,
                 col: 0,
                 cyclomatic: 8,
@@ -1260,7 +1260,7 @@ fn module_to_cached_roundtrip_complexity() {
             FunctionComplexity {
                 name: "simple".to_string(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 30,
                 col: 4,
                 cyclomatic: 1,

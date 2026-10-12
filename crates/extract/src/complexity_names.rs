@@ -56,12 +56,30 @@ pub fn span_name(call: &CallExpression<'_>) -> Option<String> {
 /// Returns `None` when the first argument is not a string literal or when the
 /// callee has no readable name (a call result, a computed member).
 pub fn string_keyed_call_name(call: &CallExpression<'_>) -> Option<String> {
+    // Most calls with a string first argument (`require("x")`, `t("key")`)
+    // hold no function, so check the shape before any allocation.
+    if !call.arguments.iter().skip(1).any(can_hold_named_function) {
+        return None;
+    }
     let literal = call.arguments.first().and_then(argument_literal)?;
     let callee = callee_label(&call.callee)?;
-    // A double quote in the literal gets a backslash, so the quoted literal
-    // in the name stays one token.
-    let quoted = cut_literal(&literal).replace('"', "\\\"");
+    // A backslash and a double quote in the literal get a backslash, so the
+    // quoted literal in the name stays one token.
+    let quoted = cut_literal(&literal)
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     Some(format!("{callee}(\"{quoted}\")"))
+}
+
+/// Whether an argument is a function, or a call that can hold an anonymous
+/// generator, so that a context name can reach a function through it.
+const fn can_hold_named_function(argument: &Argument<'_>) -> bool {
+    matches!(
+        argument,
+        Argument::FunctionExpression(_)
+            | Argument::ArrowFunctionExpression(_)
+            | Argument::CallExpression(_)
+    )
 }
 
 /// The call that a function body returns, when that call takes a generator
@@ -105,8 +123,7 @@ fn has_generator_argument(call: &CallExpression<'_>) -> bool {
 }
 
 /// The value of a string literal or of a template literal without
-/// substitutions. Control characters become spaces so that the name stays on
-/// one line.
+/// substitutions. A character that breaks a one-line name becomes a space.
 fn argument_literal(argument: &Argument<'_>) -> Option<String> {
     let raw = match argument {
         Argument::StringLiteral(literal) => literal.value.as_str(),
@@ -119,9 +136,15 @@ fn argument_literal(argument: &Argument<'_>) -> Option<String> {
     };
     Some(
         raw.chars()
-            .map(|c| if c.is_control() { ' ' } else { c })
+            .map(|c| if breaks_one_line_name(c) { ' ' } else { c })
             .collect(),
     )
+}
+
+/// A control character breaks the line. A `|` or a backtick breaks a
+/// Markdown table cell or a code span in the CI summaries.
+fn breaks_one_line_name(c: char) -> bool {
+    c.is_control() || c == '|' || c == '`'
 }
 
 fn cut_literal(literal: &str) -> String {
@@ -272,6 +295,27 @@ mod tests {
         let title = "\u{e9}".repeat(50);
         let name = call_name(&format!("it(\"{title}\", () => 1)"), string_keyed_call_name);
         assert_eq!(name, Some(format!("it(\"{}...\")", "\u{e9}".repeat(40))));
+    }
+
+    #[test]
+    fn markdown_breaking_characters_become_spaces() {
+        assert_eq!(
+            call_name("it(\"a | b `c`\", () => 1)", string_keyed_call_name),
+            Some("it(\"a   b  c \")".to_owned())
+        );
+    }
+
+    #[test]
+    fn backslashes_in_literals_get_a_backslash() {
+        assert_eq!(
+            call_name(r#"it("a\\", () => 1)"#, string_keyed_call_name),
+            Some(r#"it("a\\")"#.to_owned())
+        );
+    }
+
+    #[test]
+    fn calls_without_a_function_argument_get_no_name() {
+        assert_eq!(call_name("t(\"key\", 1)", string_keyed_call_name), None);
     }
 
     #[test]

@@ -41,7 +41,7 @@ use oxc_span::GetSpan;
 use oxc_span::Span;
 
 use fallow_types::extract::{
-    ANONYMOUS_ARROW_NAME, ANONYMOUS_FUNCTION_NAME, ComplexityContribution,
+    ANONYMOUS_ARROW_NAME, ANONYMOUS_FUNCTION_NAME, AnonymousFunctionKind, ComplexityContribution,
     ComplexityContributionKind, ComplexityMetric, FunctionComplexity,
 };
 
@@ -80,8 +80,9 @@ struct FunctionIdentity {
     name: String,
     is_private_member: bool,
     /// The name comes from the call or the function that holds this function
-    /// (see `FunctionComplexity::name_from_context`).
-    from_context: bool,
+    /// (see `FunctionComplexity::context_named`). The kind starts as
+    /// `Function` and an arrow sets `Arrow` when it takes the identity.
+    context_named: Option<AnonymousFunctionKind>,
 }
 
 impl FunctionIdentity {
@@ -89,7 +90,7 @@ impl FunctionIdentity {
         Self {
             name: name.into(),
             is_private_member: false,
-            from_context: false,
+            context_named: None,
         }
     }
 
@@ -97,7 +98,7 @@ impl FunctionIdentity {
         Self {
             name: name.into(),
             is_private_member: true,
-            from_context: false,
+            context_named: None,
         }
     }
 
@@ -105,7 +106,7 @@ impl FunctionIdentity {
         Self {
             name: name.into(),
             is_private_member: false,
-            from_context: true,
+            context_named: Some(AnonymousFunctionKind::Function),
         }
     }
 }
@@ -191,7 +192,7 @@ impl<'a> ComplexityVisitor<'a> {
             self.results.push(FunctionComplexity {
                 name: frame.identity.name,
                 is_private_member: frame.identity.is_private_member,
-                name_from_context: frame.identity.from_context,
+                context_named: frame.identity.context_named,
                 line,
                 col,
                 cyclomatic: frame.cyclomatic,
@@ -250,7 +251,7 @@ impl<'a> ComplexityVisitor<'a> {
         self.results.push(FunctionComplexity {
             name: fallow_types::extract::MODULE_UNIT_NAME.to_string(),
             is_private_member: false,
-            name_from_context: false,
+            context_named: None,
             line,
             col,
             cyclomatic: frame.cyclomatic,
@@ -372,7 +373,8 @@ impl<'a> ComplexityVisitor<'a> {
     /// ordinary non-React function from accruing the penalty (zero-FP posture).
     fn record_hook(&mut self, span: Span) {
         let react_shaped = self.stack.last().is_some_and(|frame| {
-            !frame.identity.from_context && frame_name_is_react_shaped(&frame.identity.name)
+            frame.identity.context_named.is_none()
+                && frame_name_is_react_shaped(&frame.identity.name)
         });
         if let Some(frame) = self.stack.last_mut() {
             frame.hook_count = frame.hook_count.saturating_add(1);
@@ -674,10 +676,15 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
     }
 
     fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'ast>) {
-        let identity = self
-            .pending_identity
-            .take()
-            .unwrap_or_else(|| FunctionIdentity::public(ANONYMOUS_ARROW_NAME));
+        let identity = self.pending_identity.take().map_or_else(
+            || FunctionIdentity::public(ANONYMOUS_ARROW_NAME),
+            |mut identity| {
+                if identity.context_named.is_some() {
+                    identity.context_named = Some(AnonymousFunctionKind::Arrow);
+                }
+                identity
+            },
+        );
 
         let is_nested = !self.stack.is_empty();
         if is_nested {
@@ -1491,10 +1498,10 @@ mod tests {
         let named: Vec<_> = results.iter().filter(|r| r.name == "fetchIssue").collect();
         assert_eq!(named.len(), 2, "{:?}", names(&results));
         let generator = named.iter().find(|r| r.cyclomatic == 2).expect("generator");
-        assert!(generator.name_from_context);
+        assert!(generator.context_named.is_some());
         let wrapper = named.iter().find(|r| r.cyclomatic == 1).expect("wrapper");
         assert!(
-            !wrapper.name_from_context,
+            wrapper.context_named.is_none(),
             "the binding name is not a context name"
         );
     }
@@ -1516,7 +1523,7 @@ mod tests {
             .iter()
             .find(|r| r.name == "load" && r.cyclomatic == 2)
             .expect("generator named load");
-        assert!(generator.name_from_context);
+        assert!(generator.context_named.is_some());
     }
 
     #[test]
@@ -1549,6 +1556,31 @@ mod tests {
     }
 
     #[test]
+    fn context_names_keep_the_placeholder_as_identity_name() {
+        let results = analyze(
+            "const load = () => Effect.gen(function* () {});\n\
+             Command.make(\"setup\", () => 1);",
+        );
+        let generator = results
+            .iter()
+            .find(|r| r.name == "load" && r.context_named.is_some())
+            .expect("generator");
+        assert_eq!(generator.identity_name(), "<anonymous>");
+        let callback = find_fn(&results, "Command.make(\"setup\")");
+        assert_eq!(
+            callback.context_named,
+            Some(AnonymousFunctionKind::Arrow),
+            "an arrow keeps its own placeholder kind"
+        );
+        assert_eq!(callback.identity_name(), "<arrow>");
+        let wrapper = results
+            .iter()
+            .find(|r| r.name == "load" && r.context_named.is_none())
+            .expect("wrapper");
+        assert_eq!(wrapper.identity_name(), "load");
+    }
+
+    #[test]
     fn effect_fn_span_names_the_body() {
         let results = analyze(
             "group.handle(\"get\", Effect.fn(function* ({ payload }) { if (payload) {} }));\n\
@@ -1574,7 +1606,7 @@ mod tests {
         assert!(all.contains(&"create"), "{all:?}");
         assert!(all.contains(&"doctor"), "{all:?}");
         assert!(all.contains(&"named"), "{all:?}");
-        assert!(results.iter().all(|r| !r.name_from_context), "{all:?}");
+        assert!(results.iter().all(|r| r.context_named.is_none()), "{all:?}");
     }
 
     #[test]
@@ -1605,13 +1637,13 @@ mod tests {
             "Command.make(\"Setup\", () => Effect.gen(function* () { useThing(); }));\n\
              const Panel = () => run(function* () { useThing(); });",
         );
-        for result in results.iter().filter(|r| r.name_from_context) {
+        for result in results.iter().filter(|r| r.context_named.is_some()) {
             assert_eq!(result.cognitive, 0, "{}", result.name);
         }
         assert!(
             results
                 .iter()
-                .any(|r| r.name_from_context && r.name == "Panel")
+                .any(|r| r.context_named.is_some() && r.name == "Panel")
         );
     }
 
@@ -1657,7 +1689,7 @@ mod tests {
         );
         let generator = results
             .iter()
-            .find(|r| r.name == "outer" && r.name_from_context)
+            .find(|r| r.name == "outer" && r.context_named.is_some())
             .expect("generator");
         assert_eq!(generator.cognitive, 1, "the generator starts at nesting 0");
     }

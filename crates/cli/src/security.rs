@@ -1687,7 +1687,7 @@ fn function_spans(
             spans.push(FunctionSpan {
                 key: RuntimeFunctionKey {
                     path: path.clone(),
-                    function: function.name.clone(),
+                    function: function.identity_name().to_owned(),
                     line: function.line,
                 },
                 end_line: function.line.saturating_add(function.line_count),

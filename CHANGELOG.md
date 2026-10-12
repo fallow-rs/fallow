@@ -56,7 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `const load = () => Effect.gen(function* ...)`, gives `load`.
 
   Names that fallow gave before do not change, and scores do not change.
-  Coverage matching still treats these functions as anonymous. An identity
+  Coverage matching and runtime function identities still use the placeholder.
+  A renamed finding gets a new CodeClimate fingerprint one time. An identity
   baseline (`--baseline-mode identity`) gives the unused allowance of an
   `<anonymous>` or `<arrow>` bucket to new names in the same file, so a saved
   baseline stays valid. Re-save the baseline to record the new names. A file

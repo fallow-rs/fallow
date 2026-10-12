@@ -134,7 +134,7 @@ fn collect_module_thin_wrappers(
     let complexity_by_name: FxHashMap<&str, &FunctionComplexity> = module
         .complexity
         .iter()
-        .map(|c| (c.name.as_str(), c))
+        .map(|c| (c.identity_name(), c))
         .collect();
     let hook_counts = component_hook_counts(module);
 

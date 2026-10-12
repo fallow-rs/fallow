@@ -1236,6 +1236,27 @@ impl FileBranching {
     }
 }
 
+/// The kind of function that has no name of its own, which selects its
+/// placeholder name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+pub enum AnonymousFunctionKind {
+    /// A function expression: `<anonymous>`.
+    Function,
+    /// An arrow function: `<arrow>`.
+    Arrow,
+}
+
+impl AnonymousFunctionKind {
+    /// The placeholder name of this kind.
+    #[must_use]
+    pub const fn placeholder(self) -> &'static str {
+        match self {
+            Self::Function => ANONYMOUS_FUNCTION_NAME,
+            Self::Arrow => ANONYMOUS_ARROW_NAME,
+        }
+    }
+}
+
 /// Complexity metrics for a single function/method/arrow.
 #[derive(Debug, Clone, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 pub struct FunctionComplexity {
@@ -1247,14 +1268,15 @@ pub struct FunctionComplexity {
     /// Kept separately from `name` because a public string-named method may
     /// legally begin with `#` and remains eligible for runtime coverage.
     pub is_private_member: bool,
-    /// Whether `name` comes from the call or the function that holds this
+    /// `Some` when `name` comes from the call or the function that holds this
     /// function, not from its own declaration, binding, or key. Examples:
     /// `Command.make("setup")` for a callback argument, the `Effect.fn` span
-    /// name, or the name of the function that returns `Effect.gen(...)`.
+    /// name, or the name of the function that returns `Effect.gen(...)`. The
+    /// value is the kind of placeholder that the function had before.
     ///
-    /// Coverage producers record such a function without a name, so coverage
-    /// matching treats it as anonymous.
-    pub name_from_context: bool,
+    /// Coverage producers and runtime identities record such a function
+    /// without a name, so they use [`Self::identity_name`].
+    pub context_named: Option<AnonymousFunctionKind>,
     /// 1-based line number where the function starts.
     pub line: u32,
     /// 0-based byte column where the function starts.
@@ -1291,6 +1313,18 @@ pub struct FunctionComplexity {
     /// the two metrics accrue at different granularities). Always computed and
     /// cached; surfaced in JSON only behind `health --complexity-breakdown`.
     pub contributions: Vec<ComplexityContribution>,
+}
+
+impl FunctionComplexity {
+    /// The name that coverage producers and runtime identities use: the
+    /// placeholder for a function with a context name, else `name`.
+    #[must_use]
+    pub fn identity_name(&self) -> &str {
+        match self.context_named {
+            Some(kind) => kind.placeholder(),
+            None => &self.name,
+        }
+    }
 }
 
 /// Structural CSS metrics for a single style rule, computed from the parsed CSS
@@ -4516,7 +4550,7 @@ mod tests {
             complexity: vec![FunctionComplexity {
                 name: "work".to_string(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 2,

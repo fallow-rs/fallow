@@ -580,10 +580,8 @@ fn compute_crap_scores_estimated(
         let cc = f64::from(f.cyclomatic);
         // A context name is not an export name, also when it repeats the name
         // of the export that returns the function (`const load = () =>
-        // Effect.gen(...)`), so it never claims a direct test reference.
-        let directly_tested =
-            !f.name_from_context && test_referenced_exports.contains(f.name.as_str());
-        let estimated_coverage = if directly_tested {
+        // Effect.gen(...)`), so the lookup uses the identity name.
+        let estimated_coverage = if test_referenced_exports.contains(f.identity_name()) {
             DIRECT_TEST_COVERAGE_ESTIMATE
         } else if is_test_reachable {
             INDIRECT_TEST_COVERAGE_ESTIMATE
@@ -1150,13 +1148,8 @@ impl IstanbulFileCoverage {
         // A context name (`Command.make("setup")`, the name of the function
         // that returns `Effect.gen(...)`) is not the name that a coverage
         // producer records. It could match the record of the wrapper function
-        // on the same line, so the lookup uses the anonymous path.
-        let name = if function.name_from_context {
-            fallow_types::extract::ANONYMOUS_FUNCTION_NAME
-        } else {
-            function.name.as_str()
-        };
-        self.lookup(name, function.line, function.col)
+        // on the same line, so the lookup uses the placeholder.
+        self.lookup(function.identity_name(), function.line, function.col)
     }
 
     fn new(mut functions: Vec<IstanbulFunctionCoverage>, relocated: bool) -> Self {
@@ -3735,7 +3728,7 @@ mod tests {
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 7,
@@ -3766,7 +3759,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "a".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 3,
@@ -3782,7 +3775,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "b".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 2,
                     col: 0,
                     cyclomatic: 5,
@@ -4438,7 +4431,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "foo".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 5,
@@ -4575,7 +4568,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 2,
@@ -4595,7 +4588,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 3,
@@ -4683,7 +4676,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "complex_fn".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 30,
@@ -4703,7 +4696,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "simple_fn".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 1,
@@ -4786,7 +4779,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "orphan".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -4870,7 +4863,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "high".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 10,
@@ -4886,7 +4879,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "medium".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 11,
                     col: 0,
                     cyclomatic: 5,
@@ -4902,7 +4895,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "low".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 21,
                     col: 0,
                     cyclomatic: 2,
@@ -4918,7 +4911,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "trivial".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 31,
                     col: 0,
                     cyclomatic: 1,
@@ -5012,7 +5005,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 2,
@@ -5032,7 +5025,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     is_private_member: false,
-                    name_from_context: false,
+                    context_named: None,
                     line: 1,
                     col: 0,
                     cyclomatic: 3,
@@ -5152,7 +5145,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -5340,7 +5333,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -5455,7 +5448,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 2,
@@ -5519,7 +5512,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 7,
@@ -5628,7 +5621,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 2,
@@ -5693,7 +5686,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "trivial".into(),
                 is_private_member: false,
-                name_from_context: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -5739,7 +5732,7 @@ mod tests {
         fallow_types::extract::FunctionComplexity {
             name: "test_fn".into(),
             is_private_member: false,
-            name_from_context: false,
+            context_named: None,
             line: 1,
             col: 0,
             cyclomatic,
@@ -5762,7 +5755,7 @@ mod tests {
         fallow_types::extract::FunctionComplexity {
             name: name.into(),
             is_private_member: false,
-            name_from_context: false,
+            context_named: None,
             line,
             col: 0,
             cyclomatic,
@@ -6213,7 +6206,7 @@ mod tests {
     #[test]
     fn estimated_crap_context_name_is_not_a_direct_test_reference() {
         let mut generator = make_fn_complexity(10);
-        generator.name_from_context = true;
+        generator.context_named = Some(fallow_types::extract::AnonymousFunctionKind::Function);
         let mut refs = rustc_hash::FxHashSet::default();
         refs.insert("test_fn".to_string());
         let with_context_name = estimated_crap_default(
@@ -6798,7 +6791,7 @@ mod tests {
             Some(100.0),
             "a declared name matches the wrapper record"
         );
-        generator.name_from_context = true;
+        generator.context_named = Some(fallow_types::extract::AnonymousFunctionKind::Function);
         assert_eq!(file_coverage.lookup_function(&generator), Some(0.0));
     }
 
