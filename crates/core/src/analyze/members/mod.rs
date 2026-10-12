@@ -22,6 +22,7 @@ use fallow_types::extract::{
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+mod external_override;
 mod factory;
 mod fluent_chain;
 mod heritage;
@@ -29,6 +30,7 @@ mod instance;
 mod playwright;
 mod typed_property;
 
+use external_override::credit_external_override_members;
 use factory::*;
 use fluent_chain::*;
 use heritage::*;
@@ -68,9 +70,11 @@ const NATIVE_ERROR_BASE_NAMES: &[&str] = &[
     "AggregateError",
 ];
 
-/// Runtime-used members on error subclasses. Kept narrow so unrelated members
-/// on error classes still report.
-const ERROR_SUBCLASS_RUNTIME_MEMBERS: &[&str] = &["name"];
+/// Runtime-used members on error subclasses: the `Error` instance protocol
+/// that runtimes read to print and to inspect an error, and `toString`, which
+/// string conversion calls. Kept narrow so unrelated members on error classes
+/// still report.
+const ERROR_SUBCLASS_RUNTIME_MEMBERS: &[&str] = &["name", "message", "stack", "cause", "toString"];
 
 fn is_native_error_base_name(name: &str) -> bool {
     NATIVE_ERROR_BASE_NAMES.contains(&name)
@@ -1189,6 +1193,8 @@ fn collect_propagated_member_accesses(
             .implementers_by_interface,
         &mut accessed_members,
     );
+
+    credit_external_override_members(input.resolved_modules, input.modules, &mut accessed_members);
 
     propagate_angular_template_member_accesses(
         input.graph,

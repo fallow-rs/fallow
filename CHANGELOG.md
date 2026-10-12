@@ -143,6 +143,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `export * as Ns from`. Re-export barrels between the namespace and the class
   are followed. A local binding that shadows the namespace does not credit the
   member.
+- **Members that a package or the runtime calls are no longer unused class
+  members.** Two cases are now credited:
+  - An `override` member of a class whose base comes from a package or is a
+    global constructor, for example `override onStop()` on a subclass of
+    `Container` from `@cloudflare/containers`, or `override get message()` on
+    a `Schema.TaggedError` or `Data.TaggedError` class from Effect.
+  - `message`, `stack`, `cause` and `toString` on a subclass of a native
+    `Error`, also without `override`. The runtime reads them to print an
+    error. Before, only `name` got this credit.
+
+  An `override` gets no new credit when the base is a project class, a mixin
+  call that takes a class (`extends Mixin(LocalBase)`), an unresolved import,
+  or a local class with the name of a global.
 - **The config JSON Schema now accepts `extends` as a single string.** The
   loader already accepted `"extends": "./base.json"` and the array form. The
   schema allowed only the array, so editors flagged a valid config. The

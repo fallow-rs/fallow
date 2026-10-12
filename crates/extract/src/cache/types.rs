@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 352;
+pub(super) const CACHE_VERSION: u32 = 353;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -65,7 +65,7 @@ assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 96);
 assert_cached_type_size!(CachedReExport, 104);
-assert_cached_type_size!(CachedMember, 64);
+assert_cached_type_size!(CachedMember, 88);
 assert_cached_type_size!(CachedDynamicImportPattern, 64);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
@@ -591,6 +591,9 @@ pub struct CachedMember {
     /// last statement is `return this`). Drives fluent-chain credit. See
     /// issue #387.
     pub(crate) is_self_returning: bool,
+    /// Root identifier of the class `extends` expression for an `override`
+    /// member, else `None`.
+    pub(crate) override_base: Option<String>,
 }
 
 /// Cached dynamic import pattern data (template literals, `import.meta.glob`).

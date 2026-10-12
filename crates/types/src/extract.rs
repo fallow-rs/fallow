@@ -2260,6 +2260,13 @@ pub struct MemberInfo {
     /// `.build()`. See issue #387.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_self_returning: bool,
+    /// Root identifier of the class `extends` expression, set only when the
+    /// member has the `override` modifier: `Container` in
+    /// `extends Container<Env>`, `Schema` in `extends Schema.TaggedError<E>()(...)`.
+    /// The analysis credits the member when this root names code outside the
+    /// project, because that code calls the overridden member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub override_base: Option<String>,
 }
 
 /// The kind of member.

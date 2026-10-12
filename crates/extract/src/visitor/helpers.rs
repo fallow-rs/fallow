@@ -936,16 +936,23 @@ pub(super) fn has_angular_plural_query_decorator(
 
 pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<MemberInfo> {
     let class_name = class.id.as_ref().map(|id| id.name.as_str());
+    let heritage_root = class
+        .heritage
+        .as_ref()
+        .and_then(|heritage| heritage_root_name(&heritage.expression));
+    let override_base = |is_override: bool| heritage_root.clone().filter(|_| is_override);
     let mut members = Vec::new();
     for element in &class.body.body {
         match element {
             ClassElement::MethodDefinition(method) => {
-                if let Some(member) = build_method_member(method, class_name) {
+                if let Some(mut member) = build_method_member(method, class_name) {
+                    member.override_base = override_base(method.r#override);
                     members.push(member);
                 }
             }
             ClassElement::PropertyDefinition(prop) => {
-                if let Some(member) = build_property_member(prop, is_angular_class) {
+                if let Some(mut member) = build_property_member(prop, is_angular_class) {
+                    member.override_base = override_base(prop.r#override);
                     members.push(member);
                 }
             }
@@ -953,6 +960,59 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
         }
     }
     members
+}
+
+/// Whether a heritage call argument is data and not a class to mix in.
+///
+/// Literals and object literals without a spread are data. An object
+/// property can name a schema (`{ user: User }` in an Effect error), so object
+/// values are not checked. An array counts only when no element is a bare
+/// identifier, member expression or spread, because `Mixin([LocalBase])`
+/// lists classes.
+fn is_heritage_data_argument(arg: &Argument<'_>) -> bool {
+    match arg {
+        Argument::StringLiteral(_)
+        | Argument::NumericLiteral(_)
+        | Argument::BooleanLiteral(_)
+        | Argument::NullLiteral(_)
+        | Argument::TemplateLiteral(_) => true,
+        Argument::ObjectExpression(object) => object
+            .properties
+            .iter()
+            .all(|property| matches!(property, ObjectPropertyKind::ObjectProperty(_))),
+        Argument::ArrayExpression(array) => array.elements.iter().all(|element| {
+            !matches!(
+                element,
+                ArrayExpressionElement::Identifier(_)
+                    | ArrayExpressionElement::StaticMemberExpression(_)
+                    | ArrayExpressionElement::SpreadElement(_)
+            )
+        }),
+        _ => false,
+    }
+}
+
+/// Root identifier of a class `extends` expression.
+///
+/// `Base` for `extends Base`, `ns` for `extends ns.Base`, `Schema` for
+/// `extends Schema.TaggedError<E>()("E", {...})`. A call returns `None` unless
+/// every argument is a literal, an object literal or an array literal: a
+/// mixin such as `Mixin(LocalBase)` can take a project class that declares
+/// the overridden member.
+fn heritage_root_name(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Identifier(ident) => Some(ident.name.to_string()),
+        Expression::StaticMemberExpression(member) => heritage_root_name(&member.object),
+        Expression::CallExpression(call) => {
+            if !call.arguments.iter().all(is_heritage_data_argument) {
+                return None;
+            }
+            heritage_root_name(&call.callee)
+        }
+        Expression::TSInstantiationExpression(inst) => heritage_root_name(&inst.expression),
+        Expression::ParenthesizedExpression(paren) => heritage_root_name(&paren.expression),
+        _ => None,
+    }
 }
 
 /// Build a `MemberInfo` for a non-constructor, non-private/protected method.
@@ -987,6 +1047,7 @@ fn build_method_member(
         decorator_names,
         is_instance_returning_static,
         is_self_returning,
+        override_base: None,
     })
 }
 
@@ -1024,6 +1085,7 @@ fn build_property_member(
         decorator_names,
         is_instance_returning_static: false,
         is_self_returning: false,
+        override_base: None,
     })
 }
 

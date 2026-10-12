@@ -1277,6 +1277,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
+                        override_base: None,
                     },
                     MemberInfo {
                         name: "listUsers".to_string(),
@@ -1286,6 +1287,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
+                        override_base: None,
                     },
                     MemberInfo {
                         name: "baseUrl".to_string(),
@@ -1295,6 +1297,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
+                        override_base: None,
                     },
                 ],
                 is_side_effect_used: false,
@@ -1318,6 +1321,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
+                        override_base: None,
                     },
                     MemberInfo {
                         name: "Inactive".to_string(),
@@ -1327,6 +1331,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
+                        override_base: None,
                     },
                     MemberInfo {
                         name: "Pending".to_string(),
@@ -1336,6 +1341,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         decorator_names: Vec::new(),
                         is_instance_returning_static: false,
                         is_self_returning: false,
+                        override_base: None,
                     },
                 ],
                 is_side_effect_used: false,

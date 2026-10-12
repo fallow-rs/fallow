@@ -675,6 +675,7 @@ pub(crate) mod member_serde {
                 decorator_names: cached.decorator_names,
                 is_instance_returning_static: cached.is_instance_returning_static,
                 is_self_returning: cached.is_self_returning,
+                override_base: None,
             }
         }
     }

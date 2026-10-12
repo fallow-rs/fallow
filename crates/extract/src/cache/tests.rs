@@ -774,6 +774,7 @@ fn module_to_cached_roundtrip_members() {
                     decorator_names: Vec::new(),
                     is_instance_returning_static: false,
                     is_self_returning: false,
+                    override_base: None,
                 },
                 MemberInfo {
                     name: "greet".to_string(),
@@ -783,6 +784,7 @@ fn module_to_cached_roundtrip_members() {
                     decorator_names: Vec::new(),
                     is_instance_returning_static: false,
                     is_self_returning: false,
+                    override_base: None,
                 },
                 MemberInfo {
                     name: "name".to_string(),
@@ -792,6 +794,7 @@ fn module_to_cached_roundtrip_members() {
                     decorator_names: Vec::new(),
                     is_instance_returning_static: false,
                     is_self_returning: false,
+                    override_base: None,
                 },
             ],
             is_side_effect_used: false,
@@ -1392,6 +1395,7 @@ fn module_to_cached_roundtrip_member_decorators() {
                 decorator_names: vec!["Inject".to_string()],
                 is_instance_returning_static: false,
                 is_self_returning: false,
+                override_base: None,
             }],
             is_side_effect_used: false,
             super_class: None,

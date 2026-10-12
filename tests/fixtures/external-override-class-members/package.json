@@ -1,0 +1,9 @@
+{
+  "name": "external-override-class-members-fixture",
+  "main": "src/app.ts",
+  "dependencies": {
+    "@acme/containers": "1.0.0",
+    "@acme/effect": "1.0.0",
+    "@acme/mixins": "1.0.0"
+  }
+}

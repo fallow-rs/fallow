@@ -2434,6 +2434,7 @@ mod tests {
             decorator_names: vec![],
             is_instance_returning_static: false,
             is_self_returning: false,
+            override_base: None,
         }];
         let graph = source_consumer_graph(vec![owner], true, false, Vec::new());
 
@@ -2596,6 +2597,7 @@ mod tests {
             decorator_names: vec![],
             is_instance_returning_static: false,
             is_self_returning: false,
+            override_base: None,
         };
         let resolved_modules = vec![
             ResolvedModule {
@@ -2689,6 +2691,7 @@ mod tests {
             decorator_names: vec![],
             is_instance_returning_static: false,
             is_self_returning: false,
+            override_base: None,
         };
         let files = vec![DiscoveredFile {
             id: FileId(0),
@@ -2854,6 +2857,7 @@ mod tests {
             decorator_names: vec![],
             is_instance_returning_static: false,
             is_self_returning: false,
+            override_base: None,
         };
         let resolved_modules = vec![
             ResolvedModule {
@@ -2935,6 +2939,7 @@ mod tests {
             decorator_names: vec![],
             is_instance_returning_static: false,
             is_self_returning: false,
+            override_base: None,
         };
         let resolved_modules = vec![
             ResolvedModule {

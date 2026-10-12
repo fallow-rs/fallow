@@ -218,6 +218,7 @@ impl ModuleInfoExtractor {
                     decorator_names: Vec::new(),
                     is_instance_returning_static: false,
                     is_self_returning: false,
+                    override_base: None,
                 })
             })
             .collect();
@@ -360,6 +361,7 @@ impl ModuleInfoExtractor {
             decorator_names: Vec::new(),
             is_instance_returning_static: false,
             is_self_returning: false,
+            override_base: None,
         });
     }
 

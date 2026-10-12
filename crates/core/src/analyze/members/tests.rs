@@ -160,6 +160,7 @@ fn make_member(name: &str, kind: MemberKind) -> MemberInfo {
         decorator_names: Vec::new(),
         is_instance_returning_static: false,
         is_self_returning: false,
+        override_base: None,
     }
 }
 
@@ -1408,6 +1409,7 @@ fn decorated_class_member_not_flagged() {
                 decorator_names: vec!["Column".to_string()],
                 is_instance_returning_static: false,
                 is_self_returning: false,
+                override_base: None,
             }],
             Some(0),
         )],

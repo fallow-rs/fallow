@@ -220,6 +220,7 @@ fn collect_store_member_keys(obj: &ObjectExpression<'_>, members: &mut Vec<Membe
             decorator_names: Vec::new(),
             is_instance_returning_static: false,
             is_self_returning: false,
+            override_base: None,
         });
     }
 }
