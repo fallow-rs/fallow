@@ -164,6 +164,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `const { a } = await factory()`, a literal key such as `a` now counts as a
   read of that member on the class that the factory returns. A promise without
   `await` and a generator result credit no members.
+- **Complexity suppressions now apply to CRAP file scores.** Before, a
+  `fallow-ignore-next-line complexity` comment did not change the CRAP part
+  of `fallow health`. A suppressed function still set the file-score order,
+  the risk tag, `crap_above_threshold`, and the `AddTestCoverage` targets
+  and their evidence. Now these values use only unsuppressed functions. The
+  raw `crap_max` does not change: it is always the highest measured value.
+  File scores get three optional fields: `crap_suppressed`,
+  `crap_unsuppressed_max` and `crap_unsuppressed_effective_threshold`. For a
+  file with a suppressed function, the `AddTestCoverage` contributing factor
+  can now have `metric: "crap_unsuppressed_max"` instead of
+  `metric: "crap_max"`. A consumer that filters on `crap_max` must also
+  accept the new metric name.
 
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
