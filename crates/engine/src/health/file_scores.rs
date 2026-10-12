@@ -136,12 +136,18 @@ struct FileScoreInput<'a> {
 }
 
 fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreResult, HealthError> {
-    let analysis_output = if let Some(pre) = input.pre_computed {
+    let mut analysis_output = if let Some(pre) = input.pre_computed {
         pre
     } else {
         crate::dead_code::analyze_with_parse_result(input.config, input.modules)
             .map_err(|e| HealthError::message(format!("analysis failed: {e}"), 2))?
     };
+    // The detector runs for the whole project when only an override enables
+    // `prop-drilling`. Drop the chains whose source file resolves to `off`.
+    crate::effective_severity::apply_prop_drilling_severities(
+        &mut analysis_output.results,
+        input.config,
+    );
     match compute_file_scores(
         scoring::FileScoreComputeInput {
             modules: input.modules,

@@ -10018,6 +10018,69 @@ fn health_owned_sections_survive_file_score_selection_and_top() {
     assert!(score_only.get("prop_drilling_chains").is_none());
 }
 
+/// Base `off` with an override that enables `prop-drilling` for one source
+/// file. Health must report only the chain that starts in that file, and the
+/// framework detector must show the rule as active.
+#[test]
+fn health_prop_drilling_respects_source_override_with_base_off() {
+    let project = crate::common::copy_fixture("prop-drilling");
+    let root = project.path();
+    write_file(
+        &root.join("src/OtherPage.tsx"),
+        "import { Layout } from \"./Layout\";\n\nexport const OtherPage = ({ user }: { user: { name: string } }) => (\n  <Layout user={user} />\n);\n",
+    );
+    write_file(
+        &root.join("src/main.tsx"),
+        "import { Page } from \"./Page\";\nimport { OtherPage } from \"./OtherPage\";\n\nexport const App = () => {\n  const user = { name: \"Ada\" };\n  return (\n    <>\n      <Page user={user} />\n      <OtherPage user={user} />\n    </>\n  );\n};\n",
+    );
+    let run = |config: &str| {
+        write_file(&root.join(".fallowrc.json"), config);
+        let output = run_fallow_in_root(
+            "health",
+            root,
+            &["--format", "json", "--quiet", "--no-cache"],
+        );
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        parse_json(&output)
+    };
+    let sources = |report: &serde_json::Value| -> Vec<String> {
+        report["prop_drilling_chains"]
+            .as_array()
+            .map(|chains| {
+                chains
+                    .iter()
+                    .map(|chain| chain["hops"][0]["file"].as_str().unwrap().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let both = run(r#"{"rules":{"prop-drilling":"warn"}}"#);
+    assert_eq!(
+        sources(&both).len(),
+        2,
+        "{:#?}",
+        both["prop_drilling_chains"]
+    );
+
+    let report = run(
+        r#"{"rules":{"prop-drilling":"off"},"overrides":[{"files":["src/Page.tsx"],"rules":{"prop-drilling":"error"}}]}"#,
+    );
+    let chains = sources(&report);
+    assert_eq!(chains.len(), 1, "{:#?}", report["prop_drilling_chains"]);
+    assert!(chains[0].ends_with("src/Page.tsx"), "{chains:?}");
+    assert_eq!(report["vital_signs"]["prop_drilling_chain_count"], 1);
+    let detector = report["framework_health"]["detectors"]
+        .as_array()
+        .and_then(|detectors| {
+            detectors
+                .iter()
+                .find(|detector| detector["id"] == "prop-drilling")
+        })
+        .unwrap_or_else(|| panic!("{:#?}", report["framework_health"]));
+    assert_eq!(detector["status"], "active", "{detector:#?}");
+}
+
 // --- `summary.baseline_staleness` gains the gate verdict (issue #2673) ----
 //
 // Health has published the counts since 3.12.0 but never the verdict, so a

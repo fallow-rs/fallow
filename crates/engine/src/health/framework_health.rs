@@ -18,9 +18,10 @@ pub(super) fn build_framework_health_diagnostics(
         return None;
     }
 
+    let rules = detector_rules(config);
     let mut detectors = Vec::new();
     for framework in &detected_frameworks {
-        add_framework_detectors(&mut detectors, framework, &config.rules, facts);
+        add_framework_detectors(&mut detectors, framework, &rules, facts);
     }
 
     if detectors.is_empty() {
@@ -69,6 +70,24 @@ fn detect_frameworks(config: &ResolvedConfig, workspaces: &[WorkspaceInfo]) -> V
     frameworks.sort_unstable();
     frameworks.dedup();
     frameworks
+}
+
+/// The rules that decide the detector status.
+///
+/// The prop-drilling detector runs when the base rule is `off` and an
+/// override enables the rule, so the status reports the override severity.
+fn detector_rules(config: &ResolvedConfig) -> RulesConfig {
+    let mut rules = config.rules.clone();
+    if rules.prop_drilling == Severity::Off
+        && let Some(severity) = config
+            .overrides
+            .iter()
+            .filter_map(|override_config| override_config.rules.prop_drilling)
+            .find(|severity| *severity != Severity::Off)
+    {
+        rules.prop_drilling = severity;
+    }
+    rules
 }
 
 fn add_framework_detectors(

@@ -113,12 +113,15 @@ fn prepare_shared_analysis_output(
     if !needed {
         return Ok(None);
     }
-    if let Some(pre) = pre_computed {
-        return Ok(Some(pre));
-    }
-    crate::dead_code::analyze_with_parse_result(config, modules)
-        .map(Some)
-        .map_err(|e| HealthError::message(format!("analysis failed: {e}"), 2))
+    let mut artifacts = match pre_computed {
+        Some(pre) => pre,
+        None => crate::dead_code::analyze_with_parse_result(config, modules)
+            .map_err(|e| HealthError::message(format!("analysis failed: {e}"), 2))?,
+    };
+    // The detector runs for the whole project when only an override enables
+    // `prop-drilling`. Drop the chains whose source file resolves to `off`.
+    crate::effective_severity::apply_prop_drilling_severities(&mut artifacts.results, config);
+    Ok(Some(artifacts))
 }
 
 #[derive(Clone, Copy)]
