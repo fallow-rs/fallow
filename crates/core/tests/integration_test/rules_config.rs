@@ -298,6 +298,40 @@ fn ignore_exports_used_in_file_kind_form_can_target_types_only() {
     );
 }
 
+/// Issue #3347: a type used by a Vue compiler macro in the same SFC is a
+/// same-file use.
+#[test]
+fn ignore_exports_used_in_file_covers_vue_sfc_macro_type_arguments() {
+    let root = fixture_path("ignore-exports-used-in-file-vue");
+    let mut config = create_config(root);
+    config.ignore_exports_used_in_file = true.into();
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_type_names: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|e| e.export.export_name.as_str())
+        .collect();
+
+    for name in [
+        "ComponentProps",
+        "ComponentEmits",
+        "ModelValue",
+        "ComponentSlots",
+        "DefaultedProps",
+        "SplitProps",
+    ] {
+        assert!(
+            !unused_type_names.contains(&name),
+            "{name} is used by a macro in the same SFC, found: {unused_type_names:?}"
+        );
+    }
+    assert!(
+        unused_type_names.contains(&"DeadProps"),
+        "DeadProps has no same-file use and must still be reported, found: {unused_type_names:?}"
+    );
+}
+
 #[test]
 fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_references() {
     let root = fixture_path("ignore-exports-used-in-file");

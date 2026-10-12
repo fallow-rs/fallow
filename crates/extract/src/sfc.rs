@@ -1001,12 +1001,45 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
 }
 
 pub(crate) fn source_type_for_script(script: &SfcScript) -> SourceType {
-    match (script.is_typescript, script.is_jsx) {
+    source_type_for(script.is_typescript, script.is_jsx)
+}
+
+fn source_type_for(is_typescript: bool, is_jsx: bool) -> SourceType {
+    match (is_typescript, is_jsx) {
         (true, true) => SourceType::tsx(),
         (true, false) => SourceType::ts(),
         (false, true) => SourceType::jsx(),
         (false, false) => SourceType::mjs(),
     }
+}
+
+/// Join the inline `<script>` blocks of a Vue or Svelte SFC into one program
+/// source for whole-file binding analysis.
+///
+/// The SFC compilers merge `<script>` and `<script setup>` (Vue) or the module
+/// and instance scripts (Svelte) into one module, so a binding in one block is
+/// visible in the other. Each `generic="..."` constraint is kept as an
+/// unexported type alias, so a type that only the constraint uses still has a
+/// reference. The result uses TypeScript when any block uses TypeScript.
+/// Returns `None` when the SFC has no inline script.
+#[must_use]
+pub fn sfc_merged_script_source(source: &str) -> Option<(String, SourceType)> {
+    let scripts: Vec<SfcScript> = extract_sfc_scripts(source)
+        .into_iter()
+        .filter(|script| script.src.is_none())
+        .collect();
+    if scripts.is_empty() {
+        return None;
+    }
+    let is_typescript = scripts.iter().any(|script| script.is_typescript);
+    let is_jsx = scripts.iter().any(|script| script.is_jsx);
+    let mut merged = String::new();
+    for script in &scripts {
+        let body = build_generic_attr_probe_source(script);
+        merged.push_str(body.as_deref().unwrap_or(&script.body));
+        merged.push_str("\n;\n");
+    }
+    Some((merged, source_type_for(is_typescript, is_jsx)))
 }
 
 /// Build an augmented script body that pins the `generic="..."` constraint as
@@ -1272,6 +1305,26 @@ mod tests {
     use fallow_types::extract::{
         ClassThisMemberAccessFact, ClassThisWholeObjectUseFact, SemanticFactView,
     };
+
+    #[test]
+    fn merged_script_source_joins_inline_blocks_as_typescript() {
+        let source = r#"<script>export const a = 1;</script>
+<script setup lang="ts" generic="T extends Item">defineProps<{ a: T }>();</script>
+<script src="./external.ts"></script>"#;
+        let (merged, source_type) =
+            sfc_merged_script_source(source).expect("inline scripts give a source");
+        assert!(source_type.is_typescript());
+        assert!(merged.contains("export const a = 1;"));
+        assert!(merged.contains("defineProps<{ a: T }>();"));
+        assert!(merged.contains("<T extends Item>"));
+        assert!(!merged.contains("external"));
+    }
+
+    #[test]
+    fn merged_script_source_is_none_without_inline_script() {
+        assert!(sfc_merged_script_source("<template><div /></template>").is_none());
+        assert!(sfc_merged_script_source(r#"<script src="./a.ts"></script>"#).is_none());
+    }
 
     #[test]
     fn is_sfc_file_vue() {

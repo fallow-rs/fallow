@@ -214,17 +214,34 @@ fn is_route_referenced_by_tanstack_generated_tree(
         })
 }
 
-fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> FxHashSet<String> {
-    if module.exports.is_empty() || !is_js_like_source(path) {
-        return FxHashSet::default();
+/// Read the program source for the same-file use check. A Vue or Svelte SFC
+/// gives its merged inline scripts, so a type that a compiler macro such as
+/// `defineProps<T>()` uses counts as a same-file use (issue #3347).
+fn same_file_program_source(path: &std::path::Path) -> Option<(String, oxc_span::SourceType)> {
+    if fallow_extract::is_sfc_file(path) {
+        return fallow_extract::sfc_merged_script_source(&read_source(path));
     }
-
+    if !is_js_like_source(path) {
+        return None;
+    }
     let source = read_source(path);
     if source.is_empty() {
+        return None;
+    }
+    Some((
+        source,
+        oxc_span::SourceType::from_path(path).unwrap_or_default(),
+    ))
+}
+
+fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> FxHashSet<String> {
+    if module.exports.is_empty() {
         return FxHashSet::default();
     }
+    let Some((source, source_type)) = same_file_program_source(path) else {
+        return FxHashSet::default();
+    };
 
-    let source_type = oxc_span::SourceType::from_path(path).unwrap_or_default();
     let allocator = oxc_allocator::Allocator::default();
     let parser_return = oxc_parser::Parser::new(&allocator, &source, source_type).parse();
     let semantic_ret = oxc_semantic::SemanticBuilder::new()

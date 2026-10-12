@@ -1,0 +1,7 @@
+{
+  "name": "ignore-exports-used-in-file-vue",
+  "main": "src/main.ts",
+  "dependencies": {
+    "vue": "^3.5.0"
+  }
+}

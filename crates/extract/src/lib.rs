@@ -101,7 +101,7 @@ pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
 pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
-    is_sfc_file,
+    is_sfc_file, sfc_merged_script_source,
 };
 pub use sfc_css::{
     scoped_unused_classes, sfc_preprocessor_virtual_stylesheet, sfc_virtual_stylesheet,
