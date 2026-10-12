@@ -10323,3 +10323,30 @@ fn health_performance_reports_the_git_log_bytes_read() {
     let uncached = health_performance_git_log_bytes(root, &["--no-cache"]);
     assert_eq!(uncached, cold, "the same history gives the same byte count");
 }
+
+#[test]
+fn health_css_credits_keyframes_in_animation_shorthand_with_var() {
+    // Issue #3349: `var()` in the shorthand must not hide the literal name.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"css-repro-plain"}"#);
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"entry":["src/main.ts"],"rules":{"css-dead-surface":"warn"}}"#,
+    );
+    write_file(&root.join("src/main.ts"), "import \"./style.css\";\n");
+    write_file(
+        &root.join("src/style.css"),
+        ".fixture {\n  --duration: 200ms;\n  animation: pulse var(--duration) ease, glow var(--duration);\n}\n\
+         .other { animation: var(--name) 1s; }\n\
+         @keyframes pulse { from { opacity: 0; } to { opacity: 1; } }\n\
+         @keyframes glow { from { opacity: 0; } }\n\
+         @keyframes dead-anim { from { opacity: 0; } }\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_keyframes", "name"),
+        vec!["dead-anim".to_string()],
+        "literal names next to var() are credited; a var() name stays unresolved"
+    );
+}

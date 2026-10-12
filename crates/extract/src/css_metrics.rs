@@ -11,13 +11,13 @@
 
 use cssparser::{Delimiter, Parser, ParserInput, parse_important};
 use lightningcss::printer::PrinterOptions;
-use lightningcss::properties::Property;
 use lightningcss::properties::animation::AnimationName;
 use lightningcss::properties::box_shadow::BoxShadow;
 use lightningcss::properties::custom::{
-    CustomProperty, CustomPropertyName, Token, TokenOrValue, Variable,
+    CustomProperty, CustomPropertyName, Token, TokenOrValue, UnparsedProperty, Variable,
 };
 use lightningcss::properties::font::FontFamily;
+use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::CssRule;
 use lightningcss::rules::font_face::FontFaceProperty;
 use lightningcss::rules::keyframes::KeyframesName;
@@ -448,6 +448,9 @@ fn collect_property_tokens(property: &Property<'_>, acc: &mut Accumulator, rule_
                 collect_animation_name(&animation.name, &mut acc.referenced_keyframes);
             }
         }
+        Property::Unparsed(unparsed) => {
+            collect_unparsed_animation_references(unparsed, &mut acc.referenced_keyframes);
+        }
         Property::FontFamily(families) => {
             collect_font_family_references(families, &mut acc.referenced_font_families);
         }
@@ -574,6 +577,65 @@ fn collect_box_shadow_tokens(shadows: &[BoxShadow], acc: &mut Accumulator) {
 fn collect_animation_references(names: &[AnimationName<'_>], out: &mut FxHashSet<String>) {
     for name in names {
         collect_animation_name(name, out);
+    }
+}
+
+/// Keywords that can fill a non-name slot of an `animation` shorthand layer,
+/// plus the CSS-wide keywords. Any other identifier in a layer is the name.
+const ANIMATION_SHORTHAND_KEYWORDS: &[&str] = &[
+    "linear",
+    "ease",
+    "ease-in",
+    "ease-out",
+    "ease-in-out",
+    "step-start",
+    "step-end",
+    "infinite",
+    "normal",
+    "reverse",
+    "alternate",
+    "alternate-reverse",
+    "none",
+    "forwards",
+    "backwards",
+    "both",
+    "running",
+    "paused",
+    "auto",
+    "initial",
+    "inherit",
+    "unset",
+    "revert",
+    "revert-layer",
+];
+
+/// Credit the literal keyframe names in an `animation` / `animation-name`
+/// declaration that lightningcss keeps as a raw token list. This happens when
+/// the value contains `var()` or `env()`, for example
+/// `animation: pulse var(--duration) ease` (issue #3349). Only top-level
+/// identifiers count, so a `var()` in the name slot stays unresolved.
+fn collect_unparsed_animation_references(
+    unparsed: &UnparsedProperty<'_>,
+    out: &mut FxHashSet<String>,
+) {
+    if !matches!(
+        unparsed.property_id,
+        PropertyId::Animation(_) | PropertyId::AnimationName(_)
+    ) {
+        return;
+    }
+    for token in &unparsed.value.0 {
+        match token {
+            TokenOrValue::Token(Token::Ident(ident))
+                if !ANIMATION_SHORTHAND_KEYWORDS
+                    .iter()
+                    .any(|keyword| ident.eq_ignore_ascii_case(keyword)) =>
+            {
+                out.insert(ident.to_string());
+            }
+            TokenOrValue::AnimationName(name) => collect_animation_name(name, out),
+            _ => {}
+        }
     }
 }
 
@@ -1066,6 +1128,53 @@ mod tests {
             "referenced: {:?}",
             a.referenced_keyframes
         );
+    }
+
+    #[test]
+    fn animation_shorthand_with_var_references_keyframes() {
+        // A `var()` in the shorthand makes lightningcss keep the declaration as
+        // an unparsed token list. The literal name must still be credited.
+        let a = analytics(
+            "@keyframes pulse { from {} }\n\
+             .a { animation: pulse var(--duration) ease; }",
+        );
+        assert_eq!(a.referenced_keyframes, vec!["pulse".to_string()]);
+    }
+
+    #[test]
+    fn animation_shorthand_with_var_credits_each_comma_layer() {
+        let a = analytics(
+            "@keyframes fade { from {} }\n@keyframes slide { from {} }\n\
+             .a { animation: fade 1s infinite, slide var(--d) cubic-bezier(0, 0, 1, 1) both; }\n\
+             .b { -webkit-animation: fade var(--d); }",
+        );
+        assert_eq!(
+            a.referenced_keyframes,
+            vec!["fade".to_string(), "slide".to_string()]
+        );
+    }
+
+    #[test]
+    fn var_in_animation_name_position_stays_unresolved() {
+        let a = analytics(
+            "@keyframes pulse { from {} }\n\
+             .a { animation: var(--name) 1s ease-in-out infinite alternate both; }\n\
+             .b { animation-name: var(--other); }",
+        );
+        assert!(
+            a.referenced_keyframes.is_empty(),
+            "no literal name: {:?}",
+            a.referenced_keyframes
+        );
+    }
+
+    #[test]
+    fn animation_name_list_with_var_credits_literal_names() {
+        let a = analytics(
+            "@keyframes spin { from {} }\n\
+             .a { animation-name: var(--first), spin; }",
+        );
+        assert_eq!(a.referenced_keyframes, vec!["spin".to_string()]);
     }
 
     #[test]
