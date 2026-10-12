@@ -1863,9 +1863,10 @@ impl ModuleInfoExtractor {
         let proof = self
             .direct_binding_class_proof(reference.name.as_str(), Some(reference.span))
             .unwrap_or_else(|| BindingClassProof {
+                builtin_containers: std::sync::Arc::default(),
                 target_name: reference.name.to_string(),
                 target_reference_span: reference.span,
-                requirements: Vec::new(),
+                requirements: BindingRequirements::Empty,
             });
         self.pending_subclass_member_accesses
             .push(PendingSubclassMemberAccess {
