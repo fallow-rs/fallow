@@ -435,13 +435,11 @@ fn names_only_diff_risk_rules(directive: &str) -> bool {
 /// The test-environment token in a line of code, or `None`.
 fn test_environment_token(code: &str) -> Option<&'static str> {
     // The tokens count only outside string literals: a parser that compares
-    // source text with `'import.meta.vitest'` is not a test-only branch.
+    // source text with `'process.env.VITEST'` is not a test-only branch.
+    // `import.meta.vitest` is not a token: Vitest uses it to mark an in-source
+    // test block, which is test code and not a production branch.
     let outside = blank_string_literals(code);
-    for token in [
-        "import.meta.vitest",
-        "process.env.VITEST",
-        "process.env.JEST_WORKER_ID",
-    ] {
+    for token in ["process.env.VITEST", "process.env.JEST_WORKER_ID"] {
         if outside.contains(token) {
             return Some(token);
         }
@@ -602,12 +600,18 @@ mod tests {
 
     #[test]
     fn added_test_environment_branches_are_hits() {
-        let head = "if (process.env.NODE_ENV === 'test') return;\nif (process.env.NODE_ENV === 'production') x();\nconst w = process.env.JEST_WORKER_ID;\nif (process.env.VITEST) y();\nif (import.meta.vitest) z();\n// process.env.VITEST\n";
+        let head = "if (process.env.NODE_ENV === 'test') return;\nif (process.env.NODE_ENV === 'production') x();\nconst w = process.env.JEST_WORKER_ID;\nif (process.env.VITEST) y();\n// process.env.VITEST\n";
         let lines: Vec<u32> = test_only_branch_hits("", head)
             .iter()
             .map(|hit| hit.line)
             .collect();
-        assert_eq!(lines, vec![1, 3, 4, 5]);
+        assert_eq!(lines, vec![1, 3, 4]);
+    }
+
+    #[test]
+    fn vitest_in_source_test_block_is_not_a_hit() {
+        let head = "export const add = (a, b) => a + b;\nif (import.meta.vitest) {\n  const { it, expect } = import.meta.vitest;\n  it('adds', () => expect(add(1, 2)).toBe(3));\n}\n";
+        assert!(test_only_branch_hits("", head).is_empty());
     }
 
     #[test]

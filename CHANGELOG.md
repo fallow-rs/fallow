@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or focus marker, removed test cases, fewer assertions, or a less strict
   coverage threshold. `added-suppression` reports a new lint, type-check,
   coverage or Fallow suppression comment. `test-only-branch` reports a new
-  `process.env.NODE_ENV === 'test'` style check in source code.
+  `process.env.NODE_ENV === 'test'` style check in source code. A Vitest
+  in-source test block (`if (import.meta.vitest)`) is test code and is not
+  reported.
   `diverged-clone-sibling` reports an edit to one copy of duplicated code when
   the other copies did not change. `added-dependency` reports a new
   `package.json` dependency and is off by default. The other four rules are

@@ -1250,7 +1250,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         category: "Audit",
         name: "Test-Only Branches",
         short: "The change adds a test-environment branch to source code",
-        full: "`fallow audit` reports a line that the change adds to a non-test source file and that checks the test environment: `process.env.NODE_ENV` compared with `'test'`, `process.env.VITEST`, `process.env.JEST_WORKER_ID` or `import.meta.vitest`. Such a branch lets the tests take a path that production does not take. Tool config files are skipped. Defaults to `warn`.",
+        full: "`fallow audit` reports a line that the change adds to a non-test source file and that checks the test environment: `process.env.NODE_ENV` compared with `'test'`, `process.env.VITEST` or `process.env.JEST_WORKER_ID`. Such a branch lets the tests take a path that production does not take. A Vitest in-source test block (`if (import.meta.vitest)`) is test code and is not reported. Tool config files are skipped. Defaults to `warn`.",
         docs_path: "cli/audit#diff-risk-rules",
     },
     RuleDef {
