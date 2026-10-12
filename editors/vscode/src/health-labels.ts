@@ -9,12 +9,19 @@
  * findings are measured and framed plainly.
  */
 
-export type HealthSection = "score" | "complexity" | "hotspots" | "targets" | "typeCoupling";
+export type HealthSection =
+  | "score"
+  | "complexity"
+  | "hotspots"
+  | "hiddenCoupling"
+  | "targets"
+  | "typeCoupling";
 
 export const HEALTH_SECTION_LABELS: Record<HealthSection, string> = {
   score: "Score",
   complexity: "Complexity",
   hotspots: "Hotspot Candidates",
+  hiddenCoupling: "Hidden Change Coupling",
   targets: "Refactoring Candidates",
   typeCoupling: "Type Coupling",
 };
@@ -24,6 +31,7 @@ export const HEALTH_SECTION_ICONS: Record<HealthSection, string> = {
   score: "pulse",
   complexity: "flame",
   hotspots: "git-commit",
+  hiddenCoupling: "git-compare",
   targets: "tools",
   typeCoupling: "references",
 };

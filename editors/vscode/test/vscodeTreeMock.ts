@@ -65,8 +65,14 @@ export const createTreeViewVscodeMock = (workspacePath: string): Record<string, 
     EventEmitter: FakeEventEmitter,
     MarkdownString: FakeMarkdownString,
     Range: FakeRange,
-    ThemeIcon: class {
+    ThemeColor: class {
       public constructor(public readonly id: string) {}
+    },
+    ThemeIcon: class {
+      public constructor(
+        public readonly id: string,
+        public readonly color?: { readonly id: string },
+      ) {}
     },
     TreeItem: FakeTreeItem,
     TreeItemCollapsibleState: {

@@ -96,6 +96,84 @@ const typeCouplingReport = (): HealthOutput =>
     },
   }) as unknown as HealthOutput;
 
+const hiddenCouplingReport = (): HealthOutput =>
+  ({
+    findings: [],
+    summary: {},
+    change_coupling: {
+      since: "12 months",
+      commits_analyzed: 12,
+      commits_skipped: 0,
+      total_pairs: 3,
+      thresholds: {
+        max_files_per_commit: 30,
+        min_revisions: 5,
+        min_shared_revisions: 5,
+        min_degree: 0.3,
+        strong_degree: 0.5,
+      },
+      pairs: [
+        {
+          path_a: "src/a.ts",
+          path_b: "src/b.ts",
+          revisions_a: 6,
+          revisions_b: 6,
+          shared_revisions: 6,
+          degree: 1,
+          strong: true,
+        },
+        {
+          path_a: "src/c.ts",
+          path_b: "src/d.ts",
+          revisions_a: 10,
+          revisions_b: 6,
+          shared_revisions: 1,
+          degree: 0.4,
+        },
+      ],
+    },
+  }) as unknown as HealthOutput;
+
+describe("HealthTreeProvider hidden change coupling", () => {
+  it("lists each pair with its degree, shared commits and strong mark", () => {
+    const provider = new HealthTreeProvider();
+    provider.update(hiddenCouplingReport());
+
+    const sections = provider.getChildren() as TestTreeItem[];
+    expect(sections.map((section) => section.label)).toEqual(["Hidden Change Coupling (3)"]);
+
+    const pairs = provider.getChildren(sections[0] as never) as TestTreeItem[];
+    expect(pairs.map((pair) => pair.label)).toEqual([
+      "src/a.ts <-> src/b.ts",
+      "src/c.ts <-> src/d.ts",
+    ]);
+
+    expect(pairs.map((pair) => (pair.iconPath as { color?: { id: string } }).color?.id)).toEqual([
+      "charts.orange",
+      undefined,
+    ]);
+
+    const strong = provider.getChildren(pairs[0] as never) as TestTreeItem[];
+    expect(strong.map((row) => row.label)).toEqual([
+      "100% degree, 6 shared commits, strong",
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+    expect(strong[0]?.command).toBeUndefined();
+    expect(commandArgs(strong[2]!)).toMatchObject({ absolutePath: "/workspace/src/b.ts" });
+
+    const weak = provider.getChildren(pairs[1] as never) as TestTreeItem[];
+    expect(weak[0]?.label).toBe("40% degree, 1 shared commit");
+  });
+
+  it("omits the section when the report has no pair", () => {
+    const provider = new HealthTreeProvider();
+    provider.update({ findings: [], summary: {} } as unknown as HealthOutput);
+
+    expect(provider.getChildren()).toEqual([]);
+  });
+});
+
 describe("HealthTreeProvider type coupling", () => {
   it("navigates contributor evidence and cycle hops to exact semantic locations", () => {
     const provider = new HealthTreeProvider();

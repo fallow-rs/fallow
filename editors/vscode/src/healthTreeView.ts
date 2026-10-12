@@ -190,6 +190,40 @@ const buildHotspotLeaves = (report: HealthReport): HealthLeafItem[] =>
     });
   });
 
+type HiddenCouplingPair = NonNullable<HealthReport["change_coupling"]>["pairs"][number];
+
+const buildHiddenCouplingLeaf = (pair: HiddenCouplingPair): HealthLeafItem => {
+  const fileA = resolveWorkspaceFilePath(pair.path_a).relative;
+  const fileB = resolveWorkspaceFilePath(pair.path_b).relative;
+  const strong = pair.strong === true;
+  const detailText = `${(pair.degree * 100).toFixed(0)}% degree, ${pair.shared_revisions} shared commit${pair.shared_revisions === 1 ? "" : "s"}${strong ? ", strong" : ""}`;
+  const tooltip = new vscode.MarkdownString();
+  tooltip.appendMarkdown(
+    `**${escapeHealthMarkdown(fileA)} <-> ${escapeHealthMarkdown(fileB)}**\n\n${escapeHealthMarkdown(detailText)} (${pair.revisions_a} and ${pair.revisions_b} commits in total).\n\nThe files change together, but no import connects them. A change to one file can need a change to the other.\n\n_History evidence, verify before acting._`,
+  );
+  const fileLeaf = (path: string, relative: string): HealthLeafItem =>
+    new HealthLeafItem(middleElidePath(relative), "file", {
+      tooltip,
+      open: { path, line: 1, col: 0 },
+    });
+  return new HealthLeafItem(
+    `${middleElidePath(fileA)} <-> ${middleElidePath(fileB)}`,
+    "git-compare",
+    {
+      tooltip,
+      iconColor: strong ? "charts.orange" : null,
+      children: [
+        new HealthLeafItem(detailText, undefined, { tooltip }),
+        fileLeaf(pair.path_a, fileA),
+        fileLeaf(pair.path_b, fileB),
+      ],
+    },
+  );
+};
+
+const buildHiddenCouplingLeaves = (report: HealthReport): HealthLeafItem[] =>
+  (report.change_coupling?.pairs ?? []).map(buildHiddenCouplingLeaf);
+
 const buildTargetLeaves = (report: HealthReport): HealthLeafItem[] =>
   (report.targets ?? []).map((target) => {
     const { relative } = resolveWorkspaceFilePath(target.path);
@@ -320,6 +354,28 @@ const buildTypeCouplingLeaves = (report: HealthOutput): HealthLeafItem[] => {
   ];
 };
 
+/** The section headers of a report, in display order. Empty sections are left out. */
+const buildHealthSections = (report: HealthOutput): HealthSectionItem[] => {
+  const hotspots = buildHotspotLeaves(report);
+  const targets = buildTargetLeaves(report);
+  const sections: ReadonlyArray<readonly [HealthSection, HealthLeafItem[], number]> = [
+    // The score is a single summary row, so suppress the redundant "(1)" count.
+    ["score", buildScoreLeaves(report), 0],
+    ["complexity", buildComplexityLeaves(report), visibleComplexityFindings(report).length],
+    ["hotspots", hotspots, hotspots.length],
+    ["hiddenCoupling", buildHiddenCouplingLeaves(report), report.change_coupling?.total_pairs ?? 0],
+    ["targets", targets, targets.length],
+    [
+      "typeCoupling",
+      buildTypeCouplingLeaves(report),
+      typeCouplingReport(report)?.files.length ?? 0,
+    ],
+  ];
+  return sections
+    .filter(([, leaves]) => leaves.length > 0)
+    .map(([section, leaves, count]) => new HealthSectionItem(section, leaves, count));
+};
+
 export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
   private report: HealthOutput | null = null;
 
@@ -346,34 +402,7 @@ export class HealthTreeProvider implements vscode.TreeDataProvider<HealthItem> {
       return [...element.children];
     }
 
-    if (!this.report) {
-      return [];
-    }
-
-    const sections: HealthItem[] = [];
-    const addSection = (
-      section: HealthSection,
-      leaves: ReadonlyArray<HealthLeafItem>,
-      count: number,
-    ): void => {
-      if (leaves.length > 0) {
-        sections.push(new HealthSectionItem(section, leaves, count));
-      }
-    };
-
-    // The score is a single summary row, so suppress the redundant "(1)" count.
-    addSection("score", buildScoreLeaves(this.report), 0);
-    addSection(
-      "complexity",
-      buildComplexityLeaves(this.report),
-      visibleComplexityFindings(this.report).length,
-    );
-    addSection("hotspots", buildHotspotLeaves(this.report), this.report.hotspots?.length ?? 0);
-    addSection("targets", buildTargetLeaves(this.report), this.report.targets?.length ?? 0);
-    const coupling = typeCouplingReport(this.report);
-    addSection("typeCoupling", buildTypeCouplingLeaves(this.report), coupling?.files.length ?? 0);
-
-    return sections;
+    return this.report ? buildHealthSections(this.report) : [];
   }
 
   dispose(): void {
