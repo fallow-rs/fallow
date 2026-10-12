@@ -17,6 +17,7 @@ use crate::duplicates::{
 use crate::graph::{
     ExportNamespace, ImportPathHop as GraphImportPathHop, ModuleGraph, ModuleNode, ReferenceKind,
 };
+use crate::search_visibility::{SearchCheck, SearchTarget, SourceCache};
 
 /// Match exact module paths before considering abbreviated suffixes.
 ///
@@ -204,10 +205,7 @@ fn reference_to_export_reference(
         || PathBuf::from(format!("<unknown:{}>", r.from_file.0)),
         |m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
     );
-    ExportReference {
-        from_file: from_path,
-        kind: format_reference_kind(r.kind),
-    }
+    ExportReference::new(from_path, format_reference_kind(r.kind))
 }
 
 /// Project graph-owned effective routes into the public trace contract.
@@ -353,15 +351,19 @@ pub fn trace_export(
 }
 
 /// Distinct referencing files of one module export surface in one namespace.
+///
+/// Each reference carries the literal-search check: the consumer source is
+/// read on demand and compared with a whole-word search for the export name.
 fn direct_export_references(
     graph: &ModuleGraph,
     root: &Path,
+    sources: &mut SourceCache<'_>,
     file_id: crate::discover::FileId,
     export_name: &str,
     namespace: ExportNamespace,
 ) -> Vec<ExportReference> {
     let mut referenced_files = FxHashSet::default();
-    graph
+    let references: Vec<_> = graph
         .effective_export_surface_references(file_id, export_name, namespace)
         .into_iter()
         .filter(|reference| {
@@ -371,8 +373,28 @@ fn direct_export_references(
                 .is_some_and(crate::graph::ModuleNode::is_reachable)
         })
         .filter(|reference| referenced_files.insert(reference.from_file))
-        .map(|r| reference_to_export_reference(graph, root, r))
+        .collect();
+    if references.is_empty() {
+        return Vec::new();
+    }
+    let target = SearchTarget::new(graph, sources, file_id, export_name, namespace);
+    references
+        .into_iter()
+        .map(|reference| {
+            let mut export_reference = reference_to_export_reference(graph, root, reference);
+            if let Some(check) = target.check(graph, sources, reference) {
+                apply_search_check(&mut export_reference, check);
+            }
+            export_reference
+        })
         .collect()
+}
+
+fn apply_search_check(reference: &mut ExportReference, check: SearchCheck) {
+    reference.line = check.line;
+    reference.search_visibility = Some(check.visibility);
+    reference.reason = check.reason;
+    reference.search_as = check.search_as;
 }
 
 /// References that credit the traced declaration, with the namespace that
@@ -398,7 +420,9 @@ fn crediting_export_references(
     Vec<NamespacedExportReferences>,
 ) {
     let namespace = surface.namespace();
-    let references = direct_export_references(graph, root, file_id, export_name, namespace);
+    let mut sources = SourceCache::new(graph);
+    let references =
+        direct_export_references(graph, root, &mut sources, file_id, export_name, namespace);
     let other = match namespace {
         ExportNamespace::Type => ExportNamespace::Value,
         ExportNamespace::Value => ExportNamespace::Type,
@@ -411,7 +435,8 @@ fn crediting_export_references(
     if !same_binding {
         return (namespace, references, Vec::new());
     }
-    let other_references = direct_export_references(graph, root, file_id, export_name, other);
+    let other_references =
+        direct_export_references(graph, root, &mut sources, file_id, export_name, other);
     let by_namespace = if references.is_empty() || other_references.is_empty() {
         Vec::new()
     } else {
@@ -1044,13 +1069,36 @@ pub fn trace_impact_closure(
         .cloned()
         .unwrap_or_else(|| file_path.replace('\\', "/"));
 
+    let mut checks: FxHashMap<String, SearchCheck> = if paths.coordination_gap.is_empty() {
+        FxHashMap::default()
+    } else {
+        consumer_search_checks(graph, module.file_id)
+            .into_iter()
+            .filter_map(|(file_id, check)| {
+                let consumer = graph.modules.get(file_id.0 as usize)?;
+                let path = consumer
+                    .path
+                    .strip_prefix(root)
+                    .unwrap_or(&consumer.path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                Some((path, check))
+            })
+            .collect()
+    };
     let coordination_gap = paths
         .coordination_gap
         .into_iter()
-        .map(|gap| ImpactClosureGap {
-            consumer_file: gap.consumer_file,
-            consumed_symbols: gap.consumed_symbols,
-            note: "syntactic attention pointer, not a correctness proof".to_string(),
+        .map(|gap| {
+            let check = checks.remove(&gap.consumer_file);
+            ImpactClosureGap {
+                consumer_file: gap.consumer_file,
+                consumed_symbols: gap.consumed_symbols,
+                note: "syntactic attention pointer, not a correctness proof".to_string(),
+                search_visibility: check.as_ref().map(|check| check.visibility),
+                reason: check.as_ref().and_then(|check| check.reason),
+                search_as: check.and_then(|check| check.search_as),
+            }
         })
         .collect();
 
@@ -1059,6 +1107,37 @@ pub fn trace_impact_closure(
         affected_not_shown: paths.affected_not_shown,
         coordination_gap,
     })
+}
+
+/// The worst literal-search check per consumer of the value exports of
+/// `seed`, over every export the consumer references. The order of the levels
+/// is `missed`, then `renamed`, then `found`.
+fn consumer_search_checks(graph: &ModuleGraph, seed: FileId) -> FxHashMap<FileId, SearchCheck> {
+    let mut checks: FxHashMap<FileId, SearchCheck> = FxHashMap::default();
+    let Some(module) = graph.modules.get(seed.0 as usize) else {
+        return checks;
+    };
+    let mut sources = SourceCache::new(graph);
+    for export in module.exports.iter().filter(|export| !export.is_type_only) {
+        let name = export.name.to_string();
+        let target = SearchTarget::new(graph, &mut sources, seed, &name, ExportNamespace::Value);
+        let mut seen = FxHashSet::default();
+        for reference in &export.references {
+            if reference.from_file == seed || !seen.insert(reference.from_file) {
+                continue;
+            }
+            let Some(check) = target.check(graph, &mut sources, reference) else {
+                continue;
+            };
+            let worse = checks
+                .get(&reference.from_file)
+                .is_none_or(|known| check.visibility > known.visibility);
+            if worse {
+                checks.insert(reference.from_file, check);
+            }
+        }
+    }
+    checks
 }
 
 /// Which endpoint of a `--path` request did not resolve to exactly one module.
@@ -3495,10 +3574,10 @@ mod tests {
             file_reachable: true,
             is_entry_point: false,
             is_used: true,
-            direct_references: vec![ExportReference {
-                from_file: PathBuf::from(r"src\entry.ts"),
-                kind: "named import".to_string(),
-            }],
+            direct_references: vec![ExportReference::new(
+                PathBuf::from(r"src\entry.ts"),
+                "named import".to_string(),
+            )],
             direct_references_by_namespace: Vec::new(),
             star_export_ambiguity: None,
             re_export_chains: vec![ReExportChain {

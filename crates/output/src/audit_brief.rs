@@ -154,6 +154,69 @@ pub struct ImpactClosureFacts {
     /// subset of [`affected_not_shown`](Self::affected_not_shown): the gap
     /// deliberately skips story and test consumers that the affected set counts.
     pub coordination_gap: Vec<CoordinationGapFact>,
+    /// Consumers that a whole-word text search for a changed export name does
+    /// not find (`missed`), or finds only under another local name
+    /// (`renamed`). Only exports whose declaration statement overlaps an added
+    /// diff line count, and only consumers outside the diff. Absent when no
+    /// such consumer exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_gap: Option<SearchGapFacts>,
+}
+
+/// Maximum number of consumers listed per export in
+/// [`ExportSearchGapFact::consumers`]. The full count is in
+/// [`ExportSearchGapFact::total`].
+pub const SEARCH_GAP_CONSUMER_CAP: usize = 10;
+
+/// The literal-search gap of the changed exports: the consumers that a text
+/// search for the export name does not find or finds only under another name.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SearchGapFacts {
+    /// Number of `missed` and `renamed` consumers over all exports, before
+    /// the per-export cap.
+    pub total: usize,
+    /// One entry per changed export with at least one such consumer, sorted
+    /// by file and line.
+    pub exports: Vec<ExportSearchGapFact>,
+}
+
+/// The `missed` and `renamed` consumers of one changed export.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ExportSearchGapFact {
+    /// Root-relative path of the changed file that declares the export.
+    pub file: String,
+    /// The export name, `default` for a default export.
+    pub export_name: String,
+    /// 1-based line of the export.
+    pub line: u32,
+    /// Number of `missed` and `renamed` consumers of this export, before the
+    /// cap.
+    pub total: usize,
+    /// At most [`SEARCH_GAP_CONSUMER_CAP`] consumers, `missed` first, then by
+    /// path.
+    pub consumers: Vec<SearchGapConsumerFact>,
+}
+
+/// One consumer that a text search for the export name does not find, or
+/// finds only under another local name.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SearchGapConsumerFact {
+    /// Root-relative path of the consumer.
+    pub consumer_file: String,
+    /// 1-based line of the import statement in the consumer, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// `missed` or `renamed`.
+    pub search_visibility: fallow_types::trace::SearchVisibility,
+    /// Why the text search does not find the uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<fallow_types::trace::SearchGapReason>,
+    /// The name to search for in this consumer instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_as: Option<String>,
 }
 
 impl ImpactClosureFacts {
@@ -171,6 +234,7 @@ impl ImpactClosureFacts {
             affected_by_dir,
             affected_by_dir_omitted,
             coordination_gap,
+            search_gap: None,
         }
     }
 }

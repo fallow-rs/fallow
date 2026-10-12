@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [@miky-mfw](https://github.com/miky-mfw) for the request.
   (Closes [#3327](https://github.com/fallow-rs/fallow/issues/3327))
 
+- **Traces now tell you which consumers a name search does not find.** A
+  `grep -w` for an export name does not find every consumer: a default import
+  under another name, a barrel alias, or a whole-namespace use hides it. Each
+  `direct_references[]` entry of `fallow dead-code --trace FILE:NAME` now has
+  `line`, `search_visibility` (`found`, `renamed`, `missed`), `reason`, and
+  `search_as`. `search_as` is the name to search for instead. Each
+  `--impact-closure` coordination gap has the same fields. The MCP
+  `trace_export` and `impact_closure` tools return them too. `fallow audit
+  --brief` adds `impact_closure.search_gap`. It lists the `missed` and `renamed`
+  consumers of each export whose declaration the diff changes, with at most 10
+  consumers per export and a total. Fallow reads the consumer sources only for
+  the exports that it checks.
+
 ### Changed
 
 - **Workspace dependency declaration guidance is clearer.** Root imports of npm

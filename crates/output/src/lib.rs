@@ -92,9 +92,10 @@ pub use audit_branching::{
 };
 pub use audit_brief::{
     AFFECTED_DIR_CAP, AFFECTED_SAMPLE_CAP, AffectedDirectory, CoordinationGapFact, DiffTriage,
-    GraphFacts, ImpactClosureFacts, PartitionFacts, REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefHeader,
-    ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewBriefSubtractSections,
-    ReviewBriefWireOutput, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
+    ExportSearchGapFact, GraphFacts, ImpactClosureFacts, PartitionFacts,
+    REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefHeader, ReviewBriefOutput, ReviewBriefSchemaVersion,
+    ReviewBriefSubtractSections, ReviewBriefWireOutput, ReviewDeltas, ReviewEffort, ReviewUnitFact,
+    RiskClass, SEARCH_GAP_CONSUMER_CAP, SearchGapConsumerFact, SearchGapFacts,
     StandardReviewBriefOutput, build_review_brief_json_output,
     serialize_decision_surface_json_output, serialize_review_brief_json_output,
     serialize_walkthrough_guide_json_output, serialize_walkthrough_validation_json_output,

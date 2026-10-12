@@ -122,6 +122,77 @@ pub struct ExportReference {
     pub from_file: PathBuf,
     /// Reference kind, such as named import, default import, or re-export.
     pub kind: String,
+    /// 1-based line of the import statement in `from_file`. Absent when the
+    /// graph holds no source position for the reference or the file cannot be
+    /// read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Whether a whole-word text search for the export name finds this
+    /// consumer. Absent when the consumer source cannot be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_visibility: Option<SearchVisibility>,
+    /// Why a text search does not find the uses in this consumer. Absent when
+    /// `search_visibility` is `found`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<SearchGapReason>,
+    /// The name to search for in this consumer instead of the export name.
+    /// Absent when the export name finds the uses or no single name does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_as: Option<String>,
+}
+
+impl ExportReference {
+    /// A reference with no source position and no search check.
+    #[must_use]
+    pub const fn new(from_file: PathBuf, kind: String) -> Self {
+        Self {
+            from_file,
+            kind,
+            line: None,
+            search_visibility: None,
+            reason: None,
+            search_as: None,
+        }
+    }
+}
+
+/// Whether a whole-word text search for an export name finds a consumer that
+/// the module graph resolves. The levels sort from best to worst.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchVisibility {
+    /// The consumer source contains the export name, and the consumer uses it
+    /// under that name.
+    Found,
+    /// The consumer source contains the export name, but the consumer uses
+    /// the export under another local name.
+    Renamed,
+    /// The consumer source does not contain the export name.
+    Missed,
+}
+
+/// Why a text search for an export name does not find the uses in a consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchGapReason {
+    /// The consumer imports the export under another local name
+    /// (`import { foo as bar }`).
+    ImportAlias,
+    /// The consumer imports a default export under another local name.
+    DefaultImport,
+    /// A barrel re-exports the export under another name, and the consumer
+    /// imports that name.
+    ReExportAlias,
+    /// The consumer imports the whole module namespace and does not name the
+    /// export.
+    NamespaceUse,
+    /// The consumer is a barrel that forwards the export with `export *`.
+    StarReExport,
+    /// The consumer loads the module with a dynamic `import()` and does not
+    /// name the export.
+    DynamicImport,
 }
 
 /// Direct references that credit one namespace of an export binding.
@@ -674,6 +745,19 @@ pub struct ImpactClosureGap {
     pub consumed_symbols: Vec<String>,
     /// Scope note for the syntactic trace.
     pub note: String,
+    /// Whether a whole-word text search for the consumed symbol names finds
+    /// this consumer. When the consumer uses more than one symbol, the worst
+    /// level wins (`missed`, then `renamed`, then `found`). Absent when the
+    /// consumer source cannot be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_visibility: Option<SearchVisibility>,
+    /// Why a text search does not find the uses of the worst symbol. Absent
+    /// when `search_visibility` is `found`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<SearchGapReason>,
+    /// The name to search for in this consumer instead of the symbol name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_as: Option<String>,
 }
 
 /// Result of tracing a clone: all groups containing the code at a source

@@ -228,7 +228,7 @@ impl FallowMcp {
         run_recommend(&self.binary, params.0).await
     }
 
-    /// Trace why an export is considered used or unused. Returns file reachability, entry-point status, direct references, re-export chains, and a concise reason string. If export_name is a class / enum / store MEMBER rather than a top-level export, returns a member trace instead (carrying member_name, member_kind, owner_export, owner_is_used) that reports the owning class's reachability and usage plus a pointer to the matching --unused-<kind>-members command, so a class-member finding can be debugged too. Use this when an agent needs evidence before deleting or rewriting a supposedly unused export or class member.
+    /// Trace why an export is considered used or unused. Returns file reachability, entry-point status, direct references, re-export chains, and a concise reason string. If export_name is a class / enum / store MEMBER rather than a top-level export, returns a member trace instead (carrying member_name, member_kind, owner_export, owner_is_used) that reports the owning class's reachability and usage plus a pointer to the matching --unused-<kind>-members command, so a class-member finding can be debugged too. Use this when an agent needs evidence before deleting or rewriting a supposedly unused export or class member. References carry `search_visibility`; see fallow://tools/trace_export.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn trace_export(
         &self,
@@ -282,7 +282,7 @@ impl FallowMcp {
         run_trace_error_tool(params.0).await
     }
 
-    /// Trace the impact closure for a file. Runs `fallow dead-code --impact-closure <path> --format json --quiet` and returns the transitive affected-but-not-in-diff set plus coordination gaps for consumers of the file contract. This is evidence for review planning, not proof that the affected files are wrong. Supports root, config, production, workspace, no_cache, and threads.
+    /// Trace the impact closure for a file. Runs `fallow dead-code --impact-closure <path> --format json --quiet` and returns the transitive affected-but-not-in-diff set plus coordination gaps for consumers of the file contract. This is evidence for review planning, not proof that the affected files are wrong. Gaps carry `search_visibility`. Supports root, config, production, workspace, no_cache, and threads.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn impact_closure(
         &self,

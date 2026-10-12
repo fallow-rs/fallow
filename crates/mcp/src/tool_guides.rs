@@ -185,6 +185,21 @@ const GET_CLOUD_REVIEW_PACKET_SECTIONS: &[ToolGuideSection] = &[
     },
 ];
 
+/// The literal-search fields shared by `trace_export` and `impact_closure`.
+const SEARCH_VISIBILITY_DETAIL: &str = r"`search_visibility` says whether a whole-word text search for the export name (`grep -w`) finds the consumer. `found`: the consumer source contains the name and uses it under that name. `renamed`: the source contains the name, but the uses go by another local name. `missed`: the source does not contain the name. `reason` names the cause: `import-alias` (`import { foo as bar }`), `default-import` (a default import under another name), `re-export-alias` (a barrel renames the export), `namespace-use` (`import * as ns` with no `ns.foo`), `star-re-export`, or `dynamic-import`. `search_as` is the name to search for in that consumer instead. The check reads the consumer source when the tool runs. A match in a comment or a string counts as found, because a text search finds it too. The fields are absent when the consumer source cannot be read.";
+
+const TRACE_EXPORT_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
+    topic: "direct_references.search_visibility",
+    summary: "Which consumers a text search for the export name does not find.",
+    detail: SEARCH_VISIBILITY_DETAIL,
+}];
+
+const IMPACT_CLOSURE_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
+    topic: "coordination_gap.search_visibility",
+    summary: "Which gap consumers a text search for the symbol names does not find.",
+    detail: r"Each coordination gap carries `search_visibility`, `reason`, and `search_as` for the consumed symbols. When a consumer uses more than one symbol, the worst level wins: `missed`, then `renamed`, then `found`. The levels and reasons are the same as for `trace_export`: read fallow://tools/trace_export for their meaning.",
+}];
+
 /// Every tool with a long-form guide, in catalogue order.
 pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
@@ -202,6 +217,14 @@ pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
         tool: "get_cloud_review_packet",
         sections: GET_CLOUD_REVIEW_PACKET_SECTIONS,
+    },
+    ToolGuide {
+        tool: "trace_export",
+        sections: TRACE_EXPORT_SECTIONS,
+    },
+    ToolGuide {
+        tool: "impact_closure",
+        sections: IMPACT_CLOSURE_SECTIONS,
     },
 ];
 
