@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline, so a new error looked inherited and the audit could pass. Now
   audit compares the source text of these literals. A new error from such a
   change is introduced and fails the audit with exit code 1.
+- **`diffFile` in the Rust API and the Node binding now places patch paths
+  as the CLI `--diff-file` does.** Patch headers resolve against the analysis
+  root or its Git repository top level. Before, a patch with
+  repository-relative headers under a nested root silently removed all
+  findings. Now the findings on the changed lines stay in the report. When
+  the patch paths are foreign or ambiguous, the call now returns the full
+  report with a `not-applied` `diff-filter` outcome. Before, it returned an
+  applied empty scope.
+
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>
   commit`. The gate audited the session tree, so a finding there blocked a
