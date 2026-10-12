@@ -102,7 +102,14 @@ pub fn diverged_clone_siblings(
                 break;
             };
             match classify_copy(&fragment, head_text) {
-                CopyState::Unchanged => siblings.push(head_span),
+                CopyState::Unchanged(lines) => siblings.push(match lines {
+                    Some((start_line, end_line)) => CloneSpan {
+                        start_line,
+                        end_line,
+                        ..head_span
+                    },
+                    None => head_span,
+                }),
                 CopyState::Edited(line) => edited.push((head_span, line)),
                 CopyState::Removed => {
                     skip_group = true;
@@ -153,8 +160,10 @@ fn merge_same_copy(found: Vec<DivergedClone>) -> Vec<DivergedClone> {
 }
 
 enum CopyState {
-    /// The fragment is still in the head file, word for word.
-    Unchanged,
+    /// The fragment is still in the head file, word for word. Carries the
+    /// 1-based head lines of its first and last non-blank line, so a copy
+    /// that moved inside its file keeps its head location.
+    Unchanged(Option<(u32, u32)>),
     /// The fragment changed, and most of its lines survive. Carries the head
     /// line of the first surviving line.
     Edited(Option<u32>),
@@ -177,21 +186,27 @@ fn fragment_lines(text: &str, span: &CloneSpan) -> Vec<String> {
 
 fn classify_copy(fragment: &[String], head_text: &str) -> CopyState {
     if fragment.is_empty() {
-        return CopyState::Unchanged;
+        return CopyState::Unchanged(None);
     }
-    let head_lines: Vec<&str> = head_text
+    // Each non-blank head line with its 1-based line number.
+    let numbered: Vec<(u32, &str)> = head_text
         .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .enumerate()
+        .map(|(index, line)| (index, line.trim()))
+        .filter(|(_, line)| !line.is_empty())
+        .filter_map(|(index, line)| u32::try_from(index + 1).ok().map(|number| (number, line)))
         .collect();
-    let verbatim = head_lines.windows(fragment.len()).any(|window| {
+    let head_lines: Vec<&str> = numbered.iter().map(|(_, line)| *line).collect();
+    let verbatim = head_lines.windows(fragment.len()).position(|window| {
         window
             .iter()
             .zip(fragment)
             .all(|(head, base)| *head == base)
     });
-    if verbatim {
-        return CopyState::Unchanged;
+    if let Some(start) = verbatim {
+        let first = numbered[start].0;
+        let last = numbered[start + fragment.len() - 1].0;
+        return CopyState::Unchanged(Some((first, last)));
     }
     let head_set: FxHashSet<&str> = head_lines.iter().copied().collect();
     let surviving = fragment
@@ -341,6 +356,39 @@ mod tests {
         assert_eq!(found.len(), 1);
         let paths: Vec<&str> = found[0].siblings.iter().map(|s| s.path.as_str()).collect();
         assert_eq!(paths, vec!["src/b.ts", "src/c.ts"]);
+    }
+
+    const SHIFTED: &str = "import { round } from './round';\n";
+
+    fn shifted(path: &str) -> CloneSpan {
+        CloneSpan {
+            path: path.to_owned(),
+            start_line: 2,
+            end_line: 8,
+        }
+    }
+
+    #[test]
+    fn sibling_shifted_in_a_changed_file_that_still_clones_is_not_reported() {
+        let head_b = format!("{SHIFTED}{COPY}");
+        let head_groups = vec![vec![span("src/a.ts"), shifted("src/b.ts")]];
+        assert!(
+            run(
+                &["src/a.ts", "src/b.ts"],
+                Some(EDITED),
+                &head_b,
+                &head_groups
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn sibling_shifted_in_a_changed_file_reports_its_head_lines() {
+        let head_b = format!("{SHIFTED}{COPY}");
+        let found = run(&["src/a.ts", "src/b.ts"], Some(EDITED), &head_b, &[]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].siblings, vec![shifted("src/b.ts")]);
     }
 
     #[test]

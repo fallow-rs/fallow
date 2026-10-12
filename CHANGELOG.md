@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `package.json` dependency and is off by default. The other four rules are
   `warn` by default. Set a rule to `error` to fail the audit, or suppress one
   finding with `// fallow-ignore-next-line <rule>`. The findings are in the new
-  `diff_risk` JSON section, in SARIF, in CodeClimate and in the MCP `audit`
-  tool.
+  `diff_risk` JSON section, in SARIF, in CodeClimate, in GitHub annotations,
+  in the GitHub job summary and in the MCP `audit` tool.
 
 ### Changed
 

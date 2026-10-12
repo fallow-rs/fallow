@@ -270,7 +270,13 @@ fn is_type_or_test_file(root: &Path, rel: &str) -> bool {
 /// normal there.
 fn is_tool_config(rel: &str) -> bool {
     let name = rel.rsplit('/').next().unwrap_or(rel);
-    name.contains(".config.") || name.contains(".conf.") || name.contains("rc.")
+    // An rc file is a dot file whose first name part ends in `rc`, such as
+    // `.eslintrc.js`. `src.ts` and `arc.ts` are not rc files.
+    let dot_rc = name.strip_prefix('.').is_some_and(|rest| {
+        rest.split_once('.')
+            .is_some_and(|(stem, _ext)| stem.ends_with("rc"))
+    });
+    name.contains(".config.") || name.contains(".conf.") || dot_rc
 }
 
 fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec<RawFinding>) {
@@ -681,6 +687,21 @@ mod tests {
         raw.iter()
             .map(|finding| (finding.rule, finding.evidence.as_str()))
             .collect()
+    }
+
+    #[test]
+    fn tool_config_names_match_config_and_dot_rc_files_only() {
+        for name in [
+            "vite.config.ts",
+            "pkg/karma.conf.js",
+            ".eslintrc.js",
+            "pkg/.mocharc.cjs",
+        ] {
+            assert!(is_tool_config(name), "{name}");
+        }
+        for name in ["src.ts", "src/arc.ts", "lib/orc.js", "src/index.ts"] {
+            assert!(!is_tool_config(name), "{name}");
+        }
     }
 
     #[test]

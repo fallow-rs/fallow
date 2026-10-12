@@ -2538,6 +2538,48 @@ fn audit_duplication_section(env: &Value) -> String {
     )
 }
 
+/// The diff-risk findings of an audit. Every finding is introduced by the
+/// change and can set the verdict, so the summary lists each one.
+fn audit_diff_risk_section(env: &Value) -> String {
+    let diff_risk = env.get("diff_risk").cloned().unwrap_or(Value::Null);
+    let findings: Vec<&Value> = arr(&diff_risk, "findings").collect();
+    if findings.is_empty() {
+        return String::new();
+    }
+    let rows = findings
+        .iter()
+        .take(15)
+        .map(|finding| {
+            let path = rel_path_absolute_only(s(finding, "path"));
+            let line = u(finding, "line");
+            let location = if line > 0 {
+                format!("{path}:{line}")
+            } else {
+                path
+            };
+            format!(
+                "| {} | {} | {} | {} |",
+                markdown_table_code_span(s(finding, "rule")),
+                markdown_table_code_span(&location),
+                markdown_table_code_span(s(finding, "evidence")),
+                str_or(finding, "severity", "warn"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tail = if findings.len() > 15 {
+        format!(
+            "\n\n> {} more diff-risk findings in the full audit report",
+            findings.len() - 15
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "### Diff Risk\n\n| Rule | Location | Evidence | Severity |\n|:-----|:---------|:---------|:---------|\n{rows}{tail}\n\n"
+    )
+}
+
 /// Port of `summary-audit.jq`.
 #[must_use]
 fn render_audit_summary(env: &Value) -> String {
@@ -2589,6 +2631,7 @@ fn render_audit_summary(env: &Value) -> String {
     }
     out.push_str(&audit_complexity_section(env));
     out.push_str(&audit_duplication_section(env));
+    out.push_str(&audit_diff_risk_section(env));
     out.push_str(if s(&attribution, "gate") == "all" {
         "*Audit gate: all. Every finding in changed files affects the verdict.*"
     } else {

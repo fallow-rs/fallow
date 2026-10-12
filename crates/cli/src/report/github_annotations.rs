@@ -116,6 +116,7 @@ pub(crate) fn collect_annotations(
             collect_section(envelope, "dead_code", pm, &mut out, collect_check);
             collect_value_section(envelope, "complexity", &mut out, collect_health);
             collect_value_section(envelope, "duplication", &mut out, collect_dupes);
+            collect_value_section(envelope, "diff_risk", &mut out, collect_diff_risk);
         }
         EnvelopeKind::Combined => {
             collect_section(envelope, "check", pm, &mut out, collect_check);
@@ -1487,6 +1488,27 @@ fn collect_security(env: &Value, out: &mut Vec<Annotation>) {
                 "Local security candidate (severity: {severity}).\n\n  \u{2022} Sink: {callee}\n  \u{2022} Evidence: {}\n\nTreat this as a candidate for verification, not a confirmed vulnerability.",
                 s(finding, "evidence"),
             ),
+        );
+    }
+}
+
+/// Audit diff-risk findings. Each finding changes the audit verdict, so its
+/// level comes from its `severity`: `error` gives `::error`, any other value
+/// gives `::warning`.
+fn collect_diff_risk(env: &Value, out: &mut Vec<Annotation>) {
+    for finding in arr(env, "findings") {
+        let level = if s(finding, "severity") == "error" {
+            AnnotationLevel::Error
+        } else {
+            AnnotationLevel::Warning
+        };
+        push(
+            out,
+            level,
+            s(finding, "path"),
+            Anchor::gated_line(finding),
+            format!("fallow/{}", s(finding, "rule")),
+            format!("{} ({})", s(finding, "message"), s(finding, "evidence")),
         );
     }
 }

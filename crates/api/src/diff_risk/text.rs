@@ -287,19 +287,28 @@ fn comment_part(line: &str) -> Option<&str> {
 }
 
 /// The byte offset of the first `//`, `/*` or `<!--` marker. A `//` right
-/// after `:` is a URL scheme, not a comment.
+/// after `:` is a URL scheme, not a comment. A `//` or `/*` inside a
+/// single-line string literal is text, not a comment. The `<!--` search reads
+/// the raw line, because an apostrophe in markup text is not a quote.
 fn comment_start(line: &str) -> Option<usize> {
-    let bytes = line.as_bytes();
+    let code = blank_string_literals(line);
+    let bytes = code.as_bytes();
     let mut index = 0;
+    let mut script = None;
     while index + 1 < bytes.len() {
         let pair = (bytes[index], bytes[index + 1]);
         let is_line_comment = pair == (b'/', b'/') && (index == 0 || bytes[index - 1] != b':');
-        if is_line_comment || pair == (b'/', b'*') || bytes[index..].starts_with(b"<!--") {
-            return Some(index);
+        if is_line_comment || pair == (b'/', b'*') {
+            script = Some(index);
+            break;
         }
         index += 1;
     }
-    None
+    let markup = line.find("<!--");
+    match (script, markup) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 const fn is_ident_byte(byte: u8) -> bool {
@@ -445,7 +454,9 @@ fn test_environment_token(code: &str) -> Option<&'static str> {
 }
 
 /// `code` with the content of each string literal on the line replaced by
-/// spaces. The quotes stay. A backslash escapes the next character.
+/// spaces. The quotes stay. A backslash escapes the next character. Each
+/// character becomes as many spaces as it has bytes, so byte offsets in the
+/// result are byte offsets in `code`.
 fn blank_string_literals(code: &str) -> String {
     let mut out = String::with_capacity(code.len());
     let mut quote: Option<char> = None;
@@ -458,18 +469,13 @@ fn blank_string_literals(code: &str) -> String {
             out.push(c);
             continue;
         };
-        if escaped {
-            escaped = false;
-            out.push(' ');
-        } else if c == '\\' {
-            escaped = true;
-            out.push(' ');
-        } else if c == open {
+        if c == open && !escaped {
             quote = None;
             out.push(c);
-        } else {
-            out.push(' ');
+            continue;
         }
+        escaped = !escaped && c == '\\';
+        out.extend(std::iter::repeat_n(' ', c.len_utf8()));
     }
     out
 }
@@ -573,6 +579,17 @@ mod tests {
         let hits = added_suppression_hits("", head);
         let lines: Vec<u32> = hits.iter().map(|hit| hit.line).collect();
         assert_eq!(lines, vec![3, 5]);
+    }
+
+    #[test]
+    fn comment_markers_inside_string_literals_are_not_suppressions() {
+        let head = "out.push('/* eslint-disable */');\nout.push(\"// @ts-nocheck\");\nconst u = 'it\\'s'; // @ts-ignore\n<!-- eslint-disable -->\n";
+        let hits = added_suppression_hits("", head);
+        let evidence: Vec<(u32, &str)> = hits
+            .iter()
+            .map(|hit| (hit.line, hit.evidence.as_str()))
+            .collect();
+        assert_eq!(evidence, vec![(3, "@ts-ignore"), (4, "eslint-disable")]);
     }
 
     #[test]

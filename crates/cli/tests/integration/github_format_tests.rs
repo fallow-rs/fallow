@@ -1750,3 +1750,73 @@ fn truncated_package_cycle_group_is_visible_in_github_formats() {
     let summary = render_summary(EnvelopeKind::Audit, &audit, &LinkContext::default());
     assert_eq!(summary.matches(note).count(), 1, "{summary}");
 }
+
+/// An audit whose verdict comes only from diff-risk findings.
+fn audit_diff_risk_envelope() -> Value {
+    json!({
+        "kind": "audit",
+        "verdict": "fail",
+        "elapsed_ms": 12,
+        "changed_files_count": 1,
+        "summary": { "dead_code_issues": 0, "complexity_findings": 0, "duplication_clone_groups": 0 },
+        "attribution": { "gate": "new-only", "diff_risk_introduced": 2 },
+        "diff_risk": {
+            "findings": [
+                {
+                    "rule": "weakened-tests", "kind": "skip-only",
+                    "path": "src/a.test.ts", "line": 4,
+                    "message": "The change skips a test.", "evidence": "it.skip",
+                    "severity": "error", "introduced": true, "actions": []
+                },
+                {
+                    "rule": "added-dependency",
+                    "path": "package.json",
+                    "message": "The change adds a dependency.", "evidence": "left-pad",
+                    "severity": "warn", "introduced": true, "actions": []
+                }
+            ]
+        }
+    })
+}
+
+/// A diff-risk finding changes the audit verdict, so the annotation stream
+/// must show it at the level of its severity.
+#[test]
+fn annotations_render_audit_diff_risk_findings_at_their_severity() {
+    let rendered = render_annotations(
+        EnvelopeKind::Audit,
+        &audit_diff_risk_envelope(),
+        &plain_options(),
+    );
+    assert!(
+        rendered.contains(
+            "::error file=src/a.test.ts,line=4,title=fallow/weakened-tests::The change skips a test. (it.skip)"
+        ),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(
+            "::warning file=package.json,title=fallow/added-dependency::The change adds a dependency. (left-pad)"
+        ),
+        "{rendered}"
+    );
+}
+
+/// The job summary must name the findings that set the verdict.
+#[test]
+fn audit_summary_lists_diff_risk_findings() {
+    let rendered = render_summary(
+        EnvelopeKind::Audit,
+        &audit_diff_risk_envelope(),
+        &LinkContext::default(),
+    );
+    assert!(rendered.contains("### Diff Risk"), "{rendered}");
+    assert!(
+        rendered.contains("| `weakened-tests` | `src/a.test.ts:4` | `it.skip` | error |"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("| `added-dependency` | `package.json` | `left-pad` | warn |"),
+        "{rendered}"
+    );
+}
