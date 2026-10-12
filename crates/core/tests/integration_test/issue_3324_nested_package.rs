@@ -189,3 +189,36 @@ fn symlink_ignored_malformed_and_outside_manifests_do_not_credit_imports() {
         );
     }
 }
+
+#[test]
+fn nameless_nested_manifests_do_not_block_root_declarations() {
+    let temp = tempfile::tempdir().expect("temporary project");
+    let root = temp.path().canonicalize().expect("canonical project");
+    write(
+        &root.join("package.json"),
+        r#"{ "name": "root", "workspaces": ["packages/*"], "dependencies": { "react": "*" } }"#,
+    );
+    write(
+        &root.join("index.ts"),
+        "import './src/esm/util'; import './src/local/util';\n",
+    );
+    write(
+        &root.join("src/esm/package.json"),
+        r#"{ "type": "module" }"#,
+    );
+    write(&root.join("src/esm/util.ts"), "import 'react';\n");
+    write(
+        &root.join("src/local/package.json"),
+        r#"{ "dependencies": { "@repro/local": "*" } }"#,
+    );
+    write(
+        &root.join("src/local/util.ts"),
+        "import 'react'; import '@repro/local';\n",
+    );
+    let results = fallow_core::analyze(&create_config(root.clone())).expect("analysis succeeds");
+    assert_eq!(
+        unlisted_sites(&results, &root),
+        Vec::<(String, String)>::new(),
+        "a marker manifest is not an owner, and a nameless manifest inherits root declarations"
+    );
+}

@@ -2348,11 +2348,19 @@ fn add_source_package_manifests(
                 continue;
             };
             let mut deps: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
+            // A manifest without a name and without dependencies is a marker
+            // (for example `{"type":"module"}`), not a package boundary.
+            if pkg.name.is_none() && deps.is_empty() {
+                continue;
+            }
+            // A manifest without a name cannot be published, so it inherits
+            // the declarations of its ancestors like a private package.
+            let is_private = pkg.private == Some(true) || pkg.name.is_none();
             deps.extend(pkg.name);
             manifests.push(WorkspaceDependencies {
                 root: directory.to_path_buf(),
                 deps,
-                is_private: pkg.private == Some(true),
+                is_private,
             });
         }
     }
