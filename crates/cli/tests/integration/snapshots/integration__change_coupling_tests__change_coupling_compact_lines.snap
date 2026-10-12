@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/integration/change_coupling_tests.rs
+expression: "lines.join(\"\\n\")"
+---
+change-coupling:src/a.ts:src/b.ts:degree=1.00,shared=6,commits_a=6,commits_b=6,strong=true

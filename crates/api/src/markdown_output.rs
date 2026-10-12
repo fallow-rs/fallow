@@ -1495,6 +1495,10 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         && report.file_scores.is_empty()
         && report.coverage_gaps.is_none()
         && report.hotspots.is_empty()
+        && report
+            .change_coupling
+            .as_ref()
+            .is_none_or(|coupling| coupling.pairs.is_empty())
         && report.targets.is_empty()
         && report.runtime_coverage.is_none()
         && report.coverage_intelligence.is_none()
@@ -1530,6 +1534,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
     write_coverage_gaps_section(&mut out, report, root);
     write_file_scores_section(&mut out, report, root);
     write_hotspots_section(&mut out, report, root);
+    write_change_coupling_section(&mut out, report, root);
     write_targets_section(&mut out, report, root);
     write_css_analytics_section(&mut out, report);
     write_metric_legend(&mut out, report);
@@ -2446,6 +2451,52 @@ fn write_hotspots_section(out: &mut String, report: &fallow_output::HealthReport
             summary.min_commits,
         );
     }
+}
+
+/// Write the hidden change-coupling pairs. Silent when the section is absent
+/// or lists no pair.
+fn write_change_coupling_section(
+    out: &mut String,
+    report: &fallow_output::HealthReport,
+    root: &Path,
+) {
+    let Some(coupling) = report.change_coupling.as_ref() else {
+        return;
+    };
+    if coupling.pairs.is_empty() {
+        return;
+    }
+    let count = coupling.total_pairs;
+    let _ = write!(
+        out,
+        "\n### Hidden Change Coupling ({count} pair{}, since {})\n\n",
+        plural(count),
+        coupling.since,
+    );
+    out.push_str("| File A | File B | Degree | Shared | Commits A | Commits B | Strong |\n");
+    out.push_str("|:-------|:-------|:-------|:-------|:----------|:----------|:-------|\n");
+    for pair in &coupling.pairs {
+        let path_a = normalize_uri(&relative_path(&pair.path_a, root).display().to_string());
+        let path_b = normalize_uri(&relative_path(&pair.path_b, root).display().to_string());
+        let _ = writeln!(
+            out,
+            "| {} | {} | {:.0}% | {} | {} | {} | {} |",
+            markdown_table_code_span(&path_a),
+            markdown_table_code_span(&path_b),
+            pair.degree * 100.0,
+            pair.shared_revisions,
+            pair.revisions_a,
+            pair.revisions_b,
+            if pair.strong { "**strong**" } else { "" },
+        );
+    }
+    let hidden = count.saturating_sub(coupling.pairs.len());
+    if hidden > 0 {
+        let _ = writeln!(out, "\n*{hidden} more pair{} not shown*", plural(hidden));
+    }
+    out.push_str(
+        "\n*Files that change together in the commit history with no import between them.*\n",
+    );
 }
 
 /// Write the hotspots table header, widening with ownership columns when present.

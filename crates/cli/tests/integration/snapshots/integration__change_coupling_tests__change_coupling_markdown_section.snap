@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/integration/change_coupling_tests.rs
+expression: markdown_coupling_section(&markdown)
+---
+### Hidden Change Coupling (1 pair, since imported churn)
+
+| File A | File B | Degree | Shared | Commits A | Commits B | Strong |
+|:-------|:-------|:-------|:-------|:----------|:----------|:-------|
+| `src/a.ts` | `src/b.ts` | 100% | 6 | 6 | 6 | **strong** |
+
+*Files that change together in the commit history with no import between them.*

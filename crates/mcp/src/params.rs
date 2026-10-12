@@ -1349,6 +1349,8 @@ pub struct HealthParams {
     pub min_severity: Option<String>,
 
     /// Git history window for hotspot analysis. Accepts durations (6m, 90d, 1y) or ISO dates.
+    /// It also sets the window for change coupling and change dispersion. When absent,
+    /// hotspots read 6 months and change coupling and dispersion read 12 months.
     pub since: Option<String>,
 
     /// Minimum commits for a file to appear in hotspot ranking.

@@ -174,6 +174,11 @@ fn human_output_lists_the_hidden_pair() {
     );
     assert!(output.stdout.contains("src/a.ts  src/b.ts [strong]"));
     assert!(
+        output.stdout.contains("  2.0 files/commit"),
+        "the hotspot row shows the dispersion: {}",
+        output.stdout
+    );
+    assert!(
         output
             .stdout
             .contains("6 shared commits (6 and 6 in total)")
@@ -260,6 +265,30 @@ fn config_thresholds_apply() {
     assert_eq!(report["change_coupling"]["thresholds"]["min_revisions"], 3);
 }
 
+#[test]
+fn out_of_range_thresholds_exit_with_a_config_error() {
+    for (config, field) in [
+        (r#"{"maxFilesPerCommit":1}"#, "maxFilesPerCommit"),
+        (r#"{"maxFilesPerCommit":5000}"#, "maxFilesPerCommit"),
+        (r#"{"minDegree":1.5}"#, "minDegree"),
+    ] {
+        let dir = project(1);
+        write_file(
+            &dir.path().join(".fallowrc.json"),
+            &format!(r#"{{"health":{{"changeCoupling":{config}}}}}"#),
+        );
+        let output = run_fallow_raw(&["--root", dir.path().to_str().unwrap(), "health", "--quiet"]);
+        assert_eq!(output.code, 2, "config {config}: {}", output.stderr);
+        assert!(
+            output
+                .stderr
+                .contains(&format!("health.changeCoupling.{field} must be")),
+            "stderr: {}",
+            output.stderr
+        );
+    }
+}
+
 /// A repository where `a.ts` and `b.ts` changed together in six commits with
 /// no import between them, and a head commit that changes only `a.ts`.
 fn audit_repo() -> tempfile::TempDir {
@@ -320,6 +349,33 @@ fn audit_brief_points_at_a_hidden_partner_missing_from_the_diff() {
 }
 
 #[test]
+fn audit_brief_skips_a_gap_whose_partner_is_in_health_ignore() {
+    let dir = audit_repo();
+    write_file(
+        &dir.path().join(".fallowrc.json"),
+        r#"{"health":{"ignore":["src/b.ts"]}}"#,
+    );
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let brief = parse_json(&output);
+    assert!(
+        brief["impact_closure"].get("co_change_gap").is_none(),
+        "b.ts is ignored: {}",
+        brief["impact_closure"]
+    );
+}
+
+#[test]
 fn audit_brief_has_no_gap_when_the_diff_changes_both_sides() {
     let dir = audit_repo();
     // Control: the same repository reports the gap while only one side changed,
@@ -362,5 +418,127 @@ fn audit_brief_has_no_gap_when_the_diff_changes_both_sides() {
         brief["impact_closure"].get("co_change_gap").is_none(),
         "both sides changed: {}",
         brief["impact_closure"]
+    );
+}
+
+/// Run `fallow health --hotspots` on the fixture in a text format.
+fn health_text(root: &Path, format: &str) -> String {
+    let root_arg = root.to_str().expect("temp path is UTF-8");
+    let clock = CLOCK.to_string();
+    let output = run_fallow_raw_with_env(
+        &[
+            "--root",
+            root_arg,
+            "health",
+            "--hotspots",
+            "--churn-file",
+            "churn.json",
+            "--format",
+            format,
+            "--quiet",
+        ],
+        &[("FALLOW_CLOCK_EPOCH", clock.as_str()), ("NO_COLOR", "1")],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    output.stdout
+}
+
+/// The change coupling section of a markdown report, up to the next heading
+/// or the metric legend.
+fn markdown_coupling_section(markdown: &str) -> String {
+    let start = markdown
+        .find("### Hidden Change Coupling")
+        .unwrap_or_else(|| panic!("no coupling section:\n{markdown}"));
+    let rest = &markdown[start..];
+    let end = ["\n### ", "\n---"]
+        .iter()
+        .filter_map(|marker| rest[3..].find(marker).map(|index| index + 3))
+        .min()
+        .unwrap_or(rest.len());
+    rest[..end].trim_end().to_owned()
+}
+
+#[test]
+fn markdown_output_lists_the_hidden_pair() {
+    let dir = project(6);
+    let markdown = health_text(dir.path(), "markdown");
+    insta::assert_snapshot!(
+        "change_coupling_markdown_section",
+        markdown_coupling_section(&markdown)
+    );
+}
+
+#[test]
+fn report_from_markdown_lists_the_hidden_pair() {
+    let dir = project(6);
+    let root = dir.path();
+    let saved = root.join("health.json");
+    std::fs::write(&saved, health_text(root, "json")).expect("write saved report");
+    let output = run_fallow_raw(&[
+        "report",
+        "--from",
+        saved.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--format",
+        "markdown",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    insta::assert_snapshot!(
+        "change_coupling_markdown_section",
+        markdown_coupling_section(&output.stdout)
+    );
+}
+
+#[test]
+fn compact_output_has_one_line_per_hidden_pair() {
+    let dir = project(6);
+    let compact = health_text(dir.path(), "compact");
+    let lines: Vec<&str> = compact
+        .lines()
+        .filter(|line| line.starts_with("change-coupling:"))
+        .collect();
+    insta::assert_snapshot!("change_coupling_compact_lines", lines.join("\n"));
+}
+
+#[test]
+fn grouped_run_keeps_change_coupling_at_the_root() {
+    let dir = project(6);
+    let report = health(dir.path(), &["--hotspots", "--group-by", "directory"]);
+
+    assert_eq!(
+        pair_paths(&report),
+        vec![("src/a.ts".to_owned(), "src/b.ts".to_owned())]
+    );
+    let groups = report["groups"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no groups: {report}"));
+    assert!(!groups.is_empty());
+    assert!(
+        groups
+            .iter()
+            .all(|group| group.get("change_coupling").is_none()),
+        "groups: {groups:?}"
+    );
+}
+
+#[test]
+fn targets_only_run_records_no_skipped_diagnostic() {
+    // Too few commits for coupling. The run asks for targets, not for the
+    // change coupling section, so no diagnostic must explain an absent section.
+    let dir = project(2);
+    let report = health(dir.path(), &["--targets", "--min-commits", "1"]);
+
+    assert!(report.get("change_coupling").is_none());
+    let diagnostics = report["workspace_diagnostics"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|entry| entry["kind"] == "change-coupling-skipped"),
+        "diagnostics: {diagnostics:?}"
     );
 }

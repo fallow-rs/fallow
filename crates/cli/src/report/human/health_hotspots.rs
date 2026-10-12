@@ -260,13 +260,21 @@ fn push_hotspot_row(lines: &mut Vec<String>, entry: &fallow_output::HotspotEntry
         filename,
         hotspot_test_tag(entry.is_test_path),
     ));
+    // The dispersion goes after the trend, so the columns before it keep their
+    // place whether or not the history has commit ids.
+    let dispersion = entry
+        .median_files_per_commit
+        .map_or_else(String::new, |median| {
+            format!("  {}", format!("{median:.1} files/commit").dimmed())
+        });
     lines.push(format!(
-        "         {} commits  {} churn  {} density  {} fan-in  {}",
+        "         {} commits  {} churn  {} density  {} fan-in  {}{}",
         format!("{:>3}", entry.commits).dimmed(),
         format!("{:>5}", entry.lines_added + entry.lines_deleted).dimmed(),
         format!("{:.2}", entry.complexity_density).dimmed(),
         format!("{:>2}", entry.fan_in).dimmed(),
         hotspot_trend_label(entry.trend),
+        dispersion,
     ));
     if let Some(ownership) = &entry.ownership {
         lines.push(format!(
