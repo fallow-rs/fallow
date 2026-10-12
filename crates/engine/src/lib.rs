@@ -69,6 +69,7 @@ pub mod project_config;
 mod public_api;
 pub mod repo_refs;
 mod results;
+pub mod search_visibility;
 mod security;
 pub mod session;
 mod session_reuse;

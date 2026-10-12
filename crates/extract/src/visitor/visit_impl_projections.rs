@@ -319,9 +319,18 @@ impl ModuleInfoExtractor {
                     };
                     if let Some(path) = projection_property_path(name, &key)
                         && seen.insert(key.to_string())
+                        && property.kind == oxc_ast::ast::PropertyKind::Init
                     {
                         self.record_projection_source(&path, span, &property.value);
                     }
+                }
+            }
+            Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => {
+                if name.contains('.')
+                    && let Some(callback) = self.callback_result_proof(source)
+                    && self.prepare_projection_path(name, span)
+                {
+                    self.retain_callback_result(name, span, callback);
                 }
             }
             Expression::ArrayExpression(_) => {
@@ -624,6 +633,7 @@ impl ModuleInfoExtractor {
                 let state = self.projection_value_view(value);
                 if !state.projection_contract
                     && state.array_element.is_none()
+                    && state.callback_result.is_none()
                     && !state.numeric_contract
                 {
                     return None;

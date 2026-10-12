@@ -19,4 +19,5 @@ mod schema_conformance;
 mod scope_parity;
 mod trace_class_member;
 mod trace_federation_sources;
+mod trace_search_visibility;
 mod warm_parse_sequence;

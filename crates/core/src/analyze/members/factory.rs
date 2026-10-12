@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "factory_callback.rs"]
+mod callback;
+
 const MAX_EXPORTED_OBJECT_INSTANCE_MEMBER_ASSOCIATIONS: usize = 8192;
 
 type FactoryPropertySources<'a> =
@@ -145,6 +148,13 @@ pub(super) fn propagate_factory_return_object_accesses(
                 })
         })
         .collect();
+    callback::propagate_callback_factory_accesses(
+        graph,
+        resolved_modules,
+        indexes,
+        &sources,
+        accessed_members,
+    );
     let mut classes_by_path = FxHashMap::default();
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
@@ -338,6 +348,7 @@ fn factory_return_object_property_classes(
         {
             use fallow_types::extract::FactoryPropertySource;
             match source {
+                FactoryPropertySource::CallbackParameterReturn { .. } => {}
                 FactoryPropertySource::LocalClass { class_local_name } => {
                     out.extend(factory_return_class_origins(
                         graph,

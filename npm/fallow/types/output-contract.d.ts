@@ -1138,6 +1138,16 @@ export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
  */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Whether a whole-word text search for an export name finds a consumer that
+ * the module graph resolves. The levels sort from best to worst.
+ */
+export type SearchVisibility = ("found" | "renamed" | "missed")
+/**
+ * Why a text search for an export name does not find the uses in a consumer,
+ * or why a consumer is not a search target (`pass-through`).
+ */
+export type SearchGapReason = ("import-alias" | "default-import" | "re-export-alias" | "namespace-use" | "dynamic-import" | "pass-through")
+/**
  * Wire-shape version of the [`DependencyUsage`] object.
  *
  * The object has its own version, because it is an optional part of the
@@ -8491,11 +8501,11 @@ function_count: number
 lines: number
 /**
  * Highest CRAP score among the file's functions. Always the raw measured
- * value; threshold overrides never rewrite it.
+ * value; threshold overrides and suppressions never rewrite it.
  */
 crap_max: number
 /**
- * Functions whose rounded CRAP score meets or exceeds their effective
+ * Unsuppressed functions whose rounded CRAP score meets or exceeds their effective
  * ceiling, resolved from `health.thresholdOverrides` over the global
  * `maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled
  * (global ceiling `0`).
@@ -8509,6 +8519,26 @@ crap_above_threshold: number
  * function at or above the canonical baseline. Omitted when zero.
  */
 crap_exempted?: number
+/**
+ * Concrete scored functions accepted by a complexity suppression, including
+ * subthreshold functions and disabled-enforcement runs. Omitted when zero.
+ * May overlap with configured exemptions; the counts are not a partition.
+ */
+crap_suppressed?: number
+/**
+ * Highest rounded CRAP among unsuppressed scored functions, including
+ * subthreshold and configured-exempt functions. Present with the paired
+ * unsuppressed threshold whenever a scored suppression exists. Explicitly
+ * zero when every scored function is suppressed; raw crap_max is unchanged.
+ */
+crap_unsuppressed_max?: (number | null)
+/**
+ * Lowest effective ceiling among unsuppressed scored functions, or the run
+ * global when none remain. Emitted with crap_unsuppressed_max. Consumers
+ * receiving an absent or partial pair fall back to the complete legacy pair:
+ * crap_max and crap_effective_threshold (or the run global when absent).
+ */
+crap_unsuppressed_effective_threshold?: (number | null)
 /**
  * Lowest effective CRAP ceiling among the file's functions, present only
  * when it differs from the run global (`summary.max_crap_threshold`).
@@ -11620,6 +11650,29 @@ from_file: string
  * Reference kind, such as named import, default import, or re-export.
  */
 kind: string
+/**
+ * 1-based line of the import statement in `from_file`. Absent when the
+ * graph holds no source position for the reference or the file cannot be
+ * read.
+ */
+line?: (number | null)
+/**
+ * Whether a whole-word text search for the export name finds this
+ * consumer. Absent when no check applies, for example when the consumer
+ * source cannot be read.
+ */
+search_visibility?: (SearchVisibility | null)
+/**
+ * Why a text search does not find the uses in this consumer. With
+ * `search_visibility` `found`, only `pass-through` occurs: the consumer
+ * is a barrel that forwards the export and does not use it.
+ */
+reason?: (SearchGapReason | null)
+/**
+ * The name to search for in this consumer instead of the export name.
+ * Absent when the export name finds the uses or no single name does.
+ */
+search_as?: (string | null)
 }
 /**
  * Direct references that credit one namespace of an export binding.
@@ -11708,7 +11761,8 @@ owner_file_reachable: boolean
  */
 owner_is_entry_point: boolean
 /**
- * Files that reference the owning export directly.
+ * Files that reference the owning export directly. The search visibility
+ * fields on each entry check the owner export name, not the member name.
  */
 owner_direct_references: ExportReference[]
 /**
@@ -12278,6 +12332,22 @@ consumed_symbols: string[]
  * Scope note for the syntactic trace.
  */
 note: string
+/**
+ * Whether a whole-word text search for the consumed symbol names finds
+ * this consumer. When the consumer uses more than one symbol, the worst
+ * level wins (`missed`, then `renamed`, then `found`). Absent when no
+ * check applies, for example when the consumer source cannot be read.
+ */
+search_visibility?: (SearchVisibility | null)
+/**
+ * Why a text search does not find the uses of the worst symbol. With
+ * `search_visibility` `found`, only `pass-through` occurs.
+ */
+reason?: (SearchGapReason | null)
+/**
+ * The name to search for in this consumer instead of the symbol name.
+ */
+search_as?: (string | null)
 }
 /**
  * Result of asking how one module reaches another: the shortest import path.
@@ -17050,6 +17120,14 @@ co_change_gap?: CoChangeGapFact[]
  * when zero.
  */
 co_change_gap_count?: number
+/**
+ * Consumers that a whole-word text search for a changed export name does
+ * not find (`missed`), or finds only under another local name
+ * (`renamed`). Only exports whose declaration statement overlaps an added
+ * diff line count, and only consumers outside the diff. Absent when no
+ * such consumer exists.
+ */
+search_gap?: (SearchGapFacts | null)
 }
 /**
  * One directory of the blast radius and how many affected files it holds.
@@ -17114,6 +17192,72 @@ degree: number
  * Scope note: history evidence, not a proof that the partner must change.
  */
 note: string
+}
+/**
+ * The literal-search gap of the changed exports: the consumers that a text
+ * search for the export name does not find or finds only under another name.
+ */
+export interface SearchGapFacts {
+/**
+ * Sum of the per-export totals, before the per-export cap. A consumer of
+ * two changed exports counts once for each export.
+ */
+total: number
+/**
+ * One entry per changed export with at least one such consumer, sorted
+ * by file and line.
+ */
+exports: ExportSearchGapFact[]
+}
+/**
+ * The `missed` and `renamed` consumers of one changed export.
+ */
+export interface ExportSearchGapFact {
+/**
+ * Root-relative path of the changed file that declares the export.
+ */
+file: string
+/**
+ * The export name, `default` for a default export.
+ */
+export_name: string
+/**
+ * 1-based line of the export.
+ */
+line: number
+/**
+ * Number of `missed` and `renamed` consumers of this export, before the
+ * cap.
+ */
+total: number
+/**
+ * At most [`SEARCH_GAP_CONSUMER_CAP`] consumers, `missed` first, then by
+ * path.
+ */
+consumers: SearchGapConsumerFact[]
+}
+/**
+ * One consumer that a text search for the export name does not find, or
+ * finds only under another local name.
+ */
+export interface SearchGapConsumerFact {
+/**
+ * Root-relative path of the consumer.
+ */
+consumer_file: string
+/**
+ * 1-based line of the import statement in the consumer, when known.
+ */
+line?: (number | null)
+search_visibility: SearchVisibility
+/**
+ * Why the text search does not find the uses.
+ */
+reason?: (SearchGapReason | null)
+/**
+ * The name to search for in this consumer instead.
+ */
+search_as?: (string | null)
 }
 /**
  * The weighted focus map: the ranked `review-here` units plus the FULL

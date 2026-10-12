@@ -92,6 +92,7 @@ mod rule_pack_tests;
 mod schema_conformance;
 mod schema_tests;
 mod scope_path_tests;
+mod search_visibility_tests;
 mod security_gate_tests;
 mod security_override_tests;
 mod security_workflow_tests;

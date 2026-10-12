@@ -3686,15 +3686,33 @@
         },
         "crap_max": {
           "type": "number",
-          "description": "Highest CRAP score among the file's functions. Always the raw measured\nvalue; threshold overrides never rewrite it."
+          "description": "Highest CRAP score among the file's functions. Always the raw measured\nvalue; threshold overrides and suppressions never rewrite it."
         },
         "crap_above_threshold": {
           "type": "integer",
-          "description": "Functions whose rounded CRAP score meets or exceeds their effective\nceiling, resolved from `health.thresholdOverrides` over the global\n`maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled\n(global ceiling `0`)."
+          "description": "Unsuppressed functions whose rounded CRAP score meets or exceeds their effective\nceiling, resolved from `health.thresholdOverrides` over the global\n`maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled\n(global ceiling `0`)."
         },
         "crap_exempted": {
           "type": "integer",
           "description": "Functions whose rounded CRAP score is at or above the canonical 30.0\nbaseline but below their effective ceiling: the count the configuration\nlet through. Stays `0` when the effective ceiling is stricter than 30.\nWhen CRAP enforcement is disabled (global ceiling `0`), counts every\nfunction at or above the canonical baseline. Omitted when zero."
+        },
+        "crap_suppressed": {
+          "type": "integer",
+          "description": "Concrete scored functions accepted by a complexity suppression, including\nsubthreshold functions and disabled-enforcement runs. Omitted when zero.\nMay overlap with configured exemptions; the counts are not a partition."
+        },
+        "crap_unsuppressed_max": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Highest rounded CRAP among unsuppressed scored functions, including\nsubthreshold and configured-exempt functions. Present with the paired\nunsuppressed threshold whenever a scored suppression exists. Explicitly\nzero when every scored function is suppressed; raw crap_max is unchanged."
+        },
+        "crap_unsuppressed_effective_threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Lowest effective ceiling among unsuppressed scored functions, or the run\nglobal when none remain. Emitted with crap_unsuppressed_max. Consumers\nreceiving an absent or partial pair fall back to the complete legacy pair:\ncrap_max and crap_effective_threshold (or the run global when absent)."
         },
         "crap_effective_threshold": {
           "type": [
@@ -19997,6 +20015,17 @@
         "co_change_gap_count": {
           "type": "integer",
           "description": "All co-change gaps, before the cap cuts `co_change_gap`. Omitted\nwhen zero."
+        },
+        "search_gap": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapFacts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Consumers that a whole-word text search for a changed export name does\nnot find (`missed`), or finds only under another local name\n(`renamed`). Only exports whose declaration statement overlaps an added\ndiff line count, and only consumers outside the diff. Absent when no\nsuch consumer exists."
         }
       },
       "required": [
@@ -24326,6 +24355,42 @@
         "kind": {
           "type": "string",
           "description": "Reference kind, such as named import, default import, or re-export."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the import statement in `from_file`. Absent when the\ngraph holds no source position for the reference or the file cannot be\nread."
+        },
+        "search_visibility": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchVisibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether a whole-word text search for the export name finds this\nconsumer. Absent when no check applies, for example when the consumer\nsource cannot be read."
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why a text search does not find the uses in this consumer. With\n`search_visibility` `found`, only `pass-through` occurs: the consumer\nis a barrel that forwards the export and does not use it."
+        },
+        "search_as": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name to search for in this consumer instead of the export name.\nAbsent when the export name finds the uses or no single name does."
         }
       },
       "required": [
@@ -24397,7 +24462,7 @@
           "items": {
             "$ref": "#/definitions/ExportReference"
           },
-          "description": "Files that reference the owning export directly."
+          "description": "Files that reference the owning export directly. The search visibility\nfields on each entry check the owner export name, not the member name."
         },
         "owner_re_export_chains": {
           "type": "array",
@@ -24774,6 +24839,35 @@
         "note": {
           "type": "string",
           "description": "Scope note for the syntactic trace."
+        },
+        "search_visibility": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchVisibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether a whole-word text search for the consumed symbol names finds\nthis consumer. When the consumer uses more than one symbol, the worst\nlevel wins (`missed`, then `renamed`, then `found`). Absent when no\ncheck applies, for example when the consumer source cannot be read."
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why a text search does not find the uses of the worst symbol. With\n`search_visibility` `found`, only `pass-through` occurs."
+        },
+        "search_as": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name to search for in this consumer instead of the symbol name."
         }
       },
       "required": [
@@ -30982,6 +31076,161 @@
         "depth"
       ],
       "description": "One file of a [`ConsumerClosure`]."
+    },
+    "SearchVisibility": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "found",
+          "description": "The consumer source contains the export name, and the consumer uses it\nunder that name."
+        },
+        {
+          "type": "string",
+          "const": "renamed",
+          "description": "The consumer source contains the export name, but the consumer uses\nthe export under another local name."
+        },
+        {
+          "type": "string",
+          "const": "missed",
+          "description": "The consumer source does not contain the export name."
+        }
+      ],
+      "description": "Whether a whole-word text search for an export name finds a consumer that\nthe module graph resolves. The levels sort from best to worst."
+    },
+    "SearchGapReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "import-alias",
+          "description": "The consumer imports the export under another local name\n(`import { foo as bar }`)."
+        },
+        {
+          "type": "string",
+          "const": "default-import",
+          "description": "The consumer imports a default export under another local name."
+        },
+        {
+          "type": "string",
+          "const": "re-export-alias",
+          "description": "A barrel re-exports the export under another name, and the consumer\nimports that name."
+        },
+        {
+          "type": "string",
+          "const": "namespace-use",
+          "description": "The consumer imports the whole module namespace and does not name the\nexport."
+        },
+        {
+          "type": "string",
+          "const": "dynamic-import",
+          "description": "The consumer loads the module with a dynamic `import()` and does not\nname the export."
+        },
+        {
+          "type": "string",
+          "const": "pass-through",
+          "description": "The consumer is a barrel that only forwards the export\n(`export * from`, `export { foo } from`) and does not use it. A change\nof the export needs no edit there, and the files that import through\nthe barrel are checked on their own. Occurs with `found`."
+        }
+      ],
+      "description": "Why a text search for an export name does not find the uses in a consumer,\nor why a consumer is not a search target (`pass-through`)."
+    },
+    "SearchGapFacts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "description": "Sum of the per-export totals, before the per-export cap. A consumer of\ntwo changed exports counts once for each export."
+        },
+        "exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExportSearchGapFact"
+          },
+          "description": "One entry per changed export with at least one such consumer, sorted\nby file and line."
+        }
+      },
+      "required": [
+        "total",
+        "exports"
+      ],
+      "description": "The literal-search gap of the changed exports: the consumers that a text\nsearch for the export name does not find or finds only under another name."
+    },
+    "ExportSearchGapFact": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Root-relative path of the changed file that declares the export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "The export name, `default` for a default export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the export."
+        },
+        "total": {
+          "type": "integer",
+          "description": "Number of `missed` and `renamed` consumers of this export, before the\ncap."
+        },
+        "consumers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SearchGapConsumerFact"
+          },
+          "description": "At most [`SEARCH_GAP_CONSUMER_CAP`] consumers, `missed` first, then by\npath."
+        }
+      },
+      "required": [
+        "file",
+        "export_name",
+        "line",
+        "total",
+        "consumers"
+      ],
+      "description": "The `missed` and `renamed` consumers of one changed export."
+    },
+    "SearchGapConsumerFact": {
+      "type": "object",
+      "properties": {
+        "consumer_file": {
+          "type": "string",
+          "description": "Root-relative path of the consumer."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the import statement in the consumer, when known."
+        },
+        "search_visibility": {
+          "description": "`missed` or `renamed`.",
+          "$ref": "#/definitions/SearchVisibility"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the text search does not find the uses."
+        },
+        "search_as": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name to search for in this consumer instead."
+        }
+      },
+      "required": [
+        "consumer_file",
+        "search_visibility"
+      ],
+      "description": "One consumer that a text search for the export name does not find, or\nfinds only under another local name."
     },
     "CoChangePartnerEvidence": {
       "type": "object",

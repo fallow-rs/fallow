@@ -129,10 +129,11 @@ fn push_export_trace_namespaced_references(lines: &mut Vec<String>, trace: &Expo
         ));
         for reference in &lane.references {
             lines.push(format!(
-                "    {} {} ({})",
+                "    {} {} ({}){}",
                 "->".dimmed(),
                 reference.from_file.display(),
-                reference.kind.dimmed()
+                reference.kind.dimmed(),
+                search_hint(reference.search_visibility, reference.search_as.as_deref())
             ));
         }
     }
@@ -146,12 +147,30 @@ fn push_direct_references(lines: &mut Vec<String>, refs: &[ExportReference]) {
     lines.push(format!("  {} direct reference(s):", refs.len()));
     for r in refs {
         lines.push(format!(
-            "    {} {} ({})",
+            "    {} {} ({}){}",
             "->".dimmed(),
             r.from_file.display(),
-            r.kind.dimmed()
+            r.kind.dimmed(),
+            search_hint(r.search_visibility, r.search_as.as_deref())
         ));
     }
+}
+
+/// A short suffix that tells the reader a name search does not find the
+/// consumer, or finds it only under another name. Empty for `found`.
+pub(in crate::report) fn search_hint(
+    visibility: Option<fallow_types::trace::SearchVisibility>,
+    search_as: Option<&str>,
+) -> String {
+    use fallow_types::trace::SearchVisibility;
+
+    let level = match visibility {
+        Some(SearchVisibility::Missed) => "name search misses it",
+        Some(SearchVisibility::Renamed) => "used under another name",
+        Some(SearchVisibility::Found) | None => return String::new(),
+    };
+    let hint = search_as.map_or_else(String::new, |name| format!(", search {name}"));
+    format!(" [{level}{hint}]").dimmed().to_string()
 }
 
 fn build_class_member_trace_human_lines(trace: &ClassMemberTrace) -> Vec<String> {
@@ -875,10 +894,10 @@ mod tests {
             file_reachable: true,
             is_entry_point: false,
             is_used: true,
-            direct_references: vec![ExportReference {
-                from_file: PathBuf::from("src/index.ts"),
-                kind: "named import".to_string(),
-            }],
+            direct_references: vec![ExportReference::new(
+                PathBuf::from("src/index.ts"),
+                "named import".to_string(),
+            )],
             direct_references_by_namespace: Vec::new(),
             star_export_ambiguity: None,
             re_export_chains: Vec::new(),
@@ -961,10 +980,10 @@ mod tests {
             owner_is_used: true,
             owner_file_reachable: true,
             owner_is_entry_point: false,
-            owner_direct_references: vec![ExportReference {
-                from_file: PathBuf::from("src/index.ts"),
-                kind: "named import".to_string(),
-            }],
+            owner_direct_references: vec![ExportReference::new(
+                PathBuf::from("src/index.ts"),
+                "named import".to_string(),
+            )],
             owner_re_export_chains: Vec::new(),
             reason: "'Helper' is used by 1 file(s)".to_string(),
             semantic,
@@ -1015,17 +1034,17 @@ mod tests {
             file_reachable: true,
             is_entry_point: true,
             is_used: true,
-            direct_references: vec![ExportReference {
-                from_file: PathBuf::from("src/app.ts"),
-                kind: "value".to_string(),
-            }],
+            direct_references: vec![ExportReference::new(
+                PathBuf::from("src/app.ts"),
+                "value".to_string(),
+            )],
             direct_references_by_namespace: vec![NamespacedExportReferences {
                 namespace: fallow_types::semantic::SemanticNamespace::Type,
                 reference_count: 1,
-                references: vec![ExportReference {
-                    from_file: PathBuf::from("src/types.ts"),
-                    kind: "type import".to_string(),
-                }],
+                references: vec![ExportReference::new(
+                    PathBuf::from("src/types.ts"),
+                    "type import".to_string(),
+                )],
             }],
             star_export_ambiguity: None,
             re_export_chains: vec![ReExportChain {
@@ -1060,6 +1079,44 @@ mod tests {
     }
 
     #[test]
+    fn export_trace_namespace_lane_references_carry_the_search_hint() {
+        let mut lane_reference =
+            ExportReference::new(PathBuf::from("src/types.ts"), "type import".to_string());
+        lane_reference.search_visibility = Some(fallow_types::trace::SearchVisibility::Renamed);
+        lane_reference.search_as = Some("UserFormat".to_string());
+        let trace = ExportTrace {
+            file: PathBuf::from("src/lib.ts"),
+            export_name: "formatUser".to_string(),
+            namespace: fallow_types::semantic::SemanticNamespace::Value,
+            file_reachable: true,
+            is_entry_point: true,
+            is_used: true,
+            direct_references: vec![ExportReference::new(
+                PathBuf::from("src/app.ts"),
+                "value".to_string(),
+            )],
+            direct_references_by_namespace: vec![NamespacedExportReferences {
+                namespace: fallow_types::semantic::SemanticNamespace::Type,
+                reference_count: 1,
+                references: vec![lane_reference],
+            }],
+            star_export_ambiguity: None,
+            re_export_chains: Vec::new(),
+            reason: "referenced from reachable code".to_string(),
+            semantic: None,
+        };
+
+        let rendered = plain(&build_export_trace_human_lines(&trace));
+
+        assert!(
+            rendered.contains(
+                "-> src/types.ts (type import) [used under another name, search UserFormat]"
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
     fn class_member_trace_renders_owner_status_references_and_barrels() {
         let trace = ClassMemberTrace {
             file: PathBuf::from("src/controller.ts"),
@@ -1070,10 +1127,10 @@ mod tests {
             owner_is_used: true,
             owner_file_reachable: true,
             owner_is_entry_point: false,
-            owner_direct_references: vec![ExportReference {
-                from_file: PathBuf::from("src/consumer.ts"),
-                kind: "named import".to_string(),
-            }],
+            owner_direct_references: vec![ExportReference::new(
+                PathBuf::from("src/consumer.ts"),
+                "named import".to_string(),
+            )],
             owner_re_export_chains: vec![ReExportChain {
                 barrel_file: PathBuf::from("src/index.ts"),
                 exported_as: "Ctrl".to_string(),

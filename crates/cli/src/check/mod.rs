@@ -609,6 +609,11 @@ pub struct CheckResult {
     /// retained graph on the brief path BEFORE the graph is dropped; `None`
     /// otherwise. Internal (CheckResult is not serialized).
     pub export_lines: Option<rustc_hash::FxHashMap<String, Vec<(String, u32)>>>,
+    /// Literal-search gaps of the exports of the changed files: consumers that
+    /// a text search for the export name does not find or finds only under
+    /// another name. Computed from the retained graph on the brief path BEFORE
+    /// the graph is dropped; `None` otherwise. Internal (not serialized).
+    pub search_gaps: Option<Vec<fallow_engine::module_graph::ExportSearchGapPaths>>,
     /// Per-anchor `rel_path -> count of in-repo modules OUTSIDE the diff that
     /// directly import it`, for the decision surface's honest per-decision consumer
     /// number. Computed from the retained graph's reverse-deps on the brief path
@@ -1202,6 +1207,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         partition_order: None,
         focus_facts: None,
         export_lines: None,
+        search_gaps: None,
         internal_consumers: None,
         test_adjacency: None,
         package_importers: None,

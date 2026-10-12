@@ -5,8 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # The title step reads the event payload. An edit of the title must start a
-    # new run, because a re-run of a failed job keeps the old title.
+    # The title and description steps read the event payload. An edit of either
+    # must start a new run, because a re-run of a failed job keeps the old text.
     types: [opened, synchronize, reopened, edited]
 
 permissions: {}
@@ -26,10 +26,12 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      issues: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -45,6 +47,15 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: printf '%s\n' "$PR_TITLE" | npm run commitlint -- --verbose
+
+      # Deferred work in a description must link a tracking issue, so it is
+      # not lost after the merge. Bot pull requests carry generated text.
+      - name: Check deferred work in the pull request description
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/check-pr-deferrals.mjs
 
       - name: Lint commit messages
         env:
