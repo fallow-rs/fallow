@@ -1,0 +1,6 @@
+{
+  "name": "pinia-setup-store-helper-reads-fixture",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": { "pinia": "^3.0.0", "vue": "^3.5.0" }
+}

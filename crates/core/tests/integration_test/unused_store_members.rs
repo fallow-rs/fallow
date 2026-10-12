@@ -207,3 +207,21 @@ fn credits_typed_param_store_members_and_flags_dead_ones() {
         "deadMember is never accessed and must still flag: {names:?}"
     );
 }
+
+#[test]
+fn credits_setup_store_members_read_by_typed_helpers_and_setup_body() {
+    // Issue #3348: `doubled` and `label` are read only through helpers whose
+    // params are typed `ReturnType<typeof useCounterStore>` (inline and alias)
+    // with a type-only import. `count` is read only by the `doubled` getter in
+    // the setup body. `deadFlag` is returned and never read (control).
+    let root = fixture_path("pinia-setup-store-helper-reads");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let members = store_members(&results, &root);
+
+    assert_eq!(
+        members,
+        vec![("src/store.ts".to_string(), "deadFlag".to_string())],
+        "only the never-read returned member must flag: {members:?}"
+    );
+}

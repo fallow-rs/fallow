@@ -1505,8 +1505,8 @@ fn should_skip_member_for_unused_report(member: &MemberInfo, ctx: &MemberSkipCon
     // only by a sibling getter/action via `this.<member>` lands in the file's
     // self-access set. Without this, a store member used solely inside its own
     // store would be falsely flagged. Class members already credit this way;
-    // store members must too. (Setup stores do not use `this`; a returned key
-    // used only internally is a genuinely dead PUBLIC member.)
+    // store members must too. (Setup stores do not use `this`; the extractor
+    // credits a returned key that the setup body reads, issue #3348.)
     if (is_class_member_kind(member.kind) || matches!(member.kind, MemberKind::StoreMember))
         && ctx
             .file_self_accesses

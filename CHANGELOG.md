@@ -42,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   styles get the credit only from the same component. Global styles get it
   from any Vue component. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the
   report. (Closes [#3350](https://github.com/fallow-rs/fallow/issues/3350))
+- **`unused-store-member` no longer reports live Pinia setup-store members in
+  two cases.** A helper can read a member through a parameter typed
+  `ReturnType<typeof useCounterStore>`, or through a type alias of that form.
+  Fallow now credits that read to the store, also when the import is
+  type-only. A setup store can also read returned state in its own body, for
+  example `count.value` inside a `computed` getter. Pinia needs returned state
+  for registration and hydration, so Fallow now credits that read. A returned
+  member that nothing reads, or that the store only writes, is still reported.
+  Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report.
+  (Closes [#3348](https://github.com/fallow-rs/fallow/issues/3348))
 - **`fallow audit` now reports a new error in a changed template or regex as
   introduced.** Audit treated a change inside a template literal or a regex
   literal as non-behavioral. It then reused the current findings as the

@@ -279,6 +279,56 @@ fn pinia_credits_original_key_for_aliased_inline_store_to_refs_member() {
 }
 
 #[test]
+fn pinia_setup_store_credits_returned_members_read_in_setup_body() {
+    // Issue #3348 case B: Pinia needs returned state for registration and
+    // hydration, so a returned member that the setup body reads is live.
+    let info = parse(
+        "import { defineStore } from 'pinia'\nimport { computed, ref } from 'vue'\nexport const useCounterStore = defineStore('counter', () => {\n  const count = ref(1)\n  const step = ref(2)\n  const unused = ref(0)\n  const token = ref('')\n  const hits = ref(0)\n  const doubled = computed(() => count.value * 2)\n  function bump() { step.value++; hits.value += 1 }\n  function setToken(next) { token.value = next }\n  return { count, total: step, unused, token, hits, doubled, bump, setToken }\n})",
+    );
+    let accesses = store_member_accesses(&info);
+    for credited in ["count", "total", "hits"] {
+        assert!(
+            accesses.contains(&("useCounterStore".to_string(), credited.to_string())),
+            "{credited} is read in the setup body and must be credited: {accesses:?}"
+        );
+    }
+    for dead in ["unused", "token", "doubled", "bump", "setToken"] {
+        assert!(
+            !accesses
+                .iter()
+                .any(|(object, member)| object == "useCounterStore" && member == dead),
+            "{dead} is only returned or written and must not be credited: {accesses:?}"
+        );
+    }
+}
+
+#[test]
+fn pinia_credits_member_read_on_param_typed_return_type_of_type_only_store_import() {
+    // Issue #3348 case A: a helper in another file reads a store member through
+    // a param typed `ReturnType<typeof useCounterStore>` with a type-only import.
+    let info = parse(
+        "import type { useCounterStore } from './store'\nexport function readDoubled(store: ReturnType<typeof useCounterStore>) {\n  return store.doubled\n}",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "doubled".to_string())),
+        "a read on a ReturnType-typed store param should credit the store factory: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_member_read_on_param_typed_store_alias() {
+    let info = parse(
+        "import type { useCounterStore } from './store'\ntype CounterStore = ReturnType<typeof useCounterStore>\nexport const readCount = (store: CounterStore) => store.count",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "count".to_string())),
+        "a read on an alias-typed store param should credit the store factory: {accesses:?}"
+    );
+}
+
+#[test]
 fn pinia_does_not_credit_non_store_inline_refs_arg() {
     let info = parse(
         "import { storeToRefs } from 'pinia'\nfunction makeThing() { return { count: 1 } }\nconst { count } = storeToRefs(makeThing())",

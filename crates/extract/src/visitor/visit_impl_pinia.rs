@@ -2,7 +2,9 @@
 
 #[allow(clippy::wildcard_imports, reason = "many Pinia helper AST types used")]
 use oxc_ast::ast::*;
+use oxc_ast_visit::{Visit, walk};
 use oxc_span::GetSpan;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::MemberAccess;
 use fallow_types::extract::{MemberInfo, MemberKind};
@@ -36,6 +38,106 @@ fn harvest_define_store_members(args: &[Argument<'_>]) -> Option<Vec<MemberInfo>
             extract_function_body_final_return_expr(func.body.as_ref()?)?,
         ),
         _ => None,
+    }
+}
+
+/// Returned setup-store keys whose local binding the setup body reads outside
+/// the final `return`. Pinia needs returned state for registration and
+/// hydration, so a member that a live getter or action reads is live too.
+/// Only a block-body setup function can read a binding before its return.
+fn setup_store_members_read_in_body(args: &[Argument<'_>]) -> Vec<String> {
+    let Some(second) = args.get(1).and_then(Argument::as_expression) else {
+        return Vec::new();
+    };
+    let body = match unwrap_paren_expr(second) {
+        Expression::ArrowFunctionExpression(arrow) => match &arrow.body {
+            ArrowFunctionBody::FunctionBody(body) => body,
+            _ => return Vec::new(),
+        },
+        Expression::FunctionExpression(func) => match func.body.as_ref() {
+            Some(body) => body,
+            None => return Vec::new(),
+        },
+        _ => return Vec::new(),
+    };
+    let Some((Statement::ReturnStatement(ret), before_return)) = body.statements.split_last()
+    else {
+        return Vec::new();
+    };
+    let Some(Expression::ObjectExpression(obj)) = ret.argument.as_ref().map(unwrap_paren_expr)
+    else {
+        return Vec::new();
+    };
+    let mut keys_by_local: FxHashMap<&str, Vec<String>> = FxHashMap::default();
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            continue;
+        };
+        let (Some(key), Expression::Identifier(local)) = (prop.key.static_name(), &prop.value)
+        else {
+            continue;
+        };
+        if key.starts_with('$') {
+            continue;
+        }
+        keys_by_local
+            .entry(local.name.as_str())
+            .or_default()
+            .push(key.to_string());
+    }
+    if keys_by_local.is_empty() {
+        return Vec::new();
+    }
+    let mut reader = SetupBodyReadCollector {
+        wanted: &keys_by_local,
+        read: FxHashSet::default(),
+    };
+    for statement in before_return {
+        reader.visit_statement(statement);
+    }
+    let mut credited: Vec<String> = reader
+        .read
+        .into_iter()
+        .filter_map(|local| keys_by_local.get(local))
+        .flatten()
+        .cloned()
+        .collect();
+    credited.sort_unstable();
+    credited
+}
+
+/// Collect the wanted local names that a setup-store body references.
+struct SetupBodyReadCollector<'w> {
+    wanted: &'w FxHashMap<&'w str, Vec<String>>,
+    read: FxHashSet<&'w str>,
+}
+
+impl<'a> Visit<'a> for SetupBodyReadCollector<'_> {
+    fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
+        if let Some((local, _)) = self.wanted.get_key_value(ident.name.as_str()) {
+            self.read.insert(local);
+        }
+    }
+
+    /// A plain write (`token.value = next`, `token = next`) does not read the
+    /// state, so write-only state stays reported. Compound operators read first.
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if expr.operator != AssignmentOperator::Assign {
+            walk::walk_assignment_expression(self, expr);
+            return;
+        }
+        match &expr.left {
+            AssignmentTarget::AssignmentTargetIdentifier(_) => {}
+            AssignmentTarget::StaticMemberExpression(member)
+                if matches!(member.object, Expression::Identifier(_)) => {}
+            AssignmentTarget::ComputedMemberExpression(member)
+                if matches!(member.object, Expression::Identifier(_)) =>
+            {
+                self.visit_expression(&member.expression);
+            }
+            left => self.visit_assignment_target(left),
+        }
+        self.visit_expression(&expr.right);
     }
 }
 
@@ -135,6 +237,12 @@ impl ModuleInfoExtractor {
         {
             if let Some(members) = harvest_define_store_members(&call.arguments) {
                 self.store_member_decls.insert(id.name.to_string(), members);
+            }
+            for member in setup_store_members_read_in_body(&call.arguments) {
+                self.member_accesses.push(MemberAccess {
+                    object: id.name.to_string(),
+                    member,
+                });
             }
             return;
         }

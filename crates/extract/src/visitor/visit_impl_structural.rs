@@ -50,7 +50,12 @@ impl ModuleInfoExtractor {
                 let type_name = param
                     .type_annotation
                     .as_deref()
-                    .and_then(extract_type_annotation_name)
+                    .and_then(|annotation| {
+                        // `ReturnType<typeof useFooStore>` names the store factory,
+                        // not the `ReturnType` utility.
+                        Self::store_factory_from_return_type(&annotation.type_annotation)
+                            .or_else(|| extract_type_annotation_name(annotation))
+                    })
                     .or_else(|| inferred_param_types?.get(index).and_then(Clone::clone))?;
                 Some((index, id.name.to_string(), type_name))
             })
@@ -110,12 +115,21 @@ impl ModuleInfoExtractor {
 
     fn record_scoped_parameter_member_accesses(&mut self, uses: &ScopedStructuralUses) {
         let type_alias_scopes = &self.function_type_alias_scopes;
+        let store_aliases = &self.type_alias_store_factory;
         self.member_accesses.extend(
             uses.params
                 .values()
                 .filter_map(|param| {
                     let type_name = param.type_name.as_deref()?;
-                    (!type_is_shadowed(type_alias_scopes, type_name)).then_some((param, type_name))
+                    if type_is_shadowed(type_alias_scopes, type_name) {
+                        return None;
+                    }
+                    // `type CounterStore = ReturnType<typeof useCounterStore>`:
+                    // credit the store factory, not the local alias.
+                    let object = store_aliases
+                        .get(type_name)
+                        .map_or(type_name, String::as_str);
+                    Some((param, object))
                 })
                 .flat_map(|(param, type_name)| {
                     param
