@@ -1175,7 +1175,7 @@
           }
         },
         "changeCoupling": {
-          "description": "Change coupling thresholds for the `change_coupling` section and the\nhidden-coupling refactoring targets.",
+          "description": "Change coupling thresholds for the `change_coupling` section and the\nhidden-coupling refactoring targets. Older fallow versions reject this\nkey as unknown, so pair it with `minimumVersion` set to the release\nthat added it.",
           "$ref": "#/$defs/ChangeCouplingConfig",
           "default": {
             "maxFilesPerCommit": 30,
@@ -1316,10 +1316,11 @@
       "type": "object",
       "properties": {
         "maxFilesPerCommit": {
-          "description": "Skip a commit that changes more analyzed files than this (default:\n30). Bulk commits (renames, format passes) create false pairs.",
+          "description": "Skip a commit that changes more analyzed files than this (default:\n30, from 2 to 1000). Bulk commits (renames, format passes) create\nfalse pairs. The upper bound keeps the pair count of one commit small.",
           "type": "integer",
           "format": "uint",
           "minimum": 2,
+          "maximum": 1000,
           "default": 30
         },
         "minRevisions": {

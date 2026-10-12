@@ -124,9 +124,10 @@ impl Default for OwnershipConfig {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ChangeCouplingConfig {
     /// Skip a commit that changes more analyzed files than this (default:
-    /// 30). Bulk commits (renames, format passes) create false pairs.
+    /// 30, from 2 to 1000). Bulk commits (renames, format passes) create
+    /// false pairs. The upper bound keeps the pair count of one commit small.
     #[serde(default = "default_coupling_max_files_per_commit")]
-    #[schemars(range(min = 2))]
+    #[schemars(range(min = 2, max = 1000))]
     pub max_files_per_commit: usize,
     /// Minimum commits for each file of a pair (default: 5).
     #[serde(default = "default_coupling_min_revisions")]
@@ -156,6 +157,36 @@ const fn default_coupling_min_shared_revisions() -> u32 {
 
 const fn default_coupling_min_degree() -> f64 {
     0.3
+}
+
+/// Smallest `maxFilesPerCommit`: a commit needs two files to form a pair.
+const MIN_COUPLING_FILES_PER_COMMIT: usize = 2;
+
+/// Largest `maxFilesPerCommit`. A commit with `n` files gives `n * (n - 1) / 2`
+/// pairs, so a higher value lets one bulk commit dominate the run time.
+const MAX_COUPLING_FILES_PER_COMMIT: usize = 1000;
+
+impl ChangeCouplingConfig {
+    /// Validate the ranges that serde cannot express.
+    #[must_use]
+    pub fn errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        if !(MIN_COUPLING_FILES_PER_COMMIT..=MAX_COUPLING_FILES_PER_COMMIT)
+            .contains(&self.max_files_per_commit)
+        {
+            errors.push(format!(
+                "health.changeCoupling.maxFilesPerCommit must be from {MIN_COUPLING_FILES_PER_COMMIT} to {MAX_COUPLING_FILES_PER_COMMIT}, found {}",
+                self.max_files_per_commit
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.min_degree) {
+            errors.push(format!(
+                "health.changeCoupling.minDegree must be from 0 to 1, found {}",
+                self.min_degree
+            ));
+        }
+        errors
+    }
 }
 
 impl Default for ChangeCouplingConfig {
@@ -258,7 +289,9 @@ pub struct HealthConfig {
     pub ownership: OwnershipConfig,
 
     /// Change coupling thresholds for the `change_coupling` section and the
-    /// hidden-coupling refactoring targets.
+    /// hidden-coupling refactoring targets. Older fallow versions reject this
+    /// key as unknown, so pair it with `minimumVersion` set to the release
+    /// that added it.
     #[serde(default)]
     pub change_coupling: ChangeCouplingConfig,
 
@@ -363,6 +396,35 @@ impl HealthConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn change_coupling_ranges_are_validated() {
+        assert!(ChangeCouplingConfig::default().errors().is_empty());
+        let at_bounds = ChangeCouplingConfig {
+            max_files_per_commit: 1000,
+            min_degree: 1.0,
+            ..ChangeCouplingConfig::default()
+        };
+        assert!(at_bounds.errors().is_empty());
+
+        for (max_files_per_commit, min_degree) in [(1, 0.3), (1001, 0.3), (30, -0.1), (30, 1.5)] {
+            let config = ChangeCouplingConfig {
+                max_files_per_commit,
+                min_degree,
+                ..ChangeCouplingConfig::default()
+            };
+            assert_eq!(
+                config.errors().len(),
+                1,
+                "maxFilesPerCommit {max_files_per_commit}, minDegree {min_degree}"
+            );
+        }
+        let nan = ChangeCouplingConfig {
+            min_degree: f64::NAN,
+            ..ChangeCouplingConfig::default()
+        };
+        assert_eq!(nan.errors().len(), 1);
+    }
 
     #[test]
     fn health_config_defaults() {

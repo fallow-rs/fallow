@@ -1389,11 +1389,12 @@ impl FallowConfig {
                 "invalid config:\n  - security.requestReceivers entries must be non-empty strings"
             ));
         }
-        let threshold_override_errors = config.health.threshold_override_errors();
-        if !threshold_override_errors.is_empty() {
+        let mut health_errors = config.health.threshold_override_errors();
+        health_errors.extend(config.health.change_coupling.errors());
+        if !health_errors.is_empty() {
             return Err(miette::miette!(
                 "invalid config:\n  - {}",
-                threshold_override_errors.join("\n  - ")
+                health_errors.join("\n  - ")
             ));
         }
         if let Some(pattern) = &config.unused_component_props.ignore_pattern
