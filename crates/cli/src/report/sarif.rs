@@ -473,8 +473,12 @@ fn saved_audit_sarif(
         )),
         None => None,
     };
-    let diff_risk =
-        parse_optional_section::<fallow_output::DiffRiskReport>(envelope, "/diff_risk").ok()?;
+    // A malformed diff-risk section drops only that run. The section is newer
+    // than the others, so it must not cost the dead-code, duplication and
+    // health runs of a saved report.
+    let diff_risk = parse_optional_section::<fallow_output::DiffRiskReport>(envelope, "/diff_risk")
+        .ok()
+        .flatten();
     Some(fallow_api::build_audit_sarif(
         fallow_api::AuditSarifOutputInput {
             dead_code: dead_code.as_ref(),
@@ -1219,6 +1223,25 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn saved_audit_sarif_keeps_other_runs_when_diff_risk_is_malformed() {
+        let root = tempfile::tempdir().expect("root");
+        let envelope = serde_json::json!({
+            "dead_code": serde_json::to_value(AnalysisResults::default()).unwrap(),
+            "diff_risk": {"findings": "not-an-array"},
+        });
+        // The native renderer must keep the valid sections. Before, a bad
+        // diff-risk section made it give up on the whole saved report.
+        let sarif = saved_audit_sarif(&envelope, root.path(), None)
+            .expect("a malformed diff-risk section must not drop the saved report");
+        let runs = sarif["runs"].as_array().expect("SARIF runs");
+        assert_eq!(runs.len(), 1, "only the dead-code run remains: {sarif}");
+        assert_ne!(
+            runs[0]["automationDetails"]["id"], "fallow/audit/diff-risk",
+            "{sarif}"
+        );
     }
 
     #[test]
