@@ -578,7 +578,12 @@ fn compute_crap_scores_estimated(
             continue;
         }
         let cc = f64::from(f.cyclomatic);
-        let estimated_coverage = if test_referenced_exports.contains(f.name.as_str()) {
+        // A context name is not an export name, also when it repeats the name
+        // of the export that returns the function (`const load = () =>
+        // Effect.gen(...)`), so it never claims a direct test reference.
+        let directly_tested =
+            !f.name_from_context && test_referenced_exports.contains(f.name.as_str());
+        let estimated_coverage = if directly_tested {
             DIRECT_TEST_COVERAGE_ESTIMATE
         } else if is_test_reachable {
             INDIRECT_TEST_COVERAGE_ESTIMATE
@@ -1142,7 +1147,16 @@ impl IstanbulFileCoverage {
         if function.is_private_member {
             return None;
         }
-        self.lookup(function.name.as_str(), function.line, function.col)
+        // A context name (`Command.make("setup")`, the name of the function
+        // that returns `Effect.gen(...)`) is not the name that a coverage
+        // producer records. It could match the record of the wrapper function
+        // on the same line, so the lookup uses the anonymous path.
+        let name = if function.name_from_context {
+            fallow_types::extract::ANONYMOUS_FUNCTION_NAME
+        } else {
+            function.name.as_str()
+        };
+        self.lookup(name, function.line, function.col)
     }
 
     fn new(mut functions: Vec<IstanbulFunctionCoverage>, relocated: bool) -> Self {
@@ -3721,6 +3735,7 @@ mod tests {
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: "doStuff".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 7,
@@ -3751,6 +3766,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "a".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 3,
@@ -3766,6 +3782,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "b".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 2,
                     col: 0,
                     cyclomatic: 5,
@@ -4421,6 +4438,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "foo".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 5,
@@ -4557,6 +4575,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 2,
@@ -4576,6 +4595,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 3,
@@ -4663,6 +4683,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "complex_fn".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 30,
@@ -4682,6 +4703,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "simple_fn".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 1,
@@ -4764,6 +4786,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "orphan".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -4847,6 +4870,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "high".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 10,
@@ -4862,6 +4886,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "medium".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 11,
                     col: 0,
                     cyclomatic: 5,
@@ -4877,6 +4902,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "low".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 21,
                     col: 0,
                     cyclomatic: 2,
@@ -4892,6 +4918,7 @@ mod tests {
                 fallow_types::extract::FunctionComplexity {
                     name: "trivial".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 31,
                     col: 0,
                     cyclomatic: 1,
@@ -4985,6 +5012,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_a".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 2,
@@ -5004,6 +5032,7 @@ mod tests {
                 vec![fallow_types::extract::FunctionComplexity {
                     name: "fn_b".into(),
                     is_private_member: false,
+                    name_from_context: false,
                     line: 1,
                     col: 0,
                     cyclomatic: 3,
@@ -5123,6 +5152,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -5310,6 +5340,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -5424,6 +5455,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 2,
@@ -5487,6 +5519,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 7,
@@ -5595,6 +5628,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "fn_a".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 2,
@@ -5659,6 +5693,7 @@ mod tests {
             vec![fallow_types::extract::FunctionComplexity {
                 name: "trivial".into(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 1,
@@ -5704,6 +5739,7 @@ mod tests {
         fallow_types::extract::FunctionComplexity {
             name: "test_fn".into(),
             is_private_member: false,
+            name_from_context: false,
             line: 1,
             col: 0,
             cyclomatic,
@@ -5726,6 +5762,7 @@ mod tests {
         fallow_types::extract::FunctionComplexity {
             name: name.into(),
             is_private_member: false,
+            name_from_context: false,
             line,
             col: 0,
             cyclomatic,
@@ -6171,6 +6208,27 @@ mod tests {
         let (max, above) = (result.max_crap, result.signals.above);
         assert!((max - 10.3).abs() < 0.1);
         assert_eq!(above, 0);
+    }
+
+    #[test]
+    fn estimated_crap_context_name_is_not_a_direct_test_reference() {
+        let mut generator = make_fn_complexity(10);
+        generator.name_from_context = true;
+        let mut refs = rustc_hash::FxHashSet::default();
+        refs.insert("test_fn".to_string());
+        let with_context_name = estimated_crap_default(
+            &[generator],
+            &refs,
+            true,
+            fallow_output::CoverageSource::Estimated,
+        );
+        let without_reference = estimated_crap_default(
+            &[make_fn_complexity(10)],
+            &rustc_hash::FxHashSet::default(),
+            true,
+            fallow_output::CoverageSource::Estimated,
+        );
+        assert!((with_context_name.max_crap - without_reference.max_crap).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -6689,6 +6747,59 @@ mod tests {
             fallow_output::CoverageSource::Istanbul
         );
         assert_eq!(result.per_function[0].coverage_pct, Some(100.0));
+    }
+
+    /// A generator that a named arrow returns takes the arrow's name as a
+    /// context name, but the coverage producer records it without a name. The
+    /// name must not match the wrapper's record two columns away, so the
+    /// lookup treats the generator as anonymous.
+    #[test]
+    fn a_context_named_generator_takes_its_own_anonymous_record() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/load.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &source_path,
+            "export const load = (id: string) =>\n  Effect.gen(function* () {\n    if (id) {}\n  });\n",
+        )
+        .unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "load",
+                    "line": 1,
+                    "decl": { "start": { "line": 1, "column": 20 }, "end": { "line": 1, "column": 21 } },
+                    "loc": { "start": { "line": 1, "column": 20 }, "end": { "line": 4, "column": 4 } }
+                },
+                "1": {
+                    "name": "(anonymous_1)",
+                    "line": 2,
+                    "decl": { "start": { "line": 2, "column": 13 }, "end": { "line": 2, "column": 14 } },
+                    "loc": { "start": { "line": 2, "column": 13 }, "end": { "line": 4, "column": 3 } }
+                }
+            }),
+            &serde_json::json!({ "0": 1, "1": 0 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        let mut generator = make_fn_complexity(2);
+        generator.name = "load".to_string();
+        generator.line = 2;
+        generator.col = 13;
+        assert_eq!(
+            file_coverage.lookup_function(&generator),
+            Some(100.0),
+            "a declared name matches the wrapper record"
+        );
+        generator.name_from_context = true;
+        assert_eq!(file_coverage.lookup_function(&generator), Some(0.0));
     }
 
     /// Curried arrows written one per line put each record's body start on

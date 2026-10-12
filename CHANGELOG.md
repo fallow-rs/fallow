@@ -46,6 +46,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `effective_severity: "error"` also render as errors; changing the current
   configuration does not rewrite those reports.
 
+- **Complexity findings name more callback bodies.** A function without a
+  declared name now takes a name from the code around it, where it got
+  `<anonymous>` or `<arrow>` before:
+  - `Effect.fn("Users.create")(function* ...)` gives `Users.create`.
+  - A function after a string-literal argument gives the call, for example
+    `Command.make("setup")`, `group.handle("github")` or `it("renders")`.
+  - A generator that a named function returns, for example
+    `const load = () => Effect.gen(function* ...)`, gives `load`.
+
+  Names that fallow gave before do not change, and scores do not change.
+  Coverage matching still treats these functions as anonymous. An identity
+  baseline (`--baseline-mode identity`) gives the unused allowance of an
+  `<anonymous>` or `<arrow>` bucket to new names in the same file, so a saved
+  baseline stays valid. Re-save the baseline to record the new names. A file
+  move no longer moves an `<arrow>` bucket, the same as an `<anonymous>`
+  bucket.
+
 ### Fixed
 
 - **The config JSON Schema now accepts `extends` as a single string.** The

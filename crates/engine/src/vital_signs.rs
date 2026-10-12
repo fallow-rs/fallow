@@ -1316,6 +1316,7 @@ mod tests {
             complexity: vec![fallow_types::extract::FunctionComplexity {
                 name: format!("fn_{id}"),
                 is_private_member: false,
+                name_from_context: false,
                 line: id + 1,
                 col: 0,
                 cyclomatic,

@@ -41,6 +41,7 @@ fn make_fc(name: &str, cyclomatic: u16, cognitive: u16, line_count: u32) -> Func
     FunctionComplexity {
         name: name.to_string(),
         is_private_member: false,
+        name_from_context: false,
         line: 1,
         col: 0,
         cyclomatic,
@@ -1101,6 +1102,7 @@ fn collect_findings_preserves_function_metadata() {
         vec![FunctionComplexity {
             name: "processData".to_string(),
             is_private_member: false,
+            name_from_context: false,
             line: 42,
             col: 8,
             cyclomatic: 25,
@@ -1149,6 +1151,7 @@ fn merge_crap_findings_disambiguates_same_line_functions() {
     let outer = FunctionComplexity {
         name: "handler".to_string(),
         is_private_member: false,
+        name_from_context: false,
         line: 1,
         col: 23,
         cyclomatic: 1,
@@ -1164,6 +1167,7 @@ fn merge_crap_findings_disambiguates_same_line_functions() {
     let inner = FunctionComplexity {
         name: "<arrow>".to_string(),
         is_private_member: false,
+        name_from_context: false,
         line: 1,
         col: 43,
         cyclomatic: 7,
@@ -1258,6 +1262,7 @@ fn merge_crap_findings_picks_outer_when_outer_exceeds() {
     let outer = FunctionComplexity {
         name: "complex".to_string(),
         is_private_member: false,
+        name_from_context: false,
         line: 5,
         col: 10,
         cyclomatic: 8,
@@ -1273,6 +1278,7 @@ fn merge_crap_findings_picks_outer_when_outer_exceeds() {
     let inner = FunctionComplexity {
         name: "<arrow>".to_string(),
         is_private_member: false,
+        name_from_context: false,
         line: 5,
         col: 30,
         cyclomatic: 1,

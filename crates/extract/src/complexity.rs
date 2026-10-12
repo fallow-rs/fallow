@@ -24,6 +24,14 @@
 /// into cognitive. Only props beyond this floor are counted.
 const PROP_COUNT_FLOOR: u16 = 4;
 
+/// Arguments that take the span name of `Effect.fn("span")(...)`: only the
+/// body. The later arguments are pipeline transforms.
+const SPAN_NAMED_ARGUMENTS: std::ops::Range<usize> = 0..1;
+
+/// Arguments that take the name of a call with a string-literal first
+/// argument: every argument after that literal.
+const STRING_KEYED_ARGUMENTS: std::ops::RangeFrom<usize> = 1..;
+
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
@@ -33,8 +41,11 @@ use oxc_span::GetSpan;
 use oxc_span::Span;
 
 use fallow_types::extract::{
-    ComplexityContribution, ComplexityContributionKind, ComplexityMetric, FunctionComplexity,
+    ANONYMOUS_ARROW_NAME, ANONYMOUS_FUNCTION_NAME, ComplexityContribution,
+    ComplexityContributionKind, ComplexityMetric, FunctionComplexity,
 };
+
+use crate::complexity_names;
 
 /// Per-function state on the scope stack.
 struct FunctionFrame {
@@ -64,9 +75,13 @@ struct FunctionFrame {
     contributions: Vec<ComplexityContribution>,
 }
 
+#[derive(Clone)]
 struct FunctionIdentity {
     name: String,
     is_private_member: bool,
+    /// The name comes from the call or the function that holds this function
+    /// (see `FunctionComplexity::name_from_context`).
+    from_context: bool,
 }
 
 impl FunctionIdentity {
@@ -74,6 +89,7 @@ impl FunctionIdentity {
         Self {
             name: name.into(),
             is_private_member: false,
+            from_context: false,
         }
     }
 
@@ -81,6 +97,15 @@ impl FunctionIdentity {
         Self {
             name: name.into(),
             is_private_member: true,
+            from_context: false,
+        }
+    }
+
+    fn from_context(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            is_private_member: false,
+            from_context: true,
         }
     }
 }
@@ -97,6 +122,10 @@ pub struct ComplexityVisitor<'a> {
     /// Identity override from a parent node (e.g., method identity from
     /// `MethodDefinition`, variable name from `const foo = function() {}`).
     pending_identity: Option<FunctionIdentity>,
+    /// A call whose anonymous generator arguments take a context name, keyed
+    /// by the call span: the `Effect.gen(...)` call that a named function
+    /// returns, or one passed to a string-keyed call.
+    named_generator_call: Option<(Span, FunctionIdentity)>,
 }
 
 impl<'a> ComplexityVisitor<'a> {
@@ -107,6 +136,7 @@ impl<'a> ComplexityVisitor<'a> {
             line_offsets,
             source,
             pending_identity: None,
+            named_generator_call: None,
         }
     }
 
@@ -161,6 +191,7 @@ impl<'a> ComplexityVisitor<'a> {
             self.results.push(FunctionComplexity {
                 name: frame.identity.name,
                 is_private_member: frame.identity.is_private_member,
+                name_from_context: frame.identity.from_context,
                 line,
                 col,
                 cyclomatic: frame.cyclomatic,
@@ -219,6 +250,7 @@ impl<'a> ComplexityVisitor<'a> {
         self.results.push(FunctionComplexity {
             name: fallow_types::extract::MODULE_UNIT_NAME.to_string(),
             is_private_member: false,
+            name_from_context: false,
             line,
             col,
             cyclomatic: frame.cyclomatic,
@@ -339,10 +371,9 @@ impl<'a> ComplexityVisitor<'a> {
     /// branching does. Gating on the name convention keeps a `use*` call inside an
     /// ordinary non-React function from accruing the penalty (zero-FP posture).
     fn record_hook(&mut self, span: Span) {
-        let react_shaped = self
-            .stack
-            .last()
-            .is_some_and(|frame| frame_name_is_react_shaped(&frame.identity.name));
+        let react_shaped = self.stack.last().is_some_and(|frame| {
+            !frame.identity.from_context && frame_name_is_react_shaped(&frame.identity.name)
+        });
         if let Some(frame) = self.stack.last_mut() {
             frame.hook_count = frame.hook_count.saturating_add(1);
         }
@@ -440,6 +471,106 @@ impl<'a> ComplexityVisitor<'a> {
         matches!(expr, Expression::LogicalExpression(_))
     }
 
+    /// Mark the generator call that the current function returns, so that the
+    /// generator takes the name of that function. In
+    /// `const load = () => Effect.gen(function* () {...})` the generator is the
+    /// real body of `load`. A function with a placeholder name passes nothing.
+    fn name_returned_generator(&mut self, returned: &Expression<'_>) {
+        let Some(frame) = self.stack.last() else {
+            return;
+        };
+        if complexity_names::is_placeholder_name(&frame.identity.name) {
+            return;
+        }
+        if let Some(call) = complexity_names::returned_generator_call(returned) {
+            let identity = FunctionIdentity::from_context(frame.identity.name.clone());
+            self.named_generator_call = Some((call.span, identity));
+        }
+    }
+
+    fn take_named_generator_call(&mut self, span: Span) -> Option<FunctionIdentity> {
+        if self
+            .named_generator_call
+            .as_ref()
+            .is_some_and(|(call_span, _)| *call_span == span)
+        {
+            return self
+                .named_generator_call
+                .take()
+                .map(|(_, identity)| identity);
+        }
+        None
+    }
+
+    /// Walk a call and give `identity` to each anonymous generator argument.
+    fn visit_call_with_named_generators(
+        &mut self,
+        call: &CallExpression<'_>,
+        identity: &FunctionIdentity,
+    ) {
+        self.visit_expression(&call.callee);
+        for argument in &call.arguments {
+            let offered = self.pending_identity.is_none()
+                && complexity_names::is_anonymous_generator(argument);
+            if offered {
+                self.pending_identity = Some(identity.clone());
+            }
+            self.visit_argument(argument);
+            if offered {
+                self.pending_identity = None;
+            }
+        }
+    }
+
+    /// Walk a call and offer `identity` to the arguments in `named`. A
+    /// function argument takes it directly. A call argument passes it to its
+    /// anonymous generator (`.handle("get", Effect.fn(function* ...))`), and
+    /// to nothing else, so `it("x", wrap(() => ...))` keeps `<arrow>`.
+    ///
+    /// A binding or key name that waits for the first function keeps
+    /// priority: the offer happens only when no such name is pending, so only
+    /// a function that would get a placeholder takes the context name. In
+    /// `const setup = Command.make("setup", {...}, cb)` the object argument
+    /// consumes the binding name, so `cb` takes `Command.make("setup")`.
+    fn visit_call_with_context_name(
+        &mut self,
+        call: &CallExpression<'_>,
+        named: &impl std::ops::RangeBounds<usize>,
+        identity: &FunctionIdentity,
+    ) {
+        self.visit_expression(&call.callee);
+        for (index, argument) in call.arguments.iter().enumerate() {
+            let offered = named.contains(&index)
+                && self.pending_identity.is_none()
+                && self.offer_context_name(argument, identity);
+            self.visit_argument(argument);
+            if offered {
+                self.pending_identity = None;
+                self.named_generator_call = None;
+            }
+        }
+    }
+
+    /// Offer `identity` to one argument. Returns whether the argument can take
+    /// it.
+    fn offer_context_name(&mut self, argument: &Argument<'_>, identity: &FunctionIdentity) -> bool {
+        if matches!(
+            argument,
+            Argument::FunctionExpression(_) | Argument::ArrowFunctionExpression(_)
+        ) {
+            self.pending_identity = Some(identity.clone());
+            return true;
+        }
+        let Some(call) = argument
+            .as_expression()
+            .and_then(complexity_names::returned_generator_call)
+        else {
+            return false;
+        };
+        self.named_generator_call = Some((call.span, identity.clone()));
+        true
+    }
+
     /// Walk an `if` (or an `else if` continuation) computing both metrics.
     ///
     /// `is_else_if` is `true` when the statement is the `alternate` of a parent
@@ -524,7 +655,7 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
                 FunctionIdentity::public(id.name.to_string())
             })
             .or_else(|| self.pending_identity.take())
-            .unwrap_or_else(|| FunctionIdentity::public("<anonymous>"));
+            .unwrap_or_else(|| FunctionIdentity::public(ANONYMOUS_FUNCTION_NAME));
 
         let is_nested = !self.stack.is_empty();
         if is_nested {
@@ -546,7 +677,7 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         let identity = self
             .pending_identity
             .take()
-            .unwrap_or_else(|| FunctionIdentity::public("<arrow>"));
+            .unwrap_or_else(|| FunctionIdentity::public(ANONYMOUS_ARROW_NAME));
 
         let is_nested = !self.stack.is_empty();
         if is_nested {
@@ -556,7 +687,11 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         let param_count = Self::count_params(&arrow.params);
         let prop_count = Self::count_props(&arrow.params);
         self.push_function(identity, arrow.span, param_count, prop_count);
+        if let Some(body) = arrow.get_expression() {
+            self.name_returned_generator(body);
+        }
         walk::walk_arrow_function_expression(self, arrow);
+        self.named_generator_call = None;
         self.pop_function();
 
         if is_nested {
@@ -783,11 +918,35 @@ impl<'ast> Visit<'ast> for ComplexityVisitor<'_> {
         self.close_jsx();
     }
 
+    fn visit_return_statement(&mut self, stmt: &ReturnStatement<'ast>) {
+        if let Some(argument) = &stmt.argument {
+            self.name_returned_generator(argument);
+        }
+        walk::walk_return_statement(self, stmt);
+        self.named_generator_call = None;
+    }
+
     fn visit_call_expression(&mut self, call: &CallExpression<'ast>) {
         if let Expression::Identifier(callee) = &call.callee
             && is_hook_callee(callee.name.as_str())
         {
             self.record_hook(call.span);
+        }
+        if let Some(identity) = self.take_named_generator_call(call.span) {
+            let identity =
+                complexity_names::span_name(call).map_or(identity, FunctionIdentity::from_context);
+            self.visit_call_with_named_generators(call, &identity);
+            return;
+        }
+        if let Some(span) = complexity_names::span_name(call) {
+            let identity = FunctionIdentity::from_context(span);
+            self.visit_call_with_context_name(call, &SPAN_NAMED_ARGUMENTS, &identity);
+            return;
+        }
+        if let Some(name) = complexity_names::string_keyed_call_name(call) {
+            let identity = FunctionIdentity::from_context(name);
+            self.visit_call_with_context_name(call, &STRING_KEYED_ARGUMENTS, &identity);
+            return;
         }
         walk::walk_call_expression(self, call);
     }
@@ -1317,6 +1476,190 @@ mod tests {
         let inner = find_fn(&results, "inner");
         assert_eq!(outer.cyclomatic, 2);
         assert_eq!(inner.cyclomatic, 2);
+    }
+
+    fn names(results: &[FunctionComplexity]) -> Vec<&str> {
+        results.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    #[test]
+    fn returned_effect_generator_takes_the_binding_name() {
+        let results = analyze(
+            "const fetchIssue = (key: string) =>\n\
+               Effect.gen(function* () { if (key) { yield* load(key); } });",
+        );
+        let named: Vec<_> = results.iter().filter(|r| r.name == "fetchIssue").collect();
+        assert_eq!(named.len(), 2, "{:?}", names(&results));
+        let generator = named.iter().find(|r| r.cyclomatic == 2).expect("generator");
+        assert!(generator.name_from_context);
+        let wrapper = named.iter().find(|r| r.cyclomatic == 1).expect("wrapper");
+        assert!(
+            !wrapper.name_from_context,
+            "the binding name is not a context name"
+        );
+    }
+
+    #[test]
+    fn generator_returned_through_pipe_takes_the_function_name() {
+        let results = analyze(
+            "function load(id: string) {\n\
+               const key = id.trim();\n\
+               return Effect.gen(function* () { if (key) {} }).pipe(Effect.withSpan(\"load\"));\n\
+             }",
+        );
+        assert!(
+            !names(&results).contains(&"<anonymous>"),
+            "{:?}",
+            names(&results)
+        );
+        let generator = results
+            .iter()
+            .find(|r| r.name == "load" && r.cyclomatic == 2)
+            .expect("generator named load");
+        assert!(generator.name_from_context);
+    }
+
+    #[test]
+    fn string_keyed_call_names_its_callback_and_generator() {
+        let results = analyze(
+            "export const setup = Command.make(\"setup\", { force: flag }, (args) =>\n\
+               Effect.gen(function* () { if (args.force) {} }),\n\
+             );\n\
+             group.handle(\"github\", (_args) => Effect.gen(function* () {}));",
+        );
+        let all = names(&results);
+        assert!(!all.contains(&"<anonymous>"), "{all:?}");
+        assert!(!all.contains(&"<arrow>"), "{all:?}");
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| r.name == "Command.make(\"setup\")")
+                .count(),
+            2,
+            "{all:?}"
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| r.name == "group.handle(\"github\")")
+                .count(),
+            2,
+            "{all:?}"
+        );
+    }
+
+    #[test]
+    fn effect_fn_span_names_the_body() {
+        let results = analyze(
+            "group.handle(\"get\", Effect.fn(function* ({ payload }) { if (payload) {} }));\n\
+             register(Effect.fn(\"Users.create\")(function* (input) { if (input) {} }, (effect) => effect));",
+        );
+        let all = names(&results);
+        assert!(all.contains(&"group.handle(\"get\")"), "{all:?}");
+        assert!(all.contains(&"Users.create"), "{all:?}");
+        assert!(
+            all.contains(&"<arrow>"),
+            "a pipeline transform after the body keeps its placeholder: {all:?}"
+        );
+    }
+
+    #[test]
+    fn declared_and_bound_names_do_not_change() {
+        let results = analyze(
+            "const create = Effect.fn(\"Users.create\")(function* () {});\n\
+             const doctor = Command.make(\"doctor\", () => 1);\n\
+             it(\"works\", function named() {});",
+        );
+        let all = names(&results);
+        assert!(all.contains(&"create"), "{all:?}");
+        assert!(all.contains(&"doctor"), "{all:?}");
+        assert!(all.contains(&"named"), "{all:?}");
+        assert!(results.iter().all(|r| !r.name_from_context), "{all:?}");
+    }
+
+    #[test]
+    fn callbacks_that_are_not_the_body_keep_their_placeholder() {
+        let results = analyze(
+            "const render = (items) => items.map((item) => item ? 1 : 0);\n\
+             Match.when({ type: \"a\" }, (req) => Effect.gen(function* () {}));\n\
+             it(\"wraps\", wrap(() => 1));\n\
+             yieldAll(function* () {});",
+        );
+        let all = names(&results);
+        assert_eq!(
+            all.iter().filter(|n| **n == "<arrow>").count(),
+            3,
+            "{all:?}"
+        );
+        assert_eq!(
+            all.iter().filter(|n| **n == "<anonymous>").count(),
+            2,
+            "{all:?}"
+        );
+        assert!(!all.contains(&"it(\"wraps\")"), "{all:?}");
+    }
+
+    #[test]
+    fn context_names_do_not_add_react_hook_density() {
+        let results = analyze(
+            "Command.make(\"Setup\", () => Effect.gen(function* () { useThing(); }));\n\
+             const Panel = () => run(function* () { useThing(); });",
+        );
+        for result in results.iter().filter(|r| r.name_from_context) {
+            assert_eq!(result.cognitive, 0, "{}", result.name);
+        }
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name_from_context && r.name == "Panel")
+        );
+    }
+
+    #[test]
+    fn effect_combinators_add_no_complexity() {
+        let results = analyze(
+            "const program = pipe(\n\
+               load,\n\
+               Effect.catchTag(\"NotFound\", () => Effect.succeed(null)),\n\
+               Effect.flatMap((value) =>\n\
+                 Match.value(value).pipe(\n\
+                   Match.when({ kind: \"a\" }, () => Effect.void),\n\
+                   Match.orElse(() => Effect.fail(new Unknown())),\n\
+                 ),\n\
+               ),\n\
+               Effect.if({ onTrue: () => a, onFalse: () => b }),\n\
+             );\n\
+             const run = Effect.gen(function* () {\n\
+               const a = yield* first;\n\
+               const b = yield* second(a);\n\
+               return yield* third(b);\n\
+             });",
+        );
+        for result in &results {
+            assert_eq!(
+                (result.cyclomatic, result.cognitive),
+                (1, 0),
+                "{} counts a combinator as a decision",
+                result.name
+            );
+        }
+    }
+
+    #[test]
+    fn nesting_does_not_pass_into_an_effect_callback() {
+        let results = analyze(
+            "const outer = (flag) => {\n\
+               if (flag) {\n\
+                 return Effect.gen(function* () { if (flag) {} });\n\
+               }\n\
+               return Effect.void;\n\
+             };",
+        );
+        let generator = results
+            .iter()
+            .find(|r| r.name == "outer" && r.name_from_context)
+            .expect("generator");
+        assert_eq!(generator.cognitive, 1, "the generator starts at nesting 0");
     }
 
     #[test]

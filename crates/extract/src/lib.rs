@@ -21,6 +21,7 @@ pub mod astro;
 mod binding_references;
 pub mod cache;
 pub(crate) mod complexity;
+mod complexity_names;
 mod component_contracts;
 pub mod css;
 pub mod css_classes;

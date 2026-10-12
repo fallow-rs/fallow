@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 347;
+pub(super) const CACHE_VERSION: u32 = 348;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -74,7 +74,7 @@ assert_cached_type_size!(fallow_types::extract::ImportedCallSite, 80);
 assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 64);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
-assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
+assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 104);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 168);

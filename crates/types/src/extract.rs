@@ -1081,6 +1081,21 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
     name == "<template>" || name.starts_with("<snippet:")
 }
 
+/// Placeholder name of a function expression that has no name from its
+/// declaration, its binding, a key, or its call context.
+pub const ANONYMOUS_FUNCTION_NAME: &str = "<anonymous>";
+
+/// Placeholder name of an arrow function that has no name from its binding, a
+/// key, or its call context.
+pub const ANONYMOUS_ARROW_NAME: &str = "<arrow>";
+
+/// True when `name` is the placeholder of a function without a name. Two
+/// functions that share a placeholder are not the same function.
+#[must_use]
+pub fn is_anonymous_function_name(name: &str) -> bool {
+    name == ANONYMOUS_FUNCTION_NAME || name == ANONYMOUS_ARROW_NAME
+}
+
 /// Emitted name of the synthetic module-scope complexity unit.
 pub const MODULE_UNIT_NAME: &str = "<module>";
 
@@ -1224,13 +1239,22 @@ impl FileBranching {
 /// Complexity metrics for a single function/method/arrow.
 #[derive(Debug, Clone, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 pub struct FunctionComplexity {
-    /// Function name (or `"<anonymous>"` for unnamed functions/arrows).
+    /// Function name, or a placeholder (`"<anonymous>"`, `"<arrow>"`) for a
+    /// function that has no name.
     pub name: String,
     /// Whether this function is an ECMAScript `#`-private class member.
     ///
     /// Kept separately from `name` because a public string-named method may
     /// legally begin with `#` and remains eligible for runtime coverage.
     pub is_private_member: bool,
+    /// Whether `name` comes from the call or the function that holds this
+    /// function, not from its own declaration, binding, or key. Examples:
+    /// `Command.make("setup")` for a callback argument, the `Effect.fn` span
+    /// name, or the name of the function that returns `Effect.gen(...)`.
+    ///
+    /// Coverage producers record such a function without a name, so coverage
+    /// matching treats it as anonymous.
+    pub name_from_context: bool,
     /// 1-based line number where the function starts.
     pub line: u32,
     /// 0-based byte column where the function starts.
@@ -4492,6 +4516,7 @@ mod tests {
             complexity: vec![FunctionComplexity {
                 name: "work".to_string(),
                 is_private_member: false,
+                name_from_context: false,
                 line: 1,
                 col: 0,
                 cyclomatic: 2,
