@@ -53,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   member that nothing reads, or that the store only writes, is still reported.
   Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report.
   (Closes [#3348](https://github.com/fallow-rs/fallow/issues/3348))
-- **`ignoreExportsUsedInFile` now applies to Vue and Svelte single-file
-  components.** Before, the same-file use check read only `.js` and `.ts`
+- **`ignoreExportsUsedInFile` now applies to Vue single-file components.**
+  Before, the same-file use check read only `.js` and `.ts`
   style files. An exported interface that `defineProps<T>()`,
   `defineEmits<T>()`, `defineModel<T>()`, `defineSlots<T>()` or
   `withDefaults(defineProps<T>(), ...)` used in the same SFC was reported as
@@ -62,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as one program, so a binding in `<script>` that `<script setup>` uses also
   counts. Exports with no same-file use are still reported. Thanks
   [@Smrtnyk](https://github.com/Smrtnyk) for the report.
-  (Fixes [#3347](https://github.com/fallow-rs/fallow/issues/3347))
+  (Closes [#3347](https://github.com/fallow-rs/fallow/issues/3347))
 - **`fallow audit` now reports a new error in a changed template or regex as
   introduced.** Audit treated a change inside a template literal or a regex
   literal as non-behavioral. It then reused the current findings as the
