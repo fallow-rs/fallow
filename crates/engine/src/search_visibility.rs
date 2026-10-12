@@ -124,7 +124,13 @@ impl SearchTarget {
             .0
         });
         let binding = self.binding(graph, reference);
-        let (visibility, reason, search_as) = if found {
+        let (visibility, reason, search_as) = if matches!(binding, Some(Binding::ReExport)) {
+            (
+                SearchVisibility::Found,
+                Some(SearchGapReason::PassThrough),
+                None,
+            )
+        } else if found {
             self.classify_found(binding.as_ref())
         } else {
             self.classify_missed(binding.as_ref(), reference.kind)
@@ -178,34 +184,43 @@ impl SearchTarget {
             }
             Some(Binding::Default { local }) => (SearchGapReason::DefaultImport, non_empty(local)),
             Some(Binding::Namespace { local }) => (SearchGapReason::NamespaceUse, non_empty(local)),
-            Some(Binding::ReExport { exported, star }) => {
-                if *star {
-                    (SearchGapReason::StarReExport, None)
-                } else {
-                    (SearchGapReason::ReExportAlias, non_empty(exported))
-                }
-            }
-            None => (reason_for_kind(kind), None),
+            Some(Binding::ReExport) | None => (reason_for_kind(kind), None),
         };
         (SearchVisibility::Missed, Some(reason), search_as)
     }
 
-    /// Find the import binding behind a graph reference. The import span and
-    /// an exposing module identify the binding, the same way the graph credits
-    /// the reference.
+    /// Find the binding behind a graph reference. The import span and an
+    /// exposing module identify the binding, the same way the graph credits
+    /// the reference. When the span names no import, any import of the export
+    /// in the same file wins over a re-export: a barrel that also uses the
+    /// export is a consumer, and only a barrel without such an import passes
+    /// the export through.
     fn binding<'g>(
         &self,
         graph: &'g ModuleGraph,
         reference: &SymbolReference,
     ) -> Option<Binding<'g>> {
+        self.import_binding(graph, reference.from_file, Some(reference.import_span))
+            .or_else(|| self.import_binding(graph, reference.from_file, None))
+            .or_else(|| self.re_export_binding(graph, reference))
+    }
+
+    /// The import binding of the export in `from_file`, restricted to the
+    /// import at `span` when one is given.
+    fn import_binding<'g>(
+        &self,
+        graph: &'g ModuleGraph,
+        from_file: FileId,
+        span: Option<oxc_span::Span>,
+    ) -> Option<Binding<'g>> {
         let mut namespace_binding = None;
-        for (target, symbols) in graph.outgoing_symbol_edges(reference.from_file) {
+        for (target, symbols) in graph.outgoing_symbol_edges(from_file) {
             let Some(names) = self.exposures.get(&target) else {
                 continue;
             };
             for symbol in symbols
                 .iter()
-                .filter(|symbol| symbol.import_span == reference.import_span)
+                .filter(|symbol| span.is_none_or(|span| symbol.import_span == span))
             {
                 match &symbol.imported_name {
                     ImportedName::Named(imported) if names.contains(imported) => {
@@ -228,10 +243,7 @@ impl SearchTarget {
                 }
             }
         }
-        if namespace_binding.is_some() {
-            return namespace_binding;
-        }
-        self.re_export_binding(graph, reference)
+        namespace_binding
     }
 
     fn re_export_binding<'g>(
@@ -247,16 +259,11 @@ impl SearchTarget {
                     re_export.imported_name == "*" || names.contains(&re_export.imported_name)
                 })
         };
-        let re_export = module
+        module
             .re_exports
             .iter()
-            .filter(forwards)
-            .find(|re_export| re_export.span == reference.import_span)
-            .or_else(|| module.re_exports.iter().find(forwards))?;
-        Some(Binding::ReExport {
-            exported: &re_export.exported_name,
-            star: re_export.imported_name == "*",
-        })
+            .any(|re_export| forwards(&re_export))
+            .then_some(Binding::ReExport)
     }
 }
 
@@ -287,10 +294,18 @@ const fn reason_for_kind(kind: ReferenceKind) -> SearchGapReason {
 
 /// How a consumer binds the export.
 enum Binding<'g> {
-    Named { imported: &'g str, local: &'g str },
-    Default { local: &'g str },
-    Namespace { local: &'g str },
-    ReExport { exported: &'g str, star: bool },
+    Named {
+        imported: &'g str,
+        local: &'g str,
+    },
+    Default {
+        local: &'g str,
+    },
+    Namespace {
+        local: &'g str,
+    },
+    /// The consumer forwards the export and has no import of it.
+    ReExport,
 }
 
 /// The search term of the default export of `file_id`: the name of the

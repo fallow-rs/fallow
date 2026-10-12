@@ -343,3 +343,153 @@ fn audit_brief_omits_search_gap_when_every_consumer_is_found() {
         brief["impact_closure"]
     );
 }
+
+/// A project where barrels forward `formatDate` and the default export
+/// `Widget`. `star.ts` and `named.ts` only forward the export. `both.ts`
+/// forwards it and also uses it under another local name. These three barrels
+/// are public package entry points, so the graph credits their re-exports.
+/// `use-named.ts` imports through the inner alias barrel `alias.ts`.
+fn write_barrel_probe(root: &Path) {
+    fs::create_dir_all(root.join("src")).expect("create source directory");
+    let files: &[(&str, &str)] = &[
+        (
+            "package.json",
+            r#"{"name":"barrel-probe","type":"module","exports":{".":"./src/index.ts","./star":"./src/star.ts","./named":"./src/named.ts","./both":"./src/both.ts"}}"#,
+        ),
+        (
+            "src/index.ts",
+            "import './use-star';\nimport './use-named';\nimport './use-both';\n",
+        ),
+        (
+            "src/lib.ts",
+            "export const formatDate = (d: Date): string => d.toISOString();\n\nexport default function Widget(): string {\n  return 'w';\n}\n",
+        ),
+        ("src/star.ts", "export * from './lib';\n"),
+        (
+            "src/named.ts",
+            "export { formatDate as fd } from './lib';\nexport { default as Thing } from './lib';\n",
+        ),
+        (
+            "src/both.ts",
+            "export * from './lib';\nimport { formatDate as f } from './lib';\nexport const today = (): string => f(new Date());\n",
+        ),
+        (
+            "src/use-star.ts",
+            "import { formatDate } from './star';\nconsole.log(formatDate(new Date()));\n",
+        ),
+        (
+            "src/alias.ts",
+            "export { formatDate as fd } from './lib';\n",
+        ),
+        (
+            "src/use-named.ts",
+            "import { fd } from './alias';\nconsole.log(fd(new Date()));\n",
+        ),
+        (
+            "src/use-both.ts",
+            "import { today } from './both';\nconsole.log(today());\n",
+        ),
+    ];
+    for (path, content) in files {
+        fs::write(root.join(path), content).expect("write probe file");
+    }
+}
+
+#[test]
+fn pass_through_barrels_are_not_search_gaps() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_barrel_probe(root);
+
+    let trace_named = trace(root, "src/lib.ts:formatDate");
+    let references = &trace_named["direct_references"];
+    for barrel in ["src/star.ts", "src/named.ts"] {
+        let entry = reference(references, barrel);
+        assert_eq!(entry["search_visibility"], "found", "{entry}");
+        assert_eq!(entry["reason"], "pass-through", "{entry}");
+        assert!(entry.get("search_as").is_none(), "{entry}");
+    }
+    let both = reference(references, "src/both.ts");
+    assert_eq!(both["search_visibility"], "renamed", "{both}");
+    assert_eq!(both["reason"], "import-alias", "{both}");
+    assert_eq!(both["search_as"], "f", "{both}");
+
+    let trace_default = trace(root, "src/lib.ts:default");
+    let named = reference(&trace_default["direct_references"], "src/named.ts");
+    assert_eq!(named["search_visibility"], "found", "{named}");
+    assert_eq!(named["reason"], "pass-through", "{named}");
+
+    let closure = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &[
+            "--impact-closure",
+            "src/lib.ts",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    let gaps = closure["coordination_gap"]
+        .as_array()
+        .unwrap_or_else(|| panic!("coordination_gap array: {closure}"));
+    let gap = |consumer: &str| {
+        gaps.iter()
+            .find(|gap| gap["consumer_file"] == consumer)
+            .unwrap_or_else(|| panic!("no gap for {consumer}: {closure}"))
+    };
+    for barrel in ["src/star.ts", "src/named.ts"] {
+        assert_eq!(gap(barrel)["search_visibility"], "found", "{closure}");
+        assert_eq!(gap(barrel)["reason"], "pass-through", "{closure}");
+    }
+    assert_eq!(
+        gap("src/both.ts")["search_visibility"],
+        "renamed",
+        "{closure}"
+    );
+}
+
+#[test]
+fn audit_brief_skips_pass_through_barrels() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_barrel_probe(root);
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "base");
+    fs::write(
+        root.join("src/lib.ts"),
+        "export const formatDate = (d: Date): string => d.toUTCString();\n\nexport default function Widget(): string {\n  return 'w';\n}\n",
+    )
+    .expect("change lib.ts");
+    commit_all(root, "head");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().expect("utf-8 root"),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let brief = parse_json(&output);
+    let search_gap = &brief["impact_closure"]["search_gap"];
+    let exports = search_gap["exports"]
+        .as_array()
+        .unwrap_or_else(|| panic!("search_gap.exports: {}", brief["impact_closure"]));
+    let files: Vec<&str> = exports
+        .iter()
+        .flat_map(|export| export["consumers"].as_array().into_iter().flatten())
+        .map(|consumer| consumer["consumer_file"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        files,
+        ["src/use-named.ts", "src/both.ts"],
+        "only real consumers count: {search_gap}"
+    );
+    assert_eq!(search_gap["total"], 2, "{search_gap}");
+}

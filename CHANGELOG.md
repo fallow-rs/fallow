@@ -23,9 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under another name, a barrel alias, or a whole-namespace use hides it. Each
   `direct_references[]` entry of `fallow dead-code --trace FILE:NAME` now has
   `line`, `search_visibility` (`found`, `renamed`, `missed`), `reason`, and
-  `search_as`. `search_as` is the name to search for instead. A class member
-  trace has the same fields on `owner_direct_references[]`, checked against the
-  owner export name. Each `--impact-closure` coordination gap has the same
+  `search_as`. `search_as` is the name to search for instead. A barrel that
+  only forwards the export is `found` with `reason` `pass-through` and never
+  counts as a gap, because it needs no edit when the export changes. A class
+  member trace has the same fields on `owner_direct_references[]`, checked
+  against the owner export name. Each `--impact-closure` coordination gap has the same
   fields. The MCP `trace_export` and `impact_closure` tools return them too.
   `fallow audit --brief` adds `impact_closure.search_gap`. It lists the
   `missed` and `renamed` consumers of each export whose declaration the diff

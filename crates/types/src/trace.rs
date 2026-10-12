@@ -133,8 +133,9 @@ pub struct ExportReference {
     /// source cannot be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_visibility: Option<SearchVisibility>,
-    /// Why a text search does not find the uses in this consumer. Absent when
-    /// `search_visibility` is `found`.
+    /// Why a text search does not find the uses in this consumer. With
+    /// `search_visibility` `found`, only `pass-through` occurs: the consumer
+    /// is a barrel that forwards the export and does not use it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<SearchGapReason>,
     /// The name to search for in this consumer instead of the export name.
@@ -174,7 +175,8 @@ pub enum SearchVisibility {
     Missed,
 }
 
-/// Why a text search for an export name does not find the uses in a consumer.
+/// Why a text search for an export name does not find the uses in a consumer,
+/// or why a consumer is not a search target (`pass-through`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -190,11 +192,14 @@ pub enum SearchGapReason {
     /// The consumer imports the whole module namespace and does not name the
     /// export.
     NamespaceUse,
-    /// The consumer is a barrel that forwards the export with `export *`.
-    StarReExport,
     /// The consumer loads the module with a dynamic `import()` and does not
     /// name the export.
     DynamicImport,
+    /// The consumer is a barrel that only forwards the export
+    /// (`export * from`, `export { foo } from`) and does not use it. A change
+    /// of the export needs no edit there, and the files that import through
+    /// the barrel are checked on their own. Occurs with `found`.
+    PassThrough,
 }
 
 /// Direct references that credit one namespace of an export binding.
@@ -753,8 +758,8 @@ pub struct ImpactClosureGap {
     /// check applies, for example when the consumer source cannot be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_visibility: Option<SearchVisibility>,
-    /// Why a text search does not find the uses of the worst symbol. Absent
-    /// when `search_visibility` is `found`.
+    /// Why a text search does not find the uses of the worst symbol. With
+    /// `search_visibility` `found`, only `pass-through` occurs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<SearchGapReason>,
     /// The name to search for in this consumer instead of the symbol name.

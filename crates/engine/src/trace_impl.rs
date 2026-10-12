@@ -4,8 +4,8 @@ use fallow_types::discover::FileId;
 use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
     ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace,
-    ImportPathTraceSchemaVersion, NamespacedExportReferences, ReExportChain, ToolingCredit,
-    TracedCloneGroup, TracedExport, TracedReExport,
+    ImportPathTraceSchemaVersion, NamespacedExportReferences, ReExportChain, SearchGapReason,
+    ToolingCredit, TracedCloneGroup, TracedExport, TracedReExport,
 };
 use fallow_types::trace_chain::StarExportAmbiguity;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1129,9 +1129,13 @@ fn consumer_search_checks(graph: &ModuleGraph, seed: FileId) -> FxHashMap<FileId
             let Some(check) = target.check(graph, &mut sources, reference) else {
                 continue;
             };
-            let worse = checks
-                .get(&reference.from_file)
-                .is_none_or(|known| check.visibility > known.visibility);
+            // A local use of one export outranks a pass-through of another.
+            let worse = checks.get(&reference.from_file).is_none_or(|known| {
+                check.visibility > known.visibility
+                    || (check.visibility == known.visibility
+                        && known.reason == Some(SearchGapReason::PassThrough)
+                        && check.reason != Some(SearchGapReason::PassThrough))
+            });
             if worse {
                 checks.insert(reference.from_file, check);
             }

@@ -24274,7 +24274,7 @@
               "type": "null"
             }
           ],
-          "description": "Why a text search does not find the uses in this consumer. Absent when\n`search_visibility` is `found`."
+          "description": "Why a text search does not find the uses in this consumer. With\n`search_visibility` `found`, only `pass-through` occurs: the consumer\nis a barrel that forwards the export and does not use it."
         },
         "search_as": {
           "type": [
@@ -24751,7 +24751,7 @@
               "type": "null"
             }
           ],
-          "description": "Why a text search does not find the uses of the worst symbol. Absent\nwhen `search_visibility` is `found`."
+          "description": "Why a text search does not find the uses of the worst symbol. With\n`search_visibility` `found`, only `pass-through` occurs."
         },
         "search_as": {
           "type": [
@@ -31007,16 +31007,16 @@
         },
         {
           "type": "string",
-          "const": "star-re-export",
-          "description": "The consumer is a barrel that forwards the export with `export *`."
+          "const": "dynamic-import",
+          "description": "The consumer loads the module with a dynamic `import()` and does not\nname the export."
         },
         {
           "type": "string",
-          "const": "dynamic-import",
-          "description": "The consumer loads the module with a dynamic `import()` and does not\nname the export."
+          "const": "pass-through",
+          "description": "The consumer is a barrel that only forwards the export\n(`export * from`, `export { foo } from`) and does not use it. A change\nof the export needs no edit there, and the files that import through\nthe barrel are checked on their own. Occurs with `found`."
         }
       ],
-      "description": "Why a text search for an export name does not find the uses in a consumer."
+      "description": "Why a text search for an export name does not find the uses in a consumer,\nor why a consumer is not a search target (`pass-through`)."
     },
     "SearchGapFacts": {
       "type": "object",

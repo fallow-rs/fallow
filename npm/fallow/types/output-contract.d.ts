@@ -1135,9 +1135,10 @@ export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_fil
  */
 export type SearchVisibility = ("found" | "renamed" | "missed")
 /**
- * Why a text search for an export name does not find the uses in a consumer.
+ * Why a text search for an export name does not find the uses in a consumer,
+ * or why a consumer is not a search target (`pass-through`).
  */
-export type SearchGapReason = ("import-alias" | "default-import" | "re-export-alias" | "namespace-use" | "star-re-export" | "dynamic-import")
+export type SearchGapReason = ("import-alias" | "default-import" | "re-export-alias" | "namespace-use" | "dynamic-import" | "pass-through")
 /**
  * Wire-shape version of the [`DependencyUsage`] object.
  *
@@ -11493,8 +11494,9 @@ line?: (number | null)
  */
 search_visibility?: (SearchVisibility | null)
 /**
- * Why a text search does not find the uses in this consumer. Absent when
- * `search_visibility` is `found`.
+ * Why a text search does not find the uses in this consumer. With
+ * `search_visibility` `found`, only `pass-through` occurs: the consumer
+ * is a barrel that forwards the export and does not use it.
  */
 reason?: (SearchGapReason | null)
 /**
@@ -12169,8 +12171,8 @@ note: string
  */
 search_visibility?: (SearchVisibility | null)
 /**
- * Why a text search does not find the uses of the worst symbol. Absent
- * when `search_visibility` is `found`.
+ * Why a text search does not find the uses of the worst symbol. With
+ * `search_visibility` `found`, only `pass-through` occurs.
  */
 reason?: (SearchGapReason | null)
 /**
