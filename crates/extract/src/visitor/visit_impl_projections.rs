@@ -606,6 +606,18 @@ impl ModuleInfoExtractor {
     }
 
     fn projected_value(&mut self, expression: &Expression<'_>) -> Option<ProjectionValue> {
+        self.resolve_projected_value(expression, true)
+    }
+
+    /// Resolve the projection value of `expression`. With `track` false, the
+    /// walk adds no requirement nodes and gives `BindingRequirements::Empty`.
+    /// A caller can then refuse a value without a proof before it uses the
+    /// requirement budget that the subclass proofs share.
+    fn resolve_projected_value(
+        &mut self,
+        expression: &Expression<'_>,
+        track: bool,
+    ) -> Option<ProjectionValue> {
         match unwrap_static_expr(expression) {
             Expression::Identifier(identifier) => {
                 let (value, entry) = self.direct_binding_value(identifier.name.as_str())?;
@@ -616,15 +628,22 @@ impl ModuleInfoExtractor {
                 {
                     return None;
                 }
+                let declaration = entry.declaration_span?;
+                if !track {
+                    return Some((value, super::super::BindingRequirements::Empty));
+                }
                 let requirements = self.combine_requirements(
                     &[entry.requirements, state.requirements],
-                    &[(identifier.span, entry.declaration_span?)],
+                    &[(identifier.span, declaration)],
                 );
                 Some((value, requirements))
             }
             Expression::StaticMemberExpression(member) => {
-                let (parent, requirements) = self.projected_value(&member.object)?;
+                let (parent, requirements) = self.resolve_projected_value(&member.object, track)?;
                 let value = self.projected_property(parent, member.property.name.as_str())?;
+                if !track {
+                    return Some((value, requirements));
+                }
                 let requirements = self.concat_requirements(
                     requirements,
                     self.projection_value_view(value).requirements,
@@ -632,18 +651,22 @@ impl ModuleInfoExtractor {
                 Some((value, requirements))
             }
             Expression::ComputedMemberExpression(member) => {
-                let (parent, mut requirements) = self.projected_value(&member.object)?;
+                let (parent, mut requirements) =
+                    self.resolve_projected_value(&member.object, track)?;
                 let element = self.projection_value_view(parent).array_element?;
                 match unwrap_static_expr(&member.expression) {
                     Expression::NumericLiteral(number)
                         if number.value >= 0.0 && number.value.fract() == 0.0 => {}
                     Expression::Identifier(_) => {
                         let (index, index_requirements) =
-                            self.projected_value(&member.expression)?;
+                            self.resolve_projected_value(&member.expression, track)?;
                         if !self.projection_value_view(index).numeric_contract {
                             return None;
                         }
-                        requirements = self.concat_requirements(requirements, index_requirements);
+                        if track {
+                            requirements =
+                                self.concat_requirements(requirements, index_requirements);
+                        }
                     }
                     _ => return None,
                 }
@@ -688,6 +711,16 @@ impl ModuleInfoExtractor {
         member: &str,
     ) {
         if self.projected_member_accesses.len() >= MAX_PROJECTED_ACCESSES {
+            return;
+        }
+        // Check for a proven contract before the walk adds requirement nodes.
+        // Reads such as `n.toFixed()` on a numeric binding must not use the
+        // requirement budget that the subclass proofs share.
+        let Some((target, _)) = self.resolve_projected_value(receiver, false) else {
+            return;
+        };
+        let target = self.projection_value_view(target);
+        if !target.projection_contract || target.proof.is_none() {
             return;
         }
         let Some((id, requirements)) = self.projected_value(receiver) else {

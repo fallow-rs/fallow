@@ -672,3 +672,44 @@ fn local_subclass_jsx_member_tag_credits_declaring_class() {
         );
     }
 }
+
+/// Reads on a receiver without a projection proof (here a `number` parameter)
+/// must not use the requirement budget of the subclass proofs.
+const PROJECTION_PRESSURE_READS: usize = 8192 + 512;
+
+#[test]
+fn local_subclass_credit_survives_reads_on_receivers_without_proof() {
+    let source_root = fixture_path("local-subclass-binding-preservation");
+    let directory = tempfile::tempdir().expect("pressure fixture setup");
+    let src = directory.path().join("src");
+    std::fs::create_dir(&src).expect("pressure fixture setup");
+    std::fs::copy(
+        source_root.join("package.json"),
+        directory.path().join("package.json"),
+    )
+    .expect("pressure fixture setup");
+    std::fs::copy(source_root.join("src/c.ts"), src.join("c.ts")).expect("pressure fixture setup");
+    let original =
+        std::fs::read_to_string(source_root.join("src/index.ts")).expect("pressure fixture setup");
+    let reads = "n.toFixed();\n".repeat(PROJECTION_PRESSURE_READS);
+    let (imports, rest) = original
+        .split_once('\n')
+        .expect("fixture starts with an import line");
+    let padded =
+        format!("{imports}\nexport const pad = (n: number): void => {{\n{reads}}};\n{rest}");
+    std::fs::write(src.join("index.ts"), padded).expect("pressure fixture setup");
+
+    let config = create_config(directory.path().to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|member| {
+            format!(
+                "{}.{}",
+                member.member.parent_name, member.member.member_name
+            )
+        })
+        .collect();
+    assert_eq!(unused, ["C.dead"]);
+}
