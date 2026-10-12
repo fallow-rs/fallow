@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Workspace dependency declaration guidance is clearer.** Root imports of npm
-  workspace packages need a dependency declaration; npm links resolve imports
-  without declaring them. Guidance covers private/tooling ancestor exceptions,
-  self-references and explicit opt-outs. The declaration policy is unchanged.
-  Thanks [@VariableVince](https://github.com/VariableVince) for the question.
-  (Closes [#3325](https://github.com/fallow-rs/fallow/issues/3325))
 ### Added
 
 - **Prop-drilling findings can enforce CI gates.** Set `rules.prop-drilling` to
@@ -27,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Closes [#3327](https://github.com/fallow-rs/fallow/issues/3327))
 
 ### Changed
+
+- **Workspace dependency declaration guidance is clearer.** Root imports of npm
+  workspace packages need a dependency declaration; npm links resolve imports
+  without declaring them. Guidance covers private/tooling ancestor exceptions,
+  self-references and explicit opt-outs. The declaration policy is unchanged.
+  Thanks [@VariableVince](https://github.com/VariableVince) for the question.
+  (Closes [#3325](https://github.com/fallow-rs/fallow/issues/3325))
 
 - **Existing `prop-drilling: "error"` settings now enforce CI.** Change the rule
   to `warn` to retain advisory analysis after upgrading. Archived JSON reports
