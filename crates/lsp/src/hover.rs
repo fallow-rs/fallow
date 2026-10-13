@@ -117,6 +117,10 @@ fn check_component_hover(
         return Some(hover);
     }
 
+    if let Some(hover) = check_effect_finding(results, file_path, position, mapper) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unused_server_action(results, file_path, position, mapper) {
         return Some(hover);
     }
@@ -653,6 +657,68 @@ fn check_unused_component_output(
             format!(
                 "**fallow**: Output {} is declared but emitted nowhere in this component.",
                 format_inline_code(&o.output_name),
+            )
+        })
+    })
+}
+
+/// Check if the position is on an Effect finding anchor: an unused layer, an
+/// unused tagged error, or an unproduced `catchTag` handler.
+fn check_effect_finding(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+    mapper: &mut PositionMapper,
+) -> Option<Hover> {
+    let layer_hover = results.unused_effect_layers.iter().find_map(|finding| {
+        let layer = &finding.layer;
+        let anchor = NamedAnchor {
+            path: &layer.path,
+            line: layer.line,
+            col: layer.col,
+            name: layer.name.rsplit('.').next().unwrap_or(&layer.name),
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Layer {} is composed only into layers that nothing uses: {}.",
+                format_inline_code(&layer.name),
+                layer.dead_consumers.join(", "),
+            )
+        })
+    });
+    if layer_hover.is_some() {
+        return layer_hover;
+    }
+    let error_hover = results.unused_tagged_errors.iter().find_map(|finding| {
+        let error = &finding.error;
+        let anchor = NamedAnchor {
+            path: &error.path,
+            line: error.line,
+            col: error.col,
+            name: &error.name,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: Tagged error {} is never constructed or failed with in this project.",
+                format_inline_code(&error.name),
+            )
+        })
+    });
+    if error_hover.is_some() {
+        return error_hover;
+    }
+    results.unproduced_catch_tags.iter().find_map(|finding| {
+        let catch_tag = &finding.catch_tag;
+        let anchor = NamedAnchor {
+            path: &catch_tag.path,
+            line: catch_tag.line,
+            col: catch_tag.col,
+            name: &catch_tag.tag,
+        };
+        anchor_hover(&anchor, file_path, position, mapper, || {
+            format!(
+                "**fallow**: No code in this project produces tag {}, so this handler never runs.",
+                format_inline_code(&catch_tag.tag),
             )
         })
     })

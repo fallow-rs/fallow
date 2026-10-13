@@ -554,6 +554,9 @@ mod severity_gate {
             unused_component_inputs: _,
             unused_component_outputs: _,
             unused_svelte_events: _,
+            unused_effect_layers: _,
+            unused_tagged_errors: _,
+            unproduced_catch_tags: _,
             unused_server_actions: _,
             unused_load_data_keys: _,
             prop_drilling_chains: _,
@@ -1397,6 +1400,59 @@ mod severity_gate {
                                 event_name: "dead".to_string(),
                                 line: 1,
                                 col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-effect-layer",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_effect_layers.push(
+                        fallow_api::editor_results::UnusedEffectLayerFinding::with_actions(
+                            fallow_api::editor_results::UnusedEffectLayer {
+                                path: root.join("services.ts"),
+                                name: "CacheLive".to_string(),
+                                kind: fallow_api::editor_results::EffectLayerKind::TopLevel,
+                                line: 1,
+                                col: 0,
+                                dead_consumers: vec!["OrphanLive".to_string()],
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-tagged-error",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_tagged_errors.push(
+                        fallow_api::editor_results::UnusedTaggedErrorFinding::with_actions(
+                            fallow_api::editor_results::UnusedTaggedError {
+                                path: root.join("errors.ts"),
+                                name: "Expired".to_string(),
+                                tag: "Expired".to_string(),
+                                line: 1,
+                                col: 0,
+                                catch_sites: Vec::new(),
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unproduced-catch-tag",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unproduced_catch_tags.push(
+                        fallow_api::editor_results::UnproducedCatchTagFinding::with_actions(
+                            fallow_api::editor_results::UnproducedCatchTag {
+                                path: root.join("main.ts"),
+                                tag: "Expired".to_string(),
+                                line: 1,
+                                col: 0,
+                                candidate_classes: vec!["Expired".to_string()],
                             },
                         ),
                     );

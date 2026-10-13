@@ -7816,7 +7816,7 @@ fn audit_embeds_a_health_baseline_staleness_that_agrees_with_the_stood_down_gate
     ]);
     let envelope = parse_json(&output);
     assert_eq!(
-        envelope["schema_version"], 12,
+        envelope["schema_version"], 13,
         "the embedded staleness object is additive, so the audit envelope does not bump: {}",
         output.stdout
     );

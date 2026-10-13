@@ -6,7 +6,7 @@
     clippy::expect_used,
     reason = "health ignore globs are validated before health analysis"
 )]
-pub(super) fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
+pub fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in patterns {
         builder.add(

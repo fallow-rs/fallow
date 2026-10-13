@@ -22,6 +22,7 @@ pub(super) struct HealthReportAssembly {
     pub(super) score_output: Option<scoring::FileScoreOutput>,
     pub(super) hotspots: Vec<HotspotEntry>,
     pub(super) hotspot_summary: Option<HotspotSummary>,
+    pub(super) change_coupling: Option<fallow_output::ChangeCouplingReport>,
     pub(super) targets: Vec<RefactoringTarget>,
     pub(super) target_thresholds: Option<TargetThresholds>,
     pub(super) health_trend: Option<fallow_output::HealthTrend>,
@@ -127,6 +128,7 @@ fn build_health_report(
         score_output,
         hotspots,
         hotspot_summary,
+        change_coupling,
         targets,
         target_thresholds,
         health_trend,
@@ -156,6 +158,7 @@ fn build_health_report(
             prop_drilling_chains: prelude.prop_drilling_chains,
             report_hotspots: prelude.report_hotspots,
             report_hotspot_summary: prelude.report_hotspot_summary,
+            change_coupling,
             runtime_coverage,
             large_functions,
             targets,
@@ -233,6 +236,7 @@ struct HealthReportStructParts {
     prop_drilling_chains: Vec<fallow_types::output_dead_code::PropDrillingChainFinding>,
     report_hotspots: Vec<fallow_output::HotspotEntry>,
     report_hotspot_summary: Option<fallow_output::HotspotSummary>,
+    change_coupling: Option<fallow_output::ChangeCouplingReport>,
     runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
     large_functions: Vec<fallow_output::LargeFunctionEntry>,
     targets: Vec<fallow_output::RefactoringTarget>,
@@ -274,6 +278,7 @@ fn build_health_report_struct(
         } else {
             parts.report_hotspot_summary
         },
+        change_coupling: parts.change_coupling,
         runtime_coverage: parts.runtime_coverage,
         coverage_intelligence: None,
         large_functions: if opts.score_only_output {
@@ -321,6 +326,10 @@ fn produced_sections(
             full && parts.coverage_gaps.is_some(),
         ),
         (HealthSection::Hotspots, opts.hotspots),
+        (
+            HealthSection::ChangeCoupling,
+            parts.change_coupling.is_some(),
+        ),
         (HealthSection::Targets, full && opts.targets),
         (HealthSection::Trend, parts.health_trend.is_some()),
         (

@@ -43,11 +43,11 @@ use crate::results::{
     InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
     MixedClientServerBarrel, PackageCycle, PolicyViolation, PrivateTypeLeak, PropDrillingChain,
     ReExportCycle, ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper,
-    TypeOnlyDependency, UnlistedDependency, UnprovidedInject, UnrenderedComponent,
-    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit,
-    UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp, UnusedDependency,
-    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember,
-    UnusedServerAction, UnusedSvelteEvent,
+    TypeOnlyDependency, UnlistedDependency, UnproducedCatchTag, UnprovidedInject,
+    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
+    UnusedDependency, UnusedDependencyOverride, UnusedEffectLayer, UnusedExport, UnusedFile,
+    UnusedLoadDataKey, UnusedMember, UnusedServerAction, UnusedSvelteEvent, UnusedTaggedError,
 };
 use crate::semantic::{
     SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
@@ -2177,6 +2177,177 @@ impl UnusedSvelteEventFinding {
     }
 }
 
+/// Wire-shape envelope for an [`UnusedEffectLayer`] finding. There is no safe auto-fix: a test or a script outside the project graph can still use the layer. Actions are manual
+/// remediation guidance plus a line-level suppress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedEffectLayerFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub layer: UnusedEffectLayer,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl UnusedEffectLayerFinding {
+    /// Build the wrapper from a raw [`UnusedEffectLayer`]. Emits a manual fix action plus
+    /// a line-level suppress.
+    #[must_use]
+    pub fn with_actions(layer: UnusedEffectLayer) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::ComposeEffectLayer,
+                "Compose the layer into a layer that reaches a runtime, or remove it with its unused consumers",
+                "Manual review required: remove the unused consumer layers first, then this layer. Code outside the analyzed project can still compose it.",
+            ),
+            suppress_line("// fallow-ignore-next-line unused-effect-layer"),
+        ];
+        Self {
+            finding_id: None,
+            layer,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnusedTaggedError`] finding. There is no safe auto-fix: the error can be part of a public API contract. Actions are manual
+/// remediation guidance plus a line-level suppress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedTaggedErrorFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub error: UnusedTaggedError,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl UnusedTaggedErrorFinding {
+    /// Build the wrapper from a raw [`UnusedTaggedError`]. Emits a manual fix action plus
+    /// a line-level suppress.
+    #[must_use]
+    pub fn with_actions(error: UnusedTaggedError) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::FailTaggedError,
+                "Fail with this error where the condition occurs, or remove the class and its catchTag handlers",
+                "Manual review required: consumers outside the analyzed project can construct or decode the error.",
+            ),
+            suppress_line("// fallow-ignore-next-line unused-tagged-error"),
+        ];
+        Self {
+            finding_id: None,
+            error,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
+/// Wire-shape envelope for an [`UnproducedCatchTag`] finding. There is no safe auto-fix: the handler can guard against a future producer. Actions are manual
+/// remediation guidance plus a line-level suppress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnproducedCatchTagFinding {
+    /// The underlying finding.
+    #[serde(flatten)]
+    pub catch_tag: UnproducedCatchTag,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+}
+
+impl UnproducedCatchTagFinding {
+    /// Build the wrapper from a raw [`UnproducedCatchTag`]. Emits a manual fix action plus
+    /// a line-level suppress.
+    #[must_use]
+    pub fn with_actions(catch_tag: UnproducedCatchTag) -> Self {
+        let actions = vec![
+            manual_framework_fix(
+                FixActionType::RemoveCatchTagHandler,
+                "Remove the handler for this tag, or fail with the error where the condition occurs",
+                "Manual review required: a package or code outside the analyzed project can produce the tag.",
+            ),
+            suppress_line("// fallow-ignore-next-line unproduced-catch-tag"),
+        ];
+        Self {
+            finding_id: None,
+            catch_tag,
+            actions,
+            introduced: None,
+            effective_severity: None,
+        }
+    }
+}
+
 /// Wire-shape envelope for a [`PropDrillingChain`] finding. There is no safe
 /// auto-fix: collapsing a drilling chain (colocate the consumer, lift to a
 /// context, or compose the component) is a design decision. The only action is a
@@ -4202,6 +4373,9 @@ impl_gated_finding!(
     AbsentComponentPropFinding,
     UnusedComponentEmitFinding,
     UnusedSvelteEventFinding,
+    UnusedEffectLayerFinding,
+    UnusedTaggedErrorFinding,
+    UnproducedCatchTagFinding,
     UnusedComponentInputFinding,
     UnusedComponentOutputFinding,
     RouteCollisionFinding,
@@ -4810,6 +4984,9 @@ mod position_0_invariants {
                 FixActionType::ReviewComponentProp => "review-component-prop",
                 FixActionType::EmitComponentEvent => "emit-component-event",
                 FixActionType::WireSvelteEvent => "wire-svelte-event",
+                FixActionType::ComposeEffectLayer => "compose-effect-layer",
+                FixActionType::FailTaggedError => "fail-tagged-error",
+                FixActionType::RemoveCatchTagHandler => "remove-catch-tag-handler",
                 FixActionType::ResolveRouteCollision => "resolve-route-collision",
                 FixActionType::ResolveDynamicSegmentNameConflict => {
                     "resolve-dynamic-segment-name-conflict"

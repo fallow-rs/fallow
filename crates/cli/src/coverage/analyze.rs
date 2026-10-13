@@ -779,15 +779,15 @@ fn static_function_info(
     let static_used =
         reachability
             .analysed
-            .function_is_used(path, function.name.as_str(), function.line);
+            .function_is_used(path, function.identity_name(), function.line);
     StaticFunctionInfo {
         path: PathBuf::from(rel),
-        name: function.name.clone(),
+        name: function.identity_name().to_owned(),
         start_line: function.line,
         end_line: function.line.saturating_add(function.line_count),
         static_used,
         test_only_reference: reachability.full_tree.map(|full| {
-            !static_used && full.function_is_used(path, function.name.as_str(), function.line)
+            !static_used && full.function_is_used(path, function.identity_name(), function.line)
         }),
         test_covered: false,
         cyclomatic: u32::from(function.cyclomatic),
@@ -798,7 +798,7 @@ fn static_function_info(
         }),
         caller_count,
         owner_count,
-        stable_id: function_identity_id(rel, &function.name, function.line),
+        stable_id: function_identity_id(rel, function.identity_name(), function.line),
         source_hash: function.source_hash.clone(),
         // The complexity pass only enumerates declarations and bindings, so
         // nothing it produces is a callee-named callback.

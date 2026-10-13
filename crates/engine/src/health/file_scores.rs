@@ -58,6 +58,7 @@ pub fn compute_file_scores_and_churn(
                     resolver: input.threshold_resolver,
                     enforce_crap: input.enforce_crap,
                 },
+                with_static_links: needs_churn,
             })?;
             let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
             let churn = churn_handle
@@ -82,6 +83,7 @@ pub fn compute_file_scores_and_churn(
                 resolver: input.threshold_resolver,
                 enforce_crap: input.enforce_crap,
             },
+            with_static_links: needs_churn,
         })?
     } else {
         (None, None, None)
@@ -133,6 +135,7 @@ struct FileScoreInput<'a> {
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pre_computed: Option<DeadCodeAnalysisArtifacts>,
     crap_thresholds: scoring::CrapScoreThresholds<'a>,
+    with_static_links: bool,
 }
 
 fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreResult, HealthError> {
@@ -156,6 +159,7 @@ fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreRe
             istanbul_coverage: input.istanbul_coverage,
             root: &input.config.root,
             crap_thresholds: input.crap_thresholds,
+            with_static_links: input.with_static_links,
         },
         analysis_output,
     ) {

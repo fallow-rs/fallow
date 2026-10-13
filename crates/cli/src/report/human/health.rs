@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use colored::Colorize;
 
-use super::health_hotspots::render_hotspots;
+use super::health_hotspots::{render_change_coupling, render_hotspots};
 use super::health_runtime::render_runtime_coverage;
 use super::health_targets::render_refactoring_targets;
 use super::{
@@ -14,7 +14,7 @@ use super::{
     split_dir_filename, thousands,
 };
 use crate::health::scoring::{
-    FileScoreConcern, file_score_concern_axis, file_score_fully_crap_exempt,
+    FileScoreConcern, file_score_concern_axis, file_score_crap_signal, file_score_fully_crap_exempt,
 };
 use crate::report::format_display_path;
 
@@ -274,6 +274,7 @@ fn build_health_human_lines_with_explain(
     render_coverage_gaps(&mut lines, report, root);
     render_file_scores(&mut lines, report, root);
     render_hotspots(&mut lines, report, root);
+    render_change_coupling(&mut lines, report, root);
     render_refactoring_targets(&mut lines, report, root);
     render_css_analytics(&mut lines, report, css_requested);
     if explain {
@@ -2538,10 +2539,10 @@ fn file_score_concern_colored(
     let label = file_score_concern_axis(score, max_crap_threshold).label();
     match file_score_concern_axis(score, max_crap_threshold) {
         FileScoreConcern::Risk => {
-            let ceiling = score.crap_effective_threshold.unwrap_or(max_crap_threshold);
-            if score.crap_max >= ceiling {
+            let signal = file_score_crap_signal(score, max_crap_threshold);
+            if signal.maximum >= signal.threshold {
                 label.red().bold().to_string()
-            } else if score.crap_max >= ceiling / 2.0 {
+            } else if signal.maximum >= signal.threshold / 2.0 {
                 label.yellow().to_string()
             } else {
                 label.dimmed().to_string()
@@ -2563,51 +2564,60 @@ fn file_score_risk_suffix(
     score: &fallow_output::FileHealthScore,
     max_crap_threshold: f64,
 ) -> String {
-    if score.crap_max <= 0.0 {
+    let signal = file_score_crap_signal(score, max_crap_threshold);
+    if signal.maximum <= 0.0 {
         return String::new();
     }
-    let risk_str = if score.crap_max > 999.0 {
+    let risk_str = if signal.maximum > 999.0 {
         ">999".to_string()
     } else {
-        format!("{:.1}", score.crap_max)
+        format!("{:.1}", signal.maximum)
     };
     // A fully exempt row renders dimmed regardless of magnitude: the run has
     // zero CRAP findings for it, so a red-bold number would contradict the
     // findings story the configuration produced (issue #2228).
     let risk_colored = if file_score_fully_crap_exempt(score, max_crap_threshold) {
         risk_str.dimmed().to_string()
+    } else if signal.maximum >= signal.threshold {
+        risk_str.red().bold().to_string()
+    } else if signal.maximum >= signal.threshold / 2.0 {
+        risk_str.yellow().to_string()
     } else {
-        let ceiling = score.crap_effective_threshold.unwrap_or(max_crap_threshold);
-        if score.crap_max >= ceiling {
-            risk_str.red().bold().to_string()
-        } else if score.crap_max >= ceiling / 2.0 {
-            risk_str.yellow().to_string()
-        } else {
-            risk_str.dimmed().to_string()
-        }
+        risk_str.dimmed().to_string()
     };
     format!("  {risk_colored} risk")
 }
 
-/// Dimmed disclosure appended to rows whose CRAP breaches were let through by
-/// configuration, so a reader copying the row sees why it is not shouting. The
-/// wording distinguishes a per-file override from a raised (or disabled)
-/// global ceiling; default-configuration rows render nothing.
+/// Disclose suppression and configured exemptions separately because a
+/// suppressed function can also be covered by a configured exemption.
 fn file_score_exempt_marker(
     score: &fallow_output::FileHealthScore,
     max_crap_threshold: f64,
 ) -> String {
-    if score.crap_exempted == 0 {
+    if score.crap_exempted == 0 && score.crap_suppressed == 0 {
         return String::new();
     }
-    let marker = if score.crap_effective_threshold.is_some() {
-        "exempt (override)"
-    } else if max_crap_threshold <= 0.0 {
-        "exempt (crap disabled)"
-    } else {
-        "exempt (raised threshold)"
-    };
-    format!("  {}", marker.dimmed())
+    let mut markers = Vec::new();
+    if score.crap_suppressed > 0 {
+        markers.push("complexity suppression".to_string());
+    }
+    if score.crap_exempted > 0 {
+        if score.crap_suppressed > 0 {
+            // The minimum ceiling does not identify which configured exemption
+            // overlaps a suppression, so disclose both without guessing a cause.
+            markers.push("configured exemptions".to_string());
+        } else {
+            let reason = if score.crap_effective_threshold.is_some() {
+                "override"
+            } else if max_crap_threshold <= 0.0 {
+                "crap disabled"
+            } else {
+                "raised threshold"
+            };
+            markers.push(format!("exempt ({reason})"));
+        }
+    }
+    format!("  {}", markers.join(", ").dimmed())
 }
 
 fn push_file_scores_overflow(lines: &mut Vec<String>, score_count: usize) {
@@ -4940,6 +4950,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let lines = build_health_human_lines(&report, &root);
@@ -4976,6 +4989,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let text = plain(&build_health_human_lines(&report, &root));
@@ -5009,6 +5025,9 @@ mod tests {
                 crap_max: 552.0,
                 crap_above_threshold: 1,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
             fallow_output::FileHealthScore {
@@ -5025,6 +5044,9 @@ mod tests {
                 crap_max: 2.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
         ];
@@ -5065,6 +5087,9 @@ mod tests {
             crap_max: 110.0,
             crap_above_threshold: 0,
             crap_exempted: 2,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold,
         }
     }
@@ -5151,6 +5176,9 @@ mod tests {
             crap_max: 110.0,
             crap_above_threshold: 2,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let text = plain(&build_health_human_lines(&report, &root));
@@ -5202,6 +5230,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
             fallow_output::FileHealthScore {
@@ -5218,6 +5249,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
             fallow_output::FileHealthScore {
@@ -5234,6 +5268,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             },
         ];
@@ -5264,6 +5301,9 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             });
         }
@@ -5295,6 +5335,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         let lines = build_health_human_lines(&report, &root);
@@ -5318,6 +5361,8 @@ mod tests {
                 complexity_density: 0.85,
                 fan_in: 10,
                 trend: fallow_engine::churn::ChurnTrend::Accelerating,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5350,6 +5395,8 @@ mod tests {
                 complexity_density: 0.3,
                 fan_in: 2,
                 trend: fallow_engine::churn::ChurnTrend::Cooling,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5376,6 +5423,8 @@ mod tests {
                 complexity_density: 0.5,
                 fan_in: 5,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5402,6 +5451,8 @@ mod tests {
                 complexity_density: 0.4,
                 fan_in: 3,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5436,6 +5487,8 @@ mod tests {
                 complexity_density: 0.4,
                 fan_in: 3,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5469,6 +5522,8 @@ mod tests {
                 complexity_density: 0.4,
                 fan_in: 3,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -5848,6 +5903,9 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
             crap_exempted: 0,
+            crap_suppressed: 0,
+            crap_unsuppressed_max: None,
+            crap_unsuppressed_effective_threshold: None,
             crap_effective_threshold: None,
         }];
         report.hotspots = vec![
@@ -5861,6 +5919,8 @@ mod tests {
                 complexity_density: 0.5,
                 fan_in: 5,
                 trend: fallow_engine::churn::ChurnTrend::Accelerating,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -6099,6 +6159,8 @@ mod tests {
                 complexity_density: 0.9,
                 fan_in: 8,
                 trend: fallow_engine::churn::ChurnTrend::Accelerating,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -6113,6 +6175,8 @@ mod tests {
                 complexity_density: 0.5,
                 fan_in: 4,
                 trend: fallow_engine::churn::ChurnTrend::Stable,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }
@@ -6127,6 +6191,8 @@ mod tests {
                 complexity_density: 0.2,
                 fan_in: 1,
                 trend: fallow_engine::churn::ChurnTrend::Cooling,
+                median_files_per_commit: None,
+                median_lines_per_commit: None,
                 ownership: None,
                 is_test_path: false,
             }

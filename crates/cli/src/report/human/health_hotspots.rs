@@ -162,6 +162,74 @@ pub(super) fn render_hotspots(
     push_hotspots_footer(lines, report);
 }
 
+/// Render the hidden change-coupling pairs. Silent when the section is absent
+/// or lists no pair.
+pub(super) fn render_change_coupling(
+    lines: &mut Vec<String>,
+    report: &fallow_output::HealthReport,
+    root: &Path,
+) {
+    let Some(coupling) = report.change_coupling.as_ref() else {
+        return;
+    };
+    if coupling.pairs.is_empty() {
+        return;
+    }
+    let count = coupling.total_pairs;
+    lines.push(format!(
+        "{} {}",
+        "\u{25cf}".yellow(),
+        format!(
+            "Hidden change coupling ({count} pair{}, since {})",
+            plural(count),
+            coupling.since
+        )
+        .yellow()
+        .bold()
+    ));
+    lines.push(String::new());
+    for pair in &coupling.pairs {
+        let strong = if pair.strong {
+            format!(" {}", "[strong]".yellow())
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "  {:>3.0}%  {}  {}{}",
+            pair.degree * 100.0,
+            format_display_path(&pair.path_a, root),
+            format_display_path(&pair.path_b, root),
+            strong,
+        ));
+        lines.push(format!(
+            "         {}",
+            format!(
+                "{} shared commits ({} and {} in total), no import between them",
+                pair.shared_revisions, pair.revisions_a, pair.revisions_b
+            )
+            .dimmed()
+        ));
+    }
+    if coupling.pairs.len() < count {
+        lines.push(format!(
+            "  {}",
+            format!(
+                "{} more pair{} not shown",
+                count - coupling.pairs.len(),
+                plural(count - coupling.pairs.len())
+            )
+            .dimmed()
+        ));
+    }
+    lines.push(String::new());
+    push_docs_footer(
+        lines,
+        "Files that change together without an import",
+        &format!("{DOCS_HEALTH}#change-coupling"),
+    );
+    lines.push(String::new());
+}
+
 fn push_hotspots_header(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     let header = report.hotspot_summary.as_ref().map_or_else(
         || {
@@ -192,13 +260,21 @@ fn push_hotspot_row(lines: &mut Vec<String>, entry: &fallow_output::HotspotEntry
         filename,
         hotspot_test_tag(entry.is_test_path),
     ));
+    // The dispersion goes after the trend, so the columns before it keep their
+    // place whether or not the history has commit ids.
+    let dispersion = entry
+        .median_files_per_commit
+        .map_or_else(String::new, |median| {
+            format!("  {}", format!("{median:.1} files/commit").dimmed())
+        });
     lines.push(format!(
-        "         {} commits  {} churn  {} density  {} fan-in  {}",
+        "         {} commits  {} churn  {} density  {} fan-in  {}{}",
         format!("{:>3}", entry.commits).dimmed(),
         format!("{:>5}", entry.lines_added + entry.lines_deleted).dimmed(),
         format!("{:.2}", entry.complexity_density).dimmed(),
         format!("{:>2}", entry.fan_in).dimmed(),
         hotspot_trend_label(entry.trend),
+        dispersion,
     ));
     if let Some(ownership) = &entry.ownership {
         lines.push(format!(
@@ -345,6 +421,8 @@ mod tests {
             complexity_density: 0.42,
             fan_in: 7,
             trend,
+            median_files_per_commit: None,
+            median_lines_per_commit: None,
             ownership: None,
             is_test_path: false,
         }

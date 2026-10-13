@@ -46,6 +46,9 @@ pub struct IssueFilters {
     pub unused_component_inputs: bool,
     pub unused_component_outputs: bool,
     pub unused_svelte_events: bool,
+    pub unused_effect_layers: bool,
+    pub unused_tagged_errors: bool,
+    pub unproduced_catch_tags: bool,
     pub unused_server_actions: bool,
     pub unused_load_data_keys: bool,
     pub unresolved_imports: bool,
@@ -136,6 +139,9 @@ impl IssueFilters {
             "--unused-component-inputs" => self.unused_component_inputs = true,
             "--unused-component-outputs" => self.unused_component_outputs = true,
             "--unused-svelte-events" => self.unused_svelte_events = true,
+            "--unused-effect-layers" => self.unused_effect_layers = true,
+            "--unused-tagged-errors" => self.unused_tagged_errors = true,
+            "--unproduced-catch-tags" => self.unproduced_catch_tags = true,
             "--unused-server-actions" => self.unused_server_actions = true,
             "--unused-load-data-keys" => self.unused_load_data_keys = true,
             "--unresolved-imports" => self.unresolved_imports = true,
@@ -177,6 +183,9 @@ impl IssueFilters {
             || self.unused_component_inputs
             || self.unused_component_outputs
             || self.unused_svelte_events
+            || self.unused_effect_layers
+            || self.unused_tagged_errors
+            || self.unproduced_catch_tags
             || self.unused_server_actions
             || self.unused_load_data_keys
             || self.unresolved_imports
@@ -299,6 +308,15 @@ impl IssueFilters {
         }
         if !self.unused_svelte_events {
             results.unused_svelte_events.clear();
+        }
+        if !self.unused_effect_layers {
+            results.unused_effect_layers.clear();
+        }
+        if !self.unused_tagged_errors {
+            results.unused_tagged_errors.clear();
+        }
+        if !self.unproduced_catch_tags {
+            results.unproduced_catch_tags.clear();
         }
         if !self.unused_server_actions {
             results.unused_server_actions.clear();
@@ -574,6 +592,14 @@ pub struct CheckResult {
     /// `None` outside the brief path. Holds root-relative paths so it survives
     /// the graph drop and serializes directly.
     pub impact_closure: Option<fallow_engine::module_graph::ImpactClosurePaths>,
+    /// Co-change gaps for the review brief: changed files whose hidden
+    /// change-coupling partner is not in the diff. Computed on the brief path
+    /// from the retained graph and the cached churn pass; empty elsewhere.
+    pub co_change_gaps: Vec<fallow_output::CoChangeGapFact>,
+    /// Churn pass of the review brief, read once for the co-change gaps and
+    /// the reviewer routing. `None` outside the brief path and without a
+    /// commit history.
+    pub brief_churn: Option<fallow_engine::churn::ChurnResult>,
     /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
@@ -601,6 +627,11 @@ pub struct CheckResult {
     /// retained graph on the brief path BEFORE the graph is dropped; `None`
     /// otherwise. Internal (CheckResult is not serialized).
     pub export_lines: Option<rustc_hash::FxHashMap<String, Vec<(String, u32)>>>,
+    /// Literal-search gaps of the exports of the changed files: consumers that
+    /// a text search for the export name does not find or finds only under
+    /// another name. Computed from the retained graph on the brief path BEFORE
+    /// the graph is dropped; `None` otherwise. Internal (not serialized).
+    pub search_gaps: Option<Vec<fallow_engine::module_graph::ExportSearchGapPaths>>,
     /// Per-anchor `rel_path -> count of in-repo modules OUTSIDE the diff that
     /// directly import it`, for the decision surface's honest per-decision consumer
     /// number. Computed from the retained graph's reverse-deps on the brief path
@@ -1188,10 +1219,13 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         explain_skipped: opts.explain_skipped,
         syntactic_dead_code_keys,
         impact_closure: None,
+        co_change_gaps: Vec::new(),
+        brief_churn: None,
         public_api_keys: None,
         partition_order: None,
         focus_facts: None,
         export_lines: None,
+        search_gaps: None,
         internal_consumers: None,
         test_adjacency: None,
         package_importers: None,
@@ -2526,6 +2560,9 @@ mod tests {
             unused_component_inputs: false,
             unused_component_outputs: false,
             unused_svelte_events: false,
+            unused_effect_layers: false,
+            unused_tagged_errors: false,
+            unproduced_catch_tags: false,
             unused_server_actions: false,
             unused_load_data_keys: false,
             unresolved_imports: false,
@@ -3128,6 +3165,9 @@ mod tests {
             unused_component_inputs: true,
             unused_component_outputs: true,
             unused_svelte_events: true,
+            unused_effect_layers: true,
+            unused_tagged_errors: true,
+            unproduced_catch_tags: true,
             unused_server_actions: true,
             unused_load_data_keys: true,
             unresolved_imports: true,

@@ -197,6 +197,9 @@ issuekind_json_key_fallback() {
     unused-component-input) echo "unused_component_inputs" ;;
     unused-component-output) echo "unused_component_outputs" ;;
     unused-svelte-event) echo "unused_svelte_events" ;;
+    unused-effect-layer) echo "unused_effect_layers" ;;
+    unused-tagged-error) echo "unused_tagged_errors" ;;
+    unproduced-catch-tag) echo "unproduced_catch_tags" ;;
     unused-server-action) echo "unused_server_actions" ;;
     unused-load-data-key) echo "unused_load_data_keys" ;;
     route-collision) echo "route_collisions" ;;

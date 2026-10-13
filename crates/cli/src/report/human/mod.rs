@@ -6,7 +6,7 @@ mod health_hotspots;
 mod health_runtime;
 mod health_targets;
 mod perf;
-mod traces;
+pub(super) mod traces;
 pub(super) mod walkthrough;
 
 pub(super) use check::*;
@@ -261,6 +261,18 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
             "A Svelte component dispatching a createEventDispatcher event whose name is listened to nowhere in the project (remove it or listen for it)",
             "https://fallow.tools/docs/explanations/dead-code/#unused-svelte-events",
         )),
+        "Unused Effect layers" => Some((
+            "An Effect layer composed only into layers that nothing uses (remove the unused consumers, then this layer)",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-effect-layers",
+        )),
+        "Unused tagged errors" => Some((
+            "An Effect tagged error that only types or catchTag handlers reference; no code constructs or fails with it",
+            "https://fallow.tools/docs/explanations/dead-code/#unused-tagged-errors",
+        )),
+        "Unproduced catch tags" => Some((
+            "A catchTag handler for a project tag that no code produces (remove the handler or fail with the error)",
+            "https://fallow.tools/docs/explanations/dead-code/#unproduced-catch-tags",
+        )),
         "Unused server actions" => Some((
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references (wire it to a consumer or remove it)",
             "https://fallow.tools/docs/explanations/dead-code/#unused-server-actions",
@@ -317,6 +329,9 @@ fn section_issue_kind(title: &str) -> Option<IssueKind> {
         "Unused component inputs" => IssueKind::UnusedComponentInput,
         "Unused component outputs" => IssueKind::UnusedComponentOutput,
         "Unused Svelte events" => IssueKind::UnusedSvelteEvent,
+        "Unused Effect layers" => IssueKind::UnusedEffectLayer,
+        "Unused tagged errors" => IssueKind::UnusedTaggedError,
+        "Unproduced catch tags" => IssueKind::UnproducedCatchTag,
         "Unused server actions" => IssueKind::UnusedServerAction,
         "Unused load data keys" => IssueKind::UnusedLoadDataKey,
         _ => return None,
@@ -817,6 +832,9 @@ mod tests {
         "Unused component inputs",
         "Unused component outputs",
         "Unused Svelte events",
+        "Unused Effect layers",
+        "Unused tagged errors",
+        "Unproduced catch tags",
         "Unused server actions",
         "Unused load data keys",
     ];

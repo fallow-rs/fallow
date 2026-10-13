@@ -3,9 +3,9 @@
 //! Contains the canonical list of all built-in plugins, categorized by domain.
 
 use super::super::{
-    Plugin, adonis::AdonisPlugin, ag_ui::AgUiPlugin, angular::AngularPlugin, astro::AstroPlugin,
-    ava::AvaPlugin, babel::BabelPlugin, biome::BiomePlugin,
-    browser_extension::BrowserExtensionPlugin, bun::BunPlugin, c8::C8Plugin,
+    Plugin, adonis::AdonisPlugin, ag_ui::AgUiPlugin, alchemy::AlchemyPlugin,
+    angular::AngularPlugin, astro::AstroPlugin, ava::AvaPlugin, babel::BabelPlugin,
+    biome::BiomePlugin, browser_extension::BrowserExtensionPlugin, bun::BunPlugin, c8::C8Plugin,
     capacitor::CapacitorPlugin, changesets::ChangesetsPlugin,
     commit_and_tag_version::CommitAndTagVersionPlugin, commitizen::CommitizenPlugin,
     commitlint::CommitlintPlugin, content_collections::ContentCollectionsPlugin,
@@ -199,6 +199,7 @@ fn add_tooling_and_infra_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         HardhatPlugin,
         VercelPlugin,
         WranglerPlugin,
+        AlchemyPlugin,
         OpenNextCloudflarePlugin,
         SentryPlugin,
         HuskyPlugin,

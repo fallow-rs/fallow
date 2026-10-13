@@ -869,6 +869,27 @@
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -1494,6 +1515,27 @@
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -1665,6 +1707,17 @@
             }
           ],
           "description": "Hotspot analysis summary.\n\nSet whenever the run measured churn, which needs readable git history;\n`--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing\nbeside it rather than gating this summary."
+        },
+        "change_coupling": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChangeCouplingReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Hidden change coupling: file pairs that change together in the git\nhistory without an import or re-export chain between them. Present\nwhen the hotspots section ran and the run read the git history.\nAdvisory: no health score weight."
         },
         "runtime_coverage": {
           "anyOf": [
@@ -2906,6 +2959,17 @@
           ],
           "description": "Hotspot analysis summary.\n\nSet whenever the run measured churn, which needs readable git history;\n`--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing\nbeside it rather than gating this summary."
         },
+        "change_coupling": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChangeCouplingReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Hidden change coupling: file pairs that change together in the git\nhistory without an import or re-export chain between them. Present\nwhen the hotspots section ran and the run read the git history.\nAdvisory: no health score weight."
+        },
         "runtime_coverage": {
           "anyOf": [
             {
@@ -3675,15 +3739,33 @@
         },
         "crap_max": {
           "type": "number",
-          "description": "Highest CRAP score among the file's functions. Always the raw measured\nvalue; threshold overrides never rewrite it."
+          "description": "Highest CRAP score among the file's functions. Always the raw measured\nvalue; threshold overrides and suppressions never rewrite it."
         },
         "crap_above_threshold": {
           "type": "integer",
-          "description": "Functions whose rounded CRAP score meets or exceeds their effective\nceiling, resolved from `health.thresholdOverrides` over the global\n`maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled\n(global ceiling `0`)."
+          "description": "Unsuppressed functions whose rounded CRAP score meets or exceeds their effective\nceiling, resolved from `health.thresholdOverrides` over the global\n`maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled\n(global ceiling `0`)."
         },
         "crap_exempted": {
           "type": "integer",
           "description": "Functions whose rounded CRAP score is at or above the canonical 30.0\nbaseline but below their effective ceiling: the count the configuration\nlet through. Stays `0` when the effective ceiling is stricter than 30.\nWhen CRAP enforcement is disabled (global ceiling `0`), counts every\nfunction at or above the canonical baseline. Omitted when zero."
+        },
+        "crap_suppressed": {
+          "type": "integer",
+          "description": "Concrete scored functions accepted by a complexity suppression, including\nsubthreshold functions and disabled-enforcement runs. Omitted when zero.\nMay overlap with configured exemptions; the counts are not a partition."
+        },
+        "crap_unsuppressed_max": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Highest rounded CRAP among unsuppressed scored functions, including\nsubthreshold and configured-exempt functions. Present with the paired\nunsuppressed threshold whenever a scored suppression exists. Explicitly\nzero when every scored function is suppressed; raw crap_max is unchanged."
+        },
+        "crap_unsuppressed_effective_threshold": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Lowest effective ceiling among unsuppressed scored functions, or the run\nglobal when none remain. Emitted with crap_unsuppressed_max. Consumers\nreceiving an absent or partial pair fall back to the complete legacy pair:\ncrap_max and crap_effective_threshold (or the run global when absent)."
         },
         "crap_effective_threshold": {
           "type": [
@@ -3747,6 +3829,20 @@
         "trend": {
           "description": "Whether churn is rising, falling, or steady over the window.",
           "$ref": "#/definitions/ChurnTrend"
+        },
+        "median_files_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of analyzed files in the commits\nthat changed this file, over the change coupling history window. Bulk\ncommits above the coupling file cap are not counted. Absent when the\nhistory has no commit ids (for example imported churn without them)."
+        },
+        "median_lines_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of changed lines (added plus\ndeleted, analyzed files only) in the commits that changed this file.\nSame window and rules as `median_files_per_commit`."
         },
         "ownership": {
           "anyOf": [
@@ -6055,6 +6151,18 @@
           "type": "integer",
           "description": "Svelte components dispatching a custom event via `createEventDispatcher`\nwhose name is listened to nowhere in the project."
         },
+        "unused_effect_layers": {
+          "type": "integer",
+          "description": "Effect layers composed only into layers that nothing uses."
+        },
+        "unused_tagged_errors": {
+          "type": "integer",
+          "description": "Effect tagged error classes that no code constructs or fails with."
+        },
+        "unproduced_catch_tags": {
+          "type": "integer",
+          "description": "`catchTag` handlers for a project tag that no code produces."
+        },
         "unused_server_actions": {
           "type": "integer",
           "description": "Next.js Server Actions (exports of `\"use server\"` files) referenced by no\ncode in the project."
@@ -7057,6 +7165,27 @@
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -7646,6 +7775,21 @@
         },
         {
           "type": "string",
+          "const": "compose-effect-layer",
+          "description": "Compose an Effect layer into a layer that reaches a runtime, or remove\nit (manual; used by unused-effect-layer findings)."
+        },
+        {
+          "type": "string",
+          "const": "fail-tagged-error",
+          "description": "Fail with an Effect tagged error from project code, or remove the class\nand its handlers (manual; used by unused-tagged-error findings)."
+        },
+        {
+          "type": "string",
+          "const": "remove-catch-tag-handler",
+          "description": "Remove a `catchTag` handler for a tag that nothing produces, or add the\nproducer (manual; used by unproduced-catch-tag findings)."
+        },
+        {
+          "type": "string",
           "const": "resolve-route-collision",
           "description": "Resolve a Next.js App Router route collision by moving or merging one of\nthe files that own the same URL (manual; suppressing a guaranteed build\nerror is never the right fix, so this is the primary action)."
         },
@@ -7930,6 +8074,11 @@
           "type": "string",
           "const": "add_test_coverage",
           "description": "Multiple complex functions lack test dependency path."
+        },
+        {
+          "type": "string",
+          "const": "resolve_hidden_coupling",
+          "description": "File changes together with another file in most commits, but no import\nor re-export chain connects them."
         }
       ],
       "description": "Category of refactoring recommendation."
@@ -8039,6 +8188,13 @@
             "$ref": "#/definitions/CloneSiblingEvidence"
           },
           "description": "Other duplicate-code instances that share a clone group with this target."
+        },
+        "co_change_partners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoChangePartnerEvidence"
+          },
+          "description": "Files that change together with this target without a static edge\n(populated for `ResolveHiddenCoupling` targets), strongest first."
         }
       },
       "description": "Evidence linking a target back to specific analysis data.\n\nProvides enough detail for an AI agent to act on a recommendation\nwithout a second tool call."
@@ -12079,6 +12235,20 @@
           "description": "Whether churn is rising, falling, or steady over the window.",
           "$ref": "#/definitions/ChurnTrend"
         },
+        "median_files_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of analyzed files in the commits\nthat changed this file, over the change coupling history window. Bulk\ncommits above the coupling file cap are not counted. Absent when the\nhistory has no commit ids (for example imported churn without them)."
+        },
+        "median_lines_per_commit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Change dispersion: the median number of changed lines (added plus\ndeleted, analyzed files only) in the commits that changed this file.\nSame window and rules as `median_files_per_commit`."
+        },
         "ownership": {
           "anyOf": [
             {
@@ -12863,6 +13033,24 @@
             "cause"
           ],
           "description": "Churn-based hotspot analysis was skipped, so the hotspots, churn and\nownership sections report nothing at all. The remaining health sections\nare unaffected."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cause": {
+              "type": "string",
+              "description": "Kebab-case token: `shallow-clone` (the fetched history is\nincomplete) or `too-few-commits` (fewer analyzed commits than the\nminimum revisions of one file). The set is open."
+            },
+            "kind": {
+              "type": "string",
+              "const": "change-coupling-skipped"
+            }
+          },
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "description": "Change coupling found no pairs because the history cannot show them.\nThe `change_coupling` section is present with an empty `pairs` list,\nand this entry tells why the list is empty."
         },
         {
           "type": "object",
@@ -19784,7 +19972,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "const": 12,
+      "const": 13,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -19921,6 +20109,28 @@
             "$ref": "#/definitions/CoordinationGapFact"
           },
           "description": "Coordination gaps: a changed file exports a contract consumed by a module\nabsent from the diff. One entry per (changed file, consumer) pair. NOT a\nsubset of [`affected_not_shown`](Self::affected_not_shown): the gap\ndeliberately skips story and test consumers that the affected set counts."
+        },
+        "co_change_gap": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CoChangeGapFact"
+          },
+          "description": "Co-change gaps: a changed file has a hidden change-coupling partner\nthat is absent from the diff. The two files changed together in most\ncommits of the history window, but no import or re-export chain\nconnects them, so the graph facts above cannot point at the partner.\nAdvisory, never gates. Omitted when empty.\nAt most 10 entries (`CO_CHANGE_GAP_CAP`), strongest degree first."
+        },
+        "co_change_gap_count": {
+          "type": "integer",
+          "description": "All co-change gaps, before the cap cuts `co_change_gap`. Omitted\nwhen zero."
+        },
+        "search_gap": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapFacts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Consumers that a whole-word text search for a changed export name does\nnot find (`missed`), or finds only under another local name\n(`renamed`). Only exports whose declaration statement overlaps an added\ndiff line count, and only consumers outside the diff. Absent when no\nsuch consumer exists."
         }
       },
       "required": [
@@ -24250,6 +24460,42 @@
         "kind": {
           "type": "string",
           "description": "Reference kind, such as named import, default import, or re-export."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the import statement in `from_file`. Absent when the\ngraph holds no source position for the reference or the file cannot be\nread."
+        },
+        "search_visibility": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchVisibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether a whole-word text search for the export name finds this\nconsumer. Absent when no check applies, for example when the consumer\nsource cannot be read."
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why a text search does not find the uses in this consumer. With\n`search_visibility` `found`, only `pass-through` occurs: the consumer\nis a barrel that forwards the export and does not use it."
+        },
+        "search_as": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name to search for in this consumer instead of the export name.\nAbsent when the export name finds the uses or no single name does."
         }
       },
       "required": [
@@ -24321,7 +24567,7 @@
           "items": {
             "$ref": "#/definitions/ExportReference"
           },
-          "description": "Files that reference the owning export directly."
+          "description": "Files that reference the owning export directly. The search visibility\nfields on each entry check the owner export name, not the member name."
         },
         "owner_re_export_chains": {
           "type": "array",
@@ -24698,6 +24944,35 @@
         "note": {
           "type": "string",
           "description": "Scope note for the syntactic trace."
+        },
+        "search_visibility": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchVisibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether a whole-word text search for the consumed symbol names finds\nthis consumer. When the consumer uses more than one symbol, the worst\nlevel wins (`missed`, then `renamed`, then `found`). Absent when no\ncheck applies, for example when the consumer source cannot be read."
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why a text search does not find the uses of the worst symbol. With\n`search_visibility` `found`, only `pass-through` occurs."
+        },
+        "search_as": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name to search for in this consumer instead of the symbol name."
         }
       },
       "required": [
@@ -25021,12 +25296,12 @@
     },
     "HealthSchemaVersion": {
       "type": "integer",
-      "const": 11,
+      "const": 12,
       "description": "Exact schema version for [`HealthOutput`]."
     },
     "AuditSchemaVersion": {
       "type": "integer",
-      "const": 12,
+      "const": 13,
       "description": "Schema projection for the audit envelope's exact version."
     },
     "CheckSchemaVersion": {
@@ -25036,7 +25311,7 @@
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 13,
+      "const": 14,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {
@@ -29712,6 +29987,11 @@
         },
         {
           "type": "string",
+          "const": "change-coupling",
+          "description": "`change_coupling`. The pair list can be empty when the history cannot\nshow coupling; `workspace_diagnostics` then tells why."
+        },
+        {
+          "type": "string",
           "const": "targets",
           "description": "`targets`."
         },
@@ -30349,6 +30629,27 @@
           },
           "description": "Svelte components dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere project-wide (cross-file\ndead-output direction). Wrapped in [`UnusedSvelteEventFinding`] so each\nentry carries a typed `actions` array natively. Default severity is\n`warn`."
         },
+        "unused_effect_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedEffectLayerFinding"
+          },
+          "description": "Effect layers composed only into other layers that nothing uses.\nGated on the project declaring `effect`. Default severity is `warn`."
+        },
+        "unused_tagged_errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedTaggedErrorFinding"
+          },
+          "description": "Effect tagged error classes that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Default\nseverity is `warn`."
+        },
+        "unproduced_catch_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnproducedCatchTagFinding"
+          },
+          "description": "`catchTag` / `catchTags` handlers for a project tag that no code\nproduces and that no `unused_tagged_errors` entry covers. Gated on the\nproject declaring `effect`. Default severity is `warn`."
+        },
         "unused_server_actions": {
           "type": "array",
           "items": {
@@ -30901,6 +31202,600 @@
         "depth"
       ],
       "description": "One file of a [`ConsumerClosure`]."
+    },
+    "SearchVisibility": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "found",
+          "description": "The consumer source contains the export name, and the consumer uses it\nunder that name."
+        },
+        {
+          "type": "string",
+          "const": "renamed",
+          "description": "The consumer source contains the export name, but the consumer uses\nthe export under another local name."
+        },
+        {
+          "type": "string",
+          "const": "missed",
+          "description": "The consumer source does not contain the export name."
+        }
+      ],
+      "description": "Whether a whole-word text search for an export name finds a consumer that\nthe module graph resolves. The levels sort from best to worst."
+    },
+    "SearchGapReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "import-alias",
+          "description": "The consumer imports the export under another local name\n(`import { foo as bar }`)."
+        },
+        {
+          "type": "string",
+          "const": "default-import",
+          "description": "The consumer imports a default export under another local name."
+        },
+        {
+          "type": "string",
+          "const": "re-export-alias",
+          "description": "A barrel re-exports the export under another name, and the consumer\nimports that name."
+        },
+        {
+          "type": "string",
+          "const": "namespace-use",
+          "description": "The consumer imports the whole module namespace and does not name the\nexport."
+        },
+        {
+          "type": "string",
+          "const": "dynamic-import",
+          "description": "The consumer loads the module with a dynamic `import()` and does not\nname the export."
+        },
+        {
+          "type": "string",
+          "const": "pass-through",
+          "description": "The consumer is a barrel that only forwards the export\n(`export * from`, `export { foo } from`) and does not use it. A change\nof the export needs no edit there, and the files that import through\nthe barrel are checked on their own. Occurs with `found`."
+        }
+      ],
+      "description": "Why a text search for an export name does not find the uses in a consumer,\nor why a consumer is not a search target (`pass-through`)."
+    },
+    "SearchGapFacts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "description": "Sum of the per-export totals, before the per-export cap. A consumer of\ntwo changed exports counts once for each export."
+        },
+        "exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExportSearchGapFact"
+          },
+          "description": "One entry per changed export with at least one such consumer, sorted\nby file and line."
+        }
+      },
+      "required": [
+        "total",
+        "exports"
+      ],
+      "description": "The literal-search gap of the changed exports: the consumers that a text\nsearch for the export name does not find or finds only under another name."
+    },
+    "ExportSearchGapFact": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Root-relative path of the changed file that declares the export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "The export name, `default` for a default export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the export."
+        },
+        "total": {
+          "type": "integer",
+          "description": "Number of `missed` and `renamed` consumers of this export, before the\ncap."
+        },
+        "consumers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SearchGapConsumerFact"
+          },
+          "description": "At most [`SEARCH_GAP_CONSUMER_CAP`] consumers, `missed` first, then by\npath."
+        }
+      },
+      "required": [
+        "file",
+        "export_name",
+        "line",
+        "total",
+        "consumers"
+      ],
+      "description": "The `missed` and `renamed` consumers of one changed export."
+    },
+    "SearchGapConsumerFact": {
+      "type": "object",
+      "properties": {
+        "consumer_file": {
+          "type": "string",
+          "description": "Root-relative path of the consumer."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line of the import statement in the consumer, when known."
+        },
+        "search_visibility": {
+          "description": "`missed` or `renamed`.",
+          "$ref": "#/definitions/SearchVisibility"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchGapReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the text search does not find the uses."
+        },
+        "search_as": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name to search for in this consumer instead."
+        }
+      },
+      "required": [
+        "consumer_file",
+        "search_visibility"
+      ],
+      "description": "One consumer that a text search for the export name does not find, or\nfinds only under another local name."
+    },
+    "CoChangePartnerEvidence": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File that changes together with the target."
+        },
+        "shared_revisions": {
+          "type": "integer",
+          "description": "Commits that changed both files."
+        },
+        "degree": {
+          "type": "number",
+          "description": "Coupling degree from 0 to 1."
+        }
+      },
+      "required": [
+        "path",
+        "shared_revisions",
+        "degree"
+      ],
+      "description": "A hidden change-coupling partner referenced in target evidence."
+    },
+    "ChangeCouplingReport": {
+      "type": "object",
+      "properties": {
+        "since": {
+          "type": "string",
+          "description": "History window that the section reads, for example `\"12 months\"`.\nWithout `--since` the window is 12 months, wider than the hotspot\nwindow."
+        },
+        "commits_analyzed": {
+          "type": "integer",
+          "description": "Commits that changed at least one analyzed file and were not skipped."
+        },
+        "commits_skipped": {
+          "type": "integer",
+          "description": "Commits skipped because they changed more analyzed files than\n`thresholds.max_files_per_commit`."
+        },
+        "total_pairs": {
+          "type": "integer",
+          "description": "Hidden pairs in scope before `--top` cuts `pairs`."
+        },
+        "thresholds": {
+          "description": "Thresholds that this run applied.",
+          "$ref": "#/definitions/ChangeCouplingThresholds"
+        },
+        "pairs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HiddenCouplingPair"
+          },
+          "description": "Hidden pairs, sorted by `degree` and then `shared_revisions` (both\ndescending), then by path. Empty when the history cannot show\ncoupling; `workspace_diagnostics` then tells why."
+        }
+      },
+      "required": [
+        "since",
+        "commits_analyzed",
+        "commits_skipped",
+        "total_pairs",
+        "thresholds",
+        "pairs"
+      ],
+      "description": "Hidden change coupling: pairs of files that change together in the git\nhistory while no import or re-export chain connects them.\n\nAn agent that follows the import graph cannot find the second file of a\nhidden pair. The section is advisory: it has no health score weight and\nnever gates."
+    },
+    "ChangeCouplingThresholds": {
+      "type": "object",
+      "properties": {
+        "max_files_per_commit": {
+          "type": "integer",
+          "description": "Commits with more analyzed files than this are skipped."
+        },
+        "min_revisions": {
+          "type": "integer",
+          "description": "Minimum commits for each file of a pair."
+        },
+        "min_shared_revisions": {
+          "type": "integer",
+          "description": "Minimum commits that change both files of a pair."
+        },
+        "min_degree": {
+          "type": "number",
+          "description": "Minimum coupling degree, from 0 to 1."
+        },
+        "strong_degree": {
+          "type": "number",
+          "description": "Degree at or above which a pair is `strong`."
+        }
+      },
+      "required": [
+        "max_files_per_commit",
+        "min_revisions",
+        "min_shared_revisions",
+        "min_degree",
+        "strong_degree"
+      ],
+      "description": "Thresholds that a hidden pair met."
+    },
+    "HiddenCouplingPair": {
+      "type": "object",
+      "properties": {
+        "path_a": {
+          "type": "string",
+          "description": "First file, relative to the project root. Sorts before `path_b`."
+        },
+        "path_b": {
+          "type": "string",
+          "description": "Second file, relative to the project root."
+        },
+        "revisions_a": {
+          "type": "integer",
+          "description": "Commits that changed `path_a` in the window."
+        },
+        "revisions_b": {
+          "type": "integer",
+          "description": "Commits that changed `path_b` in the window."
+        },
+        "shared_revisions": {
+          "type": "integer",
+          "description": "Commits that changed both files."
+        },
+        "degree": {
+          "type": "number",
+          "description": "Coupling degree from 0 to 1: `shared_revisions` divided by the mean of\n`revisions_a` and `revisions_b`."
+        },
+        "strong": {
+          "type": "boolean",
+          "description": "True when `degree` reaches `thresholds.strong_degree`. The check uses\nthe rounded `degree` that the report shows, so 0.495 counts as 0.5.\nA strong pair gives each file the `hidden_coupling` target factor. A\nfile that no other target rule claims becomes a\n`resolve_hidden_coupling` refactoring target."
+        }
+      },
+      "required": [
+        "path_a",
+        "path_b",
+        "revisions_a",
+        "revisions_b",
+        "shared_revisions",
+        "degree"
+      ],
+      "description": "Two files that change together without a static edge between them."
+    },
+    "CoChangeGapFact": {
+      "type": "object",
+      "properties": {
+        "changed_file": {
+          "type": "string",
+          "description": "Root-relative path of the changed file."
+        },
+        "partner_file": {
+          "type": "string",
+          "description": "Root-relative path of the hidden partner that the diff does not touch."
+        },
+        "shared_revisions": {
+          "type": "integer",
+          "description": "Commits in the history window that changed both files."
+        },
+        "degree": {
+          "type": "number",
+          "description": "Coupling degree from 0 to 1."
+        },
+        "note": {
+          "type": "string",
+          "description": "Scope note: history evidence, not a proof that the partner must change."
+        }
+      },
+      "required": [
+        "changed_file",
+        "partner_file",
+        "shared_revisions",
+        "degree",
+        "note"
+      ],
+      "description": "One co-change gap: `changed_file` is in the diff, `partner_file` is not,\nand history shows that the two files usually change together."
+    },
+    "UnusedEffectLayerFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that defines the layer."
+        },
+        "name": {
+          "type": "string",
+          "description": "`FooLive`, or `FooService.layer` for a static member."
+        },
+        "kind": {
+          "description": "Whether the layer is a module-scope const or a class static member.",
+          "$ref": "#/definitions/EffectLayerKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the layer name."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the layer name."
+        },
+        "dead_consumers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The unused layers that compose this layer, sorted by name."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "line",
+        "col",
+        "dead_consumers",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedEffectLayer`] finding. There is no safe auto-fix: a test or a script outside the project graph can still use the layer. Actions are manual\nremediation guidance plus a line-level suppress."
+    },
+    "EffectLayerKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "top_level",
+          "description": "A module-scope `const` whose initializer is a layer."
+        },
+        {
+          "type": "string",
+          "const": "static_member",
+          "description": "A class static property whose initializer is a layer."
+        }
+      ],
+      "description": "Kind of an Effect layer definition."
+    },
+    "UnusedTaggedErrorFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that declares the class."
+        },
+        "name": {
+          "type": "string",
+          "description": "The class name."
+        },
+        "tag": {
+          "type": "string",
+          "description": "The `_tag` value of the class."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the class name."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the class name."
+        },
+        "catch_sites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EffectCatchSite"
+          },
+          "description": "The `catchTag` / `catchTags` handlers that name the tag."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "tag",
+        "line",
+        "col",
+        "catch_sites",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedTaggedError`] finding. There is no safe auto-fix: the error can be part of a public API contract. Actions are manual\nremediation guidance plus a line-level suppress."
+    },
+    "EffectCatchSite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that contains the handler."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the handled tag."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the handled tag."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "A source location of a `catchTag` or `catchTags` handler."
+    },
+    "UnproducedCatchTagFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The module that contains the handler."
+        },
+        "tag": {
+          "type": "string",
+          "description": "The handled tag."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the handled tag."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the handled tag."
+        },
+        "candidate_classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The project classes that declare the tag, sorted by name."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "tag",
+        "line",
+        "col",
+        "candidate_classes",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnproducedCatchTag`] finding. There is no safe auto-fix: the handler can guard against a future producer. Actions are manual\nremediation guidance plus a line-level suppress."
     },
     "DiffRiskReport": {
       "type": "object",

@@ -826,6 +826,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--unproduced-catch-tags",
+      "column": "Issue Type",
+      "seed": "A catchTag handler names a project error tag that no code produces"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--unprovided-injects",
       "column": "Issue Type",
       "seed": "inject() / getContext() reads a key that no provide() / setContext() supplies"
@@ -898,6 +904,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--unused-effect-layers",
+      "column": "Issue Type",
+      "seed": "An Effect layer is composed only into layers that nothing uses"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--unused-enum-members",
       "column": "Issue Type",
       "seed": "Enum member is never referenced"
@@ -937,6 +949,12 @@
       "row": "--unused-svelte-events",
       "column": "Issue Type",
       "seed": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--unused-tagged-errors",
+      "column": "Issue Type",
+      "seed": "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it"
     },
     {
       "section": "flags:dead-code-filters",
@@ -2314,6 +2332,12 @@
     },
     {
       "section": "issue-types",
+      "row": "unproduced-catch-tag",
+      "column": "Description",
+      "seed": "A catchTag handler names a project error tag that no code produces"
+    },
+    {
+      "section": "issue-types",
       "row": "unprovided-inject",
       "column": "Description",
       "seed": "inject() / getContext() reads a key that no provide() / setContext() supplies"
@@ -2404,6 +2428,12 @@
     },
     {
       "section": "issue-types",
+      "row": "unused-effect-layer",
+      "column": "Description",
+      "seed": "An Effect layer is composed only into layers that nothing uses"
+    },
+    {
+      "section": "issue-types",
       "row": "unused-enum-member",
       "column": "Description",
       "seed": "Enum member is never referenced"
@@ -2449,6 +2479,12 @@
       "row": "unused-svelte-event",
       "column": "Description",
       "seed": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-tagged-error",
+      "column": "Description",
+      "seed": "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it"
     },
     {
       "section": "issue-types",

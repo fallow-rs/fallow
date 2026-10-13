@@ -421,6 +421,7 @@ pub(in crate::template_complexity) fn build_unit_complexity(
     Some(FunctionComplexity {
         name: name.to_string(),
         is_private_member: false,
+        context_named: None,
         line,
         col,
         cyclomatic: complexity.cyclomatic,

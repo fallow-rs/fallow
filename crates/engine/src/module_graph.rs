@@ -401,6 +401,134 @@ pub fn export_lines_for_changed_paths(
     Some(map)
 }
 
+/// One consumer that a whole-word text search for an export name does not
+/// find, or finds only under another local name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsumerSearchGapPaths {
+    /// Root-relative path of the consumer, forward-slashed.
+    pub consumer_file: String,
+    /// The literal-search check for the consumer.
+    pub check: crate::search_visibility::SearchCheck,
+}
+
+/// Literal-search gaps for one export of a changed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportSearchGapPaths {
+    /// Root-relative path of the changed file, forward-slashed.
+    pub file: String,
+    /// The export name, `default` for a default export.
+    pub export_name: String,
+    /// 1-based line of the export.
+    pub line: u32,
+    /// 1-based first and last line of the top-level statement that declares
+    /// the export.
+    pub declaration_lines: (u32, u32),
+    /// The `missed` and `renamed` consumers outside the changed files, sorted
+    /// by path.
+    pub consumers: Vec<ConsumerSearchGapPaths>,
+}
+
+/// Compute the literal-search gaps of the exports of absolute changed paths.
+///
+/// For each export of a changed file, the consumers outside the changed set
+/// are checked against a whole-word text search for the export name. Only
+/// exports with at least one `missed` or `renamed` consumer are returned. The
+/// consumer sources are read on demand.
+#[must_use]
+pub fn search_gaps_for_changed_paths(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<Vec<ExportSearchGapPaths>> {
+    use crate::search_visibility::{SearchTarget, SourceCache, declaration_line_ranges};
+    use fallow_graph::graph::ExportNamespace;
+    use fallow_types::trace::SearchVisibility;
+
+    let graph = graph.as_graph();
+    let mut changed_ids = changed_file_ids(graph, changed_files);
+    if changed_ids.is_empty() {
+        return None;
+    }
+    changed_ids.sort_unstable_by_key(|id| id.0);
+    let changed_set: FxHashSet<FileId> = changed_ids.iter().copied().collect();
+    let mut sources = SourceCache::new(graph);
+    let mut gaps = Vec::new();
+    for &file_id in &changed_ids {
+        let Some(module) = graph.modules.get(file_id.0 as usize) else {
+            continue;
+        };
+        if module.exports.is_empty() {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(&module.path) else {
+            continue;
+        };
+        let offsets = fallow_types::extract::compute_line_offsets(&source);
+        let starts: Vec<u32> = module
+            .exports
+            .iter()
+            .map(|export| export.span.start)
+            .collect();
+        let ranges = declaration_line_ranges(&module.path, &source, &starts);
+        for export in &module.exports {
+            let mut seen = FxHashSet::default();
+            let candidates: Vec<_> = export
+                .references
+                .iter()
+                .filter(|reference| {
+                    !changed_set.contains(&reference.from_file)
+                        && graph
+                            .modules
+                            .get(reference.from_file.0 as usize)
+                            .is_some_and(fallow_graph::graph::ModuleNode::is_reachable)
+                        && seen.insert(reference.from_file)
+                })
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+            let name = export.name.to_string();
+            let namespace = if export.is_type_only {
+                ExportNamespace::Type
+            } else {
+                ExportNamespace::Value
+            };
+            let target = SearchTarget::new(graph, &mut sources, file_id, &name, namespace);
+            let mut consumers: Vec<ConsumerSearchGapPaths> = candidates
+                .into_iter()
+                .filter_map(|reference| {
+                    let check = target.check(graph, &mut sources, reference)?;
+                    if check.visibility == SearchVisibility::Found {
+                        return None;
+                    }
+                    let consumer = graph.modules.get(reference.from_file.0 as usize)?;
+                    Some(ConsumerSearchGapPaths {
+                        consumer_file: relative_key_path(&consumer.path, root),
+                        check,
+                    })
+                })
+                .collect();
+            if consumers.is_empty() {
+                continue;
+            }
+            consumers.sort_by(|a, b| a.consumer_file.cmp(&b.consumer_file));
+            let line =
+                fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start).0;
+            gaps.push(ExportSearchGapPaths {
+                file: relative_key_path(&module.path, root),
+                export_name: name,
+                line,
+                declaration_lines: ranges
+                    .get(&export.span.start)
+                    .copied()
+                    .unwrap_or((line, line)),
+                consumers,
+            });
+        }
+    }
+    Some(gaps)
+}
+
 /// Compute direct non-diff internal consumer counts for absolute changed paths.
 #[must_use]
 pub fn internal_consumers_for_changed_paths(

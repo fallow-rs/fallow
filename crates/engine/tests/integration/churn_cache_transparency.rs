@@ -299,3 +299,202 @@ fn subdirectory_root_keys_churn_under_the_root() {
     assert_eq!(churn_rows(&warm, &app), churn_rows(&fresh, &app));
     assert_eq!(warm.files[&app.join("src/a.ts")].commits, 3);
 }
+
+/// Stage several files and commit them as one commit at `epoch`.
+fn commit_files(root: &Path, files: &[(&str, &str)], epoch: u64) {
+    for (path, contents) in files {
+        let file = root.join(path);
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).expect("create source directory");
+        }
+        std::fs::write(&file, contents).expect("write source file");
+        git(root, &["add", path], None);
+    }
+    git(root, &["commit", "--quiet", "-m", "multi"], Some(epoch));
+}
+
+fn head_sha(root: &Path) -> String {
+    let mut command = Command::new("git");
+    fallow_engine::changed_files::clear_ambient_git_env(&mut command);
+    let output = command
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()
+        .expect("rev-parse");
+    String::from_utf8(output.stdout)
+        .expect("utf8 sha")
+        .trim()
+        .to_owned()
+}
+
+/// Commit file sets as `(sha, [relative paths])`, sorted, for comparison.
+fn commit_sets(result: &ChurnResult, root: &Path) -> Vec<(String, Vec<String>)> {
+    let mut sets: Vec<(String, Vec<String>)> = result
+        .commits
+        .iter()
+        .map(|commit| {
+            let mut files: Vec<String> = commit
+                .files
+                .iter()
+                .map(|file| {
+                    file.path
+                        .strip_prefix(root)
+                        .unwrap_or(&file.path)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            files.sort();
+            (commit.sha.clone(), files)
+        })
+        .collect();
+    sets.sort();
+    sets
+}
+
+#[test]
+fn churn_groups_files_by_commit_sha() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    commit_files(
+        root,
+        &[
+            ("src/a.ts", "export const a = 1;\n"),
+            ("src/b.ts", "export const b = 1;\n"),
+        ],
+        BASE_EPOCH,
+    );
+    let first = head_sha(root);
+    commit_file(
+        root,
+        "src/a.ts",
+        "export const a = 2;\nexport const c = 3;\n",
+        BASE_EPOCH + SECS_PER_DAY,
+    );
+    let second = head_sha(root);
+
+    let (result, _) = churn(root, &fixture.cache, true);
+    let mut expected = vec![
+        (first, vec!["src/a.ts".to_owned(), "src/b.ts".to_owned()]),
+        (second.clone(), vec!["src/a.ts".to_owned()]),
+    ];
+    expected.sort();
+    assert_eq!(
+        commit_sets(&result, root),
+        expected,
+        "each commit keeps the set of files it changed"
+    );
+    let latest = result
+        .commits
+        .iter()
+        .find(|commit| commit.sha == second)
+        .expect("second commit");
+    assert_eq!(
+        latest.files[0].lines_changed, 3,
+        "1 deleted + 2 added lines"
+    );
+}
+
+#[test]
+fn incremental_cache_keeps_commit_file_sets_identical_to_a_cold_build() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    commit_files(
+        root,
+        &[
+            ("src/a.ts", "export const a = 1;\n"),
+            ("src/b.ts", "export const b = 1;\n"),
+        ],
+        BASE_EPOCH,
+    );
+    let (_, seeded) = churn(root, &fixture.cache, false);
+    assert!(!seeded);
+    commit_files(
+        root,
+        &[
+            ("src/a.ts", "export const a = 2;\n"),
+            ("src/c.ts", "export const c = 1;\n"),
+        ],
+        BASE_EPOCH + SECS_PER_DAY,
+    );
+
+    let (warm, from_cache) = churn(root, &fixture.cache, false);
+    assert!(from_cache, "the second run extends the cache");
+    let (cold, _) = churn(root, &root.join(".fallow-cold-cache"), true);
+    assert_eq!(commit_sets(&warm, root), commit_sets(&cold, root));
+    assert_eq!(commit_sets(&cold, root).len(), 2);
+}
+
+#[test]
+fn a_wider_cached_window_serves_a_narrower_request() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    commit_file(root, "src/old.ts", "export const old = 1;\n", BASE_EPOCH);
+    commit_file(
+        root,
+        "src/new.ts",
+        "export const fresh = 1;\n",
+        BASE_EPOCH + 200 * SECS_PER_DAY,
+    );
+    let wide = SinceDuration::relative(1, ChurnWindowUnit::Years, "1 year");
+
+    let (wide_result, wide_hit) =
+        analyze_churn_cached(root, &wide, &fixture.cache, false).expect("wide churn");
+    assert!(!wide_hit);
+    assert_eq!(
+        changed_files(&wide_result, root),
+        vec!["src/new.ts".to_owned(), "src/old.ts".to_owned()]
+    );
+
+    let (narrow, narrow_hit) =
+        analyze_churn_cached(root, &window(), &fixture.cache, false).expect("narrow churn");
+    assert!(narrow_hit, "the 1y cache entry covers the 90 day request");
+    let (cold, _) = churn(root, &root.join(".fallow-cold-cache"), true);
+    assert_eq!(churn_rows(&narrow, root), churn_rows(&cold, root));
+    assert_eq!(commit_sets(&narrow, root), commit_sets(&cold, root));
+
+    // The narrow run must not replace the wide entry.
+    let (_, wide_again) =
+        analyze_churn_cached(root, &wide, &fixture.cache, false).expect("wide churn again");
+    assert!(wide_again, "the wide entry survives a narrow run");
+}
+
+#[test]
+fn history_window_keeps_older_commits_while_files_use_the_narrow_window() {
+    let fixture = Fixture::new();
+    let root = &fixture.root;
+    commit_files(
+        root,
+        &[
+            ("src/a.ts", "export const a = 1;\n"),
+            ("src/b.ts", "export const b = 1;\n"),
+        ],
+        BASE_EPOCH,
+    );
+    commit_file(
+        root,
+        "src/c.ts",
+        "export const c = 1;\n",
+        BASE_EPOCH + 200 * SECS_PER_DAY,
+    );
+    let history = SinceDuration::relative(1, ChurnWindowUnit::Years, "1 year");
+
+    let (result, _) = fallow_engine::churn::analyze_churn_cached_with_history(
+        root,
+        &window(),
+        &history,
+        &fixture.cache,
+        true,
+    )
+    .expect("churn with history");
+    assert_eq!(
+        changed_files(&result, root),
+        vec!["src/c.ts".to_owned()],
+        "per-file churn uses the 90 day window"
+    );
+    assert_eq!(
+        result.commits.len(),
+        2,
+        "the commit list covers the one year history window"
+    );
+}

@@ -67,6 +67,9 @@ fn detect_frameworks(config: &ResolvedConfig, workspaces: &[WorkspaceInfo]) -> V
     if deps.contains("@angular/core") {
         frameworks.push("angular".to_string());
     }
+    if deps.contains("effect") {
+        frameworks.push("effect".to_string());
+    }
     frameworks.sort_unstable();
     frameworks.dedup();
     frameworks
@@ -98,6 +101,7 @@ fn add_framework_detectors(
 ) {
     match framework {
         "angular" => add_angular_detectors(detectors, framework, rules),
+        "effect" => add_effect_detectors(detectors, framework, rules),
         "next" => add_next_detectors(detectors, framework, rules),
         "nuxt" => add_nuxt_detectors(detectors, framework, rules),
         "vue" => add_vue_detectors(detectors, framework, rules),
@@ -106,6 +110,31 @@ fn add_framework_detectors(
         "sveltekit" => add_sveltekit_detectors(detectors, framework, rules, facts),
         _ => {}
     }
+}
+
+fn add_effect_detectors(
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
+    framework: &str,
+    rules: &RulesConfig,
+) {
+    add_detector(
+        detectors,
+        framework,
+        "unused-effect-layer",
+        rules.unused_effect_layers,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unused-tagged-error",
+        rules.unused_tagged_errors,
+    );
+    add_detector(
+        detectors,
+        framework,
+        "unproduced-catch-tag",
+        rules.unproduced_catch_tags,
+    );
 }
 
 fn add_angular_detectors(

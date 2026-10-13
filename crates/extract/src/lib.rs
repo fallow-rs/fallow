@@ -15,16 +15,19 @@
     )
 )]
 
+pub mod alchemy;
 mod asset_url;
 pub mod astro;
 mod binding_references;
 pub mod cache;
 pub(crate) mod complexity;
+mod complexity_names;
 mod component_contracts;
 pub mod css;
 pub mod css_classes;
 pub mod css_in_js;
 pub mod css_metrics;
+pub mod effect_facts;
 pub mod federation_runtime;
 pub mod flags;
 mod function_body;

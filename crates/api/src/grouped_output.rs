@@ -349,6 +349,21 @@ where
                 .unused_svelte_events
                 .push(item.clone());
         }
+        for item in &results.unused_effect_layers {
+            self.entry_for_path(&item.layer.path)
+                .unused_effect_layers
+                .push(item.clone());
+        }
+        for item in &results.unused_tagged_errors {
+            self.entry_for_path(&item.error.path)
+                .unused_tagged_errors
+                .push(item.clone());
+        }
+        for item in &results.unproduced_catch_tags {
+            self.entry_for_path(&item.catch_tag.path)
+                .unproduced_catch_tags
+                .push(item.clone());
+        }
         for item in &results.unused_server_actions {
             self.entry_for_path(&item.action.path)
                 .unused_server_actions

@@ -264,6 +264,19 @@ pub fn trace_impact_closure(
     trace_impl::trace_impact_closure(graph.as_graph(), root, file_path)
 }
 
+/// Trace the impact closure for a file without the literal-search check.
+///
+/// The coordination gaps have no search fields, and no consumer source is
+/// read. Use it when only the affected set is needed.
+#[must_use]
+pub fn trace_impact_closure_without_search(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    file_path: &str,
+) -> Option<ImpactClosureTrace> {
+    trace_impl::trace_impact_closure_without_search(graph.as_graph(), root, file_path)
+}
+
 /// Trace the shortest import path between two modules.
 ///
 /// # Errors

@@ -20,7 +20,7 @@ use fallow_engine::test_paths::is_test_code_path_str;
 use fallow_engine::{
     codeowners::CodeOwners,
     project_analysis::ProjectAnalysisArtifactOptions,
-    trace::{trace_file, trace_impact_closure},
+    trace::{trace_file, trace_impact_closure_without_search},
 };
 use fallow_output::{
     SimilarCodeAction, SimilarCodeActionType, SimilarCodeCacheStatus, SimilarCodeCacheSummary,
@@ -1058,8 +1058,10 @@ fn enrich_graph_and_clones(
         return;
     };
 
-    let left_impact = trace_impact_closure(graph, session.root(), &left_location.path);
-    let right_impact = trace_impact_closure(graph, session.root(), &right_location.path);
+    let left_impact =
+        trace_impact_closure_without_search(graph, session.root(), &left_location.path);
+    let right_impact =
+        trace_impact_closure_without_search(graph, session.root(), &right_location.path);
     apply_graph_evidence(
         session.root(),
         &left_trace,
@@ -2636,6 +2638,7 @@ mod tests {
             author_pool: Vec::new(),
             clock: fallow_engine::clock::AnalysisClock::pinned(1_788_782_400),
             git_log_bytes: 0,
+            commits: Vec::new(),
         };
 
         assert_eq!(churn_commits_for(&churn, Path::new(r"C:\repo\src\a.ts")), 7);

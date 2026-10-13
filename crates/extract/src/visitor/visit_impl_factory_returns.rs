@@ -323,7 +323,7 @@ pub(super) fn function_body_is_terminal(body: BodyRef<'_, '_>) -> bool {
 /// control flow, not into nested functions). A bare `return;` contributes
 /// nothing, so a shorter result than the return count signals a non-value return
 /// path. See issue #1441.
-fn collect_return_args_in_statements<'b, 'a>(
+pub(super) fn collect_return_args_in_statements<'b, 'a>(
     statements: &'b [Statement<'a>],
     out: &mut Vec<&'b Expression<'a>>,
 ) {

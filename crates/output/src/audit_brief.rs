@@ -6,7 +6,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 12;
+///
+/// Version 13 tracks the embedded health contract: the required
+/// `targets[].category` enum gained `resolve_hidden_coupling`.
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 13;
 
 /// Maximum number of affected-but-not-in-diff paths sampled into
 /// [`ImpactClosureFacts::affected_not_shown`].
@@ -24,6 +27,10 @@ pub const AFFECTED_SAMPLE_CAP: usize = 10;
 /// lightest ones and are counted in
 /// [`ImpactClosureFacts::affected_by_dir_omitted`].
 pub const AFFECTED_DIR_CAP: usize = 25;
+
+/// Maximum number of entries in [`ImpactClosureFacts::co_change_gap`]. The
+/// full count is in [`ImpactClosureFacts::co_change_gap_count`].
+pub const CO_CHANGE_GAP_CAP: usize = 10;
 
 /// Independently-versioned wire-version newtype for the brief envelope.
 /// Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
@@ -154,9 +161,99 @@ pub struct ImpactClosureFacts {
     /// subset of [`affected_not_shown`](Self::affected_not_shown): the gap
     /// deliberately skips story and test consumers that the affected set counts.
     pub coordination_gap: Vec<CoordinationGapFact>,
+    /// Co-change gaps: a changed file has a hidden change-coupling partner
+    /// that is absent from the diff. The two files changed together in most
+    /// commits of the history window, but no import or re-export chain
+    /// connects them, so the graph facts above cannot point at the partner.
+    /// Advisory, never gates. Omitted when empty.
+    /// At most 10 entries (`CO_CHANGE_GAP_CAP`), strongest degree first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub co_change_gap: Vec<CoChangeGapFact>,
+    /// All co-change gaps, before the cap cuts `co_change_gap`. Omitted
+    /// when zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub co_change_gap_count: usize,
+    /// Consumers that a whole-word text search for a changed export name does
+    /// not find (`missed`), or finds only under another local name
+    /// (`renamed`). Only exports whose declaration statement overlaps an added
+    /// diff line count, and only consumers outside the diff. Absent when no
+    /// such consumer exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_gap: Option<SearchGapFacts>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if passes a reference"
+)]
+const fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+/// Maximum number of consumers listed per export in
+/// [`ExportSearchGapFact::consumers`]. The full count is in
+/// [`ExportSearchGapFact::total`].
+pub const SEARCH_GAP_CONSUMER_CAP: usize = 10;
+
+/// The literal-search gap of the changed exports: the consumers that a text
+/// search for the export name does not find or finds only under another name.
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SearchGapFacts {
+    /// Sum of the per-export totals, before the per-export cap. A consumer of
+    /// two changed exports counts once for each export.
+    pub total: usize,
+    /// One entry per changed export with at least one such consumer, sorted
+    /// by file and line.
+    pub exports: Vec<ExportSearchGapFact>,
+}
+
+/// The `missed` and `renamed` consumers of one changed export.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ExportSearchGapFact {
+    /// Root-relative path of the changed file that declares the export.
+    pub file: String,
+    /// The export name, `default` for a default export.
+    pub export_name: String,
+    /// 1-based line of the export.
+    pub line: u32,
+    /// Number of `missed` and `renamed` consumers of this export, before the
+    /// cap.
+    pub total: usize,
+    /// At most [`SEARCH_GAP_CONSUMER_CAP`] consumers, `missed` first, then by
+    /// path.
+    pub consumers: Vec<SearchGapConsumerFact>,
+}
+
+/// One consumer that a text search for the export name does not find, or
+/// finds only under another local name.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SearchGapConsumerFact {
+    /// Root-relative path of the consumer.
+    pub consumer_file: String,
+    /// 1-based line of the import statement in the consumer, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// `missed` or `renamed`.
+    pub search_visibility: fallow_types::trace::SearchVisibility,
+    /// Why the text search does not find the uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<fallow_types::trace::SearchGapReason>,
+    /// The name to search for in this consumer instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_as: Option<String>,
 }
 
 impl ImpactClosureFacts {
+    /// Set the co-change gaps: keep the first [`CO_CHANGE_GAP_CAP`] entries
+    /// and record the full count.
+    pub fn set_co_change_gaps(&mut self, gaps: &[CoChangeGapFact]) {
+        self.co_change_gap_count = gaps.len();
+        self.co_change_gap = gaps.iter().take(CO_CHANGE_GAP_CAP).cloned().collect();
+    }
+
     /// Build the facts from the full closure, capping the file sample and the
     /// directory rollup while preserving the exact total.
     ///
@@ -171,8 +268,28 @@ impl ImpactClosureFacts {
             affected_by_dir,
             affected_by_dir_omitted,
             coordination_gap,
+            co_change_gap: Vec::new(),
+            co_change_gap_count: 0,
+            search_gap: None,
         }
     }
+}
+
+/// One co-change gap: `changed_file` is in the diff, `partner_file` is not,
+/// and history shows that the two files usually change together.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CoChangeGapFact {
+    /// Root-relative path of the changed file.
+    pub changed_file: String,
+    /// Root-relative path of the hidden partner that the diff does not touch.
+    pub partner_file: String,
+    /// Commits in the history window that changed both files.
+    pub shared_revisions: u32,
+    /// Coupling degree from 0 to 1.
+    pub degree: f64,
+    /// Scope note: history evidence, not a proof that the partner must change.
+    pub note: String,
 }
 
 /// One directory of the blast radius and how many affected files it holds.
@@ -872,6 +989,31 @@ mod tests {
             (heaviest.dir.as_str(), heaviest.count),
             ("src/zzz_heavy", 90)
         );
+    }
+
+    #[test]
+    fn co_change_gaps_beyond_the_cap_are_counted() {
+        let gaps: Vec<CoChangeGapFact> = (0..CO_CHANGE_GAP_CAP + 3)
+            .map(|index| CoChangeGapFact {
+                changed_file: format!("src/changed{index}.ts"),
+                partner_file: format!("src/partner{index}.ts"),
+                shared_revisions: 5,
+                degree: 0.5,
+                note: String::new(),
+            })
+            .collect();
+        let mut facts = ImpactClosureFacts::new(&[], Vec::new());
+        facts.set_co_change_gaps(&gaps);
+
+        assert_eq!(facts.co_change_gap.len(), CO_CHANGE_GAP_CAP);
+        assert_eq!(facts.co_change_gap_count, CO_CHANGE_GAP_CAP + 3);
+        assert_eq!(facts.co_change_gap[0].changed_file, "src/changed0.ts");
+
+        let mut empty = ImpactClosureFacts::new(&[], Vec::new());
+        empty.set_co_change_gaps(&[]);
+        let json = serde_json::to_value(&empty).expect("facts serialize");
+        assert!(json.get("co_change_gap").is_none());
+        assert!(json.get("co_change_gap_count").is_none());
     }
 
     #[test]

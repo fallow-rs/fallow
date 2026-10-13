@@ -470,6 +470,55 @@ fn push_markdown_framework_sections(
     );
 }
 
+/// Push the Effect sections: unused layers, unused tagged errors and
+/// unproduced catch tags.
+fn push_markdown_effect_sections(
+    out: &mut String,
+    results: &AnalysisResults,
+    rel: &dyn Fn(&Path) -> String,
+) {
+    markdown_section(
+        out,
+        &results.unused_effect_layers,
+        "Unused Effect layers",
+        |f| {
+            vec![format!(
+                "- {}:{} {} is composed only into layers that nothing uses ({})",
+                markdown_code_span(&rel(&f.layer.path)),
+                f.layer.line,
+                markdown_code_span(&f.layer.name),
+                f.layer.dead_consumers.join(", "),
+            )]
+        },
+    );
+    markdown_section(
+        out,
+        &results.unused_tagged_errors,
+        "Unused tagged errors",
+        |f| {
+            vec![format!(
+                "- {}:{} {} is never constructed or failed with (remove it or fail with it)",
+                markdown_code_span(&rel(&f.error.path)),
+                f.error.line,
+                markdown_code_span(&f.error.name),
+            )]
+        },
+    );
+    markdown_section(
+        out,
+        &results.unproduced_catch_tags,
+        "Unproduced catch tags",
+        |f| {
+            vec![format!(
+                "- {}:{} catchTag {} handles a tag that no code produces",
+                markdown_code_span(&rel(&f.catch_tag.path)),
+                f.catch_tag.line,
+                markdown_code_span(&f.catch_tag.tag),
+            )]
+        },
+    );
+}
+
 fn push_markdown_component_sections(
     out: &mut String,
     results: &AnalysisResults,
@@ -538,6 +587,7 @@ fn push_markdown_component_sections(
         "Unused Svelte events",
         |e| format_markdown_unused_svelte_event(e, rel),
     );
+    push_markdown_effect_sections(out, results, rel);
     markdown_section(
         out,
         &results.unused_server_actions,
@@ -1495,6 +1545,10 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         && report.file_scores.is_empty()
         && report.coverage_gaps.is_none()
         && report.hotspots.is_empty()
+        && report
+            .change_coupling
+            .as_ref()
+            .is_none_or(|coupling| coupling.pairs.is_empty())
         && report.targets.is_empty()
         && report.runtime_coverage.is_none()
         && report.coverage_intelligence.is_none()
@@ -1530,6 +1584,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
     write_coverage_gaps_section(&mut out, report, root);
     write_file_scores_section(&mut out, report, root);
     write_hotspots_section(&mut out, report, root);
+    write_change_coupling_section(&mut out, report, root);
     write_targets_section(&mut out, report, root);
     write_css_analytics_section(&mut out, report);
     write_metric_legend(&mut out, report);
@@ -2333,16 +2388,25 @@ fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthRep
 
     for score in &report.file_scores {
         let file_str = rel(&score.path);
+        let signal = fallow_engine::health::scoring::file_score_crap_signal(
+            score,
+            report.summary.max_crap_threshold,
+        );
+        let suppression = if score.crap_suppressed > 0 {
+            " (complexity suppression)"
+        } else {
+            ""
+        };
         let _ = writeln!(
             out,
-            "| {} | {mi:.1} | {fi} | {fan_out} | {dead:.0}% | {density:.2} | {crap:.1} |",
+            "| {} | {mi:.1} | {fi} | {fan_out} | {dead:.0}% | {density:.2} | {crap:.1}{suppression} |",
             markdown_table_code_span(&file_str),
             mi = score.maintainability_index,
             fi = score.fan_in,
             fan_out = score.fan_out,
             dead = score.dead_code_ratio * 100.0,
             density = score.complexity_density,
-            crap = score.crap_max,
+            crap = signal.maximum,
         );
     }
 
@@ -2484,6 +2548,52 @@ fn write_hotspots_section(out: &mut String, report: &fallow_output::HealthReport
             summary.min_commits,
         );
     }
+}
+
+/// Write the hidden change-coupling pairs. Silent when the section is absent
+/// or lists no pair.
+fn write_change_coupling_section(
+    out: &mut String,
+    report: &fallow_output::HealthReport,
+    root: &Path,
+) {
+    let Some(coupling) = report.change_coupling.as_ref() else {
+        return;
+    };
+    if coupling.pairs.is_empty() {
+        return;
+    }
+    let count = coupling.total_pairs;
+    let _ = write!(
+        out,
+        "\n### Hidden Change Coupling ({count} pair{}, since {})\n\n",
+        plural(count),
+        coupling.since,
+    );
+    out.push_str("| File A | File B | Degree | Shared | Commits A | Commits B | Strong |\n");
+    out.push_str("|:-------|:-------|:-------|:-------|:----------|:----------|:-------|\n");
+    for pair in &coupling.pairs {
+        let path_a = normalize_uri(&relative_path(&pair.path_a, root).display().to_string());
+        let path_b = normalize_uri(&relative_path(&pair.path_b, root).display().to_string());
+        let _ = writeln!(
+            out,
+            "| {} | {} | {:.0}% | {} | {} | {} | {} |",
+            markdown_table_code_span(&path_a),
+            markdown_table_code_span(&path_b),
+            pair.degree * 100.0,
+            pair.shared_revisions,
+            pair.revisions_a,
+            pair.revisions_b,
+            if pair.strong { "**strong**" } else { "" },
+        );
+    }
+    let hidden = count.saturating_sub(coupling.pairs.len());
+    if hidden > 0 {
+        let _ = writeln!(out, "\n*{hidden} more pair{} not shown*", plural(hidden));
+    }
+    out.push_str(
+        "\n*Files that change together in the commit history with no import between them.*\n",
+    );
 }
 
 /// Write the hotspots table header, widening with ownership columns when present.
@@ -3067,6 +3177,9 @@ mod health_markdown_tests {
                 crap_max: 4.0,
                 crap_above_threshold: 0,
                 crap_exempted: 0,
+                crap_suppressed: 0,
+                crap_unsuppressed_max: None,
+                crap_unsuppressed_effective_threshold: None,
                 crap_effective_threshold: None,
             }],
             hotspots: vec![
@@ -3080,6 +3193,8 @@ mod health_markdown_tests {
                     complexity_density: 0.5,
                     fan_in: 1,
                     trend: fallow_types::churn::ChurnTrend::Stable,
+                    median_files_per_commit: None,
+                    median_lines_per_commit: None,
                     ownership: None,
                     is_test_path: false,
                 }

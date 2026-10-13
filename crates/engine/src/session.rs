@@ -1856,6 +1856,101 @@ mod tests {
     }
 
     #[test]
+    fn callback_property_proof_refresh_matches_fresh_sessions() {
+        for (present, absent) in [
+            (
+                "export function wrap<T>(callback: () => T) { return { value: callback() }; }",
+                "export function wrap<T>(callback: () => T) { return { value: { used() {} } }; }",
+            ),
+            (
+                "export { computed as wrap } from 'vue';",
+                "export { computed as wrap } from 'foreign';",
+            ),
+        ] {
+            let project = tempfile::tempdir().expect("callback session fixture");
+            let root = project.path();
+            std::fs::write(
+                root.join("package.json"),
+                r#"{"name":"callback-refresh","type":"module","main":"index.ts","dependencies":{"vue":"*","foreign":"*"}}"#,
+            )
+            .expect("package");
+            std::fs::write(
+                root.join("classes.ts"),
+                "export class C { control() {} used() {} dead() {} }",
+            )
+            .expect("class");
+            std::fs::write(root.join("index.ts"), "import { wrap } from './factory'; import { C } from './classes'; new C().control(); wrap(() => new C()).value.used();").expect("consumer");
+            let path = root.join("factory.ts");
+            std::fs::write(&path, present).expect("initial producer");
+            let mut session = class_projection_session(root);
+            assert_eq!(session_class_projection(&session), ["dead"]);
+            for (source, expected) in [(absent, vec!["dead", "used"]), (present, vec!["dead"])] {
+                std::fs::write(&path, source).expect("producer update");
+                session.refresh_discovery();
+                assert_eq!(session_class_projection(&session), expected);
+                assert_eq!(
+                    session_class_projection(&session),
+                    session_class_projection(&class_projection_session(root))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn callback_review_proof_refresh_matches_fresh_sessions() {
+        for (present, absent) in [
+            (
+                "let current = new C(); wrap((ignored = 0) => current).value.used();",
+                "let current = new C(); wrap((ignored = (current = { used() {} })) => current).value.used();",
+            ),
+            (
+                "import { computed } from 'vue'; const getter = () => new C(); const alias = getter; const options = { get: alias, set: value => {} }; computed(options).value.used();",
+                "import { computed } from 'vue'; const getter = () => new C(); const alias = getter; const options = { get: alias, set: value => {} }; options.get = () => ({ used() {} }); computed(options).value.used();",
+            ),
+            (
+                "let current = new C(); wrap(() => current).value.used();",
+                "let current = new C(); wrap(() => { current = { used() {} }; return current; }).value.used();",
+            ),
+            (
+                "import { computed } from 'vue'; const options = { get: () => new C(), set: value => {} }; const alias = options; computed(alias).value.used();",
+                "import { computed } from 'vue'; const options = { get: () => new C(), set: value => {} }; const alias = options; alias.get = () => ({ used() {} }); computed(options).value.used();",
+            ),
+        ] {
+            let project = tempfile::tempdir().expect("callback review session fixture");
+            let root = project.path();
+            std::fs::write(root.join("package.json"), r#"{"name":"callback-review-refresh","type":"module","main":"index.ts","dependencies":{"vue":"*"}}"#).expect("package");
+            std::fs::write(
+                root.join("classes.ts"),
+                "export class C { control() {} used() {} dead() {} }",
+            )
+            .expect("class");
+            std::fs::write(
+                root.join("helper.ts"),
+                "export function wrap(fn) { return { value: fn() }; }",
+            )
+            .expect("helper");
+            let path = root.join("index.ts");
+            let source = |body: &str| {
+                format!(
+                    "import {{ C }} from './classes'; import {{ wrap }} from './helper'; new C().control(); {body}"
+                )
+            };
+            std::fs::write(&path, source(present)).expect("initial source");
+            let mut session = class_projection_session(root);
+            assert_eq!(session_class_projection(&session), ["dead"]);
+            for (body, expected) in [(absent, vec!["dead", "used"]), (present, vec!["dead"])] {
+                std::fs::write(&path, source(body)).expect("source update");
+                session.refresh_discovery();
+                assert_eq!(session_class_projection(&session), expected);
+                assert_eq!(
+                    session_class_projection(&session),
+                    session_class_projection(&class_projection_session(root))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn indexed_source_proof_removal_and_restoration_matches_fresh_sessions() {
         for (label, present, absent, access) in [
             (

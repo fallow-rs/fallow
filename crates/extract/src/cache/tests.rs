@@ -1227,6 +1227,7 @@ fn module_to_cached_roundtrip_complexity() {
             FunctionComplexity {
                 name: "complex".to_string(),
                 is_private_member: true,
+                context_named: None,
                 line: 5,
                 col: 0,
                 cyclomatic: 8,
@@ -1259,6 +1260,7 @@ fn module_to_cached_roundtrip_complexity() {
             FunctionComplexity {
                 name: "simple".to_string(),
                 is_private_member: false,
+                context_named: None,
                 line: 30,
                 col: 4,
                 cyclomatic: 1,
@@ -2094,4 +2096,73 @@ fn factory_property_sources_roundtrip_with_declaring_module_names() {
     )];
     assert_eq!(accesses(&module), expected);
     assert_eq!(accesses(&restored), expected);
+}
+
+#[test]
+fn callback_factory_sources_and_consumers_survive_cache_roundtrip() {
+    use fallow_types::extract::{
+        CallbackFactoryArgument, CallbackFactoryPropertyAccessFact, SemanticFactView,
+    };
+    let module = parse_from_content(
+        FileId(8),
+        Path::new("src/callback.ts"),
+        r"
+        import { C } from './c'; import { computed as wrap } from 'vue';
+        export function forward<T>(callback: () => T) { return { result: callback() }; }
+        const result = wrap({ get: () => new C(), set: (_value: unknown) => {} });
+        result.value = new C(); result.value.go();
+    ",
+    );
+    let sources = |module: &ModuleInfo| {
+        SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+            .factory_return_object_property_sources()
+            .map(|source| {
+                (
+                    source.factory_export_name.clone(),
+                    source.property_path.clone(),
+                    source.source.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let consumers = |module: &ModuleInfo| {
+        SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+            .callback_factory_property_accesses()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let expected_sources = vec![(
+        "forward".to_string(),
+        "result".to_string(),
+        FactoryPropertySource::CallbackParameterReturn { parameter_index: 0 },
+    )];
+    let expected_accesses = vec![CallbackFactoryPropertyAccessFact {
+        callee_name: "wrap".into(),
+        callee_member: None,
+        property_path: "value".into(),
+        member: "go".into(),
+        vue_only: false,
+        assigned_class: Some("C".into()),
+        arguments: vec![CallbackFactoryArgument {
+            parameter_index: 0,
+            class_local_name: "C".into(),
+            getter: true,
+            lazy_safe: true,
+        }],
+    }];
+    assert_eq!(sources(&module), expected_sources);
+    assert_eq!(consumers(&module), expected_accesses);
+    assert!(
+        !module
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "C" && access.member == "go"),
+        "conditional member must not bypass producer authority"
+    );
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let bytes = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&bytes).expect("callback cache decode");
+    let restored = cached_to_module(&decoded, FileId(8));
+    assert_eq!(sources(&restored), expected_sources);
+    assert_eq!(consumers(&restored), expected_accesses);
 }

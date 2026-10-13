@@ -1929,6 +1929,9 @@ fn build_policy_section(lines: &mut Vec<String>, input: &SectionInput<'_>) {
         && results.unused_component_inputs.is_empty()
         && results.unused_component_outputs.is_empty()
         && results.unused_svelte_events.is_empty()
+        && results.unused_effect_layers.is_empty()
+        && results.unused_tagged_errors.is_empty()
+        && results.unproduced_catch_tags.is_empty()
         && results.unused_server_actions.is_empty()
         && results.unused_load_data_keys.is_empty()
         && results.route_collisions.is_empty()
@@ -2172,6 +2175,45 @@ fn push_framework_key_sections(
             e.event.path.as_path()
         },
         format_detail: &format_unused_svelte_event,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_effect_layers,
+        title: "Unused Effect layers",
+        level: severity_to_level(rules.unused_effect_layers),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &fallow_types::output_dead_code::UnusedEffectLayerFinding| {
+            e.layer.path.as_path()
+        },
+        format_detail: &format_unused_effect_layer,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_tagged_errors,
+        title: "Unused tagged errors",
+        level: severity_to_level(rules.unused_tagged_errors),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &fallow_types::output_dead_code::UnusedTaggedErrorFinding| {
+            e.error.path.as_path()
+        },
+        format_detail: &format_unused_tagged_error,
+    });
+
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unproduced_catch_tags,
+        title: "Unproduced catch tags",
+        level: severity_to_level(rules.unproduced_catch_tags),
+        root,
+        max_files: MAX_FLAT_ITEMS,
+        get_path: |e: &fallow_types::output_dead_code::UnproducedCatchTagFinding| {
+            e.catch_tag.path.as_path()
+        },
+        format_detail: &format_unproduced_catch_tag,
     });
 
     build_human_grouped_section(GroupedSectionInput {
@@ -2430,6 +2472,43 @@ fn format_unused_component_output(
         format!(":{}", o.line).dimmed(),
         o.output_name.bold(),
         "is declared but emitted nowhere in this component (remove it or emit it)".dimmed(),
+    )
+}
+
+fn format_unused_effect_layer(
+    entry: &fallow_types::output_dead_code::UnusedEffectLayerFinding,
+) -> String {
+    let layer = &entry.layer;
+    format!(
+        "{} {} {} {}",
+        format!(":{}", layer.line).dimmed(),
+        layer.name.bold(),
+        "is composed only into layers that nothing uses:".dimmed(),
+        layer.dead_consumers.join(", ").dimmed(),
+    )
+}
+
+fn format_unused_tagged_error(
+    entry: &fallow_types::output_dead_code::UnusedTaggedErrorFinding,
+) -> String {
+    let error = &entry.error;
+    format!(
+        "{} {} {}",
+        format!(":{}", error.line).dimmed(),
+        error.name.bold(),
+        "is never constructed or failed with (remove it or fail with it)".dimmed(),
+    )
+}
+
+fn format_unproduced_catch_tag(
+    entry: &fallow_types::output_dead_code::UnproducedCatchTagFinding,
+) -> String {
+    let catch_tag = &entry.catch_tag;
+    format!(
+        "{} {} {}",
+        format!(":{}", catch_tag.line).dimmed(),
+        catch_tag.tag.bold(),
+        "is caught, but no code in this project produces it".dimmed(),
     )
 }
 
@@ -3546,6 +3625,15 @@ fn collect_framework_rules(
     for e in &results.unused_svelte_events {
         insert_matching_rule(rules, &e.event.path, root, resolver);
     }
+    for e in &results.unused_effect_layers {
+        insert_matching_rule(rules, &e.layer.path, root, resolver);
+    }
+    for e in &results.unused_tagged_errors {
+        insert_matching_rule(rules, &e.error.path, root, resolver);
+    }
+    for e in &results.unproduced_catch_tags {
+        insert_matching_rule(rules, &e.catch_tag.path, root, resolver);
+    }
     for a in &results.unused_server_actions {
         insert_matching_rule(rules, &a.action.path, root, resolver);
     }
@@ -4101,6 +4189,21 @@ fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResul
     );
     push_summary_part(
         parts,
+        results.unused_effect_layers.len(),
+        "unused Effect layers",
+    );
+    push_summary_part(
+        parts,
+        results.unused_tagged_errors.len(),
+        "unused tagged errors",
+    );
+    push_summary_part(
+        parts,
+        results.unproduced_catch_tags.len(),
+        "unproduced catch tags",
+    );
+    push_summary_part(
+        parts,
         results.unused_server_actions.len(),
         "unused server actions",
     );
@@ -4505,6 +4608,21 @@ fn check_summary_framework_categories(
             "Unused Svelte events",
             results.unused_svelte_events.len(),
             severity_to_level(rules.unused_svelte_events),
+        ),
+        (
+            "Unused Effect layers",
+            results.unused_effect_layers.len(),
+            severity_to_level(rules.unused_effect_layers),
+        ),
+        (
+            "Unused tagged errors",
+            results.unused_tagged_errors.len(),
+            severity_to_level(rules.unused_tagged_errors),
+        ),
+        (
+            "Unproduced catch tags",
+            results.unproduced_catch_tags.len(),
+            severity_to_level(rules.unproduced_catch_tags),
         ),
         (
             "Unused server actions",

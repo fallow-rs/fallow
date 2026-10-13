@@ -39,6 +39,9 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-component-input": "symbol-property",
   "unused-component-output": "symbol-event",
   "unused-svelte-event": "symbol-event",
+  "unused-effect-layer": "layers",
+  "unused-tagged-error": "error",
+  "unproduced-catch-tag": "debug-disconnect",
   "unrendered-component": "symbol-misc",
   "unprovided-inject": "plug",
   "invalid-client-export": "error",
@@ -426,6 +429,42 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
               e.line,
               e.col,
               "unused-svelte-event",
+            ),
+        ),
+      );
+    }
+
+    if (this.result.unused_effect_layers) {
+      addCategory(
+        "unused-effect-layer",
+        this.result.unused_effect_layers.map(
+          (layer) =>
+            new IssueItem(layer.name, layer.path, layer.line, layer.col, "unused-effect-layer"),
+        ),
+      );
+    }
+
+    if (this.result.unused_tagged_errors) {
+      addCategory(
+        "unused-tagged-error",
+        this.result.unused_tagged_errors.map(
+          (error) =>
+            new IssueItem(error.name, error.path, error.line, error.col, "unused-tagged-error"),
+        ),
+      );
+    }
+
+    if (this.result.unproduced_catch_tags) {
+      addCategory(
+        "unproduced-catch-tag",
+        this.result.unproduced_catch_tags.map(
+          (catchTag) =>
+            new IssueItem(
+              catchTag.tag,
+              catchTag.path,
+              catchTag.line,
+              catchTag.col,
+              "unproduced-catch-tag",
             ),
         ),
       );

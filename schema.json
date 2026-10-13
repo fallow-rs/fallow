@@ -197,6 +197,12 @@
           ],
           "emailMode": "handle"
         },
+        "changeCoupling": {
+          "maxFilesPerCommit": 30,
+          "minRevisions": 5,
+          "minSharedRevisions": 5,
+          "minDegree": 0.3
+        },
         "suggestInlineSuppression": true
       }
     },
@@ -227,6 +233,9 @@
         "unused-component-inputs": "warn",
         "unused-component-outputs": "warn",
         "unused-svelte-events": "warn",
+        "unused-effect-layers": "warn",
+        "unused-tagged-errors": "warn",
+        "unproduced-catch-tags": "warn",
         "unused-server-actions": "warn",
         "unused-load-data-keys": "warn",
         "prop-drilling": "off",
@@ -1173,6 +1182,16 @@
             "emailMode": "handle"
           }
         },
+        "changeCoupling": {
+          "description": "Change coupling thresholds for the `change_coupling` section and the\nhidden-coupling refactoring targets. Older fallow versions reject this\nkey as unknown, so pair it with `minimumVersion` set to the release\nthat added it.",
+          "$ref": "#/$defs/ChangeCouplingConfig",
+          "default": {
+            "maxFilesPerCommit": 30,
+            "minRevisions": 5,
+            "minSharedRevisions": 5,
+            "minDegree": 0.3
+          }
+        },
         "suggestInlineSuppression": {
           "description": "Whether health JSON output emits `suppress-line` action hints\nalongside complexity findings (default: `true`). Set to `false` to\nopt out across the project: useful for teams that manage suppressions\nexclusively through `// fallow-ignore-*` comments authored by hand or\nthrough the `fallow.suppress` LSP code action, but who do not want\nCI-driven `suppress-line` action hints in their JSON output.\n`--baseline` activates auto-omission regardless of this setting,\nsince baseline files are a separate suppression mechanism.",
           "type": "boolean",
@@ -1299,6 +1318,43 @@
           "const": "hash"
         }
       ]
+    },
+    "ChangeCouplingConfig": {
+      "description": "Thresholds for change coupling (`change_coupling` in `fallow health`).\n\nThe defaults are the Code Maat defaults. A pair of files is hidden coupling\nwhen each file has `minRevisions` commits, the pair shares\n`minSharedRevisions` commits, the coupling degree reaches `minDegree`, and\nno import or re-export chain connects the two files.",
+      "type": "object",
+      "properties": {
+        "maxFilesPerCommit": {
+          "description": "Skip a commit that changes more analyzed files than this (default:\n30, from 2 to 1000). Bulk commits (renames, format passes) create\nfalse pairs. The upper bound keeps the pair count of one commit small.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 2,
+          "maximum": 1000,
+          "default": 30
+        },
+        "minRevisions": {
+          "description": "Minimum commits for each file of a pair (default: 5).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 5
+        },
+        "minSharedRevisions": {
+          "description": "Minimum commits that change both files of a pair (default: 5).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 5
+        },
+        "minDegree": {
+          "description": "Minimum coupling degree, from 0 to 1 (default: 0.3). The degree is the\nnumber of shared commits divided by the mean commit count of the two\nfiles.",
+          "type": "number",
+          "format": "double",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.3
+        }
+      },
+      "additionalProperties": false
     },
     "TypeAwareConfig": {
       "description": "Shared opt-in configuration for TypeScript semantic analysis.",
@@ -1434,6 +1490,21 @@
         },
         "unused-svelte-events": {
           "description": "Svelte component dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere in the analyzed project. The\ncross-file dead-output direction (no eslint-plugin-svelte / svelte-check\nrule covers the listener side). Defaults to `warn`, not `error`: a\ndispatched event can be part of a deliberately-stable public component\nAPI, or a listener may be added later, so analyzer confidence is lower;\nwarn encodes that without failing CI.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unused-effect-layers": {
+          "description": "Effect layer composed only into other layers that nothing uses. Gated\non the project declaring `effect`. Defaults to `warn`: code outside the\nanalyzed project can still compose the layer.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unused-tagged-errors": {
+          "description": "Effect tagged error class that only type positions or `catchTag`\nhandlers reference. Gated on the project declaring `effect`. Defaults\nto `warn`: consumers outside the project can construct the error.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "unproduced-catch-tags": {
+          "description": "`catchTag` handler for a project tag that no code produces, when no\n`unused-tagged-errors` finding covers it. Gated on the project\ndeclaring `effect`. Defaults to `warn`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -2330,6 +2401,39 @@
         },
         "unused-svelte-events": {
           "description": "Optional override for [`RulesConfig::unused_svelte_events`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-effect-layers": {
+          "description": "Optional override for [`RulesConfig::unused_effect_layers`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-tagged-errors": {
+          "description": "Optional override for [`RulesConfig::unused_tagged_errors`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unproduced-catch-tags": {
+          "description": "Optional override for [`RulesConfig::unproduced_catch_tags`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

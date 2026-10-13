@@ -263,6 +263,9 @@ pub struct ModuleInfo {
     pub component_props: Vec<ComponentProp>,
     /// Cached framework-neutral component input contracts and inspected callers.
     pub component_contracts: Option<Box<ComponentContractFacts>>,
+    /// Effect layer, tagged error and `catchTag` facts. Set only for a module
+    /// that imports `effect` or an `@effect/*` package.
+    pub effect_facts: Option<Box<EffectFacts>>,
     /// `true` when the template spreads the whole props/attrs object
     /// (`v-bind="$attrs"` / `v-bind="$props"` / `v-bind="props"`) or the props
     /// return is destructured with a rest element. Either form can consume a prop
@@ -486,6 +489,7 @@ impl ModuleInfo {
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             component_contracts: None,
+            effect_facts: None,
             has_props_attrs_fallthrough: false,
             has_define_expose: false,
             has_define_model: false,
@@ -1081,6 +1085,21 @@ pub fn is_synthetic_template_unit(name: &str) -> bool {
     name == "<template>" || name.starts_with("<snippet:")
 }
 
+/// Placeholder name of a function expression that has no name from its
+/// declaration, its binding, a key, or its call context.
+pub const ANONYMOUS_FUNCTION_NAME: &str = "<anonymous>";
+
+/// Placeholder name of an arrow function that has no name from its binding, a
+/// key, or its call context.
+pub const ANONYMOUS_ARROW_NAME: &str = "<arrow>";
+
+/// True when `name` is the placeholder of a function without a name. Two
+/// functions that share a placeholder are not the same function.
+#[must_use]
+pub fn is_anonymous_function_name(name: &str) -> bool {
+    name == ANONYMOUS_FUNCTION_NAME || name == ANONYMOUS_ARROW_NAME
+}
+
 /// Emitted name of the synthetic module-scope complexity unit.
 pub const MODULE_UNIT_NAME: &str = "<module>";
 
@@ -1221,16 +1240,47 @@ impl FileBranching {
     }
 }
 
+/// The kind of function that has no name of its own, which selects its
+/// placeholder name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+pub enum AnonymousFunctionKind {
+    /// A function expression: `<anonymous>`.
+    Function,
+    /// An arrow function: `<arrow>`.
+    Arrow,
+}
+
+impl AnonymousFunctionKind {
+    /// The placeholder name of this kind.
+    #[must_use]
+    pub const fn placeholder(self) -> &'static str {
+        match self {
+            Self::Function => ANONYMOUS_FUNCTION_NAME,
+            Self::Arrow => ANONYMOUS_ARROW_NAME,
+        }
+    }
+}
+
 /// Complexity metrics for a single function/method/arrow.
 #[derive(Debug, Clone, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 pub struct FunctionComplexity {
-    /// Function name (or `"<anonymous>"` for unnamed functions/arrows).
+    /// Function name, or a placeholder (`"<anonymous>"`, `"<arrow>"`) for a
+    /// function that has no name.
     pub name: String,
     /// Whether this function is an ECMAScript `#`-private class member.
     ///
     /// Kept separately from `name` because a public string-named method may
     /// legally begin with `#` and remains eligible for runtime coverage.
     pub is_private_member: bool,
+    /// `Some` when `name` comes from the call or the function that holds this
+    /// function, not from its own declaration, binding, or key. Examples:
+    /// `Command.make("setup")` for a callback argument, the `Effect.fn` span
+    /// name, or the name of the function that returns `Effect.gen(...)`. The
+    /// value is the kind of placeholder that the function had before.
+    ///
+    /// Coverage producers and runtime identities record such a function
+    /// without a name, so they use [`Self::identity_name`].
+    pub context_named: Option<AnonymousFunctionKind>,
     /// 1-based line number where the function starts.
     pub line: u32,
     /// 0-based byte column where the function starts.
@@ -1267,6 +1317,18 @@ pub struct FunctionComplexity {
     /// the two metrics accrue at different granularities). Always computed and
     /// cached; surfaced in JSON only behind `health --complexity-breakdown`.
     pub contributions: Vec<ComplexityContribution>,
+}
+
+impl FunctionComplexity {
+    /// The name that coverage producers and runtime identities use: the
+    /// placeholder for a function with a context name, else `name`.
+    #[must_use]
+    pub fn identity_name(&self) -> &str {
+        match self.context_named {
+            Some(kind) => kind.placeholder(),
+            None => &self.name,
+        }
+    }
 }
 
 /// Structural CSS metrics for a single style rule, computed from the parsed CSS
@@ -2371,6 +2433,8 @@ pub enum SemanticFact {
     FactoryReturnObjectPropertySource(Box<FactoryReturnObjectPropertySourceFact>),
     /// Property read whose bound factory receiver passed source-time lexical and value checks.
     ProvenFactoryReturnObjectPropertyAccess(FactoryReturnObjectPropertyAccessFact),
+    /// Caller-owned callback origins for a source-proven returned property.
+    CallbackFactoryPropertyAccess(Box<CallbackFactoryPropertyAccessFact>),
 }
 
 /// Deferred class provenance owned by the module declaring an object factory.
@@ -2401,6 +2465,45 @@ pub enum FactoryPropertySource {
         /// Local class binding resolved relative to the factory module.
         class_local_name: String,
     },
+    /// Return of the callback at this ordinal in the proven helper declaration.
+    CallbackParameterReturn {
+        /// Zero-based formal parameter ordinal.
+        parameter_index: u32,
+    },
+}
+
+/// Callback-origin member use, joined with the callee module's property source.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CallbackFactoryPropertyAccessFact {
+    /// Callee import binding in the caller module.
+    pub callee_name: String,
+    /// Static export selected from a namespace import, if present.
+    pub callee_member: Option<String>,
+    /// Requested path in the wrapper's returned value.
+    pub property_path: String,
+    /// Requested member on the callback result.
+    pub member: String,
+    /// A property write permits only the canonical Vue getter contract.
+    pub vue_only: bool,
+    /// Ordinary assigned value, ignored by a canonical Vue setter contract.
+    pub assigned_class: Option<String>,
+    /// Callback ordinal and class origin interpreted in the caller module.
+    pub arguments: Vec<CallbackFactoryArgument>,
+}
+
+/// Proven callback result owned by a factory consumer's module.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CallbackFactoryArgument {
+    /// Zero-based actual argument ordinal.
+    pub parameter_index: u32,
+    /// Class binding resolved in the consumer module.
+    pub class_local_name: String,
+    /// This argument is an options object with a proven `get` callback.
+    pub getter: bool,
+    /// No mutable capture makes a lazy invocation select another class.
+    pub lazy_safe: bool,
 }
 
 /// An exported object factory's deferred property receiver.
@@ -2657,6 +2760,16 @@ impl<'a> SemanticFactView<'a> {
     ) -> impl Iterator<Item = &'a FactoryReturnObjectPropertyAccessFact> + 'a {
         self.semantic_facts.iter().filter_map(|fact| match fact {
             SemanticFact::ProvenFactoryReturnObjectPropertyAccess(access) => Some(access),
+            _ => None,
+        })
+    }
+
+    /// Iterate caller-owned callback property projections.
+    pub fn callback_factory_property_accesses(
+        self,
+    ) -> impl Iterator<Item = &'a CallbackFactoryPropertyAccessFact> + 'a {
+        self.semantic_facts.iter().filter_map(|fact| match fact {
+            SemanticFact::CallbackFactoryPropertyAccess(access) => Some(access.as_ref()),
             _ => None,
         })
     }
@@ -3894,7 +4007,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1456);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1464);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
@@ -4441,6 +4554,7 @@ mod tests {
             complexity: vec![FunctionComplexity {
                 name: "work".to_string(),
                 is_private_member: false,
+                context_named: None,
                 line: 1,
                 col: 0,
                 cyclomatic: 2,
@@ -4533,6 +4647,7 @@ mod tests {
             referenced_import_bindings: Vec::new(),
             component_props: Vec::new(),
             component_contracts: None,
+            effect_facts: None,
             has_props_attrs_fallthrough: false,
             has_define_expose: false,
             has_define_model: false,
@@ -5127,6 +5242,65 @@ pub struct ComponentInvocation {
     pub unknown_props: bool,
     /// Framework syntax of this caller.
     pub framework: ComponentFramework,
+}
+
+/// Persisted syntactic Effect evidence for one module.
+///
+/// The layer keys, their `dependencies` and `layer_root_keys` use one
+/// format: a plain binding name (`FooLive`) or a class static member
+/// (`FooService.layer`). Import aliases resolve to the imported name, and a
+/// namespace member (`Ns.FooLive`) resolves to the member name.
+#[derive(Debug, Clone, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectFacts {
+    /// Module-scope classes that extend a tagged error constructor.
+    pub tagged_errors: Vec<EffectTaggedError>,
+    /// `catchTag("X")` arguments and `catchTags({ X })` keys.
+    pub caught_tags: Vec<EffectCaughtTag>,
+    /// Tags written as an object literal `_tag: "X"` property.
+    pub literal_tags: Vec<String>,
+    /// Layer definitions: module-scope consts and class static properties.
+    pub layers: Vec<EffectLayer>,
+    /// Keys that a value reference outside every layer definition reads.
+    pub layer_root_keys: Vec<String>,
+}
+
+/// A module-scope class that extends a tagged error constructor.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectTaggedError {
+    /// Class binding name.
+    pub name: String,
+    /// The `_tag` string literal.
+    pub tag: String,
+    /// Byte offset of the class name.
+    pub span_start: u32,
+    /// The class is exported from its module.
+    pub exported: bool,
+    /// The module reads the class as a value outside its own declaration.
+    pub local_value_reference: bool,
+    /// The module reads the class in a type position outside its own declaration.
+    pub local_type_reference: bool,
+}
+
+/// One tag that a `catchTag` or `catchTags` handler names.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectCaughtTag {
+    /// The handled tag.
+    pub tag: String,
+    /// Byte offset of the tag string or object key.
+    pub span_start: u32,
+}
+
+/// A layer definition and the layer keys its initializer reads.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct EffectLayer {
+    /// `FooLive` or `FooService.layer`.
+    pub key: String,
+    /// Byte offset of the binding name or static property key.
+    pub span_start: u32,
+    /// The const, or the class of a static property, is exported.
+    pub exported: bool,
+    /// Keys that value references inside the initializer read.
+    pub dependencies: Vec<String>,
 }
 
 /// Persisted syntactic evidence for conservative component-input analysis.

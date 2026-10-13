@@ -1,0 +1,9 @@
+{
+  "name": "effect-dead-code",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "effect": "^3.0.0"
+  }
+}

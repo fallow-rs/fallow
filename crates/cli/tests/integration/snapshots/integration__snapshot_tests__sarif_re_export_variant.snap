@@ -495,6 +495,45 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-effect-layer",
+              "shortDescription": {
+                "text": "An Effect layer is composed only into layers that nothing uses"
+              },
+              "fullDescription": {
+                "text": "An Effect `Layer` definition (a module-scope const or a class static property such as `static layer = Layer.effect(this, make)`) whose every reference sits inside other layer definitions that are themselves unused. The layer never reaches `Effect.provide`, `ManagedRuntime.make`, `Layer.launch` or any other runtime use. fallow builds a layer graph from `Layer.*` initializers and `.pipe(Layer.*)` chains. Any value reference outside a layer definition is a root, including references in functions and tests. A layer with zero references is not reported here: `unused-export` or `unused-class-member` reports it, so the rule reports the tail of a dead composition and names the unused consumers. Default warn. The check runs only when the project declares `effect`."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unused-effect-layers",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unused-tagged-error",
+              "shortDescription": {
+                "text": "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it"
+              },
+              "fullDescription": {
+                "text": "A class that extends `Data.TaggedError(\"X\")` or `Schema.TaggedError<Self>()(\"X\", ...)` that type positions or `catchTag(\"X\")` handlers reference, but that no code reads as a value. Any value reference counts as a producer: `new X()`, `X.make`, `Schema.Union(X)`, an API or RPC error declaration that decodes the error at a boundary, or passing the class to a function. Only type positions and catch-tag strings do not count. A class with zero references is left to `unused-export`. The finding lists the `catchTag` handlers of the tag. Default warn. The check runs only when the project declares `effect`."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unused-tagged-errors",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unproduced-catch-tag",
+              "shortDescription": {
+                "text": "A catchTag handler names a project error tag that no code produces"
+              },
+              "fullDescription": {
+                "text": "A `catchTag(\"X\", ...)` or `catchTags({ X: ... })` handler where every project class with tag `X` is never constructed or failed with, and no object literal `_tag: \"X\"` or tagged constructor produces the tag. A tag that no project class declares can come from a package, so the rule abstains. Effect built-in tags such as `TimeoutException` are never reported. The rule reports a handler only when no `unused-tagged-error` finding covers its classes: the error rule is off, or its finding is suppressed. Default warn. The check runs only when the project declares `effect`."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unproduced-catch-tags",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/route-collision",
               "shortDescription": {
                 "text": "Two or more Next.js App Router route files resolve to the same URL"

@@ -296,6 +296,32 @@ test("the deadline stops failed reads before the error window", async () => {
   assert.deepEqual(sleeps, [30 * 1000, 60 * 1000]);
 });
 
+test("a suspended machine does not use up the error window", async () => {
+  // Each sleep takes 16 minutes, for example on a laptop in sleep mode.
+  const script = scripted([
+    failure,
+    failure,
+    failure,
+    { ok: true, checks: [check("lint", "pass")] },
+  ]);
+  const warnings = [];
+
+  const result = await waitForChecks({
+    ...script,
+    sleep: async () => {
+      await script.sleep(16 * MINUTE_MS);
+    },
+    minChecks: 1,
+    intervalMs: 30 * 1000,
+    timeoutMs: 120 * MINUTE_MS,
+    warn: (line) => warnings.push(line),
+  });
+
+  assert.equal(result.status, "pass");
+  assert.equal(script.reads(), 4);
+  assert.equal(warnings.length, 3);
+});
+
 test("a good read resets the backoff and the error window", async () => {
   const passing = { ok: true, checks: [check("lint", "pass")] };
   const pending = { ok: true, checks: [check("lint", "pending")] };

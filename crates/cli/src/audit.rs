@@ -754,10 +754,13 @@ fn run_audit_head_analyses(
         && let Some(ref mut check) = check
     {
         check.impact_closure = compute_brief_impact_closure(opts.root, check, changed_files);
+        check.brief_churn = fallow_api::routing::audit_churn(opts.root, &check.config);
+        check.co_change_gaps = compute_brief_co_change_gaps(opts, check, changed_files);
         check.public_api_keys = Some(public_api_keys_from_check(Some(check), opts.root));
         check.partition_order = compute_brief_partition_order(opts.root, check, changed_files);
         check.focus_facts = compute_brief_focus_facts(opts.root, check, changed_files);
         check.export_lines = compute_brief_export_lines(opts.root, check, changed_files);
+        check.search_gaps = compute_brief_search_gaps(opts.root, check, changed_files);
         check.internal_consumers =
             compute_brief_internal_consumers(opts.root, check, changed_files);
         check.test_adjacency = compute_brief_test_adjacency(opts.root, check, changed_files);
@@ -802,6 +805,94 @@ fn compute_brief_impact_closure(
     fallow_engine::module_graph::impact_closure_for_changed_paths(graph, root, changed_files)
 }
 
+/// Reviewer routing for the brief. Reuses the churn pass that the co-change
+/// gaps read, and reads the history only when no such pass is on `check`.
+fn brief_routing(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> routing::RoutingFacts {
+    match check.brief_churn.as_ref() {
+        Some(churn) => {
+            routing::compute_routing_from_churn(root, &check.config, changed_files, churn)
+        }
+        None => routing::compute_routing(root, &check.config, changed_files),
+    }
+}
+
+/// Scope note on every co-change gap fact.
+const CO_CHANGE_GAP_NOTE: &str = "history evidence, not a proof that the partner must change";
+
+/// Compute the co-change gaps for the review brief: changed files whose
+/// hidden change-coupling partner is not in the diff.
+///
+/// Reads the churn pass on `check.brief_churn`, which routing also reads, and
+/// the retained graph for the static edges. Applies `health.ignore` and the
+/// workspace filter like the `change_coupling` health section. Empty off the
+/// brief path, without a commit history, and on a shallow clone, whose
+/// history cannot show coupling.
+fn compute_brief_co_change_gaps(
+    opts: &AuditOptions<'_>,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Vec<fallow_output::CoChangeGapFact> {
+    use fallow_engine::change_coupling as coupling;
+
+    let root = opts.root;
+    let Some(graph) = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())
+    else {
+        return Vec::new();
+    };
+    let Some(churn) = check.brief_churn.as_ref() else {
+        return Vec::new();
+    };
+    if churn.shallow_clone {
+        return Vec::new();
+    }
+    let links = coupling::StaticLinkIndex::from_retained_graph(graph);
+    let settings = coupling::ChangeCouplingSettings::from(&check.config.health.change_coupling);
+    let mut analysis = coupling::analyze_change_history(&churn.commits, &links, &settings);
+    // The check already reported an invalid workspace selection.
+    let ws_roots = fallow_engine::workspace_scope::resolve_workspace_scope_roots(
+        root,
+        opts.workspace,
+        opts.changed_workspaces,
+        &check.workspaces,
+    )
+    .ok()
+    .flatten();
+    let ignore_set = coupling::health_ignore_set(&check.config.health.ignore);
+    let scope = coupling::PairScope {
+        root,
+        ignore_set: &ignore_set,
+        ws_roots: ws_roots.as_deref(),
+        diff_index: None,
+    };
+    analysis
+        .hidden_pairs
+        .retain(|pair| scope.contains(&pair.path_a, &pair.path_b));
+    let relative = |path: &std::path::Path| {
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    coupling::co_change_gaps(&analysis, changed_files)
+        .into_iter()
+        .map(|gap| fallow_output::CoChangeGapFact {
+            changed_file: relative(&gap.changed),
+            partner_file: relative(&gap.partner),
+            shared_revisions: gap.shared_revisions,
+            degree: gap.degree,
+            note: CO_CHANGE_GAP_NOTE.to_owned(),
+        })
+        .collect()
+}
+
 /// Compute the partition + order for the review brief's stage 2 from the
 /// check result's retained graph against the changed-file set.
 ///
@@ -839,6 +930,23 @@ fn compute_brief_export_lines(
         .and_then(|out| out.graph.as_ref())?;
 
     fallow_engine::module_graph::export_lines_for_changed_paths(graph, root, changed_files)
+}
+
+/// Precompute the literal-search gaps of the changed exports for the brief,
+/// BEFORE health drops the graph. The brief keeps only the exports whose
+/// declaration the diff touches. `None` when the graph is not retained.
+fn compute_brief_search_gaps(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<Vec<fallow_engine::module_graph::ExportSearchGapPaths>> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    fallow_engine::module_graph::search_gaps_for_changed_paths(graph, root, changed_files)
 }
 
 /// Precompute the per-anchor honest consumer count for the decision surface:
@@ -1147,8 +1255,7 @@ fn prepare_audit_brief_external_data(
     base_ref: &str,
 ) -> AuditBriefExternalData {
     let weakening_signals = compute_weakening_signals(opts.root, base_ref, changed_files);
-    let routing =
-        check.map(|check| routing::compute_routing(opts.root, &check.config, changed_files));
+    let routing = check.map(|check| brief_routing(opts.root, check, changed_files));
     let diff_evidence = compute_brief_diff_evidence(opts.root, base_ref, opts.walkthrough_file);
     let dependency_anchors = compute_dependency_anchors(
         opts.root,
@@ -1460,9 +1567,9 @@ fn compute_audit_brief_data_with_lookups(
     {
         None => (
             compute_weakening_signals(input.opts.root, input.base_ref, input.changed_files),
-            input.check.map(|check| {
-                routing::compute_routing(input.opts.root, &check.config, input.changed_files)
-            }),
+            input
+                .check
+                .map(|check| brief_routing(input.opts.root, check, input.changed_files)),
             None,
             compute_dependency_anchors(
                 input.opts.root,

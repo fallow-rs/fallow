@@ -454,6 +454,12 @@ pub struct DeadCodeFilters {
     pub unused_component_outputs: bool,
     /// Svelte component events never listened to.
     pub unused_svelte_events: bool,
+    /// Effect layers composed only into unused layers.
+    pub unused_effect_layers: bool,
+    /// Effect tagged errors that no code produces.
+    pub unused_tagged_errors: bool,
+    /// `catchTag` handlers for a tag that no code produces.
+    pub unproduced_catch_tags: bool,
     /// Server actions never invoked.
     pub unused_server_actions: bool,
     /// `load` data keys never read by the consuming page.
@@ -514,6 +520,9 @@ impl DeadCodeFilters {
             || self.unused_component_inputs
             || self.unused_component_outputs
             || self.unused_svelte_events
+            || self.unused_effect_layers
+            || self.unused_tagged_errors
+            || self.unproduced_catch_tags
             || self.unused_server_actions
             || self.unused_load_data_keys
             || self.unresolved_imports
@@ -567,6 +576,9 @@ impl DeadCodeFilters {
             "--unused-component-inputs" => self.unused_component_inputs = true,
             "--unused-component-outputs" => self.unused_component_outputs = true,
             "--unused-svelte-events" => self.unused_svelte_events = true,
+            "--unused-effect-layers" => self.unused_effect_layers = true,
+            "--unused-tagged-errors" => self.unused_tagged_errors = true,
+            "--unproduced-catch-tags" => self.unproduced_catch_tags = true,
             "--unused-server-actions" => self.unused_server_actions = true,
             "--unused-load-data-keys" => self.unused_load_data_keys = true,
             "--unresolved-imports" => self.unresolved_imports = true,

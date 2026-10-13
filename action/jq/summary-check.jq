@@ -75,6 +75,9 @@ else
     table_row("Unused component inputs"; "unused_component_inputs"; "unused-component-inputs"),
     table_row("Unused component outputs"; "unused_component_outputs"; "unused-component-outputs"),
     table_row("Unused Svelte events"; "unused_svelte_events"; "unused-svelte-events"),
+    table_row("Unused Effect layers"; "unused_effect_layers"; "unused-effect-layers"),
+    table_row("Unused tagged errors"; "unused_tagged_errors"; "unused-tagged-errors"),
+    table_row("Unproduced catch tags"; "unproduced_catch_tags"; "unproduced-catch-tags"),
     table_row("Unprovided injects"; "unprovided_injects"; "unprovided-injects"),
     table_row("Unused load data keys"; "unused_load_data_keys"; "unused-load-data-keys"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
@@ -181,6 +184,15 @@ else
   section("Unused Svelte events"; "unused_svelte_events";
     "Svelte components dispatching a `createEventDispatcher` event listened to nowhere in the project (cross-file dead-output direction).\n\n| File | Component | Event |\n|------|-----------|-------|\n";
     "| `\(.path):\(.line)` | `\(.component_name)` | `\(.event_name)` |") +
+  section("Unused Effect layers"; "unused_effect_layers";
+    "Effect layers composed only into layers that nothing uses.\n\n| File | Layer |\n|------|-------|\n";
+    "| `\(.path):\(.line)` | `\(.name)` |") +
+  section("Unused tagged errors"; "unused_tagged_errors";
+    "Effect tagged errors that no code constructs or fails with.\n\n| File | Class | Tag |\n|------|-------|-----|\n";
+    "| `\(.path):\(.line)` | `\(.name)` | `\(.tag)` |") +
+  section("Unproduced catch tags"; "unproduced_catch_tags";
+    "`catchTag` handlers for a project tag that no code produces.\n\n| File | Tag |\n|------|-----|\n";
+    "| `\(.path):\(.line)` | `\(.tag)` |") +
   section("Unprovided injects"; "unprovided_injects";
     "Vue `inject` / Svelte `getContext` calls for a key that no ancestor `provide` / `setContext` supplies.\n\n| File | Key | Framework |\n|------|-----|-----------|\n";
     "| `\(.path):\(.line)` | `\(.key_name)` | \(.framework) |") +

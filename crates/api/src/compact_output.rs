@@ -582,7 +582,8 @@ impl<'a> CompactLineBuilder<'a> {
         }
     }
 
-    /// Push compact lines for Svelte events, server actions, and load-data keys.
+    /// Push compact lines for Svelte events, Effect findings, server actions,
+    /// and load-data keys.
     fn push_component_framework_lines(&mut self) {
         for finding in &self.results.unused_svelte_events {
             self.lines.push(format!(
@@ -590,6 +591,30 @@ impl<'a> CompactLineBuilder<'a> {
                 self.rel(&finding.event.path),
                 finding.event.line,
                 finding.event.event_name,
+            ));
+        }
+        for finding in &self.results.unused_effect_layers {
+            self.lines.push(format!(
+                "unused-effect-layer:{}:{}:{}",
+                self.rel(&finding.layer.path),
+                finding.layer.line,
+                finding.layer.name,
+            ));
+        }
+        for finding in &self.results.unused_tagged_errors {
+            self.lines.push(format!(
+                "unused-tagged-error:{}:{}:{}",
+                self.rel(&finding.error.path),
+                finding.error.line,
+                finding.error.name,
+            ));
+        }
+        for finding in &self.results.unproduced_catch_tags {
+            self.lines.push(format!(
+                "unproduced-catch-tag:{}:{}:{}",
+                self.rel(&finding.catch_tag.path),
+                finding.catch_tag.line,
+                finding.catch_tag.tag,
             ));
         }
         for finding in &self.results.unused_server_actions {
@@ -701,6 +726,7 @@ pub fn build_health_compact_lines(
     push_coverage_gaps_compact(&mut lines, report, root);
     push_runtime_sections_compact(&mut lines, report, root);
     push_hotspots_compact(&mut lines, &report.hotspots, root);
+    push_change_coupling_compact(&mut lines, report.change_coupling.as_ref(), root);
     push_health_trend_compact(&mut lines, report);
     push_refactoring_targets_compact(&mut lines, &report.targets, root);
     lines
@@ -1040,6 +1066,30 @@ fn push_hotspots_compact(
             entry.fan_in,
             entry.trend,
             ownership_suffix,
+        ));
+    }
+}
+
+/// One line per hidden change-coupling pair:
+/// `change-coupling:<path_a>:<path_b>:degree=..,shared=..,commits_a=..,commits_b=..,strong=..`.
+fn push_change_coupling_compact(
+    lines: &mut Vec<String>,
+    coupling: Option<&fallow_output::ChangeCouplingReport>,
+    root: &Path,
+) {
+    let Some(coupling) = coupling else {
+        return;
+    };
+    for pair in &coupling.pairs {
+        lines.push(format!(
+            "change-coupling:{}:{}:degree={:.2},shared={},commits_a={},commits_b={},strong={}",
+            compact_path(&pair.path_a, root),
+            compact_path(&pair.path_b, root),
+            pair.degree,
+            pair.shared_revisions,
+            pair.revisions_a,
+            pair.revisions_b,
+            pair.strong,
         ));
     }
 }

@@ -29,6 +29,9 @@ use crate::output_dead_code::{
     UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
     UnusedSvelteEventFinding, UnusedTypeFinding,
 };
+pub use crate::output_dead_code::{
+    UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
+};
 use crate::serde_path;
 use crate::suppress::closest_known_kind_name;
 
@@ -475,6 +478,20 @@ pub struct AnalysisResults {
     /// `warn`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_svelte_events: Vec<UnusedSvelteEventFinding>,
+    /// Effect layers composed only into other layers that nothing uses.
+    /// Gated on the project declaring `effect`. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_effect_layers: Vec<UnusedEffectLayerFinding>,
+    /// Effect tagged error classes that only type positions or `catchTag`
+    /// handlers reference. Gated on the project declaring `effect`. Default
+    /// severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_tagged_errors: Vec<UnusedTaggedErrorFinding>,
+    /// `catchTag` / `catchTags` handlers for a project tag that no code
+    /// produces and that no `unused_tagged_errors` entry covers. Gated on the
+    /// project declaring `effect`. Default severity is `warn`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unproduced_catch_tags: Vec<UnproducedCatchTagFinding>,
     /// Next.js Server Actions (exports of `"use server"` files) that no code in
     /// the project references. Reclassified out of `unused_exports` for
     /// `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -764,6 +781,9 @@ struct AnalysisResultsFrameworkMergeParts {
     unused_component_inputs: Vec<UnusedComponentInputFinding>,
     unused_component_outputs: Vec<UnusedComponentOutputFinding>,
     unused_svelte_events: Vec<UnusedSvelteEventFinding>,
+    unused_effect_layers: Vec<UnusedEffectLayerFinding>,
+    unused_tagged_errors: Vec<UnusedTaggedErrorFinding>,
+    unproduced_catch_tags: Vec<UnproducedCatchTagFinding>,
     unused_server_actions: Vec<UnusedServerActionFinding>,
     unused_load_data_keys: Vec<UnusedLoadDataKeyFinding>,
     unused_load_data_keys_global_abstain: bool,
@@ -853,6 +873,9 @@ fn split_merge_parts(
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
         unused_load_data_keys_global_abstain,
@@ -927,6 +950,9 @@ fn split_merge_parts(
             unused_component_inputs,
             unused_component_outputs,
             unused_svelte_events,
+            unused_effect_layers,
+            unused_tagged_errors,
+            unproduced_catch_tags,
             unused_server_actions,
             unused_load_data_keys,
             unused_load_data_keys_global_abstain,
@@ -1001,6 +1027,9 @@ macro_rules! counted_analysis_result_fields {
             unused_component_inputs => "unused_component_inputs",
             unused_component_outputs => "unused_component_outputs",
             unused_svelte_events => "unused_svelte_events",
+            unused_effect_layers => "unused_effect_layers",
+            unused_tagged_errors => "unused_tagged_errors",
+            unproduced_catch_tags => "unproduced_catch_tags",
             unused_server_actions => "unused_server_actions",
             unused_load_data_keys => "unused_load_data_keys",
         }
@@ -1044,6 +1073,9 @@ impl_single_source_dead_code! {
     UnusedComponentInputFinding => input.path,
     UnusedComponentOutputFinding => output.path,
     UnusedSvelteEventFinding => event.path,
+    UnusedEffectLayerFinding => layer.path,
+    UnusedTaggedErrorFinding => error.path,
+    UnproducedCatchTagFinding => catch_tag.path,
     UnusedServerActionFinding => action.path,
     UnusedLoadDataKeyFinding => key.path,
     ThinWrapperFinding => wrapper.file,
@@ -1215,6 +1247,9 @@ fn classify_ignore_findings_fields(results: &AnalysisResults) {
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
         unused_svelte_events: _unused_svelte_events,
+        unused_effect_layers: _unused_effect_layers,
+        unused_tagged_errors: _unused_tagged_errors,
+        unproduced_catch_tags: _unproduced_catch_tags,
         unused_server_actions: _unused_server_actions,
         unused_load_data_keys: _unused_load_data_keys,
         // Hideable: uncounted source-owned React health signals.
@@ -1498,6 +1533,10 @@ impl AnalysisResults {
         self.unused_component_outputs
             .extend(parts.unused_component_outputs);
         self.unused_svelte_events.extend(parts.unused_svelte_events);
+        self.unused_effect_layers.extend(parts.unused_effect_layers);
+        self.unused_tagged_errors.extend(parts.unused_tagged_errors);
+        self.unproduced_catch_tags
+            .extend(parts.unproduced_catch_tags);
         self.unused_server_actions
             .extend(parts.unused_server_actions);
         self.unused_load_data_keys
@@ -1762,6 +1801,32 @@ impl AnalysisResults {
                 .cmp(&b.event.path)
                 .then(a.event.line.cmp(&b.event.line))
                 .then(a.event.event_name.cmp(&b.event.event_name))
+        });
+        self.sort_effect_findings();
+    }
+
+    fn sort_effect_findings(&mut self) {
+        self.unused_effect_layers.sort_by(|a, b| {
+            a.layer
+                .path
+                .cmp(&b.layer.path)
+                .then(a.layer.line.cmp(&b.layer.line))
+                .then(a.layer.name.cmp(&b.layer.name))
+        });
+        self.unused_tagged_errors.sort_by(|a, b| {
+            a.error
+                .path
+                .cmp(&b.error.path)
+                .then(a.error.line.cmp(&b.error.line))
+                .then(a.error.name.cmp(&b.error.name))
+        });
+        self.unproduced_catch_tags.sort_by(|a, b| {
+            a.catch_tag
+                .path
+                .cmp(&b.catch_tag.path)
+                .then(a.catch_tag.line.cmp(&b.catch_tag.line))
+                .then(a.catch_tag.col.cmp(&b.catch_tag.col))
+                .then(a.catch_tag.tag.cmp(&b.catch_tag.tag))
         });
     }
 
@@ -2503,6 +2568,94 @@ pub struct UnusedSvelteEvent {
     pub line: u32,
     /// 0-based byte column offset of the `dispatch('<name>')` call.
     pub col: u32,
+}
+
+/// Kind of an Effect layer definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum EffectLayerKind {
+    /// A module-scope `const` whose initializer is a layer.
+    TopLevel,
+    /// A class static property whose initializer is a layer.
+    StaticMember,
+}
+
+/// An Effect layer whose every reference sits inside other layers that
+/// nothing in the project uses. The layer is reachable only through a dead
+/// composition, so it never reaches a runtime. A layer with zero references
+/// is not reported here: `unused-export` or `unused-class-member` owns it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedEffectLayer {
+    /// The module that defines the layer.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// `FooLive`, or `FooService.layer` for a static member.
+    pub name: String,
+    /// Whether the layer is a module-scope const or a class static member.
+    pub kind: EffectLayerKind,
+    /// 1-based line number of the layer name.
+    pub line: u32,
+    /// 0-based byte column offset of the layer name.
+    pub col: u32,
+    /// The unused layers that compose this layer, sorted by name.
+    pub dead_consumers: Vec<String>,
+}
+
+/// A source location of a `catchTag` or `catchTags` handler.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EffectCatchSite {
+    /// The module that contains the handler.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the handled tag.
+    pub line: u32,
+    /// 0-based byte column offset of the handled tag.
+    pub col: u32,
+}
+
+/// An Effect tagged error class that type positions or `catchTag` handlers
+/// reference, but that no code constructs, fails with, or reads as a value.
+/// Any value reference counts as a producer, including a schema union or an
+/// API error declaration that decodes the error at a boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedTaggedError {
+    /// The module that declares the class.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The class name.
+    pub name: String,
+    /// The `_tag` value of the class.
+    pub tag: String,
+    /// 1-based line number of the class name.
+    pub line: u32,
+    /// 0-based byte column offset of the class name.
+    pub col: u32,
+    /// The `catchTag` / `catchTags` handlers that name the tag.
+    pub catch_sites: Vec<EffectCatchSite>,
+}
+
+/// A `catchTag("X")` / `catchTags({ X })` handler whose tag `X` belongs to
+/// project classes that no code produces. Reported only when no
+/// `unused-tagged-error` finding covers those classes (the rule is off, or
+/// the class finding is suppressed).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnproducedCatchTag {
+    /// The module that contains the handler.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The handled tag.
+    pub tag: String,
+    /// 1-based line number of the handled tag.
+    pub line: u32,
+    /// 0-based byte column offset of the handled tag.
+    pub col: u32,
+    /// The project classes that declare the tag, sorted by name.
+    pub candidate_classes: Vec<String>,
 }
 
 /// One hop in a prop-drilling chain: a component that received the prop and

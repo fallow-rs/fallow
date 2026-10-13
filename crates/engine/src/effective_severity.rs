@@ -46,6 +46,9 @@ use fallow_types::output_dead_code::{
     UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
     UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
+use fallow_types::output_dead_code::{
+    UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
+};
 use fallow_types::results::{AnalysisResults, PolicyViolationSeverity, StaleSuppression};
 
 use crate::error_severity::promote_warns_to_errors;
@@ -180,6 +183,9 @@ file_scoped! {
     UnusedComponentInputFinding => input.path, unused_component_inputs;
     UnusedComponentOutputFinding => output.path, unused_component_outputs;
     UnusedSvelteEventFinding => event.path, unused_svelte_events;
+    UnusedEffectLayerFinding => layer.path, unused_effect_layers;
+    UnusedTaggedErrorFinding => error.path, unused_tagged_errors;
+    UnproducedCatchTagFinding => catch_tag.path, unproduced_catch_tags;
     UnusedServerActionFinding => action.path, unused_server_actions;
     UnusedLoadDataKeyFinding => key.path, unused_load_data_keys;
     InvalidClientExportFinding => export.path, invalid_client_export;
@@ -506,6 +512,9 @@ fn for_each_gated_finding(
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
         // Policy violations carry their own evaluated `severity`.
@@ -575,6 +584,9 @@ fn for_each_gated_finding(
     visit(unused_component_inputs, f);
     visit(unused_component_outputs, f);
     visit(unused_svelte_events, f);
+    visit(unused_effect_layers, f);
+    visit(unused_tagged_errors, f);
+    visit(unproduced_catch_tags, f);
     visit(unused_server_actions, f);
     visit(unused_load_data_keys, f);
 }
@@ -632,6 +644,9 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         unused_component_inputs,
         unused_component_outputs,
         unused_svelte_events,
+        unused_effect_layers,
+        unused_tagged_errors,
+        unproduced_catch_tags,
         unused_server_actions,
         unused_load_data_keys,
         policy_violations: _,
@@ -697,6 +712,9 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(unused_component_inputs)
         || tally.add(unused_component_outputs)
         || tally.add(unused_svelte_events)
+        || tally.add(unused_effect_layers)
+        || tally.add(unused_tagged_errors)
+        || tally.add(unproduced_catch_tags)
         || tally.add(unused_server_actions)
         || tally.add(unused_load_data_keys);
 }

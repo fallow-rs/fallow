@@ -1,6 +1,7 @@
 mod astro;
 mod component_contracts;
 mod css;
+mod effect;
 mod graphql;
 mod js_ts;
 mod mdx;

@@ -887,7 +887,12 @@ fn build_static_files(
             // sample and only depresses the reported match rate.
             .filter(|function| !fallow_types::extract::is_synthetic_module_unit(&function.name))
             .map(|function| {
-                mark_ambiguous_function_line(&mut locations, path, &function.name, function.line);
+                mark_ambiguous_function_line(
+                    &mut locations,
+                    path,
+                    function.identity_name(),
+                    function.line,
+                );
                 build_static_function(&BuildStaticFunctionInput {
                     function,
                     path,
@@ -955,7 +960,7 @@ fn build_static_function(input: &BuildStaticFunctionInput<'_>) -> StaticFunction
     );
     static_function(StaticFunctionInput {
         relative_posix: input.relative_posix,
-        name: &input.function.name,
+        name: input.function.identity_name(),
         start_line: input.function.line,
         end_line: input
             .function
@@ -1103,7 +1108,7 @@ fn function_static_used(
     !static_signals
         .unused_export_names
         .get(path)
-        .is_some_and(|names| names.contains(function.name.as_str()))
+        .is_some_and(|names| names.contains(function.identity_name()))
         && !static_signals
             .unused_export_lines
             .get(path)
@@ -1129,7 +1134,7 @@ fn function_test_covered(
     static_signals
         .test_referenced_export_names
         .get(path)
-        .is_some_and(|names| names.contains(function.name.as_str()))
+        .is_some_and(|names| names.contains(function.identity_name()))
         || static_signals
             .test_referenced_export_lines
             .get(path)
@@ -1144,7 +1149,7 @@ fn function_matches_export(
     static_signals
         .exported_names
         .get(path)
-        .is_some_and(|names| names.contains(function.name.as_str()))
+        .is_some_and(|names| names.contains(function.identity_name()))
         || static_signals
             .exported_lines
             .get(path)
@@ -2420,11 +2425,11 @@ fn build_static_targets(
                 .entry((path.as_path(), function.line))
                 .or_default() += 1;
             targets.insert(
-                function_identity_id(&relative_posix, &function.name, function.line),
+                function_identity_id(&relative_posix, function.identity_name(), function.line),
                 StaticTarget {
                     path: path.clone(),
                     line: function.line,
-                    name: function.name.clone(),
+                    name: function.identity_name().to_owned(),
                     cost: StaticCost {
                         cognitive: function.cognitive,
                         cyclomatic: function.cyclomatic,

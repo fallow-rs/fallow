@@ -120,7 +120,7 @@ kind: "similar-code-cache-clear"
 /**
  * Schema projection for the audit envelope's exact version.
  */
-export type AuditSchemaVersion = 12
+export type AuditSchemaVersion = 13
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -269,7 +269,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -445,6 +445,10 @@ export type DependencyOverrideSource = ("pnpm-workspace.yaml" | "package.json")
  * surfacing them statically catches the issue first.
  */
 export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value")
+/**
+ * Kind of an Effect layer definition.
+ */
+export type EffectLayerKind = ("top_level" | "static_member")
 /**
  * Which advisory a loaded baseline earned on this run.
  *
@@ -680,6 +684,14 @@ cause: string
 kind: "hotspots-skipped"
 } | {
 /**
+ * Kebab-case token: `shallow-clone` (the fetched history is
+ * incomplete) or `too-few-commits` (fewer analyzed commits than the
+ * minimum revisions of one file). The set is open.
+ */
+cause: string
+kind: "change-coupling-skipped"
+} | {
+/**
  * `true` when the run also asked for ownership attribution, which a
  * shallow clone skews further by inflating single-author dominance.
  */
@@ -874,7 +886,7 @@ export type CoverageSourceConsistency = ("uniform" | "mixed")
  * set is OPEN: a later release can add a section, so a consumer must accept
  * a token that it does not know.
  */
-export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "targets" | "trend" | "runtime-coverage" | "css")
+export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "change-coupling" | "targets" | "trend" | "runtime-coverage" | "css")
 /**
  * Lifecycle state for a configured threshold override.
  */
@@ -1014,7 +1026,7 @@ export type CoverageIntelligenceMatchConfidence = ("path-function-line" | "path-
 /**
  * Category of refactoring recommendation.
  */
-export type RecommendationCategory = ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies" | "add_test_coverage")
+export type RecommendationCategory = ("urgent_churn_complexity" | "break_circular_dependency" | "split_high_impact" | "remove_dead_code" | "extract_complex_functions" | "extract_dependencies" | "add_test_coverage" | "resolve_hidden_coupling")
 /**
  * A ranked refactoring recommendation for a file.
  *
@@ -1146,6 +1158,16 @@ export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
  */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Whether a whole-word text search for an export name finds a consumer that
+ * the module graph resolves. The levels sort from best to worst.
+ */
+export type SearchVisibility = ("found" | "renamed" | "missed")
+/**
+ * Why a text search for an export name does not find the uses in a consumer,
+ * or why a consumer is not a search target (`pass-through`).
+ */
+export type SearchGapReason = ("import-alias" | "default-import" | "re-export-alias" | "namespace-use" | "dynamic-import" | "pass-through")
+/**
  * Wire-shape version of the [`DependencyUsage`] object.
  *
  * The object has its own version, because it is an optional part of the
@@ -1260,7 +1282,7 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
 /**
  * Exact schema version for [`HealthOutput`].
  */
-export type HealthSchemaVersion = 11
+export type HealthSchemaVersion = 12
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
@@ -1398,7 +1420,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 13
+export type CombinedSchemaVersion = 14
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */
@@ -1443,7 +1465,7 @@ export type VendorFlagState = ("on" | "off" | "rolled_out" | "archived" | "exper
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 12
+export type ReviewBriefSchemaVersion = 13
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -3110,6 +3132,23 @@ unused_component_outputs?: UnusedComponentOutputFinding[]
  */
 unused_svelte_events?: UnusedSvelteEventFinding[]
 /**
+ * Effect layers composed only into other layers that nothing uses.
+ * Gated on the project declaring `effect`. Default severity is `warn`.
+ */
+unused_effect_layers?: UnusedEffectLayerFinding[]
+/**
+ * Effect tagged error classes that only type positions or `catchTag`
+ * handlers reference. Gated on the project declaring `effect`. Default
+ * severity is `warn`.
+ */
+unused_tagged_errors?: UnusedTaggedErrorFinding[]
+/**
+ * `catchTag` / `catchTags` handlers for a project tag that no code
+ * produces and that no `unused_tagged_errors` entry covers. Gated on the
+ * project declaring `effect`. Default severity is `warn`.
+ */
+unproduced_catch_tags?: UnproducedCatchTagFinding[]
+/**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for
  * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -3391,6 +3430,18 @@ unused_component_outputs?: number
  * whose name is listened to nowhere in the project.
  */
 unused_svelte_events?: number
+/**
+ * Effect layers composed only into layers that nothing uses.
+ */
+unused_effect_layers?: number
+/**
+ * Effect tagged error classes that no code constructs or fails with.
+ */
+unused_tagged_errors?: number
+/**
+ * `catchTag` handlers for a project tag that no code produces.
+ */
+unproduced_catch_tags?: number
 /**
  * Next.js Server Actions (exports of `"use server"` files) referenced by no
  * code in the project.
@@ -6307,6 +6358,181 @@ introduced?: (AuditIntroduced | null)
 effective_severity?: (EffectiveSeverity | null)
 }
 /**
+ * Wire-shape envelope for an [`UnusedEffectLayer`] finding. There is no safe auto-fix: a test or a script outside the project graph can still use the layer. Actions are manual
+ * remediation guidance plus a line-level suppress.
+ */
+export interface UnusedEffectLayerFinding {
+/**
+ * The module that defines the layer.
+ */
+path: string
+/**
+ * `FooLive`, or `FooService.layer` for a static member.
+ */
+name: string
+kind: EffectLayerKind
+/**
+ * 1-based line number of the layer name.
+ */
+line: number
+/**
+ * 0-based byte column offset of the layer name.
+ */
+col: number
+/**
+ * The unused layers that compose this layer, sorted by name.
+ */
+dead_consumers: string[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * Wire-shape envelope for an [`UnusedTaggedError`] finding. There is no safe auto-fix: the error can be part of a public API contract. Actions are manual
+ * remediation guidance plus a line-level suppress.
+ */
+export interface UnusedTaggedErrorFinding {
+/**
+ * The module that declares the class.
+ */
+path: string
+/**
+ * The class name.
+ */
+name: string
+/**
+ * The `_tag` value of the class.
+ */
+tag: string
+/**
+ * 1-based line number of the class name.
+ */
+line: number
+/**
+ * 0-based byte column offset of the class name.
+ */
+col: number
+/**
+ * The `catchTag` / `catchTags` handlers that name the tag.
+ */
+catch_sites: EffectCatchSite[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * A source location of a `catchTag` or `catchTags` handler.
+ */
+export interface EffectCatchSite {
+/**
+ * The module that contains the handler.
+ */
+path: string
+/**
+ * 1-based line number of the handled tag.
+ */
+line: number
+/**
+ * 0-based byte column offset of the handled tag.
+ */
+col: number
+}
+/**
+ * Wire-shape envelope for an [`UnproducedCatchTag`] finding. There is no safe auto-fix: the handler can guard against a future producer. Actions are manual
+ * remediation guidance plus a line-level suppress.
+ */
+export interface UnproducedCatchTagFinding {
+/**
+ * The module that contains the handler.
+ */
+path: string
+/**
+ * The handled tag.
+ */
+tag: string
+/**
+ * 1-based line number of the handled tag.
+ */
+line: number
+/**
+ * 0-based byte column offset of the handled tag.
+ */
+col: number
+/**
+ * The project classes that declare the tag, sorted by name.
+ */
+candidate_classes: string[]
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
  * Wire-shape envelope for an [`UnusedServerAction`] finding. There is no safe
  * auto-fix: the fix is binary but judgement-bearing (wire the action up to a
  * consumer, or delete it). Actions are manual remediation guidance plus a
@@ -7508,6 +7734,13 @@ hotspots?: HotspotFinding[]
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
+ * Hidden change coupling: file pairs that change together in the git
+ * history without an import or re-export chain between them. Present
+ * when the hotspots section ran and the run read the git history.
+ * Advisory: no health score weight.
+ */
+change_coupling?: (ChangeCouplingReport | null)
+/**
  * Runtime coverage findings from the paid sidecar (only populated with
  * `--runtime-coverage`).
  */
@@ -8499,11 +8732,11 @@ function_count: number
 lines: number
 /**
  * Highest CRAP score among the file's functions. Always the raw measured
- * value; threshold overrides never rewrite it.
+ * value; threshold overrides and suppressions never rewrite it.
  */
 crap_max: number
 /**
- * Functions whose rounded CRAP score meets or exceeds their effective
+ * Unsuppressed functions whose rounded CRAP score meets or exceeds their effective
  * ceiling, resolved from `health.thresholdOverrides` over the global
  * `maxCrap` / `--max-crap` value. Zero when CRAP enforcement is disabled
  * (global ceiling `0`).
@@ -8517,6 +8750,26 @@ crap_above_threshold: number
  * function at or above the canonical baseline. Omitted when zero.
  */
 crap_exempted?: number
+/**
+ * Concrete scored functions accepted by a complexity suppression, including
+ * subthreshold functions and disabled-enforcement runs. Omitted when zero.
+ * May overlap with configured exemptions; the counts are not a partition.
+ */
+crap_suppressed?: number
+/**
+ * Highest rounded CRAP among unsuppressed scored functions, including
+ * subthreshold and configured-exempt functions. Present with the paired
+ * unsuppressed threshold whenever a scored suppression exists. Explicitly
+ * zero when every scored function is suppressed; raw crap_max is unchanged.
+ */
+crap_unsuppressed_max?: (number | null)
+/**
+ * Lowest effective ceiling among unsuppressed scored functions, or the run
+ * global when none remain. Emitted with crap_unsuppressed_max. Consumers
+ * receiving an absent or partial pair fall back to the complete legacy pair:
+ * crap_max and crap_effective_threshold (or the run global when absent).
+ */
+crap_unsuppressed_effective_threshold?: (number | null)
 /**
  * Lowest effective CRAP ceiling among the file's functions, present only
  * when it differs from the run global (`summary.max_crap_threshold`).
@@ -8739,6 +8992,19 @@ complexity_density: number
 fan_in: number
 trend: ChurnTrend
 /**
+ * Change dispersion: the median number of analyzed files in the commits
+ * that changed this file, over the change coupling history window. Bulk
+ * commits above the coupling file cap are not counted. Absent when the
+ * history has no commit ids (for example imported churn without them).
+ */
+median_files_per_commit?: (number | null)
+/**
+ * Change dispersion: the median number of changed lines (added plus
+ * deleted, analyzed files only) in the commits that changed this file.
+ * Same window and rules as `median_files_per_commit`.
+ */
+median_lines_per_commit?: (number | null)
+/**
  * Ownership metrics, when ownership analysis ran.
  */
 ownership?: (OwnershipMetrics | null)
@@ -8910,6 +9176,105 @@ epoch_secs: number
  * False only for `wall_clock`, where the numbers drift between runs.
  */
 reproducible: boolean
+}
+/**
+ * Hidden change coupling: pairs of files that change together in the git
+ * history while no import or re-export chain connects them.
+ *
+ * An agent that follows the import graph cannot find the second file of a
+ * hidden pair. The section is advisory: it has no health score weight and
+ * never gates.
+ */
+export interface ChangeCouplingReport {
+/**
+ * History window that the section reads, for example `"12 months"`.
+ * Without `--since` the window is 12 months, wider than the hotspot
+ * window.
+ */
+since: string
+/**
+ * Commits that changed at least one analyzed file and were not skipped.
+ */
+commits_analyzed: number
+/**
+ * Commits skipped because they changed more analyzed files than
+ * `thresholds.max_files_per_commit`.
+ */
+commits_skipped: number
+/**
+ * Hidden pairs in scope before `--top` cuts `pairs`.
+ */
+total_pairs: number
+thresholds: ChangeCouplingThresholds
+/**
+ * Hidden pairs, sorted by `degree` and then `shared_revisions` (both
+ * descending), then by path. Empty when the history cannot show
+ * coupling; `workspace_diagnostics` then tells why.
+ */
+pairs: HiddenCouplingPair[]
+}
+/**
+ * Thresholds that a hidden pair met.
+ */
+export interface ChangeCouplingThresholds {
+/**
+ * Commits with more analyzed files than this are skipped.
+ */
+max_files_per_commit: number
+/**
+ * Minimum commits for each file of a pair.
+ */
+min_revisions: number
+/**
+ * Minimum commits that change both files of a pair.
+ */
+min_shared_revisions: number
+/**
+ * Minimum coupling degree, from 0 to 1.
+ */
+min_degree: number
+/**
+ * Degree at or above which a pair is `strong`.
+ */
+strong_degree: number
+}
+/**
+ * Two files that change together without a static edge between them.
+ */
+export interface HiddenCouplingPair {
+/**
+ * First file, relative to the project root. Sorts before `path_b`.
+ */
+path_a: string
+/**
+ * Second file, relative to the project root.
+ */
+path_b: string
+/**
+ * Commits that changed `path_a` in the window.
+ */
+revisions_a: number
+/**
+ * Commits that changed `path_b` in the window.
+ */
+revisions_b: number
+/**
+ * Commits that changed both files.
+ */
+shared_revisions: number
+/**
+ * Coupling degree from 0 to 1: `shared_revisions` divided by the mean of
+ * `revisions_a` and `revisions_b`.
+ */
+degree: number
+/**
+ * True when `degree` reaches `thresholds.strong_degree`. The check uses
+ * the rounded `degree` that the report shows, so 0.495 counts as 0.5.
+ * A strong pair gives each file the `hidden_coupling` target factor. A
+ * file that no other target rule claims becomes a
+ * `resolve_hidden_coupling` refactoring target.
+ */
+strong?: boolean
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by
@@ -9721,6 +10086,11 @@ direct_callers?: DirectCallerEvidence[]
  * Other duplicate-code instances that share a clone group with this target.
  */
 clone_siblings?: CloneSiblingEvidence[]
+/**
+ * Files that change together with this target without a static edge
+ * (populated for `ResolveHiddenCoupling` targets), strongest first.
+ */
+co_change_partners?: CoChangePartnerEvidence[]
 }
 /**
  * A function referenced in target evidence.
@@ -9789,6 +10159,23 @@ end_line: number
  * Stable duplicate-group handle, matching `dupes --trace dup:<id>`.
  */
 fingerprint: string
+}
+/**
+ * A hidden change-coupling partner referenced in target evidence.
+ */
+export interface CoChangePartnerEvidence {
+/**
+ * File that changes together with the target.
+ */
+path: string
+/**
+ * Commits that changed both files.
+ */
+shared_revisions: number
+/**
+ * Coupling degree from 0 to 1.
+ */
+degree: number
 }
 /**
  * Suggested action attached to a [`RefactoringTarget`].
@@ -11576,6 +11963,29 @@ from_file: string
  * Reference kind, such as named import, default import, or re-export.
  */
 kind: string
+/**
+ * 1-based line of the import statement in `from_file`. Absent when the
+ * graph holds no source position for the reference or the file cannot be
+ * read.
+ */
+line?: (number | null)
+/**
+ * Whether a whole-word text search for the export name finds this
+ * consumer. Absent when no check applies, for example when the consumer
+ * source cannot be read.
+ */
+search_visibility?: (SearchVisibility | null)
+/**
+ * Why a text search does not find the uses in this consumer. With
+ * `search_visibility` `found`, only `pass-through` occurs: the consumer
+ * is a barrel that forwards the export and does not use it.
+ */
+reason?: (SearchGapReason | null)
+/**
+ * The name to search for in this consumer instead of the export name.
+ * Absent when the export name finds the uses or no single name does.
+ */
+search_as?: (string | null)
 }
 /**
  * Direct references that credit one namespace of an export binding.
@@ -11664,7 +12074,8 @@ owner_file_reachable: boolean
  */
 owner_is_entry_point: boolean
 /**
- * Files that reference the owning export directly.
+ * Files that reference the owning export directly. The search visibility
+ * fields on each entry check the owner export name, not the member name.
  */
 owner_direct_references: ExportReference[]
 /**
@@ -12234,6 +12645,22 @@ consumed_symbols: string[]
  * Scope note for the syntactic trace.
  */
 note: string
+/**
+ * Whether a whole-word text search for the consumed symbol names finds
+ * this consumer. When the consumer uses more than one symbol, the worst
+ * level wins (`missed`, then `renamed`, then `found`). Absent when no
+ * check applies, for example when the consumer source cannot be read.
+ */
+search_visibility?: (SearchVisibility | null)
+/**
+ * Why a text search does not find the uses of the worst symbol. With
+ * `search_visibility` `found`, only `pass-through` occurs.
+ */
+reason?: (SearchGapReason | null)
+/**
+ * The name to search for in this consumer instead of the symbol name.
+ */
+search_as?: (string | null)
 }
 /**
  * Result of asking how one module reaches another: the shortest import path.
@@ -13193,6 +13620,13 @@ hotspots?: HotspotFinding[]
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
+ * Hidden change coupling: file pairs that change together in the git
+ * history without an import or re-export chain between them. Present
+ * when the hotspots section ran and the run read the git history.
+ * Advisory: no health score weight.
+ */
+change_coupling?: (ChangeCouplingReport | null)
+/**
  * Runtime coverage findings from the paid sidecar (only populated with
  * `--runtime-coverage`).
  */
@@ -14098,6 +14532,23 @@ unused_component_outputs?: UnusedComponentOutputFinding[]
  * `warn`.
  */
 unused_svelte_events?: UnusedSvelteEventFinding[]
+/**
+ * Effect layers composed only into other layers that nothing uses.
+ * Gated on the project declaring `effect`. Default severity is `warn`.
+ */
+unused_effect_layers?: UnusedEffectLayerFinding[]
+/**
+ * Effect tagged error classes that only type positions or `catchTag`
+ * handlers reference. Gated on the project declaring `effect`. Default
+ * severity is `warn`.
+ */
+unused_tagged_errors?: UnusedTaggedErrorFinding[]
+/**
+ * `catchTag` / `catchTags` handlers for a project tag that no code
+ * produces and that no `unused_tagged_errors` entry covers. Gated on the
+ * project declaring `effect`. Default severity is `warn`.
+ */
+unproduced_catch_tags?: UnproducedCatchTagFinding[]
 /**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for
@@ -15810,6 +16261,23 @@ unused_component_outputs?: UnusedComponentOutputFinding[]
  */
 unused_svelte_events?: UnusedSvelteEventFinding[]
 /**
+ * Effect layers composed only into other layers that nothing uses.
+ * Gated on the project declaring `effect`. Default severity is `warn`.
+ */
+unused_effect_layers?: UnusedEffectLayerFinding[]
+/**
+ * Effect tagged error classes that only type positions or `catchTag`
+ * handlers reference. Gated on the project declaring `effect`. Default
+ * severity is `warn`.
+ */
+unused_tagged_errors?: UnusedTaggedErrorFinding[]
+/**
+ * `catchTag` / `catchTags` handlers for a project tag that no code
+ * produces and that no `unused_tagged_errors` entry covers. Gated on the
+ * project declaring `effect`. Default severity is `warn`.
+ */
+unproduced_catch_tags?: UnproducedCatchTagFinding[]
+/**
  * Next.js Server Actions (exports of `"use server"` files) that no code in
  * the project references. Reclassified out of `unused_exports` for
  * `"use server"` files. Wrapped in [`UnusedServerActionFinding`] so each
@@ -16985,6 +17453,28 @@ affected_by_dir_omitted: number
  * deliberately skips story and test consumers that the affected set counts.
  */
 coordination_gap: CoordinationGapFact[]
+/**
+ * Co-change gaps: a changed file has a hidden change-coupling partner
+ * that is absent from the diff. The two files changed together in most
+ * commits of the history window, but no import or re-export chain
+ * connects them, so the graph facts above cannot point at the partner.
+ * Advisory, never gates. Omitted when empty.
+ * At most 10 entries (`CO_CHANGE_GAP_CAP`), strongest degree first.
+ */
+co_change_gap?: CoChangeGapFact[]
+/**
+ * All co-change gaps, before the cap cuts `co_change_gap`. Omitted
+ * when zero.
+ */
+co_change_gap_count?: number
+/**
+ * Consumers that a whole-word text search for a changed export name does
+ * not find (`missed`), or finds only under another local name
+ * (`renamed`). Only exports whose declaration statement overlaps an added
+ * diff line count, and only consumers outside the diff. Absent when no
+ * such consumer exists.
+ */
+search_gap?: (SearchGapFacts | null)
 }
 /**
  * One directory of the blast radius and how many affected files it holds.
@@ -17023,6 +17513,98 @@ consumed_symbols: string[]
  * Honest scope note: this is a syntactic attention pointer, not a proof.
  */
 note: string
+}
+/**
+ * One co-change gap: `changed_file` is in the diff, `partner_file` is not,
+ * and history shows that the two files usually change together.
+ */
+export interface CoChangeGapFact {
+/**
+ * Root-relative path of the changed file.
+ */
+changed_file: string
+/**
+ * Root-relative path of the hidden partner that the diff does not touch.
+ */
+partner_file: string
+/**
+ * Commits in the history window that changed both files.
+ */
+shared_revisions: number
+/**
+ * Coupling degree from 0 to 1.
+ */
+degree: number
+/**
+ * Scope note: history evidence, not a proof that the partner must change.
+ */
+note: string
+}
+/**
+ * The literal-search gap of the changed exports: the consumers that a text
+ * search for the export name does not find or finds only under another name.
+ */
+export interface SearchGapFacts {
+/**
+ * Sum of the per-export totals, before the per-export cap. A consumer of
+ * two changed exports counts once for each export.
+ */
+total: number
+/**
+ * One entry per changed export with at least one such consumer, sorted
+ * by file and line.
+ */
+exports: ExportSearchGapFact[]
+}
+/**
+ * The `missed` and `renamed` consumers of one changed export.
+ */
+export interface ExportSearchGapFact {
+/**
+ * Root-relative path of the changed file that declares the export.
+ */
+file: string
+/**
+ * The export name, `default` for a default export.
+ */
+export_name: string
+/**
+ * 1-based line of the export.
+ */
+line: number
+/**
+ * Number of `missed` and `renamed` consumers of this export, before the
+ * cap.
+ */
+total: number
+/**
+ * At most [`SEARCH_GAP_CONSUMER_CAP`] consumers, `missed` first, then by
+ * path.
+ */
+consumers: SearchGapConsumerFact[]
+}
+/**
+ * One consumer that a text search for the export name does not find, or
+ * finds only under another local name.
+ */
+export interface SearchGapConsumerFact {
+/**
+ * Root-relative path of the consumer.
+ */
+consumer_file: string
+/**
+ * 1-based line of the import statement in the consumer, when known.
+ */
+line?: (number | null)
+search_visibility: SearchVisibility
+/**
+ * Why the text search does not find the uses.
+ */
+reason?: (SearchGapReason | null)
+/**
+ * The name to search for in this consumer instead.
+ */
+search_as?: (string | null)
 }
 /**
  * The weighted focus map: the ranked `review-here` units plus the FULL

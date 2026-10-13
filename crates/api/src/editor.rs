@@ -208,6 +208,9 @@ pub mod editor_results {
         UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
         UnusedSvelteEventFinding, UnusedTypeFinding,
     };
+    pub use fallow_types::output_dead_code::{
+        UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
+    };
     pub use fallow_types::results::{
         AbsentComponentProp, ActiveSuppression, AnalysisResults, BoundaryCallViolation,
         BoundaryCoverageViolation, BoundaryViolation, CircularDependency, CircularDependencyEdge,
@@ -233,6 +236,9 @@ pub mod editor_results {
         UnusedComponentOutput, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
         UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
         UnusedSvelteEvent,
+    };
+    pub use fallow_types::results::{
+        EffectCatchSite, EffectLayerKind, UnproducedCatchTag, UnusedEffectLayer, UnusedTaggedError,
     };
 }
 
@@ -1316,6 +1322,9 @@ pub(crate) mod tests {
         assert_eq!(target.unused_component_inputs.len(), 1);
         assert_eq!(target.unused_component_outputs.len(), 1);
         assert_eq!(target.unused_svelte_events.len(), 1);
+        assert_eq!(target.unused_effect_layers.len(), 1);
+        assert_eq!(target.unused_tagged_errors.len(), 1);
+        assert_eq!(target.unproduced_catch_tags.len(), 1);
         assert_eq!(target.unused_server_actions.len(), 1);
         assert_eq!(target.unused_load_data_keys.len(), 1);
         assert!(target.unused_load_data_keys_global_abstain);
@@ -1872,6 +1881,41 @@ pub(crate) mod tests {
                         event_name: "dead".to_string(),
                         line: 31,
                         col: 0,
+                    },
+                ),
+            ],
+            unused_effect_layers: vec![
+                super::editor_results::UnusedEffectLayerFinding::with_actions(
+                    super::editor_results::UnusedEffectLayer {
+                        path: "/services.ts".into(),
+                        name: "CacheLive".to_string(),
+                        kind: super::editor_results::EffectLayerKind::TopLevel,
+                        line: 33,
+                        col: 0,
+                        dead_consumers: vec!["OrphanLive".to_string()],
+                    },
+                ),
+            ],
+            unused_tagged_errors: vec![
+                super::editor_results::UnusedTaggedErrorFinding::with_actions(
+                    super::editor_results::UnusedTaggedError {
+                        path: "/errors.ts".into(),
+                        name: "Expired".to_string(),
+                        tag: "Expired".to_string(),
+                        line: 34,
+                        col: 0,
+                        catch_sites: Vec::new(),
+                    },
+                ),
+            ],
+            unproduced_catch_tags: vec![
+                super::editor_results::UnproducedCatchTagFinding::with_actions(
+                    super::editor_results::UnproducedCatchTag {
+                        path: "/main.ts".into(),
+                        tag: "Expired".to_string(),
+                        line: 35,
+                        col: 0,
+                        candidate_classes: vec!["Expired".to_string()],
                     },
                 ),
             ],

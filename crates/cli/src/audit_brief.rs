@@ -137,7 +137,23 @@ pub fn derive_graph_facts(results: &AnalysisResults) -> GraphFacts {
 /// closure (computed on the brief path). Returns an empty closure when no graph
 /// was retained (the closure is `None`).
 #[must_use]
-fn build_impact_closure_facts(result: &AuditResult) -> ImpactClosureFacts {
+fn build_impact_closure_facts(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> ImpactClosureFacts {
+    let mut facts = build_graph_impact_closure_facts(result, diff_index);
+    if let Some(check) = result.check.as_ref() {
+        facts.set_co_change_gaps(&check.co_change_gaps);
+    }
+    facts
+}
+
+/// The graph part of the Stage 3 facts: affected set, coordination gaps and
+/// the literal-search gap.
+fn build_graph_impact_closure_facts(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> ImpactClosureFacts {
     let Some(closure) = result
         .check
         .as_ref()
@@ -155,7 +171,67 @@ fn build_impact_closure_facts(result: &AuditResult) -> ImpactClosureFacts {
             note: COORDINATION_GAP_NOTE.to_string(),
         })
         .collect();
-    ImpactClosureFacts::new(&closure.affected_not_shown, coordination_gap)
+    let mut facts = ImpactClosureFacts::new(&closure.affected_not_shown, coordination_gap);
+    facts.search_gap = build_search_gap_facts(result, diff_index);
+    facts
+}
+
+/// Build the literal-search gap facts: the `missed` and `renamed` consumers of
+/// each export whose declaration statement overlaps an added diff line.
+/// Returns `None` when no diff is known or no such consumer exists.
+fn build_search_gap_facts(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> Option<fallow_output::SearchGapFacts> {
+    use fallow_types::trace::SearchVisibility;
+
+    let diff_index = diff_index?;
+    let gaps = result.check.as_ref()?.search_gaps.as_ref()?;
+    let mut exports: Vec<fallow_output::ExportSearchGapFact> = gaps
+        .iter()
+        .filter(|gap| {
+            let key = diff_index.key_for_root_relative(&gap.file);
+            let (start, end) = gap.declaration_lines;
+            diff_index.range_overlaps_added(&key, u64::from(start), u64::from(end))
+        })
+        .map(|gap| {
+            let mut consumers: Vec<&fallow_engine::module_graph::ConsumerSearchGapPaths> =
+                gap.consumers.iter().collect();
+            consumers.sort_by(|a, b| {
+                let missed = |c: &fallow_engine::module_graph::ConsumerSearchGapPaths| {
+                    c.check.visibility != SearchVisibility::Missed
+                };
+                missed(a)
+                    .cmp(&missed(b))
+                    .then_with(|| a.consumer_file.cmp(&b.consumer_file))
+            });
+            fallow_output::ExportSearchGapFact {
+                file: gap.file.clone(),
+                export_name: gap.export_name.clone(),
+                line: gap.line,
+                total: consumers.len(),
+                consumers: consumers
+                    .into_iter()
+                    .take(fallow_output::SEARCH_GAP_CONSUMER_CAP)
+                    .map(|consumer| fallow_output::SearchGapConsumerFact {
+                        consumer_file: consumer.consumer_file.clone(),
+                        line: consumer.check.line,
+                        search_visibility: consumer.check.visibility,
+                        reason: consumer.check.reason,
+                        search_as: consumer.check.search_as.clone(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    if exports.is_empty() {
+        return None;
+    }
+    exports.sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.line.cmp(&b.line)));
+    Some(fallow_output::SearchGapFacts {
+        total: exports.iter().map(|export| export.total).sum(),
+        exports,
+    })
 }
 
 /// Build the Stage 2 partition facts from the audit result's retained
@@ -419,7 +495,7 @@ pub fn build_brief_output_with_diff(
     graph_facts.exports_added = added;
     graph_facts.api_width_delta = i64::try_from(added).unwrap_or(i64::MAX);
     let partition = build_partition_facts(result);
-    let impact_closure = build_impact_closure_facts(result);
+    let impact_closure = build_impact_closure_facts(result, diff_index);
     let focus = build_focus_map(result, &deltas);
     ReviewBriefOutput {
         branching: build_branching_report(result),
@@ -937,6 +1013,33 @@ fn symbols_taken(sources: &[&CoordinationGapFact]) -> usize {
     sources.iter().map(|g| g.consumed_symbols.len()).sum()
 }
 
+/// Human lines for the co-change gaps: one header, one line per listed gap,
+/// and a note for the gaps that the cap cut.
+fn co_change_gap_lines(closure: &ImpactClosureFacts) -> Vec<String> {
+    let gaps = &closure.co_change_gap;
+    if gaps.is_empty() {
+        return Vec::new();
+    }
+    let total = closure.co_change_gap_count.max(gaps.len());
+    let mut lines = vec![format!(
+        "  co-change gaps ({total}): files that usually change together, no import between them"
+    )];
+    for gap in gaps {
+        lines.push(format!(
+            "    {} -> {} ({} shared commits, {:.0}%)",
+            gap.changed_file,
+            gap.partner_file,
+            gap.shared_revisions,
+            gap.degree * 100.0
+        ));
+    }
+    let hidden = total - gaps.len();
+    if hidden > 0 {
+        lines.push(format!("    {hidden} more not shown"));
+    }
+    lines
+}
+
 /// Print the Stage 3 impact-closure summary on the human brief: the blast
 /// radius and its heaviest directory, then the coordination gaps (the precise
 /// inter-module attention pointer). Caller has already gated on `!quiet`.
@@ -947,6 +1050,62 @@ fn print_impact_closure_human(closure: &ImpactClosureFacts) {
     for line in coordination_gap_lines(&closure.coordination_gap) {
         eprintln!("{line}");
     }
+    for line in co_change_gap_lines(closure) {
+        eprintln!("{line}");
+    }
+    for line in search_gap_lines(closure.search_gap.as_ref()) {
+        eprintln!("{line}");
+    }
+}
+
+/// Exports and consumers per export that the human search-gap section shows.
+const MAX_HUMAN_SEARCH_GAP_EXPORTS: usize = 3;
+const MAX_HUMAN_SEARCH_GAP_CONSUMERS: usize = 3;
+
+/// Human lines for the literal-search gap: the consumers of changed exports
+/// that a text search for the export name misses or finds under another name.
+fn search_gap_lines(facts: Option<&fallow_output::SearchGapFacts>) -> Vec<String> {
+    use fallow_types::trace::SearchVisibility;
+
+    let Some(facts) = facts else {
+        return Vec::new();
+    };
+    let mut lines = vec![format!(
+        "  search gap: {} consumer use{} of changed exports hide{} from a name search",
+        facts.total,
+        crate::report::plural(facts.total),
+        if facts.total == 1 { "s" } else { "" },
+    )];
+    let mut truncated = facts.exports.len() > MAX_HUMAN_SEARCH_GAP_EXPORTS;
+    for export in facts.exports.iter().take(MAX_HUMAN_SEARCH_GAP_EXPORTS) {
+        lines.push(format!(
+            "         {} in {}:{}",
+            elide_symbol(&export.export_name, 30),
+            elide_path(&export.file, 34),
+            export.line,
+        ));
+        for consumer in export.consumers.iter().take(MAX_HUMAN_SEARCH_GAP_CONSUMERS) {
+            let level = if consumer.search_visibility == SearchVisibility::Missed {
+                "missed"
+            } else {
+                "renamed"
+            };
+            let hint = consumer
+                .search_as
+                .as_deref()
+                .map(|name| format!(", search {}", elide_symbol(name, 20)))
+                .unwrap_or_default();
+            lines.push(format!(
+                "           {level} {}{hint}",
+                elide_path(&consumer.consumer_file, 40),
+            ));
+        }
+        truncated |= export.total > MAX_HUMAN_SEARCH_GAP_CONSUMERS;
+    }
+    if truncated {
+        lines.push("         (--format json for the full list)".to_string());
+    }
+    lines
 }
 
 /// Greedily wrap prose to `first` columns on the opening line and `rest`
@@ -2100,6 +2259,58 @@ mod tests {
             consumer_file: consumer.to_string(),
             consumed_symbols: symbols.iter().map(|s| (*s).to_string()).collect(),
             note: COORDINATION_GAP_NOTE.to_string(),
+        }
+    }
+
+    #[test]
+    fn search_gap_lines_name_the_hidden_consumers_and_fit_eighty_columns() {
+        use fallow_types::trace::{SearchGapReason, SearchVisibility};
+
+        assert!(search_gap_lines(None).is_empty());
+        let consumer =
+            |file: &str, visibility, search_as: &str| fallow_output::SearchGapConsumerFact {
+                consumer_file: file.to_string(),
+                line: Some(3),
+                search_visibility: visibility,
+                reason: Some(SearchGapReason::ReExportAlias),
+                search_as: Some(search_as.to_string()),
+            };
+        let long_dir = "packages/very-long-workspace-name/src/features/deeply/nested";
+        let facts = fallow_output::SearchGapFacts {
+            total: 5,
+            exports: vec![fallow_output::ExportSearchGapFact {
+                file: format!("{long_dir}/lib.ts"),
+                export_name: "formatDateForTheCurrentLocaleAndTimezone".to_string(),
+                line: 12,
+                total: 5,
+                consumers: vec![
+                    consumer(&format!("{long_dir}/a.ts"), SearchVisibility::Missed, "fd"),
+                    consumer("src/b.ts", SearchVisibility::Renamed, "fmt"),
+                    consumer("src/c.ts", SearchVisibility::Missed, "lib"),
+                    consumer("src/d.ts", SearchVisibility::Missed, "lib2"),
+                ],
+            }],
+        };
+        let lines = search_gap_lines(Some(&facts));
+        assert_eq!(
+            lines[0],
+            "  search gap: 5 consumer uses of changed exports hide from a name search"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("renamed src/b.ts, search fmt"))
+        );
+        assert!(!lines.iter().any(|line| line.contains("src/d.ts")));
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("         (--format json for the full list)")
+        );
+        for line in &lines {
+            assert!(
+                line.chars().count() <= 80,
+                "line overruns 80 columns: {line}"
+            );
         }
     }
 

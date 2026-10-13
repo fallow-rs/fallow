@@ -183,6 +183,21 @@ pub struct RulesConfig {
     /// warn encodes that without failing CI.
     #[serde(default = "Severity::default_warn", alias = "unused-svelte-event")]
     pub unused_svelte_events: Severity,
+    /// Effect layer composed only into other layers that nothing uses. Gated
+    /// on the project declaring `effect`. Defaults to `warn`: code outside the
+    /// analyzed project can still compose the layer.
+    #[serde(default = "Severity::default_warn", alias = "unused-effect-layer")]
+    pub unused_effect_layers: Severity,
+    /// Effect tagged error class that only type positions or `catchTag`
+    /// handlers reference. Gated on the project declaring `effect`. Defaults
+    /// to `warn`: consumers outside the project can construct the error.
+    #[serde(default = "Severity::default_warn", alias = "unused-tagged-error")]
+    pub unused_tagged_errors: Severity,
+    /// `catchTag` handler for a project tag that no code produces, when no
+    /// `unused-tagged-errors` finding covers it. Gated on the project
+    /// declaring `effect`. Defaults to `warn`.
+    #[serde(default = "Severity::default_warn", alias = "unproduced-catch-tag")]
+    pub unproduced_catch_tags: Severity,
     /// Next.js Server Action (an export of a `"use server"` file) referenced by
     /// no code in the project: no import-and-call, no `action={fn}` binding, no
     /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified out
@@ -468,6 +483,9 @@ impl Default for RulesConfig {
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
             unused_svelte_events: Severity::Warn,
+            unused_effect_layers: Severity::Warn,
+            unused_tagged_errors: Severity::Warn,
+            unproduced_catch_tags: Severity::Warn,
             unused_server_actions: Severity::Warn,
             unused_load_data_keys: Severity::Warn,
             prop_drilling: Severity::Off,
@@ -586,6 +604,9 @@ impl RulesConfig {
             IssueKind::UnusedComponentInput => self.unused_component_inputs,
             IssueKind::UnusedComponentOutput => self.unused_component_outputs,
             IssueKind::UnusedSvelteEvent => self.unused_svelte_events,
+            IssueKind::UnusedEffectLayer => self.unused_effect_layers,
+            IssueKind::UnusedTaggedError => self.unused_tagged_errors,
+            IssueKind::UnproducedCatchTag => self.unproduced_catch_tags,
             IssueKind::UnusedServerAction => self.unused_server_actions,
             IssueKind::UnusedLoadDataKey => self.unused_load_data_keys,
             IssueKind::PropDrilling => self.prop_drilling,
@@ -659,6 +680,9 @@ impl RulesConfig {
                 unused_component_inputs,
                 unused_component_outputs,
                 unused_svelte_events,
+                unused_effect_layers,
+                unused_tagged_errors,
+                unproduced_catch_tags,
                 unused_server_actions,
                 unused_load_data_keys,
                 prop_drilling,
@@ -717,12 +741,6 @@ impl RulesConfig {
                 misplaced_directive,
                 route_collision,
                 dynamic_segment_name_conflict,
-            ]
-        );
-        apply_partial_rules!(
-            self,
-            partial,
-            [
                 weakened_tests,
                 added_suppression,
                 test_only_branch,
@@ -893,6 +911,27 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_svelte_events: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_effect_layers`].
+    #[serde(
+        default,
+        alias = "unused-effect-layer",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_effect_layers: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_tagged_errors`].
+    #[serde(
+        default,
+        alias = "unused-tagged-error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_tagged_errors: Option<Severity>,
+    /// Optional override for [`RulesConfig::unproduced_catch_tags`].
+    #[serde(
+        default,
+        alias = "unproduced-catch-tag",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unproduced_catch_tags: Option<Severity>,
     /// Optional override for [`RulesConfig::unused_server_actions`].
     #[serde(
         default,
@@ -1222,6 +1261,9 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-component-inputs",
     "unused-component-outputs",
     "unused-svelte-events",
+    "unused-effect-layers",
+    "unused-tagged-errors",
+    "unproduced-catch-tags",
     "unused-server-actions",
     "unused-load-data-keys",
     "prop-drilling",
@@ -1283,6 +1325,9 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-component-input",
     "unused-component-output",
     "unused-svelte-event",
+    "unused-effect-layer",
+    "unused-tagged-error",
+    "unproduced-catch-tag",
     "unused-server-action",
     "unused-load-data-key",
     "unresolved-import",
@@ -1769,6 +1814,9 @@ mod tests {
             unused_component_inputs: Some(Severity::Off),
             unused_component_outputs: Some(Severity::Off),
             unused_svelte_events: Some(Severity::Off),
+            unused_effect_layers: Some(Severity::Off),
+            unused_tagged_errors: Some(Severity::Off),
+            unproduced_catch_tags: Some(Severity::Off),
             unused_server_actions: Some(Severity::Off),
             unused_load_data_keys: Some(Severity::Off),
             prop_drilling: Some(Severity::Off),
@@ -1907,7 +1955,7 @@ mod tests {
     /// more. See the note on [`KNOWN_RULE_NAMES`].
     #[test]
     fn known_rule_names_list_length_is_pinned() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 116);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 122);
     }
 
     /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -1976,8 +2024,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            120,
-            "expected 120 source-level alias attrs (60 per struct); got {}: {:?}",
+            126,
+            "expected 126 source-level alias attrs (63 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

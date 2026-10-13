@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Effect dead-code findings.** Projects that declare `effect` get three new
+  rules, each at `warn` by default:
+  - `unused-effect-layer` reports a layer that only unused layers compose.
+    A layer with zero references stays an `unused-export` or an
+    `unused-class-member`.
+  - `unused-tagged-error` reports a `Data.TaggedError` or
+    `Schema.TaggedError` class that types or `catchTag` handlers reference,
+    but that no code constructs, fails with, or decodes.
+  - `unproduced-catch-tag` reports a `catchTag` handler for a project tag
+    that no code produces, when no `unused-tagged-error` finding covers it.
+
+  Any value reference to an error class counts as a producer, so errors that
+  an API or RPC schema decodes are not reported. Tags that no project class
+  declares, and Effect built-in tags, are never reported.
+
 - **Prop-drilling findings can enforce CI gates.** Set `rules.prop-drilling` to
   `error` to enforce chains, or `warn` for advisory findings, including under
   `--fail-on-issues`. Source-hop overrides and suppressions control each chain.
@@ -37,6 +52,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the VS Code audit status bar count the findings too. `added-dependency`
   has no suppression comment, because `package.json` cannot hold one: set the
   rule to `off` for the path in an `overrides` entry.
+- **`fallow health` now reports hidden change coupling and change
+  dispersion.** A hidden pair is two files that change together in most
+  commits while no import or re-export chain connects them. An agent that
+  follows imports does not find the second file. The new `change_coupling`
+  section lists these pairs with the Code Maat defaults: 5 commits per file,
+  5 shared commits, a coupling degree of at least 30%, and commits with more
+  than 30 analyzed files skipped. `health.changeCoupling` changes the
+  thresholds. Each hotspot also gets `median_files_per_commit` and
+  `median_lines_per_commit`. Without `--since`, these values read 12 months
+  of history. A strong pair adds the `hidden_coupling` factor to the
+  refactoring targets of its files. A file that no other target rule claims
+  becomes a `resolve_hidden_coupling` refactoring target, so existing targets
+  keep their category. This new category value moves `schema_version` to 12
+  for health, 13 for audit, 14 for the combined report and 13 for the audit
+  brief. `fallow audit --brief` shows an advisory `co_change_gap` fact when
+  a diff changes one file of a hidden pair and not the other. The health
+  score does not change. The churn cache moves to version 8 and is rebuilt
+  once. The `fallow-churn/v1` import accepts an optional `commit` field.
+
+- **Traces now tell you which consumers a name search does not find.** A
+  `grep -w` for an export name does not find every consumer: a default import
+  under another name, a barrel alias, or a whole-namespace use hides it. Each
+  `direct_references[]` entry of `fallow dead-code --trace FILE:NAME` now has
+  `line`, `search_visibility` (`found`, `renamed`, `missed`), `reason`, and
+  `search_as`. `search_as` is the name to search for instead. A barrel that
+  only forwards the export is `found` with `reason` `pass-through` and never
+  counts as a gap, because it needs no edit when the export changes. A class
+  member trace has the same fields on `owner_direct_references[]`, checked
+  against the owner export name. Each `--impact-closure` coordination gap
+  has `search_visibility`, `reason`, and `search_as`. The MCP `trace_export`
+  and `impact_closure` tools return them too. `fallow audit --brief` adds
+  `impact_closure.search_gap`. It lists the `missed` and `renamed` consumers
+  of each export whose declaration the diff changes, with at most 10
+  consumers per export and a total. A trace reads the consumer sources of the
+  traced export only. The audit brief reads the consumer sources of the
+  exports in the changed files.
+- **Alchemy projects no longer report their stacks and deployed Workers as
+  unused.** A new built-in `alchemy` plugin activates on the `alchemy`
+  dependency. Each `alchemy.run.{ts,mts,cts,js,mjs,cjs}` file is an entry
+  point, so the Worker modules that a stack imports stay reachable. The file
+  that a resource names in `main` stays reachable from the file that declares
+  it. Fallow reads `new URL("./x.ts", import.meta.url)`,
+  `${import.meta.dirname}/x.ts`, `path.join(import.meta.dirname, ...)`, a
+  string next to such a `rootDir`, and a string in a stack file. When `main`
+  names its own file, the `default` export and the exported Durable Object,
+  Workflow and Container classes count as used. The CLI loads
+  `@effect/platform-node` and `@effect/platform-bun` at runtime, so these
+  packages are credited. The extraction cache version changes, so the first
+  run after the upgrade parses each file again.
 
 ### Changed
 
@@ -51,6 +115,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `warn` to retain advisory analysis after upgrading. Archived JSON reports
   with `effective_severity: "error"` also render as errors; changing the current
   configuration does not rewrite those reports.
+
+- **Complexity findings name more callback bodies.** A function without a
+  declared name now takes a name from the code around it, where it got
+  `<anonymous>` or `<arrow>` before:
+  - `Effect.fn("Users.create")(function* ...)` gives `Users.create`.
+  - A function after a string-literal argument gives the call, for example
+    `Command.make("setup")`, `group.handle("github")` or `it("renders")`.
+  - A generator that a named function returns, for example
+    `const load = () => Effect.gen(function* ...)`, gives `load`.
+
+  Names that fallow gave before do not change, and scores do not change.
+  Coverage matching and runtime function identities still use the placeholder.
+  A renamed finding gets a new CodeClimate fingerprint one time. An identity
+  baseline (`--baseline-mode identity`) gives the unused allowance of an
+  `<anonymous>` or `<arrow>` bucket to new names in the same file, so a saved
+  baseline stays valid. Re-save the baseline to record the new names. A file
+  move no longer moves an `<arrow>` bucket, the same as an `<anonymous>`
+  bucket.
 
 ### Fixed
 
@@ -163,6 +245,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through that property now credit the members of the class. A replaced or
   unknown property value gives no credit. The parse cache version advances to
   345 so warm caches use the corrected property origins.
+- **Class members reached through callback wrappers and Vue computed values are
+  now credited.** The analysis follows synchronous helpers that return a
+  callback result in an object property, including imported helpers and aliases.
+  Vue `computed` values use the getter's result, including writable options.
+  The parse cache version advances to 346 to replace cached results without
+  these callback relationships.
 
 - **Class members accessed through known array and tuple elements are now credited.**
   The analysis tracks indexed receivers and local aliases, including inherited
@@ -184,6 +272,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `const { a } = await factory()`, a literal key such as `a` now counts as a
   read of that member on the class that the factory returns. A promise without
   `await` and a generator result credit no members.
+- **Complexity suppressions now apply to CRAP file scores.** Before, a
+  `fallow-ignore-next-line complexity` comment did not change the CRAP part
+  of `fallow health`. A suppressed function still set the file-score order,
+  the risk tag, `crap_above_threshold`, and the `AddTestCoverage` targets
+  and their evidence. Now these values use only unsuppressed functions. The
+  raw `crap_max` does not change: it is always the highest measured value.
+  File scores get three optional fields: `crap_suppressed`,
+  `crap_unsuppressed_max` and `crap_unsuppressed_effective_threshold`. For a
+  file with a suppressed function, the `AddTestCoverage` contributing factor
+  can now have `metric: "crap_unsuppressed_max"` instead of
+  `metric: "crap_max"`. A consumer that filters on `crap_max` must also
+  accept the new metric name.
 
 - **The agent gate now audits the work tree that a git command names.** A
   session in one worktree can commit in another worktree with `git -C <dir>

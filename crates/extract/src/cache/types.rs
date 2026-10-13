@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 345;
+pub(super) const CACHE_VERSION: u32 = 352;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -54,7 +54,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1496);
+assert_cached_type_size!(CachedModule, 1504);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
@@ -74,7 +74,7 @@ assert_cached_type_size!(fallow_types::extract::ImportedCallSite, 80);
 assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 64);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
-assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
+assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 104);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 168);
@@ -275,6 +275,8 @@ pub struct CachedModule {
     pub component_props: Vec<fallow_types::extract::ComponentProp>,
     /// Framework-neutral input contracts and inspected caller evidence.
     pub component_contracts: Option<Box<fallow_types::extract::ComponentContractFacts>>,
+    /// Effect layer, tagged error and `catchTag` facts.
+    pub effect_facts: Option<Box<fallow_types::extract::EffectFacts>>,
     /// Whether the template spreads `$attrs`/`$props`/`props` or the
     /// `defineProps` return is rest-destructured. Round-trips for the abstain.
     pub has_props_attrs_fallthrough: bool,
