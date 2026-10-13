@@ -12,6 +12,7 @@ expression: rendered
 | Dead code | 3 | 2 | 1 |
 | Complexity | 1 | 1 | 0 |
 | Duplication | 1 | 0 | 1 |
+| Styling | 0 | 0 | 0 |
 
 ### Dead Code
 

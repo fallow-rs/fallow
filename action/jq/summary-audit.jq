@@ -112,10 +112,14 @@ styling_rows as $styling_rows |
 "## Fallow Audit\n\n" +
 "> \($verdict | verdict_label) · \(plural($files; "changed file")) · \($elapsed)ms\n\n" +
 "| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n" +
-"| Dead code | \($dead) | \($attr.dead_code_introduced // 0) | \($attr.dead_code_inherited // 0) |\n" +
-"| Complexity | \($complex) | \($attr.complexity_introduced // 0) | \($attr.complexity_inherited // 0) |\n" +
-"| Duplication | \($dupes) | \($attr.duplication_introduced // 0) | \($attr.duplication_inherited // 0) |\n" +
-"| Styling | \($styling) | \($attr.styling_introduced // 0) | \($attr.styling_inherited // 0) |\n\n" +
+(if ($summary.dead_code_skipped // false) then "| Dead code | skipped | - | - |\n"
+ else "| Dead code | \($dead) | \($attr.dead_code_introduced // 0) | \($attr.dead_code_inherited // 0) |\n" end) +
+(if ($summary.complexity_skipped // false) then "| Complexity | skipped | - | - |\n"
+ else "| Complexity | \($complex) | \($attr.complexity_introduced // 0) | \($attr.complexity_inherited // 0) |\n" end) +
+(if ($summary.duplication_skipped // false) then "| Duplication | skipped | - | - |\n"
+ else "| Duplication | \($dupes) | \($attr.duplication_introduced // 0) | \($attr.duplication_inherited // 0) |\n" end) +
+(if ($summary.complexity_skipped // false) then "| Styling | skipped | - | - |\n\n"
+ else "| Styling | \($styling) | \($attr.styling_introduced // 0) | \($attr.styling_inherited // 0) |\n\n" end) +
 (if ($attr.duplication_demoted // 0) > 0 then
   "> \(plural($attr.duplication_demoted; "introduced clone group")) demoted to inherited (not written by this changeset)\n\n"
 else "" end) +

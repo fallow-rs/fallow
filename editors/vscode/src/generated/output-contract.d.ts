@@ -1708,7 +1708,8 @@ gate_outcomes?: (GateOutcomes | null)
  */
 _meta?: (Meta | null)
 /**
- * Dead-code findings scoped to the audit changeset.
+ * Dead-code findings scoped to the audit changeset. Absent when no file
+ * changed, or when `summary.dead_code_skipped` says the pass was skipped.
  */
 dead_code?: (CheckOutput | null)
 /**
@@ -1743,6 +1744,24 @@ dead_code_issues: number
  * Whether any reported dead-code issue has error severity.
  */
 dead_code_has_errors: boolean
+/**
+ * True when `--only`, `--skip` or `audit.deadCode = false` skipped the
+ * dead-code sub-analysis. The dead-code counts are then 0 and do not mean
+ * a clean result. Omitted when the sub-analysis ran.
+ */
+dead_code_skipped?: boolean
+/**
+ * True when `--only`, `--skip` or `audit.health = false` skipped the
+ * health sub-analysis. The complexity and styling counts are then 0 and
+ * do not mean a clean result. Omitted when the sub-analysis ran.
+ */
+complexity_skipped?: boolean
+/**
+ * True when `--only`, `--skip` or `audit.dupes = false` skipped the
+ * duplication sub-analysis. The clone-group counts are then 0 and do not
+ * mean a clean result. Omitted when the sub-analysis ran.
+ */
+duplication_skipped?: boolean
 /**
  * Total complexity findings reported for the changed files.
  */
@@ -11981,7 +12000,7 @@ search_visibility?: (SearchVisibility | null)
 /**
  * Why a text search does not find the uses in this consumer. With
  * `search_visibility` `found`, only `pass-through` occurs: the consumer
- * is a barrel that forwards the export and does not use it.
+ * forwards the export and does not use it.
  */
 reason?: (SearchGapReason | null)
 /**

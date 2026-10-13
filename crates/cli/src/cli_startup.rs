@@ -732,7 +732,9 @@ fn command_rejects_output_gate(command: Option<&Command>) -> bool {
 
 fn global_filter_error(cli: &Cli) -> Option<&'static str> {
     if (!cli.only.is_empty() || !cli.skip.is_empty()) && cli.command.is_some() {
-        return Some("--only and --skip can only be used without a subcommand");
+        return Some(
+            "--only and --skip can only be used without a subcommand. For audit, pass them after `audit`",
+        );
     }
     if (cli.production_dead_code || cli.production_health || cli.production_dupes)
         && cli.command.is_some()

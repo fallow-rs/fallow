@@ -385,7 +385,11 @@ pub(crate) fn fmt_num(value: &Value) -> String {
 /// Format a numeric field, or `"0"` when missing.
 #[must_use]
 pub(crate) fn num(value: &Value, key: &str) -> String {
-    value.get(key).map_or_else(|| "0".to_owned(), fmt_num)
+    // jq's `// 0` also replaces an explicit null, so the ports do the same.
+    value
+        .get(key)
+        .filter(|value| !value.is_null())
+        .map_or_else(|| "0".to_owned(), fmt_num)
 }
 
 #[cfg(test)]

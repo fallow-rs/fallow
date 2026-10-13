@@ -1737,6 +1737,19 @@ pub struct AuditParams {
     /// Run only the duplication sub-analysis in production mode.
     pub production_dupes: Option<bool>,
 
+    /// Run only these audit sub-analyses, with the values of bare `fallow
+    /// --only`: `dead-code`, `architecture`, `dupes`, `health`. Replaces the
+    /// `audit.deadCode`, `audit.health` and `audit.dupes` config selection.
+    /// Cannot be combined with `skip`.
+    pub only: Option<Vec<String>>,
+
+    /// Skip these audit sub-analyses, with the values of `only`. A skipped
+    /// sub-analysis leaves the verdict; the response omits its block and sets
+    /// `summary.dead_code_skipped`, `complexity_skipped` or
+    /// `duplication_skipped`. A baseline for a skipped sub-analysis is an
+    /// error.
+    pub skip: Option<Vec<String>>,
+
     /// Set `false` to skip styling analytics in audit. Unset or `true` uses
     /// `audit.css` from the config, which defaults to enabled.
     pub css: Option<bool>,

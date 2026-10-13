@@ -141,6 +141,9 @@ pub struct AuditOptions<'a> {
     /// `--fail-on-parse-error`, forwarded to the dead-code and health
     /// sub-passes. The audit applies the `parse-error` gate once over both.
     pub fail_on_parse_error: bool,
+    /// The sub-analyses to run on head and base, from `--only`, `--skip` and
+    /// the `audit.*` config. The brief path always runs all of them.
+    pub analyses: AuditAnalysisSelection,
     /// Run styling analytics (CSS + CSS-in-JS) in the health sub-pass so styling
     /// signals surface in the audit output. Default on; `--no-css` disables.
     /// Descriptive + verdict-neutral (never affects the audit verdict / exit code).
@@ -189,6 +192,37 @@ pub struct AuditOptions<'a> {
     /// analyses, attribution, and verdict, so the whole audit reads as the
     /// scoped slice. `None` means whole-project scope.
     pub scope: Option<std::path::PathBuf>,
+}
+
+/// The sub-analyses one audit runs, resolved from `--only`, `--skip` and the
+/// `audit.deadCode` / `audit.health` / `audit.dupes` config keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AuditAnalysisSelection {
+    pub dead_code: bool,
+    pub health: bool,
+    pub dupes: bool,
+    /// Which dead-code findings stay in the report (`--only architecture`,
+    /// `--skip architecture`).
+    pub architecture: crate::check::ArchitectureSelection,
+}
+
+impl AuditAnalysisSelection {
+    /// Every sub-analysis with every dead-code finding: the default.
+    pub const ALL: Self = Self {
+        dead_code: true,
+        health: true,
+        dupes: true,
+        architecture: crate::check::ArchitectureSelection::All,
+    };
+
+    /// The cache-key label of the architecture selection.
+    pub const fn architecture_label(self) -> &'static str {
+        match self.architecture {
+            crate::check::ArchitectureSelection::All => "all",
+            crate::check::ArchitectureSelection::Only => "only",
+            crate::check::ArchitectureSelection::Exclude => "exclude",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -315,6 +349,7 @@ fn build_base_audit_options<'a>(
         include_entry_exports: opts.include_entry_exports,
         show_cascade: opts.show_cascade,
         fail_on_parse_error: false,
+        analyses: opts.analyses,
         // Base styling keys keep opt-in `rules.css-* = error` gated on
         // introduced findings only; the base snapshot is cached.
         css: opts.css,
@@ -584,9 +619,10 @@ fn run_audit_base_analyses(
         &base_cache_dir,
         &base_coverage,
     );
-    let share_dead_code_parse_with_health = audit_production_flags(opts)
-        .modes()
-        .dead_code_matches_health();
+    let share_dead_code_parse_with_health = opts.analyses.health
+        && audit_production_flags(opts)
+            .modes()
+            .dead_code_matches_health();
 
     let (check_res, dupes_res) = rayon::join(
         || {
@@ -730,8 +766,9 @@ fn run_audit_head_analyses(
     changed_files: &FxHashSet<PathBuf>,
 ) -> Result<HeadAnalyses, ExitCode> {
     let modes = audit_production_flags(opts).modes();
-    let share_dead_code_parse_with_health = modes.dead_code_matches_health();
-    let share_dead_code_files_with_dupes = modes.all_match();
+    let share_dead_code_parse_with_health =
+        opts.analyses.health && modes.dead_code_matches_health();
+    let share_dead_code_files_with_dupes = opts.analyses.dupes && modes.all_match();
 
     let mut check = run_audit_check(
         opts,
@@ -1319,6 +1356,7 @@ fn audit_review_benchmark_options<'a>(
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
+        analyses: AuditAnalysisSelection::ALL,
         css: false,
         css_deep: false,
         runtime_coverage: None,
@@ -2180,6 +2218,9 @@ fn empty_audit_result(
         summary: AuditSummary {
             dead_code_issues: 0,
             dead_code_has_errors: false,
+            dead_code_skipped: !opts.analyses.dead_code,
+            complexity_skipped: !opts.analyses.health,
+            duplication_skipped: !opts.analyses.dupes,
             complexity_findings: 0,
             max_cyclomatic: None,
             duplication_clone_groups: 0,
@@ -2227,7 +2268,13 @@ fn run_audit_check<'a>(
     retain_modules_for_health: bool,
     analysis_snapshot: fallow_config::AnalysisSnapshot,
 ) -> Result<Option<CheckResult>, ExitCode> {
-    let filters = IssueFilters::default();
+    if !opts.analyses.dead_code {
+        return Ok(None);
+    }
+    let filters = IssueFilters {
+        architecture_selection: opts.analyses.architecture,
+        ..IssueFilters::default()
+    };
     // The review brief needs the module graph for the impact closure, which
     // rides the retained-modules path. Force retention on the brief path even
     // when health does not share the dead-code parse (mismatched production
@@ -2327,6 +2374,9 @@ fn run_audit_dupes<'a>(
     changed_files: Option<&'a FxHashSet<PathBuf>>,
     pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
 ) -> Result<Option<DupesResult>, ExitCode> {
+    if !opts.analyses.dupes {
+        return Ok(None);
+    }
     let dupes_cfg = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
@@ -2425,6 +2475,9 @@ fn run_audit_health<'a>(
     shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
     coverage_relocated: bool,
 ) -> Result<Option<HealthResult>, ExitCode> {
+    if !opts.analyses.health {
+        return Ok(None);
+    }
     let runtime_coverage = match opts.runtime_coverage {
         Some(path) => Some(crate::health::coverage::prepare_options(
             path,
@@ -2579,6 +2632,7 @@ pub fn run_audit_with_type_aware(
             let _ = record_audit_impact(opts, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &result, opts.json_style);
             note_stale_baseline_gate_inert(opts);
+            note_type_aware_require_inert(opts, type_aware);
             if report_exit != ExitCode::SUCCESS {
                 return report_exit;
             }
@@ -2617,6 +2671,18 @@ fn note_stale_baseline_gate_inert(opts: &AuditOptions<'_>) {
     );
 }
 
+/// Type-aware analysis feeds only the dead-code pass, so a skipped pass leaves
+/// `--type-aware-require` nothing to judge. Say so instead of passing silently.
+fn note_type_aware_require_inert(opts: &AuditOptions<'_>, type_aware: AuditTypeAwareOptions<'_>) {
+    if opts.analyses.dead_code || type_aware.require.is_none() {
+        return;
+    }
+    eprintln!(
+        "Note: --type-aware-require did not run: this audit skips the dead-code sub-analysis \
+         (--only, --skip or the audit config), which is the only one that uses type-aware analysis."
+    );
+}
+
 fn audit_type_aware_completeness_failed(result: &AuditResult) -> bool {
     type_aware_meta_completeness_failed(
         result
@@ -2637,6 +2703,11 @@ fn record_audit_impact(
     gate_marker: Option<&str>,
     result: &AuditResult,
 ) -> Result<(), String> {
+    // A skipped sub-analysis reports no findings, which Impact would credit as
+    // resolved. Like the bare run, only a full selection writes Impact.
+    if opts.analyses != AuditAnalysisSelection::ALL {
+        return Ok(());
+    }
     let mut findings = result
         .check
         .as_ref()

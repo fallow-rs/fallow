@@ -1801,6 +1801,23 @@ assert_contains "$OUT_AUDIT_STYLE_NEW" "| Styling | 1 | 1 | 0 |" "audit: styling
 assert_contains "$OUT_AUDIT_STYLE_NEW" "| new |" "audit: styling-only new-only status is visible"
 assert_not_contains "$OUT_AUDIT_STYLE_NEW" "demoted to inherited" "audit: no demotion footnote without demotions"
 
+OUT_AUDIT_DEAD_SKIPPED=$(jq -n '{
+  command: "audit", verdict: "warn", changed_files_count: 1, elapsed_ms: 3,
+  summary: {dead_code_issues: 0, dead_code_skipped: true, complexity_findings: 1, duplication_clone_groups: 0},
+  attribution: {gate: "new-only", complexity_introduced: 1}
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_contains "$OUT_AUDIT_DEAD_SKIPPED" "| Dead code | skipped | - | - |" "audit: a skipped dead-code pass is not a clean row"
+assert_contains "$OUT_AUDIT_DEAD_SKIPPED" "| Complexity | 1 | 1 | 0 |" "audit: a run sub-analysis keeps its counts"
+
+OUT_AUDIT_HEALTH_DUPES_SKIPPED=$(jq -n '{
+  command: "audit", verdict: "pass", changed_files_count: 1, elapsed_ms: 3,
+  summary: {dead_code_issues: 0, complexity_findings: 0, duplication_clone_groups: 0, complexity_skipped: true, duplication_skipped: true},
+  attribution: {gate: "new-only"}
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_contains "$OUT_AUDIT_HEALTH_DUPES_SKIPPED" "| Complexity | skipped | - | - |" "audit: a skipped health pass is not a clean row"
+assert_contains "$OUT_AUDIT_HEALTH_DUPES_SKIPPED" "| Duplication | skipped | - | - |" "audit: a skipped duplication pass is not a clean row"
+assert_contains "$OUT_AUDIT_HEALTH_DUPES_SKIPPED" "| Styling | skipped | - | - |" "audit: styling comes from the health pass"
+
 OUT_AUDIT_STYLE_ALL=$(jq -n '{
   command: "audit", verdict: "fail", changed_files_count: 1, elapsed_ms: 4,
   summary: {dead_code_issues: 0, complexity_findings: 0, duplication_clone_groups: 0},
@@ -4536,6 +4553,17 @@ assert_contains "$STALE_STDOUT" "::notice::fallow: the dead-code baseline has 12
   "audit baselines: a config-resolved baseline is reported without a path"
 assert_contains "$STALE_STDOUT" "Run 'fallow dead-code' with that baseline over the whole project" \
   "audit baselines: the pointer degrades when there is no path to name"
+
+# Audit forwards the `only` and `skip` selectors, like the bare run (#3381).
+run_stale_analyze INPUT_COMMAND="audit" MOCK_AUDIT_BASELINES="1" INPUT_SKIP="dead-code,dupes"
+# The file holds `printf %q` words, so read it back as the shell array it is.
+AUDIT_SELECTION_ARGS=$(
+  # shellcheck disable=SC1091
+  source "$(dirname "$STALE_OUTPUT_FILE")/fallow-analysis-args.sh"
+  printf '%s ' "${FALLOW_ANALYSIS_ARGS[@]}"
+)
+assert_contains "$AUDIT_SELECTION_ARGS" "audit" "audit selection: the command is audit"
+assert_contains "$AUDIT_SELECTION_ARGS" "--skip dead-code,dupes" "audit selection: the skip input reaches audit"
 
 # A single-analysis command keeps the first-match chain and gains no audit line.
 run_stale_analyze INPUT_COMMAND="dead-code" INPUT_BASELINE="baseline.json"

@@ -316,12 +316,12 @@ inputs:
   threads:
     description: 'Number of parser threads (default: available CPU cores)'
     required: false
-  # Bare invocation selectors
+  # Analysis selectors for the bare invocation and for `audit`
   only:
-    description: 'Run only these analyses when no command is specified (comma-separated: dead-code,architecture,dupes,health)'
+    description: 'Run only these analyses when no command is specified or the command is audit (comma-separated: dead-code,architecture,dupes,health). For audit it replaces the audit.deadCode, audit.health and audit.dupes config selection'
     required: false
   skip:
-    description: 'Skip these analyses when no command is specified (comma-separated: dead-code,architecture,dupes,health)'
+    description: 'Skip these analyses when no command is specified or the command is audit (comma-separated: dead-code,architecture,dupes,health). With audit, a baseline input for a skipped analysis fails the run'
     required: false
 
 outputs:

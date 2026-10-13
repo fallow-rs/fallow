@@ -2629,6 +2629,30 @@ fn audit_diff_risk_section(env: &Value) -> String {
     )
 }
 
+/// One row of the audit category table. A skipped sub-analysis prints
+/// `skipped`, because its 0 counts do not mean a clean result.
+fn audit_category_row(
+    label: &str,
+    summary: &Value,
+    skipped_key: &str,
+    findings: &str,
+    attribution: &Value,
+    attribution_prefix: &str,
+) -> String {
+    if summary
+        .get(skipped_key)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return format!("| {label} | skipped | - | - |");
+    }
+    format!(
+        "| {label} | {findings} | {} | {} |",
+        num(attribution, &format!("{attribution_prefix}_introduced")),
+        num(attribution, &format!("{attribution_prefix}_inherited")),
+    )
+}
+
 /// Port of `summary-audit.jq`.
 #[must_use]
 fn render_audit_summary(env: &Value) -> String {
@@ -2638,20 +2662,53 @@ fn render_audit_summary(env: &Value) -> String {
     let dead_code = env.get("dead_code").cloned().unwrap_or(Value::Null);
     let dead_rows = audit_dead_code_rows(&dead_code);
 
+    let styling_count = env
+        .get("complexity")
+        .and_then(|complexity| complexity.get("styling_findings"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
+        .to_string();
+    let rows = [
+        audit_category_row(
+            "Dead code",
+            &summary,
+            "dead_code_skipped",
+            &num(&summary, "dead_code_issues"),
+            &attribution,
+            "dead_code",
+        ),
+        audit_category_row(
+            "Complexity",
+            &summary,
+            "complexity_skipped",
+            &num(&summary, "complexity_findings"),
+            &attribution,
+            "complexity",
+        ),
+        audit_category_row(
+            "Duplication",
+            &summary,
+            "duplication_skipped",
+            &num(&summary, "duplication_clone_groups"),
+            &attribution,
+            "duplication",
+        ),
+        audit_category_row(
+            "Styling",
+            &summary,
+            "complexity_skipped",
+            &styling_count,
+            &attribution,
+            "styling",
+        ),
+    ]
+    .join("\n");
+
     let mut out = format!(
-        "## Fallow Audit\n\n> {} \u{b7} {} \u{b7} {}ms\n\n| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n| Dead code | {} | {} | {} |\n| Complexity | {} | {} | {} |\n| Duplication | {} | {} | {} |\n\n",
+        "## Fallow Audit\n\n> {} \u{b7} {} \u{b7} {}ms\n\n| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n{rows}\n\n",
         audit_verdict_label(verdict),
         plural_n(u(env, "changed_files_count") as usize, "changed file"),
         num(env, "elapsed_ms"),
-        num(&summary, "dead_code_issues"),
-        num(&attribution, "dead_code_introduced"),
-        num(&attribution, "dead_code_inherited"),
-        num(&summary, "complexity_findings"),
-        num(&attribution, "complexity_introduced"),
-        num(&attribution, "complexity_inherited"),
-        num(&summary, "duplication_clone_groups"),
-        num(&attribution, "duplication_introduced"),
-        num(&attribution, "duplication_inherited"),
     );
     if !dead_rows.is_empty() {
         let rows = dead_rows
@@ -3494,7 +3551,8 @@ mod tests {
     use fallow_types::issue_meta::counted_result_issue_metas;
 
     use super::{
-        DEAD_CODE_CATEGORIES, LinkContext, render_combined_summary, render_health_summary,
+        DEAD_CODE_CATEGORIES, LinkContext, render_audit_summary, render_combined_summary,
+        render_health_summary,
     };
 
     /// One listed complexity finding.
@@ -3541,6 +3599,38 @@ mod tests {
             repo: String::new(),
             sha: String::new(),
         }
+    }
+
+    /// A skipped dead-code pass reports 0 issues, which must not read as a
+    /// clean row.
+    #[test]
+    fn audit_summary_marks_skipped_sub_analyses() {
+        let audit = |dead_code: bool, complexity: bool, duplication: bool| {
+            serde_json::json!({
+                "command": "audit",
+                "verdict": "warn",
+                "changed_files_count": 1,
+                "elapsed_ms": 3,
+                "summary": {
+                    "dead_code_issues": 0,
+                    "dead_code_skipped": dead_code,
+                    "complexity_skipped": complexity,
+                    "duplication_skipped": duplication,
+                    "complexity_findings": 1,
+                    "duplication_clone_groups": 0
+                },
+                "attribution": {"gate": "new-only", "complexity_introduced": 1}
+            })
+        };
+        let out = render_audit_summary(&audit(true, false, false));
+        assert!(out.contains("| Dead code | skipped | - | - |"), "{out}");
+        assert!(out.contains("| Complexity | 1 | 1 | 0 |"), "{out}");
+        assert!(out.contains("| Styling | 0 | 0 | 0 |"), "{out}");
+        let out = render_audit_summary(&audit(false, true, true));
+        assert!(out.contains("| Dead code | 0 | 0 | 0 |"), "{out}");
+        assert!(out.contains("| Complexity | skipped | - | - |"), "{out}");
+        assert!(out.contains("| Duplication | skipped | - | - |"), "{out}");
+        assert!(out.contains("| Styling | skipped | - | - |"), "{out}");
     }
 
     /// With a baseline, the headline counts the functions after the

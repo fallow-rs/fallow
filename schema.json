@@ -3252,6 +3252,27 @@
           "description": "Selects which findings affect the `fallow audit` verdict: `new-only` (default) fails only on findings introduced by the current changeset (running a base-snapshot attribution pass), while `all` fails on every finding in changed files and skips that pass. Set to `all` to gate the full backlog in changed files; the `--gate` CLI flag overrides this.",
           "$ref": "#/$defs/AuditGate"
         },
+        "deadCode": {
+          "description": "Toggles the dead-code sub-analysis in `fallow audit` (unused files, exports, types, members and dependencies, plus boundary violations and circular dependencies, which come from the same pass). Defaults to on when unset; set `false` to leave it out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dead-code` turns it off for one run and `--only` replaces this selection. The review brief (`--brief`, `fallow review`) keeps every sub-analysis because it reads the module graph.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "health": {
+          "description": "Toggles the health sub-analysis in `fallow audit` (complexity and CRAP findings, plus styling findings, which come from the same pass). Defaults to on when unset; set `false` to leave it out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip health` turns it off for one run and `--only` replaces this selection.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dupes": {
+          "description": "Toggles the duplication sub-analysis in `fallow audit`. Defaults to on when unset; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "css": {
           "description": "Toggles styling analytics (CSS and CSS-in-JS) in the `fallow audit` health sub-pass; these findings are descriptive and verdict-neutral by default (they change the exit code only when a css-* rule is set to error). Defaults to on when unset; set `false` to skip styling analysis. The `--no-css` CLI flag forces it off regardless.",
           "type": [

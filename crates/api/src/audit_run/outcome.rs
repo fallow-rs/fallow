@@ -306,6 +306,9 @@ fn summary(view: &AuditAnalysesView<'_>, comparison: &AuditComparison) -> AuditS
     AuditSummary {
         dead_code_issues: comparison.dead_code.visible_count(),
         dead_code_has_errors: dead_code_has_errors(view),
+        dead_code_skipped: view.dead_code.is_none(),
+        complexity_skipped: view.health.is_none(),
+        duplication_skipped: view.duplication.is_none(),
         complexity_findings: view
             .health
             .as_ref()

@@ -690,6 +690,16 @@ pub struct AuditOptions {
     /// Production override for the duplication domain; `None` defers to
     /// config.
     pub production_dupes: Option<bool>,
+    /// Run the dead-code domain; `None` defers to `audit.deadCode` in config,
+    /// which defaults to on. When off, the verdict comes from the domains that
+    /// run.
+    pub dead_code: Option<bool>,
+    /// Run the health domain; `None` defers to `audit.health` in config,
+    /// which defaults to on.
+    pub health: Option<bool>,
+    /// Run the duplication domain; `None` defers to `audit.dupes` in config,
+    /// which defaults to on.
+    pub duplication: Option<bool>,
     /// `Some(false)` skips CSS / styling analysis, as `--no-css` does. `None`
     /// and `Some(true)` defer to `audit.css` in config, which defaults to on.
     pub css: Option<bool>,

@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
+  `--only` and `--skip` with the values and rules of bare `fallow --only` /
+  `--skip`: `dead-code`, `architecture`, `dupes` and `health`. The new config
+  keys `audit.deadCode`, `audit.health` and `audit.dupes` set the default
+  selection. `--skip` removes from it, and `--only` replaces it. A skipped
+  sub-analysis is skipped on the head and on the base snapshot, so it leaves
+  the verdict, `summary` and `attribution`. A warn-only gate for complexity and
+  duplication is now `fallow audit --skip dead-code` with the complexity rules
+  at `warn`.
+  - The JSON report omits the block of a skipped sub-analysis and sets
+    `summary.dead_code_skipped`, `complexity_skipped` or
+    `duplication_skipped`. The human output and the GitHub step summary show
+    the row as skipped.
+  - `architecture` narrows the dead-code findings to, or away from, cycles,
+    boundary violations and policy violations. Styling findings come from the
+    health sub-analysis.
+  - A baseline flag for a skipped sub-analysis exits 2. A configured baseline
+    for it is ignored. `--max-crap`, `--coverage`, `--coverage-root` and
+    `--runtime-coverage` print a note when the health sub-analysis is skipped.
+  - A selection that leaves no sub-analysis exits 2. The bare
+    `fallow --skip dead-code,dupes,health` now exits 2 too, instead of
+    printing an empty report.
+  - A partial selection does not write the Impact record, as for the bare run.
+  - The review brief (`--brief`, `fallow review`) keeps every sub-analysis.
+  - The GitHub Action `only` / `skip` inputs and the GitLab `FALLOW_ONLY` /
+    `FALLOW_SKIP` variables now apply to `audit` too. The MCP `audit` tool
+    takes `only` and `skip`, and the programmatic `run_audit` reads the three
+    config keys.
+  - The GitHub step summary of `audit` now has the `Styling` row in both of
+    its renderers.
+
+  Thanks @cr101 for the request. (#3381)
+
 - **Built-in plugins for nine more tools.** Before, fallow did not know these
   tools. Thus it reported their config files, entry files and packages as
   unused. Now each plugin activates on its package or config file:
@@ -199,6 +232,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Search gaps no longer count files that only forward an export.** A file
+  that imports an export and only exports it again needs no edit when the
+  export changes. Examples are `import { a } from './x'; export { a }` and
+  `import { a as c } from './x'; export { c }`. Such a file is now `found`
+  with `reason` `pass-through` in `--trace` references, in `--impact-closure`
+  coordination gaps and in the audit brief `impact_closure.search_gap`, the
+  same as a pure barrel. A file that also uses the binding stays a normal
+  consumer. A file that forwards the binding with `export default b` or
+  `export = b` also stays a consumer, because its importers are not listed
+  under the original export. A namespace import with member access (`ns.a`) stays `found`,
+  and a whole-object use (`Object.keys(ns)`, a spread, `ns` as a value) stays
+  `missed`.
 - **The MCP `audit` tool and `fallow_api::run_audit` read the `audit` config
   section.** The typed route ignored `audit.gate`, `audit.css` and
   `audit.cssDeep`. A project with `"gate": "all"` got the `new-only` verdict
@@ -229,8 +274,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `clone_families[]` by file set. `fallow dupes`, the MCP tools and
   `fallow_api` already used this order. Before, these three commands ordered
   the families by duplicated lines. The `suggestions[]` of a family now follow
-  the order of its `groups[]` on every surface. The family set and the values
-  do not change.
+  the order of its `groups[]` on every surface. Two `mirrored_directories[]`
+  entries with the same `total_lines` are now ordered by directory pair. The
+  family set and the values do not change.
 
 - **The review brief and the audit report the same weakened guardrails.**
   The `weakening` section of `fallow audit --brief` and `fallow review` now

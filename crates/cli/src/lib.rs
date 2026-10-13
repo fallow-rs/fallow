@@ -1946,6 +1946,20 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         coverage_root: Option<PathBuf>,
 
+        /// Run only these sub-analyses (comma-separated: dead-code,
+        /// architecture, dupes, health), with the same values as bare
+        /// `fallow --only`. Replaces the `audit.deadCode`, `audit.health` and
+        /// `audit.dupes` selection. The review brief (`--brief`, `fallow
+        /// review`) keeps every sub-analysis.
+        #[arg(long, value_delimiter = ',', conflicts_with = "skip")]
+        only: Vec<AnalysisKind>,
+
+        /// Skip these sub-analyses (comma-separated: dead-code, architecture,
+        /// dupes, health), with the same values as bare `fallow --skip`, on
+        /// top of the `audit.*` selection.
+        #[arg(long, value_delimiter = ',')]
+        skip: Vec<AnalysisKind>,
+
         /// Disable styling analytics in audit.
         #[arg(long = "no-css")]
         no_css: bool,
@@ -4165,6 +4179,13 @@ fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     let cli = dispatch.cli;
     let (run_check, run_dupes, run_health) = combined::resolve_analyses(&cli.only, &cli.skip);
+    if !(run_check || run_dupes || run_health) {
+        return emit_error(
+            "--skip leaves no analysis to run: pass at most two of dead-code, dupes and health",
+            2,
+            dispatch.output,
+        );
+    }
     let production = match dispatch.production_modes(
         cli.production_dead_code,
         cli.production_health,
@@ -5640,6 +5661,8 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         max_crap,
         coverage,
         coverage_root,
+        only,
+        skip,
         no_css,
         css_deep,
         no_css_deep,
@@ -5683,6 +5706,8 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             max_crap,
             coverage,
             coverage_root,
+            only,
+            skip,
             no_css,
             css_deep,
             no_css_deep,
@@ -6831,6 +6856,8 @@ struct AuditDispatchArgs {
     max_crap: Option<f64>,
     coverage: Option<PathBuf>,
     coverage_root: Option<PathBuf>,
+    only: Vec<AnalysisKind>,
+    skip: Vec<AnalysisKind>,
     no_css: bool,
     css_deep: bool,
     no_css_deep: bool,
@@ -6858,6 +6885,7 @@ struct AuditDispatchArgs {
 
 struct ResolvedAuditInputs {
     audit_cfg: fallow_config::AuditConfig,
+    analyses: audit::AuditAnalysisSelection,
     cache_dir: PathBuf,
     production: ProductionModes,
     dead_code_baseline: Option<PathBuf>,
@@ -6886,6 +6914,13 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
         Ok(inputs) => inputs,
         Err(code) => return code,
     };
+    if (!args.only.is_empty() || !args.skip.is_empty()) && audit_renders_brief(args) {
+        eprintln!(
+            "Note: --only and --skip have no effect on the review brief, which keeps every \
+             sub-analysis."
+        );
+    }
+    note_inert_health_flags(args, inputs.analyses);
 
     // The brief and the walkthrough views always exit 0, so the gate stands
     // down there and says so.
@@ -6950,21 +6985,49 @@ fn resolve_audit_inputs(
         args.production_health,
         args.production_dupes,
     )?;
-    let resolved_dead_code_baseline = resolve_audit_baseline_path(
-        root,
+    let analyses = resolve_audit_analyses(&audit_cfg, args);
+    if !(analyses.dead_code || analyses.health || analyses.dupes) {
+        return Err(emit_error(
+            "this audit selects no sub-analysis: --skip and the audit.deadCode, audit.health and audit.dupes config keys leave nothing to run",
+            2,
+            output,
+        ));
+    }
+    // A skipped sub-analysis reads no baseline. An explicit flag for one is a
+    // mistake; a configured one is dropped so the baseline gates do not see it.
+    let baseline = |enabled: bool, flag: &str, cli_path: Option<&Path>, cfg_path: Option<&str>| {
+        if enabled {
+            return Ok(resolve_audit_baseline_path(root, cli_path, cfg_path));
+        }
+        if cli_path.is_some() {
+            return Err(emit_error(
+                &format!(
+                    "{flag} has no effect: this audit skips that sub-analysis (--only, --skip or the audit config)"
+                ),
+                2,
+                output,
+            ));
+        }
+        Ok(None)
+    };
+    let resolved_dead_code_baseline = baseline(
+        analyses.dead_code,
+        "--dead-code-baseline",
         args.dead_code_baseline.as_deref(),
         audit_cfg.dead_code_baseline.as_deref(),
-    );
-    let resolved_health_baseline = resolve_audit_baseline_path(
-        root,
+    )?;
+    let resolved_health_baseline = baseline(
+        analyses.health,
+        "--health-baseline",
         args.health_baseline.as_deref(),
         audit_cfg.health_baseline.as_deref(),
-    );
-    let resolved_dupes_baseline = resolve_audit_baseline_path(
-        root,
+    )?;
+    let resolved_dupes_baseline = baseline(
+        analyses.dupes,
+        "--dupes-baseline",
         args.dupes_baseline.as_deref(),
         audit_cfg.dupes_baseline.as_deref(),
-    );
+    )?;
     let coverage_inputs = resolve_coverage_inputs(
         args.coverage.as_deref(),
         args.coverage_root.as_deref(),
@@ -6974,6 +7037,7 @@ fn resolve_audit_inputs(
 
     Ok(ResolvedAuditInputs {
         audit_cfg,
+        analyses,
         cache_dir,
         production,
         dead_code_baseline: resolved_dead_code_baseline,
@@ -6982,6 +7046,59 @@ fn resolve_audit_inputs(
         coverage: coverage_inputs.coverage,
         coverage_root: coverage_inputs.coverage_root,
     })
+}
+
+/// Name the health-only flags that a skipped health sub-analysis leaves without
+/// effect, so a CI job that skips health does not lose a gate in silence.
+fn note_inert_health_flags(args: &AuditDispatchArgs, analyses: audit::AuditAnalysisSelection) {
+    if analyses.health {
+        return;
+    }
+    let inert: Vec<&str> = [
+        (args.max_crap.is_some(), "--max-crap"),
+        (args.coverage.is_some(), "--coverage"),
+        (args.coverage_root.is_some(), "--coverage-root"),
+        (args.runtime_coverage.is_some(), "--runtime-coverage"),
+    ]
+    .into_iter()
+    .filter_map(|(set, flag)| set.then_some(flag))
+    .collect();
+    if !inert.is_empty() {
+        eprintln!(
+            "Note: {} did not run: this audit skips the health sub-analysis.",
+            inert.join(", ")
+        );
+    }
+}
+
+/// Resolve the sub-analyses of one audit with the bare `--only` / `--skip`
+/// semantics. `--only` replaces the `audit.*` selection and `--skip` removes
+/// from it. The review brief keeps every sub-analysis, because it reads the
+/// module graph and all three sections.
+fn resolve_audit_analyses(
+    config: &fallow_config::AuditConfig,
+    args: &AuditDispatchArgs,
+) -> audit::AuditAnalysisSelection {
+    if audit_renders_brief(args) {
+        return audit::AuditAnalysisSelection::ALL;
+    }
+    let architecture = combined::resolve_architecture_selection(&args.only, &args.skip);
+    if !args.only.is_empty() {
+        let (dead_code, dupes, health) = combined::resolve_analyses(&args.only, &[]);
+        return audit::AuditAnalysisSelection {
+            dead_code,
+            health,
+            dupes,
+            architecture,
+        };
+    }
+    let (dead_code, dupes, health) = combined::resolve_analyses(&[], &args.skip);
+    audit::AuditAnalysisSelection {
+        dead_code: dead_code && config.dead_code.unwrap_or(true),
+        health: health && config.health.unwrap_or(true),
+        dupes: dupes && config.dupes.unwrap_or(true),
+        architecture,
+    }
 }
 
 fn audit_css_enabled(config: &fallow_config::AuditConfig, args: &AuditDispatchArgs) -> bool {
@@ -7034,6 +7151,7 @@ fn run_resolved_audit(
             include_entry_exports: cli.include_entry_exports,
             show_cascade: cli.show_cascade,
             fail_on_parse_error: cli.fail_on_parse_error,
+            analyses: inputs.analyses,
             // Styling analytics, including deep cross-file reachability, is on
             // by default in `fallow audit`; both layers remain verdict-neutral
             // unless a user escalates a styling rule to error.
@@ -7104,6 +7222,8 @@ fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
         max_crap: None,
         coverage: None,
         coverage_root: None,
+        only: Vec::new(),
+        skip: Vec::new(),
         no_css: true,
         css_deep: false,
         no_css_deep: false,
@@ -7165,6 +7285,7 @@ fn decision_surface_audit_options<'a>(
         include_entry_exports: cli.include_entry_exports,
         show_cascade: cli.show_cascade,
         fail_on_parse_error: false,
+        analyses: audit::AuditAnalysisSelection::ALL,
         // Decision-surface (brief apex) does not render styling; keep it lean.
         css: false,
         css_deep: false,

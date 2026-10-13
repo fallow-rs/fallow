@@ -67,6 +67,8 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     let changed_files_count = changed_files.len();
 
+    reject_empty_selection(options)?;
+
     if changed_files.is_empty() {
         return Ok(empty_audit_output(
             options,
@@ -77,7 +79,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         ));
     }
 
-    reject_config_baselines(&config.audit)?;
+    reject_config_baselines(&config.audit, options)?;
     type_aware_config::reject_config_type_aware(
         &options.analysis.type_aware,
         &resolved,
@@ -114,9 +116,10 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     };
 
     let mut head = analyses.subanalyses;
-    if outcome.base_snapshot.is_some() {
-        for ((group, introduced), demoted) in head
-            .duplication
+    if outcome.base_snapshot.is_some()
+        && let Some(duplication) = head.duplication.as_mut()
+    {
+        for ((group, introduced), demoted) in duplication
             .output
             .report
             .clone_groups
@@ -128,7 +131,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
             group.demotion_reason = demoted.then_some(crate::CloneDemotionReason::NoAddedLines);
         }
     }
-    let next_steps = audit_next_steps(&head.dead_code, &head.complexity);
+    let next_steps = audit_next_steps(head.dead_code.as_ref(), head.complexity.as_ref());
     let base_snapshot = crate::audit_run::programmatic_base_snapshot(&outcome);
 
     Ok(AuditProgrammaticOutput {
@@ -142,9 +145,9 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         elapsed: start.elapsed(),
         base_snapshot_skipped: None,
         base_snapshot,
-        dead_code: Some(head.dead_code),
-        duplication: Some(head.duplication),
-        complexity: Some(head.complexity),
+        dead_code: head.dead_code,
+        duplication: head.duplication,
+        complexity: head.complexity,
         diff_risk: outcome.diff_risk,
         next_steps,
         telemetry_analysis_run_id: None,
@@ -250,7 +253,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
             complexity,
         } = &self.subanalyses;
         AuditAnalysesView {
-            dead_code: Some(DeadCodeView {
+            dead_code: dead_code.as_ref().map(|dead_code| DeadCodeView {
                 results: &dead_code.output.results,
                 config: self.config,
                 root: &dead_code.root,
@@ -262,7 +265,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
                 syntactic_keys: None,
                 public_api: None,
             }),
-            duplication: Some(DuplicationView {
+            duplication: duplication.as_ref().map(|duplication| DuplicationView {
                 clone_groups: duplication
                     .output
                     .report
@@ -274,7 +277,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
                 duplication_percentage: duplication.output.report.stats.duplication_percentage,
                 threshold: duplication.threshold,
             }),
-            health: Some(HealthView {
+            health: complexity.as_ref().map(|complexity| HealthView {
                 report: &complexity.report,
                 root: &complexity.root,
                 rules: &self.config.rules,
@@ -284,20 +287,25 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
     }
 
     fn dead_code_results_mut(&mut self) -> Option<&mut AnalysisResults> {
-        Some(&mut self.subanalyses.dead_code.output.results)
+        self.subanalyses
+            .dead_code
+            .as_mut()
+            .map(|dead_code| &mut dead_code.output.results)
     }
 
     fn health_report_mut(&mut self) -> Option<&mut fallow_output::HealthReport> {
-        Some(&mut self.subanalyses.complexity.report)
+        self.subanalyses
+            .complexity
+            .as_mut()
+            .map(|complexity| &mut complexity.report)
     }
 
     fn record_type_aware_warning(&mut self, warning: &str) {
         if let Some(meta) = self
             .subanalyses
             .dead_code
-            .output
-            .meta
             .as_mut()
+            .and_then(|dead_code| dead_code.output.meta.as_mut())
             .and_then(|meta| meta.type_aware.as_mut())
         {
             meta.warnings.push(warning.to_owned());
@@ -321,6 +329,9 @@ fn options_with_audit_config(
 ) -> AuditOptions {
     let fallow_config::AuditConfig {
         gate,
+        dead_code,
+        health,
+        dupes,
         css,
         css_deep,
         // `reject_config_baselines` refuses these keys.
@@ -338,23 +349,65 @@ fn options_with_audit_config(
     let css_deep = css && options.css_deep.or(*css_deep).unwrap_or(true);
     AuditOptions {
         gate: Some(options.gate.unwrap_or(*gate)),
+        dead_code: Some(
+            options
+                .dead_code
+                .unwrap_or_else(|| dead_code.unwrap_or(true)),
+        ),
+        health: Some(options.health.unwrap_or_else(|| health.unwrap_or(true))),
+        duplication: Some(options.duplication.unwrap_or_else(|| dupes.unwrap_or(true))),
         css: Some(css),
         css_deep: Some(css_deep),
         ..options.clone()
     }
 }
 
+/// A selection without any domain is an error, as in `fallow audit`.
+fn reject_empty_selection(options: &AuditOptions) -> ProgrammaticResult<()> {
+    if options.dead_code == Some(false)
+        && options.health == Some(false)
+        && options.duplication == Some(false)
+    {
+        return Err(ProgrammaticError::new(
+            "this audit selects no domain: the options and the audit.deadCode, audit.health and audit.dupes config keys leave nothing to run",
+            2,
+        )
+        .with_code("FALLOW_AUDIT_NO_ANALYSIS")
+        .with_context("audit"));
+    }
+    Ok(())
+}
+
 /// The typed audit cannot apply the health and duplication baselines of the
 /// `audit` config section. Fail instead of ignoring them: an ignored baseline
 /// reports suppressed findings again and can fail the gate. The MCP `audit`
-/// tool reads this code and runs the CLI, which applies the baselines.
-fn reject_config_baselines(config: &fallow_config::AuditConfig) -> ProgrammaticResult<()> {
+/// tool reads this code and runs the CLI, which applies the baselines. The
+/// baseline of a skipped domain has no effect, as in `fallow audit`.
+fn reject_config_baselines(
+    config: &fallow_config::AuditConfig,
+    options: &AuditOptions,
+) -> ProgrammaticResult<()> {
     let keys = [
-        ("audit.deadCodeBaseline", &config.dead_code_baseline),
-        ("audit.healthBaseline", &config.health_baseline),
-        ("audit.dupesBaseline", &config.dupes_baseline),
+        (
+            "audit.deadCodeBaseline",
+            &config.dead_code_baseline,
+            options.dead_code,
+        ),
+        (
+            "audit.healthBaseline",
+            &config.health_baseline,
+            options.health,
+        ),
+        (
+            "audit.dupesBaseline",
+            &config.dupes_baseline,
+            options.duplication,
+        ),
     ];
-    let Some((key, _)) = keys.iter().find(|(_, value)| value.is_some()) else {
+    let Some((key, _, _)) = keys
+        .iter()
+        .find(|(_, value, runs)| value.is_some() && *runs != Some(false))
+    else {
         return Ok(());
     };
     Err(ProgrammaticError::new(
@@ -453,6 +506,9 @@ fn empty_audit_output(
         summary: AuditSummary {
             dead_code_issues: 0,
             dead_code_has_errors: false,
+            dead_code_skipped: options.dead_code == Some(false),
+            complexity_skipped: options.health == Some(false),
+            duplication_skipped: options.duplication == Some(false),
             complexity_findings: 0,
             max_cyclomatic: None,
             duplication_clone_groups: 0,
@@ -478,9 +534,12 @@ fn empty_audit_output(
 }
 
 struct AuditSubanalyses {
-    dead_code: crate::DeadCodeProgrammaticOutput,
-    duplication: crate::DuplicationProgrammaticOutput,
-    complexity: crate::HealthProgrammaticOutput,
+    /// `None` when the audit skips the dead-code domain.
+    dead_code: Option<crate::DeadCodeProgrammaticOutput>,
+    /// `None` when the audit skips the duplication domain.
+    duplication: Option<crate::DuplicationProgrammaticOutput>,
+    /// `None` when the audit skips the health domain.
+    complexity: Option<crate::HealthProgrammaticOutput>,
 }
 
 struct AuditSubanalysisOptions {
@@ -574,6 +633,36 @@ fn run_audit_subanalyses_in_context(
         options.production_dupes,
     )?;
 
+    // A partial selection runs each chosen domain on its own; the shared
+    // sessions below assume all three domains.
+    let dead_code = options.dead_code != Some(false);
+    let health = options.health != Some(false);
+    let duplication = options.duplication != Some(false);
+    if !(dead_code && health && duplication) {
+        return Ok(AuditSubanalyses {
+            dead_code: dead_code
+                .then(|| {
+                    run_dead_code_in_context(
+                        &subanalysis_options.dead_code,
+                        None,
+                        &audit_section_context(&subanalysis_options.dead_code.analysis)?,
+                    )
+                })
+                .transpose()?,
+            duplication: duplication
+                .then(|| {
+                    run_duplication_in_context(
+                        &subanalysis_options.duplication,
+                        &audit_section_context(&subanalysis_options.duplication.analysis)?,
+                    )
+                })
+                .transpose()?,
+            complexity: health
+                .then(|| run_health_for_audit(&subanalysis_options.complexity))
+                .transpose()?,
+        });
+    }
+
     if production_modes.all_match() {
         return run_shared_project_audit_subanalyses(&subanalysis_options, changed_files);
     }
@@ -587,16 +676,16 @@ fn run_audit_subanalyses_in_context(
     }
 
     Ok(AuditSubanalyses {
-        dead_code: run_dead_code_in_context(
+        dead_code: Some(run_dead_code_in_context(
             &subanalysis_options.dead_code,
             None,
             &audit_section_context(&subanalysis_options.dead_code.analysis)?,
-        )?,
-        duplication: run_duplication_in_context(
+        )?),
+        duplication: Some(run_duplication_in_context(
             &subanalysis_options.duplication,
             &audit_section_context(&subanalysis_options.duplication.analysis)?,
-        )?,
-        complexity: run_health_for_audit(&subanalysis_options.complexity)?,
+        )?),
+        complexity: Some(run_health_for_audit(&subanalysis_options.complexity)?),
     })
 }
 
@@ -636,12 +725,12 @@ fn run_shared_dead_code_health_audit_subanalyses(
             changed_files,
         )?;
         Ok(AuditSubanalyses {
-            dead_code,
-            duplication: run_duplication_in_context(
+            dead_code: Some(dead_code),
+            duplication: Some(run_duplication_in_context(
                 duplication_options,
                 &audit_section_context(&duplication_options.analysis)?,
-            )?,
-            complexity,
+            )?),
+            complexity: Some(complexity),
         })
     })
 }
@@ -664,9 +753,9 @@ fn run_shared_dead_code_dupes_audit_subanalyses(
                 retain_duplication_artifacts: false,
             })?;
         Ok(AuditSubanalyses {
-            dead_code,
-            duplication,
-            complexity: run_health_for_audit(&options.complexity)?,
+            dead_code: Some(dead_code),
+            duplication: Some(duplication),
+            complexity: Some(run_health_for_audit(&options.complexity)?),
         })
     })
 }
@@ -774,9 +863,9 @@ fn run_all_audit_subanalyses_with_project_artifacts(
         duplication_artifacts,
     )?;
     Ok(AuditSubanalyses {
-        dead_code,
-        duplication,
-        complexity,
+        dead_code: Some(dead_code),
+        duplication: Some(duplication),
+        complexity: Some(complexity),
     })
 }
 
@@ -851,12 +940,12 @@ fn load_programmatic_audit_config(
 }
 
 fn audit_next_steps(
-    dead_code: &crate::DeadCodeProgrammaticOutput,
-    complexity: &crate::HealthProgrammaticOutput,
+    dead_code: Option<&crate::DeadCodeProgrammaticOutput>,
+    complexity: Option<&crate::HealthProgrammaticOutput>,
 ) -> Vec<NextStep> {
     let input = fallow_output::build_audit_next_steps_input(
-        Some((&dead_code.output.results, dead_code.root.as_path())),
-        Some(&complexity.report),
+        dead_code.map(|dead_code| (&dead_code.output.results, dead_code.root.as_path())),
+        complexity.map(|complexity| &complexity.report),
         crate::next_steps::suggestions_enabled(),
     );
     build_audit_next_steps(&input)
