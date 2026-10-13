@@ -1,0 +1,11 @@
+{
+  "name": "fallow-marketplace-publisher",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@vscode/vsce": "4.0.0"
+  }
+}

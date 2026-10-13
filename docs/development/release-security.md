@@ -30,8 +30,14 @@ creates, moves, or publishes Git tags or GitHub Releases.
 Preparation jobs may execute dependency code because they have no publication
 credentials. Publication jobs must remain small. They must not install
 repository dependencies, run package lifecycle scripts, or execute
-repository-controlled build steps. They may install pinned publisher CLIs
-globally with `--ignore-scripts`.
+repository-controlled build steps. VSIX publishers install only the dedicated
+reviewed tool graph under `.github/publishers/` with `npm ci --ignore-scripts`.
+Its manifests and integrity-pinned lockfiles come from a sparse checkout of the
+validated dispatch SHA. Tools never come from build artifacts or caches, and
+publication tokens appear only on the final publication step.
+The Open VSX graph overrides its VSCE packaging dependency to the same reviewed
+version used for Marketplace, avoiding its older vulnerable secret-scanning
+graph. Publication uses prepared VSIX files, with no packaging step.
 
 ## Invariants
 
@@ -75,7 +81,9 @@ globally with `--ignore-scripts`.
 - Keep repository dependency installation out of `npm-publish`, both VSIX
   publisher jobs, and `publish-crates`.
 - Keep `--ignore-scripts` on every privileged `npm publish`.
-- Keep global publication tools pinned to reviewed versions.
+- Keep publication tools and their transitive dependency graph pinned in the
+  dedicated lockfiles. Invoke them with `npx --no-install --prefix` so execution
+  cannot fetch a missing CLI. Review lockfile changes before release.
 - Stage the `fallow` npm root, never publish it from the workflow. `fallow` pins
   its platform packages and `fallow-type-aware` to the exact release version,
   so those reach users only through a new root. The `fallow` trusted publisher

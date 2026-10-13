@@ -671,22 +671,16 @@ test("release publication waits for the aggregate verification gate", () => {
       /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-root-approved\]/,
       registry,
     );
-    assert.match(job, /permissions: \{\}/, registry);
-    assert.match(
-      job,
-      new RegExp(
-        `npm install -g --ignore-scripts ${cli.replace("/", "\\/")}@${pin.replaceAll(".", "\\.")}`,
-        "u",
-      ),
-      registry,
+    assert.match(job, /permissions:\n\s+contents: read/, registry);
+    const directory = cli === "ovsx" ? "open-vsx" : "marketplace";
+    const publisher = JSON.parse(
+      readFileSync(`.github/publishers/${directory}/package.json`, "utf8"),
     );
+    assert.equal(publisher.dependencies[cli], pin, registry);
+    assert.match(job, /npm ci[^\n]+--ignore-scripts --no-audit --no-fund/u, registry);
     assert.match(job, new RegExp(`secrets\\.${secret}`, "u"), registry);
     assert.doesNotMatch(job, new RegExp(`secrets\\.${otherSecret}`, "u"), registry);
-    assert.doesNotMatch(
-      job,
-      /actions\/checkout|pnpm|npm (?:ci|install)(?! -g)|\bbuild\b/u,
-      registry,
-    );
+    assert.doesNotMatch(job, /pnpm|npm install|\bbuild\b/u, registry);
     assert.doesNotMatch(job, /continue-on-error/u, registry);
     assert.match(job, /\.entries\[\]\.file/u, registry);
     assert.match(job, /--skip-duplicate/u, registry);
@@ -2247,4 +2241,56 @@ test("ordinary workflow npm installs suppress dependency lifecycle scripts", () 
     /secrets\.|environment:|id-token: write/u,
     "Electron initialization must not run with publishing credentials",
   );
+});
+
+test("VSIX publishers use reviewed frozen graphs from the validated source commit", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const extension = JSON.parse(readFileSync("editors/vscode/package.json", "utf8"));
+  for (const [jobName, directory, cli, token] of [
+    ["vscode-publish-marketplace", "marketplace", "@vscode/vsce", "VSCE_PAT"],
+    ["vscode-publish-open-vsx", "open-vsx", "ovsx", "OVSX_PAT"],
+  ]) {
+    const job = indentedBlock(workflow, jobName, 2);
+    assert.doesNotMatch(job, /npm install -g/u, "global installs resolve an unfrozen graph");
+    const prefix = `.github/publishers/${directory}`;
+    assert.ok(job.includes(`npm ci --prefix ${prefix} --ignore-scripts --no-audit --no-fund`));
+    assert.ok(
+      job.includes(
+        `npx --no-install --prefix ${prefix} ${cli === "ovsx" ? "ovsx" : "vsce"} publish`,
+      ),
+    );
+    assert.match(job, /ref: \$\{\{ github\.sha \}\}/u);
+    assert.match(job, /persist-credentials: false/u);
+    assert.ok(job.includes(`sparse-checkout: ${prefix}`));
+    assert.match(job, /sparse-checkout-cone-mode: false/u);
+    assert.doesNotMatch(job, /cache:|actions\/cache|npm install|pnpm|cargo /u);
+    assert.match(job, /permissions:\n\s+contents: read/u);
+    assert.equal(job.match(/secrets\./gu)?.length, 1);
+    assert.match(job, new RegExp(`env:\\n\\s+${token}: \\$\\{\\{ secrets\\.${token} \\}\\}`, "u"));
+
+    const manifest = JSON.parse(readFileSync(`${prefix}/package.json`, "utf8"));
+    const lock = JSON.parse(readFileSync(`${prefix}/package-lock.json`, "utf8"));
+    assert.equal(manifest.private, true);
+    assert.equal(manifest.dependencies[cli], extension.devDependencies[cli]);
+    assert.deepEqual(Object.keys(manifest.dependencies), [cli]);
+    assert.equal(lock.lockfileVersion, 3);
+    assert.deepEqual(lock.packages[""].dependencies, manifest.dependencies);
+    assert.equal(lock.packages[`node_modules/${cli}`].version, manifest.dependencies[cli]);
+    if (cli === "ovsx") {
+      assert.equal(manifest.overrides["@vscode/vsce"], extension.devDependencies["@vscode/vsce"]);
+      assert.equal(
+        lock.packages["node_modules/@vscode/vsce"].version,
+        manifest.overrides["@vscode/vsce"],
+      );
+    }
+    const dependencies = Object.entries(lock.packages).filter(([path]) => path !== "");
+    assert.ok(dependencies.length > 0);
+    for (const [path, dependency] of dependencies) {
+      assert.match(path, /^node_modules\//u);
+      assert.match(dependency.version, /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/u, path);
+      assert.match(dependency.resolved, /^https:\/\/registry\.npmjs\.org\//u, path);
+      assert.match(dependency.integrity, /^sha512-[A-Za-z0-9+/]+={0,2}$/u, path);
+      assert.equal(dependency.link, undefined, path);
+    }
+  }
 });

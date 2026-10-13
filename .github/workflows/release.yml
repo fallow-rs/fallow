@@ -2003,8 +2003,17 @@ jobs:
     environment: release
     runs-on: ubuntu-26.04
     timeout-minutes: 45
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      - name: Checkout reviewed Marketplace publisher graph
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/publishers/marketplace
+          sparse-checkout-cone-mode: false
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
@@ -2016,7 +2025,7 @@ jobs:
           path: vscode-targets
 
       - name: Install VS Code Marketplace publisher
-        run: npm install -g --ignore-scripts @vscode/vsce@4.0.0
+        run: npm ci --prefix .github/publishers/marketplace --ignore-scripts --no-audit --no-fund
 
       - name: Publish every target to VS Code Marketplace
         shell: bash
@@ -2056,7 +2065,7 @@ jobs:
           while [ "${#pending[@]}" -ne 0 ]; do
             remaining=()
             for file in "${pending[@]}"; do
-              if ! vsce publish \
+              if ! npx --no-install --prefix .github/publishers/marketplace vsce publish \
                   --packagePath "vscode-targets/$file" \
                   --no-dependencies \
                   --skip-duplicate; then
@@ -2087,8 +2096,17 @@ jobs:
     environment: release
     runs-on: ubuntu-26.04
     timeout-minutes: 45
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      - name: Checkout reviewed Open VSX publisher graph
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/publishers/open-vsx
+          sparse-checkout-cone-mode: false
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
@@ -2100,7 +2118,7 @@ jobs:
           path: vscode-targets
 
       - name: Install Open VSX publisher
-        run: npm install -g --ignore-scripts ovsx@1.2.0
+        run: npm ci --prefix .github/publishers/open-vsx --ignore-scripts --no-audit --no-fund
 
       - name: Publish every target to Open VSX
         shell: bash
@@ -2140,7 +2158,7 @@ jobs:
           while [ "${#pending[@]}" -ne 0 ]; do
             remaining=()
             for file in "${pending[@]}"; do
-              if ! ovsx publish \
+              if ! npx --no-install --prefix .github/publishers/open-vsx ovsx publish \
                   "vscode-targets/$file" \
                   --no-dependencies \
                   --skip-duplicate; then

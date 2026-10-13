@@ -1,0 +1,14 @@
+{
+  "name": "fallow-open-vsx-publisher",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ovsx": "1.2.0"
+  },
+  "overrides": {
+    "@vscode/vsce": "4.0.0"
+  }
+}
