@@ -330,8 +330,8 @@ fn options_with_audit_config(
         // The typed audit uses a temporary base worktree, not the persistent
         // snapshot cache that this key ages out.
         cache_max_age_days: _,
-        // The typed audit does not read `audit.typeAware`: the MCP tool sends
-        // type-aware requests to the CLI.
+        // `type_aware_config::reject_config_type_aware` refuses this key when
+        // it turns type-aware analysis on.
         type_aware: _,
     } = config;
     let css = options.css != Some(false) && css.unwrap_or(true);
