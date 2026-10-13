@@ -54,6 +54,20 @@ Update those two versions by hand.
 
 ### Package installs
 
+The root `.npmrc` disables dependency lifecycle scripts by default. Keep
+`--ignore-scripts` explicit on CI installs, including installs with `--prefix`
+that load another package's configuration. Run required native builds and
+extension-host downloads through the existing explicit build and test commands.
+Do not turn install scripts back on for the whole dependency tree.
+
+The review desktop app downloads its pinned Electron binary explicitly after
+installation, without enabling lifecycle scripts for other dependencies:
+
+```bash
+npm ci --prefix apps/review-electron --ignore-scripts
+node apps/review-electron/node_modules/electron/install.js
+```
+
 A root-only `npm ci` is enough for the type-aware CLI test targets. The
 type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`;
 without a sidecar-local install it resolves `typescript` from ancestor

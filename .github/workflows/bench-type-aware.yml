@@ -46,7 +46,7 @@ jobs:
           cache-dependency-path: tools/type-aware-sidecar/package-lock.json
 
       - name: Install type-aware benchmark dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm ci --no-audit --no-fund --ignore-scripts
         working-directory: tools/type-aware-sidecar
 
       - name: Run type-aware benchmarks

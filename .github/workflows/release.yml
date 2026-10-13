@@ -405,8 +405,6 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     needs: [release-context, pgo-profile]
-    # Holds the binary signing key, which exists only as an environment secret.
-    environment: release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
     container: ${{ matrix.container }}
@@ -836,6 +834,86 @@ jobs:
           cp "target/${FALLOW_TARGET}/release/${FALLOW_MCP_BINARY}" "fallow-mcp-${FALLOW_NPM_DIR}.exe"
           cp "target/${FALLOW_TARGET}/release/fallow-similar-code.exe" "fallow-similar-code-${FALLOW_NPM_DIR}.exe"
 
+      - name: Upload unsigned binary payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unsigned-binaries-${{ matrix.npm_dir }}
+          if-no-files-found: error
+          path: |
+            fallow-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            fallow-multicall-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            fallow-lsp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            fallow-mcp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+            fallow-similar-code-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
+
+      - name: Upload NAPI addon
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: napi-${{ matrix.npm_dir }}
+          path: crates/napi/fallow-node.${{ matrix.npm_dir }}.node
+
+  # Fresh runners keep build scripts and dependency execution away from the key.
+  sign:
+    name: Sign (${{ matrix.npm_dir }})
+    needs: build
+    environment: release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - npm_dir: darwin-x64
+            ext: ''
+          - npm_dir: darwin-arm64
+            ext: ''
+          - npm_dir: linux-x64-gnu
+            ext: ''
+          - npm_dir: linux-arm64-gnu
+            ext: ''
+          - npm_dir: linux-x64-musl
+            ext: ''
+          - npm_dir: linux-arm64-musl
+            ext: ''
+          - npm_dir: win32-x64-msvc
+            ext: '.exe'
+          - npm_dir: win32-arm64-msvc
+            ext: '.exe'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Download unsigned binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: unsigned-binaries-${{ matrix.npm_dir }}
+          path: unsigned-binaries
+
+      - name: Validate unsigned binary inventory
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
+          FALLOW_BINARY_EXT: ${{ matrix.ext }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { lstatSync, readdirSync } from 'node:fs';
+          const { FALLOW_NPM_DIR: platform, FALLOW_BINARY_EXT: ext } = process.env;
+          const names = ['fallow', 'fallow-multicall', 'fallow-lsp', 'fallow-mcp', 'fallow-similar-code'];
+          const expected = names.map(name => `${name}-${platform}${ext}`).sort();
+          assert.deepEqual(readdirSync('unsigned-binaries').sort(), expected, 'Unexpected unsigned binary inventory');
+          for (const name of expected) {
+            const stat = lstatSync(`unsigned-binaries/${name}`);
+            assert.ok(stat.isFile() && stat.size > 0, `Expected a nonempty regular binary: ${name}`);
+          }
+          NODE
+
       - name: Verify binary-signing public key parity
         shell: bash
         env:
@@ -848,12 +926,9 @@ jobs:
           ED25519_BINARY_SIGNING_PRIVATE_KEY: ${{ secrets.ED25519_BINARY_SIGNING_PRIVATE_KEY }}
           ED25519_BINARY_SIGNING_PUBLIC_KEY: ${{ vars.ED25519_BINARY_SIGNING_PUBLIC_KEY }}
           FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
-          FALLOW_RUNNER_OS: ${{ runner.os }}
+          FALLOW_BINARY_EXT: ${{ matrix.ext }}
         run: |
-          ext=""
-          if [ "$FALLOW_RUNNER_OS" = "Windows" ]; then
-            ext=".exe"
-          fi
+          ext="$FALLOW_BINARY_EXT"
 
           for bin in \
             "fallow-${FALLOW_NPM_DIR}${ext}" \
@@ -862,84 +937,66 @@ jobs:
             "fallow-mcp-${FALLOW_NPM_DIR}${ext}" \
             "fallow-similar-code-${FALLOW_NPM_DIR}${ext}"
           do
-            node .github/scripts/sign-binary.mjs "$bin" "${bin}.sig"
-            node .github/scripts/verify-binary.mjs "$bin" "${bin}.sig"
+            node .github/scripts/sign-binary.mjs "unsigned-binaries/$bin" "unsigned-binaries/${bin}.sig"
+            node .github/scripts/verify-binary.mjs "unsigned-binaries/$bin" "unsigned-binaries/${bin}.sig"
           done
 
-      # The npm platform packages ship the multicall `fallow` binary and the
-      # exact-version local similar-code provider.
-      # (CLI + LSP + MCP linked into a single engine). Stage it plus its
-      # signature under the package's `fallow(.exe)` name so the "Upload npm
-      # binary" step carries exactly those two files into the npm-<platform>
-      # artifact, which `npm-prep` copies into `@fallow-cli/<platform>/`. The
-      # standalone per-binary GitHub release assets (`fallow-<npm_dir>`,
-      # `fallow-lsp-<npm_dir>`, `fallow-mcp-<npm_dir>`) are uploaded separately
-      # above and are unchanged. `npm/fallow/scripts/verify-binary.js` and the
-      # GitHub Action installer verify the Ed25519 signature, then cross-check
-      # SHA-256 against the release asset digest. Refs #465.
+      # npm ships the multicall binary as fallow, plus the exact-version
+      # similar-code provider. Preserve their existing signature siblings.
       - name: Stage npm platform payload (multicall binary as fallow)
         shell: bash
         env:
           FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
-          FALLOW_RUNNER_OS: ${{ runner.os }}
+          FALLOW_BINARY_EXT: ${{ matrix.ext }}
         run: |
-          ext=""
-          if [ "$FALLOW_RUNNER_OS" = "Windows" ]; then
-            ext=".exe"
-          fi
+          ext="$FALLOW_BINARY_EXT"
           mkdir -p npm-payload
-          cp "fallow-multicall-${FALLOW_NPM_DIR}${ext}"     "npm-payload/fallow${ext}"
-          cp "fallow-multicall-${FALLOW_NPM_DIR}${ext}.sig" "npm-payload/fallow${ext}.sig"
-          cp "fallow-similar-code-${FALLOW_NPM_DIR}${ext}"     "npm-payload/fallow-similar-code${ext}"
-          cp "fallow-similar-code-${FALLOW_NPM_DIR}${ext}.sig" "npm-payload/fallow-similar-code${ext}.sig"
+          cp "unsigned-binaries/fallow-multicall-${FALLOW_NPM_DIR}${ext}"     "npm-payload/fallow${ext}"
+          cp "unsigned-binaries/fallow-multicall-${FALLOW_NPM_DIR}${ext}.sig" "npm-payload/fallow${ext}.sig"
+          cp "unsigned-binaries/fallow-similar-code-${FALLOW_NPM_DIR}${ext}"     "npm-payload/fallow-similar-code${ext}"
+          cp "unsigned-binaries/fallow-similar-code-${FALLOW_NPM_DIR}${ext}.sig" "npm-payload/fallow-similar-code${ext}.sig"
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: fallow-cli-${{ matrix.npm_dir }}
           path: |
-            fallow-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            fallow-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
+            unsigned-binaries/fallow-${{ matrix.npm_dir }}${{ matrix.ext }}
+            unsigned-binaries/fallow-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload LSP artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: fallow-lsp-${{ matrix.npm_dir }}
           path: |
-            fallow-lsp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            fallow-lsp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
+            unsigned-binaries/fallow-lsp-${{ matrix.npm_dir }}${{ matrix.ext }}
+            unsigned-binaries/fallow-lsp-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload MCP artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: fallow-mcp-${{ matrix.npm_dir }}
           path: |
-            fallow-mcp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            fallow-mcp-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
+            unsigned-binaries/fallow-mcp-${{ matrix.npm_dir }}${{ matrix.ext }}
+            unsigned-binaries/fallow-mcp-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload similar-code provider artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: fallow-similar-code-${{ matrix.npm_dir }}
           path: |
-            fallow-similar-code-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}
-            fallow-similar-code-${{ matrix.npm_dir }}${{ runner.os == 'Windows' && '.exe' || '' }}.sig
+            unsigned-binaries/fallow-similar-code-${{ matrix.npm_dir }}${{ matrix.ext }}
+            unsigned-binaries/fallow-similar-code-${{ matrix.npm_dir }}${{ matrix.ext }}.sig
 
       - name: Upload npm binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: npm-${{ matrix.npm_dir }}
           path: |
-            npm-payload/fallow${{ runner.os == 'Windows' && '.exe' || '' }}
-            npm-payload/fallow${{ runner.os == 'Windows' && '.exe' || '' }}.sig
-            npm-payload/fallow-similar-code${{ runner.os == 'Windows' && '.exe' || '' }}
-            npm-payload/fallow-similar-code${{ runner.os == 'Windows' && '.exe' || '' }}.sig
-
-      - name: Upload NAPI addon
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: napi-${{ matrix.npm_dir }}
-          path: crates/napi/fallow-node.${{ matrix.npm_dir }}.node
+            npm-payload/fallow${{ matrix.ext }}
+            npm-payload/fallow${{ matrix.ext }}.sig
+            npm-payload/fallow-similar-code${{ matrix.ext }}
+            npm-payload/fallow-similar-code${{ matrix.ext }}.sig
 
   validate:
     name: Release validation
@@ -950,7 +1007,7 @@ jobs:
 
   similar-code-conformance:
     name: Similar-code production conformance
-    needs: build
+    needs: [build, sign]
     runs-on: ubuntu-26.04
     timeout-minutes: 75
     permissions:
@@ -1140,7 +1197,7 @@ jobs:
   # never install).
   release-verified:
     name: Release verified
-    needs: [build, validate, similar-code-conformance]
+    needs: [build, sign, validate, similar-code-conformance]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions: {}
@@ -1154,7 +1211,7 @@ jobs:
   # publish job. See the npm-publish job below for the matching pattern.
   npm-prep:
     name: Pack npm tarballs
-    needs: build
+    needs: [build, sign]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
@@ -1442,12 +1499,7 @@ jobs:
       fallow_sha256: ${{ steps.publish.outputs.fallow_sha256 }}
       fallow_stage_id: ${{ steps.publish.outputs.fallow_stage_id }}
     env:
-      # Bootstrap fallback. When NPM_TOKEN is present in repo secrets,
-      # setup-node writes it to .npmrc and `npm publish` authenticates
-      # with it. When the secret is absent (steady state, once every
-      # package has a trusted publisher registered), this stays empty
-      # and OIDC / trusted publishing handles auth exactly like today.
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NODE_AUTH_TOKEN: ''
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1586,8 +1638,8 @@ jobs:
               echo "fallow_sha256=$digest" >> "$GITHUB_OUTPUT"
               # One stage call per run, never a probing publish: every attempt
               # signs and logs a provenance statement before npm answers. The
-              # token is cleared so a bootstrap NPM_TOKEN never reaches a
-              # staged name, whose publisher is OIDC and stage-only.
+              # token stays empty so authentication always uses the
+              # environment-scoped, stage-only trusted publisher.
               set +e
               stage_output=$(NODE_AUTH_TOKEN="" npm stage publish "$file" --access public --provenance --ignore-scripts 2>&1)
               stage_status=$?
@@ -1709,7 +1761,7 @@ jobs:
   # check out or build repository code while a registry token is present.
   vscode-prep:
     name: Build VS Code target VSIX files
-    needs: build
+    needs: [build, sign]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:

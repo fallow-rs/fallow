@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  mkdtempSync,
+  copyFileSync,
+  writeFileSync,
+  rmSync,
+} from "node:fs";
+import { spawnSync as runProcess } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -604,7 +614,7 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.doesNotMatch(workflow, /^\s+administration:/mu);
   assert.match(build, /needs: \[release-context, pgo-profile\]/);
   assert.match(validate, /needs: release-context/);
-  assert.match(similarCodeConformance, /needs: build/);
+  assert.match(similarCodeConformance, /needs: \[build, sign\]/);
   assert.match(similarCodeConformance, /permissions:\n\s+contents: read/);
   assert.doesNotMatch(similarCodeConformance, /id-token: write|contents: write/);
   assert.match(similarCodeConformance, /fallow-similar-code-linux-x64-gnu/);
@@ -617,7 +627,7 @@ test("release publication waits for the aggregate verification gate", () => {
     /cargo deny[\s\S]*tools\/similar-code-sidecar\/Cargo\.toml[\s\S]*check licenses/u,
   );
   assert.match(similarCodeConformance, /semantic-clone-candle-conformance\.mjs/);
-  assert.match(gate, /needs: \[build, validate, similar-code-conformance\]/);
+  assert.match(gate, /needs: \[build, sign, validate, similar-code-conformance\]/);
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
   assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke\]/);
@@ -781,9 +791,9 @@ test("release credential jobs run in the main-only release environment", () => {
   const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
   const security = readFileSync("docs/development/release-security.md", "utf8");
   const credentialJobs = [
-    "build",
     "npm-publish",
     "publish-crates",
+    "sign",
     "vscode-publish-marketplace",
     "vscode-publish-open-vsx",
   ];
@@ -2126,4 +2136,115 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
     assert.equal(job.match(/^    if: (.+)$/m)?.[1], check.match(/^    if: (.+)$/m)?.[1]);
     assert.equal(job.match(/^    runs-on: (.+)$/m)?.[1], check.match(/^    runs-on: (.+)$/m)?.[1]);
   }
+});
+
+test("release build dependencies never receive the binary signing credential", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const build = indentedBlock(workflow, "build", 2);
+  assert.doesNotMatch(
+    build,
+    /secrets\.|environment: release/u,
+    "dependency execution must run outside the signing environment",
+  );
+  const signing = indentedBlock(workflow, "sign", 2);
+  assert.match(signing, /needs: build/u);
+  assert.match(signing, /environment: release/u);
+  assert.doesNotMatch(
+    signing,
+    /npm (?:ci|install)|pnpm install|cargo |pip install|cache@/u,
+    "signing runner must not build or install repository dependencies",
+  );
+  assert.match(build, /name: unsigned-binaries-\$\{\{ matrix\.npm_dir \}\}/u);
+  assert.doesNotMatch(build, /name: npm-\$\{\{|name: fallow-cli-\$\{\{/u);
+  const buildPlatforms = Array.from(build.matchAll(/^\s+npm_dir: (\S+)$/gmu), (match) => match[1]);
+  const signingPlatforms = Array.from(
+    signing.matchAll(/^\s+- npm_dir: (\S+)$/gmu),
+    (match) => match[1],
+  );
+  assert.deepEqual(
+    signingPlatforms.toSorted(),
+    buildPlatforms.toSorted(),
+    "every built platform must be signed exactly once",
+  );
+  for (const consumer of ["npm-prep", "similar-code-conformance"]) {
+    assert.match(
+      indentedBlock(workflow, consumer, 2),
+      /needs: \[build, sign\]/u,
+      `${consumer} must wait for signed artifacts`,
+    );
+  }
+});
+
+test("npm publishing uses only environment-scoped trusted publishing", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const publisher = indentedBlock(workflow, "npm-publish", 2);
+  assert.doesNotMatch(
+    publisher,
+    /secrets\.NPM_TOKEN/u,
+    "a stolen bootstrap token must not bypass the trusted publisher policy",
+  );
+  assert.match(publisher, /NODE_AUTH_TOKEN: ''/u);
+  assert.match(publisher, /id-token: write/u);
+});
+
+test("root npm installs disable lifecycle scripts by default", (t) => {
+  assert.ok(existsSync(".npmrc"), "root npm installation must have a lifecycle script policy");
+  const cwd = mkdtempSync(join(tmpdir(), "fallow-lifecycle-policy-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFileSync(
+    join(cwd, "package.json"),
+    JSON.stringify({
+      name: "lifecycle-policy-fixture",
+      version: "1.0.0",
+      scripts: { preinstall: "node -e \"require('fs').writeFileSync('EXECUTED', 'yes')\"" },
+    }),
+  );
+  const run = (args) => runProcess("npm", args, { cwd, encoding: "utf8" });
+  const lock = run([
+    "install",
+    "--package-lock-only",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+  ]);
+  assert.equal(lock.status, 0, lock.stderr);
+  const unsafe = run(["ci", "--ignore-scripts=false", "--no-audit", "--no-fund"]);
+  assert.equal(unsafe.status, 0, unsafe.stderr);
+  assert.equal(readFileSync(join(cwd, "EXECUTED"), "utf8"), "yes");
+  rmSync(join(cwd, "EXECUTED"));
+  copyFileSync(".npmrc", join(cwd, ".npmrc"));
+  const safe = run(["ci", "--no-audit", "--no-fund"]);
+  assert.equal(safe.status, 0, safe.stderr);
+  assert.equal(
+    existsSync(join(cwd, "EXECUTED")),
+    false,
+    "the root npm policy must stop lifecycle code from running during ordinary installs",
+  );
+});
+
+test("ordinary workflow npm installs suppress dependency lifecycle scripts", () => {
+  for (const path of ["bench-type-aware.yml", "review-electron.yml", "ci.yml"]) {
+    const workflow = readWorkflow(`.github/workflows/${path}`);
+    const installs = workflow
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#") && /\bnpm ci\b/u.test(line));
+    assert.ok(installs.length > 0, `${path} must exercise the npm install policy`);
+    for (const line of installs) {
+      assert.ok(
+        line.includes("--ignore-scripts"),
+        `${path} permits dependency lifecycle scripts: ${line.trim()}`,
+      );
+    }
+  }
+  const electron = indentedBlock(readWorkflow(".github/workflows/review-electron.yml"), "test", 2);
+  assert.match(
+    electron,
+    /node node_modules\/electron\/install\.js/u,
+    "the pinned Electron binary must still be initialized explicitly",
+  );
+  assert.doesNotMatch(
+    electron,
+    /secrets\.|environment:|id-token: write/u,
+    "Electron initialization must not run with publishing credentials",
+  );
 });

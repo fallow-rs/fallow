@@ -11,9 +11,10 @@ creates, moves, or publishes Git tags or GitHub Releases.
 |---|---|---|
 | `release-context` | Bind the dispatch to `main`, the release version, and an absent tag | Read only |
 | `pgo-profile` | Build an instrumented binary, train the PGO profile on pinned public fixtures, and upload only the profile | Read only |
-| `build` | Build and sign release artifacts | Artifact signing only |
+| `build` | Build unsigned binaries, archives, and NAPI addons | Read only |
+| `sign` | Sign downloaded raw binaries and stage npm binary payloads on fresh runners | Artifact signing only |
 | `validate` | Reusable release validation | Read only |
-| `release-verified` | Join build, validation, and `similar-code-conformance` | None |
+| `release-verified` | Join build, signing, validation, and `similar-code-conformance` | None |
 | `release-assets` | Flatten and store the complete GitHub asset bundle, including all VSIX targets | Read only |
 | `release-ready` | Join publication jobs and prove the tag is still absent | Read only |
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
@@ -34,7 +35,7 @@ globally with `--ignore-scripts`.
 
 ## Invariants
 
-- Run every credential-bearing job in the `release` environment: `build`
+- Run every credential-bearing job in the `release` environment: `sign`
   (binary signing key), `publish-crates`, `npm-publish`, and both VSIX
   publisher jobs. Its deployment branch policy admits `main` only. The ref
   check in `release-context` is part of the workflow file, so it stops a
@@ -59,6 +60,17 @@ globally with `--ignore-scripts`.
   artifact name must not start with `fallow-`, because `release-assets`
   downloads that pattern as release assets. The `build` job fails when a
   release binary contains the LLVM profiler runtime.
+- Keep `build` outside the `release` environment, with no signing credential.
+  Upload raw binary data only as `unsigned-binaries-<platform>`, separately from
+  the existing release archives and NAPI addons. Each `sign` matrix runner is
+  fresh, downloads its exact unsigned artifact, and rejects unexpected,
+  missing, empty, or nonregular entries before the signing key is exposed.
+  Signing uses only Node builtins and the committed signing scripts. Never
+  install dependencies, restore build caches, or execute downloaded binaries
+  in `sign`. The key is set only on the signing step. Preserve the signed
+  release artifact names and npm multicall payload names. Every consumer of
+  signed binaries must wait for `sign`, including npm preparation and
+  similar-code conformance.
 - Keep every checkout at `persist-credentials: false`.
 - Keep repository dependency installation out of `npm-publish`, both VSIX
   publisher jobs, and `publish-crates`.
@@ -75,8 +87,9 @@ globally with `--ignore-scripts`.
 - Make exactly one `npm stage publish` call per staged name per run and never
   probe with a direct publish. Every attempt, including a refused one, signs
   and logs a provenance statement before the registry answers.
-- Clear `NODE_AUTH_TOKEN` for the stage call so a bootstrap token never reaches
-  a staged name.
+- Keep `NODE_AUTH_TOKEN` empty throughout `npm-publish`. Every package must
+  have environment-scoped trusted publishing configured. Never restore a
+  repository token fallback: a token bypasses the OIDC environment binding.
 - Treat npm error code `E409` from the stage call as already staged. The job
   has no npm login, so it cannot read stages, and the `npm view` precheck does
   not see a staged version. The maintainer digest comparison is what proves
