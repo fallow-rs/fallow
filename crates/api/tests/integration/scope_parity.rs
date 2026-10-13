@@ -512,7 +512,7 @@ fn type_aware_leaks_follow_the_package_scope() {
     let options = DeadCodeOptions {
         analysis: AnalysisOptions {
             type_aware: fallow_api::TypeAwareOptions {
-                enabled: true,
+                enabled: Some(true),
                 projects: Vec::new(),
                 require: fallow_api::TypeAwareRequire::Complete,
             },

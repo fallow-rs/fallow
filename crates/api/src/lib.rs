@@ -407,13 +407,26 @@ pub struct AnalysisOptions {
 /// Typed options for Fallow's optional TypeScript semantic companion.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TypeAwareOptions {
-    /// Turn on TypeScript semantic refinement for this call.
-    pub enabled: bool,
+    /// `Some(true)` turns on TypeScript semantic refinement for this call, as
+    /// `--type-aware` does. `Some(false)` keeps the call syntactic, as
+    /// `--no-type-aware` does, also when `FALLOW_TYPE_AWARE` or the config
+    /// turns it on. `None` follows `FALLOW_TYPE_AWARE` and the config. The
+    /// typed runners cannot run type-aware analysis from those layers, so they
+    /// return [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when a layer turns it on.
+    pub enabled: Option<bool>,
     /// Explicit TypeScript project paths handed to the semantic sidecar.
     /// Empty defers to project discovery.
     pub projects: Vec<PathBuf>,
     /// How strictly semantic completion is required before results are kept.
     pub require: fallow_config::TypeAwareRequire,
+}
+
+impl TypeAwareOptions {
+    /// The caller requested type-aware analysis for this call.
+    #[must_use]
+    pub const fn requested(&self) -> bool {
+        matches!(self.enabled, Some(true))
+    }
 }
 
 /// Issue-type filters for the dead-code analysis.

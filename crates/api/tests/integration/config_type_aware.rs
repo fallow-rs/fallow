@@ -15,11 +15,11 @@ use std::path::{Path, PathBuf};
 
 use fallow_api::{
     AnalysisOptions, AuditOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions,
-    ProgrammaticError, TYPE_AWARE_CONFIG_UNSUPPORTED, run_audit, run_boundary_violations,
-    run_circular_dependencies, run_combined, run_dead_code, run_health,
+    ProgrammaticError, TYPE_AWARE_CONFIG_UNSUPPORTED, TypeAwareOptions, run_audit,
+    run_boundary_violations, run_circular_dependencies, run_combined, run_dead_code, run_health,
 };
 
-use crate::common::{commit, git, write};
+use crate::common::{commit, git, rerun_with_type_aware_sidecar, write};
 
 /// A git project whose head commit changes one exported file.
 fn project(dir: &Path, config: &str) -> PathBuf {
@@ -172,4 +172,157 @@ fn syntactic_config_runs_on_the_typed_route() {
     run_dead_code(&dead_code_options(&root)).expect("dead code");
     health(&root).expect("health");
     audit(&root).expect("audit");
+}
+
+/// `enabled: Some(false)` keeps a call syntactic, as `--no-type-aware` does,
+/// so every runner answers although both config keys turn type-aware
+/// analysis on.
+#[test]
+fn explicit_off_runs_every_runner_syntactic() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = project(
+        dir.path(),
+        r#"{"typeAware":{"enabled":true},"audit":{"typeAware":true}}"#,
+    );
+    let off = AnalysisOptions {
+        type_aware: TypeAwareOptions {
+            enabled: Some(false),
+            ..TypeAwareOptions::default()
+        },
+        ..analysis(&root)
+    };
+    let dead_code = DeadCodeOptions {
+        analysis: off.clone(),
+        ..DeadCodeOptions::default()
+    };
+    let report = run_dead_code(&dead_code).expect("dead code");
+    assert!(
+        report
+            .output
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.type_aware.as_ref())
+            .is_none()
+    );
+    run_circular_dependencies(&dead_code).expect("circular dependencies");
+    run_boundary_violations(&dead_code).expect("boundary violations");
+    run_health(&ComplexityOptions {
+        analysis: off.clone(),
+        ..ComplexityOptions::default()
+    })
+    .expect("health");
+    run_combined(&CombinedOptions {
+        analysis: off.clone(),
+        ..CombinedOptions::default()
+    })
+    .expect("combined");
+    run_audit(&AuditOptions {
+        analysis: off,
+        base: Some("HEAD~1".to_owned()),
+        ..AuditOptions::default()
+    })
+    .expect("audit");
+}
+
+/// The unused class members of a project whose OpenTelemetry sampler
+/// implements `Sampler`, with `enabled` as the type-aware choice.
+fn sampler_members(config: &str, enabled: Option<bool>) -> Vec<String> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("project");
+    write(
+        &root,
+        "package.json",
+        r#"{"name":"otel-sampler","private":true,"main":"src/index.ts",
+            "dependencies":{"@opentelemetry/sdk-trace-base":"1.30.0"}}"#,
+    );
+    write(&root, ".fallowrc.json", config);
+    write(
+        &root,
+        "src/index.ts",
+        "import { MySampler } from './sampler';\nconsole.log(new MySampler());\n",
+    );
+    write(
+        &root,
+        "src/sampler.ts",
+        "import type { Sampler } from '@opentelemetry/sdk-trace-base';\n\
+         export class MySampler implements Sampler {\n\
+         \x20 shouldSample() { return { decision: 1 }; }\n\
+         \x20 toString() { return 'MySampler'; }\n\
+         \x20 unusedHelper() { return 1; }\n\
+         }\n",
+    );
+    let report = run_dead_code(&DeadCodeOptions {
+        analysis: AnalysisOptions {
+            type_aware: TypeAwareOptions {
+                enabled,
+                ..TypeAwareOptions::default()
+            },
+            ..analysis(&root)
+        },
+        ..DeadCodeOptions::default()
+    })
+    .expect("dead code");
+    let mut members: Vec<String> = report
+        .output
+        .results
+        .unused_class_members
+        .iter()
+        .map(|finding| finding.member.member_name.clone())
+        .collect();
+    members.sort();
+    members
+}
+
+/// `Some(false)` reaches detection as `--no-type-aware` does. With
+/// `typeAware.enabled` in config, detection holds framework members back for
+/// semantic verification. A syntactic run must credit them, as it does when
+/// the config leaves type-aware analysis off.
+#[test]
+fn explicit_off_credits_framework_members_as_a_syntactic_config_does() {
+    let off_in_config = sampler_members("{}", None);
+    assert_eq!(off_in_config, vec!["unusedHelper".to_owned()]);
+    assert_eq!(
+        sampler_members(r#"{"typeAware":{"enabled":true}}"#, Some(false)),
+        off_in_config
+    );
+}
+
+const PRIVATE_LEAK_TEST: &str =
+    "config_type_aware::explicit_on_turns_on_private_type_leaks_as_the_cli_does";
+
+/// A type-aware run turns the opt-in `private-type-leaks` rule on, as
+/// `fallow dead-code --type-aware` does, so `Some(true)` reports the
+/// exported function that returns a non-exported interface.
+#[test]
+fn explicit_on_turns_on_private_type_leaks_as_the_cli_does() {
+    if std::env::var_os("FALLOW_TYPE_AWARE_BIN").is_none() {
+        rerun_with_type_aware_sidecar(PRIVATE_LEAK_TEST);
+        return;
+    }
+    let leaks = |config: &str, enabled: Option<bool>| {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = project(dir.path(), config);
+        run_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                type_aware: TypeAwareOptions {
+                    enabled,
+                    ..TypeAwareOptions::default()
+                },
+                ..analysis(&root)
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead code")
+        .output
+        .results
+        .private_type_leaks
+        .len()
+    };
+    assert_eq!(leaks("{}", Some(true)), 1);
+    assert_eq!(leaks("{}", None), 0);
+    // A rule that the config sets keeps its severity.
+    assert_eq!(
+        leaks(r#"{"rules":{"private-type-leaks":"off"}}"#, Some(true)),
+        0
+    );
 }

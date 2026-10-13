@@ -17,6 +17,12 @@ export interface TypeAwareAnalysisOptions extends AnalysisOptions {
 }
 
 export interface TypeAwareOptions {
+  /**
+   * `true` runs type-aware analysis. `false` keeps the call syntactic, also
+   * when `typeAware.enabled` or `FALLOW_TYPE_AWARE` turns it on. When unset
+   * and one of these turns it on, the call rejects with
+   * `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED`.
+   */
   enabled?: boolean;
   projects?: string[];
   require?: 'best-effort' | 'complete';

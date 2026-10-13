@@ -13,7 +13,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     ISSUE_TYPE_FLAGS,
-    api_runtime::{env_changed_since, env_diff_file, run_api_blocking, typed_tool_result},
+    api_runtime::{
+        env_changed_since, env_diff_file, run_api_blocking, typed_tool_result, typed_type_aware,
+    },
     api_runtime::{non_empty_path, workspace_patterns_from_param},
     fallback_policy::{
         baseline_requested, grouped_requested, regression_requested, type_aware_requested,
@@ -183,6 +185,7 @@ fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptio
             ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
+            type_aware: typed_type_aware(params.type_aware),
             ..AnalysisOptions::default()
         },
         filters: filters_from_params(params)?,
@@ -692,5 +695,20 @@ mod tests {
             assert!(!requires_cli_fallback(&params));
             assert_cli_fallback_ran(run_analyze(MISSING_FALLBACK_BINARY, params).await);
         }
+
+        // `type_aware: false` keeps the run syntactic on both routes.
+        let off = || AnalyzeParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            type_aware: Some(false),
+            ..AnalyzeParams::default()
+        };
+        let result = run_analyze(MISSING_FALLBACK_BINARY, off())
+            .await
+            .expect("the typed route answers");
+        assert_eq!(result.is_error, Some(false));
+        let args = build_analyze_args(&off()).expect("analyze args");
+        assert!(args.contains(&"--no-type-aware".to_string()), "{args:?}");
+        assert!(!args.contains(&"--type-aware".to_string()), "{args:?}");
     }
 }

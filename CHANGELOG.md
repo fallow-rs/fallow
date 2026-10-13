@@ -229,6 +229,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns the error code `FALLOW_AUDIT_BASELINE_UNSUPPORTED` for these keys.
   It does not ignore them.
 
+- **`type_aware: false` keeps a run syntactic on every programmatic surface.**
+  The MCP `analyze`, `check_health`, `audit` and `inspect_target` tools
+  ignored `type_aware: false`: when the config turned type-aware analysis
+  on, the run was type-aware. The tools now pass `--no-type-aware` to the CLI
+  and keep the typed route syntactic, as `--no-type-aware` does. In
+  `fallow_api`, `TypeAwareOptions.enabled` is now an `Option<bool>`.
+  `Some(false)` runs syntactic without the
+  `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` error, also when
+  `FALLOW_TYPE_AWARE` or the config turns type-aware analysis on. In the
+  Node bindings, `typeAware: { enabled: false }` does the same. Before, it
+  was the same as an unset option. An explicit choice now also reaches
+  detection, as the CLI flags do: a syntactic run credits the framework
+  class members that the type-aware config holds back for verification, and
+  a type-aware run turns the opt-in `private-type-leaks` rule on unless the
+  config sets it. Before, `fallow_api` and the Node bindings reported no
+  private-type leaks for a type-aware run where `fallow dead-code
+  --type-aware` reported them.
+
 - **The MCP tools run type-aware analysis when the config turns it on.**
   `fallow` runs type-aware analysis when `typeAware.enabled` is `true`, and
   `fallow audit` also when `audit.typeAware` is `true`. The typed route of the

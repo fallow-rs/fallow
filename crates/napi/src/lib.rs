@@ -282,7 +282,7 @@ fn map_type_aware_options(input: Option<TypeAwareOptions>) -> napi::Result<api::
         }
     };
     Ok(api::TypeAwareOptions {
-        enabled: input.enabled.unwrap_or(false),
+        enabled: input.enabled,
         projects: input
             .projects
             .unwrap_or_default()

@@ -34,7 +34,8 @@ pub(super) enum TypeAwareCommand {
 }
 
 /// Fail with [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when the environment or the
-/// config turns on type-aware analysis that `type_aware` leaves off.
+/// config turns on type-aware analysis and `type_aware` leaves the choice
+/// open.
 ///
 /// # Errors
 ///
@@ -71,7 +72,9 @@ pub(super) fn reject_config_type_aware_at(
     location: ConfigLocation<'_>,
     command: TypeAwareCommand,
 ) -> ProgrammaticResult<()> {
-    if type_aware.enabled {
+    // An explicit choice wins over the environment and the config, as the
+    // `--type-aware` and `--no-type-aware` flags do.
+    if type_aware.enabled.is_some() {
         return Ok(());
     }
     let source = match env_layer(std::env::var(TYPE_AWARE_ENV)) {
@@ -151,6 +154,28 @@ mod tests {
             env_layer(Err(std::env::VarError::NotPresent)),
             EnvLayer::Unset
         );
+    }
+
+    /// An explicit choice returns before the environment or the config is
+    /// read, as `--type-aware` and `--no-type-aware` win over both. The root
+    /// does not exist, so a config read would fail.
+    #[test]
+    fn explicit_choice_wins_before_the_environment_and_the_config() {
+        for enabled in [Some(true), Some(false)] {
+            let options = TypeAwareOptions {
+                enabled,
+                ..TypeAwareOptions::default()
+            };
+            let location = ConfigLocation {
+                root: Path::new("/fallow-no-such-root"),
+                config_path: Some(Path::new("/fallow-no-such-root/.fallowrc.json")),
+                allow_remote_extends: false,
+            };
+            assert!(
+                reject_config_type_aware_at(&options, location, TypeAwareCommand::Audit).is_ok(),
+                "{enabled:?}"
+            );
+        }
     }
 
     #[test]

@@ -665,7 +665,7 @@ fn refine_with_unfiltered_unused_files(
     let outcome =
         crate::type_aware::refine_programmatic_dead_code(options, filters, session, results);
     results.unused_files = reported_unused_files;
-    if options.enabled {
+    if options.requested() {
         // Reconciliation can add findings, so rule severities are resolved
         // again over the refined set. The pass removes findings and writes
         // each gate severity again, so repeating it is idempotent. Mirrors
@@ -875,7 +875,31 @@ fn configure_project_for_dead_code(
         project_config.config.show_cascade = true;
     }
     activate_explicit_dead_code_opt_ins(&options.filters, &mut project_config.config.rules);
+    apply_explicit_type_aware_choice(options, &mut project_config.config);
     project_config
+}
+
+/// Write an explicit `type_aware` choice into the resolved config, as the
+/// `--type-aware` and `--no-type-aware` flags do. Detection reads
+/// `typeAware.enabled` itself: it holds framework class-member rules back for
+/// semantic verification, and a syntactic run must credit them instead.
+/// A type-aware run turns the opt-in `private-type-leaks` rule on, as the CLI
+/// does, unless a filter is active or the config sets the rule.
+fn apply_explicit_type_aware_choice(
+    options: &DeadCodeOptions,
+    config: &mut fallow_config::ResolvedConfig,
+) {
+    let Some(enabled) = options.analysis.type_aware.enabled else {
+        return;
+    };
+    config.type_aware.enabled = enabled;
+    if enabled
+        && !options.filters.any_active()
+        && config.rules.private_type_leaks == fallow_config::Severity::Off
+        && !config.rules.private_type_leaks_configured
+    {
+        config.rules.private_type_leaks = fallow_config::Severity::Warn;
+    }
 }
 
 fn activate_explicit_dead_code_opt_ins(

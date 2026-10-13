@@ -11,7 +11,7 @@ use super::{
     VALID_AUDIT_GATES,
     api_runtime::{
         env_changed_since, env_diff_file, non_empty_path, non_empty_string,
-        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result,
+        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result, typed_type_aware,
         workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
@@ -318,7 +318,7 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             changed_workspaces: None,
             explain: true,
-            type_aware: fallow_api::TypeAwareOptions::default(),
+            type_aware: typed_type_aware(params.type_aware),
             ..AnalysisOptions::default()
         },
         base: non_empty_string(params.base.as_deref()),
@@ -1003,6 +1003,23 @@ mod tests {
             assert_eq!(run_audit_api_value(&params), Ok(None), "{config}");
             assert_cli_fallback_ran(run_audit(MISSING_FALLBACK_BINARY, params).await);
         }
+
+        // `type_aware: false` keeps the audit syntactic on both routes.
+        let project = audit_fixture();
+        write_type_aware_config(project.path(), r#"{"audit":{"typeAware":true}}"#);
+        let off = || AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            no_cache: Some(true),
+            type_aware: Some(false),
+            ..AuditParams::default()
+        };
+        assert!(
+            run_audit_api_value(&off()).expect("typed audit").is_some(),
+            "`type_aware: false` stays on the typed route"
+        );
+        let args = build_audit_args(&off()).expect("audit args");
+        assert!(args.contains(&"--no-type-aware".to_string()), "{args:?}");
 
         let project = audit_fixture();
         write_type_aware_config(

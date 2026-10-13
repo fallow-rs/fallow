@@ -125,9 +125,15 @@ fn push_type_aware(
     projects: Option<&[String]>,
     require: Option<crate::params::TypeAwareRequireParam>,
 ) {
-    if enabled == Some(true) || projects.is_some_and(|items| !items.is_empty()) || require.is_some()
-    {
+    let requested = enabled == Some(true)
+        || projects.is_some_and(|items| !items.is_empty())
+        || require.is_some();
+    if requested {
         args.push("--type-aware".to_string());
+    } else if enabled == Some(false) {
+        // `false` keeps the run syntactic also when the config turns
+        // type-aware analysis on, as on the typed route.
+        args.push("--no-type-aware".to_string());
     }
     if let Some(projects) = projects {
         for project in projects.iter().filter(|project| !project.is_empty()) {

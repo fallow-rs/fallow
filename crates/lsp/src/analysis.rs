@@ -414,7 +414,7 @@ fn run_typed_project_analysis(
         && let Some(options) = input.type_aware_options.filter(|options| options.enabled)
     {
         let type_aware = fallow_api::TypeAwareOptions {
-            enabled: true,
+            enabled: Some(true),
             projects: options.projects.iter().map(PathBuf::from).collect(),
             require: options.require.unwrap_or_default(),
         };
