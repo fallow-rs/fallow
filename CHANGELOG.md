@@ -173,6 +173,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the original export. A namespace import with member access (`ns.a`) stays `found`,
   and a whole-object use (`Object.keys(ns)`, a spread, `ns` as a value) stays
   `missed`.
+- **The MCP `audit` tool and `fallow_api::run_audit` read the `audit` config
+  section.** The typed route ignored `audit.gate`, `audit.css` and
+  `audit.cssDeep`. A project with `"gate": "all"` got the `new-only` verdict
+  from the MCP tool, and the CLI gave `all`. The typed route now uses these
+  keys when the tool parameter is not set, the same as `fallow audit`. The
+  typed route cannot apply `audit.deadCodeBaseline`, `audit.healthBaseline`
+  or `audit.dupesBaseline`. When the config sets one of them, the MCP tool
+  now runs the CLI, which applies the baseline. `fallow_api::run_audit`
+  returns the error code `FALLOW_AUDIT_BASELINE_UNSUPPORTED` for these keys.
+  It does not ignore them.
+
+- **The MCP tools run type-aware analysis when the config turns it on.**
+  `fallow` runs type-aware analysis when `typeAware.enabled` is `true`, and
+  `fallow audit` also when `audit.typeAware` is `true`. The typed route of the
+  MCP `analyze`, `check_changed`, `check_health` and `audit` tools and of the
+  Code Mode `combined` route ignored these keys and the `FALLOW_TYPE_AWARE`
+  variable. It returned syntactic results where the CLI returned type-aware
+  results. These routes now run the CLI when one of these settings turns on
+  type-aware analysis. `fallow_api::run_dead_code`,
+  `run_circular_dependencies`, `run_boundary_violations`, `run_audit`,
+  `run_combined` and `run_health` now return the error code
+  `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` in this case. They do not return
+  syntactic results. The Node bindings return the same error. To run
+  type-aware analysis through the API, set `typeAware.enabled` in the call
+  options. To keep a call syntactic, set `FALLOW_TYPE_AWARE=0`.
+- **Clone families have one order on every surface.** `fallow audit`,
+  `fallow dupes --changed-since` and `fallow dupes --baseline` now order
+  `clone_families[]` by file set. `fallow dupes`, the MCP tools and
+  `fallow_api` already used this order. Before, these three commands ordered
+  the families by duplicated lines. The `suggestions[]` of a family now follow
+  the order of its `groups[]` on every surface. The family set and the values
+  do not change.
 
 - **The review brief and the audit report the same weakened guardrails.**
   The `weakening` section of `fallow audit --brief` and `fallow review` now

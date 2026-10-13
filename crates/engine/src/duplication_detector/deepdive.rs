@@ -825,11 +825,16 @@ mod tests {
         let mut partial_baseline =
             DuplicationBaselineData::from_report(&original, Path::new("/original/checkout"));
         partial_baseline.normalized_clone_fingerprints = vec![reviewed.clone()];
+        // The baseline filter returns the report order, so the instance order
+        // of the reversed input does not survive. The location still names
+        // the group that stays.
         let filtered = filter_new_clone_groups(relocated.clone(), &partial_baseline, root);
         assert_eq!(filtered.clone_groups.len(), 1);
-        assert_eq!(
-            filtered.clone_groups[0].instances[0].file,
-            remaining_location
+        assert!(
+            filtered.clone_groups[0]
+                .instances
+                .iter()
+                .any(|instance| instance.file == remaining_location)
         );
         assert!(
             filter_new_clone_groups(relocated.clone(), &baseline, root)

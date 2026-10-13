@@ -173,12 +173,14 @@ pub use output_contracts::{
     SecurityOutput, SecurityOutputConfig, SecuritySummaryOutput, SimilarCodeCandidateSnapshot,
     SimilarCodeOutput, TraceOutput, WorkspacesOutput,
 };
+pub use runtime::TYPE_AWARE_CONFIG_UNSUPPORTED;
 pub use runtime::{
-    ArchitectureOutput, ArchitectureProgrammaticOutput, AuditProgrammaticKeySnapshot,
-    AuditProgrammaticOutput, BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput,
-    CircularDependenciesOutput, CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput,
-    DeadCodeOutput, DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
-    DuplicationOutput, DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
+    AUDIT_CONFIG_BASELINE_UNSUPPORTED, ArchitectureOutput, ArchitectureProgrammaticOutput,
+    AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
+    BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
+    CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput, DeadCodeOutput,
+    DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput, DuplicationOutput,
+    DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
     FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
     ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
     ProgrammaticHealthRunner, TraceClassMemberOutput, TraceCloneBenchmarkResult, TraceCloneOutput,
@@ -688,12 +690,15 @@ pub struct AuditOptions {
     /// Production override for the duplication domain; `None` defers to
     /// config.
     pub production_dupes: Option<bool>,
-    /// Enable CSS / styling analysis; `None` defers to config.
+    /// `Some(false)` skips CSS / styling analysis, as `--no-css` does. `None`
+    /// and `Some(true)` defer to `audit.css` in config, which defaults to on.
     pub css: Option<bool>,
-    /// Enable deep cross-file CSS analysis; `None` defers to config.
+    /// Enable deep cross-file CSS analysis; `None` defers to `audit.cssDeep`
+    /// in config, which defaults to on. It runs only when CSS analysis runs.
     pub css_deep: Option<bool>,
-    /// Gate mode deciding which findings fail the audit.
-    pub gate: fallow_config::AuditGate,
+    /// Gate mode deciding which findings fail the audit; `None` defers to
+    /// `audit.gate` in config, which defaults to `new-only`.
+    pub gate: Option<fallow_config::AuditGate>,
     /// Fail the gate when a changed function exceeds this CRAP score.
     pub max_crap: Option<f64>,
     /// Test coverage report path for coverage-aware findings.

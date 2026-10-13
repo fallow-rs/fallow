@@ -10,8 +10,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_AUDIT_GATES,
     api_runtime::{
-        env_changed_since, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
+        env_changed_since, env_diff_file, non_empty_path, non_empty_string,
+        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result,
         workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
@@ -20,21 +20,19 @@ use super::{
 
 /// Run the `audit` tool through the typed API when parameters map cleanly to
 /// the programmatic contract, falling back to the CLI for CLI-only surfaces.
+/// The baseline keys of the `audit` config section and config-sourced
+/// type-aware analysis are CLI-only too; see
+/// [`super::api_runtime::typed_error_needs_cli`].
 pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
         let options = match audit_options_from_params(&params) {
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        let result = run_api_blocking("audit", move || audit_typed_value(options, None))
-            .await?
-            .map_or_else(
-                |err| {
-                    CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))])
-                },
-                |value| json_success(&value),
-            );
-        return Ok(result);
+        let result = run_api_blocking("audit", move || audit_typed_value(options, None)).await?;
+        if let Some(result) = typed_tool_result(result) {
+            return Ok(result);
+        }
     }
 
     match build_audit_args(&params) {
@@ -75,9 +73,7 @@ fn run_audit_api_value_with_env(
         return Ok(None);
     }
     let options = audit_options_from_params(params)?;
-    audit_typed_value(options, env)
-        .map(Some)
-        .map_err(|err| programmatic_error_body(&err))
+    super::api_runtime::typed_api_value(audit_typed_value(options, env))
 }
 
 /// Fill the typed route's coverage inputs from the explicit parameters, the
@@ -262,14 +258,18 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
     })
 }
 
-fn audit_gate_from_param(value: Option<&str>) -> Result<AuditGate, String> {
-    match value.unwrap_or("new-only") {
-        "new-only" => Ok(AuditGate::NewOnly),
-        "all" => Ok(AuditGate::All),
-        other => Err(validation_error_body(format!(
-            "Invalid gate '{other}'. Valid values: new-only, all"
-        ))),
-    }
+/// An absent `gate` stays `None`, so the typed route defers to `audit.gate`
+/// in config, as `fallow audit` without `--gate` does.
+fn audit_gate_from_param(value: Option<&str>) -> Result<Option<AuditGate>, String> {
+    value
+        .map(|gate| match gate {
+            "new-only" => Ok(AuditGate::NewOnly),
+            "all" => Ok(AuditGate::All),
+            other => Err(validation_error_body(format!(
+                "Invalid gate '{other}'. Valid values: new-only, all"
+            ))),
+        })
+        .transpose()
 }
 
 #[cfg(test)]
@@ -347,11 +347,11 @@ mod tests {
     }
 
     #[test]
-    fn default_new_only_audit_uses_programmatic_api_route() {
+    fn default_audit_uses_programmatic_api_route_and_defers_the_gate() {
         let params = AuditParams::default();
         assert!(!requires_cli_fallback(&params));
         let options = audit_options_from_params(&params).expect("audit options");
-        assert_eq!(options.gate, AuditGate::NewOnly);
+        assert_eq!(options.gate, None);
     }
 
     /// #2368: the typed route honors `health.coverage` / `health.coverageRoot`
@@ -548,7 +548,7 @@ mod tests {
         };
         assert!(!requires_cli_fallback(&params));
         let options = audit_options_from_params(&params).expect("audit options");
-        assert_eq!(options.gate, AuditGate::All);
+        assert_eq!(options.gate, Some(AuditGate::All));
         assert!(options.analysis.explain);
     }
 
@@ -721,6 +721,99 @@ mod tests {
         );
     }
 
+    /// Without a `gate` parameter the typed route reads `audit.gate` from
+    /// the config, as `fallow audit` without `--gate` does.
+    #[test]
+    fn audit_api_value_reads_the_config_gate() {
+        let project = audit_styling_fixture();
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"css-selector-complexity":"error"},"audit":{"gate":"all"}}"#,
+        )
+        .expect("write config gate");
+        std::fs::write(
+            project.path().join("src/styles.css"),
+            "#app .legacy .title { color: red; }\n.plain { color: blue; }\n",
+        )
+        .expect("write inherited-only change");
+        let params = AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        };
+
+        let value = run_audit_api_value(&params)
+            .expect("config-gate MCP API value")
+            .expect("typed API path");
+        assert_eq!(value["attribution"]["gate"], "all", "{value}");
+        assert_eq!(value["verdict"], "fail", "{value}");
+
+        let overridden = run_audit_api_value(&AuditParams {
+            gate: Some("new-only".to_string()),
+            ..params
+        })
+        .expect("new-only MCP API value")
+        .expect("typed API path");
+        assert_eq!(overridden["attribution"]["gate"], "new-only");
+        assert_eq!(overridden["verdict"], "pass", "{overridden}");
+    }
+
+    /// The typed route cannot apply a baseline from the `audit` config
+    /// section, so the tool runs the CLI, which can. The binary here does not
+    /// exist, so the CLI spawn error proves that the fallback ran.
+    #[tokio::test]
+    async fn config_baseline_falls_back_to_the_cli() {
+        let project = audit_fixture();
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"audit":{"healthBaseline":"health-baseline.json"}}"#,
+        )
+        .expect("write config baseline");
+        let params = AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        };
+        assert!(!requires_cli_fallback(&params));
+        assert_eq!(run_audit_api_value(&params), Ok(None));
+
+        let err = run_audit("missing-fallow-binary-for-fallback", params)
+            .await
+            .expect_err("the CLI fallback cannot start");
+        assert!(
+            err.message
+                .contains("Failed to execute fallow binary 'missing-fallow-binary-for-fallback'"),
+            "{err:?}"
+        );
+    }
+
+    /// Only the config-baseline code takes the CLI: another typed error, such
+    /// as an unknown base ref, stays a structured error of the typed route.
+    /// The binary does not exist, so a fallback would fail to start instead.
+    #[tokio::test]
+    async fn other_typed_errors_do_not_fall_back_to_the_cli() {
+        let project = audit_fixture();
+        let result = run_audit(
+            "missing-fallow-binary-for-fallback",
+            AuditParams {
+                root: Some(project.path().display().to_string()),
+                base: Some("no-such-ref-for-audit".to_string()),
+                no_cache: Some(true),
+                ..AuditParams::default()
+            },
+        )
+        .await
+        .expect("a typed error result, not a CLI start failure");
+        assert_eq!(result.is_error, Some(true));
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
+            _ => panic!("expected text content"),
+        };
+        assert!(text.contains("FALLOW_CHANGED_FILES_FAILED"), "{text}");
+    }
+
     fn audit_fixture() -> tempfile::TempDir {
         let project = tempfile::tempdir().expect("project");
         std::fs::create_dir_all(project.path().join("src")).expect("create src");
@@ -798,5 +891,46 @@ mod tests {
             ],
         );
         project
+    }
+
+    /// `typeAware.enabled` and `audit.typeAware` in config make `fallow
+    /// audit` type-aware. The typed route cannot run that, so the tool runs
+    /// the CLI. `audit.typeAware: false` keeps the audit on the typed route.
+    #[tokio::test]
+    async fn config_type_aware_falls_back_to_the_cli() {
+        use super::super::api_runtime::{
+            MISSING_FALLBACK_BINARY, assert_cli_fallback_ran, write_type_aware_config,
+        };
+        for config in [
+            r#"{"typeAware":{"enabled":true}}"#,
+            r#"{"audit":{"typeAware":true}}"#,
+        ] {
+            let project = audit_fixture();
+            write_type_aware_config(project.path(), config);
+            let params = AuditParams {
+                root: Some(project.path().display().to_string()),
+                base: Some("HEAD".to_string()),
+                no_cache: Some(true),
+                ..AuditParams::default()
+            };
+            assert!(!requires_cli_fallback(&params));
+            assert_eq!(run_audit_api_value(&params), Ok(None), "{config}");
+            assert_cli_fallback_ran(run_audit(MISSING_FALLBACK_BINARY, params).await);
+        }
+
+        let project = audit_fixture();
+        write_type_aware_config(
+            project.path(),
+            r#"{"typeAware":{"enabled":true},"audit":{"typeAware":false}}"#,
+        );
+        let value = run_audit_api_value(&AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("typed audit")
+        .expect("a syntactic audit stays on the typed route");
+        assert!(value["verdict"].is_string(), "{value}");
     }
 }

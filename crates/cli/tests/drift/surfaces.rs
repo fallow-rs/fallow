@@ -783,7 +783,9 @@ pub fn mcp_audit(server: &mut McpServer, root: &Path) -> Value {
     )
 }
 
-/// Run `fallow_api::run_audit` in this process against the base commit.
+/// Run `fallow_api::run_audit` in this process against the base commit. The
+/// gate stays unset, as in [`cli_audit`] and [`mcp_audit`], so `audit.gate`
+/// in config decides it.
 ///
 /// # Panics
 ///
@@ -797,7 +799,6 @@ pub fn api_audit(root: &Path) -> Value {
             ..fallow_api::AnalysisOptions::default()
         },
         base: Some(AUDIT_BASE_REF.to_string()),
-        gate: fallow_api::AuditGate::NewOnly,
         min_invocations_hot: 100,
         ..fallow_api::AuditOptions::default()
     };

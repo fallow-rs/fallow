@@ -217,7 +217,7 @@ Each finding carries `rule`, `path`, an optional `line`, `message`, `evidence`, 
     ToolGuideSection {
         topic: "styling",
         summary: "What the default styling pass adds, and how css_deep changes it.",
-        detail: r"Styling analytics are on by default in audit. CSS and CSS-in-JS evidence can add `styling_findings`, `css_analytics`, and `styling_health` inside the nested `complexity` block. Set css_deep=false to skip project-wide styling reachability and keep the local styling checks. Set css_deep=true to turn it on again when the config turns it off. Styling actions are report-only: verify each one before you edit.",
+        detail: r"Styling analytics are on by default in audit. CSS and CSS-in-JS evidence can add `styling_findings`, `css_analytics`, and `styling_health` inside the nested `complexity` block. Set css_deep=false to skip project-wide styling reachability and keep the local styling checks. Set css_deep=true to turn it on again when the config turns it off. An unset css or css_deep uses `audit.css` or `audit.cssDeep` from the config. Set css=false to skip all styling analytics; css=true cannot turn them on when `audit.css` is false. Styling actions are report-only: verify each one before you edit.",
     },
     ToolGuideSection {
         topic: "coverage",
@@ -239,7 +239,7 @@ When the config sets `health.thresholdOverrides`, audit complexity findings use 
     ToolGuideSection {
         topic: "baselines",
         summary: "How saved baselines keep old issues out of the verdict.",
-        detail: r"Set dead_code_baseline, health_baseline, and dupes_baseline to the baseline files that `fallow dead-code|health|dupes --save-baseline` wrote. Pre-existing issues on touched files then do not decide the verdict: only issues that are not in the matching baseline count.
+        detail: r"Set dead_code_baseline, health_baseline, and dupes_baseline to the baseline files that `fallow dead-code|health|dupes --save-baseline` wrote. Pre-existing issues on touched files then do not decide the verdict: only issues that are not in the matching baseline count. When a parameter is unset, the `audit.deadCodeBaseline`, `audit.healthBaseline`, and `audit.dupesBaseline` config keys apply, as in `fallow audit`. A parameter wins over the config key.
 
 Set include_entry_exports=true to also report unused exports in entry files. This finds typos in framework exports, such as `meatdata` for `metadata`. The flag ORs with the `includeEntryExports` config value. explain_skipped only changes the human-format note about skipped default ignores; MCP JSON responses do not change.",
     },
