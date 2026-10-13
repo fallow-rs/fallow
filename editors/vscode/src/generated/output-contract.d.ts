@@ -19538,8 +19538,12 @@ counts: MutationStatusCounts
 score?: (number | null)
 /**
  * The share of mutants that a test reaches, a fraction from 0 to 1:
- * `covered / (covered + no_coverage)`, with `covered = killed + timeout
- * + survived`. `null` when no mutant is covered or unreached.
+ * `covered / (covered + no_coverage)` over the whole plan. `covered`
+ * counts each executed mutant with a covering test and each `pending`
+ * mutant that a passing dry-run test covers. A `pending` mutant that no
+ * dry-run test covers is `no_coverage`, so a run that `--max-mutants`
+ * caps reports the coverage of the full run. `equivalent` and `pruned`
+ * mutants never count. `null` when no mutant is covered or unreached.
  */
 coverage?: (number | null)
 }
@@ -19713,9 +19717,16 @@ file?: (string | null)
  */
 test_id?: (string | null)
 /**
- * The error message, for an error outside a test.
+ * The error message, for an error outside a test, or the reason for a
+ * test that did not pass in the dry run of a restarted companion.
  */
 message?: (string | null)
+/**
+ * The mutants that ran without this test, because the test did not pass
+ * in the dry run of a restarted companion. Each of them ran with its
+ * other covering tests. Absent for a failure of the first dry run.
+ */
+mutant_ids?: string[]
 }
 /**
  * A selected file that the plan did not instrument.
@@ -19731,7 +19742,8 @@ path: string
 reason: string
 }
 /**
- * The git worktree check of a run (decision 4).
+ * The git worktree check of a run: a run refuses a dirty worktree unless
+ * `--allow-dirty` is set, and it compares the worktree after the run.
  */
 export interface MutationWorktreeCheck {
 /**

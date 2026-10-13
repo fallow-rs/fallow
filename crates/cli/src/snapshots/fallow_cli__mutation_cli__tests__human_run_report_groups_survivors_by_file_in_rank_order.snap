@@ -1,13 +1,12 @@
 ---
 source: crates/cli/src/mutation_cli_tests.rs
-assertion_line: 326
 expression: text
 ---
 Mutation testing (ran the project tests)
 Scope: changed code against origin/main
 Score 25.0%  killed 1  survived 3  timeout 0  partial (time-budget)
 Coverage 80.0%  no coverage 1
-✗ Minimum score 50%: missed
+[X] Minimum score 50%: missed
 
 ● Survived (3)
   src/b.ts

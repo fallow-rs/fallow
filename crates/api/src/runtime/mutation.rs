@@ -380,6 +380,7 @@ fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
     SchedulePlan {
         mutants: scheduled(plan, MutantDisposition::Planned),
         unreached: scheduled(plan, MutantDisposition::NoCoverage),
+        pending: scheduled(plan, MutantDisposition::Pending),
         known_ids: plan
             .mutants
             .iter()

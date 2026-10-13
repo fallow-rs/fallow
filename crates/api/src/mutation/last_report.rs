@@ -1,4 +1,5 @@
-//! The saved report of the last mutation run (decision 23).
+//! The saved report of the last mutation run, which `fallow mutation
+//! inspect` reads when no `--report` is given.
 //!
 //! Each run saves its full JSON report to
 //! `<cache dir>/mutation/last-report.json`. The cache directory has a

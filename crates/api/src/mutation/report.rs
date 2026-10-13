@@ -106,7 +106,8 @@ pub fn plan_files(plan: &MutationPlan) -> Vec<MutationPlanFile> {
 
 /// The result of each plan mutant: the plan disposition, or the scheduler
 /// outcome of a planned mutant. A planned mutant with no outcome is
-/// `pending`. A statically `no_coverage` mutant with an outcome is a static
+/// `pending`. A pending mutant that the dry run never covered is
+/// `no_coverage`. A statically `no_coverage` mutant with an outcome is a static
 /// map miss, and the outcome of the dry-run map wins.
 pub fn mutant_results(plan: &MutationPlan, outcome: Option<&ScheduleOutcome>) -> Vec<MutantResult> {
     plan.mutants
@@ -142,6 +143,15 @@ pub fn mutant_results(plan: &MutationPlan, outcome: Option<&ScheduleOutcome>) ->
                     status: MutantStatus::NoCoverage,
                     ..base
                 },
+                (MutantDisposition::Pending, Some(result))
+                    if result.status == MutantStatus::NoCoverage =>
+                {
+                    MutantResult {
+                        status: MutantStatus::NoCoverage,
+                        static_mutant: result.static_mutant,
+                        ..base
+                    }
+                }
                 (MutantDisposition::Planned | MutantDisposition::Pending, _) => base,
             }
         })
@@ -150,15 +160,7 @@ pub fn mutant_results(plan: &MutationPlan, outcome: Option<&ScheduleOutcome>) ->
 
 /// The totals of `results`.
 pub fn summary(results: &[MutantResult]) -> MutationSummary {
-    let mut counts = MutationStatusCounts::default();
-    for result in results {
-        counts.add(result.status);
-    }
-    MutationSummary {
-        counts,
-        score: counts.score(),
-        coverage: counts.coverage(),
-    }
+    MutationSummary::from_results(results)
 }
 
 /// A function group: the file, then the first line and span of the function.
@@ -291,6 +293,7 @@ pub fn baseline_failures(outcome: Option<&ScheduleOutcome>) -> Vec<MutationBasel
                     file: failure.file.clone(),
                     test_id: failure.test_id.clone(),
                     message: failure.message.clone(),
+                    mutant_ids: failure.mutant_ids.clone(),
                 })
                 .collect()
         })
@@ -412,6 +415,37 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_mutant_that_the_dry_run_never_hit_is_no_coverage() {
+        let plan = plan(
+            vec![
+                planned("m1", Some(1), MutantDisposition::Planned, None),
+                planned("m2", Some(2), MutantDisposition::Pending, None),
+                planned("m3", Some(3), MutantDisposition::Pending, None),
+            ],
+            2,
+        );
+        let mut outcome = outcome(&[
+            ("m1", MutantStatus::Killed),
+            ("m3", MutantStatus::NoCoverage),
+        ]);
+        if let Some(result) = outcome.results.get_mut("m3") {
+            result.covering_tests.clear();
+        }
+        let results = mutant_results(&plan, Some(&outcome));
+        let statuses: Vec<MutantStatus> = results.iter().map(|result| result.status).collect();
+        assert_eq!(
+            statuses,
+            vec![
+                MutantStatus::Killed,
+                MutantStatus::Pending,
+                MutantStatus::NoCoverage,
+            ]
+        );
+        let summary = summary(&results);
+        assert_eq!(summary.coverage, Some(2.0 / 3.0));
+    }
+
+    #[test]
     fn plan_dispositions_and_schedule_outcomes_merge_into_one_status_each() {
         let plan = plan(
             vec![
@@ -471,8 +505,8 @@ mod tests {
         );
         assert_eq!(
             summary.coverage,
-            Some(2.0 / 3.0),
-            "covered / (covered + no_coverage)"
+            Some(0.8),
+            "covered / (covered + no_coverage); the pending mutants count as covered"
         );
 
         let completion = completion(&CompletionFacts {
@@ -588,6 +622,7 @@ mod tests {
             file: Some("test/a.test.ts".to_owned()),
             test_id: None,
             message: Some("boom".to_owned()),
+            mutant_ids: Vec::new(),
         };
         let completion = completion(&CompletionFacts {
             plan: &plan,

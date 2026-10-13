@@ -1,8 +1,7 @@
 //! Joins a mutation report with a separate verdict document.
 //!
 //! A verdict marks one mutant as equivalent to the original code. This
-//! replaces an inline suppression comment (decision 22 of the mutation
-//! engine): the report stays the evidence, and the verdict is a separate,
+//! replaces an inline suppression comment: the report stays the evidence, and the verdict is a separate,
 //! reviewable judgment. The join key is the `review_key` of the verdict, which
 //! is the `mutant_id` of the report. The id hashes the enclosing function
 //! text, so a verdict stays valid until that function changes.
@@ -10,7 +9,8 @@
 use std::collections::BTreeSet;
 
 use fallow_output::{
-    MutantStatus, MutationReport, MutationStatusCounts, MutationVerdictInput, MutationVerdictJoin,
+    MutantStatus, MutationReport, MutationStatusCounts, MutationSummary, MutationVerdictInput,
+    MutationVerdictJoin,
 };
 use rustc_hash::FxHashSet;
 use std::fmt::Write as _;
@@ -188,13 +188,7 @@ pub fn apply_mutation_verdicts(
         .map(|verdict| verdict.review_key.clone())
         .collect();
 
-    let mut counts = MutationStatusCounts::default();
-    for mutant in &report.mutants {
-        counts.add(mutant.status);
-    }
-    report.summary.counts = counts;
-    report.summary.score = counts.score();
-    report.summary.coverage = counts.coverage();
+    report.summary = MutationSummary::from_results(&report.mutants);
     report.verdicts = Some(MutationVerdictJoin {
         verdicts_sha256: sha256_hex(verdict_json),
         applied: applied.into_iter().collect(),
@@ -233,7 +227,12 @@ mod tests {
             status,
             prune_reason: None,
             killed_by: None,
-            covering_tests: Vec::new(),
+            covering_tests: match status {
+                MutantStatus::NoCoverage | MutantStatus::Pending | MutantStatus::Pruned => {
+                    Vec::new()
+                }
+                _ => vec!["test/a.test.ts::t1".to_owned()],
+            },
             static_mutant: false,
             duration_ms: None,
         }
@@ -258,11 +257,7 @@ mod tests {
                 base_ref: None,
             },
             runner: None,
-            summary: MutationSummary {
-                counts,
-                score: counts.score(),
-                coverage: counts.coverage(),
-            },
+            summary: MutationSummary::from_results(&mutants),
             functions: vec![MutationFunctionResult {
                 file: "src/a.ts".to_owned(),
                 name: Some("add".to_owned()),

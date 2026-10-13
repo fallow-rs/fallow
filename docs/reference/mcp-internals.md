@@ -160,8 +160,12 @@ Contract rules:
   process and serializes with
   `fallow_output::serialize_mutation_plan_json_output`, so its envelope is the
   `fallow mutation --plan` JSON, with `kind: "mutation-plan"`.
-  `mutation_inspect` runs `fallow mutation inspect <id> --report <file>` as a
-  subprocess. A plan document is a valid `--report` input. No MCP tool runs
+  `mutation_inspect` runs `fallow mutation inspect <id> [--report <file>]` as
+  a subprocess. A relative `report` resolves against `root`, and outer
+  whitespace is trimmed. Without `report`, the CLI reads
+  `<cache dir>/mutation/last-report.json`, and `root`, `config` and
+  `allow_remote_extends` select that cache directory. A plan document is a
+  valid `report` input. No MCP tool runs
   mutants in version 1: a run executes the tests of the project, so the agent
   host decides it through the CLI. Both descriptions name `fallow mutation`
   for that reason. Code Mode refuses both tools and names the standalone

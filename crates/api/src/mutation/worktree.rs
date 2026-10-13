@@ -1,4 +1,4 @@
-//! The git worktree guard of a run (decisions 3 and 4).
+//! The git worktree guard of a run.
 //!
 //! A mutant can turn a guarded write into an unguarded one, and the run has
 //! no sandbox copy. The run therefore starts only in a clean worktree unless

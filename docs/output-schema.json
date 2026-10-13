@@ -33004,7 +33004,7 @@
             "number",
             "null"
           ],
-          "description": "The share of mutants that a test reaches, a fraction from 0 to 1:\n`covered / (covered + no_coverage)`, with `covered = killed + timeout\n+ survived`. `null` when no mutant is covered or unreached."
+          "description": "The share of mutants that a test reaches, a fraction from 0 to 1:\n`covered / (covered + no_coverage)` over the whole plan. `covered`\ncounts each executed mutant with a covering test and each `pending`\nmutant that a passing dry-run test covers. A `pending` mutant that no\ndry-run test covers is `no_coverage`, so a run that `--max-mutants`\ncaps reports the coverage of the full run. `equivalent` and `pruned`\nmutants never count. `null` when no mutant is covered or unreached."
         }
       },
       "required": [
@@ -33034,7 +33034,14 @@
             "string",
             "null"
           ],
-          "description": "The error message, for an error outside a test."
+          "description": "The error message, for an error outside a test, or the reason for a\ntest that did not pass in the dry run of a restarted companion."
+        },
+        "mutant_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The mutants that ran without this test, because the test did not pass\nin the dry run of a restarted companion. Each of them ran with its\nother covering tests. Absent for a failure of the first dry run."
         }
       },
       "description": "A test or a test file that failed with no active mutant. Its tests do not\ndecide a mutant status."
@@ -33088,7 +33095,7 @@
         "allow_dirty",
         "changed_paths"
       ],
-      "description": "The git worktree check of a run (decision 4)."
+      "description": "The git worktree check of a run: a run refuses a dirty worktree unless\n`--allow-dirty` is set, and it compares the worktree after the run."
     },
     "MutationRunIssue": {
       "type": "object",

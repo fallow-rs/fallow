@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--plan` selects and ranks the mutants and runs no code.
     `fallow mutation inspect <mutant_id>` shows one mutant against the current
     file and runs no code. It reads the report that the last run saved in the
-    Fallow cache, or the file that `--report` names. A changed file gives a
+    Fallow cache, or the file that `--report` names. From a subdirectory, it
+    finds the report of a run at the project root. A changed file gives a
     `stale` status.
   - The default scope is the changed code against the base ref, as for
     `audit`. `--all` and file paths widen or narrow it.
@@ -30,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The exit code is 0 by default. `--min-score` or `mutation.minScore` makes a
     lower score exit with 1. `--verdicts <file>` marks equivalent mutants,
     which leave the score.
+  - The coverage counts the mutants that the run did not execute because of
+    `--max-mutants`. The dry run decides their coverage: a pending mutant that
+    no test reaches in the dry run is `no_coverage`. A capped run therefore
+    reports the coverage of the full run.
+  - A covering test that fails in the dry run of a restarted companion is a
+    baseline failure. The mutant runs with its other covering tests and is a
+    runtime error only when no covering test is left.
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
 

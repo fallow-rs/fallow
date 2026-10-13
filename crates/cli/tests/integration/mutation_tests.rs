@@ -242,6 +242,43 @@ fn a_relative_output_file_from_a_subdirectory_never_makes_the_tree_dirty() {
     }
 }
 
+/// `inspect` without `--report` from a subdirectory finds the report that a
+/// run at the project root saved, and reads the files of that root.
+#[test]
+fn inspect_from_a_subdirectory_reads_the_saved_report_of_the_project_root() {
+    let project = untested_project();
+    let (_, report) = json_mutation(project.path(), &["--all"]);
+    let id = report["mutants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|mutant| mutant["operator"] == "arithmetic-operator" && mutant["function"] == "add")
+        .and_then(|mutant| mutant["mutant_id"].as_str())
+        .expect("an arithmetic mutant in add")
+        .to_owned();
+    let output = std::process::Command::new(super::common::fallow_bin())
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .current_dir(project.path().join("src"))
+        .args(["mutation", "inspect", &id, "--format", "json", "--quiet"])
+        .output()
+        .expect("fallow");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{stdout}");
+    let packet: serde_json::Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(packet["status"], "fresh", "{packet}");
+    assert_eq!(packet["code"]["mutated_lines"], "  return a - b;");
+}
+
+/// The `mutation --help` text uses no `(s)` plural form.
+#[test]
+fn mutation_help_has_no_parenthesized_plural() {
+    let output = super::common::run_fallow_raw(&["mutation", "--help"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(output.stdout.contains("inspect"), "{}", output.stdout);
+    assert!(!output.stdout.contains("(s)"), "{}", output.stdout);
+}
+
 #[test]
 fn equivalent_verdicts_leave_the_score_and_report_unmatched_keys() {
     let project = untested_project();
@@ -481,11 +518,9 @@ mod end_to_end {
         Some(dunce::canonicalize(package).expect("package path"))
     }
 
-    #[test]
-    fn a_vitest_run_kills_add_mutants_and_reports_a_survivor_of_is_positive() {
-        let Some(package) = companion_package() else {
-            return;
-        };
+    /// A git project with a copy of the `vitest-basic` companion fixture.
+    /// `extra_source` is appended to `src/math.ts` before the commit.
+    fn vitest_project(package: &Path, extra_source: &str) -> (tempfile::TempDir, PathBuf) {
         let fixture = package.join("test/fixtures/vitest-basic");
         let project = tempfile::tempdir().expect("dir");
         let root = dunce::canonicalize(project.path()).expect("root");
@@ -507,8 +542,80 @@ mod end_to_end {
             root.join("node_modules/vitest"),
         )
         .expect("symlink");
+        if !extra_source.is_empty() {
+            let math = root.join("src/math.ts");
+            let mut source = fs::read_to_string(&math).expect("math.ts");
+            source.push_str(extra_source);
+            fs::write(&math, source).expect("math.ts");
+        }
         git(&root, &["init", "-q"]);
         commit_all(&root, "init");
+        (project, root)
+    }
+
+    /// The sorted ids of the `no_coverage` mutants of a run report.
+    fn no_coverage_ids(report: &serde_json::Value) -> Vec<String> {
+        let mut ids: Vec<String> = report["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .filter(|mutant| mutant["status"] == "no_coverage")
+            .map(|mutant| mutant["mutant_id"].as_str().expect("id").to_owned())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// `triple` is in a module that the test imports, so the static graph
+    /// reaches it, but no test calls it. A run that `--max-mutants` caps
+    /// leaves its mutants pending, and the dry run must still give them
+    /// `no_coverage`, as the full run does.
+    #[test]
+    fn a_capped_run_reports_the_coverage_and_no_coverage_mutants_of_a_full_run() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(
+            &package,
+            "\nexport function triple(n: number): number {\n  return n * 3;\n}\n",
+        );
+        let args = ["src/math.ts", "--concurrency", "1"];
+        let (full_output, full) = json_mutation(&root, &args);
+        assert_eq!(full_output.code, 0, "{}", full_output.stderr);
+        let mut capped_args = args.to_vec();
+        capped_args.extend(["--max-mutants", "1"]);
+        let (capped_output, capped) = json_mutation(&root, &capped_args);
+        assert_eq!(capped_output.code, 0, "{}", capped_output.stderr);
+
+        assert!(
+            capped["summary"]["counts"]["pending"].as_u64() > Some(0),
+            "{capped}"
+        );
+        let triple: Vec<String> = full["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .filter(|mutant| mutant["function"] == "triple")
+            .map(|mutant| mutant["mutant_id"].as_str().expect("id").to_owned())
+            .collect();
+        assert!(!triple.is_empty(), "{full}");
+        let full_ids = no_coverage_ids(&full);
+        assert!(
+            triple.iter().all(|id| full_ids.contains(id)),
+            "the full run gives no_coverage to each mutant of triple: {full}"
+        );
+        assert_eq!(no_coverage_ids(&capped), full_ids);
+        let coverage = full["summary"]["coverage"].as_f64().expect("a coverage");
+        assert!(coverage > 0.0 && coverage < 1.0, "{full}");
+        assert_eq!(capped["summary"]["coverage"], full["summary"]["coverage"]);
+    }
+
+    #[test]
+    fn a_vitest_run_kills_add_mutants_and_reports_a_survivor_of_is_positive() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package, "");
 
         let (output, report) = json_mutation(
             &root,

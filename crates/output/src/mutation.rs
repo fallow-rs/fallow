@@ -1,7 +1,7 @@
 //! Independent JSON contracts for mutation testing.
 //!
-//! A mutation report never contains source text (decision 5 of the mutation
-//! engine). A mutant is identified by its id, file, position and operator.
+//! A mutation report never contains source text, so a report can leave the
+//! machine without the code of the project. A mutant is identified by its id, file, position and operator.
 //! The `inspect` command shows the code of one mutant.
 
 use fallow_types::envelope::{ElapsedMs, ToolVersion};
@@ -126,8 +126,8 @@ impl MutationStatusCounts {
     /// (killed + timeout + survived)`, from 0 to 1. `None` when no mutant
     /// ran to a tested result.
     ///
-    /// `no_coverage` mutants stay out of the score (decision 15).
-    /// [`Self::coverage`] reports them. Runtime errors, flaky, pruned,
+    /// `no_coverage` mutants stay out of the score;
+    /// [`MutationSummary::coverage`] reports them. Runtime errors, flaky, pruned,
     /// pending and equivalent mutants never count.
     #[must_use]
     #[expect(
@@ -138,20 +138,6 @@ impl MutationStatusCounts {
         let detected = self.killed + self.timeout;
         let executed = detected + self.survived;
         (executed > 0).then(|| detected as f64 / executed as f64)
-    }
-
-    /// The share of mutants that a test reaches: `covered / (covered +
-    /// no_coverage)`, with `covered = killed + timeout + survived`, from 0 to
-    /// 1. `None` when no mutant is covered or unreached.
-    #[must_use]
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "mutant counts are far below 2^52"
-    )]
-    pub fn coverage(&self) -> Option<f64> {
-        let covered = self.killed + self.timeout + self.survived;
-        let counted = covered + self.no_coverage;
-        (counted > 0).then(|| covered as f64 / counted as f64)
     }
 }
 
@@ -371,9 +357,52 @@ pub struct MutationSummary {
     /// compare this value in percent.
     pub score: Option<f64>,
     /// The share of mutants that a test reaches, a fraction from 0 to 1:
-    /// `covered / (covered + no_coverage)`, with `covered = killed + timeout
-    /// + survived`. `null` when no mutant is covered or unreached.
+    /// `covered / (covered + no_coverage)` over the whole plan. `covered`
+    /// counts each executed mutant with a covering test and each `pending`
+    /// mutant that a passing dry-run test covers. A `pending` mutant that no
+    /// dry-run test covers is `no_coverage`, so a run that `--max-mutants`
+    /// caps reports the coverage of the full run. `equivalent` and `pruned`
+    /// mutants never count. `null` when no mutant is covered or unreached.
     pub coverage: Option<f64>,
+}
+
+impl MutationSummary {
+    /// The totals, the score and the coverage of `results`.
+    #[must_use]
+    pub fn from_results(results: &[MutantResult]) -> Self {
+        let mut counts = MutationStatusCounts::default();
+        let (mut covered, mut uncovered) = (0usize, 0usize);
+        for result in results {
+            counts.add(result.status);
+            match result.status {
+                MutantStatus::NoCoverage => uncovered += 1,
+                MutantStatus::Pending => covered += 1,
+                MutantStatus::Killed
+                | MutantStatus::Timeout
+                | MutantStatus::Survived
+                | MutantStatus::RuntimeError
+                | MutantStatus::Flaky
+                    if !result.covering_tests.is_empty() || result.static_mutant =>
+                {
+                    covered += 1;
+                }
+                _ => {}
+            }
+        }
+        Self {
+            counts,
+            score: counts.score(),
+            coverage: ratio(covered, covered + uncovered),
+        }
+    }
+}
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "mutant counts are far below 2^52"
+)]
+fn ratio(part: usize, whole: usize) -> Option<f64> {
+    (whole > 0).then(|| part as f64 / whole as f64)
 }
 
 /// A test or a test file that failed with no active mutant. Its tests do not
@@ -387,9 +416,15 @@ pub struct MutationBaselineFailure {
     /// The test id, for a failed test.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_id: Option<String>,
-    /// The error message, for an error outside a test.
+    /// The error message, for an error outside a test, or the reason for a
+    /// test that did not pass in the dry run of a restarted companion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The mutants that ran without this test, because the test did not pass
+    /// in the dry run of a restarted companion. Each of them ran with its
+    /// other covering tests. Absent for a failure of the first dry run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mutant_ids: Vec<String>,
 }
 
 /// A selected file that the plan did not instrument.
@@ -402,7 +437,8 @@ pub struct MutationSkippedFile {
     pub reason: String,
 }
 
-/// The git worktree check of a run (decision 4).
+/// The git worktree check of a run: a run refuses a dirty worktree unless
+/// `--allow-dirty` is set, and it compares the worktree after the run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationWorktreeCheck {
@@ -816,23 +852,70 @@ mod tests {
         assert_eq!(counts.pruned, 1);
         assert_eq!(counts.pending, 1);
         assert_eq!(counts.score(), Some(0.75));
-        assert_eq!(counts.coverage(), Some(4.0 / 6.0));
+    }
+
+    fn result(status: MutantStatus, covering_tests: &[&str]) -> MutantResult {
+        MutantResult {
+            location: MutantLocation {
+                mutant_id: "m".to_owned(),
+                file: "src/a.ts".to_owned(),
+                line: 1,
+                column: 1,
+                span: (0, 1),
+                operator: "arithmetic-operator".to_owned(),
+                function: None,
+                function_line: None,
+                rank: None,
+            },
+            status,
+            prune_reason: None,
+            killed_by: None,
+            covering_tests: covering_tests
+                .iter()
+                .map(|test| (*test).to_owned())
+                .collect(),
+            static_mutant: false,
+            duration_ms: None,
+        }
     }
 
     #[test]
-    fn unreached_mutants_lower_the_coverage_but_not_the_score() {
-        let reached = counts(&[MutantStatus::Killed, MutantStatus::Survived]);
-        assert_eq!(reached.score(), Some(0.5));
-        assert_eq!(reached.coverage(), Some(1.0));
-        let mut unreached = reached;
-        for _ in 0..98 {
-            unreached.add(MutantStatus::NoCoverage);
-        }
-        assert_eq!(unreached.score(), Some(0.5));
-        assert_eq!(unreached.coverage(), Some(0.02));
-        assert_eq!(counts(&[MutantStatus::NoCoverage]).score(), None);
-        assert_eq!(counts(&[MutantStatus::NoCoverage]).coverage(), Some(0.0));
-        assert_eq!(counts(&[MutantStatus::Pending]).coverage(), None);
+    fn coverage_counts_executed_mutants_with_a_test_and_pending_mutants_as_covered() {
+        let summary = MutationSummary::from_results(&[
+            result(MutantStatus::Killed, &["t1"]),
+            result(MutantStatus::Survived, &["t1"]),
+            result(MutantStatus::RuntimeError, &["t2"]),
+            result(MutantStatus::Pending, &[]),
+            result(MutantStatus::NoCoverage, &[]),
+            result(MutantStatus::Equivalent, &["t1"]),
+            result(MutantStatus::Pruned, &[]),
+        ]);
+        assert_eq!(summary.score, Some(0.5));
+        assert_eq!(summary.coverage, Some(0.8));
+        assert_eq!(
+            MutationSummary::from_results(&[result(MutantStatus::Pruned, &[])]).coverage,
+            None
+        );
+    }
+
+    #[test]
+    fn a_capped_run_reports_the_coverage_of_the_full_run() {
+        let full = MutationSummary::from_results(&[
+            result(MutantStatus::Killed, &["t1"]),
+            result(MutantStatus::Survived, &["t1"]),
+            result(MutantStatus::NoCoverage, &[]),
+            result(MutantStatus::NoCoverage, &[]),
+        ]);
+        let capped = MutationSummary::from_results(&[
+            result(MutantStatus::Killed, &["t1"]),
+            result(MutantStatus::Pending, &[]),
+            result(MutantStatus::NoCoverage, &[]),
+            result(MutantStatus::NoCoverage, &[]),
+        ]);
+        assert_eq!(full.coverage, Some(0.5));
+        assert_eq!(capped.coverage, Some(0.5));
+        assert_eq!(full.score, Some(0.5));
+        assert_eq!(capped.score, Some(1.0));
     }
 
     #[test]

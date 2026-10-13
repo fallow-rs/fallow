@@ -2,8 +2,7 @@
 //! current file. It reads files and instruments one source text in memory. It
 //! never executes code.
 //!
-//! A mutation report holds no source text (decision 5 of the mutation
-//! engine). The code of a mutant comes from the current file: the file must
+//! A mutation report holds no source text. The code of a mutant comes from the current file: the file must
 //! have the SHA-256 digest of the report, and the instrumentation of the
 //! current text must give the same mutant id. Otherwise the packet is stale
 //! and has no code, so a changed file never gives a wrong answer.

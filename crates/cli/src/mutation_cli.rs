@@ -27,7 +27,7 @@ use crate::mutation_human::{
     CodeExcerpt, CodeLookup, RunReportOptions, render_inspect, render_plan, render_run,
 };
 
-/// The exit code of a run with a score below the minimum (decision 21).
+/// The exit code of a run with a score below the minimum.
 const MIN_SCORE_EXIT_CODE: u8 = 1;
 /// The exit code of invalid input and execution errors.
 const INPUT_EXIT_CODE: u8 = 2;
@@ -262,14 +262,24 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         runner_timeout: None,
         output_paths: input
             .output_file
-            .map(Path::to_path_buf)
+            .map(absolute_output_path)
             .into_iter()
             .collect(),
     })
 }
 
+/// The `--output-file` path as the report writer opens it: a relative path
+/// is relative to the process directory, also when `--root` names another
+/// directory. The worktree check leaves out this same absolute path.
+fn absolute_output_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
+}
+
 /// The exit code of a finished run: 1 only when a minimum score is set and
-/// the measured score is lower (decision 21). A run with no counted mutant
+/// the measured score is lower. Survivors alone never fail a run. A run with no counted mutant
 /// has no score and passes.
 #[must_use]
 pub fn run_exit_code(report: &MutationReport, min_score: Option<f64>) -> u8 {
@@ -538,40 +548,76 @@ fn emit_plan(plan: MutationPlanOutput, input: &MutationCliInput<'_>) -> ExitCode
     ExitCode::SUCCESS
 }
 
-/// The saved report that `inspect` reads: the `--report` file, else the
-/// report of the last run in the Fallow cache.
+/// The saved report that `inspect` reads and the project root of its paths.
+///
+/// With `--report`, the root is the given root. Without it, inspect reads the
+/// report that the last run saved in the Fallow cache. When neither
+/// `--root` nor `--config` is set, the search walks up from the working
+/// directory to the git worktree root, so an inspect from a subdirectory
+/// finds the report of a run at the project root.
 fn inspect_report_path(
     input: &MutationCliInput<'_>,
     report: Option<&Path>,
-) -> Result<PathBuf, ProgrammaticError> {
+) -> Result<(PathBuf, PathBuf), ProgrammaticError> {
     if let Some(report) = report {
-        return Ok(report.to_path_buf());
+        return Ok((report.to_path_buf(), input.root.to_path_buf()));
     }
-    let path = fallow_api::mutation::last_mutation_report_path(&AnalysisOptions {
-        root: Some(input.root.to_path_buf()),
-        config_path: input.config_path.map(Path::to_path_buf),
-        allow_remote_extends: input.allow_remote_extends,
-        ..AnalysisOptions::default()
-    })?;
-    if !path.is_file() {
-        return Err(ProgrammaticError::new(
-            "no saved mutation report: no run of `fallow mutation` saved one for this project",
-            INPUT_EXIT_CODE,
-        )
-        .with_code("FALLOW_MUTATION_NO_REPORT")
-        .with_context("mutation.report")
-        .with_help(
-            "pass --report <file> with a saved mutation report or `--plan --format json` document",
-        ));
+    let saved_report = |root: &Path| {
+        fallow_api::mutation::last_mutation_report_path(&AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            config_path: input.config_path.map(Path::to_path_buf),
+            allow_remote_extends: input.allow_remote_extends,
+            ..AnalysisOptions::default()
+        })
+    };
+    let path = saved_report(input.root)?;
+    if path.is_file() {
+        return Ok((path, input.root.to_path_buf()));
     }
-    Ok(path)
+    if input.root_flag.is_none() && input.config_path.is_none() {
+        for ancestor in project_ancestors(input.root) {
+            if let Ok(path) = saved_report(&ancestor)
+                && path.is_file()
+            {
+                return Ok((path, ancestor));
+            }
+        }
+    }
+    Err(ProgrammaticError::new(
+        "no saved mutation report: no run of `fallow mutation` saved one for this project",
+        INPUT_EXIT_CODE,
+    )
+    .with_code("FALLOW_MUTATION_NO_REPORT")
+    .with_context("mutation.report")
+    .with_help(
+        "pass the --root and --config of the run, or pass --report <file> with a saved mutation report or `--plan --format json` document",
+    ))
+}
+
+/// The parent directories of `root`, nearest first, up to and including the
+/// first one with a `.git` entry. A `root` outside a git worktree has none,
+/// so the search never leaves the project.
+fn project_ancestors(root: &Path) -> Vec<PathBuf> {
+    let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if root.join(".git").exists() {
+        return Vec::new();
+    }
+    let mut ancestors = Vec::new();
+    for ancestor in root.ancestors().skip(1) {
+        ancestors.push(ancestor.to_path_buf());
+        if ancestor.join(".git").exists() {
+            return ancestors;
+        }
+    }
+    Vec::new()
 }
 
 fn run_inspect(input: &MutationCliInput<'_>, mutant_id: &str, report: Option<&Path>) -> ExitCode {
     let (output, style) = (input.output, input.json_style);
-    let packet = inspect_report_path(input, report)
-        .and_then(|path| crate::mutation_inspect::read_saved_report(&path))
-        .and_then(|saved| crate::mutation_inspect::inspect(&saved, mutant_id, input.root));
+    let packet = inspect_report_path(input, report).and_then(|(path, root)| {
+        let saved = crate::mutation_inspect::read_saved_report(&path)?;
+        crate::mutation_inspect::inspect(&saved, mutant_id, &root)
+    });
     let packet = match packet {
         Ok(packet) => packet,
         Err(error) => return crate::error::emit_programmatic_error(&error, output, style),

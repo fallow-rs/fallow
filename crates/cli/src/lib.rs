@@ -1137,6 +1137,7 @@ enum Command {
     /// default scope is the changed code against the base ref, as `audit`.
     /// `--plan` and `inspect` run no code. Fallow does not write to project
     /// files. The report lists any path that the tests changed.
+    #[command(disable_help_subcommand = true)]
     Mutation {
         #[command(subcommand)]
         subcommand: Option<mutation_cli::MutationSubcommand>,

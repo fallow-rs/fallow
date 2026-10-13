@@ -44,6 +44,10 @@ pub struct SchedulePlan {
     /// A dry-run hit on one is a static map miss: the scheduler runs it like
     /// a planned mutant and reports the miss (architecture section 11).
     pub unreached: Vec<ScheduledMutant>,
+    /// The mutants after the `--max-mutants` limit, in rank order. They
+    /// never run, but a pending mutant that no passing dry-run test hits
+    /// gets `no_coverage`, so the coverage does not depend on the limit.
+    pub pending: Vec<ScheduledMutant>,
     /// Each mutant id of the plan. A hit outside this set stops the run.
     pub known_ids: FxHashSet<String>,
     /// The static test files of the plan.
@@ -95,7 +99,16 @@ pub struct BaselineFailure {
     pub file: Option<String>,
     pub test_id: Option<String>,
     pub message: Option<String>,
+    /// The mutants that ran without this test, because it did not pass in
+    /// the dry run of a restarted companion. Sorted. Empty for a failure of
+    /// the first dry run.
+    pub mutant_ids: Vec<String>,
 }
+
+/// The message of a covering test that did not pass in the dry run of a
+/// restarted companion.
+const RESTARTED_DRY_RUN_FAILURE: &str =
+    "the test did not pass in the dry run of a restarted companion";
 
 /// An error that did not stop the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,6 +207,9 @@ struct Attempt {
     killed_by: Option<String>,
     duration_ms: Option<u64>,
     issue: Option<ScheduleIssue>,
+    /// The covering tests that the companion left out, because they did not
+    /// pass in its dry run.
+    dropped_tests: Vec<String>,
 }
 
 impl Attempt {
@@ -208,6 +224,21 @@ impl Attempt {
                 mutant_id: Some(job.id.clone()),
                 stderr_tail,
             }),
+            dropped_tests: Vec::new(),
+        }
+    }
+
+    const fn decided(
+        status: MutantStatus,
+        killed_by: Option<String>,
+        duration_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            status,
+            killed_by,
+            duration_ms,
+            issue: None,
+            dropped_tests: Vec::new(),
         }
     }
 }
@@ -406,20 +437,20 @@ impl<'a> Worker<'a> {
                 return Ok(Attempt::runtime_error(job, message, tail));
             }
         }
-        if let Some(missing) = job
+        let (tests, dropped_tests): (Vec<String>, Vec<String>) = job
             .tests
             .iter()
-            .find(|test| !self.known_tests.contains(*test))
-        {
-            return Ok(Attempt::runtime_error(
-                job,
-                format!("the test `{missing}` did not pass in the dry run of this companion"),
-                None,
-            ));
+            .cloned()
+            .partition(|test| self.known_tests.contains(test));
+        if tests.is_empty() {
+            let mut attempt =
+                Attempt::runtime_error(job, no_covering_test_message(&dropped_tests), None);
+            attempt.dropped_tests = dropped_tests;
+            return Ok(attempt);
         }
         let request = Request::Run(RunRequest {
             mutant_id: job.id.clone(),
-            test_ids: job.tests.clone(),
+            test_ids: tests,
             timeout_ms: job.timeout_ms,
             bail: true,
         });
@@ -431,14 +462,11 @@ impl<'a> Worker<'a> {
                 None,
             ));
         };
-        let attempt = match link.request(&request, watchdog) {
+        let mut attempt = match link.request(&request, watchdog) {
             Ok(Response::Run(result)) => match classify(job, &result) {
-                Ok((status, killed_by)) => Attempt {
-                    status,
-                    killed_by,
-                    duration_ms: round_ms(result.duration_ms),
-                    issue: None,
-                },
+                Ok((status, killed_by)) => {
+                    Attempt::decided(status, killed_by, round_ms(result.duration_ms))
+                }
                 Err(reason) => {
                     self.reset();
                     Attempt::runtime_error(job, reason, None)
@@ -450,12 +478,7 @@ impl<'a> Worker<'a> {
             }
             Err(LinkFault::Timeout) => {
                 self.reset();
-                Attempt {
-                    status: MutantStatus::Timeout,
-                    killed_by: None,
-                    duration_ms: Some(job.watchdog_ms()),
-                    issue: None,
-                }
+                Attempt::decided(MutantStatus::Timeout, None, Some(job.watchdog_ms()))
             }
             Err(fault) => {
                 let tail = fault.stderr_tail().map(str::to_owned);
@@ -463,6 +486,7 @@ impl<'a> Worker<'a> {
                 Attempt::runtime_error(job, fault.to_string(), tail)
             }
         };
+        attempt.dropped_tests = dropped_tests;
         if job.static_mutant && !caps.fresh_modules_per_run && self.link.is_some() {
             self.reload();
         }
@@ -558,6 +582,7 @@ fn read_dry_run(
                     file: Some(file.clone()),
                     test_id: None,
                     message: Some(error.message.clone()),
+                    mutant_ids: Vec::new(),
                 });
             }
             None => global_errors.push(error.message.clone()),
@@ -573,6 +598,7 @@ fn read_dry_run(
                 file: Some(test.file.clone()),
                 test_id: Some(test.test_id.clone()),
                 message: None,
+                mutant_ids: Vec::new(),
             }),
             TestStatus::Pass if !excluded_files.contains(&test.file) => {
                 passing.insert(
@@ -704,8 +730,8 @@ fn build_jobs(
             outcome.issues.push(ScheduleIssue {
                 code: "static-map-miss",
                 message: format!(
-                    "the dry run hit mutant `{}` in `{}`, but the static map reaches no test of that file; the module graph misses a test that loads it",
-                    mutant.id, mutant.file
+                    "the dry run hit this mutant in `{}`, but the static map reaches no test of that file; the module graph misses a test that loads it",
+                    mutant.file
                 ),
                 mutant_id: Some(mutant.id.clone()),
                 stderr_tail: None,
@@ -770,12 +796,7 @@ impl Phase<'_> {
                 .deadline
                 .is_some_and(|deadline| Instant::now() >= deadline)
             {
-                let attempt = Attempt {
-                    status: MutantStatus::Pending,
-                    killed_by: None,
-                    duration_ms: None,
-                    issue: None,
-                };
+                let attempt = Attempt::decided(MutantStatus::Pending, None, None);
                 if let Ok(mut attempts) = self.attempts.lock() {
                     attempts.push((job, attempt));
                 }
@@ -853,20 +874,18 @@ fn run_phase(
     Ok((phase.attempts.into_inner().unwrap_or_default(), workers))
 }
 
-fn record(
-    results: &mut FxHashMap<String, MutantOutcome>,
-    issues: &mut Vec<ScheduleIssue>,
-    job: Job,
-    attempt: Attempt,
-) {
+fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt: Attempt) {
     if let Some(issue) = attempt.issue {
-        issues.push(issue);
+        outcome.issues.push(issue);
+    }
+    for test in attempt.dropped_tests {
+        note_restarted_baseline_failure(outcome, facts, test, &job.id);
     }
     // `job.tests` is in measured fastest-first order. The report must not
     // depend on durations, so it lists the covering tests by id.
     let mut covering_tests = job.tests;
     covering_tests.sort_unstable();
-    results.insert(
+    outcome.results.insert(
         job.id,
         MutantOutcome {
             status: attempt.status,
@@ -876,6 +895,30 @@ fn record(
             duration_ms: attempt.duration_ms,
         },
     );
+}
+
+/// Records `test` as a baseline failure of a restarted companion that
+/// affected `mutant_id`. The mutant ran with its other covering tests.
+fn note_restarted_baseline_failure(
+    outcome: &mut ScheduleOutcome,
+    facts: &DryRunFacts,
+    test: String,
+    mutant_id: &str,
+) {
+    if let Some(failure) = outcome
+        .baseline_failures
+        .iter_mut()
+        .find(|failure| failure.test_id.as_deref() == Some(test.as_str()))
+    {
+        failure.mutant_ids.push(mutant_id.to_owned());
+        return;
+    }
+    outcome.baseline_failures.push(BaselineFailure {
+        file: facts.passing.get(&test).map(|(file, _)| file.clone()),
+        test_id: Some(test),
+        message: Some(RESTARTED_DRY_RUN_FAILURE.to_owned()),
+        mutant_ids: vec![mutant_id.to_owned()],
+    });
 }
 
 fn setup_error(stage: &str, fault: &LinkFault) -> ScheduleError {
@@ -946,6 +989,33 @@ fn start_primary(
     })
 }
 
+/// The longest test name that [`no_covering_test_message`] shows.
+const MAX_TEST_NAME_CHARS: usize = 60;
+const ELLIPSIS: &str = "...";
+
+/// The `runtime_error` message for a mutant with no covering test left after
+/// the dry run of a respawned companion. It gives the count and the first
+/// test only: `baseline_failures` holds the full list. The message leaves out
+/// the mutant id because the issue carries it.
+fn no_covering_test_message(dropped: &[String]) -> String {
+    let first = dropped.first().map_or_else(String::new, |name| {
+        if name.chars().count() <= MAX_TEST_NAME_CHARS {
+            return name.clone();
+        }
+        let kept: String = name
+            .chars()
+            .take(MAX_TEST_NAME_CHARS - ELLIPSIS.len())
+            .collect();
+        format!("{kept}{ELLIPSIS}")
+    });
+    let tests = if dropped.len() == 1 {
+        format!("1 test: {first}")
+    } else {
+        format!("{} tests, first: {first}", dropped.len())
+    };
+    format!("no covering test passed in the dry run of the restarted companion ({tests})")
+}
+
 /// The issue for static test files that the runner does not list. Their
 /// tests never run, so a mutant that only they reach stays `no_coverage`.
 fn undiscovered_issue(files: &[String]) -> Option<ScheduleIssue> {
@@ -966,6 +1036,29 @@ fn undiscovered_issue(files: &[String]) -> Option<ScheduleIssue> {
         mutant_id: None,
         stderr_tail: None,
     })
+}
+
+/// Gives `no_coverage` to each pending mutant that has no passing dry-run
+/// covering test. The test is the same as for a planned mutant, so a run
+/// that `--max-mutants` limits reports the coverage of the full run.
+fn mark_unreached_pending(
+    plan: &SchedulePlan,
+    facts: &DryRunFacts,
+    dry_files: &[String],
+    outcome: &mut ScheduleOutcome,
+) {
+    for mutant in &plan.pending {
+        let static_mutant = facts.static_ids.contains(&mutant.id);
+        if covering_tests(plan, facts, dry_files, mutant, static_mutant, false).is_empty() {
+            outcome.results.insert(
+                mutant.id.clone(),
+                MutantOutcome {
+                    static_mutant,
+                    ..MutantOutcome::no_coverage()
+                },
+            );
+        }
+    }
 }
 
 /// Runs each survivor again in a new companion (section 10). A different
@@ -1007,14 +1100,13 @@ fn retry_survivors(
             .get(&job.id)
             .and_then(|first| first.duration_ms);
         record(
-            &mut outcome.results,
-            &mut outcome.issues,
+            outcome,
+            facts,
             job,
             Attempt {
                 status,
-                killed_by: attempt.killed_by,
                 duration_ms: first_duration,
-                issue: attempt.issue,
+                ..attempt
             },
         );
     }
@@ -1042,7 +1134,7 @@ pub fn run_schedule(
         workers: 0,
     };
     let no_coverage_for_all = |outcome: &mut ScheduleOutcome| {
-        for mutant in &plan.mutants {
+        for mutant in plan.mutants.iter().chain(&plan.pending) {
             outcome
                 .results
                 .insert(mutant.id.clone(), MutantOutcome::no_coverage());
@@ -1096,6 +1188,7 @@ pub fn run_schedule(
     outcome.unloaded_paths = dry.unloaded_paths;
     outcome.baseline_failures.clone_from(&facts.baseline);
     let jobs = build_jobs(plan, &facts, &dry_files, runner.caps, &mut outcome);
+    mark_unreached_pending(plan, &facts, &dry_files, &mut outcome);
     let known: FxHashSet<String> = facts.passing.keys().cloned().collect();
 
     let mutants_started = Instant::now();
@@ -1113,7 +1206,7 @@ pub fn run_schedule(
         if attempt.status == MutantStatus::Survived {
             survivors.push(job.clone());
         }
-        record(&mut outcome.results, &mut outcome.issues, job, attempt);
+        record(&mut outcome, &facts, job, attempt);
     }
     if !survivors.is_empty() {
         let retry_started = Instant::now();
@@ -1123,6 +1216,11 @@ pub fn run_schedule(
     outcome
         .issues
         .sort_by(|left, right| left.mutant_id.cmp(&right.mutant_id));
+    for failure in &mut outcome.baseline_failures {
+        failure.mutant_ids.sort();
+        failure.mutant_ids.dedup();
+    }
+    outcome.baseline_failures.sort();
     outcome.unretried_survivors.sort();
     Ok(outcome)
 }

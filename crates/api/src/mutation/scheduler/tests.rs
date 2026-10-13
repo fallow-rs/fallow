@@ -193,6 +193,7 @@ fn plan(ids: &[&str]) -> SchedulePlan {
             })
             .collect(),
         unreached: Vec::new(),
+        pending: Vec::new(),
         known_ids: ids
             .iter()
             .copied()
@@ -633,11 +634,13 @@ fn baseline_failures_never_decide_a_mutant() {
                 file: Some("test/a.test.ts".to_owned()),
                 test_id: Some(tid("t1")),
                 message: None,
+                mutant_ids: Vec::new(),
             },
             BaselineFailure {
                 file: Some("test/b.test.ts".to_owned()),
                 test_id: None,
                 message: Some("suite failed".to_owned()),
+                mutant_ids: Vec::new(),
             },
         ]
     );
@@ -745,6 +748,59 @@ fn an_ended_time_budget_leaves_each_mutant_pending() {
     assert_eq!(status(&outcome, "m2"), MutantStatus::Pending);
     assert_eq!(status(&outcome, "m3"), MutantStatus::NoCoverage);
     assert!(spawner.runs().is_empty());
+}
+
+#[test]
+fn a_capped_run_gives_no_coverage_to_the_same_mutants_as_a_full_run() {
+    let killer =
+        |_: usize, run: &RunRequest| Ok(run_result(run, RunStatus::Killed, Some(&tid("t1"))));
+    let full_spawner = FakeSpawner::new(script(|_| standard_dry(), killer));
+    let full = run_schedule(&full_spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("full");
+
+    let capped_spawner = FakeSpawner::new(script(|_| standard_dry(), killer));
+    let mut capped_plan = plan(&["m1"]);
+    capped_plan.pending = ["m2", "m3"]
+        .iter()
+        .map(|id| ScheduledMutant {
+            id: (*id).to_owned(),
+            file: "src/a.ts".to_owned(),
+        })
+        .collect();
+    let capped = run_schedule(&capped_spawner, &capped_plan, &config(1)).expect("capped");
+
+    let no_coverage = |outcome: &ScheduleOutcome| -> BTreeSet<String> {
+        outcome
+            .results
+            .iter()
+            .filter(|(_, result)| result.status == MutantStatus::NoCoverage)
+            .map(|(id, _)| id.clone())
+            .collect()
+    };
+    assert_eq!(no_coverage(&capped), no_coverage(&full));
+    assert_eq!(no_coverage(&capped), BTreeSet::from(["m3".to_owned()]));
+    assert!(
+        !capped.results.contains_key("m2"),
+        "a pending mutant with a dry-run hit has no result and stays pending"
+    );
+    let ran: Vec<String> = capped_spawner
+        .runs()
+        .into_iter()
+        .map(|(_, run)| run.mutant_id)
+        .collect();
+    assert_eq!(ran, vec!["m1".to_owned()], "a pending mutant never runs");
+}
+
+#[test]
+fn without_a_dry_run_each_pending_mutant_is_no_coverage() {
+    let spawner = FakeSpawner::new(|_, _| Err(LinkFault::Protocol("unexpected".to_owned())));
+    let mut plan = plan(&["m1"]);
+    plan.pending = vec![ScheduledMutant {
+        id: "m2".to_owned(),
+        file: "src/a.ts".to_owned(),
+    }];
+    plan.test_files.clear();
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m2"), MutantStatus::NoCoverage);
 }
 
 #[test]
@@ -883,6 +939,18 @@ fn a_dry_run_hit_on_a_statically_unreached_mutant_runs_it_and_reports_the_miss()
         .filter_map(|issue| issue.mutant_id.as_deref())
         .collect();
     assert_eq!(missed, vec!["m3", "m4"]);
+    for issue in outcome
+        .issues
+        .iter()
+        .filter(|issue| issue.code == "static-map-miss")
+    {
+        let id = issue.mutant_id.as_deref().unwrap_or_default();
+        assert!(
+            !issue.message.contains(&format!("`{id}`")),
+            "the issue carries the id, so the message leaves it out: {}",
+            issue.message
+        );
+    }
 }
 
 #[test]
@@ -942,4 +1010,97 @@ fn undiscovered_issue_uses_the_singular_for_one_file_and_the_plural_for_more() {
          test/a.test-d.ts, test/b.test-d.ts"
     );
     assert!(undiscovered_issue(&[]).is_none());
+}
+
+#[test]
+fn no_covering_test_message_gives_a_count_and_the_first_test_only() {
+    let many: Vec<String> = (1..=28)
+        .map(|index| tid(&format!("case {index}")))
+        .collect();
+    assert_eq!(
+        no_covering_test_message(&many),
+        "no covering test passed in the dry run of the restarted companion \
+         (28 tests, first: test/a.test.ts::case 1)"
+    );
+    let long = vec![format!("test/a.test.ts::{}", "x".repeat(200))];
+    let message = no_covering_test_message(&long);
+    assert!(message.starts_with("no covering test passed"), "{message}");
+    assert!(message.ends_with("...)"), "{message}");
+    assert!(message.chars().count() < 140, "{message}");
+}
+
+/// A covering test that fails in the dry run of a respawned companion is a
+/// baseline failure of that companion. The mutant runs with the other
+/// covering tests, and only a mutant with no covering test left is a
+/// runtime error.
+#[test]
+fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
+    let dry = |index: usize| DryRunResult {
+        tests: vec![
+            test("t1", 2.0, TestStatus::Pass),
+            test(
+                "t2",
+                3.0,
+                if index == 0 {
+                    TestStatus::Pass
+                } else {
+                    TestStatus::Fail
+                },
+            ),
+        ],
+        hits: BTreeMap::from([
+            (tid("t1"), vec!["m1".to_owned(), "m2".to_owned()]),
+            (tid("t2"), vec!["m2".to_owned(), "m3".to_owned()]),
+        ]),
+        static_hits: Vec::new(),
+        file_hits: None,
+        unhandled_errors: Vec::new(),
+        unloaded_paths: Vec::new(),
+        file_setup_ms: BTreeMap::new(),
+    };
+    let spawner = FakeSpawner::new(script(dry, |_, run| match run.mutant_id.as_str() {
+        "m1" => Err(LinkFault::Timeout),
+        _ => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    }));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
+
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Timeout);
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Killed);
+    let m2_runs: Vec<Vec<String>> = spawner
+        .runs()
+        .into_iter()
+        .filter(|(_, run)| run.mutant_id == "m2")
+        .map(|(_, run)| run.test_ids)
+        .collect();
+    assert_eq!(m2_runs, vec![vec![tid("t1")]], "m2 runs without t2");
+    assert_eq!(
+        outcome.results["m2"].covering_tests,
+        vec![tid("t1"), tid("t2")],
+        "the report keeps each covering test of the first dry run"
+    );
+    assert_eq!(status(&outcome, "m3"), MutantStatus::RuntimeError);
+    let m3_issue = outcome
+        .issues
+        .iter()
+        .find(|issue| issue.mutant_id.as_deref() == Some("m3"))
+        .expect("m3 issue");
+    assert_eq!(
+        m3_issue.message,
+        format!(
+            "no covering test passed in the dry run of the restarted companion (1 test: {})",
+            tid("t2")
+        ),
+        "the human footer adds the mutant id, so the message leaves it out"
+    );
+    assert_eq!(
+        outcome.baseline_failures,
+        vec![BaselineFailure {
+            file: Some("test/a.test.ts".to_owned()),
+            test_id: Some(tid("t2")),
+            message: Some(
+                "the test did not pass in the dry run of a restarted companion".to_owned()
+            ),
+            mutant_ids: vec!["m2".to_owned(), "m3".to_owned()],
+        }]
+    );
 }

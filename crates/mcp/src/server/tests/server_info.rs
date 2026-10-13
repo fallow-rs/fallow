@@ -1023,7 +1023,7 @@ fn code_execute_description_matches_the_manifest_code_mode_allowlist() {
     );
 }
 
-/// MCP never runs mutants in version 1 (mutation decision 2). The two
+/// MCP never runs mutants in version 1. The two
 /// mutation tools must say so, and must name the CLI command that runs the
 /// tests, so an agent can ask its host before it executes project code.
 #[test]

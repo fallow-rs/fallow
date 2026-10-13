@@ -1387,7 +1387,7 @@ async fn plan_text_for_math(root: &std::path::Path) -> String {
 }
 
 /// Without `report`, inspect reads the report that the last run saved in
-/// the cache directory of the project (mutation decision 23), as the CLI
+/// the cache directory of the project, as the CLI
 /// does. Before any run, the call gives the no-report error.
 #[tokio::test]
 async fn e2e_mutation_inspect_without_a_report_reads_the_last_run_report() {

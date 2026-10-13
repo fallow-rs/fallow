@@ -54,7 +54,7 @@ fn run_mutation_on_a_corpus_project() {
 }
 
 /// Writes the engine plan of the same request, with the replacement text of
-/// each mutant, for the differential oracle (decision 18). The public report
+/// each mutant, for the differential oracle. The public report
 /// carries no source text, so the oracle reads the plan instead.
 #[test]
 #[ignore = "reads an external project; set FALLOW_MUTATION_CORPUS_ROOT"]

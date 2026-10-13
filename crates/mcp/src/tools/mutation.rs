@@ -1,5 +1,5 @@
 //! Read-only mutation tools. MCP plans mutants and inspects one mutant, but
-//! never runs the tests of the project (mutation decision 2): a run is a
+//! never runs the tests of the project: a run is a
 //! host permission decision, so it stays with the `fallow mutation` CLI.
 
 use std::path::{Path, PathBuf};
@@ -48,7 +48,7 @@ pub async fn run_mutation_plan(
 
 /// Inspect one mutant of a saved report through `fallow mutation inspect`.
 /// Without `report`, the CLI reads the report that the last run saved in the
-/// cache directory of the project (mutation decision 23).
+/// cache directory of the project.
 pub async fn run_mutation_inspect(
     binary: &str,
     params: MutationInspectParams,
@@ -174,7 +174,7 @@ pub fn build_mutation_inspect_args(params: &MutationInspectParams) -> Result<Vec
     if let Some(report) = &params.report {
         args.extend([
             "--report".to_owned(),
-            report_path(params.root.as_deref(), report),
+            report_path(params.root.as_deref(), report.trim()),
         ]);
     }
     Ok(args)
@@ -390,6 +390,17 @@ mod tests {
             })),
             absolute,
             "an absolute report path stays as it is"
+        );
+        assert_eq!(
+            report_arg(serde_json::json!({
+                "mutant_id": "m_1",
+                "report": " reports/plan.json ",
+                "root": "/repo",
+            })),
+            std::path::Path::new("/repo")
+                .join("reports/plan.json")
+                .to_string_lossy(),
+            "outer whitespace is trimmed, as for mutant_id"
         );
         assert_eq!(
             report_arg(serde_json::json!({

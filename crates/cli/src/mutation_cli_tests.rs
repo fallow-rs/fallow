@@ -227,7 +227,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         status,
         prune_reason: (status == MutantStatus::Pruned).then(|| "side-effect-sink".to_owned()),
         killed_by: (status == MutantStatus::Killed).then(|| "test/a.test.ts::adds".to_owned()),
-        covering_tests: if status == MutantStatus::Survived {
+        covering_tests: if matches!(status, MutantStatus::Survived | MutantStatus::Killed) {
             vec![
                 "test/a.test.ts::adds".to_owned(),
                 "test/a.test.ts::subtracts".to_owned(),
@@ -255,11 +255,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
             base_ref: Some("origin/main".to_owned()),
         },
         runner: None,
-        summary: MutationSummary {
-            counts,
-            score: counts.score(),
-            coverage: counts.coverage(),
-        },
+        summary: MutationSummary::from_results(&mutants),
         functions: Vec::<MutationFunctionResult>::new(),
         mutants,
         no_test_files: false,
@@ -371,8 +367,14 @@ fn human_run_report_has_one_line_for_no_tests_and_no_data() {
     let no_data = report(Vec::new(), Vec::new());
     let text = run_text(&no_data, &OPTIONS);
     assert!(
-        text.contains("No mutation data: the changed code against origin/main has no mutant."),
+        text.contains(
+            "No mutation data: the changed code has no mutant. `fallow mutation --plan --all` lists the mutants of each file and runs no code.\n"
+        ),
         "{text}"
+    );
+    assert!(
+        !text.contains("Use --all"),
+        "no step runs the tests: {text}"
     );
     assert!(text.contains("Score n/a"), "{text}");
 }
@@ -536,14 +538,15 @@ fn human_counts_use_singular_and_plural_nouns() {
     let mut one = report(Vec::new(), Vec::new());
     let failure = |id: &str| MutationBaselineFailure {
         file: Some("test/a.test.ts".to_owned()),
-        test_id: Some(id.to_owned()),
+        test_id: Some(format!("test/a.test.ts::{id}")),
         message: None,
+        mutant_ids: Vec::new(),
     };
     one.baseline_failures = vec![failure("adds")];
     let text = run_text(&one, &OPTIONS);
     assert!(
         text.contains(
-            "Baseline failures: 1 test fails with no active mutant, so it decides no mutant.\n"
+            "Baseline failure: test/a.test.ts::adds fails with no active mutant, so no mutant uses its result.\n"
         ),
         "{text}"
     );
@@ -552,7 +555,7 @@ fn human_counts_use_singular_and_plural_nouns() {
     let text = run_text(&two, &OPTIONS);
     assert!(
         text.contains(
-            "Baseline failures: 2 tests fail with no active mutant, so they decide no mutant.\n"
+            "Baseline failures: 2 tests fail with no active mutant, so no mutant uses their results. First: test/a.test.ts::adds (see --format json)\n"
         ),
         "{text}"
     );
@@ -837,9 +840,10 @@ fn the_scope_line_shortens_a_full_sha_base_ref() {
         text.contains("Scope: changed code against f06c800d0c59\n"),
         "{text}"
     );
-    assert!(
-        text.contains("No mutation data: the changed code against f06c800d0c59 has no mutant."),
-        "{text}"
+    assert_eq!(
+        text.matches("f06c800d0c59").count(),
+        1,
+        "the base ref is printed once: {text}"
     );
     assert!(!text.contains("f06c800d0c59f2a4"), "{text}");
 }
@@ -855,11 +859,35 @@ fn inspect_with_tests(count: usize) -> fallow_output::MutationInspectOutput {
 #[test]
 fn inspect_caps_the_covering_tests_at_ten() {
     let text = plain(&render_inspect(&inspect_with_tests(12)));
-    assert!(text.contains("\u{25cf} Covering tests (12)\n"), "{text}");
+    assert!(
+        text.contains("\n\n\u{25cf} Covering tests (12)\n"),
+        "a blank line comes before the section, as in the run output: {text}"
+    );
     assert!(text.contains("  test/a.test.ts::case 10\n"), "{text}");
     assert!(!text.contains("case 11"), "{text}");
     assert!(
         text.contains("  and 2 more tests (see --format json)\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn inspect_puts_a_blank_line_before_each_block_after_the_code() {
+    let mut killed = inspect_with_tests(12);
+    killed.killed_by = Some("test/a.test.ts::case 3".to_owned());
+    let text = plain(&render_inspect(&killed));
+    assert!(
+        text.contains(
+            "  and 2 more tests (see --format json)\n\nKilled by: test/a.test.ts::case 3\n"
+        ),
+        "{text}"
+    );
+
+    let mut unreached = inspect_packet(fallow_output::MutationInspectStatus::Fresh, None);
+    unreached.static_test_files = vec!["test/a.test.ts".to_owned()];
+    let text = plain(&render_inspect(&unreached));
+    assert!(
+        text.contains("\n\n\u{25cf} Test files that reach the file (1)\n  test/a.test.ts\n"),
         "{text}"
     );
 }
@@ -900,18 +928,18 @@ fn min_score_line(score: Option<f64>, min_score: f64) -> String {
 }
 
 #[test]
-fn a_met_minimum_score_shows_the_check_mark() {
+fn a_met_minimum_score_shows_the_ok_prefix() {
     assert_eq!(
         min_score_line(Some(0.8), 50.0),
-        "\u{2713} Minimum score 50%: met"
+        "[OK] Minimum score 50%: met"
     );
 }
 
 #[test]
-fn a_missed_minimum_score_shows_the_failure_mark() {
+fn a_missed_minimum_score_shows_the_failure_prefix() {
     assert_eq!(
         min_score_line(Some(0.4), 50.0),
-        "\u{2717} Minimum score 50%: missed"
+        "[X] Minimum score 50%: missed"
     );
 }
 
@@ -920,5 +948,220 @@ fn an_unmeasured_minimum_score_shows_the_inactive_prefix() {
     assert_eq!(
         min_score_line(None, 50.0),
         "[-] Minimum score 50%: not measured"
+    );
+}
+
+#[test]
+fn an_error_line_names_its_mutant() {
+    let mut errored = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::RuntimeError)],
+        Vec::new(),
+    );
+    errored.errors = vec![
+        fallow_output::MutationRunIssue {
+            code: "runtime-error".to_owned(),
+            message: "the companion exited".to_owned(),
+            mutant_id: Some("m1".to_owned()),
+            stderr_tail: None,
+        },
+        fallow_output::MutationRunIssue {
+            code: "test-files-not-discovered".to_owned(),
+            message: "the runner does not list 1 static test file".to_owned(),
+            mutant_id: None,
+            stderr_tail: None,
+        },
+    ];
+    let text = run_text(&errored, &OPTIONS);
+    assert!(
+        text.contains("Error (runtime-error), mutant m1: the companion exited\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Error (test-files-not-discovered): the runner does not list"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_survived_section_shows_ten_mutants_and_one_more_line() {
+    let survivors: Vec<MutantResult> = (1..=12)
+        .map(|rank| {
+            mutant(
+                &format!("s{rank}"),
+                if rank % 2 == 0 {
+                    "src/a.ts"
+                } else {
+                    "src/b.ts"
+                },
+                rank,
+                MutantStatus::Survived,
+            )
+        })
+        .collect();
+    let text = run_text(&report(survivors, Vec::new()), &OPTIONS);
+    assert!(text.contains("\u{25cf} Survived (12)\n"), "{text}");
+    assert_eq!(text.matches("      id s").count(), 10, "{text}");
+    assert!(text.contains("id s10\n"), "{text}");
+    assert!(!text.contains("id s11\n"), "{text}");
+    assert!(
+        text.contains("  and 2 more survivors (see --format json)\n"),
+        "{text}"
+    );
+
+    let ten: Vec<MutantResult> = (1..=10)
+        .map(|rank| {
+            mutant(
+                &format!("s{rank}"),
+                "src/a.ts",
+                rank,
+                MutantStatus::Survived,
+            )
+        })
+        .collect();
+    let text = run_text(&report(ten, Vec::new()), &OPTIONS);
+    assert_eq!(text.matches("      id s").count(), 10, "{text}");
+    assert!(!text.contains("more survivor"), "{text}");
+}
+
+#[test]
+fn inspect_caps_the_static_test_files_under_a_section_header() {
+    let mut packet = inspect_packet(fallow_output::MutationInspectStatus::Fresh, None);
+    packet.static_test_files = (1..=12)
+        .map(|index| format!("test/case-{index:02}.test.ts"))
+        .collect();
+    let text = plain(&render_inspect(&packet));
+    assert!(
+        text.contains("\n\n\u{25cf} Test files that reach the file (12)\n"),
+        "a blank line comes before the section, as in the run output: {text}"
+    );
+    assert!(text.contains("  test/case-10.test.ts\n"), "{text}");
+    assert!(!text.contains("case-11"), "{text}");
+    assert!(
+        text.contains("  and 2 more files (see --format json)\n"),
+        "{text}"
+    );
+}
+
+fn excerpt_sides(code: CodeExcerpt) -> (String, String) {
+    let report = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::Survived)],
+        Vec::new(),
+    );
+    let mut lookup = CodeLookup::default();
+    lookup.insert("m1".to_owned(), code);
+    let text = run_text(
+        &report,
+        &RunReportOptions {
+            min_score: None,
+            code: Some(&lookup),
+            inspect_flags: None,
+        },
+    );
+    let line = text
+        .lines()
+        .find(|line| line.contains(" -> "))
+        .unwrap_or_default()
+        .to_owned();
+    let (original, mutated) = line
+        .split_once("arithmetic-operator  ")
+        .and_then(|(_, code)| code.split_once(" -> "))
+        .unwrap_or_default();
+    (original.to_owned(), mutated.to_owned())
+}
+
+#[test]
+fn a_long_span_centers_the_excerpt_on_the_changed_token() {
+    let (original, mutated) = excerpt_sides(excerpt(
+        "  return ",
+        "alpha_very_long_operand_name_number_one === beta_very_long_operand_name_two || gamma === delta",
+        "alpha_very_long_operand_name_number_one === beta_very_long_operand_name_two && gamma === delta",
+        ";",
+    ));
+    assert!(original.contains("two || gamma"), "{original}");
+    assert!(mutated.contains("two && gamma"), "{mutated}");
+    assert_eq!(
+        original.replace("||", "&&"),
+        mutated,
+        "one window for both sides"
+    );
+    assert!(original.chars().count() <= 60, "{original}");
+}
+
+#[test]
+fn the_original_and_the_replacement_share_one_window() {
+    let (original, mutated) = excerpt_sides(excerpt(
+        "if (inputString === \".\" || ",
+        "inputString === \"..\"",
+        "false",
+        ") return true;",
+    ));
+    assert_eq!(
+        original, "...utString === \".\" || inputString === \"..\") return true;",
+        "{original}"
+    );
+    assert_eq!(
+        mutated, "...utString === \".\" || false) return true;",
+        "{mutated}"
+    );
+}
+
+#[test]
+fn a_relative_output_file_resolves_against_the_process_directory() {
+    let mut relative = input(
+        Path::new("/project"),
+        MutationArgs::default(),
+        MutationConfig::default(),
+    );
+    relative.output_file = Some(Path::new("reports/mutation.json"));
+    let options = run_options(&relative).expect("options");
+    let cwd = std::env::current_dir().expect("cwd");
+    assert_eq!(
+        options.output_paths,
+        vec![cwd.join("reports/mutation.json")]
+    );
+    relative.output_file = Some(Path::new("/tmp/mutation.json"));
+    let options = run_options(&relative).expect("options");
+    assert_eq!(
+        options.output_paths,
+        vec![std::path::PathBuf::from("/tmp/mutation.json")]
+    );
+}
+
+#[test]
+fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
+    let plan = MutationPlanOutput {
+        schema_version: MutationPlanSchemaVersion::V1,
+        version: ToolVersion("0.0.0".to_owned()),
+        elapsed_ms: ElapsedMs(0),
+        scope: MutationScopeOutput {
+            kind: MutationScopeKind::All,
+            base_ref: None,
+        },
+        counts: MutationPlanCountsOutput {
+            total: 21,
+            planned: 21,
+            ..MutationPlanCountsOutput::default()
+        },
+        mutants: (1..=21)
+            .map(|rank| MutationPlanMutant {
+                location: mutant(&format!("p{rank}"), "src/a.ts", rank, MutantStatus::Pending)
+                    .location,
+                disposition: MutationPlanDisposition::Planned,
+                prune_reason: None,
+            })
+            .collect(),
+        files: Vec::new(),
+        test_files: vec!["test/a.test.ts".to_owned()],
+        no_test_files: false,
+        framework_config_checked: true,
+        skipped_files: Vec::new(),
+        unmatched_paths: Vec::new(),
+    };
+    let text = plain(&render_plan(&plan));
+    assert!(text.contains("  p20\n"), "{text}");
+    assert!(!text.contains("  p21\n"), "{text}");
+    assert!(
+        text.contains("  and 1 more mutant (see --format json)\n"),
+        "{text}"
     );
 }

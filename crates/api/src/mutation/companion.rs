@@ -1,5 +1,5 @@
 //! The embedded companion: its files, its install in the cache, and the
-//! SHA-256 check before each spawn (decision 11).
+//! SHA-256 check before each spawn, so a changed companion never runs.
 //!
 //! The canonical source is `tools/mutation-runner/src/`. A generator copies the
 //! runtime files to `src/mutation/companion/`, because `include_str!` cannot
@@ -108,7 +108,7 @@ impl InstalledCompanion {
             let actual = sha256_hex(&bytes);
             if &actual != expected {
                 return Err(format!(
-                    "the mutation companion file {} changed after install (sha256 {actual}, expected {expected}); delete {} and run again",
+                    "the mutation companion file {} changed after install (sha256 {actual}, expected {expected}). Fallow does not run a changed companion. Delete {} to restore it from the binary.",
                     path.display(),
                     self.dir.display()
                 ));
@@ -271,6 +271,10 @@ mod tests {
         let error = installed.verify().unwrap_err();
         assert!(error.contains("runtime/global.mjs"), "{error}");
         assert!(error.contains("changed after install"), "{error}");
+        assert!(
+            !error.contains("run again"),
+            "no step runs the tests: {error}"
+        );
         assert!(install(temp.path(), FAKE).is_err());
     }
 

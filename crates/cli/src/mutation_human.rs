@@ -17,9 +17,7 @@ use fallow_output::{
 };
 use rustc_hash::FxHashMap;
 
-use crate::report::{
-    HumanStatus, Level, build_section_header, findings_status_line, format_path, human_status_line,
-};
+use crate::report::{HumanStatus, Level, build_section_header, format_path, human_status_line};
 
 /// The longest code fragment that a survivor line shows.
 const MAX_FRAGMENT_CHARS: usize = 60;
@@ -35,8 +33,11 @@ const SHORT_SHA_CHARS: usize = 12;
 const MAX_PLAN_MUTANTS_SHOWN: usize = 20;
 /// The most files that the no-coverage section lists.
 const MAX_NO_COVERAGE_FILES: usize = 10;
-/// The most covering tests that the inspect output lists.
-const MAX_COVERING_TESTS_SHOWN: usize = 10;
+/// The most covering tests and test files that the inspect output lists.
+const MAX_INSPECT_ITEMS_SHOWN: usize = 10;
+/// The most survivors that the run report lists. The grouped sections of
+/// the other commands use the same cap.
+const MAX_SURVIVORS_SHOWN: usize = 10;
 /// The runner note for a type-check pass that the run did not execute.
 const TYPECHECK_NOT_RUN_NOTE: &str = "typecheck-not-run";
 
@@ -91,18 +92,34 @@ fn scope_line(scope: &MutationScopeOutput) -> String {
     }
 }
 
-/// The line for a scope with no mutant. A changed-code scope also says how
-/// to widen the scope.
+/// The line for a scope with no mutant. The scope line above already names
+/// the base ref. A changed-code scope also names the read-only plan of each
+/// file.
 fn no_data_line(scope: &MutationScopeOutput) -> String {
     match scope.kind {
-        MutationScopeKind::Changed => format!(
-            "No mutation data: the {} has no mutant. Use --all or pass paths to widen the scope.\n",
-            scope_line(scope)
-        ),
+        MutationScopeKind::Changed => "No mutation data: the changed code has no mutant. `fallow mutation --plan --all` lists the mutants of each file and runs no code.\n".to_owned(),
         MutationScopeKind::All | MutationScopeKind::Paths => {
             format!("No mutation data: {} have no mutant.\n", scope_line(scope))
         }
     }
+}
+
+/// The line under a capped list: the count of hidden items and where the
+/// full list is.
+fn more_line(hidden: usize, one: &str, many: &str) -> String {
+    format!(
+        "  and {hidden} more {} (see --format json)",
+        plural(hidden, one, many)
+    )
+}
+
+/// `text` cut to `max` characters, with an ellipsis at the cut.
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let kept: String = text.chars().take(max - ELLIPSIS.len()).collect();
+    format!("{kept}{ELLIPSIS}")
 }
 
 fn percent(score: Option<f64>) -> String {
@@ -131,47 +148,74 @@ fn collapse(text: &str) -> String {
     out
 }
 
-/// One side of a code fragment on one line, at most `MAX_FRAGMENT_CHARS`
-/// characters. A long line shows a window around the changed text, so the
-/// change stays visible.
-fn fragment(before: &str, changed: &str, after: &str) -> String {
-    let before: Vec<char> = collapse(before).trim_start().chars().collect();
-    let changed: Vec<char> = collapse(changed).chars().collect();
-    let after: Vec<char> = collapse(after).trim_end().chars().collect();
-    let line: Vec<char> = before
-        .iter()
-        .chain(&changed)
-        .chain(&after)
-        .copied()
-        .collect();
-    if line.len() <= MAX_FRAGMENT_CHARS {
-        return line.into_iter().collect();
+/// The length of the common prefix of `a` and `b`.
+fn common_prefix(a: &[char], b: &[char]) -> usize {
+    a.iter()
+        .zip(b)
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
+/// The original and the mutated line on one line each, at most
+/// `MAX_FRAGMENT_CHARS` characters. A long line shows one window around the
+/// changed token, the text that differs between the original and the
+/// replacement. Both sides use the same window start, so they stay aligned.
+fn fragments(excerpt: &CodeExcerpt) -> (String, String) {
+    let before: Vec<char> = collapse(&excerpt.before).trim_start().chars().collect();
+    let original: Vec<char> = collapse(&excerpt.original).chars().collect();
+    let replacement: Vec<char> = collapse(&excerpt.replacement).chars().collect();
+    let after: Vec<char> = collapse(&excerpt.after).trim_end().chars().collect();
+    let prefix = common_prefix(&original, &replacement);
+    let rest_original: Vec<char> = original[prefix..].iter().rev().copied().collect();
+    let rest_replacement: Vec<char> = replacement[prefix..].iter().rev().copied().collect();
+    let suffix = common_prefix(&rest_original, &rest_replacement);
+    let change_start = before.len() + prefix;
+    let change_len = original.len().max(replacement.len()) - prefix - suffix;
+    let line = |changed: &[char]| -> Vec<char> {
+        before
+            .iter()
+            .chain(changed)
+            .chain(&after)
+            .copied()
+            .collect()
+    };
+    let lines = [line(&original), line(&replacement)];
+    let longest = lines.iter().map(Vec::len).max().unwrap_or(0);
+    if longest <= MAX_FRAGMENT_CHARS {
+        let [original, mutated] = lines;
+        return (
+            original.into_iter().collect(),
+            mutated.into_iter().collect(),
+        );
     }
     let width = MAX_FRAGMENT_CHARS - 2 * ELLIPSIS.len();
-    let change_start = before.len();
-    let window_start = if changed.len() >= width {
+    let window_start = if change_len >= width {
         change_start
     } else {
-        (change_start + changed.len() / 2)
+        (change_start + change_len / 2)
             .saturating_sub(width / 2)
-            .min(line.len() - width)
+            .min(longest - width)
     };
-    let window_end = (window_start + width).min(line.len());
-    let mut out = String::new();
-    if window_start > 0 {
-        out.push_str(ELLIPSIS);
-    }
-    out.extend(&line[window_start..window_end]);
-    if window_end < line.len() {
-        out.push_str(ELLIPSIS);
-    }
-    out
+    lines
+        .map(|line| {
+            let start = window_start.min(line.len());
+            let end = (start + width).min(line.len());
+            let mut out = String::new();
+            if start > 0 {
+                out.push_str(ELLIPSIS);
+            }
+            out.extend(&line[start..end]);
+            if end < line.len() {
+                out.push_str(ELLIPSIS);
+            }
+            out
+        })
+        .into()
 }
 
 fn code_fragment(code: Option<&CodeLookup>, id: &str) -> Option<String> {
     code?.get(id).map(|excerpt| {
-        let original = fragment(&excerpt.before, &excerpt.original, &excerpt.after);
-        let mutated = fragment(&excerpt.before, &excerpt.replacement, &excerpt.after);
+        let (original, mutated) = fragments(excerpt);
         let mutated = if mutated.trim().is_empty() {
             "(empty line)".to_owned()
         } else {
@@ -236,21 +280,35 @@ fn mutant_head(mutant: &MutantResult) -> String {
     head
 }
 
-/// The mutants with `status`, grouped by file. Files are in the order of the
-/// best rank of their mutants; mutants are in rank order.
-fn grouped(report: &MutationReport, status: MutantStatus) -> Vec<(&str, Vec<&MutantResult>)> {
-    let mut files: BTreeMap<&str, Vec<&MutantResult>> = BTreeMap::new();
-    for mutant in report
+/// The `limit` best-ranked mutants with `status`, grouped by file. Files
+/// are in the order of the best rank of their mutants; mutants are in rank
+/// order.
+fn grouped(
+    report: &MutationReport,
+    status: MutantStatus,
+    limit: usize,
+) -> Vec<(&str, Vec<&MutantResult>)> {
+    let rank = |mutant: &MutantResult| mutant.location.rank.unwrap_or(u32::MAX);
+    let mut selected: Vec<&MutantResult> = report
         .mutants
         .iter()
         .filter(|mutant| mutant.status == status)
-    {
+        .collect();
+    selected.sort_by(|a, b| {
+        (rank(a), &a.location.file, a.location.line).cmp(&(
+            rank(b),
+            &b.location.file,
+            b.location.line,
+        ))
+    });
+    selected.truncate(limit);
+    let mut files: BTreeMap<&str, Vec<&MutantResult>> = BTreeMap::new();
+    for mutant in selected {
         files
             .entry(mutant.location.file.as_str())
             .or_default()
             .push(mutant);
     }
-    let rank = |mutant: &MutantResult| mutant.location.rank.unwrap_or(u32::MAX);
     let mut groups: Vec<(&str, Vec<&MutantResult>)> = files
         .into_iter()
         .map(|(file, mut mutants)| {
@@ -266,16 +324,7 @@ fn grouped(report: &MutationReport, status: MutantStatus) -> Vec<(&str, Vec<&Mut
 /// first test name, cut to `MAX_TEST_NAME_CHARS`. The full list is in the
 /// JSON report and in `inspect`.
 fn covered_by_line(tests: &[String]) -> Option<String> {
-    let first = tests.first()?;
-    let name: String = if first.chars().count() > MAX_TEST_NAME_CHARS {
-        let kept: String = first
-            .chars()
-            .take(MAX_TEST_NAME_CHARS - ELLIPSIS.len())
-            .collect();
-        format!("{kept}{ELLIPSIS}")
-    } else {
-        first.clone()
-    };
+    let name = shorten(tests.first()?, MAX_TEST_NAME_CHARS);
     Some(if tests.len() == 1 {
         format!("covered by 1 test: {name}")
     } else {
@@ -284,7 +333,7 @@ fn covered_by_line(tests: &[String]) -> Option<String> {
 }
 
 fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&CodeLookup>) {
-    let groups = grouped(report, MutantStatus::Survived);
+    let groups = grouped(report, MutantStatus::Survived, MAX_SURVIVORS_SHOWN);
     if groups.is_empty() {
         return;
     }
@@ -293,9 +342,11 @@ fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&Cod
         "\n{}",
         build_section_header("Survived", report.summary.counts.survived, Level::Error)
     );
+    let mut shown = 0;
     for (file, mutants) in groups {
         let _ = writeln!(out, "  {}", format_path(file));
         for mutant in mutants {
+            shown += 1;
             let rank = mutant
                 .location
                 .rank
@@ -314,6 +365,10 @@ fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&Cod
                 let _ = writeln!(out, "      {}", line.dimmed());
             }
         }
+    }
+    let hidden = report.summary.counts.survived.saturating_sub(shown);
+    if hidden > 0 {
+        let _ = writeln!(out, "{}", more_line(hidden, "survivor", "survivors"));
     }
 }
 
@@ -352,11 +407,7 @@ fn render_no_coverage(out: &mut String, report: &MutationReport) {
     }
     let hidden = files.len().saturating_sub(MAX_NO_COVERAGE_FILES);
     if hidden > 0 {
-        let _ = writeln!(
-            out,
-            "  and {hidden} more {} (see --format json)",
-            plural(hidden, "file", "files")
-        );
+        let _ = writeln!(out, "{}", more_line(hidden, "file", "files"));
     }
 }
 
@@ -393,17 +444,42 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
             verdicts.unmatched.len()
         );
     }
-    if !report.baseline_failures.is_empty() {
-        let failed = report.baseline_failures.len();
-        let _ = writeln!(
-            footer,
-            "Baseline failures: {failed} {} with no active mutant, so {} no mutant.",
-            plural(failed, "test fails", "tests fail"),
-            plural(failed, "it decides", "they decide")
+    if let Some(first) = report.baseline_failures.first() {
+        let name = shorten(
+            first
+                .test_id
+                .as_deref()
+                .or(first.file.as_deref())
+                .or(first.message.as_deref())
+                .unwrap_or("a test file"),
+            MAX_TEST_NAME_CHARS,
         );
+        let failed = report.baseline_failures.len();
+        if failed == 1 {
+            let _ = writeln!(
+                footer,
+                "Baseline failure: {name} fails with no active mutant, so no mutant uses its result."
+            );
+        } else {
+            let _ = writeln!(
+                footer,
+                "Baseline failures: {failed} tests fail with no active mutant, so no mutant uses their results. First: {name} (see --format json)"
+            );
+        }
     }
     for error in &report.errors {
-        let _ = writeln!(footer, "Error ({}): {}", error.code, error.message);
+        match &error.mutant_id {
+            Some(id) => {
+                let _ = writeln!(
+                    footer,
+                    "Error ({}), mutant {id}: {}",
+                    error.code, error.message
+                );
+            }
+            None => {
+                let _ = writeln!(footer, "Error ({}): {}", error.code, error.message);
+            }
+        }
     }
     if !report.worktree.changed_paths.is_empty() {
         let _ = writeln!(
@@ -446,12 +522,18 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
     }
     if let Some(min_score) = min_score {
         let line = match report.summary.score {
-            Some(score) if score * 100.0 < min_score => {
-                findings_status_line(&format!("Minimum score {min_score}%: missed"), true)
+            Some(score) if score * 100.0 < min_score => human_status_line(
+                HumanStatus::Failure,
+                format!("Minimum score {min_score}%: missed"),
+            )
+            .red()
+            .bold()
+            .to_string(),
+            Some(_) => {
+                human_status_line(HumanStatus::Ok, format!("Minimum score {min_score}%: met"))
+                    .green()
+                    .to_string()
             }
-            Some(_) => format!("\u{2713} Minimum score {min_score}%: met")
-                .green()
-                .to_string(),
             None => human_status_line(
                 HumanStatus::Inactive,
                 format!("Minimum score {min_score}%: not measured"),
@@ -576,12 +658,9 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
                 location.mutant_id
             );
         }
-        if planned.len() > MAX_PLAN_MUTANTS_SHOWN {
-            let _ = writeln!(
-                out,
-                "  ... {} more (use --format json)",
-                planned.len() - MAX_PLAN_MUTANTS_SHOWN
-            );
+        let hidden = planned.len().saturating_sub(MAX_PLAN_MUTANTS_SHOWN);
+        if hidden > 0 {
+            let _ = writeln!(out, "{}", more_line(hidden, "mutant", "mutants"));
         }
     }
     out
@@ -660,29 +739,33 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
         let tests = &packet.covering_tests;
         let _ = writeln!(
             out,
-            "{}",
+            "\n{}",
             build_section_header("Covering tests", tests.len(), Level::Info)
         );
-        for test in tests.iter().take(MAX_COVERING_TESTS_SHOWN) {
+        for test in tests.iter().take(MAX_INSPECT_ITEMS_SHOWN) {
             let _ = writeln!(out, "  {test}");
         }
-        let hidden = tests.len().saturating_sub(MAX_COVERING_TESTS_SHOWN);
+        let hidden = tests.len().saturating_sub(MAX_INSPECT_ITEMS_SHOWN);
         if hidden > 0 {
-            let _ = writeln!(
-                out,
-                "  and {hidden} more {} (see --format json)",
-                plural(hidden, "test", "tests")
-            );
+            let _ = writeln!(out, "{}", more_line(hidden, "test", "tests"));
         }
     } else if !packet.static_test_files.is_empty() {
+        let files = &packet.static_test_files;
         let _ = writeln!(
             out,
-            "Test files that reach the file: {}",
-            packet.static_test_files.join(", ")
+            "\n{}",
+            build_section_header("Test files that reach the file", files.len(), Level::Info)
         );
+        for file in files.iter().take(MAX_INSPECT_ITEMS_SHOWN) {
+            let _ = writeln!(out, "  {}", format_path(file));
+        }
+        let hidden = files.len().saturating_sub(MAX_INSPECT_ITEMS_SHOWN);
+        if hidden > 0 {
+            let _ = writeln!(out, "{}", more_line(hidden, "file", "files"));
+        }
     }
     if let Some(killed_by) = &packet.killed_by {
-        let _ = writeln!(out, "Killed by: {killed_by}");
+        let _ = writeln!(out, "\nKilled by: {killed_by}");
     }
     out
 }

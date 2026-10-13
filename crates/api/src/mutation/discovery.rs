@@ -1,4 +1,4 @@
-//! JavaScript runtime discovery for the companion (decision 12): `node` or
+//! JavaScript runtime discovery for the companion: `node` or
 //! `bun` from `PATH`, or an explicit runtime path.
 
 use std::ffi::OsStr;
