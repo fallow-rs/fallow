@@ -380,7 +380,7 @@ impl ResolveContext<'_> {
             .filter_map(|pattern| glob::Pattern::new(&pattern).ok())
             .collect();
         for pattern in &patterns {
-            for path in matching_paths(projects_root, pattern) {
+            for path in matching_paths(projects_root, pattern, self.root) {
                 if excluded.iter().any(|excluded| excluded.matches_path(&path)) {
                     continue;
                 }
@@ -398,7 +398,10 @@ impl ResolveContext<'_> {
 
     /// Read a project config file that `projects` names. The file is used.
     fn add_project_file(&mut self, file: &Path, runner_root: &Path, depth: usize) {
-        if self.seen.iter().any(|seen| seen == file) || depth >= MAX_PROJECT_DEPTH {
+        if self.seen.iter().any(|seen| seen == file)
+            || depth >= MAX_PROJECT_DEPTH
+            || !file.starts_with(self.root)
+        {
             return;
         }
         self.seen.push(file.to_path_buf());
@@ -429,11 +432,13 @@ impl ResolveContext<'_> {
 }
 
 /// The files and directories that one `projects` path names. A plain path
-/// gives itself. A glob gives its matches, without `node_modules`.
-fn matching_paths(dir: &Path, pattern: &str) -> Vec<PathBuf> {
+/// gives itself. A glob gives its matches, without `node_modules`. A path or a
+/// glob base outside `root` gives nothing, so a pattern such as `../**` never
+/// walks the file system above the project.
+fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     if !pattern.contains(['*', '?', '[', '{']) {
-        let path = join_path(dir, pattern);
-        return if path.exists() {
+        let path = config_parser::lexical_normalize(&join_path(dir, pattern));
+        return if path.starts_with(root) && path.exists() {
             vec![path]
         } else {
             Vec::new()
@@ -442,12 +447,18 @@ fn matching_paths(dir: &Path, pattern: &str) -> Vec<PathBuf> {
     let Some(full) = glob_in(dir, pattern) else {
         return Vec::new();
     };
+    let literal_prefix = &pattern[..pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len())];
+    let base = config_parser::lexical_normalize(&join_path(dir, literal_prefix));
+    if !base.starts_with(root) {
+        return Vec::new();
+    }
     let Ok(matches) = glob::glob(&full) else {
         return Vec::new();
     };
     matches
         .flatten()
         .take(MAX_PROJECT_GLOB_MATCHES)
+        .filter(|path| path.starts_with(root))
         .filter(|path| {
             !path
                 .components()
@@ -719,6 +730,20 @@ mod tests {
         assert_eq!(
             RstestPlugin.entry_point_role(),
             fallow_config::EntryPointRole::Test
+        );
+    }
+
+    #[test]
+    fn project_glob_outside_the_root_matches_nothing() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().join("app");
+        std::fs::create_dir_all(root.join("packages/a")).expect("create dir");
+        std::fs::create_dir_all(tmp.path().join("outside")).expect("create dir");
+        assert!(matching_paths(&root, "../**", &root).is_empty());
+        assert!(matching_paths(&root, "../outside", &root).is_empty());
+        assert_eq!(
+            matching_paths(&root, "packages/*", &root),
+            vec![root.join("packages/a")]
         );
     }
 }
