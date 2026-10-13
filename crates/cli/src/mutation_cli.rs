@@ -18,14 +18,13 @@ use fallow_api::{
 };
 use fallow_config::{MutationConfig, OutputFormat};
 use fallow_output::{
-    MutantStatus, MutationPlanOutput, MutationReport, MutationScopeKind, MutationScopeOutput,
-    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
-    serialize_mutation_plan_json_output,
+    MutantStatus, MutationPlanOutput, MutationReport, serialize_mutation_inspect_json_output,
+    serialize_mutation_json_output, serialize_mutation_plan_json_output,
 };
 
 use crate::json_style::JsonStyle;
 use crate::mutation_human::{
-    CodeLookup, RunReportOptions, render_inspect, render_plan, render_run,
+    CodeExcerpt, CodeLookup, RunReportOptions, render_inspect, render_plan, render_run,
 };
 
 /// The exit code of a run with a score below the minimum (decision 21).
@@ -39,14 +38,16 @@ pub enum MutationSubcommand {
     ///
     /// Prints the original and the mutated code, the covering tests and the
     /// killing test. When the file changed after the report, the status is
-    /// `stale` and no code is shown.
+    /// `stale` and no code is shown. Without `--report`, it reads the report
+    /// that the last run saved in the Fallow cache.
     Inspect {
         /// The `mutant_id` from the report.
         #[arg(value_name = "MUTANT_ID")]
         mutant_id: String,
-        /// A saved `fallow mutation --format json` report or `--plan` document.
+        /// A saved `fallow mutation --format json` report or `--plan` document
+        /// (default: the report of the last run).
         #[arg(long, value_name = "PATH")]
-        report: PathBuf,
+        report: Option<PathBuf>,
     },
 }
 
@@ -99,8 +100,11 @@ pub struct MutationArgs {
 pub struct MutationCliInput<'a> {
     pub(crate) root: &'a Path,
     pub(crate) config_path: Option<&'a Path>,
-    /// The `--root` flag as typed, for the suggested save command.
+    /// The `--root` flag as typed, for the suggested inspect command.
     pub(crate) root_flag: Option<&'a Path>,
+    /// The `--output-file` path. The run writes it after the run, and the
+    /// worktree check leaves it out.
+    pub(crate) output_file: Option<&'a Path>,
     pub(crate) allow_remote_extends: bool,
     pub(crate) no_cache: bool,
     pub(crate) threads: usize,
@@ -139,24 +143,13 @@ pub fn parse_duration(text: &str) -> Option<Duration> {
     (!duration.is_zero()).then_some(duration)
 }
 
-fn parse_operators(
-    names: &[String],
-    config: &MutationConfig,
-) -> Result<Option<Vec<Operator>>, ProgrammaticError> {
-    let from_config: Option<Vec<String>> = config.operators.as_ref().map(|operators| {
-        operators
-            .iter()
-            .map(|operator| operator.as_str().to_owned())
-            .collect()
-    });
-    let names: Vec<String> = if names.is_empty() {
-        match from_config {
-            Some(names) => names,
-            None => return Ok(None),
-        }
-    } else {
-        names.to_vec()
-    };
+/// The operators of the `--operators` flag. `None` when the flag is not
+/// set: the API plan then applies the `mutation.operators` config key, so the
+/// CLI and MCP share one rule.
+fn parse_operators(names: &[String]) -> Result<Option<Vec<Operator>>, ProgrammaticError> {
+    if names.is_empty() {
+        return Ok(None);
+    }
     names
         .iter()
         .map(|name| {
@@ -259,7 +252,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             ..AnalysisOptions::default()
         },
         scope: scope(input)?,
-        operators: parse_operators(&input.args.operators, &input.config)?,
+        operators: parse_operators(&input.args.operators)?,
         allow_side_effects: input.args.allow_side_effects,
         max_mutants: input.args.max_mutants,
         allow_dirty: input.args.allow_dirty,
@@ -267,6 +260,11 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         concurrency: input.args.concurrency.or(input.config.concurrency),
         time_budget,
         runner_timeout: None,
+        output_paths: input
+            .output_file
+            .map(Path::to_path_buf)
+            .into_iter()
+            .collect(),
     })
 }
 
@@ -285,68 +283,20 @@ fn path_argument(path: &Path) -> String {
     crate::similar_code_cli::render_cli_argument(&path.to_string_lossy())
 }
 
-/// The command that saves a JSON report of the same run, for `inspect`.
-///
-/// The command repeats each input that selects or decides mutants: the
-/// scope, the operators, the limits, the side-effect override, the runtime
-/// and the verdict document. A changed-code scope pins the base ref that the
-/// run used, so a later save sees the same diff.
-pub fn save_report_command(input: &MutationCliInput<'_>, scope: &MutationScopeOutput) -> String {
-    let args = &input.args;
-    let mut words = vec!["fallow".to_owned(), "mutation".to_owned()];
+/// The global flags that `fallow mutation inspect` needs to find the saved
+/// report of this run: the root and the config, because the config can move
+/// the cache directory. Each flag starts with a space.
+pub fn inspect_flags(input: &MutationCliInput<'_>) -> String {
+    let mut flags = String::new();
     if let Some(root) = input.root_flag {
-        words.extend(["--root".to_owned(), path_argument(root)]);
+        flags.push_str(" --root ");
+        flags.push_str(&path_argument(root));
     }
     if let Some(config) = input.config_path {
-        words.extend(["--config".to_owned(), path_argument(config)]);
+        flags.push_str(" --config ");
+        flags.push_str(&path_argument(config));
     }
-    match scope.kind {
-        MutationScopeKind::All => words.push("--all".to_owned()),
-        MutationScopeKind::Paths => words.extend(args.paths.iter().map(|path| path_argument(path))),
-        MutationScopeKind::Changed => {
-            if let Some(diff) = input.diff_file {
-                words.extend(["--diff-file".to_owned(), path_argument(diff)]);
-            } else if let Some(base) = input.changed_since.or(scope.base_ref.as_deref()) {
-                words.extend([
-                    "--changed-since".to_owned(),
-                    crate::similar_code_cli::render_cli_argument(base),
-                ]);
-            }
-        }
-    }
-    if !args.operators.is_empty() {
-        words.extend([
-            "--operators".to_owned(),
-            args.operators
-                .iter()
-                .map(|name| crate::similar_code_cli::render_cli_argument(name))
-                .collect::<Vec<_>>()
-                .join(","),
-        ]);
-    }
-    if let Some(max) = args.max_mutants {
-        words.extend(["--max-mutants".to_owned(), max.to_string()]);
-    }
-    if let Some(budget) = &args.time_budget {
-        words.extend([
-            "--time-budget".to_owned(),
-            crate::similar_code_cli::render_cli_argument(budget),
-        ]);
-    }
-    if args.allow_side_effects {
-        words.push("--allow-side-effects".to_owned());
-    }
-    if args.allow_dirty {
-        words.push("--allow-dirty".to_owned());
-    }
-    if let Some(runtime) = &args.runtime {
-        words.extend(["--runtime".to_owned(), path_argument(runtime)]);
-    }
-    if let Some(verdicts) = &args.verdicts {
-        words.extend(["--verdicts".to_owned(), path_argument(verdicts)]);
-    }
-    words.extend(["--format", "json", "--quiet", ">", "mutation.json"].map(str::to_owned));
-    words.join(" ")
+    flags
 }
 
 fn read_verdicts(path: &Path) -> Result<Vec<u8>, ProgrammaticError> {
@@ -435,14 +385,16 @@ fn code_lookup(report: &MutationReport, root: &Path) -> CodeLookup {
             &mutant.location.mutant_id,
             mutant.location.span,
         ) {
-            let (before, after) = crate::mutation_inspect::mutated_lines(
-                source,
-                mutant.location.span,
-                &code.replacement,
-            );
+            let (before, after) =
+                crate::mutation_inspect::line_context(source, mutant.location.span);
             lookup.insert(
                 mutant.location.mutant_id.clone(),
-                (before.trim().to_owned(), after.trim().to_owned()),
+                CodeExcerpt {
+                    before: before.to_owned(),
+                    original: code.original,
+                    replacement: code.replacement,
+                    after: after.to_owned(),
+                },
             );
         }
     }
@@ -460,7 +412,7 @@ pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
         );
     }
     if let Some(MutationSubcommand::Inspect { mutant_id, report }) = &input.subcommand {
-        return run_inspect(input.root, mutant_id, report, output, style);
+        return run_inspect(input, mutant_id, report.as_deref());
     }
     match run_inner(input) {
         Ok(code) => code,
@@ -479,7 +431,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             ));
         }
         let plan = plan_mutation(&options)?;
-        return Ok(emit_plan(plan, input.output, input.json_style));
+        return Ok(emit_plan(plan, input));
     }
     let verdicts = input
         .args
@@ -492,7 +444,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     }
     if !input.quiet {
         eprintln!(
-            "fallow: mutation testing runs the project tests against each mutant. The project files on disk do not change."
+            "fallow: mutation testing runs the project tests against each mutant. Fallow does not write to project files. The report lists any path that the tests changed."
         );
     }
     let mut report = run_mutation(&options)?;
@@ -502,28 +454,48 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     }
     let exit = run_exit_code(&report, min_score);
     crate::telemetry::note_result_count(report.summary.counts.survived);
+    let value = serialize_mutation_json_output(report.clone()).map_err(|error| {
+        ProgrammaticError::new(
+            format!("failed to serialize the mutation report: {error}"),
+            2,
+        )
+    })?;
+    let saved = match fallow_api::mutation::save_last_mutation_report(&options.analysis, &value) {
+        Ok(_) => true,
+        Err(error) => {
+            eprintln!(
+                "fallow: warning: the mutation report was not saved for `fallow mutation inspect`: {}",
+                error.message
+            );
+            false
+        }
+    };
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::redirect_report_to_file(path, input.output)
+    {
+        return Ok(code);
+    }
     if matches!(input.output, OutputFormat::Json) {
-        let value = serialize_mutation_json_output(report).map_err(|error| {
-            ProgrammaticError::new(
-                format!("failed to serialize the mutation report: {error}"),
-                2,
-            )
-        })?;
         emit_json(&value, input.json_style)?;
     } else {
         let code = code_lookup(&report, input.root);
-        let save_command = save_report_command(input, &report.scope);
+        let flags = inspect_flags(input);
         let text = render_run(
             &report,
             &RunReportOptions {
                 min_score,
-                code: &code,
-                save_command: &save_command,
+                code: Some(&code),
+                inspect_flags: saved.then_some(flags.as_str()),
             },
         );
         for line in text.lines() {
             crate::report::sink::outln!("{line}");
         }
+    }
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::finalize_report_file(path, input.quiet, input.output)
+    {
+        return Ok(code);
     }
     Ok(ExitCode::from(exit))
 }
@@ -536,39 +508,80 @@ fn emit_json(value: &serde_json::Value, style: JsonStyle) -> Result<(), Programm
     Ok(())
 }
 
-fn emit_plan(plan: MutationPlanOutput, output: OutputFormat, style: JsonStyle) -> ExitCode {
+fn emit_plan(plan: MutationPlanOutput, input: &MutationCliInput<'_>) -> ExitCode {
+    let (output, style) = (input.output, input.json_style);
     crate::telemetry::note_result_count(plan.counts.planned);
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::redirect_report_to_file(path, output)
+    {
+        return code;
+    }
     if matches!(output, OutputFormat::Json) {
         let result = serialize_mutation_plan_json_output(plan)
             .map_err(|error| {
                 ProgrammaticError::new(format!("failed to serialize the mutation plan: {error}"), 2)
             })
             .and_then(|value| emit_json(&value, style));
-        return match result {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => crate::error::emit_programmatic_error(&error, output, style),
-        };
+        if let Err(error) = result {
+            return crate::error::emit_programmatic_error(&error, output, style);
+        }
+    } else {
+        for line in render_plan(&plan).lines() {
+            crate::report::sink::outln!("{line}");
+        }
     }
-    for line in render_plan(&plan).lines() {
-        crate::report::sink::outln!("{line}");
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::finalize_report_file(path, input.quiet, output)
+    {
+        return code;
     }
     ExitCode::SUCCESS
 }
 
-fn run_inspect(
-    root: &Path,
-    mutant_id: &str,
-    report: &Path,
-    output: OutputFormat,
-    style: JsonStyle,
-) -> ExitCode {
-    let packet = crate::mutation_inspect::read_saved_report(report)
-        .and_then(|saved| crate::mutation_inspect::inspect(&saved, mutant_id, root));
+/// The saved report that `inspect` reads: the `--report` file, else the
+/// report of the last run in the Fallow cache.
+fn inspect_report_path(
+    input: &MutationCliInput<'_>,
+    report: Option<&Path>,
+) -> Result<PathBuf, ProgrammaticError> {
+    if let Some(report) = report {
+        return Ok(report.to_path_buf());
+    }
+    let path = fallow_api::mutation::last_mutation_report_path(&AnalysisOptions {
+        root: Some(input.root.to_path_buf()),
+        config_path: input.config_path.map(Path::to_path_buf),
+        allow_remote_extends: input.allow_remote_extends,
+        ..AnalysisOptions::default()
+    })?;
+    if !path.is_file() {
+        return Err(ProgrammaticError::new(
+            "no saved mutation report: no run of `fallow mutation` saved one for this project",
+            INPUT_EXIT_CODE,
+        )
+        .with_code("FALLOW_MUTATION_NO_REPORT")
+        .with_context("mutation.report")
+        .with_help(
+            "pass --report <file> with a saved mutation report or `--plan --format json` document",
+        ));
+    }
+    Ok(path)
+}
+
+fn run_inspect(input: &MutationCliInput<'_>, mutant_id: &str, report: Option<&Path>) -> ExitCode {
+    let (output, style) = (input.output, input.json_style);
+    let packet = inspect_report_path(input, report)
+        .and_then(|path| crate::mutation_inspect::read_saved_report(&path))
+        .and_then(|saved| crate::mutation_inspect::inspect(&saved, mutant_id, input.root));
     let packet = match packet {
         Ok(packet) => packet,
         Err(error) => return crate::error::emit_programmatic_error(&error, output, style),
     };
     crate::telemetry::note_result_count(1);
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::redirect_report_to_file(path, output)
+    {
+        return code;
+    }
     if matches!(output, OutputFormat::Json) {
         let result = serialize_mutation_inspect_json_output(packet)
             .map_err(|error| {
@@ -578,13 +591,18 @@ fn run_inspect(
                 )
             })
             .and_then(|value| emit_json(&value, style));
-        return match result {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => crate::error::emit_programmatic_error(&error, output, style),
-        };
+        if let Err(error) = result {
+            return crate::error::emit_programmatic_error(&error, output, style);
+        }
+    } else {
+        for line in render_inspect(&packet).lines() {
+            crate::report::sink::outln!("{line}");
+        }
     }
-    for line in render_inspect(&packet).lines() {
-        crate::report::sink::outln!("{line}");
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::finalize_report_file(path, input.quiet, output)
+    {
+        return code;
     }
     ExitCode::SUCCESS
 }

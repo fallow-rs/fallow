@@ -12,17 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fallow mutation` measures how well the tests detect code changes.** The
   command makes small changes (mutants) in the changed code and runs the
   Vitest tests of the project against each one. A mutant that no test fails
-  on survives. The report gives the mutation score, the survivors by file with
-  their covering tests, and the mutants that no test reaches.
+  on survives. The report gives the mutation score over the tested mutants,
+  the survivors by file with their covering tests, and the share of mutants
+  that a test reaches.
   - `--plan` selects and ranks the mutants and runs no code.
-    `fallow mutation inspect <mutant_id> --report <file>` shows one mutant
-    against the current file and runs no code. A changed file gives a `stale`
-    status.
+    `fallow mutation inspect <mutant_id>` shows one mutant against the current
+    file and runs no code. It reads the report that the last run saved in the
+    Fallow cache, or the file that `--report` names. A changed file gives a
+    `stale` status.
   - The default scope is the changed code against the base ref, as for
     `audit`. `--all` and file paths widen or narrow it.
   - A run refuses a dirty git worktree unless `--allow-dirty` is set. Mutants
     near file system, process, network or database calls are pruned unless
-    `--allow-side-effects` is set. The project files on disk never change.
+    `--allow-side-effects` is set. Fallow does not write to project files, and
+    the report lists any path that the tests changed. `-o <file>` writes the
+    report after the run, and the worktree check leaves that file out.
   - The exit code is 0 by default. `--min-score` or `mutation.minScore` makes a
     lower score exit with 1. `--verdicts <file>` marks equivalent mutants,
     which leave the score.

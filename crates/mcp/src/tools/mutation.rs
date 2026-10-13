@@ -5,11 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_api::mutation::Operator;
-use fallow_api::{
-    AnalysisOptions, MutationRunOptions, MutationRunScope, ProgrammaticError, plan_mutation,
-    resolve_programmatic_analysis_context,
-};
-use fallow_config::{ConfigLoadOptions, FallowConfig};
+use fallow_api::{AnalysisOptions, MutationRunOptions, MutationRunScope, plan_mutation};
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
@@ -20,19 +16,18 @@ use super::api_runtime::{
 };
 use super::{push_global, push_remote_extends, run_tool, validation_error_body};
 
-/// Build the static mutation plan through the typed API.
+/// Build the static mutation plan through the typed API. Without the
+/// `operators` param, `plan_mutation` applies the `mutation.operators` config
+/// key, as `fallow mutation --plan` does.
 pub async fn run_mutation_plan(
     _binary: &str,
     params: MutationPlanParams,
 ) -> Result<CallToolResult, McpError> {
-    let mut options = match mutation_plan_options(&params) {
+    let options = match mutation_plan_options(&params) {
         Ok(options) => options,
         Err(message) => return Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
     };
     let result = run_api_blocking("mutation_plan", move || {
-        if options.operators.is_none() {
-            options.operators = config_operators(&options.analysis)?;
-        }
         plan_mutation(&options).and_then(|plan| {
             fallow_output::serialize_mutation_plan_json_output(plan).map_err(|error| {
                 fallow_api::ProgrammaticError::new(
@@ -52,6 +47,8 @@ pub async fn run_mutation_plan(
 }
 
 /// Inspect one mutant of a saved report through `fallow mutation inspect`.
+/// Without `report`, the CLI reads the report that the last run saved in the
+/// cache directory of the project (mutation decision 23).
 pub async fn run_mutation_inspect(
     binary: &str,
     params: MutationInspectParams,
@@ -141,58 +138,22 @@ fn plan_operators(names: Option<&[String]>) -> Result<Option<Vec<Operator>>, Str
         .map(Some)
 }
 
-/// The `mutation.operators` config key, as `fallow mutation --plan` applies
-/// it when no operator flag is set. `None` when the project has no config
-/// file or the key is not set.
-fn config_operators(
-    analysis: &AnalysisOptions,
-) -> Result<Option<Vec<Operator>>, ProgrammaticError> {
-    let context = resolve_programmatic_analysis_context(analysis)?;
-    let load_options = ConfigLoadOptions {
-        allow_remote_extends: analysis.allow_remote_extends,
-    };
-    let loaded = match context.config_path() {
-        Some(path) => FallowConfig::load_with_options(path, load_options)
-            .map(Some)
-            .map_err(|error| format!("failed to load config: {error:#}")),
-        None => FallowConfig::find_and_load_with_options(context.root(), load_options)
-            .map(|found| found.map(|(config, _)| config))
-            .map_err(|error| format!("failed to load config: {error}")),
-    }
-    .map_err(|message| ProgrammaticError::new(message, 2).with_code("FALLOW_CONFIG_LOAD_FAILED"))?;
-    let Some(names) = loaded.and_then(|config| config.mutation.operators) else {
-        return Ok(None);
-    };
-    names
-        .iter()
-        .map(|name| {
-            Operator::from_name(name.as_str()).ok_or_else(|| {
-                ProgrammaticError::new(
-                    format!(
-                        "unknown mutation operator `{}` in the config",
-                        name.as_str()
-                    ),
-                    2,
-                )
-                .with_code("FALLOW_INVALID_MUTATION_OPTIONS")
-                .with_context("mutation.operators")
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
-}
-
 /// Build the CLI arguments of `mutation_inspect`.
 ///
 /// # Errors
 ///
-/// Returns a validation error body when `mutant_id` or `report` is empty.
+/// Returns a validation error body when `mutant_id` or a given `report` is
+/// empty.
 pub fn build_mutation_inspect_args(params: &MutationInspectParams) -> Result<Vec<String>, String> {
     let mutant_id = params.mutant_id.trim();
     if mutant_id.is_empty() {
         return Err(validation_error_body("mutant_id must not be empty"));
     }
-    if params.report.trim().is_empty() {
+    if params
+        .report
+        .as_deref()
+        .is_some_and(|report| report.trim().is_empty())
+    {
         return Err(validation_error_body("report must not be empty"));
     }
     let mut args = vec![
@@ -209,12 +170,13 @@ pub fn build_mutation_inspect_args(params: &MutationInspectParams) -> Result<Vec
         None,
     );
     push_remote_extends(&mut args, params.allow_remote_extends);
-    args.extend([
-        "inspect".to_owned(),
-        mutant_id.to_owned(),
-        "--report".to_owned(),
-        report_path(params.root.as_deref(), &params.report),
-    ]);
+    args.extend(["inspect".to_owned(), mutant_id.to_owned()]);
+    if let Some(report) = &params.report {
+        args.extend([
+            "--report".to_owned(),
+            report_path(params.root.as_deref(), report),
+        ]);
+    }
     Ok(args)
 }
 
@@ -436,6 +398,31 @@ mod tests {
             })),
             "plan.json",
             "without a root the server working directory applies"
+        );
+    }
+
+    #[test]
+    fn inspect_without_a_report_lets_the_cli_read_the_last_run_report() {
+        let args = build_mutation_inspect_args(&inspect_params(serde_json::json!({
+            "mutant_id": "m_1a2b3c",
+            "root": "/repo",
+            "config": "/repo/.fallowrc.json",
+        })))
+        .unwrap();
+        assert_eq!(
+            args,
+            [
+                "mutation",
+                "--format",
+                "json",
+                "--quiet",
+                "--root",
+                "/repo",
+                "--config",
+                "/repo/.fallowrc.json",
+                "inspect",
+                "m_1a2b3c",
+            ]
         );
     }
 

@@ -7,6 +7,7 @@
 
 pub(crate) mod companion;
 pub(crate) mod discovery;
+pub(crate) mod last_report;
 pub(crate) mod manifest;
 pub(crate) mod protocol;
 pub(crate) mod report;
@@ -24,6 +25,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub use fallow_engine::mutation::Operator;
+pub use last_report::{last_mutation_report_path, save_last_mutation_report};
 pub use verdicts::{MAX_VERDICT_INPUT_BYTES, apply_mutation_verdicts, validate_mutation_verdicts};
 
 use crate::AnalysisOptions;
@@ -80,4 +82,9 @@ pub struct MutationRunOptions {
     /// The timeout of the companion `init` and the dry run. `None` uses
     /// 120 seconds.
     pub runner_timeout: Option<Duration>,
+    /// The files that the caller writes after the run, for example the
+    /// `--output-file` report. The worktree check leaves them out, so an old
+    /// report does not make the worktree dirty. A relative path is relative
+    /// to the process directory, as the caller writes it.
+    pub output_paths: Vec<PathBuf>,
 }

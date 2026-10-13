@@ -180,7 +180,7 @@ impl FallowMcp {
         run_mutation_plan(&self.binary, params.0).await
     }
 
-    /// Inspect one mutant of a saved `fallow mutation` JSON report: original and mutated code, covering tests, and the killing test. A source_sha256 mismatch with the current file gives a stale status, not a wrong answer. This tool never runs tests. A report needs the CLI command `fallow mutation`, which executes the project's tests, so ask your host first.
+    /// Inspect one mutant of a saved `fallow mutation` JSON report (default: the report that the last run saved in the Fallow cache): original and mutated code, covering tests, and the killing test. A source_sha256 mismatch with the current file gives a stale status, not a wrong answer. This tool never runs tests. A report needs the CLI command `fallow mutation`, which executes the project's tests, so ask your host first.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn mutation_inspect(
         &self,

@@ -103,7 +103,98 @@ fn a_project_without_tests_reports_no_coverage_without_a_companion() {
         report.summary.counts.no_coverage,
         report.summary.counts.total
     );
-    assert_eq!(report.summary.score, Some(0.0));
+    assert_eq!(
+        report.summary.score, None,
+        "no mutant ran, so the score has no value"
+    );
+    assert_eq!(report.summary.coverage, Some(0.0));
+}
+
+#[test]
+fn the_plan_uses_the_config_operators_unless_the_caller_names_operators() {
+    let project = small_project();
+    fs::write(
+        project.path().join(".fallowrc.json"),
+        r#"{"mutation":{"operators":["return-value"]}}"#,
+    )
+    .expect("config");
+    let operators = |options: &MutationRunOptions| -> Vec<String> {
+        let mut names: Vec<String> = plan_mutation(options)
+            .expect("plan")
+            .mutants
+            .into_iter()
+            .map(|mutant| mutant.location.operator)
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+    let from_config = options(project.path(), MutationRunScope::All);
+    assert_eq!(operators(&from_config), vec!["return-value"]);
+
+    let mut explicit = options(project.path(), MutationRunScope::All);
+    explicit.operators = Some(vec![crate::mutation::Operator::ArithmeticOperator]);
+    assert_eq!(operators(&explicit), vec!["arithmetic-operator"]);
+}
+
+#[test]
+fn an_output_path_of_the_caller_does_not_make_the_worktree_dirty() {
+    let project = small_project();
+    commit_all(project.path());
+    let report_path = project.path().join("reports/mutation.json");
+    fs::create_dir_all(report_path.parent().unwrap()).expect("dir");
+    fs::write(&report_path, "").expect("write");
+
+    let error = run_mutation(&options(project.path(), MutationRunScope::All)).unwrap_err();
+    assert_eq!(
+        error.code.as_deref(),
+        Some("FALLOW_MUTATION_DIRTY_WORKTREE")
+    );
+    assert!(
+        error.message.contains("1 uncommitted path:"),
+        "{}",
+        error.message
+    );
+
+    let mut with_output = options(project.path(), MutationRunScope::All);
+    with_output.output_paths = vec![report_path];
+    let report = run_mutation(&with_output).expect("the output path is not dirty");
+    assert!(report.worktree.dirty_at_start.is_empty());
+}
+
+#[test]
+fn the_last_report_is_saved_in_the_ignored_cache() {
+    let project = small_project();
+    commit_all(project.path());
+    let options = options(project.path(), MutationRunScope::All);
+    let report = run_mutation(&options).expect("run");
+    let value = fallow_output::serialize_mutation_json_output(report).expect("json");
+
+    let path =
+        crate::mutation::save_last_mutation_report(&options.analysis, &value).expect("saved");
+
+    assert_eq!(
+        path,
+        crate::mutation::last_mutation_report_path(&options.analysis).expect("path")
+    );
+    assert!(
+        path.ends_with(".fallow/mutation/last-report.json"),
+        "{}",
+        path.display()
+    );
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("read")).expect("json");
+    assert_eq!(saved["kind"], "mutation");
+    let status = Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .current_dir(project.path())
+        .output()
+        .expect("git status");
+    assert_eq!(
+        String::from_utf8_lossy(&status.stdout),
+        "",
+        "the cache is ignored"
+    );
 }
 
 #[test]

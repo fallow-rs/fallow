@@ -951,11 +951,18 @@ fn start_primary(
 fn undiscovered_issue(files: &[String]) -> Option<ScheduleIssue> {
     (!files.is_empty()).then(|| ScheduleIssue {
         code: "test-files-not-discovered",
-        message: format!(
-            "the runner does not list {} static test file(s), so they did not run: {}",
-            files.len(),
-            files.join(", ")
-        ),
+        message: {
+            let (noun, pronoun) = if files.len() == 1 {
+                ("file", "it")
+            } else {
+                ("files", "they")
+            };
+            format!(
+                "the runner does not list {} static test {noun}, so {pronoun} did not run: {}",
+                files.len(),
+                files.join(", ")
+            )
+        },
         mutant_id: None,
         stderr_tail: None,
     })

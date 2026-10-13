@@ -12,7 +12,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 |---|---|---|
 | `fallow mutation --plan` | no | `mutation-plan` |
 | `fallow mutation` | yes | `mutation` |
-| `fallow mutation inspect <mutant_id> --report <file>` | no | `mutation-inspect` |
+| `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
 
 - The default scope is the changed code against the detected base ref, the same
   way as `fallow audit`. `--changed-since <ref>` (alias `--base`) sets the
@@ -27,6 +27,15 @@ read-only next steps. It never writes a test and never proposes a code change.
   `--min-score`, `--operators` and `--verdicts`.
 - Only `--format human` and `--format json` are valid. Version 1 has no SARIF,
   CodeClimate, LSP, gate, GitHub Action or GitLab surface.
+- Each run saves its full JSON report to
+  `<cache dir>/mutation/last-report.json` (by default `.fallow/mutation/`).
+  The cache directory has a `.gitignore` with `*`, so the saved report does
+  not make the worktree dirty.
+- `-o <path>` (`--output-file`) writes the report only after the run. The
+  worktree check leaves that path out, so a report from an earlier run does
+  not make the worktree dirty. A shell redirect such as `> mutation.json`
+  creates the file before Fallow starts, so the dirty-worktree check refuses
+  the run. Use `-o` or the saved report instead.
 
 ## Safety boundary
 
@@ -39,8 +48,8 @@ read-only next steps. It never writes a test and never proposes a code change.
   sink are pruned (`side-effect-sink`). `--allow-side-effects` keeps them. This
   override is a flag only: the config rejects `allowSideEffects`, so a project
   config cannot widen what a run executes.
-- The project files on disk never change. The instrumented files live in the
-  Fallow cache.
+- Fallow does not write to project files. The instrumented files live in the
+  Fallow cache. The report lists any path that the tests changed.
 
 ## Exit codes
 
@@ -50,15 +59,39 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
 | `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document. |
 
-The flag wins over the config key. A run with no counted mutant has no score
-and exits `0`.
+The flag wins over the config key. The minimum applies to the score, in
+percent. A run with no executed mutant has no score and exits `0`, also when
+each mutant is `no_coverage`.
 
-## Score
+## Score and coverage
 
-`score = (killed + timeout) / (killed + timeout + survived + no_coverage)`.
-`runtime_error`, `flaky`, `pruned`, `pending` and `equivalent` mutants do not
-count. Only `completion.status: "complete"` makes an empty survivor list
-conclusive.
+- `summary.score` covers the executed mutants only:
+  `score = (killed + timeout) / (killed + timeout + survived)`.
+- `summary.coverage` reports the unreached mutants apart:
+  `coverage = covered / (covered + no_coverage)`, with
+  `covered = killed + timeout + survived`.
+- `no_coverage` never enters the score. A capped run of 200
+  mutants in a project with 20000 unreached mutants still gets a score that
+  describes the 200 tested mutants.
+- `pending`, `equivalent`, `flaky`, `runtime_error` and `pruned` mutants count
+  in neither value.
+- Both values are fractions from 0 to 1 in JSON. `--min-score` and
+  `mutation.minScore` use percent.
+- Only `completion.status: "complete"` makes an empty survivor list
+  conclusive.
+
+## Runner notes
+
+`runner.notes` lists facts of the runner setup that limit the result. The key
+is absent when the runner states no fact.
+
+- `typecheck-not-run`: the project config enables the Vitest type-check pass
+  (`typecheck.enabled`). The run does not execute it, so a mutant that only a
+  type test kills is not counted as killed. The human output prints one line
+  for this note.
+
+`runner` is absent when no companion started, for example in a project with
+no test files.
 
 ## Verdicts for equivalent mutants
 
@@ -94,8 +127,15 @@ A verdict document replaces an inline suppression comment:
 ## Inspect
 
 `inspect` reads a saved `mutation` or `mutation-plan` document and the current
-file. The report holds no source text, so inspect instruments the current file
-in memory and finds the mutant by id and span.
+file. Without `--report`, it reads the report that the last run saved in the
+Fallow cache. Pass the same `--root` and `--config` as the run, because the
+config can move the cache directory. When no run saved a report, inspect exits
+with code 2 and `FALLOW_MUTATION_NO_REPORT`. Each run replaces the saved
+report, so an id from an earlier run exits with code 2 and
+`FALLOW_MUTATION_UNKNOWN_MUTANT`. Pass `--report <file>` to read another saved
+report. The report holds no source text,
+so inspect instruments the current file in memory and finds the mutant by id
+and span.
 
 - `fresh`: the file has the SHA-256 digest of the report, and the instrumented
   file gives the mutant. The packet shows the original and mutated lines.
@@ -109,26 +149,41 @@ reaches inspects as `no-digest`.
 
 ## Human output
 
+- The output uses the section headers and colors of the other commands.
+  `NO_COLOR`, a pipe and `-o` remove the colors.
 - The header says `(ran the project tests)` only when a companion started or a
   mutant has a tested result. Otherwise it says `(no test ran)`.
-- One summary line: the score, killed, survived, no coverage, timeout, and the
-  completion status. The line adds `equivalent`, `runtime error` and `flaky`
-  only when the count is not zero. A partial run adds the pending count to the
-  completion status, for example `partial (mutant-limit, 4 pending)`.
+- The score line: the score, killed, survived, timeout, and the completion
+  status. The line adds `pending`, `equivalent`, `runtime error` and `flaky`
+  only when the count is not zero.
+- The scope line shows a full 40-character base SHA as its first 12
+  characters, as `audit` does.
+- The coverage line: the coverage and the no-coverage count.
+- One line when `runner.notes` has `typecheck-not-run`: type-level kills are
+  not counted.
 - Survivors grouped by file, files and mutants in rank order, each with the
-  location, the operator, the original and mutated line, and the covering
-  tests.
-- A separate no-coverage section, the pruned counts by reason, and one line for
-  "no tests" or "no mutation data", never one line for each function. A
-  project with no test files gets the one "no tests" line with the mutant
-  count, and no no-coverage section. An empty changed-code scope also says
-  that `--all` or paths widen the scope.
-- The next steps. A human run saves no report, so the first step is the
-  command that saves a JSON report, marked as a step that runs the tests
-  again. The command repeats the inputs that select or decide mutants: the
-  scope with the base ref of the run, the paths, the operators, the limits,
-  the side-effect override, the runtime and the verdict document. The second
-  step is `fallow mutation inspect`, which runs no code.
+  location, the operator, the original and mutated code, and one line with
+  the count of covering tests and the first test name, cut to 60 characters.
+  A long code line shows a window around the change, so the changed token
+  stays visible. The JSON report lists all covering tests.
+- The `inspect` output shows the first 10 covering tests under a
+  `Covering tests (N)` header and one `and N more tests` line. The
+  `--format json` packet lists all covering tests.
+- The plan lists the planned mutants under a `Planned (N)` header, in run
+  order.
+- The minimum-score line shows a green check mark when the score meets the
+  minimum, a red cross when it misses the minimum, and the dimmed `[-]` prefix
+  when no score is measured.
+- A separate no-coverage section with one line for each file and its count.
+  The section shows the 10 files with the most mutants and one
+  `and N more files` line. The JSON report has the full list.
+- The pruned counts by reason, and one line for "no tests" or "no mutation
+  data", never one line for each function. A project with no test files gets
+  the one "no tests" line with the mutant count, and no no-coverage section.
+  An empty changed-code scope also says that `--all` or paths widen the scope.
+- The next step is read-only: `fallow mutation inspect <id>` for the first
+  survivor. It reads the saved report of the run, so no step runs the tests
+  again. The step repeats `--root` and `--config` when the run used them.
 
 ## Config
 

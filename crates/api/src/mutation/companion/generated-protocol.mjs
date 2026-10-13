@@ -39,6 +39,7 @@ export const MUTATION_RUNNER_PROTOCOL = deepFreeze({
   ],
   isolation_modes: ["process", "none"],
   in_band_markers: ["fallow-filtered", "fallow-bailed"],
+  ready_notes: ["typecheck-not-run"],
   runtime: {
     global_name: "__fallowMutation",
     active_function: "__fallow_m_a",

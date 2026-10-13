@@ -146,17 +146,19 @@ const buildOverlay = (root, runDir, pathMap) => {
 const readSourceMap = (path) => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null);
 
 /**
- * Serves the instrumented copy of each mapped file. Vitest 4 gives the
- * plugins of `createVitest` to the root project only, so on Vitest 4 the
- * `config` hook also adds this plugin to each inline project definition.
+ * Serves the instrumented copy of each mapped file. The `config` hook also
+ * adds this plugin to each inline project definition. Vitest 4 gives the
+ * plugins of `createVitest` to the root project only. Vitest 5 does not give
+ * them to an inline project with a `browser` block, also when browser mode
+ * is off. Vite keeps one copy of a plugin that a project gets twice.
  */
-const overlayPlugin = (overlay, loaded, { addToInlineProjects }) => {
+const overlayPlugin = (overlay, loaded) => {
   const plugin = {
     name: OVERLAY_PLUGIN,
     enforce: "pre",
     config(config) {
       const projects = config.test?.projects;
-      if (!addToInlineProjects || !Array.isArray(projects)) return;
+      if (!Array.isArray(projects)) return;
       config.test.projects = projects.map((project) =>
         isPlainObject(project)
           ? { ...project, plugins: [...(project.plugins ?? []), plugin] }
@@ -293,6 +295,39 @@ const provideActiveMutant = (vitest, mutantId) => {
   }
 };
 
+const hasOverlay = (project) =>
+  project.vite.config.plugins.some((plugin) => plugin.name === OVERLAY_PLUGIN);
+
+/**
+ * True for a project from a config file other than the root config. Vitest 5
+ * gives an inline project the root config file, and Vitest 4 gives it none.
+ */
+const isFileBased = (project, rootConfigFile) => {
+  const configFile = project.vite.config.configFile;
+  return typeof configFile === "string" && configFile !== rootConfigFile;
+};
+
+const projectNames = (projects) =>
+  projects.map((project) => JSON.stringify(project.name)).join(", ");
+
+/** Gives the reason of each group of projects without the overlay. */
+const uncoveredReasons = (uncovered, rootConfigFile) => {
+  const fileBased = uncovered.filter((project) => isFileBased(project, rootConfigFile));
+  const inline = uncovered.filter((project) => !isFileBased(project, rootConfigFile));
+  const reasons = [];
+  if (fileBased.length > 0) {
+    reasons.push(
+      `Vitest file-based project ${projectNames(fileBased)} comes from a separate config file and cannot load the instrumented files; define the project inline in the root config`,
+    );
+  }
+  if (inline.length > 0) {
+    reasons.push(
+      `Vitest inline project ${projectNames(inline)} did not get the companion overlay plugin and cannot load the instrumented files`,
+    );
+  }
+  return reasons;
+};
+
 /**
  * Throws when a project does not serve the instrumented files. A project
  * without the overlay runs the original code for each mutant, so its tests
@@ -300,16 +335,22 @@ const provideActiveMutant = (vitest, mutantId) => {
  * plugins to a project from a separate config file.
  */
 const assertOverlayInEachProject = async (vitest) => {
-  const uncovered = vitest.projects.filter(
-    (project) => !project.vite.config.plugins.some((plugin) => plugin.name === OVERLAY_PLUGIN),
-  );
+  const uncovered = vitest.projects.filter((project) => !hasOverlay(project));
   if (uncovered.length === 0) return;
+  const reasons = uncoveredReasons(uncovered, vitest.vite.config.configFile);
   await vitest.close();
-  throw new CompanionError(
-    "config-load-failed",
-    `Vitest project ${uncovered.map((project) => JSON.stringify(project.name)).join(", ")} cannot load the instrumented files; define the project inline in the root config`,
-  );
+  throw new CompanionError("config-load-failed", reasons.join("; "));
 };
+
+/**
+ * Lists the facts of the runner setup that limit the result, as kebab-case
+ * notes. `typecheck-not-run`: a project enables the Vitest type-check pass,
+ * but the companion does not run it, so a type error never detects a mutant.
+ */
+const runnerNotes = (projects) =>
+  projects.some((project) => project.config.typecheck?.enabled === true)
+    ? ["typecheck-not-run"]
+    : [];
 
 /**
  * Sets the project options that each run of the companion needs: the setup
@@ -547,9 +588,7 @@ export const createAdapter = async (init) => {
     createVitest,
     version,
     init: { ...init, root },
-    plugin: overlayPlugin(overlay, loaded, {
-      addToInlineProjects: parseVersion(version)[0] < 5,
-    }),
+    plugin: overlayPlugin(overlay, loaded),
   });
   await assertOverlayInEachProject(vitest);
   forceRunnerOptions(vitest);
@@ -684,6 +723,7 @@ export const createAdapter = async (init) => {
       fresh_modules_per_run: freshModulesPerRun,
       batch_mutants: false,
     },
+    notes: runnerNotes(vitest.projects),
     dryRun,
     run,
     reload: async () => ({ method: freshModulesPerRun ? "noop" : "restart_required" }),

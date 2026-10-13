@@ -65,6 +65,9 @@
     "fallow-filtered",
     "fallow-bailed"
   ],
+  "ready_notes": [
+    "typecheck-not-run"
+  ],
   "runtime": {
     "global_name": "__fallowMutation",
     "active_function": "__fallow_m_a",

@@ -1,13 +1,15 @@
 //! Human output of `fallow mutation`.
 //!
-//! The renderers return plain text, so the snapshot tests see the exact
-//! output. The report holds no source text; the survivor lines show
-//! `original -> replacement` only when the caller reproduced the code from an
-//! unchanged file.
+//! The renderers return text with the color codes of the other commands
+//! (`colored` drops them for `NO_COLOR`, a pipe and `--output-file`). The
+//! report holds no source text; the survivor lines show `original ->
+//! replacement` only when the caller reproduced the code from an unchanged
+//! file.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use colored::Colorize as _;
 use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
     MutationInspectStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
@@ -15,30 +17,74 @@ use fallow_output::{
 };
 use rustc_hash::FxHashMap;
 
+use crate::report::{
+    HumanStatus, Level, build_section_header, findings_status_line, format_path, human_status_line,
+};
+
 /// The longest code fragment that a survivor line shows.
 const MAX_FRAGMENT_CHARS: usize = 60;
-/// The most covering tests that a survivor line names.
-const MAX_TESTS_SHOWN: usize = 3;
+/// The marker of a cut at the start or the end of a fragment.
+const ELLIPSIS: &str = "...";
+/// The longest covering-test name that a survivor line shows.
+const MAX_TEST_NAME_CHARS: usize = 60;
+/// The length of a full hex commit SHA.
+const FULL_SHA_CHARS: usize = 40;
+/// The length of a shortened commit SHA in the scope line.
+const SHORT_SHA_CHARS: usize = 12;
 /// The most planned mutants that the plan output lists.
 const MAX_PLAN_MUTANTS_SHOWN: usize = 20;
+/// The most files that the no-coverage section lists.
+const MAX_NO_COVERAGE_FILES: usize = 10;
+/// The most covering tests that the inspect output lists.
+const MAX_COVERING_TESTS_SHOWN: usize = 10;
+/// The runner note for a type-check pass that the run did not execute.
+const TYPECHECK_NOT_RUN_NOTE: &str = "typecheck-not-run";
 
-/// The reproduced code of a mutant: the original source line and the same
-/// line with the replacement applied, both trimmed.
-pub type CodeLookup = FxHashMap<String, (String, String)>;
+/// The source line of a mutant in parts: the text before the span, the span,
+/// its replacement and the text after the span. The parts let a long line
+/// keep the change in view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeExcerpt {
+    pub before: String,
+    pub original: String,
+    pub replacement: String,
+    pub after: String,
+}
+
+/// The reproduced code of a mutant, by mutant id.
+pub type CodeLookup = FxHashMap<String, CodeExcerpt>;
 
 /// The options of the human run report.
 pub struct RunReportOptions<'a> {
     /// The minimum score in percent, from the flag or the config.
     pub min_score: Option<f64>,
     /// The reproduced code of the survivors and the unreached mutants.
-    pub code: &'a CodeLookup,
-    /// The command that saves a JSON report of the same run, for `inspect`.
-    pub save_command: &'a str,
+    pub code: Option<&'a CodeLookup>,
+    /// The global flags that `inspect` needs to find the saved report, for
+    /// example ` --root packages/app`. `None` when the run saved no report.
+    pub inspect_flags: Option<&'a str>,
+}
+
+/// Picks the noun form for `count`.
+const fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
+    if count == 1 { one } else { many }
+}
+
+/// Cuts a full 40-character hex SHA to 12 characters, as `audit` does. A
+/// branch name or another ref stays as it is.
+fn short_base_ref(base_ref: &str) -> &str {
+    if base_ref.len() == FULL_SHA_CHARS && base_ref.bytes().all(|b| b.is_ascii_hexdigit()) {
+        &base_ref[..SHORT_SHA_CHARS]
+    } else {
+        base_ref
+    }
 }
 
 fn scope_line(scope: &MutationScopeOutput) -> String {
     match (scope.kind, scope.base_ref.as_deref()) {
-        (MutationScopeKind::Changed, Some(base)) => format!("changed code against {base}"),
+        (MutationScopeKind::Changed, Some(base)) => {
+            format!("changed code against {}", short_base_ref(base))
+        }
         (MutationScopeKind::Changed, None) => "changed code of the diff".to_owned(),
         (MutationScopeKind::All, _) => "all source files".to_owned(),
         (MutationScopeKind::Paths, _) => "the given paths".to_owned(),
@@ -66,24 +112,72 @@ fn percent(score: Option<f64>) -> String {
     )
 }
 
-fn one_line(text: &str) -> String {
-    let collapsed: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.chars().count() <= MAX_FRAGMENT_CHARS {
-        return collapsed;
+/// Collapses each whitespace run to one space. A run at an edge stays one
+/// space, so the joined parts keep their separation.
+fn collapse(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_space = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            if !in_space {
+                out.push(' ');
+            }
+            in_space = true;
+        } else {
+            out.push(ch);
+            in_space = false;
+        }
     }
-    let mut cut: String = collapsed.chars().take(MAX_FRAGMENT_CHARS - 3).collect();
-    cut.push_str("...");
-    cut
+    out
 }
 
-fn code_fragment(code: &CodeLookup, id: &str) -> Option<String> {
-    code.get(id).map(|(original, replacement)| {
-        let replacement = if replacement.trim().is_empty() {
+/// One side of a code fragment on one line, at most `MAX_FRAGMENT_CHARS`
+/// characters. A long line shows a window around the changed text, so the
+/// change stays visible.
+fn fragment(before: &str, changed: &str, after: &str) -> String {
+    let before: Vec<char> = collapse(before).trim_start().chars().collect();
+    let changed: Vec<char> = collapse(changed).chars().collect();
+    let after: Vec<char> = collapse(after).trim_end().chars().collect();
+    let line: Vec<char> = before
+        .iter()
+        .chain(&changed)
+        .chain(&after)
+        .copied()
+        .collect();
+    if line.len() <= MAX_FRAGMENT_CHARS {
+        return line.into_iter().collect();
+    }
+    let width = MAX_FRAGMENT_CHARS - 2 * ELLIPSIS.len();
+    let change_start = before.len();
+    let window_start = if changed.len() >= width {
+        change_start
+    } else {
+        (change_start + changed.len() / 2)
+            .saturating_sub(width / 2)
+            .min(line.len() - width)
+    };
+    let window_end = (window_start + width).min(line.len());
+    let mut out = String::new();
+    if window_start > 0 {
+        out.push_str(ELLIPSIS);
+    }
+    out.extend(&line[window_start..window_end]);
+    if window_end < line.len() {
+        out.push_str(ELLIPSIS);
+    }
+    out
+}
+
+fn code_fragment(code: Option<&CodeLookup>, id: &str) -> Option<String> {
+    code?.get(id).map(|excerpt| {
+        let original = fragment(&excerpt.before, &excerpt.original, &excerpt.after);
+        let mutated = fragment(&excerpt.before, &excerpt.replacement, &excerpt.after);
+        let mutated = if mutated.trim().is_empty() {
             "(empty line)".to_owned()
         } else {
-            one_line(replacement)
+            mutated
         };
-        format!("{} -> {replacement}", one_line(original))
+        format!("{original} -> {mutated}")
     })
 }
 
@@ -102,34 +196,24 @@ fn completion_text(report: &MutationReport) -> String {
                         .unwrap_or_default()
                 })
                 .collect();
-            let pending = report.summary.counts.pending;
-            if pending > 0 {
-                format!("partial ({}, {pending} pending)", reasons.join(", "))
-            } else {
-                format!("partial ({})", reasons.join(", "))
-            }
+            format!("partial ({})", reasons.join(", "))
         }
     }
 }
 
-/// Picks the noun form for `count`.
-const fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
-    if count == 1 { one } else { many }
-}
-
-/// The summary line: the main counts always, the rare counts only when they
-/// are not zero.
+/// The score line: the score over the executed mutants and the main counts
+/// always, the rare counts only when they are not zero.
 fn summary_line(report: &MutationReport) -> String {
     let counts = &report.summary.counts;
     let mut line = format!(
-        "Score {}  killed {}  survived {}  no coverage {}  timeout {}",
+        "Score {}  killed {}  survived {}  timeout {}",
         percent(report.summary.score),
         counts.killed,
         counts.survived,
-        counts.no_coverage,
         counts.timeout
     );
     for (label, count) in [
+        ("pending", counts.pending),
         ("equivalent", counts.equivalent),
         ("runtime error", counts.runtime_error),
         ("flaky", counts.flaky),
@@ -178,14 +262,39 @@ fn grouped(report: &MutationReport, status: MutantStatus) -> Vec<(&str, Vec<&Mut
     groups
 }
 
-fn render_survivors(out: &mut String, report: &MutationReport, code: &CodeLookup) {
+/// The covering tests of a survivor on one short line: the count and the
+/// first test name, cut to `MAX_TEST_NAME_CHARS`. The full list is in the
+/// JSON report and in `inspect`.
+fn covered_by_line(tests: &[String]) -> Option<String> {
+    let first = tests.first()?;
+    let name: String = if first.chars().count() > MAX_TEST_NAME_CHARS {
+        let kept: String = first
+            .chars()
+            .take(MAX_TEST_NAME_CHARS - ELLIPSIS.len())
+            .collect();
+        format!("{kept}{ELLIPSIS}")
+    } else {
+        first.clone()
+    };
+    Some(if tests.len() == 1 {
+        format!("covered by 1 test: {name}")
+    } else {
+        format!("covered by {} tests, first: {name}", tests.len())
+    })
+}
+
+fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&CodeLookup>) {
     let groups = grouped(report, MutantStatus::Survived);
     if groups.is_empty() {
         return;
     }
-    let _ = writeln!(out, "\nSurvived ({})", report.summary.counts.survived);
+    let _ = writeln!(
+        out,
+        "\n{}",
+        build_section_header("Survived", report.summary.counts.survived, Level::Error)
+    );
     for (file, mutants) in groups {
-        let _ = writeln!(out, "  {file}");
+        let _ = writeln!(out, "  {}", format_path(file));
         for mutant in mutants {
             let rank = mutant
                 .location
@@ -196,45 +305,58 @@ fn render_survivors(out: &mut String, report: &MutationReport, code: &CodeLookup
                 let _ = write!(out, "  {fragment}");
             }
             let _ = writeln!(out);
-            let _ = writeln!(out, "      id {}", mutant.location.mutant_id);
-            if !mutant.covering_tests.is_empty() {
-                let shown: Vec<&str> = mutant
-                    .covering_tests
-                    .iter()
-                    .take(MAX_TESTS_SHOWN)
-                    .map(String::as_str)
-                    .collect();
-                let more = mutant.covering_tests.len().saturating_sub(MAX_TESTS_SHOWN);
-                let suffix = if more > 0 {
-                    format!(" (+{more} more)")
-                } else {
-                    String::new()
-                };
-                let _ = writeln!(out, "      covered by {}{suffix}", shown.join(", "));
+            let _ = writeln!(
+                out,
+                "      {}",
+                format!("id {}", mutant.location.mutant_id).dimmed()
+            );
+            if let Some(line) = covered_by_line(&mutant.covering_tests) {
+                let _ = writeln!(out, "      {}", line.dimmed());
             }
         }
     }
 }
 
-fn render_no_coverage(out: &mut String, report: &MutationReport, code: &CodeLookup) {
-    let groups = grouped(report, MutantStatus::NoCoverage);
-    if groups.is_empty() {
+/// The no-coverage section: one line per file with its count, the files
+/// with the most mutants first, capped. The full list is in the JSON report.
+fn render_no_coverage(out: &mut String, report: &MutationReport) {
+    let mut files: BTreeMap<&str, usize> = BTreeMap::new();
+    for mutant in report
+        .mutants
+        .iter()
+        .filter(|mutant| mutant.status == MutantStatus::NoCoverage)
+    {
+        *files.entry(mutant.location.file.as_str()).or_default() += 1;
+    }
+    if files.is_empty() {
         return;
     }
+    let mut files: Vec<(&str, usize)> = files.into_iter().collect();
+    files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     let _ = writeln!(
         out,
-        "\nNo coverage ({}): no test reaches these mutants",
-        report.summary.counts.no_coverage
+        "\n{}: no test reaches these mutants",
+        build_section_header(
+            "No coverage",
+            report.summary.counts.no_coverage,
+            Level::Warn
+        )
     );
-    for (file, mutants) in groups {
-        let _ = writeln!(out, "  {file}");
-        for mutant in mutants {
-            let _ = write!(out, "    {}", mutant_head(mutant));
-            if let Some(fragment) = code_fragment(code, &mutant.location.mutant_id) {
-                let _ = write!(out, "  {fragment}");
-            }
-            let _ = writeln!(out);
-        }
+    for (file, count) in files.iter().take(MAX_NO_COVERAGE_FILES) {
+        let _ = writeln!(
+            out,
+            "  {}  {count} {}",
+            format_path(file),
+            plural(*count, "mutant", "mutants")
+        );
+    }
+    let hidden = files.len().saturating_sub(MAX_NO_COVERAGE_FILES);
+    if hidden > 0 {
+        let _ = writeln!(
+            out,
+            "  and {hidden} more {} (see --format json)",
+            plural(hidden, "file", "files")
+        );
     }
 }
 
@@ -251,6 +373,7 @@ fn prune_counts<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
 }
 
 fn render_footer_lines(out: &mut String, report: &MutationReport) {
+    let mut footer = String::new();
     let pruned = prune_counts(
         report
             .mutants
@@ -258,11 +381,11 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
             .filter_map(|mutant| mutant.prune_reason.as_deref()),
     );
     if !pruned.is_empty() {
-        let _ = writeln!(out, "\nPruned: {pruned}");
+        let _ = writeln!(footer, "Pruned: {pruned}");
     }
     if let Some(verdicts) = &report.verdicts {
         let _ = writeln!(
-            out,
+            footer,
             "Verdicts: {} equivalent, {} contradicted by a test, {} deferred, {} unmatched",
             verdicts.applied.len(),
             verdicts.contradicted.len(),
@@ -271,25 +394,82 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         );
     }
     if !report.baseline_failures.is_empty() {
+        let failed = report.baseline_failures.len();
         let _ = writeln!(
-            out,
-            "Baseline failures: {} {} with no active mutant and decide no mutant",
-            report.baseline_failures.len(),
-            plural(
-                report.baseline_failures.len(),
-                "test failed",
-                "tests failed"
-            )
+            footer,
+            "Baseline failures: {failed} {} with no active mutant, so {} no mutant.",
+            plural(failed, "test fails", "tests fail"),
+            plural(failed, "it decides", "they decide")
         );
     }
     for error in &report.errors {
-        let _ = writeln!(out, "Error ({}): {}", error.code, error.message);
+        let _ = writeln!(footer, "Error ({}): {}", error.code, error.message);
     }
     if !report.worktree.changed_paths.is_empty() {
         let _ = writeln!(
-            out,
+            footer,
             "Worktree changed during the run: {}",
             report.worktree.changed_paths.join(", ")
+        );
+    }
+    if !footer.is_empty() {
+        out.push('\n');
+        out.push_str(&footer);
+    }
+}
+
+/// The lines under the score line: the coverage, the empty states, the
+/// minimum score and the runner facts.
+fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Option<f64>) {
+    let counts = &report.summary.counts;
+    if let Some(coverage) = report.summary.coverage
+        && !report.no_test_files
+    {
+        let _ = writeln!(
+            out,
+            "Coverage {}  no coverage {}",
+            percent(Some(coverage)),
+            counts.no_coverage
+        );
+    }
+    if report.no_test_files && counts.no_coverage > 0 {
+        let _ = writeln!(
+            out,
+            "No tests: the project has no test files, so the {} {} no coverage.",
+            counts.no_coverage,
+            plural(counts.no_coverage, "mutant has", "mutants have")
+        );
+    } else if report.no_test_files {
+        out.push_str("No tests: the project has no test files, so no mutant can be killed.\n");
+    } else if counts.total == 0 {
+        out.push_str(&no_data_line(&report.scope));
+    }
+    if let Some(min_score) = min_score {
+        let line = match report.summary.score {
+            Some(score) if score * 100.0 < min_score => {
+                findings_status_line(&format!("Minimum score {min_score}%: missed"), true)
+            }
+            Some(_) => format!("\u{2713} Minimum score {min_score}%: met")
+                .green()
+                .to_string(),
+            None => human_status_line(
+                HumanStatus::Inactive,
+                format!("Minimum score {min_score}%: not measured"),
+            )
+            .dimmed()
+            .to_string(),
+        };
+        let _ = writeln!(out, "{line}");
+    }
+    let typecheck_not_run = report.runner.as_ref().is_some_and(|runner| {
+        runner
+            .notes
+            .iter()
+            .any(|note| note == TYPECHECK_NOT_RUN_NOTE)
+    });
+    if typecheck_not_run {
+        out.push_str(
+            "Type check: the project enables the Vitest type-check pass, and this run did not run it. Type-level kills are not counted.\n",
         );
     }
 }
@@ -306,41 +486,23 @@ pub fn render_run(report: &MutationReport, options: &RunReportOptions<'_>) -> St
     };
     let _ = writeln!(out, "Scope: {}", scope_line(&report.scope));
     let _ = writeln!(out, "{}", summary_line(report));
-    if report.no_test_files && counts.no_coverage > 0 {
-        let _ = writeln!(
-            out,
-            "No tests: the project has no test files, so the {} {} no coverage.",
-            counts.no_coverage,
-            plural(counts.no_coverage, "mutant has", "mutants have")
-        );
-    } else if report.no_test_files {
-        out.push_str("No tests: the project has no test files, so no mutant can be killed.\n");
-    } else if counts.total == 0 {
-        out.push_str(&no_data_line(&report.scope));
-    }
-    if let Some(min_score) = options.min_score {
-        let verdict = match report.summary.score {
-            Some(score) if score * 100.0 < min_score => "missed",
-            Some(_) => "met",
-            None => "not measured",
-        };
-        let _ = writeln!(out, "Minimum score {min_score}%: {verdict}");
-    }
+    render_status_lines(&mut out, report, options.min_score);
     render_survivors(&mut out, report, options.code);
     if !report.no_test_files {
-        render_no_coverage(&mut out, report, options.code);
+        render_no_coverage(&mut out, report);
     }
     render_footer_lines(&mut out, report);
-    if let Some(first) = report
-        .mutants
-        .iter()
-        .filter(|mutant| mutant.status == MutantStatus::Survived)
-        .min_by_key(|mutant| mutant.location.rank.unwrap_or(u32::MAX))
+    if let Some(flags) = options.inspect_flags
+        && let Some(first) = report
+            .mutants
+            .iter()
+            .filter(|mutant| mutant.status == MutantStatus::Survived)
+            .min_by_key(|mutant| mutant.location.rank.unwrap_or(u32::MAX))
     {
         let _ = writeln!(
             out,
-            "\nNext\n  Save a JSON report (runs the tests again): {}\n  Inspect a survivor (runs no code): fallow mutation inspect {} --report mutation.json",
-            options.save_command, first.location.mutant_id
+            "\nNext\n  Inspect a survivor (runs no code): fallow mutation inspect {}{flags}",
+            first.location.mutant_id
         );
     }
     out
@@ -362,7 +524,7 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
     );
     let _ = writeln!(
         out,
-        "Files: {} mutated, {} {} them",
+        "Files: {} instrumented, {} {} them",
         plan.files.len(),
         plan.test_files.len(),
         plural(
@@ -390,7 +552,11 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
         .filter(|mutant| mutant.disposition == MutationPlanDisposition::Planned)
         .collect();
     if !planned.is_empty() {
-        let _ = writeln!(out, "\nPlanned, in run order");
+        let _ = writeln!(
+            out,
+            "\n{}",
+            build_section_header("Planned", planned.len(), Level::Info)
+        );
         for mutant in planned.iter().take(MAX_PLAN_MUTANTS_SHOWN) {
             let location = &mutant.location;
             let rank = location
@@ -403,7 +569,7 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
             let _ = writeln!(
                 out,
                 "  {rank}{}:{}:{}{function}  {}  {}",
-                location.file,
+                format_path(&location.file),
                 location.line,
                 location.column,
                 location.operator,
@@ -430,6 +596,24 @@ const fn stale_text(reason: MutationStaleReason) -> &'static str {
     }
 }
 
+/// Writes each line of `text` with the `marker` and its own line number,
+/// starting at `first_line`. A mutant can span more than one line.
+fn write_diff_lines(out: &mut String, marker: char, first_line: u32, text: &str) {
+    for (line, offset) in text.split('\n').zip(0u32..) {
+        let row = format!(
+            "{marker} {:>4} | {}",
+            first_line.saturating_add(offset),
+            line.trim_end_matches('\r')
+        );
+        let row = if marker == '-' {
+            row.red()
+        } else {
+            row.green()
+        };
+        let _ = writeln!(out, "{row}");
+    }
+}
+
 /// Renders the human output of `inspect`.
 pub fn render_inspect(packet: &MutationInspectOutput) -> String {
     let location = &packet.location;
@@ -442,7 +626,9 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
     let _ = write!(
         out,
         "{}:{}:{}",
-        location.file, location.line, location.column
+        format_path(&location.file),
+        location.line,
+        location.column
     );
     if let Some(function) = &location.function {
         let _ = write!(out, "  {function}");
@@ -458,8 +644,8 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
     out.push('\n');
     match (&packet.code, packet.stale_reason) {
         (Some(code), _) => {
-            let _ = writeln!(out, "- {:>4} | {}", location.line, code.original_lines);
-            let _ = writeln!(out, "+ {:>4} | {}", location.line, code.mutated_lines);
+            write_diff_lines(&mut out, '-', location.line, &code.original_lines);
+            write_diff_lines(&mut out, '+', location.line, &code.mutated_lines);
         }
         (None, Some(reason)) => {
             let _ = writeln!(
@@ -471,9 +657,22 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
         (None, None) => {}
     }
     if !packet.covering_tests.is_empty() {
-        let _ = writeln!(out, "Covering tests:");
-        for test in &packet.covering_tests {
+        let tests = &packet.covering_tests;
+        let _ = writeln!(
+            out,
+            "{}",
+            build_section_header("Covering tests", tests.len(), Level::Info)
+        );
+        for test in tests.iter().take(MAX_COVERING_TESTS_SHOWN) {
             let _ = writeln!(out, "  {test}");
+        }
+        let hidden = tests.len().saturating_sub(MAX_COVERING_TESTS_SHOWN);
+        if hidden > 0 {
+            let _ = writeln!(
+                out,
+                "  and {hidden} more {} (see --format json)",
+                plural(hidden, "test", "tests")
+            );
         }
     } else if !packet.static_test_files.is_empty() {
         let _ = writeln!(

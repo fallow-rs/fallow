@@ -78,6 +78,7 @@ const createSession = () => {
       runtime_version: process.version,
       test_files: created.testFiles,
       capabilities: created.capabilities,
+      notes: created.notes,
     });
   };
 

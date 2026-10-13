@@ -62,6 +62,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
         fresh_modules_per_run: true,
         batch_mutants: false,
       });
+      assert.deepEqual(ready.notes, []);
     });
 
     test("the dry run reports every test with its status and line", () => {

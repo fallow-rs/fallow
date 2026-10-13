@@ -101,6 +101,69 @@ for (const { packageName, version } of VITEST_MAJORS) {
         JSON.stringify(response),
       );
       assert.match(response.error.message, /\bchild\b/u);
+      assert.match(response.error.message, /separate config file/u);
+    } finally {
+      companion.stop();
+      fixture.cleanup();
+    }
+  });
+
+  test(`vitest ${version}: an inline project with a disabled browser block runs the mutants`, async () => {
+    const fixture = createFixtureProject({ packageName });
+    const companion = startCompanion();
+    const file = "test/math.test.ts";
+    const testId = `${file}::add > adds numbers`;
+    try {
+      const ready = await companion.request({
+        v: 1,
+        id: 1,
+        type: "init",
+        root: fixture.root,
+        runner: "vitest",
+        config_path: "vitest.browser-projects.config.mjs",
+        run_dir: fixture.runDir,
+        path_map: fixture.pathMap,
+        options: {},
+      });
+      assert.equal(ready.type, "ready", JSON.stringify(ready));
+      assert.deepEqual(ready.test_files, [file]);
+
+      const dryRun = await companion.request({ v: 1, id: 2, type: "dry_run", test_files: [file] });
+      assert.deepEqual(dryRun.hits[testId], ["m1"], JSON.stringify(dryRun));
+
+      const killed = await companion.request({
+        v: 1,
+        id: 3,
+        type: "run",
+        mutant_id: "m1",
+        test_ids: [testId],
+        timeout_ms: 10_000,
+        bail: true,
+      });
+      assert.equal(killed.status, "killed", JSON.stringify(killed));
+    } finally {
+      companion.stop();
+      fixture.cleanup();
+    }
+  });
+
+  test(`vitest ${version}: ready notes that the type-check pass does not run`, async () => {
+    const fixture = createFixtureProject({ packageName });
+    const companion = startCompanion();
+    try {
+      const ready = await companion.request({
+        v: 1,
+        id: 1,
+        type: "init",
+        root: fixture.root,
+        runner: "vitest",
+        config_path: "vitest.typecheck.config.mjs",
+        run_dir: fixture.runDir,
+        path_map: fixture.pathMap,
+        options: {},
+      });
+      assert.equal(ready.type, "ready", JSON.stringify(ready));
+      assert.deepEqual(ready.notes, ["typecheck-not-run"]);
     } finally {
       companion.stop();
       fixture.cleanup();

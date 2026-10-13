@@ -231,9 +231,9 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "mutation_inspect",
         kind: "trace",
-        description: "Inspect one mutant of a saved mutation report, with a stale status when its source changed; runs no tests",
+        description: "Inspect one mutant of a saved mutation report (default: the last run report), with a stale status when its source changed; runs no tests",
         cli_command: Some(
-            "fallow mutation inspect <mutant-id> --report <report.json> --format json --quiet",
+            "fallow mutation inspect <mutant-id> [--report <report.json>] --format json --quiet",
         ),
         key_params: &["mutant_id", "report"],
         license: McpToolLicense::Free,
@@ -1551,6 +1551,24 @@ mod tests {
             );
             assert!(!alias.is_empty(), "{tool} has an empty Code Mode alias");
         }
+    }
+
+    #[test]
+    fn mutation_inspect_marks_the_report_as_optional() {
+        let tool = MCP_TOOLS
+            .iter()
+            .find(|t| t.name == "mutation_inspect")
+            .expect("mutation_inspect row");
+        let cli_command = tool.cli_command.expect("mutation_inspect CLI analogue");
+        assert!(
+            cli_command.contains("[--report <report.json>]"),
+            "without --report the CLI reads the last run report, so the row must show it as optional: {cli_command}"
+        );
+        assert!(
+            tool.description.contains("last run report"),
+            "the description must name the last run default: {}",
+            tool.description
+        );
     }
 
     #[test]

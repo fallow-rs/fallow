@@ -1397,7 +1397,6 @@ name = "fallow-mcp"
 version = "3.33.1"
 dependencies = [
  "fallow-api",
- "fallow-config",
  "fallow-output",
  "fallow-process",
  "fallow-types",

@@ -157,26 +157,29 @@ pub fn reproduce(
     })
 }
 
-/// The whole source lines that contain `span`, before and after the
-/// replacement.
-pub fn mutated_lines(source: &str, span: (u32, u32), replacement: &str) -> (String, String) {
+/// The text of the source lines around `span`: the part before the span on
+/// its first line, and the part after the span on its last line.
+pub fn line_context(source: &str, span: (u32, u32)) -> (&str, &str) {
     let (start, end) = (span.0 as usize, span.1 as usize);
     let line_start = source[..start].rfind('\n').map_or(0, |index| index + 1);
     let line_end = source[end..]
         .find('\n')
         .map_or(source.len(), |index| end + index);
-    let original = source[line_start..line_end]
-        .trim_end_matches('\r')
-        .to_owned();
-    let mutated = format!(
-        "{}{}{}",
+    (
         &source[line_start..start],
-        replacement,
-        &source[end..line_end]
+        source[end..line_end].trim_end_matches('\r'),
     )
-    .trim_end_matches('\r')
-    .to_owned();
-    (original, mutated)
+}
+
+/// The whole source lines that contain `span`, before and after the
+/// replacement.
+pub fn mutated_lines(source: &str, span: (u32, u32), replacement: &str) -> (String, String) {
+    let (before, after) = line_context(source, span);
+    let original = &source[span.0 as usize..span.1 as usize];
+    (
+        format!("{before}{original}{after}"),
+        format!("{before}{replacement}{after}"),
+    )
 }
 
 fn location(mutant: &SavedMutant) -> MutantLocation {
@@ -212,6 +215,9 @@ pub fn inspect(
             fallow_api::ProgrammaticError::new(format!("the report has no mutant `{mutant_id}`"), 2)
                 .with_code("FALLOW_MUTATION_UNKNOWN_MUTANT")
                 .with_context("mutation.mutantId")
+                .with_help(
+                    "without --report, inspect reads the report of the last run for this project, and each run replaces it; pass --report <file> to read another saved report",
+                )
         })?;
     let relative = Path::new(&mutant.file);
     if relative.is_absolute()

@@ -29,7 +29,7 @@ use super::{Level, format_display_path, plural, relative_path, split_dir_filenam
 pub(super) const MAX_FLAT_ITEMS: usize = 10;
 
 /// Format a path with dimmed directory and bold filename.
-pub(super) fn format_path(path_str: &str) -> String {
+pub fn format_path(path_str: &str) -> String {
     let (dir, filename) = split_dir_filename(path_str);
     format!("{}{}", dir.dimmed(), filename.bold())
 }
@@ -67,7 +67,7 @@ pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
 /// The mark follows the gate result. A run that fails shows the red failure
 /// mark. A run that passes, because all of its findings are at rule severity
 /// `warn`, shows the yellow warning mark.
-pub(super) fn findings_status_line(text: &str, run_fails: bool) -> String {
+pub fn findings_status_line(text: &str, run_fails: bool) -> String {
     if run_fails {
         format!("\u{2717} {text}").red().bold().to_string()
     } else {
@@ -76,7 +76,7 @@ pub(super) fn findings_status_line(text: &str, run_fails: bool) -> String {
 }
 
 /// Build a colored section header with bullet, title, and count.
-pub(super) fn build_section_header(title: &str, count: usize, level: Level) -> String {
+pub fn build_section_header(title: &str, count: usize, level: Level) -> String {
     let label = format!("{title} ({count})");
     match level {
         Level::Warn => format!("{} {}", "\u{25cf}".yellow(), label.yellow().bold()),

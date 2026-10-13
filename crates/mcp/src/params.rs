@@ -573,18 +573,22 @@ pub struct MutationInspectParams {
 
     /// Path to a saved `fallow mutation` report or `mutation_plan` output.
     /// A relative path resolves against `root`. Without `root`, it resolves
-    /// against the working directory of the MCP server.
+    /// against the working directory of the MCP server. Omitted: the report
+    /// that the last `fallow mutation` run saved in the Fallow cache of the
+    /// project.
     #[schemars(length(min = 1))]
-    pub report: String,
+    pub report: Option<String>,
 
     /// Project root; defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file.
+    /// Path to a fallow config file. Used only without `report`, to find the
+    /// cache directory that holds the report of the last run.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
-    /// and never grants process-global trust.
+    /// Allow trusted HTTPS config `extends` for this request. Used only
+    /// without `report`, as for `config`. Defaults to false and never grants
+    /// process-global trust.
     pub allow_remote_extends: Option<bool>,
 }
 

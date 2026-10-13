@@ -27,6 +27,10 @@ const REQUIRED_CAPABILITIES: &[&str] = &[
     "fresh_modules_per_run",
     "batch_mutants",
 ];
+/// The `ready` notes that the report reads.
+pub const TYPECHECK_NOT_RUN_NOTE: &str = "typecheck-not-run";
+/// The `ready` notes that the report reads.
+const REQUIRED_READY_NOTES: &[&str] = &[TYPECHECK_NOT_RUN_NOTE];
 /// The test statuses that the scheduler reads.
 const REQUIRED_TEST_STATUSES: &[&str] = &["pass", "fail", "skip", "todo"];
 
@@ -47,6 +51,8 @@ pub struct Manifest {
     pub failure_kinds: Vec<String>,
     pub reload_methods: Vec<String>,
     pub capabilities: Vec<String>,
+    /// The facts that a `ready` response can state in `notes`.
+    pub ready_notes: Vec<String>,
     // The companion owns these values. The API never reads them, but the
     // manifest still names them, so `deny_unknown_fields` must accept them.
     #[serde(rename = "error_codes")]
@@ -188,6 +194,7 @@ pub fn parse_manifest(source: &str) -> Result<Manifest, String> {
         &manifest.capabilities,
         REQUIRED_CAPABILITIES,
     )?;
+    require_all("ready_notes", &manifest.ready_notes, REQUIRED_READY_NOTES)?;
     if manifest.runners.is_empty() {
         return Err("the manifest names no runner".to_owned());
     }
@@ -267,6 +274,16 @@ mod tests {
         let mut value = embedded();
         value["wire_protocol_version"] = serde_json::json!(0);
         assert!(parse_value(&value).unwrap_err().contains("positive"));
+    }
+
+    #[test]
+    fn validation_requires_the_ready_notes_that_the_report_reads() {
+        let mut value = embedded();
+        value["ready_notes"] = serde_json::json!([]);
+        assert_eq!(
+            parse_value(&value).unwrap_err(),
+            "the manifest field `ready_notes` has no `typecheck-not-run`"
+        );
     }
 
     #[test]

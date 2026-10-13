@@ -194,6 +194,7 @@ pub fn apply_mutation_verdicts(
     }
     report.summary.counts = counts;
     report.summary.score = counts.score();
+    report.summary.coverage = counts.coverage();
     report.verdicts = Some(MutationVerdictJoin {
         verdicts_sha256: sha256_hex(verdict_json),
         applied: applied.into_iter().collect(),
@@ -260,6 +261,7 @@ mod tests {
             summary: MutationSummary {
                 counts,
                 score: counts.score(),
+                coverage: counts.coverage(),
             },
             functions: vec![MutationFunctionResult {
                 file: "src/a.ts".to_owned(),
@@ -308,7 +310,8 @@ mod tests {
             mutant("m3", MutantStatus::Survived),
             mutant("m4", MutantStatus::NoCoverage),
         ]);
-        assert_eq!(report.summary.score, Some(0.25));
+        assert_eq!(report.summary.score, Some(1.0 / 3.0));
+        assert_eq!(report.summary.coverage, Some(0.75));
 
         apply_mutation_verdicts(&mut report, &document(&["m2", "m4"])).unwrap();
 
@@ -327,6 +330,7 @@ mod tests {
         assert_eq!(report.summary.counts.no_coverage, 0);
         assert_eq!(report.summary.counts.total, 4);
         assert_eq!(report.summary.score, Some(0.5));
+        assert_eq!(report.summary.coverage, Some(1.0));
         let function = &report.functions[0];
         assert_eq!(function.counts.equivalent, 2);
         assert_eq!(function.counts.no_coverage, 0);

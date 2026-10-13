@@ -24,6 +24,7 @@ use crate::ProgrammaticError;
 use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 use crate::mutation::companion::{COMPANION_FILES, install};
 use crate::mutation::discovery::discover_runtime;
+use crate::mutation::last_report::ignore_cache_dir;
 use crate::mutation::manifest::manifest;
 use crate::mutation::protocol::{InitOptions, InitRequest};
 use crate::mutation::report::{
@@ -172,6 +173,30 @@ fn engine_scope(
     }
 }
 
+/// The operators of the `mutation.operators` config key. The CLI and MCP
+/// callers pass `None` when the user names no operator, so both apply this
+/// one rule.
+fn config_operators(
+    session: &AnalysisSession,
+) -> ProgrammaticResult<Option<Vec<fallow_engine::mutation::Operator>>> {
+    let Some(names) = &session.config().mutation.operators else {
+        return Ok(None);
+    };
+    names
+        .iter()
+        .map(|name| {
+            fallow_engine::mutation::Operator::from_name(name.as_str()).ok_or_else(|| {
+                mutation_error(
+                    "FALLOW_INVALID_MUTATION_OPTIONS",
+                    format!("unknown mutation operator `{}`", name.as_str()),
+                )
+                .with_context("mutation.operators")
+            })
+        })
+        .collect::<ProgrammaticResult<Vec<_>>>()
+        .map(Some)
+}
+
 struct Planned {
     resolved: ProgrammaticAnalysisContext,
     cache_dir: PathBuf,
@@ -189,9 +214,13 @@ fn plan_for(
     let cache_dir = session.config().cache_dir.clone();
     before_plan(resolved.root(), &cache_dir)?;
     let (scope, base_ref) = engine_scope(options, &resolved)?;
+    let operators = match &options.operators {
+        Some(operators) => Some(operators.clone()),
+        None => config_operators(&session)?,
+    };
     let request = MutationPlanRequest {
         scope,
-        operators: options.operators.clone(),
+        operators,
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
     };
@@ -235,8 +264,15 @@ pub fn plan_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutatio
 fn take_worktree_snapshot(
     root: &Path,
     cache_dir: &Path,
+    output_paths: &[PathBuf],
 ) -> ProgrammaticResult<Option<WorktreeSnapshot>> {
-    snapshot(root, &[cache_dir.to_path_buf()])
+    let mut excluded = Vec::with_capacity(output_paths.len() + 1);
+    excluded.push(cache_dir.to_path_buf());
+    // The caller writes a relative output path against the process
+    // directory, which can be below the root.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| root.to_path_buf());
+    excluded.extend(output_paths.iter().map(|path| cwd.join(path)));
+    snapshot(root, &excluded)
         .map_err(|message| mutation_error("FALLOW_MUTATION_WORKTREE_CHECK_FAILED", message))
 }
 
@@ -290,6 +326,10 @@ fn with_worktree_facts(mut error: ProgrammaticError, end: &WorktreeEnd) -> Progr
     error
 }
 
+const fn path_noun(count: usize) -> &'static str {
+    if count == 1 { "path" } else { "paths" }
+}
+
 fn guard_worktree(allow_dirty: bool, start: Option<&WorktreeSnapshot>) -> ProgrammaticResult<()> {
     if allow_dirty {
         return Ok(());
@@ -309,23 +349,13 @@ fn guard_worktree(allow_dirty: bool, start: Option<&WorktreeSnapshot>) -> Progra
     Err(mutation_error(
         "FALLOW_MUTATION_DIRTY_WORKTREE",
         format!(
-            "the git worktree has {} uncommitted path(s): {}",
+            "the git worktree has {} uncommitted {}: {}",
             dirty.len(),
+            path_noun(dirty.len()),
             shown.join(", ")
         ),
     )
     .with_help("commit or stash the changes, or pass --allow-dirty"))
-}
-
-/// Writes `*` to `<cache>/.gitignore` when the cache has no ignore file, so
-/// that the run directory never shows in `git status`.
-fn ignore_cache_dir(cache_dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(cache_dir)?;
-    let ignore = cache_dir.join(".gitignore");
-    if !ignore.exists() {
-        std::fs::write(ignore, "*\n")?;
-    }
-    Ok(())
 }
 
 fn default_concurrency() -> usize {
@@ -466,12 +496,50 @@ fn execute(
             version: runtime.version.clone(),
         },
         concurrency: outcome.workers,
+        notes: ready
+            .notes
+            .iter()
+            .filter(|note| manifest.ready_notes.contains(note))
+            .cloned()
+            .collect(),
     });
     Ok(Execution {
         outcome: Some(outcome),
         runner,
         setup_ms,
     })
+}
+
+/// The errors of a finished run: the scheduler issues and the worktree facts.
+fn run_issues(
+    outcome: Option<&ScheduleOutcome>,
+    changed_paths: &[String],
+    check_error: Option<String>,
+) -> Vec<fallow_output::MutationRunIssue> {
+    let mut errors = issues(outcome);
+    if !changed_paths.is_empty() {
+        errors.push(fallow_output::MutationRunIssue {
+            code: "worktree-changed".to_owned(),
+            message: format!(
+                "the run changed {} worktree {}; a mutant or a test wrote to the project",
+                changed_paths.len(),
+                path_noun(changed_paths.len())
+            ),
+            mutant_id: None,
+            stderr_tail: None,
+        });
+    }
+    if let Some(message) = check_error {
+        errors.push(fallow_output::MutationRunIssue {
+            code: "worktree-check-failed".to_owned(),
+            message: format!(
+                "the end-of-run worktree check failed, so stray writes are unknown: {message}"
+            ),
+            mutant_id: None,
+            stderr_tail: None,
+        });
+    }
+    errors
 }
 
 /// Plans the mutants, runs the project tests against each planned mutant,
@@ -492,13 +560,17 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
     let deadline = options.time_budget.map(|budget| started + budget);
     let mut start_snapshot = None;
     let planned = plan_for(options, |root, cache_dir| {
-        start_snapshot = take_worktree_snapshot(root, cache_dir)?;
+        start_snapshot = take_worktree_snapshot(root, cache_dir, &options.output_paths)?;
         guard_worktree(options.allow_dirty, start_snapshot.as_ref())
     })?;
     let plan_ms = millis(started.elapsed());
     let execution = execute(options, &planned, deadline);
     let worktree_end = settle_worktree(start_snapshot.as_ref(), || {
-        take_worktree_snapshot(planned.resolved.root(), &planned.cache_dir)
+        take_worktree_snapshot(
+            planned.resolved.root(),
+            &planned.cache_dir,
+            &options.output_paths,
+        )
     });
     let execution = execution.map_err(|error| with_worktree_facts(error, &worktree_end))?;
     let WorktreeEnd {
@@ -518,28 +590,7 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         unretried_survivors: outcome.is_some_and(|outcome| !outcome.unretried_survivors.is_empty()),
         unloaded_paths: outcome.map_or(&[], |outcome| outcome.unloaded_paths.as_slice()),
     });
-    let mut errors = issues(outcome);
-    if !changed_paths.is_empty() {
-        errors.push(fallow_output::MutationRunIssue {
-            code: "worktree-changed".to_owned(),
-            message: format!(
-                "the run changed {} worktree path(s); a mutant or a test wrote to the project",
-                changed_paths.len()
-            ),
-            mutant_id: None,
-            stderr_tail: None,
-        });
-    }
-    if let Some(message) = check_error {
-        errors.push(fallow_output::MutationRunIssue {
-            code: "worktree-check-failed".to_owned(),
-            message: format!(
-                "the end-of-run worktree check failed, so stray writes are unknown: {message}"
-            ),
-            mutant_id: None,
-            stderr_tail: None,
-        });
-    }
+    let errors = run_issues(outcome, &changed_paths, check_error);
     let timings = outcome.map_or_else(
         || MutationTimings {
             plan_ms,
@@ -620,6 +671,19 @@ mod tests {
             "{}",
             error.message
         );
+    }
+
+    #[test]
+    fn every_config_operator_name_maps_to_an_engine_operator() {
+        for operator in fallow_engine::mutation::Operator::ALL {
+            let name: fallow_config::MutationOperatorName =
+                serde_json::from_value(serde_json::json!(operator.as_str()))
+                    .expect("a config operator name");
+            assert_eq!(
+                fallow_engine::mutation::Operator::from_name(name.as_str()),
+                Some(operator)
+            );
+        }
     }
 
     #[test]

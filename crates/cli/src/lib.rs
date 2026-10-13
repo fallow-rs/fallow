@@ -1135,8 +1135,8 @@ enum Command {
     /// Changes the code in small ways (mutants) and runs the project tests
     /// against each mutant. A mutant that no test fails on survives. The
     /// default scope is the changed code against the base ref, as `audit`.
-    /// `--plan` and `inspect` run no code. The project files on disk never
-    /// change.
+    /// `--plan` and `inspect` run no code. Fallow does not write to project
+    /// files. The report lists any path that the tests changed.
     Mutation {
         #[command(subcommand)]
         subcommand: Option<mutation_cli::MutationSubcommand>,
@@ -3995,8 +3995,11 @@ fn dispatch_and_finalize(
     let quiet = dispatch.quiet;
 
     // Set up the report-file sink before dispatch so rendering lands in the file;
-    // progress and the confirmation stay on stderr.
-    if let Some(path) = cli.output_file.as_deref()
+    // progress and the confirmation stay on stderr. `fallow mutation` opens the
+    // file itself after the run, so the file never makes the worktree dirty.
+    let deferred_output = matches!(command, Some(Command::Mutation { .. }));
+    let output_file = cli.output_file.as_deref().filter(|_| !deferred_output);
+    if let Some(path) = output_file
         && let Err(code) = redirect_report_to_file(path, output)
     {
         return Err(code);
@@ -4019,7 +4022,7 @@ fn dispatch_and_finalize(
         }
     };
 
-    if let Some(path) = cli.output_file.as_deref()
+    if let Some(path) = output_file
         && let Err(code) = finalize_report_file(path, quiet, output)
     {
         return Err(code);
@@ -4401,6 +4404,7 @@ fn dispatch_mutation_command(
         root: dispatch.root,
         config_path: cli.config.as_deref(),
         root_flag: cli.root.as_deref(),
+        output_file: cli.output_file.as_deref(),
         allow_remote_extends: cli.allow_remote_extends,
         no_cache: cli.no_cache,
         threads: dispatch.threads,

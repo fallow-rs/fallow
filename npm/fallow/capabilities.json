@@ -7611,8 +7611,8 @@
       {
         "name": "mutation_inspect",
         "kind": "trace",
-        "description": "Inspect one mutant of a saved mutation report, with a stale status when its source changed; runs no tests",
-        "cli_command": "fallow mutation inspect <mutant-id> --report <report.json> --format json --quiet",
+        "description": "Inspect one mutant of a saved mutation report (default: the last run report), with a stale status when its source changed; runs no tests",
+        "cli_command": "fallow mutation inspect <mutant-id> [--report <report.json>] --format json --quiet",
         "key_params": [
           "mutant_id",
           "report"

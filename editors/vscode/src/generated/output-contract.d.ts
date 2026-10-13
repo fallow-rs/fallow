@@ -19411,7 +19411,8 @@ elapsed_ms: ElapsedMs
 completion: MutationCompletion
 scope: MutationScopeOutput
 /**
- * The runner, when a companion started.
+ * The runner. Absent when no companion started, for example when no
+ * test file reaches a mutant.
  */
 runner?: (MutationRunnerOutput | null)
 summary: MutationSummary
@@ -19502,6 +19503,13 @@ runtime: MutationRuntimeOutput
  * The number of companion processes that ran mutants.
  */
 concurrency: number
+/**
+ * Facts of the runner setup that limit the result, kebab-case.
+ * `typecheck-not-run`: the project config enables the Vitest type-check
+ * pass, and the run did not execute it, so a type-level kill is not
+ * counted. Absent when the runner states no fact.
+ */
+notes?: string[]
 }
 /**
  * The JavaScript runtime that ran the companion.
@@ -19522,10 +19530,18 @@ version: string
 export interface MutationSummary {
 counts: MutationStatusCounts
 /**
- * The mutation score: `(killed + timeout) / (killed + timeout + survived
- * + no_coverage)`. `null` when no mutant counts.
+ * The mutation score over the executed mutants, a fraction from 0 to 1:
+ * `(killed + timeout) / (killed + timeout + survived)`. `null` when no
+ * mutant ran to a tested result. `--min-score` and `mutation.minScore`
+ * compare this value in percent.
  */
 score?: (number | null)
+/**
+ * The share of mutants that a test reaches, a fraction from 0 to 1:
+ * `covered / (covered + no_coverage)`, with `covered = killed + timeout
+ * + survived`. `null` when no mutant is covered or unreached.
+ */
+coverage?: (number | null)
 }
 /**
  * The number of mutants for each status, and the mutation score.

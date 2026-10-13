@@ -107,6 +107,9 @@ pub struct Ready {
     pub test_files: Vec<String>,
     #[serde(default)]
     pub capabilities: Capabilities,
+    /// Facts of the runner setup, for example `typecheck-not-run`.
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -418,6 +421,13 @@ mod tests {
         assert!(!ready.capabilities.bail);
         assert!(!ready.capabilities.fresh_modules_per_run);
         assert!(!ready.capabilities.test_filter);
+        assert!(ready.notes.is_empty(), "notes default to none");
+
+        let line = r#"{"v":1,"id":1,"type":"ready","runner_version":"5.0.4","runtime_version":"v24.20.0","notes":["typecheck-not-run"]}"#;
+        let Response::Ready(ready) = decode_response(line, 1, 1, "ready").unwrap() else {
+            panic!("expected ready");
+        };
+        assert_eq!(ready.notes, vec!["typecheck-not-run".to_owned()]);
     }
 
     #[test]

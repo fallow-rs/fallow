@@ -736,7 +736,7 @@ const TOOL_SCHEMA_EXPECTATIONS: &[(&str, &[&str], &[&str])] = &[
             "config",
             "allow_remote_extends",
         ],
-        &["mutant_id", "report"],
+        &["mutant_id"],
     ),
     (
         "list_suppressions",

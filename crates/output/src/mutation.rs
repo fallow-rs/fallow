@@ -122,11 +122,13 @@ impl MutationStatusCounts {
         }
     }
 
-    /// The mutation score: `(killed + timeout) / (killed + timeout + survived
-    /// + no_coverage)`, from 0 to 1. `None` when no mutant counts.
+    /// The mutation score over the executed mutants: `(killed + timeout) /
+    /// (killed + timeout + survived)`, from 0 to 1. `None` when no mutant
+    /// ran to a tested result.
     ///
-    /// Runtime errors, flaky, pruned, pending and equivalent mutants do not
-    /// count.
+    /// `no_coverage` mutants stay out of the score (decision 15).
+    /// [`Self::coverage`] reports them. Runtime errors, flaky, pruned,
+    /// pending and equivalent mutants never count.
     #[must_use]
     #[expect(
         clippy::cast_precision_loss,
@@ -134,8 +136,22 @@ impl MutationStatusCounts {
     )]
     pub fn score(&self) -> Option<f64> {
         let detected = self.killed + self.timeout;
-        let counted = detected + self.survived + self.no_coverage;
-        (counted > 0).then(|| detected as f64 / counted as f64)
+        let executed = detected + self.survived;
+        (executed > 0).then(|| detected as f64 / executed as f64)
+    }
+
+    /// The share of mutants that a test reaches: `covered / (covered +
+    /// no_coverage)`, with `covered = killed + timeout + survived`, from 0 to
+    /// 1. `None` when no mutant is covered or unreached.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "mutant counts are far below 2^52"
+    )]
+    pub fn coverage(&self) -> Option<f64> {
+        let covered = self.killed + self.timeout + self.survived;
+        let counted = covered + self.no_coverage;
+        (counted > 0).then(|| covered as f64 / counted as f64)
     }
 }
 
@@ -249,6 +265,12 @@ pub struct MutationRunnerOutput {
     pub runtime: MutationRuntimeOutput,
     /// The number of companion processes that ran mutants.
     pub concurrency: usize,
+    /// Facts of the runner setup that limit the result, kebab-case.
+    /// `typecheck-not-run`: the project config enables the Vitest type-check
+    /// pass, and the run did not execute it, so a type-level kill is not
+    /// counted. Absent when the runner states no fact.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// The source position of a mutant. No source text.
@@ -343,9 +365,15 @@ pub struct MutationFunctionResult {
 pub struct MutationSummary {
     /// The number of mutants for each status.
     pub counts: MutationStatusCounts,
-    /// The mutation score: `(killed + timeout) / (killed + timeout + survived
-    /// + no_coverage)`. `null` when no mutant counts.
+    /// The mutation score over the executed mutants, a fraction from 0 to 1:
+    /// `(killed + timeout) / (killed + timeout + survived)`. `null` when no
+    /// mutant ran to a tested result. `--min-score` and `mutation.minScore`
+    /// compare this value in percent.
     pub score: Option<f64>,
+    /// The share of mutants that a test reaches, a fraction from 0 to 1:
+    /// `covered / (covered + no_coverage)`, with `covered = killed + timeout
+    /// + survived`. `null` when no mutant is covered or unreached.
+    pub coverage: Option<f64>,
 }
 
 /// A test or a test file that failed with no active mutant. Its tests do not
@@ -437,7 +465,9 @@ pub struct MutationReport {
     pub completion: MutationCompletion,
     /// The mutated code.
     pub scope: MutationScopeOutput,
-    /// The runner, when a companion started.
+    /// The runner. Absent when no companion started, for example when no
+    /// test file reaches a mutant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<MutationRunnerOutput>,
     /// The totals.
     pub summary: MutationSummary,
@@ -763,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn the_score_counts_detected_over_killed_timeout_survived_and_no_coverage() {
+    fn the_score_counts_executed_mutants_and_coverage_counts_reached_mutants() {
         let counts = counts(&[
             MutantStatus::Killed,
             MutantStatus::Killed,
@@ -785,7 +815,24 @@ mod tests {
         assert_eq!(counts.flaky, 1);
         assert_eq!(counts.pruned, 1);
         assert_eq!(counts.pending, 1);
-        assert_eq!(counts.score(), Some(0.5));
+        assert_eq!(counts.score(), Some(0.75));
+        assert_eq!(counts.coverage(), Some(4.0 / 6.0));
+    }
+
+    #[test]
+    fn unreached_mutants_lower_the_coverage_but_not_the_score() {
+        let reached = counts(&[MutantStatus::Killed, MutantStatus::Survived]);
+        assert_eq!(reached.score(), Some(0.5));
+        assert_eq!(reached.coverage(), Some(1.0));
+        let mut unreached = reached;
+        for _ in 0..98 {
+            unreached.add(MutantStatus::NoCoverage);
+        }
+        assert_eq!(unreached.score(), Some(0.5));
+        assert_eq!(unreached.coverage(), Some(0.02));
+        assert_eq!(counts(&[MutantStatus::NoCoverage]).score(), None);
+        assert_eq!(counts(&[MutantStatus::NoCoverage]).coverage(), Some(0.0));
+        assert_eq!(counts(&[MutantStatus::Pending]).coverage(), None);
     }
 
     #[test]

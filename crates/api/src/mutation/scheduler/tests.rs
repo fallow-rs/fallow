@@ -102,6 +102,7 @@ fn ready(caps: Capabilities, version: &str) -> Response {
         runtime_version: "v24.20.0".to_owned(),
         test_files: vec!["test/a.test.ts".to_owned(), "test/b.test.ts".to_owned()],
         capabilities: caps,
+        notes: Vec::new(),
     })
 }
 
@@ -924,4 +925,21 @@ fn a_planned_test_file_that_the_runner_does_not_list_is_a_run_issue() {
     assert_eq!(issues[0].0, "test-files-not-discovered");
     assert!(issues[0].1.contains("test/types.test-d.ts"), "{issues:?}");
     assert!(!issues[0].1.contains("test/a.test.ts"), "{issues:?}");
+}
+
+#[test]
+fn undiscovered_issue_uses_the_singular_for_one_file_and_the_plural_for_more() {
+    let one = undiscovered_issue(&["test/a.test-d.ts".to_owned()]).expect("one file");
+    assert_eq!(
+        one.message,
+        "the runner does not list 1 static test file, so it did not run: test/a.test-d.ts"
+    );
+    let two = undiscovered_issue(&["test/a.test-d.ts".to_owned(), "test/b.test-d.ts".to_owned()])
+        .expect("two files");
+    assert_eq!(
+        two.message,
+        "the runner does not list 2 static test files, so they did not run: \
+         test/a.test-d.ts, test/b.test-d.ts"
+    );
+    assert!(undiscovered_issue(&[]).is_none());
 }

@@ -32121,7 +32121,7 @@
               "type": "null"
             }
           ],
-          "description": "The runner, when a companion started."
+          "description": "The runner. Absent when no companion started, for example when no\ntest file reaches a mutant."
         },
         "summary": {
           "description": "The totals.",
@@ -32778,6 +32778,13 @@
         "concurrency": {
           "type": "integer",
           "description": "The number of companion processes that ran mutants."
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Facts of the runner setup that limit the result, kebab-case.\n`typecheck-not-run`: the project config enables the Vitest type-check\npass, and the run did not execute it, so a type-level kill is not\ncounted. Absent when the runner states no fact."
         }
       },
       "required": [
@@ -32990,7 +32997,14 @@
             "number",
             "null"
           ],
-          "description": "The mutation score: `(killed + timeout) / (killed + timeout + survived\n+ no_coverage)`. `null` when no mutant counts."
+          "description": "The mutation score over the executed mutants, a fraction from 0 to 1:\n`(killed + timeout) / (killed + timeout + survived)`. `null` when no\nmutant ran to a tested result. `--min-score` and `mutation.minScore`\ncompare this value in percent."
+        },
+        "coverage": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The share of mutants that a test reaches, a fraction from 0 to 1:\n`covered / (covered + no_coverage)`, with `covered = killed + timeout\n+ survived`. `null` when no mutant is covered or unreached."
         }
       },
       "required": [

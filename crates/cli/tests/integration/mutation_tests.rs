@@ -90,33 +90,156 @@ fn a_dirty_worktree_exits_2_unless_allowed() {
 }
 
 #[test]
-fn min_score_fails_with_exit_1_only_when_set_and_missed() {
+fn unreached_mutants_give_a_coverage_but_no_score_so_min_score_cannot_fail() {
     let project = untested_project();
     let (plain, value) = json_mutation(project.path(), &["--all"]);
     assert_eq!(plain.code, 0, "{}", plain.stderr);
-    assert_eq!(value["summary"]["score"], 0.0);
+    assert_eq!(
+        value["summary"]["score"],
+        serde_json::Value::Null,
+        "no mutant ran, so the score over executed mutants has no value: {value}"
+    );
+    assert_eq!(value["summary"]["coverage"], 0.0);
     assert!(value["summary"]["counts"]["no_coverage"].as_u64().unwrap() > 0);
     assert_eq!(value["no_test_files"], true);
+    assert!(
+        value.get("runner").is_none(),
+        "no companion started, so the runner is absent: {value}"
+    );
 
-    let (missed, _) = json_mutation(project.path(), &["--all", "--min-score", "50"]);
-    assert_eq!(missed.code, 1, "{}", missed.stderr);
+    let (unmeasured, _) = json_mutation(project.path(), &["--all", "--min-score", "50"]);
+    assert_eq!(unmeasured.code, 0, "{}", unmeasured.stderr);
 
-    let (met, _) = json_mutation(project.path(), &["--all", "--min-score", "0"]);
-    assert_eq!(met.code, 0, "{}", met.stderr);
-
-    fs::write(
-        project.path().join(".fallowrc.json"),
-        r#"{"mutation":{"minScore":40}}"#,
-    )
-    .expect("config");
-    commit_all(project.path(), "config");
-    let (from_config, _) = json_mutation(project.path(), &["--all"]);
-    assert_eq!(from_config.code, 1, "{}", from_config.stderr);
-    let (flag_wins, _) = json_mutation(project.path(), &["--all", "--min-score", "0"]);
-    assert_eq!(flag_wins.code, 0, "{}", flag_wins.stderr);
+    let human = mutation(project.path(), &["--all", "--min-score", "50", "--quiet"]);
+    assert!(
+        human.stdout.contains("Minimum score 50%: not measured"),
+        "{}",
+        human.stdout
+    );
 
     let invalid = mutation(project.path(), &["--all", "--min-score", "120", "--quiet"]);
     assert_eq!(invalid.code, 2, "{}", invalid.stderr);
+}
+
+#[test]
+fn an_output_file_in_the_worktree_is_written_after_the_run_and_never_makes_it_dirty() {
+    let project = untested_project();
+    let report = project.path().join("reports/mutation.json");
+    let report_arg = report.to_str().unwrap();
+    for attempt in ["first", "second"] {
+        let output = mutation(
+            project.path(),
+            &["--all", "--format", "json", "--quiet", "-o", report_arg],
+        );
+        assert_eq!(output.code, 0, "{attempt} run: {}", output.stdout);
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&report).expect("report")).expect("json");
+        assert_eq!(saved["kind"], "mutation", "{attempt} run");
+        assert!(
+            saved["worktree"]["dirty_at_start"]
+                .as_array()
+                .is_none_or(Vec::is_empty),
+            "{attempt} run: {saved}"
+        );
+    }
+}
+
+#[test]
+fn inspect_reads_the_report_of_the_last_run_when_no_report_is_named() {
+    let project = untested_project();
+    let (none, value) = json_mutation(project.path(), &["inspect", "0000000000000000"]);
+    assert_eq!(none.code, 2, "{value}");
+    assert_eq!(value["code"], "FALLOW_MUTATION_NO_REPORT", "{value}");
+    let help = value["help"].as_str().unwrap_or_default();
+    assert!(help.contains("--report <file>"), "{value}");
+    assert!(
+        !help.contains("run `fallow mutation`"),
+        "the help names no step that runs the tests: {value}"
+    );
+
+    let (_, report) = json_mutation(project.path(), &["--all"]);
+    let id = report["mutants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|mutant| mutant["operator"] == "arithmetic-operator" && mutant["function"] == "add")
+        .and_then(|mutant| mutant["mutant_id"].as_str())
+        .expect("an arithmetic mutant in add")
+        .to_owned();
+    let (fresh, packet) = json_mutation(project.path(), &["inspect", &id]);
+    assert_eq!(fresh.code, 0, "{}", fresh.stderr);
+    assert_eq!(packet["status"], "fresh", "{packet}");
+    assert_eq!(packet["code"]["mutated_lines"], "  return a - b;");
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .current_dir(project.path())
+        .output()
+        .expect("git status");
+    assert_eq!(
+        String::from_utf8_lossy(&status.stdout),
+        "",
+        "the saved report stays out of the worktree"
+    );
+}
+
+#[test]
+fn inspect_of_an_id_from_an_earlier_run_says_which_report_it_read() {
+    let project = untested_project();
+    let (_, all) = json_mutation(project.path(), &["--all"]);
+    let id = all["mutants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|mutant| mutant["function"] == "isPositive")
+        .and_then(|mutant| mutant["mutant_id"].as_str())
+        .expect("a mutant in isPositive")
+        .to_owned();
+    fs::write(
+        project.path().join("src/other.ts"),
+        "export function twice(n: number): number {\n  return n * 2;\n}\n",
+    )
+    .expect("other.ts");
+    commit_all(project.path(), "other");
+    let (narrow, _) = json_mutation(project.path(), &["src/other.ts"]);
+    assert_eq!(narrow.code, 0, "{}", narrow.stderr);
+
+    let (unknown, value) = json_mutation(project.path(), &["inspect", &id]);
+    assert_eq!(unknown.code, 2, "{value}");
+    assert_eq!(value["code"], "FALLOW_MUTATION_UNKNOWN_MUTANT", "{value}");
+    let help = value["help"].as_str().unwrap_or_default();
+    assert!(help.contains("last run"), "{value}");
+    assert!(help.contains("--report <file>"), "{value}");
+}
+
+/// A relative `-o` path is relative to the process directory, not to
+/// `--root`. The dirty-tree check must leave out the same file that the run
+/// writes.
+#[test]
+fn a_relative_output_file_from_a_subdirectory_never_makes_the_tree_dirty() {
+    let project = untested_project();
+    let cwd = project.path().join("src");
+    for attempt in ["first", "second"] {
+        let output = std::process::Command::new(super::common::fallow_bin())
+            .env("NO_COLOR", "1")
+            .env("RUST_LOG", "")
+            .current_dir(&cwd)
+            .args([
+                "mutation", "--root", "..", "--all", "--format", "json", "--quiet", "-o",
+                "sub.json",
+            ])
+            .output()
+            .expect("fallow");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{attempt} run: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(cwd.join("sub.json")).expect("report"))
+                .expect("json");
+        assert_eq!(saved["kind"], "mutation", "{attempt} run");
+    }
 }
 
 #[test]
@@ -387,8 +510,17 @@ mod end_to_end {
         git(&root, &["init", "-q"]);
         commit_all(&root, "init");
 
-        let (output, report) = json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
-        assert_eq!(output.code, 0, "{}", output.stderr);
+        let (output, report) = json_mutation(
+            &root,
+            &["src/math.ts", "--concurrency", "1", "--min-score", "100"],
+        );
+        assert_eq!(
+            output.code, 1,
+            "a survivor misses a minimum of 100: {}",
+            output.stderr
+        );
+        let score = report["summary"]["score"].as_f64().expect("a score");
+        assert!(score > 0.0 && score < 1.0, "{report}");
         assert_eq!(report["runner"]["name"], "vitest");
         assert_eq!(report["completion"]["status"], "complete", "{report}");
         let mutants = report["mutants"].as_array().unwrap();
@@ -413,10 +545,20 @@ mod end_to_end {
             "{}",
             human.stdout
         );
-        assert!(
-            human.stdout.contains("fallow mutation inspect "),
-            "{}",
-            human.stdout
+        let inspect = human
+            .stdout
+            .lines()
+            .find_map(|line| line.split_once("Inspect a survivor (runs no code): "))
+            .map(|(_, command)| command.to_owned())
+            .expect("an inspect step");
+        let words: Vec<&str> = inspect.split_whitespace().collect();
+        assert_eq!(&words[..3], &["fallow", "mutation", "inspect"], "{inspect}");
+        let shown = crate::common::run_fallow_raw(&words[1..]);
+        assert_eq!(
+            shown.code, 0,
+            "the printed step runs as-is: {}",
+            shown.stderr
         );
+        assert!(shown.stdout.contains("fresh"), "{}", shown.stdout);
     }
 }

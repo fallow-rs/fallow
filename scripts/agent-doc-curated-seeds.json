@@ -2754,7 +2754,7 @@
       "section": "mcp-tools",
       "row": "mutation_inspect",
       "column": "Description",
-      "seed": "Inspect one mutant of a saved mutation report, with a stale status when its source changed; runs no tests"
+      "seed": "Inspect one mutant of a saved mutation report (default: the last run report), with a stale status when its source changed; runs no tests"
     },
     {
       "section": "mcp-tools",

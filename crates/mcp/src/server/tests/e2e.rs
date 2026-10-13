@@ -1346,31 +1346,31 @@ fn write_mutation_project(root: &std::path::Path) {
     .expect("math.test.ts");
 }
 
-async fn mutation_inspect_json(root: &std::path::Path, mutant_id: &str) -> serde_json::Value {
-    let params: crate::params::MutationInspectParams = serde_json::from_value(serde_json::json!({
-        "mutant_id": mutant_id,
-        "report": root.join("plan.json").to_string_lossy(),
-        "root": root.to_string_lossy(),
-    }))
-    .expect("inspect params");
+async fn mutation_inspect_result(params: serde_json::Value) -> (bool, serde_json::Value) {
+    let params: crate::params::MutationInspectParams =
+        serde_json::from_value(params).expect("inspect params");
     let result = crate::tools::run_mutation_inspect(&fallow_binary(), params)
         .await
         .expect("inspect runs");
     let text = extract_text(&result);
-    assert_ne!(result.is_error, Some(true), "{text}");
-    serde_json::from_str(text).expect("inspect JSON")
+    (
+        result.is_error == Some(true),
+        serde_json::from_str(text).unwrap_or_else(|_| panic!("inspect JSON: {text}")),
+    )
 }
 
-/// The plan tool output is a valid `--report` input of the inspect tool, and
-/// inspect checks the saved digest against the current file: the unchanged
-/// file reproduces the mutant code, and an edited file gives a stale packet
-/// with no code.
-#[tokio::test]
-async fn e2e_mutation_inspect_is_fresh_for_the_planned_file_and_stale_after_an_edit() {
-    let dir = tempfile::tempdir().expect("temporary project");
-    let root = dir.path();
-    write_mutation_project(root);
+async fn mutation_inspect_json(root: &std::path::Path, mutant_id: &str) -> serde_json::Value {
+    let (is_error, packet) = mutation_inspect_result(serde_json::json!({
+        "mutant_id": mutant_id,
+        "report": root.join("plan.json").to_string_lossy(),
+        "root": root.to_string_lossy(),
+    }))
+    .await;
+    assert!(!is_error, "{packet}");
+    packet
+}
 
+async fn plan_text_for_math(root: &std::path::Path) -> String {
     let params: crate::params::MutationPlanParams = serde_json::from_value(serde_json::json!({
         "root": root.to_string_lossy(),
         "paths": ["src/math.ts"],
@@ -1383,6 +1383,62 @@ async fn e2e_mutation_inspect_is_fresh_for_the_planned_file_and_stale_after_an_e
         .expect("plan runs");
     let plan_text = extract_text(&plan).to_owned();
     assert_ne!(plan.is_error, Some(true), "{plan_text}");
+    plan_text
+}
+
+/// Without `report`, inspect reads the report that the last run saved in
+/// the cache directory of the project (mutation decision 23), as the CLI
+/// does. Before any run, the call gives the no-report error.
+#[tokio::test]
+async fn e2e_mutation_inspect_without_a_report_reads_the_last_run_report() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_mutation_project(root);
+
+    let (is_error, body) = mutation_inspect_result(serde_json::json!({
+        "mutant_id": "m_0000000000000000",
+        "root": root.to_string_lossy(),
+    }))
+    .await;
+    assert!(is_error, "{body}");
+    assert_eq!(body["code"], "FALLOW_MUTATION_NO_REPORT", "{body}");
+
+    let plan_text = plan_text_for_math(root).await;
+    let last_report =
+        fallow_api::mutation::last_mutation_report_path(&fallow_api::AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            ..fallow_api::AnalysisOptions::default()
+        })
+        .expect("last report path");
+    std::fs::create_dir_all(last_report.parent().expect("cache dir")).expect("cache dir");
+    std::fs::write(&last_report, &plan_text).expect("last report");
+    let plan: serde_json::Value = serde_json::from_str(&plan_text).expect("plan JSON");
+    let mutant_id = plan["mutants"][0]["mutant_id"]
+        .as_str()
+        .expect("the plan has a mutant");
+
+    let (is_error, packet) = mutation_inspect_result(serde_json::json!({
+        "mutant_id": mutant_id,
+        "root": root.to_string_lossy(),
+    }))
+    .await;
+    assert!(!is_error, "{packet}");
+    assert_eq!(packet["kind"], "mutation-inspect", "{packet}");
+    assert_eq!(packet["status"], "fresh", "{packet}");
+    assert_eq!(packet["mutant_id"], mutant_id, "{packet}");
+}
+
+/// The plan tool output is a valid `--report` input of the inspect tool, and
+/// inspect checks the saved digest against the current file: the unchanged
+/// file reproduces the mutant code, and an edited file gives a stale packet
+/// with no code.
+#[tokio::test]
+async fn e2e_mutation_inspect_is_fresh_for_the_planned_file_and_stale_after_an_edit() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_mutation_project(root);
+
+    let plan_text = plan_text_for_math(root).await;
     std::fs::write(root.join("plan.json"), &plan_text).expect("plan.json");
     let plan: serde_json::Value = serde_json::from_str(&plan_text).expect("plan JSON");
     let mutant_id = plan["mutants"][0]["mutant_id"]

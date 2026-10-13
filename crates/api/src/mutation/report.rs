@@ -157,6 +157,7 @@ pub fn summary(results: &[MutantResult]) -> MutationSummary {
     MutationSummary {
         counts,
         score: counts.score(),
+        coverage: counts.coverage(),
     }
 }
 
@@ -465,8 +466,13 @@ mod tests {
         assert_eq!(summary.counts.total, 6);
         assert_eq!(
             summary.score,
-            Some(1.0 / 3.0),
-            "killed / (killed + survived + no_coverage)"
+            Some(0.5),
+            "killed / (killed + survived); no_coverage stays out"
+        );
+        assert_eq!(
+            summary.coverage,
+            Some(2.0 / 3.0),
+            "covered / (covered + no_coverage)"
         );
 
         let completion = completion(&CompletionFacts {
