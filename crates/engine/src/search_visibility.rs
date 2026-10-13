@@ -344,8 +344,12 @@ enum Binding<'g> {
 }
 
 /// The import bindings of a source file that the file only exports again
-/// (`import { a } from './x'; export { a }`, `import b from './x'; export
-/// default b`) and does not use in any other place.
+/// with a top-level `export { .. }` (`import { a } from './x'; export { a }`)
+/// and does not use in any other place.
+///
+/// `export default b` and `export = b` are normal uses: the module graph does
+/// not credit the importers of such a file to the origin export, so the file
+/// is the only signal and must stay a consumer.
 ///
 /// Only plain script files are read. A Vue, Svelte, Astro or MDX file can use
 /// a binding in its template, so it has no such bindings. A file that does not
@@ -385,8 +389,18 @@ fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
     if imports.is_empty() {
         return FxHashSet::default();
     }
+    let top_level_exports = parsed
+        .program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::ExportNamedDeclaration(export) => Some(export.span.start),
+            _ => None,
+        })
+        .collect();
     let mut uses = BindingUses {
         imports,
+        top_level_exports,
         exported: FxHashSet::default(),
         used: FxHashSet::default(),
     };
@@ -401,6 +415,9 @@ fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
 /// and all other positions.
 struct BindingUses<'s> {
     imports: FxHashSet<&'s str>,
+    /// The start offsets of the top-level `export { .. }` statements. An
+    /// `export { .. }` in a TS namespace or an ambient module is a normal use.
+    top_level_exports: FxHashSet<u32>,
     exported: FxHashSet<&'s str>,
     used: FxHashSet<&'s str>,
 }
@@ -424,28 +441,9 @@ impl<'a> oxc_ast_visit::Visit<'a> for BindingUses<'_> {
     }
 
     fn visit_export_named_declaration(&mut self, it: &oxc_ast::ast::ExportNamedDeclaration<'a>) {
+        let exported = self.top_level_exports.contains(&it.span.start);
         for specifier in &it.specifiers {
-            self.record(specifier.local.name().as_str(), true);
-        }
-    }
-
-    fn visit_export_default_declaration(
-        &mut self,
-        it: &oxc_ast::ast::ExportDefaultDeclaration<'a>,
-    ) {
-        if let oxc_ast::ast::ExportDefaultDeclarationKind::Identifier(identifier) = &it.declaration
-        {
-            self.record(identifier.name.as_str(), true);
-        } else {
-            oxc_ast_visit::walk::walk_export_default_declaration(self, it);
-        }
-    }
-
-    fn visit_ts_export_assignment(&mut self, it: &oxc_ast::ast::TSExportAssignment<'a>) {
-        if let oxc_ast::ast::Expression::Identifier(identifier) = &it.expression {
-            self.record(identifier.name.as_str(), true);
-        } else {
-            oxc_ast_visit::walk::walk_ts_export_assignment(self, it);
+            self.record(specifier.local.name().as_str(), exported);
         }
     }
 }
@@ -724,20 +722,9 @@ mod tests {
             ["a"]
         );
         assert_eq!(
-            forwarded("a.ts", "import b from './x';\nexport default b;\n"),
-            ["b"]
-        );
-        assert_eq!(
             forwarded(
                 "a.ts",
                 "import { a as c } from './x';\nexport { c as d };\n"
-            ),
-            ["c"]
-        );
-        assert_eq!(
-            forwarded(
-                "a.ts",
-                "import b = require('./x');\nimport c from './y';\nexport = c;\n"
             ),
             ["c"]
         );
@@ -772,6 +759,34 @@ mod tests {
             empty
         );
         assert_eq!(forwarded("a.ts", "import { a } from './x';\n"), empty);
+        // The module graph does not credit the importers of `export default b`
+        // or `export = c` to the origin export, so such a file stays a
+        // consumer.
+        assert_eq!(
+            forwarded("a.ts", "import b from './x';\nexport default b;\n"),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import b = require('./x');\nimport c from './y';\nexport = c;\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\nexport namespace N {\n  export { a };\n}\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\ndeclare module 'm' {\n  export { a };\n}\n"
+            ),
+            empty
+        );
         assert_eq!(
             forwarded(
                 "a.ts",

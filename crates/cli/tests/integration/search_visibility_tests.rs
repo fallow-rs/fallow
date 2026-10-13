@@ -604,9 +604,10 @@ fn audit_brief_reads_declaration_ranges_from_a_vue_script_block() {
 }
 
 /// A project where files import `formatDate` (or the default export `Widget`)
-/// and export the binding again. `fwd-named.ts`, `fwd-default.ts` and
-/// `fwd-alias.ts` only forward it. `fwd-and-use.ts` forwards it and also uses
-/// it. `use-alias.ts` imports the forwarded name under another local name.
+/// and export the binding again. `fwd-named.ts` and `fwd-alias.ts` only
+/// forward it with `export { .. }`. `fwd-default.ts` forwards it with
+/// `export default Thing`. `fwd-and-use.ts` forwards it and also uses it.
+/// `use-alias.ts` imports the forwarded name under another local name.
 fn write_forwarding_probe(root: &Path) {
     fs::create_dir_all(root.join("src")).expect("create source directory");
     let files: &[(&str, &str)] = &[
@@ -674,11 +675,31 @@ fn import_then_export_forwarders_are_pass_through() {
     assert_eq!(downstream["search_visibility"], "missed", "{downstream}");
     assert_eq!(downstream["search_as"], "f", "{downstream}");
 
+    // The graph credits the importer of an `export { .. }` forwarder to the
+    // origin export, so the forwarder is not the only signal.
+    let listed = |entries: &serde_json::Value, file: &str| {
+        entries
+            .as_array()
+            .is_some_and(|list| list.iter().any(|entry| entry["from_file"] == file))
+    };
+    assert!(listed(references, "src/index.ts"), "{references}");
+}
+
+#[test]
+fn export_default_forwarder_stays_a_consumer() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_forwarding_probe(root);
+
+    // The graph does not credit the importers of `export default Thing` to
+    // the origin export, so the forwarding file is the only signal.
     let trace_default = trace(root, "src/lib.ts:default");
-    assert_pass_through(reference(
-        &trace_default["direct_references"],
-        "src/fwd-default.ts",
-    ));
+    let references = &trace_default["direct_references"];
+    let forwarder = reference(references, "src/fwd-default.ts");
+    assert_ne!(forwarder["reason"], "pass-through", "{forwarder}");
+    assert_eq!(forwarder["search_visibility"], "missed", "{forwarder}");
+    assert_eq!(forwarder["reason"], "default-import", "{forwarder}");
+    assert_eq!(forwarder["search_as"], "Thing", "{forwarder}");
 }
 
 #[test]
@@ -707,9 +728,10 @@ fn impact_closure_counts_import_then_export_forwarders_as_found() {
             .find(|gap| gap["consumer_file"] == consumer)
             .unwrap_or_else(|| panic!("no gap for {consumer}: {output}"))
     };
-    for forwarder in ["src/fwd-named.ts", "src/fwd-default.ts", "src/fwd-alias.ts"] {
+    for forwarder in ["src/fwd-named.ts", "src/fwd-alias.ts"] {
         assert_pass_through(gap(forwarder));
     }
+    assert_eq!(gap("src/fwd-default.ts")["search_visibility"], "missed");
     assert_eq!(gap("src/fwd-and-use.ts")["search_visibility"], "renamed");
 }
 

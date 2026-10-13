@@ -31260,7 +31260,7 @@
         {
           "type": "string",
           "const": "pass-through",
-          "description": "The consumer only forwards the export and does not use it: a barrel\n(`export * from`, `export { foo } from`), or a file that imports the\nexport and only exports it again (`import { foo } from`, then\n`export { foo }` or `export default foo`). A change of the export\nneeds no edit there, and the files that import through it are checked\non their own. Occurs with `found`."
+          "description": "The consumer only forwards the export and does not use it: a barrel\n(`export * from`, `export { foo } from`), or a file that imports the\nexport and only exports it again (`import { foo } from`, then a\ntop-level `export { foo }`). A change of the export\nneeds no edit there, and the files that import through it are checked\non their own. Occurs with `found`."
         }
       ],
       "description": "Why a text search for an export name does not find the uses in a consumer,\nor why a consumer is not a search target (`pass-through`)."

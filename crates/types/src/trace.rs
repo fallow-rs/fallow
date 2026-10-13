@@ -197,8 +197,8 @@ pub enum SearchGapReason {
     DynamicImport,
     /// The consumer only forwards the export and does not use it: a barrel
     /// (`export * from`, `export { foo } from`), or a file that imports the
-    /// export and only exports it again (`import { foo } from`, then
-    /// `export { foo }` or `export default foo`). A change of the export
+    /// export and only exports it again (`import { foo } from`, then a
+    /// top-level `export { foo }`). A change of the export
     /// needs no edit there, and the files that import through it are checked
     /// on their own. Occurs with `found`.
     PassThrough,
