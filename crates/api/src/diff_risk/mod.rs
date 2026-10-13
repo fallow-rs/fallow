@@ -434,10 +434,11 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
 ///
 /// - Identifiers that a changed non-test source file held in base and no
 ///   longer holds in head, such as a deleted function or a dropped call.
-///   Identifiers of a deleted file count only when no changed file still
-///   holds them in head, and names that the deleted file imports never count.
-/// - The directory and file-stem segments of deleted files without test
-///   cases, such as a deleted source file or fixture directory.
+///   Identifiers of a deleted file count only when no changed non-test source
+///   file still holds them in head, and names that the deleted file imports
+///   never count.
+/// - The file stem of each deleted file without test cases, and each of its
+///   directories that is gone at head, such as a deleted fixture directory.
 ///
 /// Reserved words and common globals never count.
 struct RemovedNames {
@@ -529,9 +530,6 @@ impl RemovedNames {
         let mut segments = FxHashSet::default();
         let mut head_union = FxHashSet::default();
         for file in files {
-            if let Some(head) = file.head.as_deref() {
-                head_union.extend(text::code_identifiers(head));
-            }
             // A deleted file with test cases does not explain its own removal.
             if file.head.is_none()
                 && file
@@ -539,21 +537,15 @@ impl RemovedNames {
                     .as_deref()
                     .is_some_and(|base| text::test_case_count(base) == 0)
             {
-                let stem_path = file
-                    .rel
-                    .rsplit_once('.')
-                    .map_or(file.rel.as_str(), |(stem, _)| stem);
-                segments.extend(
-                    stem_path
-                        .split('/')
-                        .filter(|segment| segment.len() >= MIN_REMOVED_NAME_LEN)
-                        .map(str::to_owned),
-                );
+                segments.extend(deleted_path_segments(root, &file.rel));
             }
             if !is_source_file(&file.rel)
                 || fallow_engine::test_paths::is_test_path_str(root, &file.rel)
             {
                 continue;
+            }
+            if let Some(head) = file.head.as_deref() {
+                head_union.extend(text::code_identifiers(head));
             }
             let Some(base) = file.base.as_deref() else {
                 continue;
@@ -575,8 +567,9 @@ impl RemovedNames {
                 }
             }
         }
-        // A name that a changed file still holds did not leave the project,
-        // for example a function that moved from a deleted file.
+        // A name of a deleted file that a changed source file still holds did
+        // not leave the project, for example a function that moved from the
+        // deleted file.
         identifiers.extend(
             deleted_identifiers
                 .into_iter()
@@ -614,6 +607,28 @@ impl RemovedNames {
                         .any(|line| path_tokens(line).any(|token| token == segment))
             })
     }
+}
+
+/// The path segments that a deleted file takes out of the project: its file
+/// stem, and each directory that is gone at head. A directory that still
+/// exists, such as `src/components`, did not leave the project, so a test that
+/// imports another file from it is not explained.
+fn deleted_path_segments(root: &Path, rel: &str) -> Vec<String> {
+    let stem_path = rel.rsplit_once('.').map_or(rel, |(stem, _)| stem);
+    let mut found = Vec::new();
+    let mut prefix_len = 0;
+    let parts: Vec<&str> = stem_path.split('/').collect();
+    let last = parts.len().saturating_sub(1);
+    for (index, part) in parts.iter().enumerate() {
+        prefix_len += part.len();
+        let is_stem = index == last;
+        let gone = is_stem || !root.join(&rel[..prefix_len]).exists();
+        if gone && part.len() >= MIN_REMOVED_NAME_LEN {
+            found.push((*part).to_owned());
+        }
+        prefix_len += 1;
+    }
+    found
 }
 
 /// The tokens of a line split on path and string delimiters.
@@ -975,8 +990,12 @@ mod tests {
     }
 
     fn removed_test_findings(files: &[FileTexts]) -> Vec<(String, String)> {
+        removed_test_findings_in(Path::new("/project"), files)
+    }
+
+    fn removed_test_findings_in(root: &Path, files: &[FileTexts]) -> Vec<(String, String)> {
         let mut raw = Vec::new();
-        detect_removed_tests(Path::new("/project"), files, &mut raw);
+        detect_removed_tests(root, files, &mut raw);
         let mut found: Vec<(String, String)> = raw
             .into_iter()
             .map(|finding| (finding.path, finding.evidence))
@@ -1163,6 +1182,7 @@ mod tests {
 
     #[test]
     fn a_deleted_directory_name_matches_whole_path_segments_only() {
+        let root = tempfile::tempdir().expect("tempdir");
         let base =
             "it('a', () => run());\nit('scores', () => {\n  expect(score(1)).toBe(1);\n});\n";
         let head = "it('a', () => run());\n";
@@ -1171,7 +1191,7 @@ mod tests {
             deleted("src/core/x.ts", "export const x = 1;\n"),
         ];
         assert_eq!(
-            removed_test_findings(&files),
+            removed_test_findings_in(root.path(), &files),
             pairs(&[("src/score.test.ts", "test cases: 2 -> 1")])
         );
         let base =
@@ -1181,7 +1201,27 @@ mod tests {
             file("src/run.test.ts", base, head),
             deleted("src/core/x.ts", "export const x = 1;\n"),
         ];
-        assert!(removed_test_findings(&files).is_empty());
+        assert!(removed_test_findings_in(root.path(), &files).is_empty());
+    }
+
+    #[test]
+    fn a_directory_that_still_exists_does_not_explain_a_removal() {
+        let root = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(root.path().join("src/components")).expect("components dir");
+        let files = [
+            deleted(
+                "src/components/Legacy.tsx",
+                "export const Legacy = () => null;\n",
+            ),
+            deleted(
+                "src/__tests__/button.test.tsx",
+                "import { Button } from '../components/Button';\nit('renders', () => {\n  expect(Button()).toBeTruthy();\n});\n",
+            ),
+        ];
+        assert_eq!(
+            removed_test_findings_in(root.path(), &files),
+            pairs(&[("src/__tests__/button.test.tsx", "test cases: 1 -> 0")])
+        );
     }
 
     #[test]

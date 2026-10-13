@@ -157,8 +157,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `weakened-tests` does not report removed tests or assertions when the
     lost test lines name code that the same change removed, such as a deleted
     function, error code or fixture directory. The tests went with that code.
-    A name that a changed file still holds, a name that a deleted file only
-    imports, and a reserved word such as `import` do not count.
+    A name of a deleted file that a changed file still holds, a name that a
+    deleted file only imports, a directory that still exists, and a reserved
+    word such as `import` do not count.
   - `weakened-tests` reports an assertion drop only when assertions are at
     least half of the code lines that the test file lost. A test rewrite that
     moves setup checks into a shared helper does not report.
