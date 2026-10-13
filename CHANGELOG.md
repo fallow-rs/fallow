@@ -101,6 +101,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@effect/platform-node` and `@effect/platform-bun` at runtime, so these
   packages are credited. The extraction cache version changes, so the first
   run after the upgrade parses each file again.
+- **OpenTelemetry SDK callbacks are no longer reported as unused class
+  members.** A new built-in `opentelemetry` plugin activates on any
+  `@opentelemetry/*` dependency. The SDK calls the methods of a class that
+  implements `Sampler`, `SpanProcessor`, `SpanExporter`,
+  `PushMetricExporter`, `LogRecordProcessor`, `LogRecordExporter`,
+  `ContextManager`, `TextMapPropagator`, `TextMapGetter` or `TextMapSetter`.
+  The plugin credits only the methods of that interface. A class that extends
+  `MetricReader` gets credit for `onInitialized`, `onForceFlush` and
+  `onShutdown`. Other members of the class stay reportable.
 
 ### Changed
 

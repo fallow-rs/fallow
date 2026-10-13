@@ -8091,7 +8091,7 @@
     ]
   },
   "plugins": {
-    "count": 135,
+    "count": 136,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -8205,6 +8205,7 @@
       "alchemy",
       "opennext-cloudflare",
       "sentry",
+      "opentelemetry",
       "husky",
       "lint-staged",
       "lefthook",

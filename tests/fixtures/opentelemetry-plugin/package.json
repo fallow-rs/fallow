@@ -1,0 +1,9 @@
+{
+  "name": "opentelemetry-plugin-fixture",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@opentelemetry/api": "*",
+    "@opentelemetry/sdk-metrics": "*",
+    "@opentelemetry/sdk-trace-base": "*"
+  }
+}
