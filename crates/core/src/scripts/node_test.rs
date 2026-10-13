@@ -1,25 +1,46 @@
 //! The built-in test runners of JavaScript runtimes: `node --test`,
 //! `bun test`, and `deno test`.
 //!
-//! Without file arguments, `node --test` searches the working directory for
-//! files that match its default patterns and runs each one. Those files are
-//! entry points of the package that runs the script. With file arguments,
-//! Node runs only the files that the arguments name.
+//! Without file arguments, each runner searches the working directory for
+//! files that match its default patterns and runs each one. With a directory
+//! argument, the runner searches only that directory. With file arguments,
+//! the runner runs only the files that the arguments name. The files that a
+//! test run finds are entry points of the package that runs the script.
 //!
 //! The files that a test run names are test entry points, so the code that
 //! they import counts as reached by tests.
+//!
+//! A directory argument is told apart from a file or a glob by its syntax,
+//! not by a filesystem check: script arguments resolve against the package
+//! directory and `cd` targets only later. An argument that ends with `/`, or
+//! whose last segment has no extension and no glob character, is a
+//! directory. A pattern for a directory that does not exist matches nothing.
 
-/// The files that `node --test` runs when the command names no file:
+/// The source extensions of the `node --test` defaults. The TypeScript
+/// extensions apply when Node strips types.
+const NODE_EXTENSIONS: &str = "{js,mjs,cjs,ts,mts,cts}";
+
+/// The file name patterns that `node --test` runs in every directory:
 /// <https://nodejs.org/api/test.html#running-tests-from-the-command-line>.
-/// The TypeScript extensions apply when Node strips types.
-const NODE_TEST_DEFAULT_PATTERNS: &[&str] = &[
-    "**/*.test.{js,mjs,cjs,ts,mts,cts}",
-    "**/*-test.{js,mjs,cjs,ts,mts,cts}",
-    "**/*_test.{js,mjs,cjs,ts,mts,cts}",
-    "**/test-*.{js,mjs,cjs,ts,mts,cts}",
-    "**/test.{js,mjs,cjs,ts,mts,cts}",
-    "**/test/**/*.{js,mjs,cjs,ts,mts,cts}",
-];
+const NODE_TEST_FILE_NAMES: &[&str] = &["*.test", "*-test", "*_test", "test-*", "test"];
+
+/// The directory in which `node --test` runs every source file.
+const NODE_TEST_DIRECTORY: &str = "test";
+
+/// The file name patterns that `bun test` runs:
+/// <https://bun.com/docs/cli/test>.
+const BUN_TEST_FILE_NAMES: &[&str] = &["*.test", "*_test", "*.spec", "*_spec"];
+
+/// The source extensions of the `bun test` defaults.
+const BUN_EXTENSIONS: &str = "{js,jsx,ts,tsx,mjs,cjs,mts,cts}";
+
+/// The file name patterns that `deno test` runs, the glob
+/// `{*_,*.,}test.{ts,tsx,mts,js,mjs,jsx}`:
+/// <https://docs.deno.com/runtime/fundamentals/testing/>.
+const DENO_TEST_FILE_NAMES: &[&str] = &["*_test", "*.test", "test"];
+
+/// The source extensions of the `deno test` defaults.
+const DENO_EXTENSIONS: &str = "{ts,tsx,mts,js,mjs,jsx}";
 
 /// Node flags that take their value from the next token when the command
 /// does not write `--flag=value`. The value is not a test file argument.
@@ -100,18 +121,212 @@ pub(super) fn test_file_args(binary: &str, args: &[&str], file_args: &[String]) 
         .collect()
 }
 
-/// Return the default test file patterns when `binary` is `node`, `args`
-/// contain the `--test` flag, and no argument names a test file.
+/// Return `file_args` with the test files that the test run finds by the
+/// default patterns of its runner.
 ///
-/// `args` are the tokens after the binary.
-pub(super) fn default_test_patterns(binary: &str, args: &[&str]) -> Vec<String> {
-    if binary != "node" || !runs_default_test_files(args) {
-        return Vec::new();
+/// A directory argument becomes the default patterns inside that directory.
+/// A run with no positional argument gets the default patterns of the
+/// working directory. Bun reads a bare word such as `bun test parser` as a
+/// filter on the path of a test file. A glob cannot express that filter, so
+/// a filter adds no pattern and turns off the defaults. A directory argument
+/// of Bun is also a filter, and the directory patterns match a subset of the
+/// files that it selects.
+///
+/// `args` are the tokens after the binary. The result is `file_args`
+/// unchanged when the command does not run a test runner.
+pub(super) fn with_default_test_patterns(
+    binary: &str,
+    args: &[&str],
+    mut file_args: Vec<String>,
+) -> Vec<String> {
+    let Some(runner) = TestRunner::of(binary, args) else {
+        return file_args;
+    };
+    let positionals: Vec<&str> = runner
+        .positionals(args)
+        .into_iter()
+        .filter(|token| !is_number(token))
+        .collect();
+    if positionals.is_empty() {
+        // tsx runs the Node test runner, but a bare `tsx --test` does not
+        // show which files it loads.
+        if binary != "tsx" {
+            file_args.extend(runner.patterns_in(""));
+        }
+        return file_args;
     }
-    NODE_TEST_DEFAULT_PATTERNS
-        .iter()
-        .map(|pattern| (*pattern).to_string())
-        .collect()
+    let directories: Vec<&str> = positionals
+        .into_iter()
+        .filter(|token| runner != TestRunner::Bun || !is_bun_name_filter(token))
+        .filter(|token| is_directory_arg(token))
+        .collect();
+    file_args.retain(|file| !directories.contains(&file.as_str()));
+    for directory in directories {
+        file_args.extend(runner.patterns_in(directory_prefix(directory)));
+    }
+    file_args
+}
+
+/// A built-in test runner with default test file patterns.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TestRunner {
+    Node,
+    Bun,
+    Deno,
+}
+
+impl TestRunner {
+    /// Return the runner when `binary` with `args` runs tests.
+    fn of(binary: &str, args: &[&str]) -> Option<Self> {
+        if !runs_tests(binary, args) {
+            return None;
+        }
+        match binary {
+            "node" | "tsx" => Some(Self::Node),
+            "bun" => Some(Self::Bun),
+            "deno" => Some(Self::Deno),
+            _ => None,
+        }
+    }
+
+    const fn file_names(self) -> &'static [&'static str] {
+        match self {
+            Self::Node => NODE_TEST_FILE_NAMES,
+            Self::Bun => BUN_TEST_FILE_NAMES,
+            Self::Deno => DENO_TEST_FILE_NAMES,
+        }
+    }
+
+    const fn extensions(self) -> &'static str {
+        match self {
+            Self::Node => NODE_EXTENSIONS,
+            Self::Bun => BUN_EXTENSIONS,
+            Self::Deno => DENO_EXTENSIONS,
+        }
+    }
+
+    /// Return the default test file patterns inside `dir`. An empty `dir`
+    /// is the working directory.
+    fn patterns_in(self, dir: &str) -> Vec<String> {
+        let prefix = if dir.is_empty() {
+            String::new()
+        } else {
+            format!("{dir}/")
+        };
+        let extensions = self.extensions();
+        let mut patterns: Vec<String> = self
+            .file_names()
+            .iter()
+            .map(|name| format!("{prefix}**/{name}.{extensions}"))
+            .collect();
+        if self == Self::Node {
+            patterns.push(format!(
+                "{prefix}**/{NODE_TEST_DIRECTORY}/**/*.{extensions}"
+            ));
+            // Node runs every source file below a directory named `test`.
+            if dir.split('/').any(|segment| segment == NODE_TEST_DIRECTORY) {
+                patterns.push(format!("{prefix}**/*.{extensions}"));
+            }
+        }
+        patterns
+    }
+
+    /// Return the positional arguments of the test run: the tokens after
+    /// the flags, the flag values and, for Bun and Deno, the `test`
+    /// subcommand.
+    fn positionals<'a>(self, args: &[&'a str]) -> Vec<&'a str> {
+        let (start, value_flags) = match self {
+            Self::Node => (0, NODE_VALUE_FLAGS),
+            Self::Bun => (
+                subcommand_index(args).map_or(args.len(), |idx| idx + 1),
+                BUN_TEST_VALUE_FLAGS,
+            ),
+            Self::Deno => (
+                subcommand_index(args).map_or(args.len(), |idx| idx + 1),
+                DENO_TEST_VALUE_FLAGS,
+            ),
+        };
+        let mut positionals = Vec::new();
+        let mut idx = start;
+        while let Some(&token) = args.get(idx) {
+            if value_flags.contains(&token) {
+                idx += 1;
+            } else if !token.starts_with('-') {
+                positionals.push(token);
+            }
+            idx += 1;
+        }
+        positionals
+    }
+}
+
+/// Bun test flags that take their value from the next token:
+/// <https://bun.com/docs/cli/test>.
+const BUN_TEST_VALUE_FLAGS: &[&str] = &[
+    "-c",
+    "-r",
+    "-t",
+    "--config",
+    "--coverage-dir",
+    "--coverage-reporter",
+    "--cwd",
+    "--max-concurrency",
+    "--preload",
+    "--reporter",
+    "--reporter-outfile",
+    "--rerun-each",
+    "--retry",
+    "--seed",
+    "--test-name-pattern",
+    "--timeout",
+];
+
+/// Deno test flags that take their value from the next token.
+const DENO_TEST_VALUE_FLAGS: &[&str] = &[
+    "-c",
+    "--cert",
+    "--config",
+    "--ext",
+    "--filter",
+    "--import-map",
+    "--junit-path",
+    "--location",
+    "--preload",
+    "--reporter",
+    "--seed",
+];
+
+/// Return `true` when `token` names a directory by its syntax: it ends with
+/// `/`, or its last segment has no extension and no glob character.
+fn is_directory_arg(token: &str) -> bool {
+    if token.contains(['*', '?', '[', '{']) {
+        return false;
+    }
+    if token.ends_with('/') {
+        return true;
+    }
+    let last = token.rsplit('/').next().unwrap_or(token);
+    matches!(last, "." | "..") || !last.trim_start_matches('.').contains('.')
+}
+
+/// Return `true` when Bun reads `token` as a filter, not as a path: it has
+/// no path separator, no leading `.`, and no extension.
+fn is_bun_name_filter(token: &str) -> bool {
+    !token.contains('/') && !token.starts_with('.') && !token.contains('.')
+}
+
+/// The value of a flag with an optional count, such as `--bail 1`.
+fn is_number(token: &str) -> bool {
+    !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Return the pattern prefix of a directory argument: `src/` gives `src`,
+/// and `.` gives the working directory.
+fn directory_prefix(directory: &str) -> &str {
+    match directory.trim_end_matches('/') {
+        "." | "./" => "",
+        dir => dir,
+    }
 }
 
 /// Return `true` when `binary` with `args` runs tests with the built-in
@@ -122,53 +337,42 @@ pub(super) fn default_test_patterns(binary: &str, args: &[&str]) -> Vec<String> 
 pub(super) fn runs_tests(binary: &str, args: &[&str]) -> bool {
     match binary {
         // tsx gives the Node flags before the script path to Node.
-        "node" | "tsx" => scan_leading_node_flags(args).test_flag,
-        "bun" | "deno" => first_positional(args) == Some("test"),
+        "node" | "tsx" => has_leading_test_flag(args),
+        "bun" | "deno" => {
+            subcommand_index(args).and_then(|idx| args.get(idx).copied()) == Some("test")
+        }
         _ => false,
     }
 }
 
-/// The result of a scan of the Node flags before the script path.
-struct LeadingNodeFlags {
-    /// The flags contain `--test`.
-    test_flag: bool,
-    /// A script path or a test file argument follows the flags.
-    positional: bool,
-}
-
-fn scan_leading_node_flags(args: &[&str]) -> LeadingNodeFlags {
-    let mut test_flag = false;
+/// Return `true` when the Node flags before the script path contain
+/// `--test`.
+fn has_leading_test_flag(args: &[&str]) -> bool {
     let mut idx = 0;
-    while idx < args.len() {
-        let token = args[idx];
+    while let Some(&token) = args.get(idx) {
         if token == "--test" {
-            test_flag = true;
-        } else if NODE_VALUE_FLAGS.contains(&token) {
+            return true;
+        }
+        if NODE_VALUE_FLAGS.contains(&token) {
             idx += 1;
         } else if !token.starts_with('-') {
-            return LeadingNodeFlags {
-                test_flag,
-                positional: true,
-            };
+            return false;
         }
         idx += 1;
     }
-    LeadingNodeFlags {
-        test_flag,
-        positional: false,
-    }
+    false
 }
 
 /// Bun and Deno flags that take their value from the next token before the
 /// subcommand.
 const BUN_DENO_VALUE_FLAGS: &[&str] = &["-c", "--config", "--cwd"];
 
-/// The first token that is not a flag or the value of a flag.
-fn first_positional<'a>(args: &[&'a str]) -> Option<&'a str> {
+/// The index of the first token that is not a flag or the value of a flag.
+fn subcommand_index(args: &[&str]) -> Option<usize> {
     let mut idx = 0;
     while let Some(&token) = args.get(idx) {
         if !token.starts_with('-') {
-            return Some(token);
+            return Some(idx);
         }
         idx += if BUN_DENO_VALUE_FLAGS.contains(&token) {
             2
@@ -179,24 +383,29 @@ fn first_positional<'a>(args: &[&'a str]) -> Option<&'a str> {
     None
 }
 
-fn runs_default_test_files(args: &[&str]) -> bool {
-    let flags = scan_leading_node_flags(args);
-    flags.test_flag && !flags.positional
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn patterns(script_args: &str) -> Vec<String> {
         let args: Vec<&str> = script_args.split_whitespace().collect();
-        default_test_patterns("node", &args)
+        with_default_test_patterns("node", &args, Vec::new())
+    }
+
+    fn run_patterns(binary: &str, script_args: &str) -> Vec<String> {
+        let args: Vec<&str> = script_args.split_whitespace().collect();
+        let file_args = args
+            .iter()
+            .filter(|token| token.contains('/') || token.contains(".t"))
+            .map(|token| (*token).to_string())
+            .collect();
+        with_default_test_patterns(binary, &args, file_args)
     }
 
     #[test]
     fn bare_test_flag_uses_default_patterns() {
         let found = patterns("--test");
-        assert_eq!(found.len(), NODE_TEST_DEFAULT_PATTERNS.len());
+        assert_eq!(found.len(), NODE_TEST_FILE_NAMES.len() + 1);
         assert!(found.contains(&"**/test/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
     }
 
@@ -292,7 +501,101 @@ mod tests {
 
     #[test]
     fn other_binaries_never_use_default_patterns() {
-        assert!(default_test_patterns("tsx", &["--test"]).is_empty());
-        assert!(default_test_patterns("bun", &["--test"]).is_empty());
+        assert!(with_default_test_patterns("tsx", &["--test"], Vec::new()).is_empty());
+        assert!(with_default_test_patterns("bun", &["--test"], Vec::new()).is_empty());
+        assert!(with_default_test_patterns("deno", &["run", "main.ts"], Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn bare_bun_and_deno_test_runs_use_their_default_patterns() {
+        assert_eq!(
+            run_patterns("bun", "test --coverage --timeout 5000 --bail 1"),
+            vec![
+                "**/*.test.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+                "**/*_test.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+                "**/*.spec.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+                "**/*_spec.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+            ]
+        );
+        assert_eq!(
+            run_patterns("deno", "test -A --filter adds"),
+            vec![
+                "**/*_test.{ts,tsx,mts,js,mjs,jsx}",
+                "**/*.test.{ts,tsx,mts,js,mjs,jsx}",
+                "**/test.{ts,tsx,mts,js,mjs,jsx}",
+            ]
+        );
+    }
+
+    #[test]
+    fn directory_arguments_scope_the_default_patterns() {
+        assert_eq!(
+            run_patterns("bun", "test src/"),
+            vec![
+                "src/**/*.test.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+                "src/**/*_test.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+                "src/**/*.spec.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+                "src/**/*_spec.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+            ]
+        );
+        assert_eq!(
+            run_patterns("deno", "test --allow-read tests"),
+            vec![
+                "tests/**/*_test.{ts,tsx,mts,js,mjs,jsx}",
+                "tests/**/*.test.{ts,tsx,mts,js,mjs,jsx}",
+                "tests/**/test.{ts,tsx,mts,js,mjs,jsx}",
+            ]
+        );
+        assert_eq!(
+            run_patterns("deno", "test ."),
+            run_patterns("deno", "test"),
+            "`.` is the working directory"
+        );
+    }
+
+    #[test]
+    fn node_runs_every_source_file_below_a_test_directory() {
+        let found = run_patterns("node", "--test test/");
+        assert!(found.contains(&"test/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
+        let found = run_patterns("node", "--test spec/unit");
+        assert!(found.contains(&"spec/unit/**/*.test.{js,mjs,cjs,ts,mts,cts}".to_string()));
+        assert!(!found.contains(&"spec/unit/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
+    }
+
+    #[test]
+    fn file_and_glob_arguments_keep_their_form() {
+        for (binary, args, expected) in [
+            ("bun", "test ./test/a.test.ts", vec!["./test/a.test.ts"]),
+            ("deno", "test tests/a_test.ts", vec!["tests/a_test.ts"]),
+            (
+                "node",
+                "--test test/**/*.test.mjs",
+                vec!["test/**/*.test.mjs"],
+            ),
+        ] {
+            assert_eq!(run_patterns(binary, args), expected, "`{binary} {args}`");
+        }
+    }
+
+    #[test]
+    fn bun_name_filters_add_no_patterns() {
+        assert!(run_patterns("bun", "test parser").is_empty());
+        assert!(run_patterns("bun", "test parser -t adds").is_empty());
+    }
+
+    #[test]
+    fn flag_values_are_not_directories() {
+        assert_eq!(
+            run_patterns("bun", "test --preload ./setup"),
+            vec!["./setup".to_string()]
+                .into_iter()
+                .chain(run_patterns("bun", "test"))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !run_patterns("node", "--test --import ./register test/a.test.mjs")
+                .iter()
+                .any(|pattern| pattern.starts_with("./register/"))
+        );
     }
 }

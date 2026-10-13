@@ -2903,7 +2903,7 @@ fn binary_path_args(binary: &str, tokens: &[&str], idx: usize) -> (Vec<String>, 
         file_args.clear();
         config_args.clear();
     }
-    file_args.extend(node_test::default_test_patterns(binary, args));
+    let file_args = node_test::with_default_test_patterns(binary, args, file_args);
     (file_args, config_args)
 }
 
@@ -2968,10 +2968,8 @@ fn wrapped_command_args<'a>(
         file_args.clear();
         config_args.clear();
     }
-    file_args.extend(node_test::default_test_patterns(
-        child,
-        &tokens[child_idx + 1..],
-    ));
+    let file_args =
+        node_test::with_default_test_patterns(child, &tokens[child_idx + 1..], file_args);
     WrappedCommandArgs {
         test_file_args: node_test::test_file_args(child, &tokens[child_idx + 1..], &file_args),
         file_args,

@@ -145,6 +145,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A test run with a directory or without file arguments now credits its
+  test files.** A script or a CI `run` line such as `bun test src/`,
+  `deno test`, `deno test tests` or `node --test test/` made no file a test
+  entry point. So the code that these tests import got coverage tier `none`
+  in `fallow health` and `fallow audit` CRAP scores. Now a directory
+  argument gives the default test file patterns of the runner inside that
+  directory. A `bun test` or `deno test` run with no file argument gives the
+  default patterns of the working directory. Fallow tells a directory from a
+  file by its syntax: the argument ends with `/`, or its last segment has no
+  extension and no glob character. Other files in the directory do not
+  become entry points. A Bun name filter such as `bun test parser` adds no
+  pattern.
 - **The config schema now describes `warn` correctly.** The descriptions of
   `Severity` and of the rules that default to `warn` said that `warn` does not
   fail CI. A `warn` finding does not change the CLI exit code unless
