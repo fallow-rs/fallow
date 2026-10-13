@@ -45,6 +45,15 @@ The harness builds keys with one normalizer per envelope shape
 
 An MCP result goes through the normalizer of the envelope in its text content.
 
+The keys are sets, so the harness does not compare the order of an array. The
+generator also writes one duplicated function, so a project has one clone
+family at most and no family order to compare. Unit tests guard the order of
+the duplication arrays instead. `DuplicationReport::sort` sets the order. Every scope
+filter and the baseline filter call it through
+`duplicates::refresh_scoped_report`. The tests are in
+`crates/engine/src/changed_files.rs`, `crates/engine/src/baseline/mod.rs` and
+`crates/engine/src/duplication_detector/families.rs`.
+
 ## Invariants
 
 | ID | Rule | Status |

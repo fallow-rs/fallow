@@ -186,6 +186,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   syntactic results. The Node bindings return the same error. To run
   type-aware analysis through the API, set `typeAware.enabled` in the call
   options. To keep a call syntactic, set `FALLOW_TYPE_AWARE=0`.
+- **Clone families have one order on every surface.** `fallow audit`,
+  `fallow dupes --changed-since` and `fallow dupes --baseline` now order
+  `clone_families[]` by file set. `fallow dupes`, the MCP tools and
+  `fallow_api` already used this order. Before, these three commands ordered
+  the families by duplicated lines. The `suggestions[]` of a family now follow
+  the order of its `groups[]` on every surface. The family set and the values
+  do not change.
 
 - **The review brief and the audit report the same weakened guardrails.**
   The `weakening` section of `fallow audit --brief` and `fallow review` now

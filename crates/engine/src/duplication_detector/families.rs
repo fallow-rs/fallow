@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use fallow_types::duplicates::sort_clone_groups_in_report_order;
 use rustc_hash::FxHashMap;
 
 use super::types::{
@@ -17,6 +18,9 @@ use super::types::{
 const MODULE_EXTRACTION_THRESHOLD: usize = 50;
 
 /// Group clone groups into families by file set, sorted by total duplicated lines.
+///
+/// The report order is different: `DuplicationReport::sort` orders the
+/// families by file set on every surface.
 #[must_use]
 pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<CloneFamily> {
     if clone_groups.is_empty() {
@@ -33,7 +37,8 @@ pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<Clon
 
     let mut families: Vec<CloneFamily> = family_map
         .into_iter()
-        .map(|(file_set, groups)| {
+        .map(|(file_set, mut groups)| {
+            sort_clone_groups_in_report_order(&mut groups);
             let total_duplicated_lines: usize = groups.iter().map(|g| g.line_count).sum();
             let total_duplicated_tokens: usize = groups.iter().map(|g| g.token_count).sum();
             let suggestions =
@@ -257,6 +262,41 @@ mod tests {
     #[test]
     fn empty_groups_produce_no_families() {
         assert!(group_into_families(&[], &root()).is_empty());
+    }
+
+    /// The suggestions follow the group order, and neither depends on the
+    /// input order. The programmatic route builds families before the report
+    /// sort, and the changed-file scope builds them after it.
+    #[test]
+    fn suggestions_follow_the_group_order_for_every_input_order() {
+        let small = CloneGroup {
+            instances: vec![instance("src/a.ts", 1, 5), instance("src/b.ts", 1, 5)],
+            token_count: 15,
+            line_count: 5,
+            similarity: None,
+        };
+        let large = CloneGroup {
+            instances: vec![instance("src/b.ts", 20, 31), instance("src/a.ts", 20, 31)],
+            token_count: 40,
+            line_count: 12,
+            similarity: None,
+        };
+        let shape = |groups: &[CloneGroup]| {
+            let family = group_into_families(groups, &root()).remove(0);
+            let lines: Vec<usize> = family.groups.iter().map(|g| g.line_count).collect();
+            let suggestions: Vec<String> = family
+                .suggestions
+                .iter()
+                .map(|s| s.description.clone())
+                .collect();
+            (lines, suggestions)
+        };
+
+        let forward = shape(&[small.clone(), large.clone()]);
+        let reverse = shape(&[large, small]);
+
+        assert_eq!(forward, reverse);
+        assert!(forward.1[0].contains(&format!("({} lines)", forward.0[0])));
     }
 
     #[test]
