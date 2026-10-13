@@ -438,7 +438,8 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       addCategory(
         "unused-effect-layer",
         this.result.unused_effect_layers.map(
-          (layer) => new IssueItem(layer.name, layer.path, layer.line, layer.col, "unused-effect-layer"),
+          (layer) =>
+            new IssueItem(layer.name, layer.path, layer.line, layer.col, "unused-effect-layer"),
         ),
       );
     }
@@ -447,7 +448,8 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       addCategory(
         "unused-tagged-error",
         this.result.unused_tagged_errors.map(
-          (error) => new IssueItem(error.name, error.path, error.line, error.col, "unused-tagged-error"),
+          (error) =>
+            new IssueItem(error.name, error.path, error.line, error.col, "unused-tagged-error"),
         ),
       );
     }
@@ -457,7 +459,13 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         "unproduced-catch-tag",
         this.result.unproduced_catch_tags.map(
           (catchTag) =>
-            new IssueItem(catchTag.tag, catchTag.path, catchTag.line, catchTag.col, "unproduced-catch-tag"),
+            new IssueItem(
+              catchTag.tag,
+              catchTag.path,
+              catchTag.line,
+              catchTag.col,
+              "unproduced-catch-tag",
+            ),
         ),
       );
     }
