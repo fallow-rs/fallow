@@ -282,6 +282,38 @@ fn is_type_or_test_file(root: &Path, rel: &str) -> bool {
         || rel.contains(".test-d.")
 }
 
+/// Directory names of test fixtures and generated code. A tool writes these
+/// files, or a test reads them as data, so their suppression comments are
+/// not a choice of the change author.
+const FIXTURE_OR_GENERATED_DIRS: &[&str] = &[
+    "fixture",
+    "fixtures",
+    "__fixtures__",
+    "__snapshots__",
+    "generated",
+    "__generated__",
+];
+
+fn is_fixture_or_generated(rel: &str) -> bool {
+    let mut dirs = rel.split('/').rev().skip(1);
+    dirs.any(|dir| FIXTURE_OR_GENERATED_DIRS.contains(&dir))
+}
+
+/// File-name markers of story files (`button.stories.tsx`).
+const STORY_FILE_MARKERS: &[&str] = &[".stories.", ".story."];
+
+/// Test or story code. Each copy there shows one case or one state, so the
+/// copies differ on purpose.
+fn is_example_copy(root: &Path, rel: &str) -> bool {
+    if fallow_engine::test_paths::is_test_path_str(root, rel) {
+        return true;
+    }
+    let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
+    STORY_FILE_MARKERS
+        .iter()
+        .any(|marker| name.contains(marker))
+}
+
 /// A tool config such as `vite.config.ts`. A test-environment check is
 /// normal there.
 fn is_tool_config(rel: &str) -> bool {
@@ -338,7 +370,10 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
         }
     }
 
-    if rules.added_suppression != Severity::Off && takes_suppression_comments(rel) {
+    if rules.added_suppression != Severity::Off
+        && takes_suppression_comments(rel)
+        && !is_fixture_or_generated(rel)
+    {
         let type_test = is_type_or_test_file(root, rel);
         for hit in text::added_suppression_hits(base, head) {
             // In a test, `@ts-expect-error` asserts that a type error exists.
@@ -395,9 +430,102 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
     }
 }
 
+/// The names that the change removed from the project.
+///
+/// - Identifiers that a changed non-test source file held in base and no
+///   longer holds in head, such as a deleted function or a dropped call.
+/// - The directory and file-stem segments of deleted files without test
+///   cases, such as a deleted source file or fixture directory.
+struct RemovedNames {
+    identifiers: FxHashSet<String>,
+    segments: FxHashSet<String>,
+}
+
+/// The shortest name that can explain a test removal. Shorter names, such as
+/// `id` or `get`, are too common to tie a test to the removed code.
+const MIN_REMOVED_NAME_LEN: usize = 4;
+
+impl RemovedNames {
+    fn collect(root: &Path, files: &[FileTexts]) -> Self {
+        let mut identifiers = FxHashSet::default();
+        let mut segments = FxHashSet::default();
+        for file in files {
+            // A deleted file with test cases does not explain its own removal.
+            if file.head.is_none()
+                && file
+                    .base
+                    .as_deref()
+                    .is_some_and(|base| text::test_case_count(base) == 0)
+            {
+                let stem_path = file
+                    .rel
+                    .rsplit_once('.')
+                    .map_or(file.rel.as_str(), |(stem, _)| stem);
+                segments.extend(
+                    stem_path
+                        .split('/')
+                        .filter(|segment| segment.len() >= MIN_REMOVED_NAME_LEN)
+                        .map(str::to_owned),
+                );
+            }
+            if !is_source_file(&file.rel)
+                || fallow_engine::test_paths::is_test_path_str(root, &file.rel)
+            {
+                continue;
+            }
+            let Some(base) = file.base.as_deref() else {
+                continue;
+            };
+            let head = file
+                .head
+                .as_deref()
+                .map(text::code_identifiers)
+                .unwrap_or_default();
+            identifiers.extend(
+                text::code_identifiers(base)
+                    .into_iter()
+                    .filter(|name| name.len() >= MIN_REMOVED_NAME_LEN && !head.contains(name)),
+            );
+        }
+        Self {
+            identifiers,
+            segments,
+        }
+    }
+
+    /// Whether the lines that a test file lost name removed code that the
+    /// head test no longer names. Then the tests left together with the code
+    /// they covered.
+    fn explain(&self, base: &str, head: &str) -> bool {
+        let removed: Vec<&str> = text::added_lines(head, base)
+            .into_iter()
+            .map(|(_, line)| line)
+            .collect();
+        if removed.is_empty() {
+            return false;
+        }
+        let head_identifiers = text::code_identifiers(head);
+        let names_removed_identifier = removed.iter().any(|line| {
+            text::code_identifiers(line)
+                .iter()
+                .any(|name| self.identifiers.contains(name) && !head_identifiers.contains(name))
+        });
+        names_removed_identifier
+            || self.segments.iter().any(|segment| {
+                !head.contains(segment.as_str())
+                    && removed.iter().any(|line| line.contains(segment.as_str()))
+            })
+    }
+}
+
 /// `removed-tests` and `assertion-drop`. Both compare per file, and both
 /// report only when the total over every changed test file also dropped, so
-/// tests or assertions that moved to another changed file do not report.
+/// tests or assertions that moved to another changed file do not report. A
+/// drop does not report when the lost test lines name code that the change
+/// removed: the tests went together with that code. An assertion drop reports
+/// only when assertions are at least half of the code lines that the file
+/// lost. Otherwise the change rewrote the test, for example it moved setup
+/// checks into a shared helper.
 fn detect_removed_tests(root: &Path, files: &[FileTexts], raw: &mut Vec<RawFinding>) {
     struct Counts<'a> {
         rel: &'a str,
@@ -405,7 +533,10 @@ fn detect_removed_tests(root: &Path, files: &[FileTexts], raw: &mut Vec<RawFindi
         head_cases: usize,
         base_asserts: usize,
         head_asserts: usize,
+        explained: bool,
+        assertions_led: bool,
     }
+    let removed_names = RemovedNames::collect(root, files);
     let counts: Vec<Counts<'_>> = files
         .iter()
         .filter(|file| fallow_engine::test_paths::is_test_code_path_str(root, &file.rel))
@@ -418,13 +549,18 @@ fn detect_removed_tests(root: &Path, files: &[FileTexts], raw: &mut Vec<RawFindi
                 head_cases: text::test_case_count(head),
                 base_asserts: text::assertion_count(base),
                 head_asserts: text::assertion_count(head),
+                explained: removed_names.explain(base, head),
+                assertions_led: {
+                    let (asserts, code) = text::removed_assertion_lines(base, head);
+                    asserts * 2 >= code
+                },
             }
         })
         .collect();
     let total = |pick: fn(&Counts<'_>) -> usize| counts.iter().map(pick).sum::<usize>();
     let cases_dropped = total(|c| c.head_cases) < total(|c| c.base_cases);
     let asserts_dropped = total(|c| c.head_asserts) < total(|c| c.base_asserts);
-    for count in &counts {
+    for count in counts.iter().filter(|count| !count.explained) {
         if cases_dropped && count.head_cases < count.base_cases {
             let evidence = format!("test cases: {} -> {}", count.base_cases, count.head_cases);
             raw.push(RawFinding {
@@ -437,6 +573,7 @@ fn detect_removed_tests(root: &Path, files: &[FileTexts], raw: &mut Vec<RawFindi
                 related: Vec::new(),
             });
         } else if asserts_dropped
+            && count.assertions_led
             && count.head_cases >= count.base_cases
             && count.head_asserts < count.base_asserts
         {
@@ -499,9 +636,9 @@ fn detect_diverged_clones(
         },
     );
     for diverged in found {
-        // Test copies differ case by case on purpose, so an edit to one test
-        // copy is not a missed sibling.
-        if fallow_engine::test_paths::is_test_path_str(root, &diverged.path) {
+        // Test and story copies differ case by case on purpose, so an edit to
+        // one of them is not a missed sibling.
+        if is_example_copy(root, &diverged.path) {
             continue;
         }
         let rules = input.rules.for_path(&root.join(&diverged.path));
@@ -734,6 +871,156 @@ mod tests {
         }
     }
 
+    fn removed_test_findings(files: &[FileTexts]) -> Vec<(String, String)> {
+        let mut raw = Vec::new();
+        detect_removed_tests(Path::new("/project"), files, &mut raw);
+        let mut found: Vec<(String, String)> = raw
+            .into_iter()
+            .map(|finding| (finding.path, finding.evidence))
+            .collect();
+        found.sort_unstable();
+        found
+    }
+
+    fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+        list.iter()
+            .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+            .collect()
+    }
+
+    const ERRORS_BASE: &str = "export const ERR_A = 'a';\nexport const ERR_GONE = 'gone';\n";
+    const ERRORS_HEAD: &str = "export const ERR_A = 'a';\n";
+    const ERRORS_TEST_BASE: &str = "test('ERR_A', () => {\n  expect(ERR_A).toBe('a');\n});\ntest('ERR_GONE', () => {\n  expect(ERR_GONE).toBe('gone');\n});\n";
+    const ERRORS_TEST_HEAD: &str = "test('ERR_A', () => {\n  expect(ERR_A).toBe('a');\n});\n";
+
+    #[test]
+    fn tests_removed_with_the_source_name_they_cover_are_not_reported() {
+        let files = [
+            file("src/errors.ts", ERRORS_BASE, ERRORS_HEAD),
+            file("src/errors.test.ts", ERRORS_TEST_BASE, ERRORS_TEST_HEAD),
+        ];
+        assert!(removed_test_findings(&files).is_empty());
+    }
+
+    #[test]
+    fn tests_removed_while_their_source_name_stays_are_reported() {
+        let files = [
+            file("src/errors.ts", ERRORS_BASE, ERRORS_BASE),
+            file("src/errors.test.ts", ERRORS_TEST_BASE, ERRORS_TEST_HEAD),
+        ];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("src/errors.test.ts", "test cases: 2 -> 1")])
+        );
+    }
+
+    #[test]
+    fn assertions_removed_with_the_source_name_they_cover_are_not_reported() {
+        let base = "test('errors', () => {\n  expect(ERR_A).toBe('a');\n  expect(ERR_GONE).toBe('gone');\n});\n";
+        let head = "test('errors', () => {\n  expect(ERR_A).toBe('a');\n});\n";
+        let files = [
+            file("src/errors.ts", ERRORS_BASE, ERRORS_HEAD),
+            file("src/errors.test.ts", base, head),
+        ];
+        assert!(removed_test_findings(&files).is_empty());
+        let files = [
+            file("src/errors.ts", ERRORS_BASE, ERRORS_BASE),
+            file("src/errors.test.ts", base, head),
+        ];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("src/errors.test.ts", "assertions: 2 -> 1")])
+        );
+    }
+
+    #[test]
+    fn tests_removed_with_a_deleted_fixture_directory_are_not_reported() {
+        let base = "test('a', () => run('basic'));\ntest('legacy', () => run('legacy-types'));\n";
+        let head = "test('a', () => run('basic'));\n";
+        let files = [
+            file("test/package.spec.js", base, head),
+            FileTexts {
+                rel: "test/fixtures/legacy-types/src/index.ts".to_owned(),
+                abs: PathBuf::from("/project/test/fixtures/legacy-types/src/index.ts"),
+                base: Some("export const a = 1;\n".to_owned()),
+                head: None,
+            },
+        ];
+        assert!(removed_test_findings(&files).is_empty());
+    }
+
+    #[test]
+    fn assertions_that_leave_with_rewritten_setup_code_are_not_reported() {
+        let base = "test('creates', async () => {\n  const response = await client.post('/api').send({ query: CREATE });\n  expect(response.body.errors).toBeUndefined();\n  const id = response.body.data.create.id;\n  expect(await read(id)).toEqual({ id });\n});\n";
+        let head = "test('creates', async () => {\n  const { id } = await createRecord();\n  expect(await read(id)).toEqual({ id });\n});\n";
+        let files = [file("test/create.spec.ts", base, head)];
+        assert!(removed_test_findings(&files).is_empty());
+        let head = "test('creates', async () => {\n  const response = await client.post('/api').send({ query: CREATE });\n  const id = response.body.data.create.id;\n});\n";
+        let files = [file("test/create.spec.ts", base, head)];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("test/create.spec.ts", "assertions: 2 -> 0")])
+        );
+    }
+
+    #[test]
+    fn tests_of_a_call_that_one_source_file_dropped_are_not_reported() {
+        let hook_base = "export const useCommands = () => {\n  const enabled = useIsFeatureEnabled('CORE');\n  return enabled ? commands : [];\n};\n";
+        let hook_head = "export const useCommands = () => commands;\n";
+        let other = "export const usePage = () => useIsFeatureEnabled('PAGE');\n";
+        let test_base = "jest.mock('./flags', () => ({ useIsFeatureEnabled: () => flag() }));\nit('shows commands', () => {\n  expect(useCommands()).toEqual(commands);\n});\nit('hides commands with the flag off', () => {\n  flag.mockReturnValue(false);\n  expect(useCommands()).toEqual([]);\n});\n";
+        let test_head =
+            "it('shows commands', () => {\n  expect(useCommands()).toEqual(commands);\n});\n";
+        let files = [
+            file("src/useCommands.ts", hook_base, hook_head),
+            file("src/usePage.ts", other, other),
+            file("src/useCommands.test.ts", test_base, test_head),
+        ];
+        assert!(removed_test_findings(&files).is_empty());
+    }
+
+    #[test]
+    fn words_in_comments_and_test_titles_do_not_explain_a_removal() {
+        let source_base =
+            "// Hide the items when the page is disabled.\nexport const items = (all) => all;\n";
+        let source_head = "export const items = (all) => all;\n";
+        let test_base = "it('keeps items', () => {\n  expect(items([1])).toEqual([1]);\n});\nit('keeps items when the page is disabled', () => {\n  expect(items([])).toEqual([]);\n});\n";
+        let test_head = "it('keeps items', () => {\n  expect(items([1])).toEqual([1]);\n});\n";
+        let files = [
+            file("src/items.ts", source_base, source_head),
+            file("src/items.test.ts", test_base, test_head),
+        ];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("src/items.test.ts", "test cases: 2 -> 1")])
+        );
+    }
+
+    #[test]
+    fn a_deleted_test_file_does_not_explain_its_own_removal() {
+        let files = [FileTexts {
+            rel: "src/zero.test.ts".to_owned(),
+            abs: PathBuf::from("/project/src/zero.test.ts"),
+            base: Some("import { price } from './zero';\nit('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n".to_owned()),
+            head: None,
+        }];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("src/zero.test.ts", "test cases: 1 -> 0")])
+        );
+    }
+
+    #[test]
+    fn edited_story_copy_is_not_a_diverged_clone() {
+        for rel in [
+            "apps/storybook/stories/select.stories.tsx",
+            "src/button.story.tsx",
+        ] {
+            assert!(is_example_copy(Path::new("/project"), rel), "{rel}");
+        }
+        assert!(!is_example_copy(Path::new("/project"), "src/store.ts"));
+    }
+
     #[test]
     fn tool_config_names_match_config_and_dot_rc_files_only() {
         for name in [
@@ -747,6 +1034,28 @@ mod tests {
         for name in ["src.ts", "src/arc.ts", "lib/orc.js", "src/index.ts"] {
             assert!(!is_tool_config(name), "{name}");
         }
+    }
+
+    #[test]
+    fn suppressions_in_fixture_and_generated_files_are_not_reported() {
+        let head = "// @ts-nocheck\nexport const a = 1;\n";
+        let mut raw = Vec::new();
+        let root = Path::new("/project");
+        let rules = RulesConfig::default();
+        for rel in [
+            "src/__tests__/upstream/fixture/generated/schema.ts",
+            "test/fixtures/app/src/index.ts",
+            "src/__generated__/graphql.ts",
+            "src/generated/client.ts",
+        ] {
+            detect_file(root, &file(rel, "", head), &rules, &mut raw);
+        }
+        assert!(raw.is_empty(), "{:?}", rules_of(&raw));
+        detect_file(root, &file("src/schema.ts", "", head), &rules, &mut raw);
+        assert_eq!(
+            rules_of(&raw),
+            vec![(DiffRiskRule::AddedSuppression, "@ts-nocheck")]
+        );
     }
 
     #[test]

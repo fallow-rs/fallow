@@ -279,7 +279,7 @@
         "weakened-tests": "warn",
         "added-suppression": "warn",
         "test-only-branch": "warn",
-        "diverged-clone-sibling": "warn",
+        "diverged-clone-sibling": "off",
         "added-dependency": "off"
       }
     },
@@ -1724,9 +1724,9 @@
           "default": "warn"
         },
         "diverged-clone-sibling": {
-          "description": "An audit diff that edits one copy of a base clone group so that it no\nlonger matches its siblings, while no sibling changed. `fallow audit`\nonly. Defaults to `warn`.",
+          "description": "An audit diff that edits one copy of a base clone group so that it no\nlonger matches its siblings, while no sibling changed. `fallow audit`\nonly. Opt-in; defaults to `off`, because copies often differ on\npurpose.",
           "$ref": "#/$defs/Severity",
-          "default": "warn"
+          "default": "off"
         },
         "added-dependency": {
           "description": "An audit diff that adds a dependency to a `package.json`. `fallow\naudit` only. Opt-in; defaults to `off`.",

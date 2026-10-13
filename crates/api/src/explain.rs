@@ -1270,7 +1270,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         category: "Audit",
         name: "Weakened Tests",
         short: "The change weakens tests or a coverage threshold",
-        full: "`fallow audit` compares the base and head text of each changed file. The `kind` field tells how the change weakened the tests: `skip-only` (a new `.skip`, `.only`, `xit` or `fit` marker), `removed-tests` (fewer test cases in a file, while the total of all changed test files also dropped), `assertion-drop` (fewer `expect`, `assert` or `should` calls in a test file with no test case removed), or `coverage-threshold` (a coverage or quality threshold that is less strict). The finding is a fact about the change, not a proof that coverage dropped. Defaults to `warn`.",
+        full: "`fallow audit` compares the base and head text of each changed file. The `kind` field tells how the change weakened the tests: `skip-only` (a new `.skip`, `.only`, `xit` or `fit` marker), `removed-tests` (fewer test cases in a file, while the total of all changed test files also dropped), `assertion-drop` (fewer `expect`, `assert` or `should` calls in a test file with no test case removed), or `coverage-threshold` (a coverage or quality threshold that is less strict). A drop does not report when the lost test lines name code that the change removed, such as a deleted function or a deleted fixture directory: the tests went with that code. An assertion drop reports only when assertions are at least half of the code lines that the file lost, so a test rewrite that moves setup checks into a helper does not report. The finding is a fact about the change, not a proof that coverage dropped. Defaults to `warn`.",
         docs_path: "cli/audit#diff-risk-rules",
     },
     RuleDef {
@@ -1278,7 +1278,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         category: "Audit",
         name: "Added Suppressions",
         short: "The change adds a suppression comment",
-        full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `deno-lint-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Defaults to `warn`.",
+        full: "`fallow audit` reports a comment line that the change adds with a lint, type-check, coverage or Fallow suppression: `eslint-disable`, `oxlint-disable`, `biome-ignore`, `deno-lint-ignore`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `istanbul ignore`, `c8 ignore`, `v8 ignore` or `fallow-ignore`. A moved comment is not added. A `fallow-ignore` comment that names only diff-risk rules does not count. Files below a fixture or generated directory (`fixtures`, `__fixtures__`, `__snapshots__`, `generated`, `__generated__`) do not report, because a tool writes them or a test reads them as data. Defaults to `warn`.",
         docs_path: "cli/audit#diff-risk-rules",
     },
     RuleDef {
@@ -1286,7 +1286,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         category: "Audit",
         name: "Test-Only Branches",
         short: "The change adds a test-environment branch to source code",
-        full: "`fallow audit` reports a line that the change adds to a non-test source file and that checks the test environment: `process.env.NODE_ENV` compared with `'test'`, `process.env.VITEST` or `process.env.JEST_WORKER_ID`. Such a branch lets the tests take a path that production does not take. A Vitest in-source test block (`if (import.meta.vitest)`) is test code and is not reported. Tool config files are skipped. Defaults to `warn`.",
+        full: "`fallow audit` reports a line that the change adds to a non-test source file and that checks the test environment: `process.env.NODE_ENV` compared with `'test'`, `process.env.VITEST` or `process.env.JEST_WORKER_ID`. Such a branch lets the tests take a path that production does not take. A Vitest in-source test block (`if (import.meta.vitest)`) is test code and is not reported. Tool config files are skipped. A check that only keeps `console` output quiet in tests (`if (process.env.NODE_ENV !== 'test') console.warn(...)`), and a check that picks an env file (`'.env.test'`), do not report. Defaults to `warn`.",
         docs_path: "cli/audit#diff-risk-rules",
     },
     RuleDef {
@@ -1294,7 +1294,7 @@ pub const AUDIT_RULES: &[RuleDef] = &[
         category: "Audit",
         name: "Diverged Clone Siblings",
         short: "The change edits one copy of duplicated code but not its siblings",
-        full: "`fallow audit` reports a base clone group where the change edited exactly one copy, the edit broke the clone, and every other copy kept its text. The siblings can need the same change. A cosmetic edit that keeps the clone, a removed copy and a change that edits every copy do not report. Needs the base snapshot of `--gate new-only`. Defaults to `warn`.",
+        full: "`fallow audit` reports a base clone group where the change edited exactly one copy, the edit broke the clone, and every other copy kept its text. The siblings can need the same change. A cosmetic edit that keeps the clone, a removed copy, a change that edits every copy, and an edit to a test or story copy do not report. Needs the base snapshot of `--gate new-only`. Opt-in: defaults to `off`, because copies often differ on purpose, for example an input and an output type, or a legacy copy. Set it to `warn` or `error` to review every diverged copy.",
         docs_path: "cli/audit#diff-risk-rules",
     },
     RuleDef {

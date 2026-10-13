@@ -475,8 +475,9 @@ pub struct RulesConfig {
     pub test_only_branch: Severity,
     /// An audit diff that edits one copy of a base clone group so that it no
     /// longer matches its siblings, while no sibling changed. `fallow audit`
-    /// only. Defaults to `warn`.
-    #[serde(default = "Severity::default_warn", alias = "diverged-clone-siblings")]
+    /// only. Opt-in; defaults to `off`, because copies often differ on
+    /// purpose.
+    #[serde(default = "Severity::default_off", alias = "diverged-clone-siblings")]
     pub diverged_clone_sibling: Severity,
     /// An audit diff that adds a dependency to a `package.json`. `fallow
     /// audit` only. Opt-in; defaults to `off`.
@@ -553,7 +554,7 @@ impl Default for RulesConfig {
             weakened_tests: Severity::Warn,
             added_suppression: Severity::Warn,
             test_only_branch: Severity::Warn,
-            diverged_clone_sibling: Severity::Warn,
+            diverged_clone_sibling: Severity::Off,
             added_dependency: Severity::Off,
         }
     }
@@ -1920,7 +1921,7 @@ mod tests {
         assert_eq!(rules.weakened_tests, Severity::Warn);
         assert_eq!(rules.added_suppression, Severity::Warn);
         assert_eq!(rules.test_only_branch, Severity::Warn);
-        assert_eq!(rules.diverged_clone_sibling, Severity::Warn);
+        assert_eq!(rules.diverged_clone_sibling, Severity::Off);
         assert_eq!(rules.added_dependency, Severity::Off);
 
         let json = r#"{"weakened-tests": "error", "added-dependency": "warn"}"#;
