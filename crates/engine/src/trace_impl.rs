@@ -1093,7 +1093,7 @@ fn impact_closure_trace(
         .cloned()
         .unwrap_or_else(|| file_path.replace('\\', "/"));
 
-    let mut checks: FxHashMap<String, SearchCheck> =
+    let mut checks: FxHashMap<String, (String, SearchCheck)> =
         if !check_search || paths.coordination_gap.is_empty() {
             FxHashMap::default()
         } else {
@@ -1115,7 +1115,7 @@ fn impact_closure_trace(
         .coordination_gap
         .into_iter()
         .map(|gap| {
-            let check = checks.remove(&gap.consumer_file);
+            let (search_symbol, check) = checks.remove(&gap.consumer_file).unzip();
             ImpactClosureGap {
                 consumer_file: gap.consumer_file,
                 consumed_symbols: gap.consumed_symbols,
@@ -1123,6 +1123,7 @@ fn impact_closure_trace(
                 search_visibility: check.as_ref().map(|check| check.visibility),
                 reason: check.as_ref().and_then(|check| check.reason),
                 search_as: check.and_then(|check| check.search_as),
+                search_symbol,
             }
         })
         .collect();
@@ -1135,10 +1136,14 @@ fn impact_closure_trace(
 }
 
 /// The worst literal-search check per consumer of the value exports of
-/// `seed`, over every export the consumer references. The order of the levels
-/// is `missed`, then `renamed`, then `found`.
-fn consumer_search_checks(graph: &ModuleGraph, seed: FileId) -> FxHashMap<FileId, SearchCheck> {
-    let mut checks: FxHashMap<FileId, SearchCheck> = FxHashMap::default();
+/// `seed`, over every export the consumer references, with the name of the
+/// export that the check belongs to. The order of the levels is `missed`, then
+/// `renamed`, then `found`.
+fn consumer_search_checks(
+    graph: &ModuleGraph,
+    seed: FileId,
+) -> FxHashMap<FileId, (String, SearchCheck)> {
+    let mut checks: FxHashMap<FileId, (String, SearchCheck)> = FxHashMap::default();
     let Some(module) = graph.modules.get(seed.0 as usize) else {
         return checks;
     };
@@ -1155,14 +1160,14 @@ fn consumer_search_checks(graph: &ModuleGraph, seed: FileId) -> FxHashMap<FileId
                 continue;
             };
             // A local use of one export outranks a pass-through of another.
-            let worse = checks.get(&reference.from_file).is_none_or(|known| {
+            let worse = checks.get(&reference.from_file).is_none_or(|(_, known)| {
                 check.visibility > known.visibility
                     || (check.visibility == known.visibility
                         && known.reason == Some(SearchGapReason::PassThrough)
                         && check.reason != Some(SearchGapReason::PassThrough))
             });
             if worse {
-                checks.insert(reference.from_file, check);
+                checks.insert(reference.from_file, (name.clone(), check));
             }
         }
     }
@@ -1668,6 +1673,7 @@ mod tests {
         assert_eq!(gap.search_visibility, None);
         assert_eq!(gap.reason, None);
         assert_eq!(gap.search_as, None);
+        assert_eq!(gap.search_symbol, None);
     }
 
     #[test]
@@ -1707,6 +1713,10 @@ mod tests {
         assert_eq!(
             checked.coordination_gap[0].search_visibility,
             Some(fallow_types::trace::SearchVisibility::Found)
+        );
+        assert_eq!(
+            checked.coordination_gap[0].search_symbol.as_deref(),
+            Some("foo")
         );
 
         let unchecked =

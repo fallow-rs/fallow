@@ -1438,7 +1438,7 @@ pub(crate) fn print_impact_closure_trace(
                     "  coordination gap: {} consumes {}{}",
                     gap.consumer_file,
                     gap.consumed_symbols.join(", "),
-                    human::traces::search_hint(gap.search_visibility, gap.search_as.as_deref())
+                    human::traces::gap_search_hint(gap)
                 );
             }
         }

@@ -162,6 +162,25 @@ pub(in crate::report) fn search_hint(
     visibility: Option<fallow_types::trace::SearchVisibility>,
     search_as: Option<&str>,
 ) -> String {
+    symbol_search_hint(None, visibility, search_as)
+}
+
+/// The search hint of an impact-closure coordination gap. When the consumer
+/// uses more than one symbol, the hint names the symbol that the search
+/// fields describe.
+pub(in crate::report) fn gap_search_hint(gap: &fallow_types::trace::ImpactClosureGap) -> String {
+    let symbol = gap
+        .search_symbol
+        .as_deref()
+        .filter(|_| gap.consumed_symbols.len() > 1);
+    symbol_search_hint(symbol, gap.search_visibility, gap.search_as.as_deref())
+}
+
+fn symbol_search_hint(
+    symbol: Option<&str>,
+    visibility: Option<fallow_types::trace::SearchVisibility>,
+    search_as: Option<&str>,
+) -> String {
     use fallow_types::trace::SearchVisibility;
 
     let level = match visibility {
@@ -169,8 +188,9 @@ pub(in crate::report) fn search_hint(
         Some(SearchVisibility::Renamed) => "used under another name",
         Some(SearchVisibility::Found) | None => return String::new(),
     };
+    let subject = symbol.map_or_else(String::new, |name| format!("{name}: "));
     let hint = search_as.map_or_else(String::new, |name| format!(", search {name}"));
-    format!(" [{level}{hint}]").dimmed().to_string()
+    format!(" [{subject}{level}{hint}]").dimmed().to_string()
 }
 
 fn build_class_member_trace_human_lines(trace: &ClassMemberTrace) -> Vec<String> {
@@ -1114,6 +1134,27 @@ mod tests {
             ),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn gap_search_hint_names_the_symbol_only_for_several_symbols() {
+        let mut gap = fallow_types::trace::ImpactClosureGap {
+            consumer_file: "src/multi.ts".to_string(),
+            consumed_symbols: vec!["default".to_string(), "formatDate".to_string()],
+            note: String::new(),
+            search_visibility: Some(fallow_types::trace::SearchVisibility::Missed),
+            reason: Some(fallow_types::trace::SearchGapReason::DefaultImport),
+            search_as: Some("Thing".to_string()),
+            search_symbol: Some("default".to_string()),
+        };
+        let hint = |gap: &fallow_types::trace::ImpactClosureGap| plain(&[gap_search_hint(gap)]);
+
+        assert_eq!(
+            hint(&gap),
+            " [default: name search misses it, search Thing]"
+        );
+        gap.consumed_symbols.truncate(1);
+        assert_eq!(hint(&gap), " [name search misses it, search Thing]");
     }
 
     #[test]

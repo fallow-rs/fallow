@@ -410,7 +410,9 @@ pub fn default_declaration_name(source: &str, start: usize) -> Option<&str> {
 /// export of a source file, keyed by the byte offset of the export span.
 ///
 /// An `export { name }` specifier maps to the statement that declares `name`
-/// in the same file. A file that does not parse maps to nothing, and the
+/// in the same file. For a Vue or Svelte SFC, an Astro component or an MDX
+/// document, only the script sections are parsed, and the statement offsets
+/// map back to the file. A file that does not parse maps to nothing, and the
 /// caller falls back to the export line.
 #[must_use]
 pub fn declaration_line_ranges(
@@ -418,20 +420,19 @@ pub fn declaration_line_ranges(
     source: &str,
     export_starts: &[u32],
 ) -> FxHashMap<u32, (u32, u32)> {
-    let Ok(source_type) = oxc_span::SourceType::from_path(path) else {
-        return FxHashMap::default();
+    let statements = match fallow_extract::embedded_script_sections(path, source) {
+        Some(sections) => sections
+            .iter()
+            .flat_map(|section| {
+                top_level_statements(&section.extraction.body, section.source_type)
+                    .into_iter()
+                    .map(|statement| statement.remapped(&section.extraction))
+            })
+            .collect(),
+        None => oxc_span::SourceType::from_path(path)
+            .map(|source_type| top_level_statements(source, source_type))
+            .unwrap_or_default(),
     };
-    let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
-    if parsed.fatal_error {
-        return FxHashMap::default();
-    }
-    let statements: Vec<TopLevelStatement> = parsed
-        .program
-        .body
-        .iter()
-        .map(top_level_statement)
-        .collect();
     let offsets = fallow_types::extract::compute_line_offsets(source);
     let line = |offset: u32| fallow_types::extract::byte_offset_to_line_col(&offsets, offset).0;
     let mut ranges = FxHashMap::default();
@@ -467,6 +468,34 @@ struct TopLevelStatement {
     end: u32,
     declared: Vec<String>,
     is_specifier_list: bool,
+}
+
+impl TopLevelStatement {
+    /// Map the statement span from the extracted script to the file.
+    fn remapped(self, extraction: &fallow_extract::ExtractionResult) -> Self {
+        let span = extraction.remap_span(oxc_span::Span::new(self.start, self.end));
+        Self {
+            start: span.start,
+            end: span.end,
+            ..self
+        }
+    }
+}
+
+/// The top-level statements of a script. A script that does not parse has
+/// none.
+fn top_level_statements(source: &str, source_type: oxc_span::SourceType) -> Vec<TopLevelStatement> {
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+    if parsed.fatal_error {
+        return Vec::new();
+    }
+    parsed
+        .program
+        .body
+        .iter()
+        .map(top_level_statement)
+        .collect()
 }
 
 fn top_level_statement(statement: &oxc_ast::ast::Statement<'_>) -> TopLevelStatement {
@@ -574,5 +603,32 @@ mod tests {
         assert_eq!(ranges.get(&a), Some(&(1, 1)));
         assert_eq!(ranges.get(&b), Some(&(3, 5)));
         assert_eq!(ranges.get(&c), Some(&(7, 7)));
+    }
+
+    fn range_of(path: &str, source: &str, needle: &str) -> Option<(u32, u32)> {
+        let start = source.find(needle)? as u32;
+        declaration_line_ranges(Path::new(path), source, &[start])
+            .get(&start)
+            .copied()
+    }
+
+    #[test]
+    fn declaration_ranges_read_the_script_blocks_of_an_sfc() {
+        let vue = "<template>\n  <div />\n</template>\n\n<script lang=\"ts\">\nexport function scale(n: number): number {\n  return n * 2;\n}\n</script>\n";
+        assert_eq!(range_of("Gauge.vue", vue, "scale("), Some((6, 8)));
+
+        let svelte = "<script context=\"module\">\nexport const size = {\n  width: 1,\n};\n</script>\n\n<script>\n  let open = false;\n</script>\n\n<div />\n";
+        assert_eq!(range_of("Box.svelte", svelte, "size ="), Some((2, 4)));
+    }
+
+    #[test]
+    fn declaration_ranges_read_astro_frontmatter_and_mdx_statements() {
+        let astro =
+            "---\nexport function title(): string {\n  return 'a';\n}\n---\n<h1>{title()}</h1>\n";
+        assert_eq!(range_of("Page.astro", astro, "title()"), Some((2, 4)));
+
+        let mdx =
+            "# Post\n\nSome prose.\n\nexport const meta = {\n  title: 'Post',\n};\n\nMore prose.\n";
+        assert_eq!(range_of("post.mdx", mdx, "meta ="), Some((5, 7)));
     }
 }

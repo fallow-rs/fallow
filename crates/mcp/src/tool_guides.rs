@@ -197,7 +197,7 @@ const TRACE_EXPORT_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
 const IMPACT_CLOSURE_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
     topic: "coordination_gap.search_visibility",
     summary: "Which gap consumers a text search for the symbol names does not find.",
-    detail: r"Each coordination gap carries `search_visibility`, `reason`, and `search_as` for the consumed symbols. When a consumer uses more than one symbol, the worst level wins: `missed`, then `renamed`, then `found`. The levels and reasons are the same as for `trace_export`: read fallow://tools/trace_export for their meaning.",
+    detail: r"Each coordination gap carries `search_visibility`, `reason`, and `search_as` for the consumed symbols. When a consumer uses more than one symbol, the worst level wins: `missed`, then `renamed`, then `found`. `search_symbol` names the entry of `consumed_symbols` that the three fields describe, `default` for a default export. The levels and reasons are the same as for `trace_export`: read fallow://tools/trace_export for their meaning.",
 }];
 
 /// Every tool with a long-form guide, in catalogue order.

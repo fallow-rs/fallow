@@ -765,6 +765,11 @@ pub struct ImpactClosureGap {
     /// The name to search for in this consumer instead of the symbol name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_as: Option<String>,
+    /// The entry of `consumed_symbols` that `search_visibility`, `reason`
+    /// and `search_as` describe: the worst symbol, `default` for a default
+    /// export. Present when `search_visibility` is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_symbol: Option<String>,
 }
 
 /// Result of tracing a clone: all groups containing the code at a source

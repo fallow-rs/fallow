@@ -12661,6 +12661,12 @@ reason?: (SearchGapReason | null)
  * The name to search for in this consumer instead of the symbol name.
  */
 search_as?: (string | null)
+/**
+ * The entry of `consumed_symbols` that `search_visibility`, `reason`
+ * and `search_as` describe: the worst symbol, `default` for a default
+ * export. Present when `search_visibility` is present.
+ */
+search_symbol?: (string | null)
 }
 /**
  * Result of asking how one module reaches another: the shortest import path.

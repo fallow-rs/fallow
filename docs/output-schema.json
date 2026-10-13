@@ -24973,6 +24973,13 @@
             "null"
           ],
           "description": "The name to search for in this consumer instead of the symbol name."
+        },
+        "search_symbol": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The entry of `consumed_symbols` that `search_visibility`, `reason`\nand `search_as` describe: the worst symbol, `default` for a default\nexport. Present when `search_visibility` is present."
         }
       },
       "required": [

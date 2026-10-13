@@ -165,7 +165,7 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 
 `--deprecated-exports-in-use` is an opt-in migration sweep (default `off`). Each finding has the exact `consumer_count` and a sample of up to 10 consumers. `fallow dead-code --trace FILE:EXPORT` lists all of them. Enable it with this flag or with `deprecated-exports-in-use: "warn"` or `"error"` in [`rules`](#configuration-file-format).
 
-Each consumer in `--trace FILE:EXPORT` and each coordination gap in `--impact-closure` has `search_visibility` (`found`, `renamed`, `missed`). A `grep -w` for the export name does not find a `missed` consumer. When `search_as` is present, search for that name in that consumer file.
+Each consumer in `--trace FILE:EXPORT` and each coordination gap in `--impact-closure` has `search_visibility` (`found`, `renamed`, `missed`). A `grep -w` for the export name does not find a `missed` consumer. When `search_as` is present, search for that name in that consumer file. A coordination gap with more than one consumed symbol names the symbol of these fields in `search_symbol`.
 
 ### Examples
 

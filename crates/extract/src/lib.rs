@@ -111,7 +111,7 @@ pub use sfc_css::{
     scoped_unused_classes, sfc_preprocessor_virtual_stylesheet, sfc_virtual_stylesheet,
 };
 pub use similar_code::extract_similar_code_functions;
-pub use source_map::ExtractionResult;
+pub use source_map::{ExtractionResult, ScriptSection, embedded_script_sections};
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 
 #[expect(

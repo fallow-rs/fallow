@@ -88,6 +88,59 @@ impl ExtractionResult {
     }
 }
 
+/// One script section of a container file: the extracted script with its
+/// mapping back to the file, and the source type to parse it with.
+#[derive(Debug, Clone)]
+pub struct ScriptSection {
+    /// The extracted script and its byte mapping.
+    pub extraction: ExtractionResult,
+    /// The source type of the extracted script.
+    pub source_type: oxc_span::SourceType,
+}
+
+/// The inline script sections of a container file: the `<script>` blocks of a
+/// Vue or Svelte SFC, the frontmatter of an Astro component, or the
+/// `import` and `export` statements of an MDX document.
+///
+/// Returns `None` when `path` is not a container format. Then the caller
+/// parses the whole file.
+#[must_use]
+pub fn embedded_script_sections(
+    path: &std::path::Path,
+    source: &str,
+) -> Option<Vec<ScriptSection>> {
+    if crate::sfc::is_sfc_file(path) {
+        return Some(
+            crate::sfc::extract_sfc_scripts(source)
+                .iter()
+                .filter(|script| script.src.is_none())
+                .map(|script| ScriptSection {
+                    extraction: ExtractionResult::contiguous(&script.body, script.byte_offset),
+                    source_type: crate::sfc::source_type_for_script(script),
+                })
+                .collect(),
+        );
+    }
+    if crate::astro::is_astro_file(path) {
+        return Some(
+            crate::astro::extract_astro_frontmatter(source)
+                .iter()
+                .map(|script| ScriptSection {
+                    extraction: ExtractionResult::contiguous(&script.body, script.byte_offset),
+                    source_type: crate::sfc::source_type_for_script(script),
+                })
+                .collect(),
+        );
+    }
+    if crate::mdx::is_mdx_file(path) {
+        return Some(vec![ScriptSection {
+            extraction: crate::mdx::extract_mdx_statements_mapped(source),
+            source_type: oxc_span::SourceType::tsx(),
+        }]);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

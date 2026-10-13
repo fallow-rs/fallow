@@ -493,3 +493,112 @@ fn audit_brief_skips_pass_through_barrels() {
     );
     assert_eq!(search_gap["total"], 2, "{search_gap}");
 }
+
+#[test]
+fn impact_closure_gap_names_the_symbol_of_the_search_fields() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_search_probe(root);
+    fs::write(
+        root.join("src/multi.ts"),
+        "import Thing, { formatDate } from './lib';\nconsole.log(Thing(), formatDate(new Date()));\n",
+    )
+    .expect("write multi.ts");
+    fs::write(
+        root.join("src/index.ts"),
+        "import './direct';\nimport './alias';\nimport './multi';\n",
+    )
+    .expect("write index.ts");
+
+    let output = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &[
+            "--impact-closure",
+            "src/lib.ts",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    let gaps = output["coordination_gap"]
+        .as_array()
+        .unwrap_or_else(|| panic!("coordination_gap array: {output}"));
+    let gap = |consumer: &str| {
+        gaps.iter()
+            .find(|gap| gap["consumer_file"] == consumer)
+            .unwrap_or_else(|| panic!("no gap for {consumer}: {output}"))
+    };
+
+    let multi = gap("src/multi.ts");
+    assert_eq!(
+        multi["consumed_symbols"].as_array().map(Vec::len),
+        Some(2),
+        "{multi}"
+    );
+    assert_eq!(multi["search_visibility"], "missed", "{multi}");
+    assert_eq!(multi["search_as"], "Thing", "{multi}");
+    assert_eq!(multi["search_symbol"], "default", "{multi}");
+    assert_eq!(gap("src/alias.ts")["search_symbol"], "formatDate");
+    assert_eq!(gap("src/direct.ts")["search_symbol"], "formatDate");
+}
+
+#[test]
+fn audit_brief_reads_declaration_ranges_from_a_vue_script_block() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).expect("create source directory");
+    let vue = |factor: u32| {
+        format!(
+            "<template>\n  <div>{{{{ label }}}}</div>\n</template>\n\n<script lang=\"ts\">\nexport function scale(n: number): number {{\n  const result = n * {factor};\n  return result;\n}}\n\nexport default {{ name: 'Gauge' }};\n</script>\n"
+        )
+    };
+    let files: &[(&str, String)] = &[
+        (
+            "package.json",
+            r#"{"name":"vue-search","type":"module","main":"src/index.ts"}"#.to_string(),
+        ),
+        ("src/index.ts", "import './use';\n".to_string()),
+        ("src/Gauge.vue", vue(2)),
+        (
+            "src/use.ts",
+            "import { scale as grow } from './Gauge.vue';\nconsole.log(grow(2));\n".to_string(),
+        ),
+    ];
+    for (path, content) in files {
+        fs::write(root.join(path), content).expect("write probe file");
+    }
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "base");
+    fs::write(root.join("src/Gauge.vue"), vue(3)).expect("change Gauge.vue");
+    commit_all(root, "head");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().expect("utf-8 root"),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let brief = parse_json(&output);
+    let search_gap = &brief["impact_closure"]["search_gap"];
+    let exports = search_gap["exports"]
+        .as_array()
+        .unwrap_or_else(|| panic!("search_gap.exports: {}", brief["impact_closure"]));
+    assert_eq!(exports.len(), 1, "{search_gap}");
+    let export = &exports[0];
+    assert_eq!(export["file"], "src/Gauge.vue", "{export}");
+    assert_eq!(export["export_name"], "scale", "{export}");
+    assert_eq!(export["line"], 6, "{export}");
+    assert_eq!(
+        export["consumers"][0]["consumer_file"], "src/use.ts",
+        "{export}"
+    );
+    assert_eq!(export["consumers"][0]["search_as"], "grow", "{export}");
+}

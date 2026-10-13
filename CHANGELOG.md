@@ -88,6 +88,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consumers per export and a total. A trace reads the consumer sources of the
   traced export only. The audit brief reads the consumer sources of the
   exports in the changed files.
+
+- **Search gaps name their symbol and read SFC declarations.** An
+  `--impact-closure` coordination gap now has `search_symbol`. It names the
+  entry of `consumed_symbols` that `search_visibility`, `reason`, and
+  `search_as` describe. The human output names the symbol when the consumer
+  uses more than one symbol. The MCP `impact_closure` tool returns the field
+  too. For a changed `.vue`, `.svelte`, `.astro`, or `.mdx` file, the audit
+  brief now reads the declaration range from the script block, so a change
+  inside a function body gives an `impact_closure.search_gap` entry.
+  ([#3371](https://github.com/fallow-rs/fallow/issues/3371),
+  [#3372](https://github.com/fallow-rs/fallow/issues/3372))
 - **Alchemy projects no longer report their stacks and deployed Workers as
   unused.** A new built-in `alchemy` plugin activates on the `alchemy`
   dependency. Each `alchemy.run.{ts,mts,cts,js,mjs,cjs}` file is an entry
