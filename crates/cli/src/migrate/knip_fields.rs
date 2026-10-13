@@ -860,12 +860,12 @@ mod tests {
 
     #[test]
     fn warn_unhandled_root_keys_reports_a_key_in_neither_table() {
-        let obj: JsonMap = serde_json::from_str(r#"{"cycles": true}"#).expect("valid json");
+        let obj: JsonMap = serde_json::from_str(r#"{"entries": true}"#).expect("valid json");
         let mut warnings = Vec::new();
         warn_unhandled_root_keys(&obj, &mut warnings);
 
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].field, "cycles");
+        assert_eq!(warnings[0].field, "entries");
         assert!(
             warnings[0].message.contains("unknown knip config key"),
             "{}",
@@ -896,7 +896,7 @@ mod tests {
     #[test]
     fn documented_and_unknown_keys_each_warn_once() {
         let obj: JsonMap =
-            serde_json::from_str(r#"{"treatTagHintsAsErrors": true, "cycles": true}"#)
+            serde_json::from_str(r#"{"treatTagHintsAsErrors": true, "entries": true}"#)
                 .expect("valid json");
         let mut warnings = Vec::new();
         warn_unmappable_fields(&obj, &mut warnings);
@@ -912,7 +912,7 @@ mod tests {
             "{fields:?}"
         );
         assert_eq!(
-            fields.iter().filter(|f| **f == "cycles").count(),
+            fields.iter().filter(|f| **f == "entries").count(),
             1,
             "{fields:?}"
         );

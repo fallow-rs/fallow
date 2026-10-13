@@ -1,0 +1,9 @@
+{
+  "name": "textlint-js-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "devDependencies": {
+    "textlint": "14.0.0"
+  }
+}

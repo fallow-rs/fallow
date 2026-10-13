@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Built-in plugins for nine more tools.** Before, fallow did not know these
+  tools. Thus it reported their config files, entry files and packages as
+  unused. Now each plugin activates on its package or config file:
+  - `mise` reads `mise.toml`, `.mise.toml`, `.config/mise/` and `conf.d`
+    configs. Task `run` commands credit the packages and local scripts that
+    they run. A bare command gets credit only when the config puts
+    `node_modules/.bin` on `PATH`.
+  - `railway` reads each `service()` in `.railway/railway.ts`. The build,
+    start and pre-deploy commands credit the packages and files that they run.
+  - `flue` makes the app, database, Cloudflare and agent modules of a Flue
+    project entry points. Values in `flue.config.*` replace the default
+    locations.
+  - `textlint` reads `.textlintrc` in each JSON, YAML and JS form, the
+    `textlint` key in `package.json`, and a `textlint --config` file. Each
+    enabled rule, filter and plugin credits its package, by short name or by
+    full name. A local rule path stays reachable.
+  - `jasmine` reads `spec/support/jasmine.*` and makes the `spec_files` and
+    `helpers` test entry points. The `requires` and `loader` modules get
+    credit.
+  - `rstest` reads `rstest.config.*`. It follows `include`, `exclude`,
+    `setupFiles`, `globalSetup`, `resolve.alias` and `projects`. It credits
+    the test environment, browser mode and coverage provider packages.
+  - `serverless-framework` and `osls` read `serverless.yml` and
+    `serverless.ts`. A root `serverless.*` config also activates
+    `serverless-framework`, because the CLI is often installed globally.
+    Each function `handler` becomes an entry point. Each
+    package in `plugins` gets credit, and `${file(...)}` references to YAML
+    and JSON files resolve. The `sls` binary credits both packages.
+  - `typescript-content-mapper` runs the `exec` script of
+    `package.json#typescript.contentMapper` as an entry point.
+
+- **`fallow migrate` knows the latest knip plugins and config keys.** A knip
+  section for `expo-router`, `varlock`, `turbo` or one of the new plugins
+  above now gets the "auto-detected" message, not the "unknown key" warning.
+  The root keys `cycles`, `ignoreGlobalBinaries`, `preprocessor`,
+  `preprocessorOptions` and `asyncCompilers` now get a specific message with
+  the closest fallow alternative.
+
 - **Effect dead-code findings.** Projects that declare `effect` get three new
   rules, each at `warn` by default:
   - `unused-effect-layer` reports a layer that only unused layers compose.

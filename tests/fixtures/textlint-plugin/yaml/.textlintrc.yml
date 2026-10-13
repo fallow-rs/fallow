@@ -1,0 +1,7 @@
+rules:
+  no-todo: true
+  write-good: false
+filters:
+  comments: true
+plugins:
+  - markdown

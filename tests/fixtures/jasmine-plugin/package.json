@@ -1,0 +1,15 @@
+{
+  "name": "jasmine-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "jasmine"
+  },
+  "devDependencies": {
+    "jasmine": "5.0.0",
+    "source-map-support": "0.5.21",
+    "unused-control": "1.0.0"
+  }
+}

@@ -70,6 +70,33 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     ),
     ("treatConfigHintsAsErrors", "No equivalent in fallow", None),
     ("treatTagHintsAsErrors", "No equivalent in fallow", None),
+    (
+        "asyncCompilers",
+        "Custom compilers are not supported in fallow (uses Oxc parser)",
+        None,
+    ),
+    (
+        "cycles",
+        "Fallow has no allow-list for exact cycle paths",
+        Some(
+            "set circularDependencies.ignoreLazyImports to skip lazy import() edges; use // fallow-ignore-next-line circular-dependency for an accepted cycle",
+        ),
+    ),
+    (
+        "ignoreGlobalBinaries",
+        "Binary filtering is not configurable in fallow",
+        None,
+    ),
+    (
+        "preprocessor",
+        "Custom report preprocessors are not supported in fallow",
+        Some("post-process `fallow --format json` output instead"),
+    ),
+    (
+        "preprocessorOptions",
+        "Custom report preprocessors are not supported in fallow",
+        None,
+    ),
 ];
 
 /// Knip root keys that `migrate_knip` translates into fallow config, plus the
@@ -132,11 +159,14 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "eslint",
     "eve",
     "expo",
+    "expo-router",
+    "flue",
     "fumadocs",
     "gatsby",
     "graphql-codegen",
     "hardhat",
     "husky",
+    "jasmine",
     "jest",
     "karma",
     "knex",
@@ -144,6 +174,7 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "lint-staged",
     "lit",
     "markdownlint",
+    "mise",
     "mocha",
     "msw",
     "nest",
@@ -155,6 +186,7 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "nx",
     "nyc",
     "openapi-ts",
+    "osls",
     "oxfmt",
     "oxlint",
     "panda-css",
@@ -167,6 +199,7 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "prettier",
     "prisma",
     "qwik",
+    "railway",
     "react-native",
     "react-router",
     "relay",
@@ -177,9 +210,11 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "rollup",
     "rsbuild",
     "rspack",
+    "rstest",
     "sanity",
     "semantic-release",
     "sentry",
+    "serverless-framework",
     "simple-git-hooks",
     "size-limit",
     "storybook",
@@ -192,12 +227,16 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
     "syncpack",
     "tailwind",
     "tanstack-router",
+    "textlint",
     "tsd",
     "tsdown",
     "tsup",
+    "turbo",
     "typedoc",
     "typescript",
+    "typescript-content-mapper",
     "unocss",
+    "varlock",
     "vercel",
     "vite",
     "vitepress",
@@ -265,8 +304,6 @@ pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
     "react-cosmos",
     "react-email",
     "rslib",
-    "rstest",
-    "serverless-framework",
     "sst",
     "starlight",
     "stencil",
@@ -308,7 +345,7 @@ mod tests {
 
     /// Knip plugin keys whose spelling differs from the built-in fallow plugin
     /// that covers the same tool. Every other entry of `KNIP_PLUGIN_KEYS` has
-    /// to match a registered plugin name exactly, so a sixth spelling
+    /// to match a registered plugin name exactly, so a new spelling
     /// difference fails `plugin_keys_resolve_to_builtin_plugins` until it is
     /// declared here.
     const KNIP_PLUGIN_KEY_ALIASES: &[(&str, &str)] = &[
@@ -316,6 +353,7 @@ mod tests {
         ("nest", "nestjs"),
         ("next", "nextjs"),
         ("panda-css", "pandacss"),
+        ("turbo", "turborepo"),
         ("webdriver-io", "webdriverio"),
     ];
 
@@ -390,10 +428,14 @@ mod tests {
 
     #[test]
     fn unmappable_fields_do_not_overlap_with_rule_map_keys() {
+        // Knip names both the cycle issue type and its root config section
+        // `cycles`. The two live at different levels of the config, so they
+        // cannot collide.
+        const SHARED_NAMES: &[&str] = &["cycles"];
         let rule_keys: FxHashSet<&str> = KNIP_RULE_MAP.iter().map(|(k, _)| *k).collect();
         for (field, _, _) in KNIP_UNMAPPABLE_FIELDS {
             assert!(
-                !rule_keys.contains(field),
+                SHARED_NAMES.contains(field) || !rule_keys.contains(field),
                 "KNIP_UNMAPPABLE_FIELDS entry `{field}` overlaps with KNIP_RULE_MAP"
             );
         }
@@ -623,6 +665,18 @@ mod tests {
             "sveltekit",
             "tanstack-router",
             "webdriver-io",
+            "expo-router",
+            "flue",
+            "jasmine",
+            "mise",
+            "osls",
+            "railway",
+            "rstest",
+            "serverless-framework",
+            "textlint",
+            "turbo",
+            "typescript-content-mapper",
+            "varlock",
         ];
         for name in expected {
             assert!(

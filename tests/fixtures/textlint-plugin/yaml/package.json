@@ -1,0 +1,14 @@
+{
+  "name": "textlint-yaml-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "devDependencies": {
+    "textlint": "14.0.0",
+    "textlint-filter-rule-comments": "1.0.0",
+    "textlint-plugin-markdown": "1.0.0",
+    "textlint-rule-no-todo": "1.0.0",
+    "textlint-rule-write-good": "1.0.0",
+    "unused-control": "1.0.0"
+  }
+}

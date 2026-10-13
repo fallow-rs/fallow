@@ -1,0 +1,14 @@
+{
+  "name": "mise-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "global-cli": "1.0.0",
+    "lint-cli": "1.0.0",
+    "local-cli": "1.0.0",
+    "test-cli": "1.0.0",
+    "unused-control": "1.0.0",
+    "windows-cli": "1.0.0"
+  }
+}

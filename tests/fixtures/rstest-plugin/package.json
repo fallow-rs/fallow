@@ -1,0 +1,19 @@
+{
+  "name": "rstest-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "rstest"
+  },
+  "devDependencies": {
+    "@rstest/browser": "0.1.0",
+    "@rstest/core": "0.1.0",
+    "@rstest/coverage-istanbul": "0.1.0",
+    "@rstest/coverage-v8": "0.1.0",
+    "jsdom": "26.0.0",
+    "playwright": "1.50.0",
+    "unused-control": "1.0.0"
+  }
+}

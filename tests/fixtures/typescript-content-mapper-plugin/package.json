@@ -1,0 +1,12 @@
+{
+  "name": "typescript-content-mapper-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "typescript": {
+    "contentMapper": {
+      "exec": ["node", "lib/transform-server.js"],
+      "compilerOptions": ["jsxImportSource"],
+      "dynamicConfig": false
+    }
+  }
+}

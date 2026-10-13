@@ -1,0 +1,12 @@
+{
+  "name": "railway-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "repository": "https://github.com/fruit-stand/storefront.git",
+  "dependencies": {
+    "external-tool": "1.0.0",
+    "railway": "1.0.0",
+    "storefront-tool": "1.0.0"
+  }
+}

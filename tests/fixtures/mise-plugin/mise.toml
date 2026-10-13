@@ -1,0 +1,16 @@
+[tools]
+node = "24"
+
+[tasks]
+lint = "time -p npx --no-install lint-cli ."
+check = ["node scripts/check.ts"]
+
+[tasks.test]
+run = "! npm exec -- test-cli run"
+
+[tasks.build]
+run = [{ task = "lint" }, "./scripts/build.ts"]
+run_windows = "pnpm exec windows-cli"
+
+[tasks.global]
+run = "global-cli ."

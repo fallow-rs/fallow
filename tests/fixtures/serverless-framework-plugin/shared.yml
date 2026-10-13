@@ -1,0 +1,5 @@
+localPlugin: serverless-offline
+
+functions:
+  hello:
+    handler: src/hello.handler

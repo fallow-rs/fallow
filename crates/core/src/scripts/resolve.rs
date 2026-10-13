@@ -40,6 +40,8 @@ static BINARY_TO_PACKAGE: &[(&str, &[&str])] = &[
     ("npmPkgJsonLint", &["npm-package-json-lint"]),
     ("i18next", &["i18next-parser"]),
     ("manypkg", &["@manypkg/cli"]),
+    ("rstest", &["@rstest/core"]),
+    ("sls", &["serverless", "osls"]),
 ];
 
 /// The packages that the static table maps `binary` to.

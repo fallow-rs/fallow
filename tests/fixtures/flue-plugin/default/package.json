@@ -1,0 +1,11 @@
+{
+  "name": "flue-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@flue/runtime": "1.0.0"
+  },
+  "devDependencies": {
+    "unused-control": "1.0.0"
+  }
+}

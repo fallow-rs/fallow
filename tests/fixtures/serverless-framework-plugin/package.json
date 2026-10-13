@@ -1,0 +1,15 @@
+{
+  "name": "serverless-framework-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "serverless deploy"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0",
+    "serverless": "3.40.0",
+    "serverless-esbuild": "1.55.0",
+    "serverless-offline": "14.4.0",
+    "unused-control": "1.0.0"
+  }
+}

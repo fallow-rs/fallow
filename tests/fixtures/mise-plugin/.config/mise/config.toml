@@ -1,0 +1,8 @@
+[env]
+_.path = "node_modules/.bin"
+
+[tasks.format]
+run = "local-cli --write ."
+
+[tasks.grouped]
+run = "node scripts/grouped.ts"

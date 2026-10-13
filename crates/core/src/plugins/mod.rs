@@ -23,10 +23,12 @@ const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
     "deno",
     "cucumber",
     "cypress",
+    "jasmine",
     "jest",
     "k6",
     "mocha",
     "playwright",
+    "rstest",
     "tap",
     "tsd",
     "vitest",
@@ -45,6 +47,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "eve",
     "expo",
     "expo-router",
+    "flue",
     "gatsby",
     "hardhat",
     "kibana",
@@ -1906,9 +1909,17 @@ macro_rules! define_plugin {
 
 pub mod config_parser;
 mod config_value_credits;
+mod flue;
+mod jasmine;
 mod manifest;
 pub mod manifest_entries;
+mod mise;
+mod osls;
+mod railway;
 pub mod registry;
+mod rstest;
+mod serverless_framework;
+mod textlint;
 mod tooling;
 
 pub(crate) use module_federation::runtime_remotes;
@@ -2104,6 +2115,7 @@ mod turborepo;
 mod typedoc;
 mod typeorm;
 mod typescript;
+mod typescript_content_mapper;
 mod unocss;
 mod varlock;
 mod velite;
@@ -2439,7 +2451,8 @@ mod tests {
         // Plugins activated from package metadata or filesystem sentinels rather
         // than dependency enablers (napi binary name; deno.json presence;
         // kibana.jsonc presence).
-        const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] = &["napi-rs", "deno", "kibana"];
+        const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] =
+            &["napi-rs", "deno", "kibana", "typescript-content-mapper"];
         let plugins = registry::builtin::create_builtin_plugins();
         for p in &plugins {
             assert!(

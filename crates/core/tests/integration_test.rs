@@ -602,6 +602,8 @@ mod nestjs_trpc_interfaces;
 
 #[path = "integration_test/external_override_class_members.rs"]
 mod external_override_class_members;
+#[path = "integration_test/flue_plugin.rs"]
+mod flue_plugin;
 #[path = "integration_test/issue_2752_nuxt_components_scope.rs"]
 mod issue_2752_nuxt_components_scope;
 #[path = "integration_test/issue_2752_nuxt_local_layers.rs"]
@@ -630,14 +632,30 @@ mod issue_739_script_auto_imports;
 mod issue_740_pinia_store_auto_imports;
 #[path = "integration_test/issue_744_tsdown_config.rs"]
 mod issue_744_tsdown_config;
+#[path = "integration_test/jasmine_plugin.rs"]
+mod jasmine_plugin;
+#[path = "integration_test/mise_plugin.rs"]
+mod mise_plugin;
 #[path = "integration_test/namespace_class_static_member.rs"]
 mod namespace_class_static_member;
 #[path = "integration_test/namespace_spy_call_member.rs"]
 mod namespace_spy_call_member;
 #[path = "integration_test/node_modules_bin_path.rs"]
 mod node_modules_bin_path;
+#[path = "integration_test/osls_plugin.rs"]
+mod osls_plugin;
 #[path = "integration_test/pkg_utils_plugin.rs"]
 mod pkg_utils_plugin;
+#[path = "integration_test/railway_plugin.rs"]
+mod railway_plugin;
+#[path = "integration_test/rstest_plugin.rs"]
+mod rstest_plugin;
+#[path = "integration_test/serverless_framework_plugin.rs"]
+mod serverless_framework_plugin;
+#[path = "integration_test/textlint_plugin.rs"]
+mod textlint_plugin;
+#[path = "integration_test/typescript_content_mapper_plugin.rs"]
+mod typescript_content_mapper_plugin;
 #[path = "integration_test/vite_root_entries.rs"]
 mod vite_root_entries;
 #[path = "integration_test/vitest_script_config_arg.rs"]

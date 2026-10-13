@@ -1,0 +1,23 @@
+{
+  "name": "textlint-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "lint:docs": "textlint --config config/docs.textlintrc.json docs"
+  },
+  "devDependencies": {
+    "@textlint-ja/textlint-rule-preset-ai-writing": "1.0.0",
+    "@textlint-rule/textlint-rule-no-unmatched-pair": "1.0.0",
+    "@textlint/textlint-plugin-markdown": "1.0.0",
+    "textlint": "14.0.0",
+    "textlint-filter-rule-comments": "1.0.0",
+    "textlint-plugin-html": "1.0.0",
+    "textlint-rule-max-comma": "1.0.0",
+    "textlint-rule-no-todo": "1.0.0",
+    "textlint-rule-preset-ja-technical-writing": "1.0.0",
+    "textlint-rule-spelling": "1.0.0",
+    "textlint-rule-write-good": "1.0.0",
+    "unused-control": "1.0.0"
+  }
+}

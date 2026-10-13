@@ -1,0 +1,24 @@
+{
+  "name": "textlint-package-json-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "lint": "textlint README.md"
+  },
+  "devDependencies": {
+    "textlint": "14.0.0",
+    "textlint-filter-rule-allowlist": "1.0.0",
+    "textlint-plugin-latex2e": "1.0.0",
+    "textlint-rule-preset-smarthr": "1.0.0",
+    "unused-control": "1.0.0"
+  },
+  "textlint": {
+    "rules": {
+      "textlint-rule-preset-smarthr": true
+    },
+    "filters": {
+      "allowlist": { "allow": ["fallow"] }
+    },
+    "plugins": ["latex2e"]
+  }
+}

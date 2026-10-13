@@ -131,6 +131,10 @@ pub struct PackageJson {
     /// name-to-path object; every referenced file is an entry point.
     #[serde(default)]
     pub bin: Option<serde_json::Value>,
+    /// The `typescript` field, kept raw. Its `contentMapper.exec` command
+    /// names a script that TypeScript runs.
+    #[serde(default)]
+    pub typescript: Option<serde_json::Value>,
     /// The `exports` field, kept raw because of its many shapes (string,
     /// conditions object, subpath map); referenced files are entry points and
     /// the map drives subpath resolution.

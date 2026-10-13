@@ -1,0 +1,13 @@
+{
+  "name": "osls-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "osls deploy"
+  },
+  "devDependencies": {
+    "osls": "3.50.0",
+    "serverless-offline": "14.4.0",
+    "unused-control": "1.0.0"
+  }
+}
