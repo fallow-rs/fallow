@@ -434,8 +434,12 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
 ///
 /// - Identifiers that a changed non-test source file held in base and no
 ///   longer holds in head, such as a deleted function or a dropped call.
+///   Identifiers of a deleted file count only when no changed file still
+///   holds them in head, and names that the deleted file imports never count.
 /// - The directory and file-stem segments of deleted files without test
 ///   cases, such as a deleted source file or fixture directory.
+///
+/// Reserved words and common globals never count.
 struct RemovedNames {
     identifiers: FxHashSet<String>,
     segments: FxHashSet<String>,
@@ -445,11 +449,89 @@ struct RemovedNames {
 /// `id` or `get`, are too common to tie a test to the removed code.
 const MIN_REMOVED_NAME_LEN: usize = 4;
 
+/// JS and TS reserved words and common globals. Each source file holds them,
+/// so they do not tie a test to the removed code.
+const NOT_REMOVED_NAMES: &[&str] = &[
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "console",
+    "const",
+    "continue",
+    "default",
+    "delete",
+    "else",
+    "enum",
+    "export",
+    "exports",
+    "extends",
+    "false",
+    "finally",
+    "from",
+    "function",
+    "import",
+    "instanceof",
+    "interface",
+    "module",
+    "null",
+    "require",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "type",
+    "typeof",
+    "undefined",
+    "void",
+    "while",
+    "with",
+    "yield",
+];
+
+/// Whether a token can name removed code.
+fn is_removed_name_candidate(name: &str) -> bool {
+    name.len() >= MIN_REMOVED_NAME_LEN && !NOT_REMOVED_NAMES.contains(&name)
+}
+
+/// The names that the import statements of a file bind. An imported name is
+/// declared in another file, so its use in a deleted file does not show that
+/// the name left the project.
+fn imported_names(src: &str) -> FxHashSet<String> {
+    let mut statements = String::new();
+    let mut in_import = false;
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+        if !in_import && trimmed.starts_with("import ") {
+            in_import = true;
+        }
+        if !in_import {
+            continue;
+        }
+        statements.push_str(line);
+        statements.push('\n');
+        if trimmed.ends_with(';') || trimmed.contains("from ") || trimmed.ends_with("from") {
+            in_import = false;
+        }
+    }
+    text::code_identifiers(&statements)
+}
+
 impl RemovedNames {
     fn collect(root: &Path, files: &[FileTexts]) -> Self {
         let mut identifiers = FxHashSet::default();
+        let mut deleted_identifiers = FxHashSet::default();
         let mut segments = FxHashSet::default();
+        let mut head_union = FxHashSet::default();
         for file in files {
+            if let Some(head) = file.head.as_deref() {
+                head_union.extend(text::code_identifiers(head));
+            }
             // A deleted file with test cases does not explain its own removal.
             if file.head.is_none()
                 && file
@@ -476,17 +558,30 @@ impl RemovedNames {
             let Some(base) = file.base.as_deref() else {
                 continue;
             };
-            let head = file
-                .head
-                .as_deref()
-                .map(text::code_identifiers)
-                .unwrap_or_default();
-            identifiers.extend(
-                text::code_identifiers(base)
-                    .into_iter()
-                    .filter(|name| name.len() >= MIN_REMOVED_NAME_LEN && !head.contains(name)),
-            );
+            match file.head.as_deref() {
+                Some(head) => {
+                    let head = text::code_identifiers(head);
+                    identifiers.extend(
+                        text::code_identifiers(base)
+                            .into_iter()
+                            .filter(|name| is_removed_name_candidate(name) && !head.contains(name)),
+                    );
+                }
+                None => {
+                    let imported = imported_names(base);
+                    deleted_identifiers.extend(text::code_identifiers(base).into_iter().filter(
+                        |name| is_removed_name_candidate(name) && !imported.contains(name),
+                    ));
+                }
+            }
         }
+        // A name that a changed file still holds did not leave the project,
+        // for example a function that moved from a deleted file.
+        identifiers.extend(
+            deleted_identifiers
+                .into_iter()
+                .filter(|name| !head_union.contains(name)),
+        );
         Self {
             identifiers,
             segments,
@@ -495,7 +590,8 @@ impl RemovedNames {
 
     /// Whether the lines that a test file lost name removed code that the
     /// head test no longer names. Then the tests left together with the code
-    /// they covered.
+    /// they covered. A path segment matches only a whole token of a line, so
+    /// a deleted `core` directory does not match `score`.
     fn explain(&self, base: &str, head: &str) -> bool {
         let removed: Vec<&str> = text::added_lines(head, base)
             .into_iter()
@@ -513,9 +609,16 @@ impl RemovedNames {
         names_removed_identifier
             || self.segments.iter().any(|segment| {
                 !head.contains(segment.as_str())
-                    && removed.iter().any(|line| line.contains(segment.as_str()))
+                    && removed
+                        .iter()
+                        .any(|line| path_tokens(line).any(|token| token == segment))
             })
     }
+}
+
+/// The tokens of a line split on path and string delimiters.
+fn path_tokens(line: &str) -> impl Iterator<Item = &str> {
+    line.split(['/', '.', '\'', '"', '`'])
 }
 
 /// `removed-tests` and `assertion-drop`. Both compare per file, and both
@@ -1008,6 +1111,77 @@ mod tests {
             removed_test_findings(&files),
             pairs(&[("src/zero.test.ts", "test cases: 1 -> 0")])
         );
+    }
+
+    fn deleted(rel: &str, base: &str) -> FileTexts {
+        FileTexts {
+            rel: rel.to_owned(),
+            abs: PathBuf::from("/project").join(rel),
+            base: Some(base.to_owned()),
+            head: None,
+        }
+    }
+
+    #[test]
+    fn an_unrelated_deleted_source_file_does_not_explain_a_deleted_test_file() {
+        let files = [
+            deleted(
+                "src/legacy.ts",
+                "import { a } from './a';\nimport { price } from './price';\nexport const legacy = price(a);\n",
+            ),
+            deleted(
+                "src/price.test.ts",
+                "import { price } from './price';\nit('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n",
+            ),
+        ];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("src/price.test.ts", "test cases: 1 -> 0")])
+        );
+    }
+
+    #[test]
+    fn a_name_that_a_changed_file_still_holds_does_not_explain_a_removal() {
+        let files = [
+            deleted("src/legacy.ts", "export const formatPrice = (n) => n;\n"),
+            file(
+                "src/format.ts",
+                "export const format = (n) => n;\n",
+                "export const formatPrice = (n) => n;\n",
+            ),
+            file(
+                "src/format.test.ts",
+                "it('formats', () => {\n  expect(formatPrice(1)).toBe(1);\n});\n",
+                "",
+            ),
+        ];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("src/format.test.ts", "test cases: 1 -> 0")])
+        );
+    }
+
+    #[test]
+    fn a_deleted_directory_name_matches_whole_path_segments_only() {
+        let base =
+            "it('a', () => run());\nit('scores', () => {\n  expect(score(1)).toBe(1);\n});\n";
+        let head = "it('a', () => run());\n";
+        let files = [
+            file("src/score.test.ts", base, head),
+            deleted("src/core/x.ts", "export const x = 1;\n"),
+        ];
+        assert_eq!(
+            removed_test_findings(&files),
+            pairs(&[("src/score.test.ts", "test cases: 2 -> 1")])
+        );
+        let base =
+            "import { a } from '../core/a';\nit('a', () => run(a));\nit('b', () => run(b));\n";
+        let head = "it('a', () => run(a));\n";
+        let files = [
+            file("src/run.test.ts", base, head),
+            deleted("src/core/x.ts", "export const x = 1;\n"),
+        ];
+        assert!(removed_test_findings(&files).is_empty());
     }
 
     #[test]
