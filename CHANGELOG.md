@@ -161,6 +161,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Search gaps no longer count files that only forward an export.** A file
+  that imports an export and only exports it again needs no edit when the
+  export changes. Examples are `import { a } from './x'; export { a }`,
+  `import b from './x'; export default b` and
+  `import { a as c } from './x'; export { c }`. Such a file is now `found`
+  with `reason` `pass-through` in `--trace` references, in `--impact-closure`
+  coordination gaps and in the audit brief `impact_closure.search_gap`, the
+  same as a pure barrel. A file that also uses the binding stays a normal
+  consumer. A namespace import with member access (`ns.a`) stays `found`,
+  and a whole-object use (`Object.keys(ns)`, a spread, `ns` as a value) stays
+  `missed`.
+
 - **The review brief and the audit report the same weakened guardrails.**
   The `weakening` section of `fallow audit --brief` and `fallow review` now
   reads its test, threshold and suppression signals from the `diff_risk`

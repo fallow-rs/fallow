@@ -12,7 +12,7 @@ use std::path::Path;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ExportName, ImportedName};
 use fallow_types::trace::{SearchGapReason, SearchVisibility};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graph::{ExportNamespace, ModuleGraph, ReferenceKind, SymbolReference};
 
@@ -39,6 +39,7 @@ struct Source {
 pub(crate) struct SourceCache<'g> {
     graph: &'g ModuleGraph,
     sources: FxHashMap<FileId, Option<Source>>,
+    forwarded: FxHashMap<FileId, FxHashSet<String>>,
 }
 
 impl<'g> SourceCache<'g> {
@@ -46,7 +47,28 @@ impl<'g> SourceCache<'g> {
         Self {
             graph,
             sources: FxHashMap::default(),
+            forwarded: FxHashMap::default(),
         }
+    }
+
+    /// Whether `file_id` only exports its import binding `local` again and
+    /// has no other use of it. The file is parsed once.
+    fn only_forwards(&mut self, file_id: FileId, local: &str) -> bool {
+        if !self.forwarded.contains_key(&file_id) {
+            let path = self
+                .graph
+                .modules
+                .get(file_id.0 as usize)
+                .map(|module| module.path.clone());
+            let names = match (path, self.get(file_id)) {
+                (Some(path), Some(source)) => forwarded_import_bindings(&path, &source.text),
+                _ => FxHashSet::default(),
+            };
+            self.forwarded.insert(file_id, names);
+        }
+        self.forwarded
+            .get(&file_id)
+            .is_some_and(|names| names.contains(local))
     }
 
     fn get(&mut self, file_id: FileId) -> Option<&Source> {
@@ -124,7 +146,20 @@ impl SearchTarget {
             .0
         });
         let binding = self.binding(graph, reference);
-        let (visibility, reason, search_as) = if matches!(binding, Some(Binding::ReExport)) {
+        let forwards = match &binding {
+            Some(Binding::ReExport) => true,
+            Some(Binding::Named { imported, local }) => {
+                let name = if local.is_empty() { imported } else { local };
+                sources.only_forwards(reference.from_file, name)
+            }
+            Some(Binding::Default { local }) => {
+                !local.is_empty() && sources.only_forwards(reference.from_file, local)
+            }
+            // The graph does not credit the importers of a forwarded
+            // namespace binding, so the forwarding file stays a consumer.
+            Some(Binding::Namespace { .. }) | None => false,
+        };
+        let (visibility, reason, search_as) = if forwards {
             (
                 SearchVisibility::Found,
                 Some(SearchGapReason::PassThrough),
@@ -306,6 +341,113 @@ enum Binding<'g> {
     },
     /// The consumer forwards the export and has no import of it.
     ReExport,
+}
+
+/// The import bindings of a source file that the file only exports again
+/// (`import { a } from './x'; export { a }`, `import b from './x'; export
+/// default b`) and does not use in any other place.
+///
+/// Only plain script files are read. A Vue, Svelte, Astro or MDX file can use
+/// a binding in its template, so it has no such bindings. A file that does not
+/// parse has none.
+#[must_use]
+fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
+    use oxc_ast::ast::{ImportDeclarationSpecifier, Statement};
+    use oxc_ast_visit::Visit;
+
+    let Ok(source_type) = oxc_span::SourceType::from_path(path) else {
+        return FxHashSet::default();
+    };
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+    if parsed.fatal_error {
+        return FxHashSet::default();
+    }
+    let imports: FxHashSet<&str> = parsed
+        .program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::ImportDeclaration(import) => import.specifiers.as_ref(),
+            _ => None,
+        })
+        .flatten()
+        .map(|specifier| match specifier {
+            ImportDeclarationSpecifier::ImportSpecifier(named) => named.local.name.as_str(),
+            ImportDeclarationSpecifier::ImportDefaultSpecifier(default) => {
+                default.local.name.as_str()
+            }
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) => {
+                namespace.local.name.as_str()
+            }
+        })
+        .collect();
+    if imports.is_empty() {
+        return FxHashSet::default();
+    }
+    let mut uses = BindingUses {
+        imports,
+        exported: FxHashSet::default(),
+        used: FxHashSet::default(),
+    };
+    uses.visit_program(&parsed.program);
+    uses.exported
+        .difference(&uses.used)
+        .map(|name| (*name).to_string())
+        .collect()
+}
+
+/// The uses of the import bindings of one file, split in export positions
+/// and all other positions.
+struct BindingUses<'s> {
+    imports: FxHashSet<&'s str>,
+    exported: FxHashSet<&'s str>,
+    used: FxHashSet<&'s str>,
+}
+
+impl BindingUses<'_> {
+    fn record(&mut self, name: &str, exported: bool) {
+        let Some(&name) = self.imports.get(name) else {
+            return;
+        };
+        if exported {
+            self.exported.insert(name);
+        } else {
+            self.used.insert(name);
+        }
+    }
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for BindingUses<'_> {
+    fn visit_identifier_reference(&mut self, it: &oxc_ast::ast::IdentifierReference<'a>) {
+        self.record(it.name.as_str(), false);
+    }
+
+    fn visit_export_named_declaration(&mut self, it: &oxc_ast::ast::ExportNamedDeclaration<'a>) {
+        for specifier in &it.specifiers {
+            self.record(specifier.local.name().as_str(), true);
+        }
+    }
+
+    fn visit_export_default_declaration(
+        &mut self,
+        it: &oxc_ast::ast::ExportDefaultDeclaration<'a>,
+    ) {
+        if let oxc_ast::ast::ExportDefaultDeclarationKind::Identifier(identifier) = &it.declaration
+        {
+            self.record(identifier.name.as_str(), true);
+        } else {
+            oxc_ast_visit::walk::walk_export_default_declaration(self, it);
+        }
+    }
+
+    fn visit_ts_export_assignment(&mut self, it: &oxc_ast::ast::TSExportAssignment<'a>) {
+        if let oxc_ast::ast::Expression::Identifier(identifier) = &it.expression {
+            self.record(identifier.name.as_str(), true);
+        } else {
+            oxc_ast_visit::walk::walk_ts_export_assignment(self, it);
+        }
+    }
 }
 
 /// The search term of the default export of `file_id`: the name of the
@@ -565,6 +707,85 @@ mod tests {
         assert!(!contains_whole_word("", "foo"));
         assert!(!contains_whole_word("foo", ""));
         assert!(contains_whole_word("a foobar foo", "foo"));
+    }
+
+    fn forwarded(path: &str, source: &str) -> Vec<String> {
+        let mut names: Vec<String> = forwarded_import_bindings(Path::new(path), source)
+            .into_iter()
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn forwarded_bindings_are_only_exported_again() {
+        assert_eq!(
+            forwarded("a.ts", "import { a } from './x';\nexport { a };\n"),
+            ["a"]
+        );
+        assert_eq!(
+            forwarded("a.ts", "import b from './x';\nexport default b;\n"),
+            ["b"]
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a as c } from './x';\nexport { c as d };\n"
+            ),
+            ["c"]
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import b = require('./x');\nimport c from './y';\nexport = c;\n"
+            ),
+            ["c"]
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import type { T } from './x';\nexport type { T };\n"
+            ),
+            ["T"]
+        );
+    }
+
+    #[test]
+    fn forwarded_bindings_exclude_local_uses_and_unused_imports() {
+        let empty: [&str; 0] = [];
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\nexport { a };\nexport const b = a * 2;\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.tsx",
+                "import A from './x';\nexport { A };\nconst v = <A />;\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded("a.ts", "import { a } from './x';\nexport default a + 1;\n"),
+            empty
+        );
+        assert_eq!(forwarded("a.ts", "import { a } from './x';\n"), empty);
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\nexport { a } from './y';\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "A.vue",
+                "<script>\nimport a from './x';\nexport { a };\n</script>\n"
+            ),
+            empty
+        );
     }
 
     #[test]

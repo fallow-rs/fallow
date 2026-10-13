@@ -602,3 +602,200 @@ fn audit_brief_reads_declaration_ranges_from_a_vue_script_block() {
     );
     assert_eq!(export["consumers"][0]["search_as"], "grow", "{export}");
 }
+
+/// A project where files import `formatDate` (or the default export `Widget`)
+/// and export the binding again. `fwd-named.ts`, `fwd-default.ts` and
+/// `fwd-alias.ts` only forward it. `fwd-and-use.ts` forwards it and also uses
+/// it. `use-alias.ts` imports the forwarded name under another local name.
+fn write_forwarding_probe(root: &Path) {
+    fs::create_dir_all(root.join("src")).expect("create source directory");
+    let files: &[(&str, &str)] = &[
+        (
+            "package.json",
+            r#"{"name":"forwarding-probe","type":"module","main":"src/index.ts"}"#,
+        ),
+        (
+            "src/index.ts",
+            "import { formatDate } from './fwd-named';\nimport Widget from './fwd-default';\nimport { today } from './fwd-and-use';\nimport './use-alias';\nconsole.log(formatDate(new Date()), Widget(), today());\n",
+        ),
+        (
+            "src/lib.ts",
+            "export const formatDate = (d: Date): string => d.toISOString();\n\nexport default function Widget(): string {\n  return 'w';\n}\n",
+        ),
+        (
+            "src/fwd-named.ts",
+            "import { formatDate } from './lib';\nexport { formatDate };\n",
+        ),
+        (
+            "src/fwd-default.ts",
+            "import Thing from './lib';\nexport default Thing;\n",
+        ),
+        (
+            "src/fwd-alias.ts",
+            "import { formatDate as fmt } from './lib';\nexport { fmt };\n",
+        ),
+        (
+            "src/fwd-and-use.ts",
+            "import { formatDate as fmt } from './lib';\nexport { fmt };\nexport const today = (): string => fmt(new Date());\n",
+        ),
+        (
+            "src/use-alias.ts",
+            "import { fmt as f } from './fwd-alias';\nconsole.log(f(new Date()));\n",
+        ),
+    ];
+    for (path, content) in files {
+        fs::write(root.join(path), content).expect("write probe file");
+    }
+}
+
+fn assert_pass_through(entry: &serde_json::Value) {
+    assert_eq!(entry["search_visibility"], "found", "{entry}");
+    assert_eq!(entry["reason"], "pass-through", "{entry}");
+    assert!(entry.get("search_as").is_none(), "{entry}");
+}
+
+#[test]
+fn import_then_export_forwarders_are_pass_through() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_forwarding_probe(root);
+
+    let trace_named = trace(root, "src/lib.ts:formatDate");
+    let references = &trace_named["direct_references"];
+    assert_pass_through(reference(references, "src/fwd-named.ts"));
+    assert_pass_through(reference(references, "src/fwd-alias.ts"));
+
+    let both = reference(references, "src/fwd-and-use.ts");
+    assert_eq!(both["search_visibility"], "renamed", "{both}");
+    assert_eq!(both["reason"], "import-alias", "{both}");
+    assert_eq!(both["search_as"], "fmt", "{both}");
+
+    let downstream = reference(references, "src/use-alias.ts");
+    assert_eq!(downstream["search_visibility"], "missed", "{downstream}");
+    assert_eq!(downstream["search_as"], "f", "{downstream}");
+
+    let trace_default = trace(root, "src/lib.ts:default");
+    assert_pass_through(reference(
+        &trace_default["direct_references"],
+        "src/fwd-default.ts",
+    ));
+}
+
+#[test]
+fn impact_closure_counts_import_then_export_forwarders_as_found() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_forwarding_probe(root);
+
+    let output = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &[
+            "--impact-closure",
+            "src/lib.ts",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    ));
+    let gaps = output["coordination_gap"]
+        .as_array()
+        .unwrap_or_else(|| panic!("coordination_gap array: {output}"));
+    let gap = |consumer: &str| {
+        gaps.iter()
+            .find(|gap| gap["consumer_file"] == consumer)
+            .unwrap_or_else(|| panic!("no gap for {consumer}: {output}"))
+    };
+    for forwarder in ["src/fwd-named.ts", "src/fwd-default.ts", "src/fwd-alias.ts"] {
+        assert_pass_through(gap(forwarder));
+    }
+    assert_eq!(gap("src/fwd-and-use.ts")["search_visibility"], "renamed");
+}
+
+/// A project where files reach `formatDate` through a module namespace.
+fn write_namespace_probe(root: &Path) {
+    fs::create_dir_all(root.join("src")).expect("create source directory");
+    let files: &[(&str, &str)] = &[
+        (
+            "package.json",
+            r#"{"name":"namespace-probe","type":"module","main":"src/index.ts"}"#,
+        ),
+        (
+            "src/index.ts",
+            "import './member';\nimport './spread';\nimport './value';\nimport './use-reexport';\nimport './use-forward';\n",
+        ),
+        (
+            "src/lib.ts",
+            "export const formatDate = (d: Date): string => d.toISOString();\n",
+        ),
+        (
+            "src/member.ts",
+            "import * as lib from './lib';\nconsole.log(lib.formatDate(new Date()));\n",
+        ),
+        (
+            "src/spread.ts",
+            "import * as lib from './lib';\nconsole.log({ ...lib });\n",
+        ),
+        (
+            "src/value.ts",
+            "import * as lib from './lib';\nconst show = (v: unknown): void => console.log(v);\nshow(lib);\n",
+        ),
+        ("src/reexport.ts", "export * as lib from './lib';\n"),
+        (
+            "src/use-reexport.ts",
+            "import { lib } from './reexport';\nconsole.log(lib.formatDate(new Date()));\n",
+        ),
+        (
+            "src/forward.ts",
+            "import * as lib from './lib';\nexport { lib };\n",
+        ),
+        (
+            "src/use-forward.ts",
+            "import { lib } from './forward';\nconsole.log(Object.keys(lib));\n",
+        ),
+    ];
+    for (path, content) in files {
+        fs::write(root.join(path), content).expect("write probe file");
+    }
+}
+
+#[test]
+fn namespace_member_access_is_found_and_whole_object_use_is_missed() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_namespace_probe(root);
+
+    let trace = trace(root, "src/lib.ts:formatDate");
+    let references = &trace["direct_references"];
+
+    let member = reference(references, "src/member.ts");
+    assert_eq!(member["search_visibility"], "found", "{member}");
+    assert!(member.get("reason").is_none(), "{member}");
+
+    for whole in ["src/spread.ts", "src/value.ts"] {
+        let entry = reference(references, whole);
+        assert_eq!(entry["search_visibility"], "missed", "{entry}");
+        assert_eq!(entry["reason"], "namespace-use", "{entry}");
+        assert_eq!(entry["search_as"], "lib", "{entry}");
+    }
+
+    let via_reexport = reference(references, "src/use-reexport.ts");
+    assert_eq!(via_reexport["search_visibility"], "found", "{via_reexport}");
+    let listed = |file: &str| {
+        references
+            .as_array()
+            .is_some_and(|entries| entries.iter().any(|entry| entry["from_file"] == file))
+    };
+    assert!(
+        !listed("src/reexport.ts"),
+        "a namespace re-export is not a consumer: {references}"
+    );
+
+    // The graph does not credit the importers of a forwarded namespace
+    // binding, so the forwarding file is the only signal and stays a gap.
+    let forward = reference(references, "src/forward.ts");
+    assert_eq!(forward["search_visibility"], "missed", "{forward}");
+    assert_eq!(forward["reason"], "namespace-use", "{forward}");
+    assert!(!listed("src/use-forward.ts"), "{references}");
+}

@@ -135,7 +135,7 @@ pub struct ExportReference {
     pub search_visibility: Option<SearchVisibility>,
     /// Why a text search does not find the uses in this consumer. With
     /// `search_visibility` `found`, only `pass-through` occurs: the consumer
-    /// is a barrel that forwards the export and does not use it.
+    /// forwards the export and does not use it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<SearchGapReason>,
     /// The name to search for in this consumer instead of the export name.
@@ -195,10 +195,12 @@ pub enum SearchGapReason {
     /// The consumer loads the module with a dynamic `import()` and does not
     /// name the export.
     DynamicImport,
-    /// The consumer is a barrel that only forwards the export
-    /// (`export * from`, `export { foo } from`) and does not use it. A change
-    /// of the export needs no edit there, and the files that import through
-    /// the barrel are checked on their own. Occurs with `found`.
+    /// The consumer only forwards the export and does not use it: a barrel
+    /// (`export * from`, `export { foo } from`), or a file that imports the
+    /// export and only exports it again (`import { foo } from`, then
+    /// `export { foo }` or `export default foo`). A change of the export
+    /// needs no edit there, and the files that import through it are checked
+    /// on their own. Occurs with `found`.
     PassThrough,
 }
 

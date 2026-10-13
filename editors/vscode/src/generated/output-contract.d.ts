@@ -11981,7 +11981,7 @@ search_visibility?: (SearchVisibility | null)
 /**
  * Why a text search does not find the uses in this consumer. With
  * `search_visibility` `found`, only `pass-through` occurs: the consumer
- * is a barrel that forwards the export and does not use it.
+ * forwards the export and does not use it.
  */
 reason?: (SearchGapReason | null)
 /**
