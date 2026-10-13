@@ -304,14 +304,33 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 /// as `--gate` and `--css-deep` / `--no-css-deep` do. `css` can only turn
 /// styling off, as `--no-css` does: the CLI has no flag that overrides
 /// `audit.css: false`.
+///
+/// The destructure names every field, so a new `audit` key does not compile
+/// until the typed route applies it, rejects it, or states why it does not
+/// apply.
 fn options_with_audit_config(
     options: &AuditOptions,
     config: &fallow_config::AuditConfig,
 ) -> AuditOptions {
-    let css = options.css != Some(false) && config.css.unwrap_or(true);
-    let css_deep = css && options.css_deep.or(config.css_deep).unwrap_or(true);
+    let fallow_config::AuditConfig {
+        gate,
+        css,
+        css_deep,
+        // `reject_config_baselines` refuses these keys.
+        dead_code_baseline: _,
+        health_baseline: _,
+        dupes_baseline: _,
+        // The typed audit uses a temporary base worktree, not the persistent
+        // snapshot cache that this key ages out.
+        cache_max_age_days: _,
+        // The typed audit does not read `audit.typeAware`: the MCP tool sends
+        // type-aware requests to the CLI.
+        type_aware: _,
+    } = config;
+    let css = options.css != Some(false) && css.unwrap_or(true);
+    let css_deep = css && options.css_deep.or(*css_deep).unwrap_or(true);
     AuditOptions {
-        gate: Some(options.gate.unwrap_or(config.gate)),
+        gate: Some(options.gate.unwrap_or(*gate)),
         css: Some(css),
         css_deep: Some(css_deep),
         ..options.clone()
