@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
 use crate::cache_rejection::CacheRejection;
@@ -271,9 +272,27 @@ pub struct TraceProvenance {
     /// Dependency name and why the unused devDependency check credits it as
     /// tooling.
     tooling_credits: Vec<(String, ToolingCredit)>,
+    /// Root-relative file path and an export name that a framework plugin
+    /// reads as configuration, such as the Next.js `dynamic` segment option.
+    config_exports: FxHashMap<PathBuf, FxHashSet<String>>,
 }
 
 impl TraceProvenance {
+    /// Record that a framework plugin reads the export `name` of the
+    /// root-relative `file` as configuration.
+    pub fn push_config_export(&mut self, file: PathBuf, name: String) {
+        self.config_exports.entry(file).or_default().insert(name);
+    }
+
+    /// Whether a framework plugin reads the export `name` of the
+    /// root-relative `file` as configuration.
+    #[must_use]
+    pub fn is_config_export(&self, file: &Path, name: &str) -> bool {
+        self.config_exports
+            .get(file)
+            .is_some_and(|names| names.contains(name))
+    }
+
     /// Record that `source` names the root-relative `file`.
     pub fn push_file(&mut self, file: PathBuf, source: TraceSource) {
         if !self

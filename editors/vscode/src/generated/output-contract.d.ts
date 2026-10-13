@@ -1509,6 +1509,25 @@ export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppressio
  */
 export type CognitiveAttribution = ("nesting-reset" | "fewer-branch-points" | "mixed")
 /**
+ * Whether the project has tests to measure against.
+ */
+export type TestReachStatus = ("measured" | "no-tests")
+/**
+ * Why mock detection is or is not active.
+ */
+export type TestReachMasking = ("active" | "no-mocks" | "capped")
+/**
+ * How tests reach one changed export.
+ *
+ * Treat this as an open set: a later version can add a class. A consumer
+ * must read an unknown value as "needs attention".
+ */
+export type TestReachClass = ("mocked-only" | "none" | "none-file" | "transitive" | "direct" | "framework")
+/**
+ * Whether the diff adds the whole declaration or changes an existing one.
+ */
+export type ExportChange = ("modified" | "new")
+/**
  * Independently-versioned wire-version newtype. Serializes as the integer
  * [`DECISION_SURFACE_SCHEMA_VERSION`].
  */
@@ -17228,6 +17247,12 @@ complexity?: (HealthReport | null)
  * comparison ran.
  */
 branching?: (BranchingReport | null)
+/**
+ * How tests reach the value exports that the diff changes. Advisory,
+ * never gates. Absent when the diff changes no value export or no diff
+ * is known.
+ */
+test_reach?: (TestReachFacts | null)
 }
 /**
  * The ranked, capped decision surface plus the set of signal_ids the
@@ -18089,6 +18114,104 @@ branch_points_delta: number
 functions_delta: number
 }
 /**
+ * How tests reach the value exports that the diff changes.
+ *
+ * A changed export is a value export whose declaring statement overlaps an
+ * added line. The section is advisory: it never changes the verdict or the
+ * exit code.
+ */
+export interface TestReachFacts {
+status: TestReachStatus
+masking: TestReachMasking
+/**
+ * Number of changed value exports.
+ */
+total: number
+counts: TestReachCounts
+/**
+ * The exports that need attention (`mocked-only`, `none`, `none-file`,
+ * `transitive`), at most [`TEST_REACH_EXPORT_CAP`]. The order is reach
+ * class, then `modified` before `new`, then file, line and name. Empty
+ * for `no-tests`.
+ */
+exports: ExportTestReachFact[]
+/**
+ * Number of attention rows left out by the cap.
+ */
+exports_omitted: number
+}
+/**
+ * Number of changed exports per reach class. The keys are exactly the
+ * [`TestReachClass`] values.
+ */
+export interface TestReachCounts {
+/**
+ * Exports that a test file references.
+ */
+direct: number
+/**
+ * Exports that tests reach only through other modules.
+ */
+transitive: number
+/**
+ * Exports that only mocking tests reference.
+ */
+"mocked-only": number
+/**
+ * Exports in a test-reached file without a test-reachable reference.
+ */
+none: number
+/**
+ * Exports in a file that no test loads.
+ */
+"none-file": number
+/**
+ * Framework configuration exports.
+ */
+framework: number
+}
+/**
+ * One changed export that needs attention.
+ */
+export interface ExportTestReachFact {
+/**
+ * Root-relative path of the file that declares the export.
+ */
+file: string
+/**
+ * The export name, `default` for a default export.
+ */
+export_name: string
+/**
+ * 1-based line of the export.
+ */
+line: number
+reach: TestReachClass
+change: ExportChange
+/**
+ * Test files that name the export, sorted, at most
+ * [`TEST_REACH_FILE_CAP`]. On a `mocked-only` row these are the mocking
+ * tests. Absent when no test file names the export.
+ */
+tests?: (string[] | null)
+/**
+ * Number of test files that name the export, before the cap. Present with
+ * `tests`.
+ */
+tests_total?: (number | null)
+/**
+ * True when one of the test files that name the export changed in this
+ * diff. Present with `tests`.
+ */
+test_changed?: (boolean | null)
+/**
+ * The mocked modules on the import paths, sorted, at most
+ * [`TEST_REACH_FILE_CAP`]. A mocked module can be a barrel in front of
+ * the declaring file. Present only on `mocked-only` rows.
+ */
+mocked_targets?: (string[] | null)
+}
+/**
  * The separable `decision-surface` envelope: the single call that puts taste-
  * decisions in front of a human, callable WITHOUT the full pipeline (the
  * `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
@@ -18287,6 +18410,12 @@ decisions: DecisionSurface
  * never had a base snapshot.
  */
 branching?: (BranchingReport | null)
+/**
+ * How tests reach the value exports that the diff changes. Advisory,
+ * never gates. Absent when the diff changes no value export or no diff
+ * is known.
+ */
+test_reach?: (TestReachFacts | null)
 }
 /**
  * The review direction artifact: the order to review in, the coherent units,

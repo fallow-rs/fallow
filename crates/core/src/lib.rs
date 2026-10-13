@@ -745,6 +745,13 @@ impl<'a> AnalysisSession<'a> {
             self.workspaces(),
             &plugin_result,
         );
+        plugins::push_config_export_provenance(
+            &mut trace_provenance,
+            &self.config.root,
+            self.files(),
+            &core.modules,
+            &plugin_result,
+        );
         let mut output = assemble_full_output(
             core,
             plugin_result,
@@ -891,6 +898,13 @@ impl DeadCodeBackendPrelude<'_> {
             &mut provenance,
             &self.config.root,
             self.discovery.workspaces(),
+            &self.plugin_result,
+        );
+        plugins::push_config_export_provenance(
+            &mut provenance,
+            &self.config.root,
+            self.discovery.files(),
+            modules,
             &self.plugin_result,
         );
         provenance

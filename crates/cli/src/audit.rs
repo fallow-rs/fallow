@@ -406,6 +406,9 @@ struct HeadAnalyses {
     check: Option<CheckResult>,
     dupes: Option<DupesResult>,
     health: Option<HealthResult>,
+    /// The diff evidence that the brief pass read on the HEAD side. The brief
+    /// data reuses it, so the run reads the diff one time.
+    brief_diff_evidence: Option<BriefDiffEvidence>,
 }
 
 impl AuditAnalyses for HeadAnalyses {
@@ -659,6 +662,7 @@ fn run_audit_base_analyses(
         check,
         dupes,
         health,
+        brief_diff_evidence: None,
     })
 }
 
@@ -713,7 +717,6 @@ struct AuditBriefData {
     diff_index: Option<fallow_output::DiffIndex>,
 }
 
-#[derive(Clone, Copy)]
 struct AuditBriefDataInput<'a> {
     opts: &'a AuditOptions<'a>,
     check: Option<&'a CheckResult>,
@@ -723,6 +726,8 @@ struct AuditBriefDataInput<'a> {
     changed_files: &'a FxHashSet<PathBuf>,
     base_ref: &'a str,
     head_sha: Option<&'a str>,
+    /// The diff evidence that the HEAD analyses already read, if any.
+    diff_evidence: Option<BriefDiffEvidence>,
     /// Diff-risk findings of the run. The brief weakening signals for tests,
     /// thresholds and suppressions come from this report.
     diff_risk: &'a fallow_output::DiffRiskReport,
@@ -786,6 +791,7 @@ fn run_audit_head_analyses(
         None
     };
     let dupes = run_audit_dupes(opts, changed_since, Some(changed_files), dupes_files)?;
+    let mut brief_diff_evidence = None;
     // Compute the impact closure AND the exports-aware public-export key
     // set for the review brief BEFORE health consumes the shared parse (which
     // owns the retained graph). Both are stored on the check result so they
@@ -800,7 +806,22 @@ fn run_audit_head_analyses(
         check.partition_order = compute_brief_partition_order(opts.root, check, changed_files);
         check.focus_facts = compute_brief_focus_facts(opts.root, check, changed_files);
         check.export_lines = compute_brief_export_lines(opts.root, check, changed_files);
-        check.search_gaps = compute_brief_search_gaps(opts.root, check, changed_files);
+        let diff_evidence = changed_since.map(|base_ref| {
+            compute_brief_diff_evidence(opts.root, base_ref, opts.walkthrough_file)
+        });
+        let changed_exports =
+            compute_brief_changed_exports(opts.root, check, changed_files).map(|exports| {
+                diff_touched_exports(
+                    exports,
+                    diff_evidence
+                        .as_ref()
+                        .and_then(|evidence| evidence.diff_index.as_ref()),
+                )
+            });
+        brief_diff_evidence = diff_evidence;
+        check.search_gaps =
+            compute_brief_search_gaps(opts.root, check, changed_files, changed_exports.as_deref());
+        check.test_reach = compute_brief_test_reach(opts.root, check, changed_exports.as_deref());
         check.internal_consumers =
             compute_brief_internal_consumers(opts.root, check, changed_files);
         check.test_adjacency = compute_brief_test_adjacency(opts.root, check, changed_files);
@@ -821,6 +842,7 @@ fn run_audit_head_analyses(
         check,
         dupes,
         health,
+        brief_diff_evidence,
     })
 }
 
@@ -972,6 +994,41 @@ fn compute_brief_export_lines(
     fallow_engine::module_graph::export_lines_for_changed_paths(graph, root, changed_files)
 }
 
+/// Keep the changed exports whose declaration statement overlaps an added
+/// diff line. The brief reports only these exports, so the search gap and the
+/// test reach passes skip the other exports. Without a diff, keep all exports.
+fn diff_touched_exports(
+    mut exports: Vec<fallow_engine::module_graph::ChangedExport>,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> Vec<fallow_engine::module_graph::ChangedExport> {
+    let Some(diff_index) = diff_index else {
+        return exports;
+    };
+    exports.retain(|export| {
+        let key = diff_index.key_for_root_relative(&export.file);
+        let (start, end) = export.declaration_lines;
+        diff_index.range_overlaps_added(&key, u64::from(start), u64::from(end))
+    });
+    exports
+}
+
+/// List the exports of the changed files with their declaration lines, BEFORE
+/// health drops the graph. The literal-search gap and the test reach passes
+/// share this one parse. `None` when the graph is not retained.
+fn compute_brief_changed_exports(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<Vec<fallow_engine::module_graph::ChangedExport>> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    fallow_engine::module_graph::changed_exports_for_changed_paths(graph, root, changed_files)
+}
+
 /// Precompute the literal-search gaps of the changed exports for the brief,
 /// BEFORE health drops the graph. The brief keeps only the exports whose
 /// declaration the diff touches. `None` when the graph is not retained.
@@ -979,6 +1036,7 @@ fn compute_brief_search_gaps(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
+    changed_exports: Option<&[fallow_engine::module_graph::ChangedExport]>,
 ) -> Option<Vec<fallow_engine::module_graph::ExportSearchGapPaths>> {
     let graph = check
         .shared_parse
@@ -986,7 +1044,35 @@ fn compute_brief_search_gaps(
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::module_graph::search_gaps_for_changed_paths(graph, root, changed_files)
+    fallow_engine::module_graph::search_gaps_for_changed_paths(
+        graph,
+        root,
+        changed_files,
+        changed_exports?,
+    )
+}
+
+/// Precompute how tests reach the value exports of the changed files, BEFORE
+/// health drops the graph. The brief keeps only the exports whose declaration
+/// the diff touches. Uses the same test-path classification as the weakening
+/// scan. `None` when the graph is not retained.
+fn compute_brief_test_reach(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_exports: Option<&[fallow_engine::module_graph::ChangedExport]>,
+) -> Option<fallow_engine::module_graph::TestReachPaths> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    fallow_engine::module_graph::test_reach_for_changed_paths(
+        graph,
+        root,
+        changed_exports?,
+        &|path| fallow_engine::test_paths::is_test_code_path_str(root, path),
+    )
 }
 
 /// Precompute the per-anchor honest consumer count for the decision surface:
@@ -1217,6 +1303,7 @@ fn finish_audit_result(
         check,
         dupes,
         health,
+        brief_diff_evidence,
     } = analyses;
     let brief = build_brief(AuditBriefDataInput {
         opts,
@@ -1227,6 +1314,7 @@ fn finish_audit_result(
         changed_files: &changed_files,
         base_ref: &input.base_ref,
         head_sha: head_sha.as_deref(),
+        diff_evidence: brief_diff_evidence,
         diff_risk: &outcome.diff_risk,
     });
 
@@ -1572,6 +1660,7 @@ fn benchmark_audit_review_brief_started_at(
             check: result.check.take(),
             dupes: result.dupes.take(),
             health: result.health.take(),
+            brief_diff_evidence: None,
         },
         base_snapshot: result
             .base_snapshot
@@ -1653,9 +1742,15 @@ fn compute_audit_brief_data_with_lookups(
         },
     ));
 
-    let diff_evidence = preloaded_diff_evidence.unwrap_or_else(|| {
-        compute_brief_diff_evidence(input.opts.root, input.base_ref, input.opts.walkthrough_file)
-    });
+    let diff_evidence = preloaded_diff_evidence
+        .or(input.diff_evidence)
+        .unwrap_or_else(|| {
+            compute_brief_diff_evidence(
+                input.opts.root,
+                input.base_ref,
+                input.opts.walkthrough_file,
+            )
+        });
     let change_anchors = diff_evidence.change_anchors;
 
     // Graph-snapshot hash pins key sets, resolved base, head sha, and anchors.

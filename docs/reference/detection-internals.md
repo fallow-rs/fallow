@@ -368,6 +368,23 @@ error by suppressing a downstream detector.
   stops at an asset reference. A new consumer that walks edges must pick one
   of these predicates instead of reading the variants.
 
+## Value references and test reach
+
+`ModuleGraph::is_test_reference_covered` accepts only a reference with
+`namespace == ExportNamespace::Value`. A type reference never runs the
+export, so it never gives test coverage. The graph attaches a type reference
+for `import type`, for a `type` specifier, and for a plain `import` whose
+binding the file uses only in type positions (`desired_import_namespaces` in
+`narrowing.rs`).
+Coverage gaps, the static CRAP estimate, and the static test signal of
+runtime coverage read this predicate through `StaticTestCoverage`.
+
+File-level test reach (`is_test_reachable`) still follows type-only edges.
+A test with only an `import type` of a module makes that module
+test-reachable. The traversal keeps these edges because it has no notion of
+a file without runtime code. Without that notion, files that hold only
+types would become untested files.
+
 ## Mock-aware test reachability
 
 Test-reachability masking (issues #2031, #2068, #2082) removes a mocked module

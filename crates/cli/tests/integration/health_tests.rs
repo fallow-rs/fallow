@@ -4626,6 +4626,94 @@ fn health_coverage_gaps_exclude_vitest_replacement_targets() {
 }
 
 #[test]
+fn health_coverage_gaps_ignore_type_only_test_references() {
+    let output = run_fallow(
+        "health",
+        "type-only-test-reach",
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "coverage gaps default to warn severity: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let coverage = &json["coverage_gaps"];
+    assert_eq!(coverage["summary"]["runtime_files"].as_u64(), Some(4));
+
+    let mut export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item["export_name"].as_str())
+        .collect();
+    export_names.sort_unstable();
+    assert_eq!(
+        export_names,
+        ["renderEntry", "shaped", "typed"],
+        "a test reference used only as a type does not cover the export"
+    );
+}
+
+#[test]
+fn health_crap_estimation_ignores_type_only_test_references() {
+    let output = run_fallow(
+        "health",
+        "type-only-test-reach",
+        &[
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "the low CRAP threshold should surface findings: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let crap_for = |path: &str, name: &str| {
+        findings
+            .iter()
+            .find(|finding| {
+                finding["name"] == name
+                    && finding["path"]
+                        .as_str()
+                        .is_some_and(|candidate| candidate.replace('\\', "/") == path)
+            })
+            .unwrap_or_else(|| panic!("expected {path}:{name} finding, got: {findings:#?}"))
+    };
+    let called = crap_for("src/called.ts", "called");
+    let typed = crap_for("src/typed.ts", "typed");
+    let shaped = crap_for("src/shaped.ts", "shaped");
+
+    assert_eq!(called["coverage_tier"], "high");
+    assert_eq!(called["crap"].as_f64(), Some(1.0));
+    assert_eq!(
+        typed["coverage_tier"], "partial",
+        "an import type must not give the direct test estimate: {typed:#?}"
+    );
+    assert_eq!(typed["crap"].as_f64(), Some(1.2));
+    assert_eq!(
+        shaped["coverage_tier"], "partial",
+        "a plain import used only as a type must not give the direct test estimate: {shaped:#?}"
+    );
+    assert_eq!(shaped["crap"].as_f64(), Some(1.2));
+}
+
+#[test]
 fn health_coverage_gaps_exclude_jest_replacement_targets() {
     let output = run_fallow(
         "health",

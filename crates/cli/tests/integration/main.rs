@@ -25,6 +25,7 @@ mod architecture_tests;
 mod audit_analysis_selection_tests;
 mod audit_complexity_attribution_tests;
 mod audit_diff_risk_tests;
+mod audit_test_reach_tests;
 mod audit_tests;
 mod baseline_growth_tests;
 mod baselines_prune_tests;

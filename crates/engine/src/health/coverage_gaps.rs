@@ -48,9 +48,10 @@ fn module_is_coverage_suppressed(module: Option<&ModuleInfo>) -> bool {
 }
 
 /// Append untested value exports of one node (those with no test-reachable
-/// reference and not already flagged unused) to `exports`.
+/// reference and not already flagged unused) to `exports`. The flag marks an
+/// export that only tests which mock its module reference.
 fn collect_untested_exports(
-    exports: &mut Vec<UntestedExport>,
+    exports: &mut Vec<(UntestedExport, bool)>,
     test_coverage: StaticTestCoverage<'_>,
     node: &ModuleNode,
     module: &ModuleInfo,
@@ -72,12 +73,16 @@ fn collect_untested_exports(
 
         let (line, col) =
             fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span.start);
-        exports.push(UntestedExport {
-            path: path.to_path_buf(),
-            export_name: export.name.to_string(),
-            line,
-            col,
-        });
+        let mocked_only = test_coverage.is_mocked_only(node.file_id, export);
+        exports.push((
+            UntestedExport {
+                path: path.to_path_buf(),
+                export_name: export.name.to_string(),
+                line,
+                col,
+            },
+            mocked_only,
+        ));
     }
 }
 
@@ -87,7 +92,7 @@ struct CoverageGapScan {
     covered_files: usize,
     runtime_paths: Vec<std::path::PathBuf>,
     files: Vec<UntestedFile>,
-    exports: Vec<UntestedExport>,
+    exports: Vec<(UntestedExport, bool)>,
 }
 
 /// Walk runtime-reachable modules, collecting untested files and exports.
@@ -164,7 +169,7 @@ fn build_coverage_gap_data(scan: CoverageGapScan, root: &std::path::Path) -> Cov
     } = scan;
 
     files.sort_by(|a, b| a.path.cmp(&b.path));
-    exports.sort_by(|a, b| {
+    exports.sort_by(|(a, _), (b, _)| {
         a.path
             .cmp(&b.path)
             .then_with(|| a.export_name.cmp(&b.export_name))
@@ -179,7 +184,9 @@ fn build_coverage_gap_data(scan: CoverageGapScan, root: &std::path::Path) -> Cov
         .collect();
     let wrapped_exports: Vec<fallow_output::UntestedExportFinding> = exports
         .into_iter()
-        .map(|export| fallow_output::UntestedExportFinding::with_actions(export, root))
+        .map(|(export, mocked_only)| {
+            fallow_output::UntestedExportFinding::with_reach_actions(export, root, mocked_only)
+        })
         .collect();
 
     CoverageGapData {

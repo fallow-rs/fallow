@@ -546,6 +546,20 @@ pub fn default_declaration_name(source: &str, start: usize) -> Option<&str> {
     (after.is_empty() || after.starts_with(';') || after.starts_with('\n')).then_some(name)
 }
 
+/// The top-level statement that declares one export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportDeclaration {
+    /// 1-based first and last line of the statement.
+    pub lines: (u32, u32),
+    /// True when the export is a variable whose initializer is a literal, or
+    /// an object or array of literals.
+    pub literal_value: bool,
+    /// True when the export comes from a re-export statement
+    /// (`export { x } from`, `export * as ns from`). Such a statement declares
+    /// nothing.
+    pub is_re_export: bool,
+}
+
 /// The 1-based line range of the top-level statement that declares each
 /// export of a source file, keyed by the byte offset of the export span.
 ///
@@ -560,6 +574,22 @@ pub fn declaration_line_ranges(
     source: &str,
     export_starts: &[u32],
 ) -> FxHashMap<u32, (u32, u32)> {
+    export_declarations(path, source, export_starts)
+        .into_iter()
+        .map(|(start, declaration)| (start, declaration.lines))
+        .collect()
+}
+
+/// The declaring statement of each export of a source file, keyed by the
+/// byte offset of the export span. One parse gives the line range and the
+/// literal-initializer flag. See [`declaration_line_ranges`] for the mapping
+/// rules.
+#[must_use]
+pub fn export_declarations(
+    path: &Path,
+    source: &str,
+    export_starts: &[u32],
+) -> FxHashMap<u32, ExportDeclaration> {
     let statements = match fallow_extract::embedded_script_sections(path, source) {
         Some(sections) => sections
             .iter()
@@ -575,7 +605,7 @@ pub fn declaration_line_ranges(
     };
     let offsets = fallow_types::extract::compute_line_offsets(source);
     let line = |offset: u32| fallow_types::extract::byte_offset_to_line_col(&offsets, offset).0;
-    let mut ranges = FxHashMap::default();
+    let mut declarations = FxHashMap::default();
     for &start in export_starts {
         let Some(containing) = statements
             .iter()
@@ -583,11 +613,11 @@ pub fn declaration_line_ranges(
         else {
             continue;
         };
+        let local = source
+            .get(start as usize..)
+            .map(identifier_prefix)
+            .unwrap_or_default();
         let statement = if containing.is_specifier_list {
-            let local = source
-                .get(start as usize..)
-                .map(identifier_prefix)
-                .unwrap_or_default();
             statements
                 .iter()
                 .find(|statement| statement.declared.iter().any(|name| name == local))
@@ -595,19 +625,27 @@ pub fn declaration_line_ranges(
         } else {
             containing
         };
-        ranges.insert(
+        declarations.insert(
             start,
-            (line(statement.start), line(statement.end.saturating_sub(1))),
+            ExportDeclaration {
+                lines: (line(statement.start), line(statement.end.saturating_sub(1))),
+                literal_value: !local.is_empty()
+                    && statement.literal_names.iter().any(|name| name == local),
+                is_re_export: containing.is_re_export,
+            },
         );
     }
-    ranges
+    declarations
 }
 
 struct TopLevelStatement {
     start: u32,
     end: u32,
     declared: Vec<String>,
+    /// Declared variables whose initializer is a literal value.
+    literal_names: Vec<String>,
     is_specifier_list: bool,
+    is_re_export: bool,
 }
 
 impl TopLevelStatement {
@@ -643,22 +681,86 @@ fn top_level_statement(statement: &oxc_ast::ast::Statement<'_>) -> TopLevelState
     use oxc_span::GetSpan;
 
     let span = statement.span();
-    let (declared, is_specifier_list) = match statement {
-        Statement::ExportDeclaration(export) => (declared_names(&export.declaration), false),
-        Statement::ExportNamedDeclaration(_) => (Vec::new(), true),
-        _ => (
-            statement
-                .as_declaration()
-                .map(declared_names)
-                .unwrap_or_default(),
-            false,
-        ),
+    let declaration = match statement {
+        Statement::ExportDeclaration(export) => Some(&export.declaration),
+        _ => statement.as_declaration(),
     };
     TopLevelStatement {
         start: span.start,
         end: span.end,
-        declared,
-        is_specifier_list,
+        declared: declaration.map(declared_names).unwrap_or_default(),
+        literal_names: declaration.map(literal_names).unwrap_or_default(),
+        is_specifier_list: matches!(statement, Statement::ExportNamedDeclaration(_)),
+        is_re_export: matches!(
+            statement,
+            Statement::ExportFromDeclaration(_) | Statement::ExportAllDeclaration(_)
+        ),
+    }
+}
+
+/// The variables of a declaration whose initializer is a literal value.
+fn literal_names(declaration: &oxc_ast::ast::Declaration<'_>) -> Vec<String> {
+    let oxc_ast::ast::Declaration::VariableDeclaration(variable) = declaration else {
+        return Vec::new();
+    };
+    variable
+        .declarations
+        .iter()
+        .filter(|declarator| {
+            declarator
+                .init
+                .as_ref()
+                .is_some_and(|init| is_literal_value(init, 0))
+        })
+        .filter_map(|declarator| declarator.id.get_binding_identifier())
+        .map(|identifier| identifier.name.to_string())
+        .collect()
+}
+
+/// How deep a literal object or array may nest before the check gives up.
+const LITERAL_DEPTH_LIMIT: usize = 16;
+
+/// Whether an expression is a literal, or an object or array of literals.
+/// A function call, an identifier or a computed key makes it a non-literal.
+fn is_literal_value(expression: &oxc_ast::ast::Expression<'_>, depth: usize) -> bool {
+    use oxc_ast::ast::{ArrayExpressionElement, Expression, ObjectPropertyKind, UnaryOperator};
+
+    if depth > LITERAL_DEPTH_LIMIT {
+        return false;
+    }
+    match expression {
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_) => true,
+        Expression::TemplateLiteral(template) => template.expressions.is_empty(),
+        Expression::UnaryExpression(unary) => {
+            matches!(
+                unary.operator,
+                UnaryOperator::UnaryNegation | UnaryOperator::UnaryPlus
+            ) && matches!(unary.argument, Expression::NumericLiteral(_))
+        }
+        Expression::ParenthesizedExpression(inner) => is_literal_value(&inner.expression, depth),
+        Expression::TSAsExpression(inner) => is_literal_value(&inner.expression, depth),
+        Expression::TSSatisfiesExpression(inner) => is_literal_value(&inner.expression, depth),
+        Expression::ArrayExpression(array) => array.elements.iter().all(|element| match element {
+            ArrayExpressionElement::SpreadElement(_) | ArrayExpressionElement::Elision(_) => false,
+            element => element
+                .as_expression()
+                .is_some_and(|value| is_literal_value(value, depth + 1)),
+        }),
+        Expression::ObjectExpression(object) => {
+            object.properties.iter().all(|property| match property {
+                ObjectPropertyKind::ObjectProperty(property) => {
+                    !property.computed
+                        && !property.method
+                        && is_literal_value(&property.value, depth + 1)
+                }
+                ObjectPropertyKind::SpreadProperty(_) => false,
+            })
+        }
+        _ => false,
     }
 }
 
@@ -839,6 +941,77 @@ mod tests {
         assert_eq!(ranges.get(&a), Some(&(1, 1)));
         assert_eq!(ranges.get(&b), Some(&(3, 5)));
         assert_eq!(ranges.get(&c), Some(&(7, 7)));
+    }
+
+    fn literal_of(source: &str, needle: &str) -> bool {
+        let start = source.find(needle).unwrap() as u32;
+        export_declarations(Path::new("page.tsx"), source, &[start])
+            .get(&start)
+            .is_some_and(|declaration| declaration.literal_value)
+    }
+
+    #[test]
+    fn export_declarations_flag_literal_initializers() {
+        assert!(literal_of(
+            "export const dynamic = 'force-dynamic';\n",
+            "dynamic"
+        ));
+        assert!(literal_of("export const revalidate = 60;\n", "revalidate"));
+        assert!(literal_of(
+            "export const maxDuration = -1;\n",
+            "maxDuration"
+        ));
+        assert!(literal_of(
+            "export const metadata: Metadata = { title: 'A', robots: { index: false }, keywords: ['a'] };\n",
+            "metadata"
+        ));
+        assert!(literal_of(
+            "export const config = { runtime: `edge` } as const;\n",
+            "config"
+        ));
+        assert!(literal_of("const a = 1;\nexport { a };\n", "a }"));
+    }
+
+    #[test]
+    fn export_declarations_reject_computed_values() {
+        assert!(!literal_of(
+            "export const metadata = { title: buildTitle('A') };\n",
+            "metadata"
+        ));
+        assert!(!literal_of("export const metadata = base;\n", "metadata"));
+        assert!(!literal_of(
+            "export const Route = createFileRoute('/')({ loader });\n",
+            "Route"
+        ));
+        assert!(!literal_of("export function GET() {}\n", "GET"));
+        assert!(!literal_of("export const x = { ...base };\n", "x"));
+        assert!(!literal_of("export const x = `a${b}`;\n", "x"));
+    }
+
+    #[test]
+    fn export_declarations_flag_re_export_statements() {
+        let source =
+            "export { a } from './a';\nexport * as ns from './ns';\nconst b = 1;\nexport { b };\n";
+        let a = source.find("a }").unwrap() as u32;
+        let ns = source.find("ns ").unwrap() as u32;
+        let b = source.rfind("b }").unwrap() as u32;
+        let declarations = export_declarations(Path::new("x.ts"), source, &[a, ns, b]);
+        assert!(declarations[&a].is_re_export);
+        assert!(declarations[&ns].is_re_export);
+        assert!(!declarations[&b].is_re_export);
+        assert_eq!(declarations[&b].lines, (3, 3));
+    }
+
+    #[test]
+    fn export_declarations_flag_each_declarator() {
+        let source = "export const a = 1, b = make();\n";
+        let a = source.find("a =").unwrap() as u32;
+        let b = source.find("b =").unwrap() as u32;
+        let declarations = export_declarations(Path::new("x.ts"), source, &[a, b]);
+        assert!(declarations[&a].literal_value);
+        assert!(!declarations[&b].literal_value);
+        assert_eq!(declarations[&a].lines, (1, 1));
+        assert_eq!(declarations[&b].lines, (1, 1));
     }
 
     fn range_of(path: &str, source: &str, needle: &str) -> Option<(u32, u32)> {

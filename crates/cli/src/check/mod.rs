@@ -632,6 +632,13 @@ pub struct CheckResult {
     /// another name. Computed from the retained graph on the brief path BEFORE
     /// the graph is dropped; `None` otherwise. Internal (not serialized).
     pub search_gaps: Option<Vec<fallow_engine::module_graph::ExportSearchGapPaths>>,
+    /// Test reach of the value exports of the changed files. Computed from
+    /// the retained graph on the brief path BEFORE the graph is dropped;
+    /// `None` otherwise. Internal (not serialized).
+    pub test_reach: Option<fallow_engine::module_graph::TestReachPaths>,
+    /// Which configs name which files, dependencies and configuration
+    /// exports. The brief reads the framework configuration exports from it.
+    pub trace_provenance: fallow_engine::trace::TraceProvenance,
     /// Per-anchor `rel_path -> count of in-repo modules OUTSIDE the diff that
     /// directly import it`, for the decision surface's honest per-decision consumer
     /// number. Computed from the retained graph's reverse-deps on the brief path
@@ -1152,7 +1159,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         workspace_diagnostics,
         discovered_file_count,
         script_used_packages,
-        trace_provenance: _,
+        trace_provenance,
     } = data;
     // A `--file` run drops dependency findings, so it reports none, like a
     // filter without the dependency issue types.
@@ -1226,6 +1233,8 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         focus_facts: None,
         export_lines: None,
         search_gaps: None,
+        test_reach: None,
+        trace_provenance,
         internal_consumers: None,
         test_adjacency: None,
         package_importers: None,

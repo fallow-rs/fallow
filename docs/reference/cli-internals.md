@@ -449,6 +449,27 @@ after every gate set the exit code.
   a projection of these findings (`crates/cli/src/audit_weakening.rs`). Do not
   add a second detector there. Only the removed-security-step scan of CI files
   is local to the brief.
+- Brief test reach: `test_reach` in the brief classifies each changed value
+  export with `ModuleGraph::export_test_reach`
+  (`crates/graph/src/graph/test_reach.rs`). The check reads the existing test
+  reachability index and stores nothing new. Only value references count. The
+  order is a covered reference from a test file (`direct`), any covered
+  reference (`transitive`), a reference that a closed factory mock removed
+  (`mocked-only`), then file reach (`none` or `none-file`). The mocked-only
+  check replays the masks along each reference path: the mask step runs before
+  the reachable step, and a CommonJS hop never masks. It runs only when
+  masking is `active`. Past the profile cap, masking is `capped` and no row is
+  `mocked-only`. The changed-export list comes from
+  `changed_exports_for_changed_paths` in `crates/engine/src/module_graph.rs`,
+  which parses each changed file once for the search gap and test reach
+  passes. The CLI keeps only the exports whose declaration overlaps an added
+  line before these passes run, so a wide diff does not classify untouched
+  exports. The HEAD analyses read the diff, and the brief reuses that read. The
+  `framework` label needs a name in `CONFIG_ONLY_EXPORT_NAMES`
+  (`crates/core/src/plugins/mod.rs`), a plugin `used_exports` rule that names
+  it for the file (recorded in the trace provenance), and a literal
+  initializer. The coverage-gap note of an untested export uses the same
+  mocked-only check.
 - Audit dependency scope: a dependency-level finding (unused, type-only,
   test-only or misplaced dependency, unused catalog entry) is in audit scope
   only when the changeset touches the manifest or catalog file that declares

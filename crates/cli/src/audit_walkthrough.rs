@@ -958,6 +958,7 @@ mod tests {
     fn guide_carries_the_snapshot_hash_and_injection_note() {
         let digest = ReviewBriefOutput {
             branching: None,
+            test_reach: None,
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "test".to_string(),
             command: "audit-brief".to_string(),
