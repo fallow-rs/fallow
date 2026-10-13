@@ -432,10 +432,9 @@ fn run_similar_code_inner_with_embedder(
             )
     };
     let ignore = build_ignore_set(&session.config().similar_code.ignore)?;
-    let extraction_limits = SimilarCodeExtractionLimits::default();
     let mut diagnostics = Vec::new();
     let admission = admit_source_files(&session, &ignore, scope_active, in_scope);
-    let extraction = extract_corpus(&admission, extraction_limits, min_lines, &mut diagnostics);
+    let extraction = extract_corpus(&admission, min_lines, &mut diagnostics);
     let engine_limits = EngineLimits::for_dimensions(provider.dimensions);
     let selection = select_corpus(
         &extraction.functions,
@@ -545,10 +544,10 @@ fn admit_source_files<'a>(
 
 fn extract_corpus(
     admission: &FileAdmission<'_>,
-    extraction_limits: SimilarCodeExtractionLimits,
     min_lines: usize,
     diagnostics: &mut Vec<SimilarCodeDiagnostic>,
 ) -> ExtractedCorpus {
+    let extraction_limits = SimilarCodeExtractionLimits::default();
     let mut functions = Vec::new();
     let mut extracted_source_bytes = 0usize;
     let mut extraction_skips = BTreeMap::new();
