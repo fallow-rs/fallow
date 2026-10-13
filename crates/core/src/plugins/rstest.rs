@@ -400,7 +400,7 @@ impl ResolveContext<'_> {
     fn add_project_file(&mut self, file: &Path, runner_root: &Path, depth: usize) {
         if self.seen.iter().any(|seen| seen == file)
             || depth >= MAX_PROJECT_DEPTH
-            || !file.starts_with(self.root)
+            || !is_inside_root(file, self.root)
         {
             return;
         }
@@ -438,7 +438,7 @@ impl ResolveContext<'_> {
 fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     if !pattern.contains(['*', '?', '[', '{']) {
         let path = config_parser::lexical_normalize(&join_path(dir, pattern));
-        return if path.starts_with(root) && path.exists() {
+        return if is_inside_root(&path, root) {
             vec![path]
         } else {
             Vec::new()
@@ -458,13 +458,24 @@ fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     matches
         .flatten()
         .take(MAX_PROJECT_GLOB_MATCHES)
-        .filter(|path| path.starts_with(root))
+        .filter(|path| is_inside_root(path, root))
         .filter(|path| {
             !path
                 .components()
                 .any(|component| component.as_os_str() == "node_modules")
         })
         .collect()
+}
+
+/// Whether an existing `path` resolves inside `root`. The check resolves `..`
+/// segments and symlinks, so a glob match such as `packages/a/../../x` or a
+/// symlink to a directory above the project does not pass.
+fn is_inside_root(path: &Path, root: &Path) -> bool {
+    let Ok(resolved) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    resolved.starts_with(root)
 }
 
 /// An absolute glob for a pattern relative to `dir`.
@@ -741,9 +752,23 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("outside")).expect("create dir");
         assert!(matching_paths(&root, "../**", &root).is_empty());
         assert!(matching_paths(&root, "../outside", &root).is_empty());
+        assert!(matching_paths(&root, "packages/*/../../../outside", &root).is_empty());
         assert_eq!(
             matching_paths(&root, "packages/*", &root),
             vec![root.join("packages/a")]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_symlink_to_outside_the_root_matches_nothing() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().join("app");
+        std::fs::create_dir_all(root.join("packages")).expect("create dir");
+        std::fs::create_dir_all(tmp.path().join("outside")).expect("create dir");
+        std::os::unix::fs::symlink(tmp.path().join("outside"), root.join("packages/link"))
+            .expect("create symlink");
+        assert!(matching_paths(&root, "packages/*", &root).is_empty());
+        assert!(matching_paths(&root, "packages/link", &root).is_empty());
     }
 }
