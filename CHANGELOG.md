@@ -210,6 +210,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The MCP `trace_export` tool runs the CLI when type-aware analysis is
+  on.** With `typeAware.enabled` in config or `FALLOW_TYPE_AWARE` set,
+  `fallow dead-code --trace` adds `semantic` evidence to the trace, and with
+  `typeAware.require: complete` it exits non-zero when that evidence is
+  incomplete. The typed route of `trace_export` and the Code Mode
+  `traceExport` route ignored these settings and returned the syntactic
+  trace only. They now run the CLI in this case. `fallow_api::run_trace_export`
+  returns the error code `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` when type-aware
+  analysis is on, also for `type_aware.enabled: Some(true)`. Set
+  `Some(false)` to get the syntactic trace.
+
 - **Search gaps no longer count files that only forward an export.** A file
   that imports an export and only exports it again needs no edit when the
   export changes. Examples are `import { a } from './x'; export { a }` and

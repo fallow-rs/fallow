@@ -282,7 +282,7 @@ fn api_route(tool: CodeModeTool) -> Option<ApiRoute> {
         }),
         CodeModeTool::TraceExport => Some(|params, cancellation| {
             let params: TraceExportParams = parse_params(params)?;
-            run_trace_export_api_value(&params, cancellation).map(Some)
+            run_trace_export_api_value(&params, cancellation)
         }),
         CodeModeTool::TraceFile => Some(|params, cancellation| {
             let params: TraceFileParams = parse_params(params)?;

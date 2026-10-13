@@ -57,6 +57,29 @@ pub(super) fn reject_config_type_aware(
     )
 }
 
+/// `fallow dead-code --trace` adds semantic evidence and its completeness
+/// exit when type-aware analysis is on. The typed trace has neither, so it
+/// refuses a type-aware run from every layer, the `type_aware` option
+/// included. `Some(false)` keeps the trace syntactic, as `--no-type-aware`
+/// does.
+///
+/// # Errors
+///
+/// Returns the config load errors, and [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when
+/// the option or a layer turns type-aware analysis on.
+pub(super) fn reject_type_aware_trace(
+    type_aware: &TypeAwareOptions,
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<()> {
+    if type_aware.requested() {
+        return Err(type_aware_refusal(
+            "analysis.typeAware",
+            "the programmatic trace has no semantic evidence; run the `fallow` CLI",
+        ));
+    }
+    reject_config_type_aware(type_aware, resolved, TypeAwareCommand::Analysis)
+}
+
 /// Where the project config of a run lives.
 #[derive(Clone, Copy)]
 pub(super) struct ConfigLocation<'a> {
@@ -94,14 +117,19 @@ pub(super) fn reject_config_type_aware_at(
     let Some(source) = source else {
         return Ok(());
     };
-    Err(ProgrammaticError::new(
-        format!(
-            "`{source}` turns on type-aware analysis, which the programmatic API runs only when the `type_aware` option requests it; set that option or run the `fallow` CLI"
-        ),
+    Err(type_aware_refusal(
+        source,
+        "the programmatic API runs it only when the `type_aware` option requests it; set that option or run the `fallow` CLI",
+    ))
+}
+
+fn type_aware_refusal(source: &str, reason: &str) -> ProgrammaticError {
+    ProgrammaticError::new(
+        format!("`{source}` turns on type-aware analysis, but {reason}"),
         2,
     )
     .with_code(TYPE_AWARE_CONFIG_UNSUPPORTED)
-    .with_context(source))
+    .with_context(source)
 }
 
 #[derive(Debug, PartialEq, Eq)]

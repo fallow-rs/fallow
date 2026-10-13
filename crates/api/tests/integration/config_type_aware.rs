@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 
 use fallow_api::{
     AnalysisOptions, AuditOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions,
-    ProgrammaticError, TYPE_AWARE_CONFIG_UNSUPPORTED, TypeAwareOptions, run_audit,
-    run_boundary_violations, run_circular_dependencies, run_combined, run_dead_code, run_health,
+    ProgrammaticError, TYPE_AWARE_CONFIG_UNSUPPORTED, TraceExportOptions, TypeAwareOptions,
+    run_audit, run_boundary_violations, run_circular_dependencies, run_combined, run_dead_code,
+    run_health, run_trace_export,
 };
 
 use crate::common::{commit, git, rerun_with_type_aware_sidecar, write};
@@ -325,4 +326,34 @@ fn explicit_on_turns_on_private_type_leaks_as_the_cli_does() {
         leaks(r#"{"rules":{"private-type-leaks":"off"}}"#, Some(true)),
         0
     );
+}
+
+/// `fallow dead-code --trace` adds semantic evidence when type-aware analysis
+/// is on. The typed trace has none, so it refuses a type-aware run from the
+/// config and from the option, and `Some(false)` keeps it syntactic.
+#[test]
+fn trace_export_refuses_every_type_aware_request() {
+    let trace = |root: &Path, enabled: Option<bool>| {
+        run_trace_export(&TraceExportOptions {
+            analysis: AnalysisOptions {
+                type_aware: TypeAwareOptions {
+                    enabled,
+                    ..TypeAwareOptions::default()
+                },
+                ..analysis(root)
+            },
+            file: "src/lib.ts".to_owned(),
+            export_name: "make".to_owned(),
+        })
+        .map(drop)
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let syntactic = project(dir.path(), "{}");
+    trace(&syntactic, None).expect("a syntactic config traces on the typed route");
+    assert_refused(trace(&syntactic, Some(true)), "analysis.typeAware");
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let type_aware = project(dir.path(), r#"{"typeAware":{"enabled":true}}"#);
+    assert_refused(trace(&type_aware, None), "typeAware.enabled");
+    trace(&type_aware, Some(false)).expect("`Some(false)` keeps the trace syntactic");
 }

@@ -334,9 +334,13 @@ Contract rules:
   set value wins over the environment and the config, so `Some(false)` runs
   syntactic without a refusal. The `type_aware: false` parameter passes
   `Some(false)` to the typed route and `--no-type-aware` to the CLI fallback.
-  The drift case
-  `type_aware_config_agrees_across_surfaces` holds the MCP envelope to the
-  `_meta.type_aware` of the CLI.
+  `run_trace_export` refuses every type-aware request, the `Some(true)`
+  option included: `fallow dead-code --trace` then adds semantic evidence
+  and its completeness exit, which the typed trace cannot. The
+  `trace_export` tool and the Code Mode `traceExport` route run the CLI on
+  that code. The drift case `type_aware_config_agrees_across_surfaces` holds
+  the MCP envelope to the `_meta.type_aware` of the CLI, and the
+  `trace_export` answer to the CLI trace.
 - `trace_symbol` and `symbol_impact` expose exact TypeScript evidence for
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.
