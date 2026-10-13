@@ -137,7 +137,21 @@ test("commit runs that stay complete for the settle window end the wait below th
   assert.equal(result.status, "settled");
   assert.equal(script.reads(), 4);
   assert.equal(code, 0);
-  assert.match(lines[0], /^Commit abc: all 2 runs passed, fewer than --min-checks 3/u);
+  assert.match(lines[0], /^Commit abc: all 2 checks passed, fewer than --min-checks 3/u);
+});
+
+test("pull request checks that stay complete for the settle window end the wait below the count", async () => {
+  const script = scripted([{ ok: true, checks: [check("CI", "pass"), check("Lint", "skipping")] }]);
+
+  const result = await wait(script, {
+    minChecks: 3,
+    timeoutMs: 20 * INTERVAL_MS,
+    settleMs: 3 * INTERVAL_MS,
+    readMergeable: mergeableStates(["MERGEABLE"]).read,
+  });
+
+  assert.equal(result.status, "settled");
+  assert.equal(script.reads(), 4);
 });
 
 test("a new or changed run starts the settle window again", async () => {
