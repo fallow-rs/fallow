@@ -925,4 +925,61 @@ mod tests {
         assert_eq!(coverage.get("esmOnly"), Some(&false));
         assert_eq!(coverage.get("required"), Some(&true));
     }
+
+    #[test]
+    fn type_only_test_import_does_not_credit_a_value_export() {
+        let files: Vec<_> = (0..3)
+            .map(|id| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(format!("/project/file{id}.ts")),
+                size_bytes: 1,
+            })
+            .collect();
+        let mut type_only = import(FileId(1), ImportedName::Named("typed".to_string()));
+        type_only.info.is_type_only = true;
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![
+                    type_only,
+                    import(FileId(2), ImportedName::Named("called".to_string())),
+                ],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: vec![value_export("typed", 0)].into(),
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![value_export("called", 0)].into(),
+                ..ResolvedModule::default()
+            },
+        ];
+        let test_entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let graph =
+            RetainedModuleGraph::from(ModuleGraph::build_with_reachability_roots_and_replacements(
+                &modules,
+                &[],
+                &test_entry_points,
+                &[],
+                &test_entry_points,
+                &files,
+            ));
+
+        let coverage: rustc_hash::FxHashMap<_, _> = module_value_exports(&graph)
+            .into_iter()
+            .map(|export| (export.name, export.test_referenced))
+            .collect();
+
+        assert_eq!(coverage.get("typed"), Some(&false));
+        assert_eq!(coverage.get("called"), Some(&true));
+    }
 }

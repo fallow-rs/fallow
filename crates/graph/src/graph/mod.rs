@@ -875,11 +875,17 @@ impl ModuleGraph {
     /// every target hop. ESM hops also require that profile not to replace the
     /// hop target; CommonJS hops remain active because Vitest replacement mocks
     /// do not intercept `require()`.
+    ///
+    /// Only a value reference can give coverage. A type reference (`import
+    /// type`) never runs the export, so it never gives coverage.
     #[must_use]
     pub fn is_test_reference_covered(&self, export: &ExportSymbol, reference_index: usize) -> bool {
         let Some(reference) = export.references.get(reference_index) else {
             return false;
         };
+        if reference.namespace != ExportNamespace::Value {
+            return false;
+        }
         if self.test_reachability_index.profile_count == 0 {
             return self.is_test_reachable(reference.from_file);
         }

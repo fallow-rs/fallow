@@ -430,7 +430,7 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{TestReachabilityPlan, TestReachabilityProfile};
-    use crate::graph::ModuleGraph;
+    use crate::graph::{ExportNamespace, ModuleGraph};
     use crate::resolve::{
         ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
         ResolvedReplacedModuleTarget,
@@ -474,13 +474,39 @@ mod tests {
         build_reachability_graph_with_replacements(file_count, &edges, runtime_eps, test_eps, &[])
     }
 
+    fn build_reachability_graph_with_replacements(
+        file_count: usize,
+        edges_spec: &[(u32, u32, bool)],
+        runtime_eps: &[u32],
+        test_eps: &[u32],
+        replacements: &[ResolvedReplacedModuleTarget],
+    ) -> ModuleGraph {
+        let edges: Vec<_> = edges_spec
+            .iter()
+            .map(|&(source, target, is_commonjs)| ReachabilityEdge {
+                source,
+                target,
+                is_commonjs,
+                is_type_only: false,
+            })
+            .collect();
+        build_reachability_graph_with_edges(file_count, &edges, runtime_eps, test_eps, replacements)
+    }
+
+    struct ReachabilityEdge {
+        source: u32,
+        target: u32,
+        is_commonjs: bool,
+        is_type_only: bool,
+    }
+
     #[expect(
         clippy::cast_possible_truncation,
         reason = "test file counts are trivially small"
     )]
-    fn build_reachability_graph_with_replacements(
+    fn build_reachability_graph_with_edges(
         file_count: usize,
-        edges_spec: &[(u32, u32, bool)],
+        edges_spec: &[ReachabilityEdge],
         runtime_eps: &[u32],
         test_eps: &[u32],
         replacements: &[ResolvedReplacedModuleTarget],
@@ -497,22 +523,22 @@ mod tests {
             .map(|i| {
                 let imports: Vec<ResolvedImport> = edges_spec
                     .iter()
-                    .filter(|(source, _, _)| *source == i as u32)
-                    .map(|(_, target, is_commonjs)| ResolvedImport {
+                    .filter(|edge| edge.source == i as u32)
+                    .map(|edge| ResolvedImport {
                         info: ImportInfo {
-                            source: format!("./file{target}"),
+                            source: format!("./file{}", edge.target),
                             imported_name: ImportedName::Named("x".to_string()),
                             local_name: "x".to_string(),
-                            is_type_only: false,
+                            is_type_only: edge.is_type_only,
                             is_type_only_star: false,
                             from_style: false,
                             span: oxc_span::Span::new(0, 10),
                             source_span: oxc_span::Span::default(),
                         },
-                        target: if *is_commonjs {
-                            ResolveResult::CommonJsInternalModule(FileId(*target))
+                        target: if edge.is_commonjs {
+                            ResolveResult::CommonJsInternalModule(FileId(edge.target))
                         } else {
-                            ResolveResult::InternalModule(FileId(*target))
+                            ResolveResult::InternalModule(FileId(edge.target))
                         },
                     })
                     .collect();
@@ -992,6 +1018,65 @@ mod tests {
         assert!(!graph.modules[1].is_test_reachable());
         assert!(graph.modules[2].is_test_reachable());
         assert!(graph.modules[3].is_test_reachable());
+    }
+
+    /// File 0 is a test root. It imports `x` from file 1, with `import type`
+    /// when `type_only` is set. With `masked`, file 0 also mocks the
+    /// unrelated file 2, so the graph uses the profiled traversal instead of
+    /// the plain BFS.
+    fn build_type_only_test_import_graph(type_only: bool, masked: bool) -> ModuleGraph {
+        let edges = [ReachabilityEdge {
+            source: 0,
+            target: 1,
+            is_commonjs: false,
+            is_type_only: type_only,
+        }];
+        let replacements = if masked {
+            vec![ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(2),
+            }]
+        } else {
+            Vec::new()
+        };
+        build_reachability_graph_with_edges(3, &edges, &[], &[0], &replacements)
+    }
+
+    #[test]
+    fn type_only_test_import_gives_no_export_coverage() {
+        for masked in [false, true] {
+            let graph = build_type_only_test_import_graph(true, masked);
+            assert_eq!(graph.test_reachability_index.profile_count > 0, masked);
+            let export = &graph.modules[1].exports[0];
+            assert_eq!(export.references.len(), 1, "masked: {masked}");
+            assert_eq!(
+                export.references[0].namespace,
+                ExportNamespace::Type,
+                "masked: {masked}"
+            );
+
+            assert!(
+                !graph.is_test_reference_covered(export, 0),
+                "masked: {masked}"
+            );
+            assert!(
+                !graph.is_any_test_reference_covered(export),
+                "masked: {masked}"
+            );
+        }
+    }
+
+    #[test]
+    fn value_test_import_gives_export_coverage() {
+        for masked in [false, true] {
+            let graph = build_type_only_test_import_graph(false, masked);
+            let export = &graph.modules[1].exports[0];
+
+            assert!(
+                graph.is_test_reference_covered(export, 0),
+                "masked: {masked}"
+            );
+        }
     }
 
     #[test]
