@@ -1,0 +1,629 @@
+//! Orchestration entry points of mutation testing for CLI, MCP and NAPI.
+//!
+//! [`plan_mutation`] runs only the static half and never executes user code.
+//! [`run_mutation`] plans through the engine, then runs the tests of the
+//! project against each planned mutant through the embedded companion.
+
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use fallow_engine::mutation::{
+    DiffIndex, MutantDisposition, MutationPlan, MutationPlanRequest, MutationScope,
+    plan_mutations_for_session,
+};
+use fallow_engine::session::AnalysisSession;
+use fallow_output::{
+    MutationPlanOutput, MutationPlanSchemaVersion, MutationReport, MutationRunnerOutput,
+    MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind, MutationScopeOutput,
+    MutationTimings, MutationWorktreeCheck,
+};
+use fallow_types::envelope::ElapsedMs;
+use rustc_hash::FxHashSet;
+
+use crate::ProgrammaticError;
+use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
+use crate::mutation::companion::{COMPANION_FILES, install};
+use crate::mutation::discovery::discover_runtime;
+use crate::mutation::manifest::manifest;
+use crate::mutation::protocol::{InitOptions, InitRequest};
+use crate::mutation::report::{
+    CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
+    plan_counts, plan_files, plan_mutants, skipped_files, summary, tool_version,
+};
+use crate::mutation::run_dir::{RunFile, write_run_dir};
+use crate::mutation::scheduler::{
+    ScheduleConfig, ScheduleError, ScheduleOutcome, SchedulePlan, ScheduledMutant, run_schedule,
+};
+use crate::mutation::transport::ProcessSpawner;
+use crate::mutation::worktree::{WorktreeSnapshot, snapshot};
+use crate::mutation::{MutationRunOptions, MutationRunScope};
+
+type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+
+/// The runner of version 1.
+const RUNNER: &str = "vitest";
+/// The default timeout of `init` and the dry run (`protocol.md` section 8).
+const DEFAULT_RUNNER_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn mutation_error(code: &str, message: impl Into<String>) -> ProgrammaticError {
+    ProgrammaticError::new(message, 2).with_code(code)
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "a run lasts far less than 2^64 milliseconds"
+)]
+const fn millis(duration: Duration) -> u64 {
+    duration.as_millis() as u64
+}
+
+fn validate(options: &MutationRunOptions) -> ProgrammaticResult<()> {
+    if options.concurrency == Some(0) {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "the mutation concurrency must be at least 1",
+        )
+        .with_context("mutation.concurrency"));
+    }
+    if options.max_mutants == Some(0) {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "the mutant limit must be at least 1",
+        )
+        .with_context("mutation.maxMutants"));
+    }
+    if options.time_budget.is_some_and(|budget| budget.is_zero())
+        || options
+            .runner_timeout
+            .is_some_and(|timeout| timeout.is_zero())
+    {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "a mutation time limit must be more than zero",
+        ));
+    }
+    Ok(())
+}
+
+fn load_session(resolved: &ProgrammaticAnalysisContext) -> ProgrammaticResult<AnalysisSession> {
+    let mut project = fallow_engine::project_config::config_for_project_with_load_options(
+        resolved.root(),
+        resolved.config_path().as_deref(),
+        fallow_config::ConfigLoadOptions {
+            allow_remote_extends: resolved.allow_remote_extends,
+        },
+    )
+    .map_err(|error| {
+        ProgrammaticError::new(format!("failed to load config: {error}"), 2)
+            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_context("analysis.configPath")
+    })?;
+    project.config.no_cache = resolved.no_cache;
+    project.config.threads = resolved.threads;
+    Ok(AnalysisSession::from_config(project))
+}
+
+fn scope_output(options: &MutationRunOptions, base_ref: Option<String>) -> MutationScopeOutput {
+    MutationScopeOutput {
+        kind: match options.scope {
+            MutationRunScope::Changed { .. } => MutationScopeKind::Changed,
+            MutationRunScope::All => MutationScopeKind::All,
+            MutationRunScope::Paths(_) => MutationScopeKind::Paths,
+        },
+        base_ref,
+    }
+}
+
+/// The engine scope, and the base ref of a changed scope.
+fn engine_scope(
+    options: &MutationRunOptions,
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<(MutationScope, Option<String>)> {
+    let root = resolved.root();
+    match &options.scope {
+        MutationRunScope::All => Ok((MutationScope::All, None)),
+        MutationRunScope::Paths(paths) => Ok((MutationScope::Paths(paths.clone()), None)),
+        MutationRunScope::Changed { base } => {
+            if let Some(diff) = &resolved.diff {
+                return Ok((MutationScope::ChangedSinceBase(diff.clone()), None));
+            }
+            let resolved_base = crate::audit_run::resolve_audit_base(root, base.as_deref())
+                .map_err(|error| {
+                    let message = match error {
+                        crate::audit_run::AuditBaseError::InvalidRef { value, reason, .. } => {
+                            format!("invalid base ref `{value}`: {reason}")
+                        }
+                        crate::audit_run::AuditBaseError::NotDetected => {
+                            "no base branch to compare against; pass a base ref or mutate all files"
+                                .to_owned()
+                        }
+                    };
+                    mutation_error("FALLOW_MUTATION_BASE_NOT_FOUND", message)
+                        .with_context("mutation.base")
+                })?;
+            let text =
+                fallow_engine::changed_files::try_get_changed_diff(root, &resolved_base.git_ref)
+                    .map_err(|error| {
+                        mutation_error(
+                            "FALLOW_CHANGED_FILES_FAILED",
+                            format!(
+                                "cannot diff against `{}`: {}",
+                                resolved_base.git_ref,
+                                error.describe()
+                            ),
+                        )
+                    })?;
+            let label = format!("git diff {}", resolved_base.git_ref);
+            let index = fallow_engine::diff_source::place_diff(
+                DiffIndex::from_unified_diff(&text),
+                root,
+                &fallow_engine::diff_source::diff_base_candidates(root),
+                &label,
+            )
+            .map_err(|stand_down| {
+                let (_, message) = stand_down.into_parts();
+                mutation_error("FALLOW_CHANGED_FILES_FAILED", message)
+            })?;
+            Ok((
+                MutationScope::ChangedSinceBase(index),
+                Some(resolved_base.git_ref),
+            ))
+        }
+    }
+}
+
+struct Planned {
+    resolved: ProgrammaticAnalysisContext,
+    cache_dir: PathBuf,
+    plan: MutationPlan,
+    base_ref: Option<String>,
+}
+
+fn plan_for(
+    options: &MutationRunOptions,
+    before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
+) -> ProgrammaticResult<Planned> {
+    validate(options)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    let session = load_session(&resolved)?;
+    let cache_dir = session.config().cache_dir.clone();
+    before_plan(resolved.root(), &cache_dir)?;
+    let (scope, base_ref) = engine_scope(options, &resolved)?;
+    let request = MutationPlanRequest {
+        scope,
+        operators: options.operators.clone(),
+        allow_side_effects: options.allow_side_effects,
+        max_mutants: options.max_mutants,
+    };
+    let plan = resolved
+        .install(|| plan_mutations_for_session(&session, &request))
+        .map_err(|error| mutation_error("FALLOW_MUTATION_PLAN_FAILED", error.to_string()))?;
+    Ok(Planned {
+        resolved,
+        cache_dir,
+        plan,
+        base_ref,
+    })
+}
+
+/// Builds the static mutation plan. It runs no user code.
+///
+/// # Errors
+///
+/// Returns an error for invalid options, a base ref that does not resolve,
+/// or a failed analysis.
+pub fn plan_mutation(options: &MutationRunOptions) -> ProgrammaticResult<MutationPlanOutput> {
+    let started = Instant::now();
+    let planned = plan_for(options, |_, _| Ok(()))?;
+    let plan = &planned.plan;
+    Ok(MutationPlanOutput {
+        schema_version: MutationPlanSchemaVersion::V1,
+        version: tool_version(),
+        elapsed_ms: ElapsedMs(millis(started.elapsed())),
+        scope: scope_output(options, planned.base_ref.clone()),
+        counts: plan_counts(plan),
+        mutants: plan_mutants(plan),
+        files: plan_files(plan),
+        test_files: plan.test_files.clone(),
+        no_test_files: plan.no_test_files,
+        framework_config_checked: plan.framework_config_checked,
+        skipped_files: skipped_files(plan),
+        unmatched_paths: plan.unmatched_paths.clone(),
+    })
+}
+
+fn take_worktree_snapshot(
+    root: &Path,
+    cache_dir: &Path,
+) -> ProgrammaticResult<Option<WorktreeSnapshot>> {
+    snapshot(root, &[cache_dir.to_path_buf()])
+        .map_err(|message| mutation_error("FALLOW_MUTATION_WORKTREE_CHECK_FAILED", message))
+}
+
+/// The worktree facts at the end of a run.
+struct WorktreeEnd {
+    /// The paths that changed since the start snapshot.
+    changed_paths: Vec<String>,
+    /// Why the end snapshot failed. Stray writes are then unknown.
+    check_error: Option<String>,
+}
+
+/// Compares the worktree with `start`. A failed end snapshot is a fact of
+/// the report, never a reason to drop the run result or its error.
+fn settle_worktree(
+    start: Option<&WorktreeSnapshot>,
+    take_end: impl FnOnce() -> ProgrammaticResult<Option<WorktreeSnapshot>>,
+) -> WorktreeEnd {
+    let Some(start) = start else {
+        return WorktreeEnd {
+            changed_paths: Vec::new(),
+            check_error: None,
+        };
+    };
+    match take_end() {
+        Ok(end) => WorktreeEnd {
+            changed_paths: end.map(|end| start.changed_paths(&end)).unwrap_or_default(),
+            check_error: None,
+        },
+        Err(error) => WorktreeEnd {
+            changed_paths: Vec::new(),
+            check_error: Some(error.message),
+        },
+    }
+}
+
+/// Adds the worktree facts to the error of a failed run.
+fn with_worktree_facts(mut error: ProgrammaticError, end: &WorktreeEnd) -> ProgrammaticError {
+    if !end.changed_paths.is_empty() {
+        error.message = format!(
+            "{}; the run changed these worktree paths: {}",
+            error.message,
+            end.changed_paths.join(", ")
+        );
+    }
+    if let Some(check_error) = &end.check_error {
+        error.message = format!(
+            "{}; the end-of-run worktree check failed: {check_error}",
+            error.message
+        );
+    }
+    error
+}
+
+fn guard_worktree(allow_dirty: bool, start: Option<&WorktreeSnapshot>) -> ProgrammaticResult<()> {
+    if allow_dirty {
+        return Ok(());
+    }
+    let Some(start) = start else {
+        return Err(mutation_error(
+            "FALLOW_MUTATION_NOT_A_REPOSITORY",
+            "mutation testing runs the tests against changed code and needs a git worktree to detect stray writes",
+        )
+        .with_help("run inside a git worktree, or pass --allow-dirty"));
+    };
+    let dirty = start.dirty_paths();
+    if dirty.is_empty() {
+        return Ok(());
+    }
+    let shown: Vec<&str> = dirty.iter().take(10).map(String::as_str).collect();
+    Err(mutation_error(
+        "FALLOW_MUTATION_DIRTY_WORKTREE",
+        format!(
+            "the git worktree has {} uncommitted path(s): {}",
+            dirty.len(),
+            shown.join(", ")
+        ),
+    )
+    .with_help("commit or stash the changes, or pass --allow-dirty"))
+}
+
+/// Writes `*` to `<cache>/.gitignore` when the cache has no ignore file, so
+/// that the run directory never shows in `git status`.
+fn ignore_cache_dir(cache_dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(cache_dir)?;
+    let ignore = cache_dir.join(".gitignore");
+    if !ignore.exists() {
+        std::fs::write(ignore, "*\n")?;
+    }
+    Ok(())
+}
+
+fn default_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .div_ceil(2)
+        .max(1)
+}
+
+fn scheduled(plan: &MutationPlan, disposition: MutantDisposition) -> Vec<ScheduledMutant> {
+    plan.mutants
+        .iter()
+        .filter(|mutant| mutant.disposition == disposition)
+        .map(|mutant| ScheduledMutant {
+            id: mutant.mutant.id.as_str().to_owned(),
+            file: mutant.file.clone(),
+        })
+        .collect()
+}
+
+fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
+    SchedulePlan {
+        mutants: scheduled(plan, MutantDisposition::Planned),
+        unreached: scheduled(plan, MutantDisposition::NoCoverage),
+        known_ids: plan
+            .mutants
+            .iter()
+            .map(|mutant| mutant.mutant.id.as_str().to_owned())
+            .collect::<FxHashSet<_>>(),
+        test_files: plan.test_files.clone(),
+        file_test_files: plan
+            .files
+            .iter()
+            .map(|file| (file.path.clone(), file.static_test_files.clone()))
+            .collect(),
+    }
+}
+
+/// The facts of a started run that the report reads.
+struct Execution {
+    outcome: Option<ScheduleOutcome>,
+    runner: Option<MutationRunnerOutput>,
+    setup_ms: u64,
+}
+
+fn execute(
+    options: &MutationRunOptions,
+    planned: &Planned,
+    deadline: Option<Instant>,
+) -> ProgrammaticResult<Execution> {
+    let plan = &planned.plan;
+    let schedule = schedule_plan(plan);
+    // With no planned mutant the dry run still runs the static test files,
+    // because a hit on a statically unreached mutant is a static map miss.
+    if schedule.mutants.is_empty()
+        && (schedule.unreached.is_empty() || schedule.test_files.is_empty())
+    {
+        return Ok(Execution {
+            outcome: None,
+            runner: None,
+            setup_ms: 0,
+        });
+    }
+    let setup_started = Instant::now();
+    let manifest = manifest()
+        .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?;
+    let range = manifest.runner(RUNNER).ok_or_else(|| {
+        mutation_error(
+            "FALLOW_MUTATION_PROTOCOL_INVALID",
+            format!("the protocol manifest has no `{RUNNER}` runner"),
+        )
+    })?;
+    let runtime = discover_runtime(options.runtime.as_deref()).map_err(|message| {
+        mutation_error("FALLOW_MUTATION_RUNTIME_NOT_FOUND", message)
+            .with_help("install Node.js, or pass the runtime path")
+            .with_context("mutation.runtime")
+    })?;
+    let cache_error =
+        |message: String| mutation_error("FALLOW_MUTATION_CACHE_WRITE_FAILED", message);
+    ignore_cache_dir(&planned.cache_dir).map_err(|error| cache_error(error.to_string()))?;
+    let mutation_cache = planned.cache_dir.join("mutation");
+    let companion = install(&mutation_cache, COMPANION_FILES)
+        .map_err(|message| mutation_error("FALLOW_MUTATION_COMPANION_INTEGRITY", message))?;
+    let files: Vec<RunFile<'_>> = plan
+        .files
+        .iter()
+        .map(|file| RunFile {
+            path: &file.path,
+            code: &file.instrumented_code,
+        })
+        .collect();
+    let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
+    let root = planned.resolved.root().to_path_buf();
+    let config = ScheduleConfig {
+        init: InitRequest {
+            root: root.to_string_lossy().into_owned(),
+            runner: RUNNER.to_owned(),
+            config_path: None,
+            run_dir: run_dir.dir.to_string_lossy().into_owned(),
+            path_map: run_dir.path_map.clone(),
+            options: InitOptions::default(),
+        },
+        runner: range.clone(),
+        concurrency: options.concurrency.unwrap_or_else(default_concurrency),
+        runner_timeout: options.runner_timeout.unwrap_or(DEFAULT_RUNNER_TIMEOUT),
+        deadline,
+    };
+    let spawner = ProcessSpawner {
+        runtime: runtime.path.clone(),
+        companion,
+        root,
+        wire_version: manifest.wire_protocol_version,
+        session_token_env: manifest.session_token_env.clone(),
+    };
+    let setup_ms = millis(setup_started.elapsed());
+    let outcome = run_schedule(&spawner, &schedule, &config).map_err(|error| {
+        let (code, stderr_tail) = match &error {
+            ScheduleError::Integrity(_) => ("FALLOW_MUTATION_COMPANION_INTEGRITY", None),
+            ScheduleError::RunnerVersion(_) => ("FALLOW_MUTATION_RUNNER_UNSUPPORTED", None),
+            ScheduleError::Setup { stderr_tail, .. } => {
+                ("FALLOW_MUTATION_RUNNER_FAILED", stderr_tail.clone())
+            }
+            ScheduleError::UnknownHit(_) => ("FALLOW_MUTATION_PLAN_MISMATCH", None),
+            ScheduleError::Baseline(_) => ("FALLOW_MUTATION_BASELINE_FAILED", None),
+        };
+        let error = mutation_error(code, error.to_string());
+        match stderr_tail.filter(|tail| !tail.trim().is_empty()) {
+            Some(tail) => error.with_help(format!("companion stderr:\n{}", tail.trim_end())),
+            None => error,
+        }
+    })?;
+    let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
+        name: RUNNER.to_owned(),
+        version: ready.runner_version.clone(),
+        protocol_version: manifest.wire_protocol_version,
+        runtime: MutationRuntimeOutput {
+            name: runtime.kind.name().to_owned(),
+            version: runtime.version.clone(),
+        },
+        concurrency: outcome.workers,
+    });
+    Ok(Execution {
+        outcome: Some(outcome),
+        runner,
+        setup_ms,
+    })
+}
+
+/// Plans the mutants, runs the project tests against each planned mutant,
+/// and reports the result.
+///
+/// The run refuses a dirty git worktree unless
+/// [`MutationRunOptions::allow_dirty`] is set. After the run it compares the
+/// worktree with the start state and reports each changed path.
+///
+/// # Errors
+///
+/// Returns an error for invalid options, a dirty worktree, a failed plan, a
+/// missing runtime, a companion that does not start or load the runner, a
+/// companion file that changed after install, or a test suite that fails
+/// with no active mutant outside each test file.
+pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<MutationReport> {
+    let started = Instant::now();
+    let deadline = options.time_budget.map(|budget| started + budget);
+    let mut start_snapshot = None;
+    let planned = plan_for(options, |root, cache_dir| {
+        start_snapshot = take_worktree_snapshot(root, cache_dir)?;
+        guard_worktree(options.allow_dirty, start_snapshot.as_ref())
+    })?;
+    let plan_ms = millis(started.elapsed());
+    let execution = execute(options, &planned, deadline);
+    let worktree_end = settle_worktree(start_snapshot.as_ref(), || {
+        take_worktree_snapshot(planned.resolved.root(), &planned.cache_dir)
+    });
+    let execution = execution.map_err(|error| with_worktree_facts(error, &worktree_end))?;
+    let WorktreeEnd {
+        changed_paths,
+        check_error,
+    } = worktree_end;
+    let plan = &planned.plan;
+    let outcome = execution.outcome.as_ref();
+    let results = mutant_results(plan, outcome);
+    let baseline = baseline_failures(outcome);
+    let completion = completion(&CompletionFacts {
+        plan,
+        results: &results,
+        baseline_failures: &baseline,
+        worktree_changed: !changed_paths.is_empty(),
+        worktree_unchecked: check_error.is_some(),
+        unretried_survivors: outcome.is_some_and(|outcome| !outcome.unretried_survivors.is_empty()),
+        unloaded_paths: outcome.map_or(&[], |outcome| outcome.unloaded_paths.as_slice()),
+    });
+    let mut errors = issues(outcome);
+    if !changed_paths.is_empty() {
+        errors.push(fallow_output::MutationRunIssue {
+            code: "worktree-changed".to_owned(),
+            message: format!(
+                "the run changed {} worktree path(s); a mutant or a test wrote to the project",
+                changed_paths.len()
+            ),
+            mutant_id: None,
+            stderr_tail: None,
+        });
+    }
+    if let Some(message) = check_error {
+        errors.push(fallow_output::MutationRunIssue {
+            code: "worktree-check-failed".to_owned(),
+            message: format!(
+                "the end-of-run worktree check failed, so stray writes are unknown: {message}"
+            ),
+            mutant_id: None,
+            stderr_tail: None,
+        });
+    }
+    let timings = outcome.map_or_else(
+        || MutationTimings {
+            plan_ms,
+            ..MutationTimings::default()
+        },
+        |outcome| MutationTimings {
+            plan_ms,
+            setup_ms: execution.setup_ms + millis(outcome.timings.setup),
+            dry_run_ms: millis(outcome.timings.dry_run),
+            mutants_ms: millis(outcome.timings.mutants),
+            retry_ms: millis(outcome.timings.retry),
+        },
+    );
+    Ok(MutationReport {
+        schema_version: MutationSchemaVersion::V1,
+        version: tool_version(),
+        elapsed_ms: ElapsedMs(millis(started.elapsed())),
+        completion,
+        scope: scope_output(options, planned.base_ref.clone()),
+        runner: execution.runner,
+        summary: summary(&results),
+        functions: function_results(plan, &results),
+        mutants: results,
+        no_test_files: plan.no_test_files,
+        baseline_failures: baseline,
+        skipped_files: skipped_files(plan),
+        unmatched_paths: plan.unmatched_paths.clone(),
+        unloaded_paths: outcome
+            .map(|outcome| outcome.unloaded_paths.clone())
+            .unwrap_or_default(),
+        worktree: MutationWorktreeCheck {
+            checked: start_snapshot.is_some(),
+            allow_dirty: options.allow_dirty,
+            dirty_at_start: start_snapshot
+                .as_ref()
+                .map(WorktreeSnapshot::dirty_paths)
+                .unwrap_or_default(),
+            changed_paths,
+        },
+        errors,
+        timings,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_end_check_keeps_the_execute_error_and_reports_the_check_error() {
+        let start = WorktreeSnapshot::default();
+        let end = settle_worktree(Some(&start), || {
+            Err(mutation_error(
+                "FALLOW_MUTATION_WORKTREE_CHECK_FAILED",
+                "git status failed",
+            ))
+        });
+        assert!(end.changed_paths.is_empty());
+        assert_eq!(end.check_error.as_deref(), Some("git status failed"));
+
+        let error = with_worktree_facts(
+            mutation_error(
+                "FALLOW_MUTATION_SETUP_FAILED",
+                "the companion did not start",
+            ),
+            &end,
+        );
+        assert_eq!(error.code.as_deref(), Some("FALLOW_MUTATION_SETUP_FAILED"));
+        assert!(
+            error.message.starts_with("the companion did not start"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("git status failed"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn no_start_snapshot_needs_no_end_check() {
+        let end = settle_worktree(None, || panic!("no end check without a start snapshot"));
+        assert!(end.changed_paths.is_empty());
+        assert!(end.check_error.is_none());
+    }
+}

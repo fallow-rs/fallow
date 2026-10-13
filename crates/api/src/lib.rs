@@ -54,6 +54,7 @@ mod list_runtime;
 /// Markdown report builders for dead-code, grouped, duplication, health, and
 /// walkthrough output.
 pub mod markdown_output;
+pub mod mutation;
 mod next_steps;
 pub mod output_contracts;
 pub mod ownership;
@@ -166,6 +167,7 @@ pub use markdown_output::{
     ComplexityListing, build_diff_risk_markdown, build_duplication_markdown,
     build_grouped_markdown, build_health_markdown, build_markdown, build_walkthrough_markdown,
 };
+pub use mutation::{MutationRunOptions, MutationRunScope};
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, CombinedOutput, FallowOutput, ImpactOutput, ListBoundariesOutput,
@@ -187,12 +189,12 @@ pub use runtime::{
     TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
     TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
     benchmark_trace_clone_compact_json, benchmark_trace_graph_family_compact_json,
-    inspect_similar_code, load_health_config, parse_similar_code_candidate_snapshot,
+    inspect_similar_code, load_health_config, parse_similar_code_candidate_snapshot, plan_mutation,
     review_similar_code, run_architecture, run_audit, run_boundary_violations,
     run_circular_dependencies, run_combined, run_complexity_with_runner, run_dead_code,
     run_dead_code_with_baseline, run_decision_surface, run_duplication, run_feature_flags,
-    run_health, run_health_with_runner, run_similar_code, run_trace_clone, run_trace_dependency,
-    run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
+    run_health, run_health_with_runner, run_mutation, run_similar_code, run_trace_clone,
+    run_trace_dependency, run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
     select_similar_code_candidate_snapshot, serialize_health_report_json,
 };
 pub use runtime_json::{

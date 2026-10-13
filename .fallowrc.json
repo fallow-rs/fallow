@@ -8,7 +8,9 @@
     "benchmarks/knip6/**",
     "reference/knip/**",
     "fuzz/corpus/**",
-    "crates/cli/viz-assets/**"
+    "crates/cli/viz-assets/**",
+    "crates/api/src/mutation/companion/**",
+    "tools/mutation-runner/test/fixtures/**"
   ],
   "ignoreUnresolvedImports": [
     "./generated/lsp-initialization-options.js",

@@ -62,6 +62,7 @@ mod inspect_envelopes;
 mod issue_contract;
 mod json_paths;
 mod list_envelopes;
+mod mutation;
 mod next_steps;
 mod package_baselines;
 mod pr_comment_envelope;
@@ -298,6 +299,16 @@ pub use list_envelopes::{
     BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
     ListBoundariesOutput, ListEntryPointOutput, ListOutput, ListPluginOutput, WorkspaceInfo,
     WorkspacesOutput, serialize_list_boundaries_json_output, serialize_list_workspaces_json_output,
+};
+pub use mutation::{
+    MUTATION_PLAN_SCHEMA_VERSION, MUTATION_SCHEMA_VERSION, MutantLocation, MutantResult,
+    MutantStatus, MutationBaselineFailure, MutationCompletion, MutationCompletionStatus,
+    MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
+    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationPlanOutput,
+    MutationPlanSchemaVersion, MutationReport, MutationRunIssue, MutationRunnerOutput,
+    MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind, MutationScopeOutput,
+    MutationSkippedFile, MutationStatusCounts, MutationSummary, MutationTimings,
+    MutationWorktreeCheck,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

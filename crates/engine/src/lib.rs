@@ -62,6 +62,9 @@ pub mod guard;
 pub mod health;
 pub mod list_inventory;
 pub mod module_graph;
+/// The static half of mutation testing: mutant selection, test mapping,
+/// pruning and ranking.
+pub mod mutation;
 pub mod package_baselines;
 pub mod plugins;
 pub mod project_analysis;

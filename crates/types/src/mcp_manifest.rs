@@ -1080,6 +1080,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
             "Rust api variant for hosts that supply an explicit cache directory. The value wins over FALLOW_CACHE_DIR and cache.dir, and run_doctor already honors FALLOW_CACHE_DIR. No napi export or dedicated MCP tool.",
         ),
     },
+    CapabilityParityRow {
+        capability: "mutation testing",
+        api_runner: Some("run_mutation"),
+        napi_export: None,
+        mcp_tool: None,
+        omission_note: Some(
+            "Mutation testing runs the project's own tests, so it is available through the CLI (`fallow mutation`) and the Rust api only. plan_mutation is the api plan entry point for `fallow mutation --plan`. A test run is a host permission decision: no napi export, and no MCP run tool in version 1.",
+        ),
+    },
     // -- MCP-only tools that shell out to the CLI: no api runner, no napi
     //    export. --
     CapabilityParityRow {

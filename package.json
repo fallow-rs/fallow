@@ -34,9 +34,9 @@
     "test:type-aware-corpus": "node --test scripts/type-aware-corpus.test.mjs",
     "smoke:styling-corpus": "node scripts/styling-corpus-smoke.mjs",
     "smoke:styling-prs": "node scripts/styling-pr-smoke.mjs",
-    "lint:js": "node scripts/assert-local-resolution.mjs oxlint && oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
-    "fmt:js": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
-    "fmt:js:check": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs"
+    "lint:js": "node scripts/assert-local-resolution.mjs oxlint && oxlint --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tools/mutation-runner tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
+    "fmt:js": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tools/mutation-runner tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs",
+    "fmt:js:check": "node scripts/assert-local-resolution.mjs oxfmt && oxfmt --check --disable-nested-config npm benchmarks crates/napi .github/scripts editors/vscode/src viz-frontend/src scripts tools/type-aware-sidecar tools/mutation-runner tests/coverage-producer-corpus/producers/drivers tests/coverage-producer-corpus/producers/lib commitlint.config.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

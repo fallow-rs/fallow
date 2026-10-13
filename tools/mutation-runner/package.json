@@ -1,0 +1,20 @@
+{
+  "name": "fallow-mutation-runner",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test runner companion for the Fallow mutation engine",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/companion.mjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "vite": "8.3.4",
+    "vitest": "5.0.4",
+    "vitest4": "npm:vitest@4.1.11"
+  }
+}

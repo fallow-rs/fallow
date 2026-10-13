@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "wire_protocol_version": 1,
+  "runtime_semantics_version": 1,
+  "session_token_env": "FALLOW_MUTATION_SESSION_TOKEN",
+  "request_types": [
+    "init",
+    "dry_run",
+    "run",
+    "reload",
+    "shutdown"
+  ],
+  "response_types": [
+    "ready",
+    "dry_run_result",
+    "run_result",
+    "reloaded",
+    "error"
+  ],
+  "test_statuses": [
+    "pass",
+    "fail",
+    "skip",
+    "todo"
+  ],
+  "run_statuses": [
+    "killed",
+    "survived",
+    "timeout",
+    "runtime_error"
+  ],
+  "failure_kinds": [
+    "assertion",
+    "error",
+    "timeout"
+  ],
+  "reload_methods": [
+    "invalidate",
+    "noop",
+    "restart_required"
+  ],
+  "error_codes": [
+    "protocol-version",
+    "bad-request",
+    "runner-not-found",
+    "runner-version",
+    "runner-load-failed",
+    "config-load-failed",
+    "test-file-missing",
+    "internal"
+  ],
+  "capabilities": [
+    "per_test_attribution",
+    "test_filter",
+    "hot_switch",
+    "bail",
+    "fresh_modules_per_run",
+    "batch_mutants"
+  ],
+  "isolation_modes": [
+    "process",
+    "none"
+  ],
+  "in_band_markers": [
+    "fallow-filtered",
+    "fallow-bailed"
+  ],
+  "runtime": {
+    "global_name": "__fallowMutation",
+    "active_function": "__fallow_m_a",
+    "hit_function": "__fallow_m_c"
+  },
+  "runners": [
+    {
+      "name": "vitest",
+      "package": "vitest",
+      "min_version": "4.0.0",
+      "max_version_exclusive": "6.0.0"
+    }
+  ]
+}

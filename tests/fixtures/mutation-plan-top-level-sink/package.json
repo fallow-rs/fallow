@@ -1,0 +1,9 @@
+{
+  "name": "mutation-plan-top-level-sink",
+  "private": true,
+  "type": "module",
+  "main": "src/startup.ts",
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

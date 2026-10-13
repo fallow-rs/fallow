@@ -20,6 +20,7 @@ mod dead_code;
 mod decision_surface;
 mod duplication;
 mod feature_flags;
+mod mutation;
 mod similar_code;
 mod trace;
 
@@ -45,6 +46,7 @@ pub use dead_code::{
 pub use decision_surface::run_decision_surface;
 pub use duplication::run_duplication;
 pub use feature_flags::run_feature_flags;
+pub use mutation::{plan_mutation, run_mutation};
 pub use similar_code::{
     inspect_similar_code, parse_similar_code_candidate_snapshot, review_similar_code,
     run_similar_code, select_similar_code_candidate_snapshot,

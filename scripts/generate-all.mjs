@@ -15,7 +15,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { assertLocalResolution } from "./assert-local-resolution.mjs";
 import { checkGithubActionsFile } from "./check-contract-surfaces.mjs";
-import { contractSurfacePaths } from "./contract-surfaces.mjs";
+import {
+  MUTATION_COMPANION_FILES,
+  MUTATION_COMPANION_SOURCE_ROOT,
+  MUTATION_COMPANION_TARGET_ROOT,
+  contractSurfacePaths,
+} from "./contract-surfaces.mjs";
 import { generateAgentAdapters } from "./generate-agent-adapters.mjs";
 import { runGenerationTransaction } from "./generation-transaction.mjs";
 
@@ -32,6 +37,8 @@ const AGENT_DOCS_TARGETS = ["npm/fallow/skills/fallow"];
 const AGENT_DOCS_SEED_RECORD_PATH = "scripts/agent-doc-curated-seeds.json";
 const TYPE_AWARE_MANIFEST_PATH = "crates/api/type-aware-protocol.json";
 const TYPE_AWARE_MODULE_PATH = "tools/type-aware-sidecar/src/generated-protocol.mjs";
+const MUTATION_RUNNER_MANIFEST_PATH = "crates/api/mutation-runner-protocol.json";
+const MUTATION_RUNNER_PROTOCOL_FILE = "generated-protocol.mjs";
 const EXTENSION_CODEGEN_PATH = "editors/vscode/scripts/codegen-contracts.mjs";
 
 /**
@@ -225,12 +232,148 @@ export const SIDECAR_PACKAGE = TYPE_AWARE_PROTOCOL.sidecar.package;\n`,
   );
 };
 
+const MUTATION_RUNNER_LIST_KEYS = [
+  "request_types",
+  "response_types",
+  "test_statuses",
+  "run_statuses",
+  "failure_kinds",
+  "reload_methods",
+  "error_codes",
+  "capabilities",
+  "isolation_modes",
+  "in_band_markers",
+];
+const MUTATION_RUNNER_RUNTIME_KEYS = ["global_name", "active_function", "hit_function"];
+const SEMVER_CORE = /^\d+\.\d+\.\d+$/u;
+const ENV_NAME = /^[A-Z][A-Z0-9_]*$/u;
+
+const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
+
+const isNonEmptyStringList = (value) =>
+  Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
+
+const hasStringFields = (record, keys) => keys.every((key) => typeof record?.[key] === "string");
+
+const isValidMutationRunner = (runner) =>
+  hasStringFields(runner, ["name", "package"]) &&
+  [runner.min_version, runner.max_version_exclusive].every((version) => SEMVER_CORE.test(version));
+
+/** Each check takes the manifest and is true when its part is valid. */
+const MUTATION_RUNNER_MANIFEST_CHECKS = [
+  (manifest) => manifest.schema_version === 1,
+  (manifest) => Number.isSafeInteger(manifest.wire_protocol_version),
+  (manifest) => Number.isSafeInteger(manifest.runtime_semantics_version),
+  (manifest) => ENV_NAME.test(manifest.session_token_env ?? ""),
+  (manifest) => MUTATION_RUNNER_LIST_KEYS.every((key) => isNonEmptyStringList(manifest[key])),
+  (manifest) => hasStringFields(manifest.runtime, MUTATION_RUNNER_RUNTIME_KEYS),
+  (manifest) =>
+    Array.isArray(manifest.runners) &&
+    manifest.runners.length > 0 &&
+    manifest.runners.every(isValidMutationRunner),
+];
+
+const assertMutationRunnerManifest = (manifest) => {
+  if (!MUTATION_RUNNER_MANIFEST_CHECKS.every((check) => check(manifest))) {
+    throw new Error("invalid mutation runner protocol manifest");
+  }
+};
+
+const FORMAT_LINE_WIDTH = 100;
+
+const isScalar = (value) => value === null || typeof value !== "object";
+
+/** Gives a list of scalars on one line, or null when it is too long or nested. */
+const inlineList = (list, linePrefix) => {
+  const inline = `[${list.map((entry) => JSON.stringify(entry)).join(", ")}]`;
+  const fits = linePrefix.length + inline.length + 1 <= FORMAT_LINE_WIDTH;
+  return list.every(isScalar) && fits ? inline : null;
+};
+
+const blockLiteral = (open, lines, close, indent) =>
+  `${open}\n${lines.join("\n")}\n${" ".repeat(indent)}${close}`;
+
+const listLiteral = (list, indent) => {
+  const inner = " ".repeat(indent + 2);
+  const lines = list.map((entry) => `${inner}${jsLiteral(entry, indent + 2, inner)},`);
+  return blockLiteral("[", lines, "]", indent);
+};
+
+const objectLiteral = (record, indent) => {
+  const inner = " ".repeat(indent + 2);
+  const lines = Object.entries(record).map(([key, entry]) => {
+    const prefix = `${inner}${key}: `;
+    return `${prefix}${jsLiteral(entry, indent + 2, prefix)},`;
+  });
+  return blockLiteral("{", lines, "}", indent);
+};
+
+/**
+ * Prints a JSON value as a JavaScript literal in the layout that `oxfmt`
+ * keeps: objects on several lines, and a list of scalars on one line when the
+ * line fits.
+ */
+const jsLiteral = (value, indent, linePrefix) => {
+  if (isScalar(value)) return JSON.stringify(value);
+  if (!Array.isArray(value)) return objectLiteral(value, indent);
+  return inlineList(value, linePrefix) ?? listLiteral(value, indent);
+};
+
+/**
+ * Writes the companion constants module. The module holds the same data as
+ * the manifest.
+ */
+export const generateMutationRunnerProtocol = (stagingRoot) => {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, MUTATION_RUNNER_MANIFEST_PATH), "utf8"));
+  assertMutationRunnerManifest(manifest);
+  writeStaged(
+    stagingRoot,
+    `${MUTATION_COMPANION_SOURCE_ROOT}/${MUTATION_RUNNER_PROTOCOL_FILE}`,
+    `// Generated from ${MUTATION_RUNNER_MANIFEST_PATH}. Do not edit.\n\
+const deepFreeze = (value) => {\n\
+  if (value !== null && typeof value === "object") {\n\
+    for (const entry of Object.values(value)) deepFreeze(entry);\n\
+    Object.freeze(value);\n\
+  }\n\
+  return value;\n\
+};\n\
+\n\
+export const MUTATION_RUNNER_PROTOCOL = deepFreeze(${jsLiteral(manifest, 0, "")});\n\
+export const WIRE_PROTOCOL_VERSION = MUTATION_RUNNER_PROTOCOL.wire_protocol_version;\n\
+export const SESSION_TOKEN_ENV = MUTATION_RUNNER_PROTOCOL.session_token_env;\n\
+export const REQUEST_TYPES = MUTATION_RUNNER_PROTOCOL.request_types;\n\
+export const ERROR_CODES = MUTATION_RUNNER_PROTOCOL.error_codes;\n\
+export const GLOBAL_NAME = MUTATION_RUNNER_PROTOCOL.runtime.global_name;\n\
+export const RUNNERS = MUTATION_RUNNER_PROTOCOL.runners;\n`,
+  );
+};
+
+/**
+ * Copies the companion runtime files into `fallow-api`. The copy of the
+ * constants module comes from the staging root, so one generation run gives
+ * the same text in both places.
+ */
+export const generateMutationCompanion = (stagingRoot) => {
+  for (const file of MUTATION_COMPANION_FILES) {
+    const sourcePath = `${MUTATION_COMPANION_SOURCE_ROOT}/${file}`;
+    const sourceRoot = file === MUTATION_RUNNER_PROTOCOL_FILE ? stagingRoot : REPO_ROOT;
+    const text = readFileSync(join(sourceRoot, sourcePath), "utf8");
+    writeStaged(
+      stagingRoot,
+      `${MUTATION_COMPANION_TARGET_ROOT}/${file}`,
+      `// Generated from ${sourcePath}. Do not edit.\n${text}`,
+    );
+  }
+};
+
 const generateAllPhases = (stagingRoot) => {
   generateSchemaFiles(stagingRoot);
   generateExtensionContracts(stagingRoot);
   generateAgentDocs(stagingRoot);
   generateNapiTypes(stagingRoot);
   generateTypeAwareProtocol(stagingRoot);
+  generateMutationRunnerProtocol(stagingRoot);
+  generateMutationCompanion(stagingRoot);
 };
 
 const checkContractSurfaceCoverage = () => {

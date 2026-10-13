@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { contractSurfaces } from "./contract-surfaces.mjs";
+import {
+  MUTATION_COMPANION_FILES,
+  MUTATION_COMPANION_SOURCE_ROOT,
+  contractSurfaces,
+} from "./contract-surfaces.mjs";
 import { checkGithubActionsPathFilter } from "./check-contract-surfaces.mjs";
 
 test("contract surface ids and generated paths are unique relative literals", () => {
@@ -69,4 +73,25 @@ jobs:
       surfaceId: "fixture",
     },
   ]);
+});
+
+test("every mutation companion runtime source has an embedded copy", () => {
+  const sources = readdirSync(MUTATION_COMPANION_SOURCE_ROOT, {
+    recursive: true,
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".mjs"))
+    .map((entry) =>
+      `${entry.parentPath}/${entry.name}`
+        .replaceAll("\\", "/")
+        .slice(MUTATION_COMPANION_SOURCE_ROOT.length + 1),
+    )
+    .toSorted();
+
+  assert.deepEqual([...MUTATION_COMPANION_FILES].toSorted(), sources);
+  const companion = contractSurfaces.find((surface) => surface.id === "mutation-runner-companion");
+  assert.deepEqual(
+    companion.generatedPaths,
+    MUTATION_COMPANION_FILES.map((file) => `crates/api/src/mutation/companion/${file}`),
+  );
 });

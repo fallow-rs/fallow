@@ -1,0 +1,12 @@
+{
+  "name": "mutation-plan-framework",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@tanstack/react-router": "^1.120.0",
+    "next": "^15.3.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

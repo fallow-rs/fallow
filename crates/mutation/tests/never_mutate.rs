@@ -177,3 +177,18 @@ keep = e - 1;
 "#;
     assert_only_in_control(source, TS, "keep = e - 1");
 }
+
+/// The logging and `require` rules see through parentheses and TypeScript
+/// wrappers on the callee.
+#[test]
+fn logging_and_require_callees_behind_type_wrappers() {
+    let source = r#"
+(console.log as any)(a + b, "msg");
+(console.log satisfies any)(c < d);
+(console.log)!(i++);
+(<any>debug)(e - f, true);
+(require as any)("left-pad" + g);
+keep = e - 1;
+"#;
+    assert_only_in_control(source, TS, "keep = e - 1");
+}

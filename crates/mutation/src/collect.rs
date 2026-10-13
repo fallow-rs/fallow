@@ -137,17 +137,22 @@ fn key_name(key: &PropertyKey<'_>) -> Option<String> {
 /// `console.*` and `debug(...)` calls. The collector skips the full call:
 /// it gives no mutant for any expression in the arguments, not only for the
 /// strings. Logic in a logging argument is therefore not tested.
+///
+/// The check reads the callee through parentheses and TypeScript wrappers,
+/// so `(console.log as any)(x)` is a logging call too.
 fn is_logging_callee(callee: &Expression<'_>) -> bool {
-    let callee = callee.without_parentheses();
+    let callee = callee_without_wrappers(callee);
     if callee.is_specific_id("debug") {
         return true;
     }
-    callee.as_member_expression().is_some_and(|member| {
-        member
-            .object()
-            .without_parentheses()
-            .is_specific_id("console")
-    })
+    callee
+        .as_member_expression()
+        .is_some_and(|member| callee_without_wrappers(member.object()).is_specific_id("console"))
+}
+
+/// A `require(...)` call, also behind parentheses and TypeScript wrappers.
+fn is_require_callee(callee: &Expression<'_>) -> bool {
+    callee_without_wrappers(callee).is_specific_id("require")
 }
 
 /// The callee without parentheses and TypeScript expression wrappers, at any
@@ -168,7 +173,7 @@ fn callee_without_wrappers<'e, 'a>(callee: &'e Expression<'a>) -> &'e Expression
 fn is_skipped_call(call: &CallExpression<'_>) -> bool {
     matches!(call.callee, Expression::Super(_))
         || is_logging_callee(&call.callee)
-        || call.callee.is_specific_id("require")
+        || is_require_callee(&call.callee)
 }
 
 const fn is_relational(operator: BinaryOperator) -> bool {
@@ -238,6 +243,21 @@ fn is_text_operand(expression: &Expression<'_>) -> bool {
     )
 }
 
+/// The byte length of the `//` comment at the start of `rest`. The comment
+/// ends before the first line terminator: `\n`, `\r`, U+2028 or U+2029.
+fn line_comment_len(rest: &[u8]) -> usize {
+    const LINE_SEPARATOR: &[u8] = "\u{2028}".as_bytes();
+    const PARAGRAPH_SEPARATOR: &[u8] = "\u{2029}".as_bytes();
+    (0..rest.len())
+        .find(|&index| {
+            let tail = &rest[index..];
+            matches!(tail, [b'\n' | b'\r', ..])
+                || tail.starts_with(LINE_SEPARATOR)
+                || tail.starts_with(PARAGRAPH_SEPARATOR)
+        })
+        .unwrap_or(rest.len())
+}
+
 impl Collector<'_> {
     fn text(&self, start: u32, end: u32) -> &str {
         self.source
@@ -265,7 +285,7 @@ impl Collector<'_> {
             }
             match rest {
                 [b'/', b'/', ..] => {
-                    index += rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len());
+                    index += line_comment_len(rest);
                 }
                 [b'/', b'*', ..] => {
                     let close = rest.windows(2).position(|w| w == b"*/")?;
@@ -823,7 +843,7 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if is_logging_callee(&it.callee) || it.callee.is_specific_id("require") {
+        if is_logging_callee(&it.callee) || is_require_callee(&it.callee) {
             return;
         }
         if let Expression::ChainExpression(chain) = callee_without_wrappers(&it.callee) {

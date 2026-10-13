@@ -449,6 +449,38 @@ fn splice_map_points_copied_text_back_to_the_original() {
 }
 
 #[test]
+fn a_binding_with_a_reserved_prelude_name_is_an_error() {
+    let cases = [
+        ("const __fallow_m_a = 1; x = a + b;", "__fallow_m_a"),
+        ("function __fallow_m_c() {} x = a + b;", "__fallow_m_c"),
+        (
+            "import { y as __fallow_m_a } from 'm'; x = a + b;",
+            "__fallow_m_a",
+        ),
+        ("let { __fallow_m_c } = o; x = a + b;", "__fallow_m_c"),
+        ("class __fallow_m_a {} x = a + b;", "__fallow_m_a"),
+    ];
+    for (source, name) in cases {
+        let result = fallow_mutation::instrument(
+            source,
+            "src/reserved.js",
+            SourceKind::Js,
+            &MutationOptions::default(),
+        );
+        assert_eq!(
+            result.err(),
+            Some(fallow_mutation::MutationError::ReservedName {
+                name: name.to_owned()
+            }),
+            "{source}"
+        );
+    }
+    // Control: a reference without a binding, and a near name, still work.
+    let control = run("__fallow_m_a; const __fallow_m_b = a + b;", SourceKind::Js);
+    assert_eq!(control.mutants.len(), 1);
+}
+
+#[test]
 fn parse_errors_are_reported() {
     let error = fallow_mutation::instrument(
         "const = ;",

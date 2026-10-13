@@ -143,6 +143,7 @@ The workspace follows the ownership boundaries in
 | `crates/graph/` | Module graph construction, import resolution, dependency traversal, cycles, and impact facts. |
 | `crates/security/` | Shared security matcher catalogue and candidate helpers. |
 | `crates/core/` | Internal detector backend used by `fallow-engine` for private detector phases. Product adapters use the workspace facade instead. |
+| `crates/mutation/` | Mutant site discovery and mutation-switching instrumentation used by the mutation engine. |
 | `crates/engine/` | Analysis sessions, discovery, parsing, graph construction, and typed analysis orchestration. |
 | `crates/output/` | Shared output contracts, action builders, summaries, SARIF builders, and reusable formatter pieces. |
 | `crates/api/` | Workspace Rust facade and programmatic workflow adapters. Its crate API is not an external semver contract. |

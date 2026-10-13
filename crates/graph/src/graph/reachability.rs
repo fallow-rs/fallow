@@ -167,7 +167,11 @@ struct ProfileWorklist {
 impl ProfileWorklist {
     fn new(profiles: &[TestReachabilityProfile], total_capacity: usize) -> Self {
         let profile_count = profiles.len();
-        let index = TestReachabilityIndex::new(total_capacity, profile_count);
+        let mut index = TestReachabilityIndex::new(total_capacity, profile_count);
+        index.profile_roots = profiles
+            .iter()
+            .map(|profile| profile.roots.clone())
+            .collect();
         let words_per_file = index.words_per_file;
         let mut masked_profiles: FxHashMap<FileId, Vec<u64>> = FxHashMap::default();
 
@@ -420,6 +424,61 @@ impl ModuleGraph {
             );
             module.set_test_reachable(test_visited.as_ref().is_some_and(|tv| tv.contains(idx)));
         }
+    }
+
+    /// The test entry points that reach each file of `files`, sorted by id.
+    ///
+    /// Each test entry point has its own traversal with its own `vi.mock`
+    /// replacement mask, so a test that replaces the file, or a module on
+    /// each import path to it, does not reach it. The traversal is the same
+    /// profiled pass that sets [`ModuleGraph::is_test_reachable`], with one
+    /// profile for each test entry point. A file is test-reachable exactly
+    /// when its list is not empty. When the profile count of the graph build
+    /// exceeded its safety cap, the masks are off, as in that build.
+    ///
+    /// The query runs one pass over the graph for each 64 test entry points.
+    #[must_use]
+    pub fn test_entry_points_reaching(&self, files: &[FileId]) -> FxHashMap<FileId, Vec<FileId>> {
+        let mut reaching: FxHashMap<FileId, Vec<FileId>> =
+            files.iter().map(|&file| (file, Vec::new())).collect();
+        let total_capacity = self.modules.len();
+        let mut roots: Vec<FileId> = self
+            .test_entry_points
+            .iter()
+            .copied()
+            .filter(|root| (root.0 as usize) < total_capacity)
+            .collect();
+        if files.is_empty() || roots.is_empty() {
+            return reaching;
+        }
+        roots.sort_unstable_by_key(|root| root.0);
+        let mut masks = self.test_reachability_index.root_masks();
+        for batch in roots.chunks(u64::BITS as usize) {
+            let profiles: Vec<TestReachabilityProfile> = batch
+                .iter()
+                .map(|&root| TestReachabilityProfile {
+                    masked_targets: masks.remove(&root).unwrap_or_default(),
+                    roots: vec![root],
+                })
+                .collect();
+            let (_, index, _) = ProfileWorklist::new(&profiles, total_capacity).run(self);
+            for (&file, entries) in &mut reaching {
+                let Some(&word) = index
+                    .profiles_for(&index.reachable_profiles, file)
+                    .and_then(|words| words.first())
+                else {
+                    continue;
+                };
+                entries.extend(
+                    batch
+                        .iter()
+                        .enumerate()
+                        .filter(|&(bit, _)| word & (1_u64 << bit) != 0)
+                        .map(|(_, &root)| root),
+                );
+            }
+        }
+        reaching
     }
 }
 
@@ -1841,5 +1900,107 @@ mod tests {
     fn empty_graph_no_panics() {
         let graph = build_reachability_graph(0, &[], &[], &[]);
         assert_eq!(graph.module_count(), 0);
+    }
+
+    fn reaching(graph: &ModuleGraph, file: u32) -> Vec<u32> {
+        let map = graph.test_entry_points_reaching(&[FileId(file)]);
+        map[&FileId(file)].iter().map(|root| root.0).collect()
+    }
+
+    #[test]
+    fn per_entry_reach_applies_the_replacement_mask_of_each_test() {
+        // 0 is a test that mocks 2 and imports it through 1.
+        // 3 is a test that imports 2 directly.
+        let graph = build_reachability_graph_with_replacements(
+            4,
+            &[(0, 1, false), (1, 2, false), (3, 2, false)],
+            &[],
+            &[0, 3],
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(2),
+            }],
+        );
+
+        assert_eq!(reaching(&graph, 2), vec![3]);
+        assert_eq!(reaching(&graph, 1), vec![0]);
+    }
+
+    #[test]
+    fn per_entry_reach_keeps_a_masked_target_behind_a_commonjs_edge() {
+        let graph = build_reachability_graph_with_replacements(
+            3,
+            &[(0, 1, true), (2, 1, false)],
+            &[],
+            &[0, 2],
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(1),
+            }],
+        );
+
+        assert_eq!(reaching(&graph, 1), vec![0, 2]);
+    }
+
+    #[test]
+    fn per_entry_reach_without_masks_lists_each_test_that_imports_the_file() {
+        let graph = build_reachability_graph(5, &[(0, 1), (1, 2), (3, 2), (4, 1)], &[], &[0, 3]);
+
+        assert_eq!(reaching(&graph, 2), vec![0, 3]);
+        assert_eq!(reaching(&graph, 1), vec![0]);
+        assert!(reaching(&graph, 4).is_empty());
+    }
+
+    #[test]
+    fn per_entry_reach_spans_more_tests_than_one_profile_word() {
+        // 70 tests import file 70. Test 0 mocks it, so 69 tests reach it.
+        let tests: Vec<u32> = (0..70).collect();
+        let edges: Vec<(u32, u32, bool)> = tests.iter().map(|&test| (test, 70, false)).collect();
+        let graph = build_reachability_graph_with_replacements(
+            71,
+            &edges,
+            &[],
+            &tests,
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(70),
+            }],
+        );
+
+        assert_eq!(reaching(&graph, 70), (1..70).collect::<Vec<u32>>());
+        assert!(graph.modules[70].is_test_reachable());
+    }
+
+    #[test]
+    fn per_entry_reach_agrees_with_test_reachability() {
+        let graph = build_reachability_graph_with_replacements(
+            6,
+            &[(0, 1, false), (1, 2, false), (3, 4, false), (4, 2, false)],
+            &[],
+            &[0, 3],
+            &[
+                ResolvedReplacedModuleTarget {
+                    source_file: FileId(0),
+                    target_file: FileId(2),
+                },
+                ResolvedReplacedModuleTarget {
+                    source_file: FileId(3),
+                    target_file: FileId(4),
+                },
+            ],
+        );
+
+        let files: Vec<FileId> = (0..6).map(FileId).collect();
+        let map = graph.test_entry_points_reaching(&files);
+        for file in &files {
+            assert_eq!(
+                !map[file].is_empty(),
+                graph.modules[file.0 as usize].is_test_reachable(),
+                "file{}",
+                file.0
+            );
+        }
+        assert_eq!(map[&FileId(1)], vec![FileId(0)]);
+        assert!(map[&FileId(2)].is_empty());
     }
 }

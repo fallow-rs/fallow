@@ -78,6 +78,17 @@ npm ci --prefix tools/type-aware-sidecar
 
 CI installs the sidecar explicitly, so these tests pass there either way.
 
+The mutation runner companion has its own install, because its suite runs
+against Vitest 5 and Vitest 4 from `tools/mutation-runner/node_modules`:
+
+```bash
+npm ci --prefix tools/mutation-runner
+node --test tools/mutation-runner/test/*.test.mjs
+```
+
+The `fallow-api` end-to-end mutation test also uses this install. Without it,
+the test prints a skip message and passes.
+
 The coverage producer corpus pins four JavaScript coverage producers in a
 package of its own, so the root `npm ci` every contributor and every CI job
 runs stays untouched:

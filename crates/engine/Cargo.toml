@@ -20,6 +20,7 @@ fallow-config = { workspace = true }
 fallow-core = { workspace = true }
 fallow-extract = { workspace = true }
 fallow-graph = { workspace = true }
+fallow-mutation = { workspace = true }
 fallow-output = { workspace = true }
 fallow-security = { workspace = true }
 fallow-types = { workspace = true }

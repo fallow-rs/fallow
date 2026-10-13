@@ -10,6 +10,7 @@ use fallow_config::{
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::trace::{PipelineCounters, PipelineTimings};
 use rustc_hash::FxHashSet;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -437,6 +438,13 @@ impl BackendAggregatedPluginResult {
         &self.inner.active_plugins
     }
 
+    /// The plugin used-export rules, compiled for path lookups.
+    pub fn used_export_names(&self) -> BackendUsedExportNames {
+        BackendUsedExportNames {
+            inner: self.inner.used_export_names(),
+        }
+    }
+
     /// The plugin stage's advisories (`plugin-config-unreadable`,
     /// `plugin-effect-not-modeled`), rendered against the project root.
     pub fn plugin_diagnostics(&self, root: &Path) -> Vec<WorkspaceDiagnostic> {
@@ -446,6 +454,19 @@ impl BackendAggregatedPluginResult {
             .cloned()
             .map(|diagnostic| diagnostic.into_workspace_diagnostic(root))
             .collect()
+    }
+}
+
+/// The plugin used-export rules of one plugin run, compiled for path lookups.
+pub struct BackendUsedExportNames {
+    inner: fallow_core::plugins::UsedExportNames,
+}
+
+impl BackendUsedExportNames {
+    /// The export names that a plugin marks as used in the file at the
+    /// project-root-relative `rel_path`. The name `*` means each export.
+    pub fn names_for(&self, rel_path: &str) -> BTreeSet<&str> {
+        self.inner.names_for(rel_path)
     }
 }
 

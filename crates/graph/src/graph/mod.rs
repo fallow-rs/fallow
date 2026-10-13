@@ -359,6 +359,9 @@ struct TestReachabilityIndex {
     words_per_file: usize,
     reachable_profiles: Vec<u64>,
     masked_profiles: Vec<MaskedTestProfiles>,
+    /// The test roots of each profile, by profile index. The per-root query
+    /// reads it to find the replacement mask of one root.
+    profile_roots: Vec<Vec<FileId>>,
 }
 
 /// Sparse profile-mask row for one replaced target.
@@ -377,7 +380,29 @@ impl TestReachabilityIndex {
             words_per_file,
             reachable_profiles: vec![0; storage_len],
             masked_profiles: Vec::new(),
+            profile_roots: Vec::new(),
         }
+    }
+
+    /// The replaced targets of each test root that has a replacement, sorted
+    /// by target id.
+    fn root_masks(&self) -> FxHashMap<FileId, Vec<FileId>> {
+        let mut masks: FxHashMap<FileId, Vec<FileId>> = FxHashMap::default();
+        for row in &self.masked_profiles {
+            for (profile, roots) in self.profile_roots.iter().enumerate() {
+                let masked = row
+                    .profiles
+                    .get(profile / u64::BITS as usize)
+                    .is_some_and(|word| word & (1_u64 << (profile % u64::BITS as usize)) != 0);
+                if !masked {
+                    continue;
+                }
+                for &root in roots {
+                    masks.entry(root).or_default().push(row.target);
+                }
+            }
+        }
+        masks
     }
 
     fn set_sparse_masks(&mut self, masks: FxHashMap<FileId, Vec<u64>>) {

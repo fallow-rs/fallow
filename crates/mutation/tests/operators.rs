@@ -381,6 +381,61 @@ fn arithmetic_operator_finds_the_token_after_a_comment() {
 }
 
 #[test]
+fn arithmetic_operator_ends_a_line_comment_at_each_line_terminator() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x = total // items\n  / count;", &[("/", "*")]),
+        ("x = total // items\r  / count;", &[("/", "*")]),
+        ("x = total // items\r\n  / count;", &[("/", "*")]),
+        ("x = total // items\u{2028}  / count;", &[("/", "*")]),
+        ("x = total // items\u{2029}  / count;", &[("/", "*")]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::ArithmeticOperator),
+            expected(want),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn arithmetic_operator_separates_division_from_a_regex() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x = a / /re/.source;", &[("/", "*")]),
+        ("x = a / /re/g.source.length;", &[("/", "*")]),
+        ("x = /re/.source / b;", &[("/", "*")]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::ArithmeticOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn optional_chaining_on_other_number_literals() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x = 1e3?.toFixed;", &[("?.", " .")]),
+        ("x = 0x1?.toString;", &[("?.", " .")]),
+        ("x = 1n?.toString;", &[("?.", ".")]),
+        ("x = 1.5?.toFixed;", &[("?.", " .")]),
+        ("x = 1e3?.[k];", &[("?.", "")]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::OptionalChaining),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn optional_chaining_on_a_number_literal_stays_a_member_access() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         ("x = 1?.toString;", &[("?.", " .")]),

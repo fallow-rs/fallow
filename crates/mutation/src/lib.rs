@@ -189,6 +189,12 @@ pub enum MutationError {
     /// The source text or the instrumented text is larger than `u32::MAX`
     /// bytes.
     TooLarge,
+    /// The source declares a binding with a name that the prelude uses. See
+    /// [`RESERVED_PREFIX`].
+    ReservedName {
+        /// The declared name.
+        name: String,
+    },
 }
 
 impl std::fmt::Display for MutationError {
@@ -200,6 +206,10 @@ impl std::fmt::Display for MutationError {
             Self::TooLarge => {
                 f.write_str("the source or the instrumented output is larger than 4 GiB")
             }
+            Self::ReservedName { name } => write!(
+                f,
+                "the source declares `{name}`, a name that the mutation prelude reserves"
+            ),
         }
     }
 }
@@ -211,6 +221,16 @@ impl std::error::Error for MutationError {}
 const fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$') || byte >= 0x80
 }
+
+/// The name prefix that the instrumentation reserves.
+///
+/// The prelude declares [`ACTIVE_FUNCTION`] and [`HIT_FUNCTION`] at the top
+/// level of each instrumented file. A source that declares a binding with one
+/// of these two names, at any scope, gives [`MutationError::ReservedName`],
+/// because that binding would replace or shadow the prelude function. Other
+/// names with this prefix do not give an error now. Do not use names with
+/// this prefix in project code, because a later prelude can use them.
+pub const RESERVED_PREFIX: &str = "__fallow_m_";
 
 /// The prelude function that asks the runtime whether a mutant is active.
 ///
@@ -244,6 +264,9 @@ pub fn instrument(
     if parsed.fatal_error || parsed.diagnostics.has_errors() {
         let messages = parsed.diagnostics.iter().map(ToString::to_string).collect();
         return Err(MutationError::Parse { messages });
+    }
+    if let Some(name) = reserved_binding(&parsed.program) {
+        return Err(MutationError::ReservedName { name });
     }
     let collected = collect::collect(&parsed.program, source);
     let insertions = header_insertions(&parsed.program, source);
@@ -295,6 +318,28 @@ pub fn instrument(
         return Err(MutationError::TooLarge);
     }
     Ok(Instrumented { mutants, code, map })
+}
+
+/// The first binding in `program` with the name of a prelude function.
+fn reserved_binding(program: &oxc_ast::ast::Program<'_>) -> Option<String> {
+    use oxc_ast_visit::Visit;
+
+    #[derive(Default)]
+    struct Finder {
+        found: Option<String>,
+    }
+    impl<'a> Visit<'a> for Finder {
+        fn visit_binding_identifier(&mut self, it: &oxc_ast::ast::BindingIdentifier<'a>) {
+            let name = it.name.as_str();
+            if self.found.is_none() && (name == ACTIVE_FUNCTION || name == HIT_FUNCTION) {
+                self.found = Some(name.to_owned());
+            }
+        }
+    }
+
+    let mut finder = Finder::default();
+    finder.visit_program(program);
+    finder.found
 }
 
 /// The prelude: two function declarations that call the runtime.

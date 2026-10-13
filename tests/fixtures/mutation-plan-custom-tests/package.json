@@ -1,0 +1,9 @@
+{
+  "name": "mutation-plan-custom-tests",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

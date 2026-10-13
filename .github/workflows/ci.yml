@@ -124,6 +124,7 @@ jobs:
               - 'editors/vscode/src/generated/issue-types.ts'
               - 'editors/vscode/package.json'
               - 'tools/type-aware-sidecar/src/generated-protocol.mjs'
+              - 'tools/mutation-runner/src/**'
               - 'scripts/generate-all.mjs'
               - 'scripts/generation-transaction.mjs'
               - 'scripts/contract-surfaces.mjs'
@@ -205,6 +206,7 @@ jobs:
               - 'crates/mcp/tests/integration/typed_route_env_coverage.rs'
               - 'crates/config/**'
               - 'crates/types/**'
+              - 'crates/api/src/mutation/discovery.rs'
               - 'crates/api/src/similar_code/cache.rs'
               - 'crates/api/src/similar_code/transport.rs'
               - 'crates/api/src/type_aware/client/mod.rs'
@@ -862,6 +864,10 @@ jobs:
       - name: Type-aware sidecar package check
         working-directory: tools/type-aware-sidecar
         run: npm pack --dry-run --json
+      - name: Install mutation runner dependencies
+        run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
+      - name: Mutation runner tests
+        run: node --test tools/mutation-runner/test/*.test.mjs
       - name: Knowledge architecture
         run: npm run check:knowledge-architecture
       - name: Cross-repository telemetry documentation parity
