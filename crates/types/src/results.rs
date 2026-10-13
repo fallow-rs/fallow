@@ -4111,9 +4111,10 @@ pub enum PolicyRuleKind {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum PolicyViolationSeverity {
-    /// Fails CI (non-zero exit code).
+    /// Sets a non-zero exit code.
     Error,
-    /// Reported without failing CI.
+    /// Reported without an effect on the exit code. The dead-code count gate
+    /// of the GitHub Action counts it unless `fail-on-issues` is `false`.
     Warn,
 }
 

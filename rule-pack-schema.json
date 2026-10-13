@@ -241,15 +241,15 @@
       ]
     },
     "Severity": {
-      "description": "Severity level for rules.\n\nControls whether an issue type causes CI failure (`error`), is reported\nwithout failing (`warn`), or is suppressed entirely (`off`).",
+      "description": "Severity level for rules.\n\nControls whether an issue type sets a non-zero exit code (`error`), is\nreported without an effect on the exit code (`warn`), or is suppressed\nentirely (`off`). `--fail-on-issues` promotes `warn` to `error`. The\ndead-code count gate of the GitHub Action counts `warn` findings unless its\n`fail-on-issues` input is `false`.",
       "oneOf": [
         {
-          "description": "Report and fail CI (non-zero exit code).",
+          "description": "Report and set a non-zero exit code.",
           "type": "string",
           "const": "error"
         },
         {
-          "description": "Report but don't fail CI.",
+          "description": "Report without an effect on the exit code.",
           "type": "string",
           "const": "warn"
         },

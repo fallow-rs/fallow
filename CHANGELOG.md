@@ -136,6 +136,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The config schema now describes `warn` correctly.** The descriptions of
+  `Severity` and of the rules that default to `warn` said that `warn` does not
+  fail CI. A `warn` finding does not change the CLI exit code unless
+  `--fail-on-issues` is set. The dead-code count gate of the GitHub Action
+  counts `warn` findings, because `fail-on-issues` defaults to `true` and the
+  gate reads `total_issues`.
 - **A static member read through a namespace is no longer an unused class
   member.** Code such as `Layer.provide(Discord.ApiClient.layer)` did not count
   as a use of `ApiClient.layer`. Now a read of `Ns.Class.member` credits the
