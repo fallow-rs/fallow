@@ -1,0 +1,9 @@
+{
+  "name": "node-test-script-entries",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test --test-reporter ./test/reporter.mjs --test-reporter-destination stdout --test-coverage-include 'src/**/*.mjs' --import ./test/setup.mjs test/math.test.mjs"
+  }
+}

@@ -159,6 +159,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/nx_project_json.rs"]
 mod nx_project_json;
+#[path = "integration_test/opentelemetry_plugin.rs"]
+mod opentelemetry_plugin;
 #[path = "integration_test/orm_entity_reflection.rs"]
 mod orm_entity_reflection;
 #[path = "integration_test/package_dist_to_src_entries.rs"]

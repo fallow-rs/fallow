@@ -351,6 +351,53 @@ fn analyze_guide_serves_the_prose_kept_out_of_tools_list() {
     assert!(!analyze.contains("`[Section]` headers"));
 }
 
+/// The `audit` guide holds the per-flag prose that left its wire description
+/// and names every diff-risk rule. The description names the guide, so an
+/// agent can still reach the moved detail.
+#[test]
+fn audit_guide_serves_the_prose_kept_out_of_tools_list() {
+    let json = read_json("fallow://tools/audit");
+    assert_eq!(json["tool"], "audit");
+    let sections = json["sections"].as_array().expect("sections array");
+    let detail = |topic: &str| {
+        sections
+            .iter()
+            .find(|section| section["topic"] == topic)
+            .and_then(|section| section["detail"].as_str())
+            .unwrap_or_else(|| panic!("audit guide missing {topic}: {sections:?}"))
+            .to_owned()
+    };
+    let diff_risk = detail("diff_risk");
+    for rule in [
+        "weakened-tests",
+        "added-suppression",
+        "test-only-branch",
+        "diverged-clone-sibling",
+        "added-dependency",
+    ] {
+        assert!(
+            diff_risk.contains(&format!("`{rule}`")),
+            "the diff_risk section must name {rule}: {diff_risk}"
+        );
+    }
+    assert!(detail("styling").contains("css_deep"));
+    assert!(detail("baselines").contains("dead_code_baseline"));
+    assert!(detail("runtime_coverage").contains("min_invocations_hot"));
+    assert!(detail("FALLOW_DIFF_FILE").contains("added hunk"));
+
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let audit = tools
+        .iter()
+        .find(|tool| tool.name == "audit")
+        .and_then(|tool| tool.description.as_deref())
+        .expect("audit description");
+    assert!(audit.contains("fallow://tools/audit"));
+    assert!(audit.contains("diff_risk"));
+    assert!(!audit.contains("min_invocations_hot"));
+    assert!(!audit.contains("FALLOW_CHANGED_SINCE"));
+}
+
 /// The shortest run of guide words whose verbatim appearance in the terse
 /// catalogue is evidence of a paste rather than of two texts describing the
 /// same subject. Short runs collide honestly ("the fallow config file"); this

@@ -7312,7 +7312,7 @@ fn review_brief_weakening_flags_deleted_test_file_not_added_file() {
                 && signal["kind"] == "test-weakened"
                 && signal["evidence"]
                     .as_str()
-                    .is_some_and(|evidence| evidence.contains("it( removed"))
+                    .is_some_and(|evidence| evidence == "test cases: 2 -> 0")
         }),
         "the deleted test file yields the removed-tests signal: {weakening:?}"
     );
@@ -7321,6 +7321,113 @@ fn review_brief_weakening_flags_deleted_test_file_not_added_file() {
             .iter()
             .all(|signal| signal["file"] != "src/added.test.ts"),
         "a net-new file scans against an empty base and must not fabricate signals: {weakening:?}"
+    );
+}
+
+/// The review brief reports one weakening signal per guardrail that the
+/// change weakens: a skip marker, a removed test, an added suppression and a
+/// lowered coverage threshold. The signals come from the diff-risk report, so
+/// the brief and the `diff_risk` section agree.
+#[test]
+fn review_brief_weakening_reports_skip_removed_suppression_and_threshold() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "weakening-kinds", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { flag } from './flag';\nexport const run = (): boolean => flag;\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/flag.ts"), "export const flag = true;\n").unwrap();
+    fs::write(
+        dir.join("src/skip.test.ts"),
+        "it('a', () => { expect(1).toBe(1); });\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/removed.test.ts"),
+        "it('a', () => { expect(1).toBe(1); });\nit('b', () => { expect(2).toBe(2); });\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("vitest.config.ts"),
+        "export default { test: { coverage: { thresholds: {\n  lines: 90,\n} } } };\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+
+    fs::write(
+        dir.join("src/skip.test.ts"),
+        "it.skip('a', () => { expect(1).toBe(1); });\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/removed.test.ts"),
+        "it('a', () => { expect(1).toBe(1); });\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/flag.ts"),
+        "// eslint-disable-next-line no-constant-condition\nexport const flag = true;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("vitest.config.ts"),
+        "export default { test: { coverage: { thresholds: {\n  lines: 70,\n} } } };\n",
+    )
+    .unwrap();
+    commit_all(dir, "head");
+
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--brief",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "the brief always exits 0. stderr: {}",
+        output.stderr
+    );
+    let brief = parse_json(&output);
+    let weakening = brief["weakening"]
+        .as_array()
+        .expect("brief JSON carries a weakening array");
+    let has = |kind: &str, file: &str, evidence: &str| {
+        weakening.iter().any(|signal| {
+            signal["kind"] == kind
+                && signal["file"] == file
+                && signal["evidence"]
+                    .as_str()
+                    .is_some_and(|text| text.contains(evidence))
+        })
+    };
+    assert!(
+        has("test-weakened", "src/skip.test.ts", "it.skip"),
+        "skip marker: {weakening:?}"
+    );
+    assert!(
+        has("test-weakened", "src/removed.test.ts", "2 -> 1"),
+        "removed test: {weakening:?}"
+    );
+    assert!(
+        has("suppression-added", "src/flag.ts", "eslint-disable"),
+        "added suppression: {weakening:?}"
+    );
+    assert!(
+        has("threshold-lowered", "vitest.config.ts", "lines: 90 -> 70"),
+        "lowered threshold: {weakening:?}"
     );
 }
 

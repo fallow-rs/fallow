@@ -1342,8 +1342,11 @@ export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "
 /**
  * Severity level for rules.
  *
- * Controls whether an issue type causes CI failure (`error`), is reported
- * without failing (`warn`), or is suppressed entirely (`off`).
+ * Controls whether an issue type sets a non-zero exit code (`error`), is
+ * reported without an effect on the exit code (`warn`), or is suppressed
+ * entirely (`off`). `--fail-on-issues` promotes `warn` to `error`. The
+ * dead-code count gate of the GitHub Action counts `warn` findings unless its
+ * `fail-on-issues` input is `false`.
  */
 export type Severity = ("error" | "warn" | "off")
 /**

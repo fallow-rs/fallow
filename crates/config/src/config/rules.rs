@@ -4,15 +4,18 @@ use serde::{Deserialize, Serialize};
 
 /// Severity level for rules.
 ///
-/// Controls whether an issue type causes CI failure (`error`), is reported
-/// without failing (`warn`), or is suppressed entirely (`off`).
+/// Controls whether an issue type sets a non-zero exit code (`error`), is
+/// reported without an effect on the exit code (`warn`), or is suppressed
+/// entirely (`off`). `--fail-on-issues` promotes `warn` to `error`. The
+/// dead-code count gate of the GitHub Action counts `warn` findings unless its
+/// `fail-on-issues` input is `false`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-    /// Report and fail CI (non-zero exit code).
+    /// Report and set a non-zero exit code.
     #[default]
     Error,
-    /// Report but don't fail CI.
+    /// Report without an effect on the exit code.
     Warn,
     /// Don't detect or report.
     Off,
@@ -123,64 +126,80 @@ pub struct RulesConfig {
     /// project-wide. Defaults to `warn`, not `error` like the closed-set
     /// class/enum member rules: a store has an OPEN declaration surface
     /// (plugins, `$onAction`, dynamic dispatch) so analyzer confidence is
-    /// genuinely lower; warn encodes that without failing CI. Promotable to
+    /// genuinely lower. A `warn` finding does not change the CLI exit code
+    /// unless `--fail-on-issues` is set. The dead-code count gate of the GitHub
+    /// Action counts it unless `fail-on-issues` is `false`. Promotable to
     /// `error` once validated on a codebase.
     #[serde(default = "Severity::default_warn", alias = "unused-store-member")]
     pub unused_store_members: Severity,
     /// Vue `inject(KEY)` / Svelte `getContext(KEY)` whose symbol KEY is
     /// `provide`/`setContext`'d nowhere in the project (the
-    /// injected-never-provided dead-half). Defaults to `warn`, not `error`:
-    /// a DI key has an open provide surface (plugins, app-level provide) so
-    /// analyzer confidence is lower; warn encodes that without failing CI.
+    /// injected-never-provided dead-half). Defaults to `warn`, not `error`: a
+    /// DI key has an open provide surface (plugins, app-level provide) so
+    /// analyzer confidence is lower. A `warn` finding does not change the CLI
+    /// exit code unless `--fail-on-issues` is set. The dead-code count gate of
+    /// the GitHub Action counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unprovided-inject")]
     pub unprovided_injects: Severity,
     /// Vue/Svelte single-file component reachable in the module graph but
     /// rendered nowhere in the project (the imported-but-never-rendered
     /// dead-half). Defaults to `warn`, not `error`: a component can be rendered
     /// reflectively (dynamic `<component :is>`), so analyzer confidence is
-    /// lower; warn encodes that without failing CI.
+    /// lower. A `warn` finding does not change the CLI exit code unless
+    /// `--fail-on-issues` is set. The dead-code count gate of the GitHub Action
+    /// counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unrendered-component")]
     pub unrendered_components: Severity,
     /// Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React
     /// declared prop referenced nowhere inside its own component. The
-    /// single-component dead-input direction. Defaults to `warn`, not `error`: a
-    /// prop can be part of a deliberately-stable public component API, so
-    /// analyzer confidence is lower; warn encodes that without failing CI.
+    /// single-component dead-input direction. Defaults to `warn`, not `error`:
+    /// a prop can be part of a deliberately-stable public component API, so
+    /// analyzer confidence is lower. A `warn` finding does not change the CLI
+    /// exit code unless `--fail-on-issues` is set. The dead-code count gate of
+    /// the GitHub Action counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-component-prop")]
     pub unused_component_props: Severity,
     /// Used optional inputs absent from inspected callers. Requires manual review; off by default.
     #[serde(default = "Severity::default_off", alias = "absent-component-prop")]
     pub absent_component_props: Severity,
     /// Vue `<script setup>` `defineEmits` declared event emitted nowhere inside
-    /// its own single-file component (no `emit('<name>')` call). The single-file
-    /// dead-input direction. Defaults to `warn`, not `error`: an emit can be part
-    /// of a deliberately-stable public component API, so analyzer confidence is
-    /// lower; warn encodes that without failing CI.
+    /// its own single-file component (no `emit('<name>')` call). The
+    /// single-file dead-input direction. Defaults to `warn`, not `error`: an
+    /// emit can be part of a deliberately-stable public component API, so
+    /// analyzer confidence is lower. A `warn` finding does not change the CLI
+    /// exit code unless `--fail-on-issues` is set. The dead-code count gate of
+    /// the GitHub Action counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-component-emit")]
     pub unused_component_emits: Severity,
     /// Angular `@Input()` / signal `input()` / `model()` declared input read
-    /// nowhere inside its own component (neither the inline/external template nor
-    /// the class body). The single-file dead-input direction, the Angular
+    /// nowhere inside its own component (neither the inline/external template
+    /// nor the class body). The single-file dead-input direction, the Angular
     /// analogue of `unused-component-prop`. Defaults to `warn`, not `error`: an
     /// input can be part of a deliberately-stable public component API, so
-    /// analyzer confidence is lower; warn encodes that without failing CI.
+    /// analyzer confidence is lower. A `warn` finding does not change the CLI
+    /// exit code unless `--fail-on-issues` is set. The dead-code count gate of
+    /// the GitHub Action counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-component-input")]
     pub unused_component_inputs: Severity,
     /// Angular `@Output()` / signal `output()` declared output emitted nowhere
     /// inside its own component (no `this.<output>.emit(...)`). The single-file
     /// dead-output direction, the Angular analogue of `unused-component-emit`.
     /// Defaults to `warn`, not `error`: an output can be part of a
-    /// deliberately-stable public component API, so analyzer confidence is lower;
-    /// warn encodes that without failing CI.
+    /// deliberately-stable public component API, so analyzer confidence is
+    /// lower. A `warn` finding does not change the CLI exit code unless
+    /// `--fail-on-issues` is set. The dead-code count gate of the GitHub Action
+    /// counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-component-output")]
     pub unused_component_outputs: Severity,
-    /// Svelte component dispatching a custom event via `createEventDispatcher()`
-    /// whose event name is listened to nowhere in the analyzed project. The
-    /// cross-file dead-output direction (no eslint-plugin-svelte / svelte-check
-    /// rule covers the listener side). Defaults to `warn`, not `error`: a
-    /// dispatched event can be part of a deliberately-stable public component
-    /// API, or a listener may be added later, so analyzer confidence is lower;
-    /// warn encodes that without failing CI.
+    /// Svelte component dispatching a custom event via
+    /// `createEventDispatcher()` whose event name is listened to nowhere in the
+    /// analyzed project. The cross-file dead-output direction (no
+    /// eslint-plugin-svelte / svelte-check rule covers the listener side).
+    /// Defaults to `warn`, not `error`: a dispatched event can be part of a
+    /// deliberately-stable public component API, or a listener may be added
+    /// later, so analyzer confidence is lower. A `warn` finding does not change
+    /// the CLI exit code unless `--fail-on-issues` is set. The dead-code count
+    /// gate of the GitHub Action counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-svelte-event")]
     pub unused_svelte_events: Severity,
     /// Effect layer composed only into other layers that nothing uses. Gated
@@ -200,20 +219,25 @@ pub struct RulesConfig {
     pub unproduced_catch_tags: Severity,
     /// Next.js Server Action (an export of a `"use server"` file) referenced by
     /// no code in the project: no import-and-call, no `action={fn}` binding, no
-    /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified out
-    /// of `unused-export` for `"use server"` files. Defaults to `warn`, not
+    /// `<form action={fn}>`. Cross-graph dead-export direction, reclassified
+    /// out of `unused-export` for `"use server"` files. Defaults to `warn`, not
     /// `error`: the rule is new and false-negative-preferring, and reflective
-    /// action-dispatch shapes can hide a real consumer; warn encodes that
-    /// without failing CI until corpus-validated.
+    /// action-dispatch shapes can hide a real consumer. The rule stays at
+    /// `warn` until corpus validation. A `warn` finding does not change the CLI
+    /// exit code unless `--fail-on-issues` is set. The dead-code count gate of
+    /// the GitHub Action counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-server-action")]
     pub unused_server_actions: Severity,
     /// SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key
     /// read by no consumer: not off the sibling `+page.svelte`'s `data.<key>`,
     /// nor project-wide via `page.data.<key>` / `$page.data.<key>`. Cross-file
-    /// dead-input direction. Defaults to `warn`, not `error`: the rule is new and
-    /// false-negative-preferring (a whole-object `data` pass abstains), and a
-    /// load fetch can have side effects so deletion is a human call; warn encodes
-    /// that without failing CI until corpus-validated.
+    /// dead-input direction. Defaults to `warn`, not `error`: the rule is new
+    /// and false-negative-preferring (a whole-object `data` pass abstains), and
+    /// a load fetch can have side effects so deletion is a human call. The rule
+    /// stays at `warn` until corpus validation. A `warn` finding does not
+    /// change the CLI exit code unless `--fail-on-issues` is set. The dead-code
+    /// count gate of the GitHub Action counts it unless `fail-on-issues` is
+    /// `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-load-data-key")]
     pub unused_load_data_keys: Severity,
     /// React/Preact prop forwarded unchanged through `>= N` intermediate
@@ -451,8 +475,9 @@ pub struct RulesConfig {
     pub test_only_branch: Severity,
     /// An audit diff that edits one copy of a base clone group so that it no
     /// longer matches its siblings, while no sibling changed. `fallow audit`
-    /// only. Defaults to `warn`.
-    #[serde(default = "Severity::default_warn", alias = "diverged-clone-siblings")]
+    /// only. Opt-in; defaults to `off`, because copies often differ on
+    /// purpose.
+    #[serde(default = "Severity::default_off", alias = "diverged-clone-siblings")]
     pub diverged_clone_sibling: Severity,
     /// An audit diff that adds a dependency to a `package.json`. `fallow
     /// audit` only. Opt-in; defaults to `off`.
@@ -529,7 +554,7 @@ impl Default for RulesConfig {
             weakened_tests: Severity::Warn,
             added_suppression: Severity::Warn,
             test_only_branch: Severity::Warn,
-            diverged_clone_sibling: Severity::Warn,
+            diverged_clone_sibling: Severity::Off,
             added_dependency: Severity::Off,
         }
     }
@@ -1896,7 +1921,7 @@ mod tests {
         assert_eq!(rules.weakened_tests, Severity::Warn);
         assert_eq!(rules.added_suppression, Severity::Warn);
         assert_eq!(rules.test_only_branch, Severity::Warn);
-        assert_eq!(rules.diverged_clone_sibling, Severity::Warn);
+        assert_eq!(rules.diverged_clone_sibling, Severity::Off);
         assert_eq!(rules.added_dependency, Severity::Off);
 
         let json = r#"{"weakened-tests": "error", "added-dependency": "warn"}"#;

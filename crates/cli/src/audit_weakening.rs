@@ -1,125 +1,65 @@
-//! Weakening-signal pass (6.F), PROMOTED TO A HEADLINE per v6.
+//! Weakening signals of the advisory review brief.
 //!
-//! A diff-scoped base-vs-head pass over the changed files that flags the
-//! AI-era failure modes a green check hides: tests removed or skipped, coverage
-//! / thresholds lowered, suppressions added, security checks/steps removed.
+//! The brief reports the guardrails that a change weakens: tests removed,
+//! skipped or focused, coverage thresholds lowered, suppressions added and
+//! security steps removed from CI. The signals are attention pointers for a
+//! reviewer. They never gate, and the brief always exits 0.
 //!
-//! Always ADVISORY, reviewer-private, NEVER gates, NEVER auto-posted. It rides
-//! the brief envelope (exit-0 by construction) as a headline section.
-//!
-//! Honest scope (ADR-001, syntactic): these are line-shape heuristics over the
-//! base-vs-head text of changed files, NOT a semantic test-coverage proof. A
-//! signal is an attention pointer ("the diff weakened a guardrail here"), framed
-//! so a reviewer decides.
+//! The diff-risk rules of `fallow audit` (`fallow_api::diff_risk`) own the
+//! test, threshold and suppression facts. This module projects those findings
+//! onto the brief signals, so the brief and the `diff_risk` section agree.
+//! Only the removed-security-step scan of CI files is local to the brief.
 
+use fallow_output::{DiffRiskReport, DiffRiskRule, WeakenedTestsKind};
 pub use fallow_output::{WeakeningKind, WeakeningSignal};
 
-/// Detect skipped-test additions: an `it.skip` / `xit` / `describe.skip` /
-/// `.only` token present in head but not base. `.only` narrows the run to a
-/// subset, silently excluding siblings, so it counts as a weakening too.
+/// Project the findings of a diff-risk report onto weakening signals.
+///
+/// - `weakened-tests` maps to `test-weakened`, except a less strict coverage
+///   threshold, which maps to `threshold-lowered`.
+/// - `added-suppression` maps to `suppression-added`.
+///
+/// The other diff-risk rules are not weakening signals.
 #[must_use]
-pub fn detect_test_weakening(base: &str, head: &str) -> Vec<String> {
-    const SKIP_TOKENS: &[&str] = &[
-        "it.skip",
-        "test.skip",
-        "describe.skip",
-        "xit(",
-        "xdescribe(",
-        "it.only",
-        "test.only",
-        "describe.only",
-    ];
-    let mut signals = Vec::new();
-    for token in SKIP_TOKENS {
-        let head_count = count_token(head, token);
-        let base_count = count_token(base, token);
-        if head_count > base_count {
-            signals.push((*token).to_string());
-        }
-    }
-    signals
+pub fn signals_from_diff_risk(report: &DiffRiskReport) -> Vec<WeakeningSignal> {
+    report
+        .findings
+        .iter()
+        .filter_map(|finding| {
+            let (kind, evidence) = match (finding.rule, finding.kind) {
+                (DiffRiskRule::WeakenedTests, Some(WeakenedTestsKind::CoverageThreshold)) => {
+                    (WeakeningKind::ThresholdLowered, finding.evidence.clone())
+                }
+                (DiffRiskRule::WeakenedTests, Some(WeakenedTestsKind::SkipOnly)) => (
+                    WeakeningKind::TestWeakened,
+                    format!("{} added", finding.evidence),
+                ),
+                (DiffRiskRule::WeakenedTests, _) => {
+                    (WeakeningKind::TestWeakened, finding.evidence.clone())
+                }
+                (DiffRiskRule::AddedSuppression, _) => (
+                    WeakeningKind::SuppressionAdded,
+                    format!("{} added", finding.evidence),
+                ),
+                (
+                    DiffRiskRule::TestOnlyBranch
+                    | DiffRiskRule::DivergedCloneSibling
+                    | DiffRiskRule::AddedDependency,
+                    _,
+                ) => return None,
+            };
+            Some(WeakeningSignal {
+                kind,
+                file: finding.path.clone(),
+                evidence,
+            })
+        })
+        .collect()
 }
 
-/// Detect net-removed tests: a `it(` / `test(` / `describe(` callsite count that
-/// dropped between base and head (a test deleted).
-#[must_use]
-pub fn detect_removed_tests(base: &str, head: &str) -> Vec<String> {
-    const TEST_TOKENS: &[&str] = &["it(", "test(", "describe("];
-    let mut signals = Vec::new();
-    for token in TEST_TOKENS {
-        let base_count = count_token(base, token);
-        let head_count = count_token(head, token);
-        if base_count > head_count {
-            signals.push(format!("{token} removed ({base_count} -> {head_count})"));
-        }
-    }
-    signals
-}
-
-/// Detect added suppressions: a `fallow-ignore` / `eslint-disable` / `@ts-ignore`
-/// / `@ts-expect-error` count that increased between base and head. Only counts
-/// occurrences on a COMMENT line (a line containing `//`, `#`, `/*`, `*`, or
-/// `<!--`), since a real suppression directive always lives in a comment. This
-/// keeps the token list's own definition (e.g. the string array in this file)
-/// from self-flagging, the only false-positive class the real-world smoke hit.
-#[must_use]
-pub fn detect_added_suppressions(base: &str, head: &str) -> Vec<String> {
-    const SUPPRESS_TOKENS: &[&str] = &[
-        "fallow-ignore",
-        "eslint-disable",
-        "@ts-ignore",
-        "@ts-expect-error",
-        "biome-ignore",
-        "prettier-ignore",
-    ];
-    let mut signals = Vec::new();
-    for token in SUPPRESS_TOKENS {
-        let base_count = count_token_in_comments(base, token);
-        let head_count = count_token_in_comments(head, token);
-        if head_count > base_count {
-            signals.push(format!("{token} added ({base_count} -> {head_count})"));
-        }
-    }
-    signals
-}
-
-/// Detect lowered numeric thresholds: a config key whose numeric value decreased
-/// between base and head. Scans common coverage/threshold key names; a key
-/// present in both with a strictly smaller head value is a weakening.
-#[must_use]
-pub fn detect_lowered_thresholds(base: &str, head: &str) -> Vec<String> {
-    const THRESHOLD_KEYS: &[&str] = &[
-        "branches",
-        "functions",
-        "lines",
-        "statements",
-        "minScore",
-        "min-score",
-        "maxCrap",
-        "max-crap",
-        "minCoverage",
-        "min-coverage",
-        "coverageThreshold",
-        "threshold",
-    ];
-    let mut signals = Vec::new();
-    for key in THRESHOLD_KEYS {
-        let (Some(base_val), Some(head_val)) = (
-            first_numeric_for_key(base, key),
-            first_numeric_for_key(head, key),
-        ) else {
-            continue;
-        };
-        if head_val < base_val {
-            signals.push(format!("{key}: {base_val} -> {head_val}"));
-        }
-    }
-    signals
-}
-
-/// Detect removed security CI steps: a line invoking a security scanner / audit
-/// step that was present in base but is gone in head. Scoped to CI files by the
-/// caller; here we count net-removed scanner-invoking lines.
+/// Detect removed security CI steps: a line that invokes a security scanner
+/// or an audit step, present in base and gone in head. The caller scopes the
+/// scan to CI files.
 #[must_use]
 pub fn detect_removed_security_steps(base: &str, head: &str) -> Vec<String> {
     const SECURITY_TOKENS: &[&str] = &[
@@ -135,19 +75,15 @@ pub fn detect_removed_security_steps(base: &str, head: &str) -> Vec<String> {
         "dependency-review",
         "osv-scanner",
     ];
-    let mut signals = Vec::new();
-    for token in SECURITY_TOKENS {
-        let base_count = count_token(base, token);
-        let head_count = count_token(head, token);
-        if base_count > head_count {
-            signals.push(format!("{token} step removed"));
-        }
-    }
-    signals
+    SECURITY_TOKENS
+        .iter()
+        .filter(|token| base.matches(**token).count() > head.matches(**token).count())
+        .map(|token| format!("{token} step removed"))
+        .collect()
 }
 
-/// Whether a path looks like a CI workflow file (where security-step removal is
-/// meaningful).
+/// Whether a path looks like a CI workflow file, where a removed security
+/// step is meaningful.
 #[must_use]
 pub fn is_ci_file(rel_path: &str) -> bool {
     rel_path.contains(".github/workflows/")
@@ -155,145 +91,129 @@ pub fn is_ci_file(rel_path: &str) -> bool {
         || rel_path.ends_with(".gitlab-ci.yaml")
 }
 
-/// Count occurrences of `token` in `src`.
-fn count_token(src: &str, token: &str) -> usize {
-    src.matches(token).count()
-}
-
-/// Count occurrences of `token` only on lines that look like a comment (a real
-/// suppression directive is always commented). Sums per-line matches so multiple
-/// suppressions on one line still count.
-fn count_token_in_comments(src: &str, token: &str) -> usize {
-    src.lines()
-        .filter(|line| line_is_comment(line))
-        .map(|line| line.matches(token).count())
-        .sum()
-}
-
-/// Whether a line contains a comment marker (`//`, `#`, `/*`, a leading `*`
-/// continuation, or `<!--`). Conservative: any of these makes the line eligible.
-fn line_is_comment(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    line.contains("//")
-        || line.contains("/*")
-        || line.contains("<!--")
-        || trimmed.starts_with('#')
-        || trimmed.starts_with('*')
-}
-
-/// Find the first numeric value following `"<key>":` or `<key>:` or `<key> =`
-/// anywhere in `src`. Returns the parsed `f64`, or `None` when the key is absent
-/// or the value is not numeric. Tolerant of JSON/JSONC/TOML/YAML shapes, both
-/// inline (`{ "branches": 90 }`) and per-line. Matches the key at a word
-/// boundary (preceded by a quote, whitespace, `{`, or `,`) so `branches` does
-/// not match a longer key that merely ends in `branches`.
-fn first_numeric_for_key(src: &str, key: &str) -> Option<f64> {
-    let mut search_from = 0;
-    while let Some(rel) = src[search_from..].find(key) {
-        let start = search_from + rel;
-        search_from = start + key.len();
-        // Word-boundary check on the byte before the key.
-        let preceded_ok = start == 0
-            || src[..start]
-                .chars()
-                .next_back()
-                .is_some_and(|c| matches!(c, '"' | '\'' | ' ' | '\t' | '{' | ',' | '\n'));
-        if !preceded_ok {
-            continue;
-        }
-        let after = src[search_from..]
-            .trim_start_matches(['"', '\''])
-            .trim_start()
-            .trim_start_matches([':', '='])
-            .trim_start()
-            .trim_start_matches(['"', '\'']);
-        let num: String = after
-            .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
-            .collect();
-        if let Ok(value) = num.parse::<f64>() {
-            return Some(value);
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_output::{DiffRiskFinding, DiffRiskSeverity};
+
+    fn finding(
+        rule: DiffRiskRule,
+        kind: Option<WeakenedTestsKind>,
+        path: &str,
+        evidence: &str,
+    ) -> DiffRiskFinding {
+        DiffRiskFinding {
+            rule,
+            kind,
+            path: path.to_owned(),
+            line: Some(1),
+            message: String::new(),
+            evidence: evidence.to_owned(),
+            severity: DiffRiskSeverity::Warn,
+            introduced: true,
+            related: Vec::new(),
+            actions: Vec::new(),
+        }
+    }
+
+    fn project(findings: Vec<DiffRiskFinding>) -> Vec<(WeakeningKind, String, String)> {
+        signals_from_diff_risk(&DiffRiskReport { findings })
+            .into_iter()
+            .map(|signal| (signal.kind, signal.file, signal.evidence))
+            .collect()
+    }
+
+    fn signal(kind: WeakeningKind, file: &str, evidence: &str) -> (WeakeningKind, String, String) {
+        (kind, file.to_owned(), evidence.to_owned())
+    }
 
     #[test]
-    fn injected_it_skip_is_flagged() {
-        let base = "it('works', () => { expect(x).toBe(1); });";
-        let head = "it.skip('works', () => { expect(x).toBe(1); });";
-        let signals = detect_test_weakening(base, head);
-        assert!(
-            signals.iter().any(|s| s == "it.skip"),
-            "it.skip must be flagged: {signals:?}"
+    fn weakened_tests_map_to_test_and_threshold_signals() {
+        let signals = project(vec![
+            finding(
+                DiffRiskRule::WeakenedTests,
+                Some(WeakenedTestsKind::SkipOnly),
+                "a.test.ts",
+                "it.skip",
+            ),
+            finding(
+                DiffRiskRule::WeakenedTests,
+                Some(WeakenedTestsKind::RemovedTests),
+                "b.test.ts",
+                "test cases: 2 -> 1",
+            ),
+            finding(
+                DiffRiskRule::WeakenedTests,
+                Some(WeakenedTestsKind::AssertionDrop),
+                "c.test.ts",
+                "assertions: 3 -> 1",
+            ),
+            finding(
+                DiffRiskRule::WeakenedTests,
+                Some(WeakenedTestsKind::CoverageThreshold),
+                "vitest.config.ts",
+                "lines: 90 -> 70",
+            ),
+        ]);
+        assert_eq!(
+            signals,
+            vec![
+                signal(WeakeningKind::TestWeakened, "a.test.ts", "it.skip added"),
+                signal(
+                    WeakeningKind::TestWeakened,
+                    "b.test.ts",
+                    "test cases: 2 -> 1"
+                ),
+                signal(
+                    WeakeningKind::TestWeakened,
+                    "c.test.ts",
+                    "assertions: 3 -> 1"
+                ),
+                signal(
+                    WeakeningKind::ThresholdLowered,
+                    "vitest.config.ts",
+                    "lines: 90 -> 70"
+                ),
+            ]
         );
     }
 
     #[test]
-    fn only_narrowing_is_flagged() {
-        let base = "describe('a', () => {});";
-        let head = "describe.only('a', () => {});";
-        let signals = detect_test_weakening(base, head);
-        assert!(signals.iter().any(|s| s == "describe.only"));
-    }
-
-    #[test]
-    fn unchanged_tests_produce_no_signal() {
-        let src = "it('a', () => {}); it('b', () => {});";
-        assert!(detect_test_weakening(src, src).is_empty());
-        assert!(detect_removed_tests(src, src).is_empty());
-    }
-
-    #[test]
-    fn removed_test_is_flagged() {
-        let base = "it('a', () => {}); it('b', () => {});";
-        let head = "it('a', () => {});";
-        let signals = detect_removed_tests(base, head);
-        assert_eq!(signals.len(), 1);
-        assert!(signals[0].contains("it("));
-    }
-
-    #[test]
-    fn added_suppression_is_flagged() {
-        let base = "const x = 1;";
-        let head = "// eslint-disable-next-line\nconst x = 1;";
-        let signals = detect_added_suppressions(base, head);
-        assert!(signals.iter().any(|s| s.starts_with("eslint-disable")));
-    }
-
-    #[test]
-    fn lowered_threshold_is_flagged() {
-        let base = r#"{ "branches": 90, "lines": 85 }"#;
-        let head = r#"{ "branches": 70, "lines": 85 }"#;
-        let signals = detect_lowered_thresholds(base, head);
-        assert_eq!(signals, vec!["branches: 90 -> 70".to_string()]);
-    }
-
-    #[test]
-    fn lowered_min_score_is_flagged() {
-        let base = "minScore: 80";
-        let head = "minScore: 50";
-        let signals = detect_lowered_thresholds(base, head);
-        assert_eq!(signals, vec!["minScore: 80 -> 50".to_string()]);
-    }
-
-    #[test]
-    fn raised_threshold_is_not_flagged() {
-        let base = r#"{ "branches": 70 }"#;
-        let head = r#"{ "branches": 90 }"#;
-        assert!(detect_lowered_thresholds(base, head).is_empty());
+    fn added_suppression_maps_and_other_rules_drop() {
+        let signals = project(vec![
+            finding(
+                DiffRiskRule::AddedSuppression,
+                None,
+                "src/a.ts",
+                "eslint-disable",
+            ),
+            finding(
+                DiffRiskRule::TestOnlyBranch,
+                None,
+                "src/a.ts",
+                "process.env.NODE_ENV",
+            ),
+            finding(DiffRiskRule::DivergedCloneSibling, None, "src/b.ts", ""),
+            finding(DiffRiskRule::AddedDependency, None, "package.json", "x@1"),
+        ]);
+        assert_eq!(
+            signals,
+            vec![signal(
+                WeakeningKind::SuppressionAdded,
+                "src/a.ts",
+                "eslint-disable added"
+            )]
+        );
     }
 
     #[test]
     fn removed_security_step_is_flagged() {
         let base = "      - run: npm audit --audit-level=high\n      - run: build";
         let head = "      - run: build";
-        let signals = detect_removed_security_steps(base, head);
-        assert!(signals.iter().any(|s| s.contains("npm audit")));
+        assert_eq!(
+            detect_removed_security_steps(base, head),
+            vec!["npm audit step removed".to_owned()]
+        );
     }
 
     #[test]

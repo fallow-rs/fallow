@@ -4,7 +4,7 @@
 //! and they do not parse the file. A line counts as added when its trimmed
 //! text occurs more often in head than in base, so a moved line is not added.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// One detector hit on a head line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,6 +122,28 @@ pub fn added_lines<'a>(base: &str, head: &'a str) -> Vec<(u32, &'a str)> {
     added
 }
 
+/// The identifier tokens in the code of `src`. Comments and the content of
+/// string literals do not count, so a word in a test title or a comment is
+/// not an identifier. A token that starts with a digit is a number.
+#[must_use]
+pub fn code_identifiers(src: &str) -> FxHashSet<String> {
+    let mut found = FxHashSet::default();
+    for line in src.lines() {
+        let code = blank_string_literals(code_part(line));
+        found.extend(
+            code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+                .filter(|token| {
+                    token
+                        .bytes()
+                        .next()
+                        .is_some_and(|byte| !byte.is_ascii_digit())
+                })
+                .map(str::to_owned),
+        );
+    }
+    found
+}
+
 /// Added lines of a test file that add a skip or focus marker.
 #[must_use]
 pub fn skip_only_hits(base: &str, head: &str) -> Vec<LineHit> {
@@ -165,6 +187,18 @@ pub fn assertion_count(src: &str) -> usize {
         .sum()
 }
 
+/// The code lines that the change removed from a file, as `(assertion lines,
+/// code lines)`. Comment and blank lines do not count.
+#[must_use]
+pub fn removed_assertion_lines(base: &str, head: &str) -> (usize, usize) {
+    added_lines(head, base)
+        .into_iter()
+        .filter(|(_, line)| !code_part(line).trim().is_empty())
+        .fold((0, 0), |(asserts, code), (_, line)| {
+            (asserts + usize::from(assertion_count(line) > 0), code + 1)
+        })
+}
+
 /// Added comment lines that add a suppression.
 #[must_use]
 pub fn added_suppression_hits(base: &str, head: &str) -> Vec<LineHit> {
@@ -184,15 +218,75 @@ pub fn added_suppression_hits(base: &str, head: &str) -> Vec<LineHit> {
 /// environment.
 #[must_use]
 pub fn test_only_branch_hits(base: &str, head: &str) -> Vec<LineHit> {
+    let head_lines: Vec<&str> = head.lines().collect();
     added_lines(base, head)
         .into_iter()
         .filter_map(|(line, text)| {
-            test_environment_token(code_part(text)).map(|token| LineHit {
+            let code = code_part(text);
+            let token = test_environment_token(code)?;
+            if picks_env_file(code) || only_quiets_logs(&head_lines, line) {
+                return None;
+            }
+            Some(LineHit {
                 line,
                 evidence: token.to_owned(),
             })
         })
         .collect()
+}
+
+/// Whether a test-environment check picks an env file, such as
+/// `config({ path: NODE_ENV === 'test' ? '.env.test' : '.env' })`. That is
+/// configuration, not a code path.
+fn picks_env_file(code: &str) -> bool {
+    ["'.env", "\".env", "`.env"]
+        .iter()
+        .any(|literal| code.contains(literal))
+}
+
+/// The most lines that [`only_quiets_logs`] reads after a check.
+const MAX_GUARDED_LINES: usize = 12;
+
+/// Whether a negated test check (`!== 'test'`) guards only `console` calls.
+/// Then the tests only stay quiet, and production takes the same code path.
+fn only_quiets_logs(lines: &[&str], line: u32) -> bool {
+    let index = usize::try_from(line).unwrap_or(0).saturating_sub(1);
+    let Some(check) = lines.get(index) else {
+        return false;
+    };
+    let check = blank_string_literals(code_part(check));
+    if !check.contains("!=") {
+        return false;
+    }
+    if check.contains("console.") {
+        return true;
+    }
+    let mut body = lines
+        .iter()
+        .skip(index + 1)
+        .take(MAX_GUARDED_LINES)
+        .map(|line| code_part(line).trim())
+        .filter(|code| !code.is_empty() && !matches!(*code, "{" | ") {" | ")"));
+    if !body
+        .next()
+        .is_some_and(|first| first.starts_with("console."))
+    {
+        return false;
+    }
+    // The rest of the block holds only more `console` calls or the
+    // arguments of one: quoted text, closing parentheses or commas.
+    for code in body {
+        if code.starts_with('}') {
+            return true;
+        }
+        let continues = code.starts_with("console.")
+            || code.starts_with(['\'', '"', '`', ')', ','])
+            || code.ends_with(',');
+        if !continues {
+            return false;
+        }
+    }
+    false
 }
 
 /// Threshold values in a coverage or quality config that the change made
@@ -611,6 +705,26 @@ mod tests {
         let hits = added_suppression_hits("", head);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 1);
+    }
+
+    #[test]
+    fn quiet_logs_in_tests_are_not_hits() {
+        let head = "if (process.env.NODE_ENV !== 'test') {\n  console.error(message);\n}\nif (\n  status !== 'ok' &&\n  process.env.NODE_ENV !== 'test'\n) {\n  console.warn(\n    `not scheduled`,\n  );\n}\nif (process.env.NODE_ENV !== 'test') {\n  sendMetrics();\n}\n";
+        let lines: Vec<u32> = test_only_branch_hits("", head)
+            .iter()
+            .map(|hit| hit.line)
+            .collect();
+        assert_eq!(lines, vec![12]);
+    }
+
+    #[test]
+    fn test_env_file_selection_is_not_a_hit() {
+        let head = "config({ path: process.env.NODE_ENV === 'test' ? '.env.test' : '.env' });\nconst key = process.env.NODE_ENV === 'test' ? 'test:' : '';\n";
+        let lines: Vec<u32> = test_only_branch_hits("", head)
+            .iter()
+            .map(|hit| hit.line)
+            .collect();
+        assert_eq!(lines, vec![2]);
     }
 
     #[test]

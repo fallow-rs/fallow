@@ -200,6 +200,65 @@ const IMPACT_CLOSURE_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
     detail: r"Each coordination gap carries `search_visibility`, `reason`, and `search_as` for the consumed symbols. When a consumer uses more than one symbol, the worst level wins: `missed`, then `renamed`, then `found`. `search_symbol` names the entry of `consumed_symbols` that the three fields describe, `default` for a default export. The levels and reasons are the same as for `trace_export`: read fallow://tools/trace_export for their meaning.",
 }];
 
+const AUDIT_SECTIONS: &[ToolGuideSection] = &[
+    ToolGuideSection {
+        topic: "diff_risk",
+        summary: "The rules that report facts about the change itself.",
+        detail: r"The top-level `diff_risk` object holds a `findings` array. The rules compare the base text and the head text of each changed file, so every finding is introduced by the change. The object is absent when the change has no diff-risk finding.
+
+- `weakened-tests`: the change weakens tests. `kind` tells how: `skip-only` (a new skip or focus marker such as `it.skip` or `it.only`), `removed-tests` (fewer test cases across the changed test files), `assertion-drop` (fewer assertions in a test file), or `coverage-threshold` (a less strict coverage or quality threshold).
+- `added-suppression`: the change adds a lint, type-check, coverage, or Fallow suppression comment.
+- `test-only-branch`: the change adds a test-environment branch, such as a `NODE_ENV` check, to non-test source code.
+- `diverged-clone-sibling`: the change edits one copy of duplicated code, and its unchanged copies no longer match. `related` names the unchanged copies. This rule needs the base pass.
+- `added-dependency`: the change adds a dependency to a `package.json`. This rule is off by default.
+
+Each finding carries `rule`, `path`, an optional `line`, `message`, `evidence`, `severity`, and `actions`. An `error` finding fails the verdict, and a `warn` finding turns `pass` into `warn`. `attribution.diff_risk_introduced` counts the findings. The `rules` config sets the severity of each rule, and the rule name is also the suppression token. The actions only suppress (`suppress-line`, `suppress-file`, or `suppress-in-config`); none is auto-fixable. Review the change before you suppress a finding.",
+    },
+    ToolGuideSection {
+        topic: "styling",
+        summary: "What the default styling pass adds, and how css_deep changes it.",
+        detail: r"Styling analytics are on by default in audit. CSS and CSS-in-JS evidence can add `styling_findings`, `css_analytics`, and `styling_health` inside the nested `complexity` block. Set css_deep=false to skip project-wide styling reachability and keep the local styling checks. Set css_deep=true to turn it on again when the config turns it off. Styling actions are report-only: verify each one before you edit.",
+    },
+    ToolGuideSection {
+        topic: "coverage",
+        summary: "How to feed Istanbul coverage into CRAP scoring.",
+        detail: r"Set coverage to an Istanbul `coverage-final.json` path for accurate CRAP scoring in the health sub-analysis. Set coverage_root to an absolute coverage-data path prefix when the paths in the file need rebasing. CRAP findings in the `complexity` block carry `coverage_source`, and `summary.coverage_source_consistency` says whether the emitted sources are uniform or mixed.",
+    },
+    ToolGuideSection {
+        topic: "complexity",
+        summary: "The synthetic units and overrides in the audit `complexity` block.",
+        detail: r#"Complexity findings include Angular `<component>` rollups that fold the worst class method and the template into one ranked unit. Synthetic `<template>` findings cover Angular, Vue, Svelte, and Astro markup. Top-level Svelte `{#snippet}` blocks are scored as their own `<snippet:NAME>` units. Template-family units are not scored on the CRAP dimension. Module-scope branching goes into a synthetic `<module>` unit that feeds the aggregate metrics and the branching totals, but never becomes a finding. On `.svelte`, `.vue`, and `.astro` files, a template-family finding suppresses with `<!-- fallow-ignore-next-line complexity -->` at `placement: "above-template-anchor-line"`.
+
+When the config sets `health.thresholdOverrides`, audit complexity findings use the resolved local thresholds, and the `complexity` block includes `threshold_overrides` state. Read the fallow://tools/check_health guide for the `component_rollup` payload and the `threshold_overrides` rows."#,
+    },
+    ToolGuideSection {
+        topic: "group_by",
+        summary: "How to partition the audit results.",
+        detail: r#"Set group_by to "owner" (CODEOWNERS), "directory", "package" (workspace), or "section" to partition the results. The `section` mode reads GitLab CODEOWNERS `[Section]` headers and adds `owners` metadata to each group."#,
+    },
+    ToolGuideSection {
+        topic: "baselines",
+        summary: "How saved baselines keep old issues out of the verdict.",
+        detail: r"Set dead_code_baseline, health_baseline, and dupes_baseline to the baseline files that `fallow dead-code|health|dupes --save-baseline` wrote. Pre-existing issues on touched files then do not decide the verdict: only issues that are not in the matching baseline count.
+
+Set include_entry_exports=true to also report unused exports in entry files. This finds typos in framework exports, such as `meatdata` for `metadata`. The flag ORs with the `includeEntryExports` config value. explain_skipped only changes the human-format note about skipped default ignores; MCP JSON responses do not change.",
+    },
+    ToolGuideSection {
+        topic: "runtime_coverage",
+        summary: "How to fold runtime coverage into the same audit call.",
+        detail: r"Set runtime_coverage to a V8 coverage directory, a V8 JSON file, or an Istanbul `coverage-final.json` to add runtime-coverage findings to the audit. One call then gives the `hot-path-touched` verdict next to dead code and complexity. A single local capture is free; continuous or multi-capture monitoring needs an active license. The verdict is informational and does not change the exit code. Set min_invocations_hot=N to tune the hot-path threshold (default 100).
+
+For PR review, `runtime_coverage.verdict` puts `hot-path-touched` before `cold-code-detected`. The full set of signals, with no priority, is in `runtime_coverage.signals[]`.",
+    },
+    ToolGuideSection {
+        topic: "FALLOW_DIFF_FILE",
+        summary: "How a diff file and the manifest scope narrow the findings.",
+        detail: r"When `FALLOW_DIFF_FILE` (the path to a unified diff) is set in the environment of the agent process, every finding (dead code, complexity, duplication, boundary, and runtime-coverage hot paths) is narrowed to source lines inside an added hunk. Project-level findings in scope (unused dependencies, catalog entries, dependency overrides) skip the line filter, because they anchor at fixed `package.json` or `pnpm-workspace.yaml` lines that a PR rarely touches. When `FALLOW_DIFF_FILE` and `FALLOW_CHANGED_SINCE` are both set, the diff controls the line filter, and `--changed-since` still scopes file discovery.
+
+Dependency-level findings (unused, misplaced, type-only, or test-only dependencies, overrides, and catalog entries) are in audit scope only when the changed set holds the package manifest that declares them, workspace manifests included. Unlisted dependencies follow imports. Use `analyze` to see every dependency finding.",
+    },
+];
+
 /// Every tool with a long-form guide, in catalogue order.
 pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
@@ -209,6 +268,10 @@ pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
         tool: "check_health",
         sections: CHECK_HEALTH_SECTIONS,
+    },
+    ToolGuide {
+        tool: "audit",
+        sections: AUDIT_SECTIONS,
     },
     ToolGuide {
         tool: "get_cloud_runtime_context",

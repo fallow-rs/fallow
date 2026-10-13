@@ -1,0 +1,7 @@
+name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: deno test --allow-read ci-checks

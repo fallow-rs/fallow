@@ -1,0 +1,8 @@
+{
+  "name": "bun-test-script-entries",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test ./test/total.test.mjs"
+  }
+}

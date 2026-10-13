@@ -2051,6 +2051,7 @@ mod obsidian;
 mod openapi_ts;
 mod opencode;
 mod opennext_cloudflare;
+mod opentelemetry;
 mod oxfmt;
 mod oxlint;
 mod pandacss;

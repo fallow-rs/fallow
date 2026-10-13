@@ -42,16 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported.
   `diverged-clone-sibling` reports an edit to one copy of duplicated code when
   the other copies did not change. `added-dependency` reports a new
-  `package.json` dependency and is off by default. The other four rules are
-  `warn` by default. Set a rule to `error` to fail the audit, or suppress one
-  finding with `// fallow-ignore-next-line <rule>`. The findings are in the new
-  `diff_risk` JSON section, in SARIF, in CodeClimate, in GitHub annotations,
-  in the GitHub job summary and in the MCP `audit` tool. Compact output adds
-  one record for each finding and markdown output adds a table. The human
-  status line, the issue count of the GitHub Action and the GitLab template,
-  and the VS Code audit status bar count the findings too. `added-dependency`
-  has no suppression comment, because `package.json` cannot hold one: set the
-  rule to `off` for the path in an `overrides` entry.
+  `package.json` dependency. These two rules are off by default. The other
+  three rules are `warn` by default. Set a rule to `error` to fail the audit,
+  or suppress one finding with `// fallow-ignore-next-line <rule>`. The
+  findings are in the new `diff_risk` JSON section, in SARIF, in CodeClimate,
+  in GitHub annotations, in the GitHub job summary and in the MCP `audit`
+  tool. Compact output adds one record for each finding and markdown output
+  adds a table. The human status line, the issue count of the GitHub Action
+  and the GitLab template, and the VS Code audit status bar count the findings
+  too. `added-dependency` has no suppression comment, because `package.json`
+  cannot hold one: set the rule to `off` for the path in an `overrides` entry.
 - **`fallow health` now reports hidden change coupling and change
   dispersion.** A hidden pair is two files that change together in most
   commits while no import or re-export chain connects them. An agent that
@@ -112,8 +112,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@effect/platform-node` and `@effect/platform-bun` at runtime, so these
   packages are credited. The extraction cache version changes, so the first
   run after the upgrade parses each file again.
+- **OpenTelemetry SDK callbacks are no longer reported as unused class
+  members.** A new built-in `opentelemetry` plugin activates on any
+  `@opentelemetry/*` dependency. The SDK calls the methods of a class that
+  implements `Sampler`, `SpanProcessor`, `SpanExporter`,
+  `PushMetricExporter`, `LogRecordProcessor`, `LogRecordExporter`,
+  `ContextManager`, `TextMapPropagator`, `TextMapGetter` or `TextMapSetter`.
+  The plugin credits only the methods of that interface. A class that extends
+  `MetricReader` gets credit for `onInitialized`, `onForceFlush` and
+  `onShutdown`. Other members of the class stay reportable.
 
 ### Changed
+
+- **The MCP `audit` tool has a `fallow://tools/audit` guide.** The guide
+  names the five diff-risk rules and holds the styling, coverage, baseline,
+  grouping, runtime-coverage and `FALLOW_DIFF_FILE` detail. The `audit` tool
+  description is now a short summary that points to the guide. (#3369)
 
 - **Workspace dependency declaration guidance is clearer.** Root imports of npm
   workspace packages need a dependency declaration; npm links resolve imports
@@ -147,6 +161,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The review brief and the audit report the same weakened guardrails.**
+  The `weakening` section of `fallow audit --brief` and `fallow review` now
+  reads its test, threshold and suppression signals from the `diff_risk`
+  findings of the same run. Before, a second detector could report a moved
+  test as removed, a lower `maxCrap` as a lowered threshold, or a
+  suppression token in a Markdown file as an added suppression. The JSON keys
+  do not change. The `evidence` text now follows the diff-risk evidence, for
+  example `test cases: 2 -> 1`. (#3368)
+
+- **`weakened-tests` reads JavaScript-family test files only.** A test file
+  in another language, such as a Rust integration test under `tests/`, can
+  hold `it.skip` or `it(` text in a string. The rule no longer reports a skip
+  marker or removed tests from such a file, and such a file no longer changes
+  the test-case totals of the change.
+
+- **The GitLab template counts styling findings like the GitHub Action.**
+  Under `gate: all`, the issue count now includes every styling finding.
+  Under `gate: new-only`, it includes the introduced styling findings. Before,
+  `FALLOW_FAIL_ON_ISSUES` did not see them. (#3370)
+
+- **A test run with a directory or without file arguments now credits its
+  test files.** A script or a CI `run` line such as `bun test src/`,
+  `deno test`, `deno test tests` or `node --test test/` made no file a test
+  entry point. So the code that these tests import got coverage tier `none`
+  in `fallow health` and `fallow audit` CRAP scores. Now a directory
+  argument gives the default test file patterns of the runner inside that
+  directory. A `bun test` or `deno test` run with no file argument gives the
+  default patterns of the working directory. Fallow tells a directory from a
+  file by its syntax: the argument ends with `/`, or its last segment has no
+  extension and no glob character. Other files in the directory do not
+  become entry points, except below a directory named `test`, where
+  `node --test` runs every source file. The `node --test <dir>` form follows
+  Node 20. Node 21 and later report an error for a directory argument. A Bun
+  name filter such as `bun test parser` adds no pattern. The test files that
+  these runs find, and the files that they import, are no longer reported as
+  unused files in `fallow dead-code`.
+- **The config schema now describes `warn` correctly.** The descriptions of
+  `Severity` and of the rules that default to `warn` said that `warn` does not
+  fail CI. A `warn` finding does not change the CLI exit code unless
+  `--fail-on-issues` is set. The dead-code count gate of the GitHub Action
+  counts `warn` findings, because `fail-on-issues` defaults to `true` and the
+  gate reads `total_issues`.
+- **The diff-risk rules of `fallow audit` report less noise.** A check over
+  merged pull requests of five public projects found these causes, and the
+  rules now handle them:
+  - `weakened-tests` does not report removed tests or assertions when the
+    lost test lines name code that the same change removed, such as a deleted
+    function, error code or fixture directory. The tests went with that code.
+    A name of a deleted file that a changed file still holds, a name that a
+    deleted file only imports, a directory that still exists, and a reserved
+    word such as `import` do not count.
+  - `weakened-tests` reports an assertion drop only when assertions are at
+    least half of the code lines that the test file lost. A test rewrite that
+    moves setup checks into a shared helper does not report.
+  - `added-suppression` does not report files below a fixture or generated
+    directory, such as a vendored `fixture/generated/schema.ts` with a
+    `// @ts-nocheck` header.
+  - `test-only-branch` does not report a check that only keeps `console`
+    output quiet in tests, or a check that picks a `.env.test` file.
+  - `diverged-clone-sibling` does not report an edit to a story copy
+    (`*.stories.*`, `*.story.*`), the same as a test copy.
+  - `diverged-clone-sibling` is now `off` by default. Most of its findings
+    were copies that differ on purpose, for example an input and an output
+    type, a legacy copy, or one component that gets a new feature. Set the
+    rule to `warn` or `error` to review every diverged copy.
+  (Closes [#3367](https://github.com/fallow-rs/fallow/issues/3367))
 - **A static member read through a namespace is no longer an unused class
   member.** Code such as `Layer.provide(Discord.ApiClient.layer)` did not count
   as a use of `ApiClient.layer`. Now a read of `Ns.Class.member` credits the
@@ -167,6 +247,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An `override` gets no new credit when the base is a project class, a mixin
   call that takes a class (`extends Mixin(LocalBase)`), an unresolved import,
   or a local class with the name of a global.
+- **Files that `node --test`, `bun test` or `deno test` runs are now test
+  entry points.** A package.json script or a CI `run` line such as
+  `node --test scripts/*.test.mjs` made these files entry points with the
+  support role only. So the code that they import got coverage tier `none` in
+  `fallow health` and `fallow audit` CRAP scores. Now the file and glob
+  arguments of these runners have the test role, and the imported code gets
+  the static coverage estimate. With no file arguments, the files that match
+  the default `node --test` patterns are test entry points too. `bun test` in
+  a script named `test` works the same way. A flag value is not a test file:
+  a reporter, a loader, a global setup module and a
+  `--test-coverage-include` glob keep no test role. A setup file such as
+  `--import ./setup.mjs` runs in the test process, so it is test code too.
+  A `--test-coverage-include` or `--test-coverage-exclude` glob also no
+  longer makes the files that it matches entry points.
 - **The config JSON Schema now accepts `extends` as a single string.** The
   loader already accepted `"extends": "./base.json"` and the array form. The
   schema allowed only the array, so editors flagged a valid config. The

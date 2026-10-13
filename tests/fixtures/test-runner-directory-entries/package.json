@@ -1,0 +1,10 @@
+{
+  "name": "test-runner-directory-entries",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:bun": "bun test src/",
+    "test:deno": "cd deno && deno test",
+    "test:node": "node --test test/"
+  }
+}

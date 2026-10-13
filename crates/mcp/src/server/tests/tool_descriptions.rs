@@ -88,7 +88,7 @@ const MAX_TOOL_DESCRIPTION_BYTES: usize = 2_000;
 ///
 /// The target is 35_000, reached by moving one tool's per-flag prose into its
 /// `fallow://tools/{name}` guide at a time.
-const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 57_747;
+const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 54_888;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_DESCRIPTION_BYTES`].
 ///
@@ -192,7 +192,6 @@ const DESCRIPTION_BUDGET_EXCEPTIONS: &[(&str, usize)] = &[
     ("code_execute", 4_650),
     ("fix_apply", 4_200),
     ("check_health", 5_500),
-    ("audit", 5_150),
     ("fix_preview", 2_750),
     ("analyze", 2_150),
     ("check_runtime_coverage", 2_350),

@@ -4294,87 +4294,86 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
     }));
 }
 
-/// The weakening scan must never conflate a head-read FAILURE with removed
-/// content: a file deleted at head genuinely scans against empty head content,
-/// a net-new file (missing at base) scans against an empty base, and head
+/// The security-step scan must never conflate a head-read failure with removed
+/// content: a CI file deleted at head scans against empty head content, a
+/// net-new CI file (missing at base) scans against an empty base, and head
 /// bytes that are not valid UTF-8 are read lossily instead of collapsing to an
-/// empty string that fabricates an `it( removed` signal.
+/// empty string that fabricates a removed-step signal.
 #[test]
-fn weakening_scan_distinguishes_deleted_head_from_unreadable_content() {
+fn security_step_scan_distinguishes_deleted_head_from_unreadable_content() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "weakening-head-reads");
     let repo = dunce::canonicalize(&repo).expect("repo root should canonicalize");
-    let tests = "it('a', () => {});\nit('b', () => {});\n";
-    fs::write(repo.join("deleted.test.ts"), tests).expect("fixture write");
-    fs::write(repo.join("lossy.test.ts"), tests).expect("fixture write");
+    let workflows = repo.join(".github/workflows");
+    fs::create_dir_all(&workflows).expect("workflow dir");
+    let steps = "jobs:\n  ci:\n    steps:\n      - run: npm audit\n";
+    fs::write(workflows.join("deleted.yml"), steps).expect("fixture write");
+    fs::write(workflows.join("lossy.yml"), steps).expect("fixture write");
     git(&repo, &["add", "."]);
     git(
         &repo,
-        &["-c", "commit.gpgsign=false", "commit", "-m", "tests"],
+        &["-c", "commit.gpgsign=false", "commit", "-m", "workflows"],
     );
 
-    fs::remove_file(repo.join("deleted.test.ts")).expect("fixture delete");
-    let mut lossy = tests.as_bytes().to_vec();
-    lossy.extend_from_slice(b"// ");
+    fs::remove_file(workflows.join("deleted.yml")).expect("fixture delete");
+    let mut lossy = steps.as_bytes().to_vec();
+    lossy.extend_from_slice(b"# ");
     lossy.extend_from_slice(&[0xFF, 0xFE, b'\n']);
-    fs::write(repo.join("lossy.test.ts"), lossy).expect("fixture write");
-    fs::write(repo.join("added.test.ts"), "it('new', () => {});\n").expect("fixture write");
+    fs::write(workflows.join("lossy.yml"), lossy).expect("fixture write");
+    fs::write(workflows.join("added.yml"), "jobs: {}\n").expect("fixture write");
 
     let changed: FxHashSet<PathBuf> = [
-        repo.join("deleted.test.ts"),
-        repo.join("lossy.test.ts"),
-        repo.join("added.test.ts"),
+        workflows.join("deleted.yml"),
+        workflows.join("lossy.yml"),
+        workflows.join("added.yml"),
     ]
     .into_iter()
     .collect();
-    let signals = compute_weakening_signals(&repo, "HEAD", &changed);
+    let signals = compute_security_step_signals(&repo, "HEAD", &changed);
 
     assert!(
         signals
             .iter()
-            .any(|signal| signal.file == "deleted.test.ts"
-                && signal.evidence.contains("it( removed")),
+            .any(|signal| signal.file == ".github/workflows/deleted.yml"
+                && signal.evidence == "npm audit step removed"),
         "a file deleted at head scans against empty head content: {signals:?}"
     );
     assert!(
-        !signals.iter().any(|signal| signal.file == "lossy.test.ts"),
-        "invalid UTF-8 head bytes are read lossily, never fabricated as removed tests: {signals:?}"
+        !signals
+            .iter()
+            .any(|signal| signal.file == ".github/workflows/lossy.yml"),
+        "invalid UTF-8 head bytes are read lossily, never fabricated as removed steps: {signals:?}"
     );
     assert!(
-        !signals.iter().any(|signal| signal.file == "added.test.ts"),
+        !signals
+            .iter()
+            .any(|signal| signal.file == ".github/workflows/added.yml"),
         "a net-new file scans against an empty base without fabricated signals: {signals:?}"
     );
 }
 
-/// A head file that exists but cannot be read (permission denied) is skipped
-/// entirely; scanning it as empty content would fabricate a removed-tests
-/// signal for every test the file still contains.
+/// A head CI file that exists but cannot be read (permission denied) is
+/// skipped; scanning it as empty content would fabricate a removed-step
+/// signal for every step the file still contains.
 #[cfg(unix)]
 #[test]
-fn weakening_scan_skips_permission_denied_head_file() {
+fn security_step_scan_skips_permission_denied_head_file() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "weakening-unreadable-head");
     let repo = dunce::canonicalize(&repo).expect("repo root should canonicalize");
-    fs::write(
-        repo.join("guarded.test.ts"),
-        "it('a', () => {});\nit('b', () => {});\n",
-    )
-    .expect("fixture write");
+    fs::write(repo.join(".gitlab-ci.yml"), "audit:\n  script: npm audit\n").expect("fixture write");
     git(&repo, &["add", "."]);
-    git(
-        &repo,
-        &["-c", "commit.gpgsign=false", "commit", "-m", "tests"],
-    );
+    git(&repo, &["-c", "commit.gpgsign=false", "commit", "-m", "ci"]);
     fs::set_permissions(
-        repo.join("guarded.test.ts"),
+        repo.join(".gitlab-ci.yml"),
         fs::Permissions::from_mode(0o000),
     )
     .expect("permissions should be set");
 
-    let changed: FxHashSet<PathBuf> = std::iter::once(repo.join("guarded.test.ts")).collect();
-    let signals = compute_weakening_signals(&repo, "HEAD", &changed);
+    let changed: FxHashSet<PathBuf> = std::iter::once(repo.join(".gitlab-ci.yml")).collect();
+    let signals = compute_security_step_signals(&repo, "HEAD", &changed);
 
     assert!(
         signals.is_empty(),
@@ -4479,33 +4478,4 @@ fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
         "the run exits 1 on this gate, so the envelope must state it: {}",
         json["gate_outcomes"]
     );
-}
-
-/// Test-weakening signals come from test code only. A mock or a fixture that
-/// drops a `regex.test(` call did not remove a test.
-#[test]
-fn test_weakening_ignores_test_support_files() {
-    let base = "export const isId = (s) => /^id-/.test(s) && /-x$/.test(s);\n";
-    let head = "export const isId = (s) => /^id-/.test(s);\n";
-    let test_weakened = |path: &str| -> bool {
-        weakening_signals_for_file(std::path::Path::new("/project"), path, base, head)
-            .iter()
-            .any(|signal| signal.kind == weakening::WeakeningKind::TestWeakened)
-    };
-
-    assert!(
-        test_weakened("src/__tests__/ids.ts"),
-        "control: a test file with fewer `test(` calls is a weakening signal"
-    );
-    for support in [
-        "src/__mocks__/ids.ts",
-        "src/__fixtures__/ids.ts",
-        "fixtures/ids.ts",
-        "src/ids.fixture.ts",
-    ] {
-        assert!(
-            !test_weakened(support),
-            "{support} is test support, not test code"
-        );
-    }
 }

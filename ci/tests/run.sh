@@ -2185,6 +2185,25 @@ for diff_risk_gate in new-only all; do
     "audit count: the $diff_risk_gate gate counts diff-risk findings"
 done
 
+# Styling findings count like the GitHub Action counts them: every styling
+# finding under the all gate, and the introduced ones under new-only.
+printf '%s\n' '{"command":"audit","verdict":"warn","attribution":{"gate":"all"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0},"complexity":{"styling_findings":[{"effective_severity":"warn"},{"effective_severity":"warn"},{"effective_severity":"warn"}]}}' \
+  > "$GATE_WORK/audit-styling-all.json"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$GATE_WORK/audit-styling-all.json" \
+  FALLOW_COMMAND=audit \
+  FALLOW_FAIL_ON_ISSUES=false)
+assert_contains "$OUT" "Found 3 issues" \
+  "audit count: the all gate counts styling findings"
+printf '%s\n' '{"command":"audit","verdict":"warn","attribution":{"gate":"new-only","dead_code_introduced":0,"complexity_introduced":0,"duplication_introduced":0,"styling_introduced":1,"styling_inherited":2},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0},"complexity":{"styling_findings":[{"effective_severity":"warn","introduced":true},{"effective_severity":"warn","introduced":false},{"effective_severity":"warn","introduced":false}]}}' \
+  > "$GATE_WORK/audit-styling-new.json"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$GATE_WORK/audit-styling-new.json" \
+  FALLOW_COMMAND=audit \
+  FALLOW_FAIL_ON_ISSUES=false)
+assert_contains "$OUT" "Found 1 issues" \
+  "audit count: the new-only gate counts introduced styling findings"
+
 for prop_command in dead-code ""; do
   for prop_severity in warn error; do
     prop_total=0
