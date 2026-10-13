@@ -1338,25 +1338,34 @@ fn test_reach_lines(
             "{TEST_REACH_ROW_INDENT}mock detection is off: too many distinct mock sets"
         ));
     }
-    for row in facts.exports.iter().take(MAX_HUMAN_TEST_REACH_EXPORTS) {
+    let shown = || facts.exports.iter().take(MAX_HUMAN_TEST_REACH_EXPORTS);
+    let name_width = shown()
+        .map(|row| elide_symbol(&row.export_name, 24).chars().count())
+        .max()
+        .unwrap_or(0);
+    for row in shown() {
         let location = format!("{}:{}", elide_path(&row.file, 28), row.line);
         let name = elide_symbol(&row.export_name, 24);
         let main = format!(
-            "{TEST_REACH_ROW_INDENT}{:<12} {location:<20} {name}",
+            "{TEST_REACH_ROW_INDENT}{:<12} {location:<20} {name:<name_width$}",
             test_reach_label(row.reach),
         );
-        let main = main.trim_end().to_string();
+        let trimmed = main.trim_end().to_string();
+        let fits = |line: &str, reason: &str| {
+            line.chars().count() + 2 + reason.chars().count() <= TEST_REACH_LINE_WIDTH
+        };
+        // The reason column aligns when the padded row fits. A long name in
+        // another row must not push this reason to its own line.
         match test_reach_reason(row, has_e2e_runner) {
-            Some(reason)
-                if main.chars().count() + 2 + reason.chars().count() <= TEST_REACH_LINE_WIDTH =>
-            {
-                lines.push(format!("{main}  {reason}"));
+            Some(reason) if fits(&main, &reason) => lines.push(format!("{main}  {reason}")),
+            Some(reason) if fits(&trimmed, &reason) => {
+                lines.push(format!("{trimmed}  {reason}"));
             }
             Some(reason) => {
-                lines.push(main);
+                lines.push(trimmed);
                 lines.push(format!("{TEST_REACH_REASON_INDENT}{reason}"));
             }
-            None => lines.push(main),
+            None => lines.push(trimmed),
         }
     }
     if facts.exports.len() > MAX_HUMAN_TEST_REACH_EXPORTS || facts.exports_omitted > 0 {
@@ -2666,6 +2675,32 @@ mod tests {
                 "line overruns 80 columns: {line}"
             );
         }
+    }
+
+    #[test]
+    fn test_reach_lines_align_the_reason_column() {
+        use fallow_output::TestReachClass;
+
+        let facts = reach_facts(
+            fallow_output::TestReachCounts {
+                mocked_only: 1,
+                none_file: 1,
+                ..fallow_output::TestReachCounts::default()
+            },
+            vec![
+                reach_row("src/queue.ts", "enqueue", TestReachClass::MockedOnly),
+                reach_row("src/ui.ts", "renderPanel", TestReachClass::NoneFile),
+            ],
+        );
+
+        assert_eq!(
+            test_reach_lines(Some(&facts), false),
+            [
+                "  test reach: 2 changed exports: 1 mocked only, 1 no test",
+                "    mocked only  src/queue.ts:120     enqueue      tests mock src/queue.ts +1",
+                "    no test      src/ui.ts:120        renderPanel  file not reached by tests",
+            ]
+        );
     }
 
     #[test]

@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     its renderers.
 
   Thanks @cr101 for the request. (#3381)
+
 - **The review brief reports test reach for changed exports.** `fallow audit
   --brief` and `fallow review` add a `test_reach` section. For each value
   export that the diff changes, it states how tests reach it:
@@ -232,6 +233,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   static test signal of runtime coverage changes the same way. File-level
   reach does not change. A test with only type references to a module still
   makes that file test-reachable.
+
 - **The coverage-gap note names mocked exports.** `fallow health
   --coverage-gaps` now says "only tests that mock this module reference it"
   when the only test references to an untested export go through a closed

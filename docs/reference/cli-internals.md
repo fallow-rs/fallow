@@ -462,7 +462,9 @@ after every gate set the exit code.
   `mocked-only`. The changed-export list comes from
   `changed_exports_for_changed_paths` in `crates/engine/src/module_graph.rs`,
   which parses each changed file once for the search gap and test reach
-  passes. The CLI keeps the rows whose declaration overlaps an added line. The
+  passes. The CLI keeps only the exports whose declaration overlaps an added
+  line before these passes run, so a wide diff does not classify untouched
+  exports. The HEAD analyses read the diff, and the brief reuses that read. The
   `framework` label needs a name in `CONFIG_ONLY_EXPORT_NAMES`
   (`crates/core/src/plugins/mod.rs`), a plugin `used_exports` rule that names
   it for the file (recorded in the trace provenance), and a literal

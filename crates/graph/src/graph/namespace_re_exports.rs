@@ -824,6 +824,92 @@ mod tests {
         assert_eq!(reach.mocked_targets, vec![FileId(2), FileId(3)]);
     }
 
+    /// An entry barrel exposes `Ns`, so its own route starts without a load
+    /// mechanism. The test reaches the barrel through `require()`, which
+    /// ignores the mock, and the test mocks both the barrel and the source.
+    fn namespace_entry_route_graph() -> ModuleGraph {
+        let files = vec![
+            discovered_file(0, "/project/consumer.test.ts", 100),
+            discovered_file(1, "/project/barrel.ts", 50),
+            discovered_file(2, "/project/source.ts", 50),
+        ];
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![named_import_with_mechanism(
+                    "./barrel",
+                    "unrelated",
+                    FileId(1),
+                    true,
+                )],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![ns_re_export("./source", "Ns", FileId(2))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![named_export("used")].into(),
+                ..Default::default()
+            },
+        ];
+        let test_entries = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let entry_points = vec![
+            test_entries[0].clone(),
+            EntryPoint {
+                path: files[1].path.clone(),
+                source: EntryPointSource::PackageJsonMain,
+            },
+        ];
+        let replacements = [1, 2].map(|target| ResolvedReplacedModuleTarget {
+            source_file: FileId(0),
+            target_file: FileId(target),
+        });
+
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &replacements,
+            &entry_points,
+            &[],
+            &test_entries,
+            &files,
+        )
+    }
+
+    #[test]
+    fn test_reach_does_not_mask_the_start_of_an_entry_route() {
+        let graph = namespace_entry_route_graph();
+        let export = &graph.modules[2].exports[0];
+        let barrel_reference = export
+            .references
+            .iter()
+            .position(|reference| reference.from_file == FileId(1))
+            .expect("the entry barrel credits the namespace member");
+        let path = export
+            .reference_path(barrel_reference)
+            .expect("the barrel credit records its route");
+        assert!(matches!(
+            graph.reference_paths[path.index()],
+            crate::graph::types::ReferencePathNode::Route {
+                start_mechanism: None,
+                ..
+            }
+        ));
+
+        let reach = reach_of(&graph, 2);
+
+        assert_eq!(reach.reach, crate::graph::ExportTestReach::MockedOnly);
+        assert_eq!(reach.mocked_targets, vec![FileId(2)]);
+    }
+
     #[test]
     fn test_reach_with_a_commonjs_namespace_consumer_is_direct() {
         let graph = namespace_coverage_graph(true);

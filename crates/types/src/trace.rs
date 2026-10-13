@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
 use crate::cache_rejection::CacheRejection;
@@ -273,29 +274,23 @@ pub struct TraceProvenance {
     tooling_credits: Vec<(String, ToolingCredit)>,
     /// Root-relative file path and an export name that a framework plugin
     /// reads as configuration, such as the Next.js `dynamic` segment option.
-    config_exports: Vec<(PathBuf, String)>,
+    config_exports: FxHashMap<PathBuf, FxHashSet<String>>,
 }
 
 impl TraceProvenance {
     /// Record that a framework plugin reads the export `name` of the
     /// root-relative `file` as configuration.
     pub fn push_config_export(&mut self, file: PathBuf, name: String) {
-        if !self
-            .config_exports
-            .iter()
-            .any(|(known, known_name)| *known == file && *known_name == name)
-        {
-            self.config_exports.push((file, name));
-        }
+        self.config_exports.entry(file).or_default().insert(name);
     }
 
     /// Whether a framework plugin reads the export `name` of the
     /// root-relative `file` as configuration.
     #[must_use]
-    pub fn is_config_export(&self, file: &std::path::Path, name: &str) -> bool {
+    pub fn is_config_export(&self, file: &Path, name: &str) -> bool {
         self.config_exports
-            .iter()
-            .any(|(known, known_name)| known == file && known_name == name)
+            .get(file)
+            .is_some_and(|names| names.contains(name))
     }
 
     /// Record that `source` names the root-relative `file`.
