@@ -687,6 +687,9 @@ struct AuditBriefDataInput<'a> {
     changed_files: &'a FxHashSet<PathBuf>,
     base_ref: &'a str,
     head_sha: Option<&'a str>,
+    /// Diff-risk findings of the run. The brief weakening signals for tests,
+    /// thresholds and suppressions come from this report.
+    diff_risk: &'a fallow_output::DiffRiskReport,
 }
 
 /// Owned production-analysis inputs for the stable review-brief benchmark.
@@ -1187,6 +1190,7 @@ fn finish_audit_result(
         changed_files: &changed_files,
         base_ref: &input.base_ref,
         head_sha: head_sha.as_deref(),
+        diff_risk: &outcome.diff_risk,
     });
 
     build_audit_result(AuditResultParts {
@@ -1242,7 +1246,7 @@ fn shared_rename_old_path(rel: &str) -> Option<String> {
 }
 
 struct AuditBriefExternalData {
-    weakening_signals: Vec<weakening::WeakeningSignal>,
+    security_step_signals: Vec<weakening::WeakeningSignal>,
     routing: Option<routing::RoutingFacts>,
     diff_evidence: BriefDiffEvidence,
     dependency_anchors: Vec<crate::audit_decision_surface::DependencyAnchor>,
@@ -1254,7 +1258,7 @@ fn prepare_audit_brief_external_data(
     changed_files: &FxHashSet<PathBuf>,
     base_ref: &str,
 ) -> AuditBriefExternalData {
-    let weakening_signals = compute_weakening_signals(opts.root, base_ref, changed_files);
+    let security_step_signals = compute_security_step_signals(opts.root, base_ref, changed_files);
     let routing = check.map(|check| brief_routing(opts.root, check, changed_files));
     let diff_evidence = compute_brief_diff_evidence(opts.root, base_ref, opts.walkthrough_file);
     let dependency_anchors = compute_dependency_anchors(
@@ -1265,7 +1269,7 @@ fn prepare_audit_brief_external_data(
         &shared_rename_old_path,
     );
     AuditBriefExternalData {
-        weakening_signals,
+        security_step_signals,
         routing,
         diff_evidence,
         dependency_anchors,
@@ -1537,7 +1541,12 @@ fn benchmark_audit_review_brief_started_at(
             .ok_or_else(|| ExitCode::from(2))?,
         changed_files,
         external: AuditBriefExternalData {
-            weakening_signals: std::mem::take(&mut result.weakening_signals),
+            // Keep only the brief-local CI signals: the next iteration projects
+            // the diff-risk signals from its own report again.
+            security_step_signals: std::mem::take(&mut result.weakening_signals)
+                .into_iter()
+                .filter(|signal| signal.kind == weakening::WeakeningKind::SecurityCheckRemoved)
+                .collect(),
             routing: result.routing.take(),
             diff_evidence: BriefDiffEvidence {
                 change_anchors: std::mem::take(&mut result.change_anchors),
@@ -1560,37 +1569,38 @@ fn compute_audit_brief_data_with_lookups(
     }
 
     let mut review_deltas = compute_review_deltas(input.check, input.base_snapshot);
-    // Every git-backed pass (weakening, routing, diff evidence, manifest diff)
-    // comes from the preloaded package when one exists, so the benchmark path
-    // never re-spawns git per iteration.
-    let (weakening_signals, routing, preloaded_diff_evidence, dependency_anchors) = match preloaded
-    {
-        None => (
-            compute_weakening_signals(input.opts.root, input.base_ref, input.changed_files),
-            input
-                .check
-                .map(|check| brief_routing(input.opts.root, check, input.changed_files)),
-            None,
-            compute_dependency_anchors(
-                input.opts.root,
-                input.base_ref,
-                input.changed_files,
+    // Every git-backed pass (security steps, routing, diff evidence, manifest
+    // diff) comes from the preloaded package when one exists, so the benchmark
+    // path never re-spawns git per iteration.
+    let (security_step_signals, routing, preloaded_diff_evidence, dependency_anchors) =
+        match preloaded {
+            None => (
+                compute_security_step_signals(input.opts.root, input.base_ref, input.changed_files),
                 input
                     .check
-                    .and_then(|check| check.package_importers.as_ref()),
-                rename_old_path,
+                    .map(|check| brief_routing(input.opts.root, check, input.changed_files)),
+                None,
+                compute_dependency_anchors(
+                    input.opts.root,
+                    input.base_ref,
+                    input.changed_files,
+                    input
+                        .check
+                        .and_then(|check| check.package_importers.as_ref()),
+                    rename_old_path,
+                ),
             ),
-        ),
-        Some(external) => (
-            external.weakening_signals,
-            external.routing,
-            Some(external.diff_evidence),
-            external.dependency_anchors,
-        ),
-    };
+            Some(external) => (
+                external.security_step_signals,
+                external.routing,
+                Some(external.diff_evidence),
+                external.dependency_anchors,
+            ),
+        };
     if let Some(deltas) = review_deltas.as_mut() {
         fallow_api::dependency_deltas::fill_dependency_delta_keys(deltas, &dependency_anchors);
     }
+    let weakening_signals = brief_weakening_signals(input.diff_risk, security_step_signals);
 
     // Decision surface: classify the SOLID-3 candidates, rank, cap, and route.
     let decision_surface = Some(compute_decision_surface_with_lookups(
@@ -1963,14 +1973,26 @@ fn compute_review_deltas(
     })
 }
 
-/// Run the weakening-signal pass over the changed files: read each file's base
-/// content via [`BaseFileReader`], diff it against the on-disk head content, and
-/// emit a [`weakening::WeakeningSignal`] per detected weakening. Best-effort,
-/// but a read FAILURE is never conflated with empty content: a file deleted at
-/// head or absent at base scans against `""` (the intended removed/new-file
-/// signals), an unreadable head file is skipped, and a base-reader error stops
-/// the scan for the remaining files (the batch pipe is no longer trustworthy).
-fn compute_weakening_signals(
+/// The weakening signals of the brief, ordered by file: the diff-risk
+/// findings for tests, thresholds and suppressions, then the CI security-step
+/// signals that only the brief computes.
+fn brief_weakening_signals(
+    diff_risk: &fallow_output::DiffRiskReport,
+    security_step_signals: Vec<weakening::WeakeningSignal>,
+) -> Vec<weakening::WeakeningSignal> {
+    let mut signals = weakening::signals_from_diff_risk(diff_risk);
+    signals.extend(security_step_signals);
+    signals.sort_by(|a, b| a.file.cmp(&b.file));
+    signals
+}
+
+/// Scan the changed CI files for removed security steps: read each file's
+/// base content via [`BaseFileReader`] and compare it with the head content
+/// on disk. Best-effort, but a read failure never reads as empty content: a
+/// file deleted at head or absent at base scans against `""`, an unreadable
+/// head file is skipped, and a base-reader error stops the scan for the
+/// remaining files (the batch pipe is no longer trustworthy).
+fn compute_security_step_signals(
     root: &Path,
     base_ref: &str,
     changed_files: &FxHashSet<PathBuf>,
@@ -1978,23 +2000,24 @@ fn compute_weakening_signals(
     let Some(git_root) = git_toplevel(root) else {
         return Vec::new();
     };
+    let mut files: Vec<(&PathBuf, &Path, String)> = changed_files
+        .iter()
+        .filter_map(|abs| {
+            let relative = abs.strip_prefix(&git_root).ok()?;
+            let rel_str = relative.to_string_lossy().replace('\\', "/");
+            weakening::is_ci_file(&rel_str).then_some((abs, relative, rel_str))
+        })
+        .collect();
+    if files.is_empty() {
+        return Vec::new();
+    }
+    files.sort();
     let Some(mut reader) = BaseFileReader::spawn(root) else {
         return Vec::new();
     };
 
     let mut signals = Vec::new();
-    // Sort the changed files for deterministic signal ordering.
-    let mut files: Vec<&PathBuf> = changed_files.iter().collect();
-    files.sort();
-
-    for abs in files {
-        let Ok(relative) = abs.strip_prefix(&git_root) else {
-            continue;
-        };
-        let rel_str = relative.to_string_lossy().replace('\\', "/");
-        // A file deleted at head scans against empty content (the intended
-        // removed-tests signal); any other read failure skips the file so an
-        // unreadable file is never reported as removed content.
+    for (abs, relative, rel_str) in files {
         let head = match std::fs::read(abs) {
             Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -2002,15 +2025,18 @@ fn compute_weakening_signals(
         };
         let base = match reader.read(base_ref, relative) {
             BaseRead::Content(base) => base,
-            // A net-new file (no base) or a non-source file still gets the
-            // scan; the detectors are no-ops on irrelevant content.
             BaseRead::Missing => String::new(),
-            // The batch pipe is in an undefined state after an IO/parse
-            // error; stop instead of scanning the remaining files against "".
             BaseRead::Error => break,
         };
-
-        signals.extend(weakening_signals_for_file(root, &rel_str, &base, &head));
+        signals.extend(
+            weakening::detect_removed_security_steps(&base, &head)
+                .into_iter()
+                .map(|evidence| weakening::WeakeningSignal {
+                    kind: weakening::WeakeningKind::SecurityCheckRemoved,
+                    file: rel_str.clone(),
+                    evidence,
+                }),
+        );
     }
     signals
 }
@@ -2088,71 +2114,6 @@ fn compute_dependency_anchors(
         });
     }
     dependency_anchors_from_manifests(&pairs, package_importers)
-}
-
-fn weakening_signals_for_file(
-    root: &Path,
-    rel_str: &str,
-    base: &str,
-    head: &str,
-) -> Vec<weakening::WeakeningSignal> {
-    use weakening::WeakeningKind;
-
-    let mut signals = Vec::new();
-    if fallow_engine::test_paths::is_test_code_path_str(root, rel_str) {
-        extend_weakening_signals(
-            &mut signals,
-            WeakeningKind::TestWeakened,
-            rel_str,
-            weakening::detect_test_weakening(base, head)
-                .into_iter()
-                .map(|token| format!("{token} added")),
-        );
-        extend_weakening_signals(
-            &mut signals,
-            WeakeningKind::TestWeakened,
-            rel_str,
-            weakening::detect_removed_tests(base, head),
-        );
-    }
-    extend_weakening_signals(
-        &mut signals,
-        WeakeningKind::SuppressionAdded,
-        rel_str,
-        weakening::detect_added_suppressions(base, head),
-    );
-    extend_weakening_signals(
-        &mut signals,
-        WeakeningKind::ThresholdLowered,
-        rel_str,
-        weakening::detect_lowered_thresholds(base, head),
-    );
-    if weakening::is_ci_file(rel_str) {
-        extend_weakening_signals(
-            &mut signals,
-            WeakeningKind::SecurityCheckRemoved,
-            rel_str,
-            weakening::detect_removed_security_steps(base, head),
-        );
-    }
-    signals
-}
-
-fn extend_weakening_signals(
-    signals: &mut Vec<weakening::WeakeningSignal>,
-    kind: weakening::WeakeningKind,
-    file: &str,
-    evidences: impl IntoIterator<Item = String>,
-) {
-    signals.extend(
-        evidences
-            .into_iter()
-            .map(|evidence| weakening::WeakeningSignal {
-                kind,
-                file: file.to_owned(),
-                evidence,
-            }),
-    );
 }
 
 fn build_audit_result(parts: AuditResultParts) -> AuditResult {

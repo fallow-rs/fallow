@@ -198,7 +198,7 @@ fn merge_base(root: &Path, base_ref: &str) -> String {
 fn is_rule_relevant(root: &Path, rel: &str) -> bool {
     fallow_engine::discover::SOURCE_EXTENSIONS.contains(&extension(rel))
         || takes_suppression_comments(rel)
-        || fallow_engine::test_paths::is_test_code_path_str(root, rel)
+        || is_js_test_code(root, rel)
         || text::is_coverage_config_path(rel)
         || crate::dependency_deltas::is_manifest_path(rel)
 }
@@ -274,6 +274,13 @@ fn takes_suppression_comments(rel: &str) -> bool {
     is_source_file(rel) || STYLE_EXTENSIONS.contains(&extension(rel))
 }
 
+/// A JavaScript-family test file, where the test rules apply. A test file in
+/// another language, such as a Rust integration test, can hold JavaScript
+/// test text in a string, so it is not read.
+fn is_js_test_code(root: &Path, rel: &str) -> bool {
+    is_source_file(rel) && fallow_engine::test_paths::is_test_code_path_str(root, rel)
+}
+
 /// A test file, or a type test of the `tsd` and Vitest conventions
 /// (`test-d/`, `*.test-d.ts`).
 fn is_type_or_test_file(root: &Path, rel: &str) -> bool {
@@ -301,7 +308,7 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
         return;
     };
     let rel = file.rel.as_str();
-    let is_test = fallow_engine::test_paths::is_test_code_path_str(root, rel);
+    let is_test = is_js_test_code(root, rel);
 
     if rules.weakened_tests != Severity::Off {
         if is_test {
@@ -408,7 +415,7 @@ fn detect_removed_tests(root: &Path, files: &[FileTexts], raw: &mut Vec<RawFindi
     }
     let counts: Vec<Counts<'_>> = files
         .iter()
-        .filter(|file| fallow_engine::test_paths::is_test_code_path_str(root, &file.rel))
+        .filter(|file| is_js_test_code(root, &file.rel))
         .map(|file| {
             let base = file.base.as_deref().unwrap_or("");
             let head = file.head.as_deref().unwrap_or("");
@@ -763,6 +770,33 @@ mod tests {
         assert_eq!(
             rules_of(&raw),
             vec![(DiffRiskRule::AddedSuppression, "@ts-expect-error")]
+        );
+    }
+
+    /// A test file in another language (a Rust integration test under
+    /// `tests/`) can hold JavaScript test text in a string. The test rules
+    /// read JavaScript-family test files only.
+    #[test]
+    fn test_rules_read_javascript_test_files_only() {
+        let root = Path::new("/project");
+        let rules = RulesConfig::default();
+        let base = "it('a', f);\nit('b', f);\n";
+        let head = "it.skip('a', f);\n";
+        let mut raw = Vec::new();
+        let rust = file("crates/cli/tests/integration/a_tests.rs", base, head);
+        detect_file(root, &rust, &rules, &mut raw);
+        detect_removed_tests(root, std::slice::from_ref(&rust), &mut raw);
+        assert!(raw.is_empty(), "{:?}", rules_of(&raw));
+
+        let js = file("src/a.test.ts", base, head);
+        detect_file(root, &js, &rules, &mut raw);
+        detect_removed_tests(root, std::slice::from_ref(&js), &mut raw);
+        assert_eq!(
+            rules_of(&raw),
+            vec![
+                (DiffRiskRule::WeakenedTests, "it.skip"),
+                (DiffRiskRule::WeakenedTests, "test cases: 2 -> 1"),
+            ]
         );
     }
 

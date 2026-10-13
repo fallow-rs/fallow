@@ -445,6 +445,10 @@ after every gate set the exit code.
   honors only a suppression that names its rule, so a new blanket
   `fallow-ignore` comment cannot hide itself. The rule tokens are in
   `NON_CORE_KINDS`, so the dead-code stale-suppression pass ignores them.
+  The brief `weakening[]` signals for tests, thresholds and suppressions are
+  a projection of these findings (`crates/cli/src/audit_weakening.rs`). Do not
+  add a second detector there. Only the removed-security-step scan of CI files
+  is local to the brief.
 - Audit dependency scope: a dependency-level finding (unused, type-only,
   test-only or misplaced dependency, unused catalog entry) is in audit scope
   only when the changeset touches the manifest or catalog file that declares

@@ -104,6 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The MCP `audit` tool has a `fallow://tools/audit` guide.** The guide
+  names the five diff-risk rules and holds the styling, coverage, baseline,
+  grouping, runtime-coverage and `FALLOW_DIFF_FILE` detail. The `audit` tool
+  description is now a short summary that points to the guide. (#3369)
+
 - **Workspace dependency declaration guidance is clearer.** Root imports of npm
   workspace packages need a dependency declaration; npm links resolve imports
   without declaring them. Guidance covers private/tooling ancestor exceptions,
@@ -135,6 +140,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bucket.
 
 ### Fixed
+
+- **The review brief and the audit report the same weakened guardrails.**
+  The `weakening` section of `fallow audit --brief` and `fallow review` now
+  reads its test, threshold and suppression signals from the `diff_risk`
+  findings of the same run. Before, a second detector could report a moved
+  test as removed, a lower `maxCrap` as a lowered threshold, or a
+  suppression token in a Markdown file as an added suppression. The JSON keys
+  do not change. The `evidence` text now follows the diff-risk evidence, for
+  example `test cases: 2 -> 1`. (#3368)
+
+- **`weakened-tests` reads JavaScript-family test files only.** A test file
+  in another language, such as a Rust integration test under `tests/`, can
+  hold `it.skip` or `it(` text in a string. The rule no longer reports a skip
+  marker or removed tests from such a file, and such a file no longer changes
+  the test-case totals of the change.
+
+- **The GitLab template counts styling findings like the GitHub Action.**
+  Under `gate: all`, the issue count now includes every styling finding.
+  Under `gate: new-only`, it includes the introduced styling findings. Before,
+  `FALLOW_FAIL_ON_ISSUES` did not see them. (#3370)
 
 - **A static member read through a namespace is no longer an unused class
   member.** Code such as `Layer.provide(Discord.ApiClient.layer)` did not count

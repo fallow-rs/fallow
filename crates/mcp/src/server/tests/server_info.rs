@@ -1332,7 +1332,17 @@ fn description_default_for_param(description: &str, param: &str) -> Option<Strin
 
 #[test]
 fn mcp_tool_description_defaults_match_cli_defaults() {
-    let descriptions = mcp_tool_descriptions();
+    // A default stated in a tool's fallow://tools/{name} guide counts: the
+    // guide holds the per-flag prose that left the wire description.
+    let mut descriptions = mcp_tool_descriptions();
+    for guide in crate::tool_guides::TOOL_GUIDES {
+        if let Some(description) = descriptions.get_mut(guide.tool) {
+            for section in guide.sections {
+                description.push(' ');
+                description.push_str(section.detail);
+            }
+        }
+    }
     let reports = default_drift_reports(
         &descriptions,
         include_str!("../../../../cli/src/lib.rs"),
