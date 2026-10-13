@@ -1231,6 +1231,53 @@ fn audit_controls_see_renames_and_manifests() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
+/// I5 for the audit sub-analysis keys: with `audit.deadCode` and
+/// `audit.dupes` false, the CLI, the MCP typed route and `fallow_api` skip the
+/// same sub-analyses, mark them in the summary, and report the same keys.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i5_audit_sub_analysis_keys_agree_across_surfaces() {
+    let mut files = audit_control_model(true).materialize(true);
+    let config = r#"{ "audit": { "deadCode": false, "dupes": false } }"#;
+    files
+        .base
+        .insert(".fallowrc.json".to_string(), config.to_string());
+    files
+        .head
+        .insert(".fallowrc.json".to_string(), config.to_string());
+    let project = Project::from_files(files);
+    let envelopes = vec![
+        ("CLI".to_string(), cli_audit(&project.root)),
+        (
+            "MCP Typed".to_string(),
+            with_typed_server(|server| mcp_audit(server, &project.root)),
+        ),
+        ("fallow_api".to_string(), api_audit(&project.root)),
+    ];
+    for (surface, envelope) in &envelopes {
+        for (block, marker) in [
+            ("dead_code", "dead_code_skipped"),
+            ("duplication", "duplication_skipped"),
+        ] {
+            assert!(
+                envelope.get(block).is_none() && envelope["summary"][marker] == true,
+                "{surface} audit ignored the `audit` sub-analysis keys: {envelope}"
+            );
+        }
+        assert!(
+            envelope["summary"].get("complexity_skipped").is_none(),
+            "{surface} audit skipped health: {envelope}"
+        );
+    }
+    let results: Vec<(String, AuditKeys)> = envelopes
+        .iter()
+        .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
+        .collect();
+    project
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
+}
+
 /// I5 under an `audit` config section. The generator writes no config file,
 /// so without this case no surface reads `audit.gate`, `audit.css`,
 /// `audit.cssDeep` or an `audit` baseline key.
