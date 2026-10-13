@@ -234,6 +234,114 @@ fn build_search_gap_facts(
     })
 }
 
+/// Build the test reach facts: how tests reach each value export whose
+/// declaration statement overlaps an added diff line. Returns `None` when no
+/// diff is known or the diff changes no value export.
+fn build_test_reach_facts(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> Option<fallow_output::TestReachFacts> {
+    use fallow_engine::module_graph::{ExportTestReach, TestMaskingState};
+    use fallow_output::{
+        ExportChange, ExportTestReachFact, TEST_REACH_EXPORT_CAP, TEST_REACH_FILE_CAP,
+        TestReachClass, TestReachCounts, TestReachFacts, TestReachMasking, TestReachStatus,
+    };
+
+    let diff_index = diff_index?;
+    let check = result.check.as_ref()?;
+    let reach = check.test_reach.as_ref()?;
+    let mut counts = TestReachCounts::default();
+    let mut rows: Vec<ExportTestReachFact> = Vec::new();
+    let mut total = 0usize;
+    for export in &reach.exports {
+        let key = diff_index.key_for_root_relative(&export.file);
+        let (start, end) = export.declaration_lines;
+        if !diff_index.range_overlaps_added(&key, u64::from(start), u64::from(end)) {
+            continue;
+        }
+        total += 1;
+        let class = if !reach.has_tests {
+            TestReachClass::NoneFile
+        } else if export.literal_value
+            && check
+                .trace_provenance
+                .is_config_export(std::path::Path::new(&export.file), &export.export_name)
+        {
+            TestReachClass::Framework
+        } else {
+            match export.reach {
+                ExportTestReach::Direct => TestReachClass::Direct,
+                ExportTestReach::Transitive => TestReachClass::Transitive,
+                ExportTestReach::MockedOnly => TestReachClass::MockedOnly,
+                ExportTestReach::None => TestReachClass::None,
+                ExportTestReach::NoneFile => TestReachClass::NoneFile,
+            }
+        };
+        counts.add(class);
+        if !reach.has_tests || matches!(class, TestReachClass::Direct | TestReachClass::Framework) {
+            continue;
+        }
+        let change = if (start..=end).all(|line| diff_index.line_is_added(&key, u64::from(line))) {
+            ExportChange::New
+        } else {
+            ExportChange::Modified
+        };
+        let mocked = class == TestReachClass::MockedOnly;
+        let tests = (mocked && !export.tests.is_empty()).then_some(&export.tests);
+        rows.push(ExportTestReachFact {
+            file: export.file.clone(),
+            export_name: export.export_name.clone(),
+            line: export.line,
+            reach: class,
+            change,
+            tests: tests.map(|tests| tests.iter().take(TEST_REACH_FILE_CAP).cloned().collect()),
+            tests_total: tests.map(Vec::len),
+            test_changed: tests.map(|tests| {
+                tests
+                    .iter()
+                    .any(|test| diff_index.changes_path(&diff_index.key_for_root_relative(test)))
+            }),
+            mocked_targets: mocked.then(|| {
+                export
+                    .mocked_targets
+                    .iter()
+                    .take(TEST_REACH_FILE_CAP)
+                    .cloned()
+                    .collect()
+            }),
+        });
+    }
+    if total == 0 {
+        return None;
+    }
+    rows.sort_by(|a, b| {
+        a.reach
+            .cmp(&b.reach)
+            .then_with(|| a.change.cmp(&b.change))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.export_name.cmp(&b.export_name))
+    });
+    let exports_omitted = rows.len().saturating_sub(TEST_REACH_EXPORT_CAP);
+    rows.truncate(TEST_REACH_EXPORT_CAP);
+    Some(TestReachFacts {
+        status: if reach.has_tests {
+            TestReachStatus::Measured
+        } else {
+            TestReachStatus::NoTests
+        },
+        masking: match reach.masking {
+            TestMaskingState::Active => TestReachMasking::Active,
+            TestMaskingState::NoMocks => TestReachMasking::NoMocks,
+            TestMaskingState::Capped => TestReachMasking::Capped,
+        },
+        total,
+        counts,
+        exports: rows,
+        exports_omitted,
+    })
+}
+
 /// Build the Stage 2 partition facts from the audit result's retained
 /// partition+order (computed on the brief path). Returns an empty partition when
 /// no graph was retained (the partition is `None`).
@@ -499,6 +607,7 @@ pub fn build_brief_output_with_diff(
     let focus = build_focus_map(result, &deltas);
     ReviewBriefOutput {
         branching: build_branching_report(result),
+        test_reach: build_test_reach_facts(result, diff_index),
         schema_version: ReviewBriefSchemaVersion::default(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         command: "audit-brief".to_string(),
@@ -654,6 +763,14 @@ fn print_brief_human(
         print_branching_human(brief.branching.as_ref());
         print_partition_human(&brief.partition);
         print_impact_closure_human(&brief.impact_closure);
+        let has_e2e_runner = result
+            .check
+            .as_ref()
+            .and_then(|check| check.test_reach.as_ref())
+            .is_some_and(|reach| reach.has_e2e_runner);
+        for line in test_reach_lines(brief.test_reach.as_ref(), has_e2e_runner) {
+            eprintln!("{line}");
+        }
         print_focus_human(&brief.focus, show_deprioritized);
         print_deltas_human(&brief.deltas);
         print_weakening_human(&brief.weakening);
@@ -1104,6 +1221,148 @@ fn search_gap_lines(facts: Option<&fallow_output::SearchGapFacts>) -> Vec<String
     }
     if truncated {
         lines.push("         (--format json for the full list)".to_string());
+    }
+    lines
+}
+
+/// Rows that the human test reach section shows.
+const MAX_HUMAN_TEST_REACH_EXPORTS: usize = 3;
+
+/// Width that every human test reach line stays within.
+const TEST_REACH_LINE_WIDTH: usize = 80;
+
+/// Indent of a test reach row and of its continuation line.
+const TEST_REACH_ROW_INDENT: &str = "    ";
+const TEST_REACH_REASON_INDENT: &str = "                 ";
+
+/// The human label of a reach class. `none` and `none-file` both read as
+/// "no test"; the row reason tells them apart.
+const fn test_reach_label(class: fallow_output::TestReachClass) -> &'static str {
+    use fallow_output::TestReachClass;
+    match class {
+        TestReachClass::MockedOnly => "mocked only",
+        TestReachClass::None | TestReachClass::NoneFile => "no test",
+        TestReachClass::Transitive => "transitive",
+        TestReachClass::Direct => "direct",
+        TestReachClass::Framework => "framework",
+    }
+}
+
+/// The non-zero class counts, in the order of the JSON `counts` keys.
+fn test_reach_count_phrases(counts: &fallow_output::TestReachCounts) -> Vec<String> {
+    [
+        (counts.direct, "direct"),
+        (counts.transitive, "transitive"),
+        (counts.mocked_only, "mocked only"),
+        (counts.none + counts.none_file, "no test"),
+        (counts.framework, "framework"),
+    ]
+    .into_iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, label)| format!("{count} {label}"))
+    .collect()
+}
+
+/// Why a row has no real test, or `None` when the label says it all.
+fn test_reach_reason(
+    row: &fallow_output::ExportTestReachFact,
+    has_e2e_runner: bool,
+) -> Option<String> {
+    use fallow_output::TestReachClass;
+    match row.reach {
+        TestReachClass::MockedOnly => {
+            let targets = row.mocked_targets.as_deref().unwrap_or_default();
+            let first = targets.first()?;
+            let more = targets.len() - 1;
+            let suffix = if more > 0 {
+                format!(" +{more}")
+            } else {
+                String::new()
+            };
+            Some(format!("tests mock {}{suffix}", elide_path(first, 40)))
+        }
+        TestReachClass::NoneFile if has_e2e_runner => {
+            Some("file not reached by tests; e2e tests do not import files".to_string())
+        }
+        TestReachClass::NoneFile => Some("file not reached by tests".to_string()),
+        _ => None,
+    }
+}
+
+/// The human lines for the test reach section.
+///
+/// Split out from the printer so the wording and the width are testable:
+/// every line holds within 80 columns. The section shows at most
+/// [`MAX_HUMAN_TEST_REACH_EXPORTS`] rows and points to the JSON for the rest.
+fn test_reach_lines(
+    facts: Option<&fallow_output::TestReachFacts>,
+    has_e2e_runner: bool,
+) -> Vec<String> {
+    use fallow_output::{TestReachMasking, TestReachStatus};
+
+    let Some(facts) = facts else {
+        return Vec::new();
+    };
+    let exports = format!(
+        "{} changed export{}",
+        facts.total,
+        crate::report::plural(facts.total)
+    );
+    if facts.status == TestReachStatus::NoTests {
+        return vec![format!(
+            "  test reach: no test files in this project; {exports} {} no test",
+            if facts.total == 1 { "has" } else { "have" },
+        )];
+    }
+    let mut lines = Vec::new();
+    let phrases = test_reach_count_phrases(&facts.counts);
+    let mut current = format!("  test reach: {exports}: ");
+    let mut first = true;
+    for phrase in &phrases {
+        let piece = if first {
+            phrase.clone()
+        } else {
+            format!(", {phrase}")
+        };
+        if !first && current.chars().count() + piece.chars().count() > TEST_REACH_LINE_WIDTH {
+            lines.push(format!("{current},"));
+            current = format!("{TEST_REACH_ROW_INDENT}{phrase}");
+        } else {
+            current.push_str(&piece);
+        }
+        first = false;
+    }
+    lines.push(current);
+    if facts.masking == TestReachMasking::Capped {
+        lines.push(format!(
+            "{TEST_REACH_ROW_INDENT}mock detection is off: too many distinct mock sets"
+        ));
+    }
+    for row in facts.exports.iter().take(MAX_HUMAN_TEST_REACH_EXPORTS) {
+        let location = format!("{}:{}", elide_path(&row.file, 28), row.line);
+        let name = elide_symbol(&row.export_name, 24);
+        let main = format!(
+            "{TEST_REACH_ROW_INDENT}{:<12} {location:<20} {name}",
+            test_reach_label(row.reach),
+        );
+        let main = main.trim_end().to_string();
+        match test_reach_reason(row, has_e2e_runner) {
+            Some(reason)
+                if main.chars().count() + 2 + reason.chars().count() <= TEST_REACH_LINE_WIDTH =>
+            {
+                lines.push(format!("{main}  {reason}"));
+            }
+            Some(reason) => {
+                lines.push(main);
+                lines.push(format!("{TEST_REACH_REASON_INDENT}{reason}"));
+            }
+            None => lines.push(main),
+        }
+    }
+    if facts.exports.len() > MAX_HUMAN_TEST_REACH_EXPORTS || facts.exports_omitted > 0 {
+        lines.push(format!(
+            "{TEST_REACH_ROW_INDENT}(--format json for the full list)"
+        ));
     }
     lines
 }
@@ -2315,6 +2574,148 @@ mod tests {
                 "line overruns 80 columns: {line}"
             );
         }
+    }
+
+    fn reach_row(
+        file: &str,
+        name: &str,
+        reach: fallow_output::TestReachClass,
+    ) -> fallow_output::ExportTestReachFact {
+        let mocked = reach == fallow_output::TestReachClass::MockedOnly;
+        fallow_output::ExportTestReachFact {
+            file: file.to_string(),
+            export_name: name.to_string(),
+            line: 120,
+            reach,
+            change: fallow_output::ExportChange::Modified,
+            tests: None,
+            tests_total: None,
+            test_changed: None,
+            mocked_targets: mocked.then(|| vec![file.to_string(), "src/other.ts".to_string()]),
+        }
+    }
+
+    fn reach_facts(
+        counts: fallow_output::TestReachCounts,
+        exports: Vec<fallow_output::ExportTestReachFact>,
+    ) -> fallow_output::TestReachFacts {
+        fallow_output::TestReachFacts {
+            status: fallow_output::TestReachStatus::Measured,
+            masking: fallow_output::TestReachMasking::Active,
+            total: counts.direct
+                + counts.transitive
+                + counts.mocked_only
+                + counts.none
+                + counts.none_file
+                + counts.framework,
+            counts,
+            exports,
+            exports_omitted: 0,
+        }
+    }
+
+    #[test]
+    fn test_reach_lines_fit_eighty_columns_and_cap_the_rows() {
+        use fallow_output::TestReachClass;
+
+        assert!(test_reach_lines(None, false).is_empty());
+        let long_dir = "packages/very-long-workspace-name/src/features/deeply/nested";
+        let counts = fallow_output::TestReachCounts {
+            direct: 1200,
+            transitive: 3400,
+            mocked_only: 5600,
+            none: 7800,
+            none_file: 1000,
+            framework: 9000,
+        };
+        let facts = reach_facts(
+            counts,
+            vec![
+                reach_row(
+                    &format!("{long_dir}/queue.ts"),
+                    "enqueueTheJobWithAVeryLongNameIndeed",
+                    TestReachClass::MockedOnly,
+                ),
+                reach_row(&format!("{long_dir}/lib.ts"), "none", TestReachClass::None),
+                reach_row(&format!("{long_dir}/ui.ts"), "ui", TestReachClass::NoneFile),
+                reach_row("src/t.ts", "transitive", TestReachClass::Transitive),
+            ],
+        );
+        let lines = test_reach_lines(Some(&facts), true);
+
+        assert!(lines[0].starts_with("  test reach: 28000 changed exports: 1200 direct,"));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("tests mock .../") && line.ends_with(" +1"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line
+                    .contains("file not reached by tests; e2e tests do not import files"))
+        );
+        assert!(!lines.iter().any(|line| line.contains("src/t.ts")));
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("    (--format json for the full list)")
+        );
+        for line in &lines {
+            assert!(
+                line.chars().count() <= 80,
+                "line overruns 80 columns: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_reach_lines_render_the_short_states() {
+        let direct_only = reach_facts(
+            fallow_output::TestReachCounts {
+                direct: 2,
+                framework: 1,
+                ..fallow_output::TestReachCounts::default()
+            },
+            Vec::new(),
+        );
+        assert_eq!(
+            test_reach_lines(Some(&direct_only), false),
+            ["  test reach: 3 changed exports: 2 direct, 1 framework"]
+        );
+
+        let mut capped = reach_facts(
+            fallow_output::TestReachCounts {
+                transitive: 1,
+                ..fallow_output::TestReachCounts::default()
+            },
+            vec![reach_row(
+                "src/a.ts",
+                "a",
+                fallow_output::TestReachClass::Transitive,
+            )],
+        );
+        capped.masking = fallow_output::TestReachMasking::Capped;
+        assert_eq!(
+            test_reach_lines(Some(&capped), false),
+            [
+                "  test reach: 1 changed export: 1 transitive",
+                "    mock detection is off: too many distinct mock sets",
+                "    transitive   src/a.ts:120         a",
+            ]
+        );
+
+        let mut no_tests = reach_facts(
+            fallow_output::TestReachCounts {
+                none_file: 7,
+                ..fallow_output::TestReachCounts::default()
+            },
+            Vec::new(),
+        );
+        no_tests.status = fallow_output::TestReachStatus::NoTests;
+        assert_eq!(
+            test_reach_lines(Some(&no_tests), false),
+            ["  test reach: no test files in this project; 7 changed exports have no test"]
+        );
     }
 
     #[test]

@@ -19963,6 +19963,17 @@
             }
           ],
           "description": "Branching conservation across the changeset: total branching against\nthe number of functions now holding it. Absent when no base comparison\nran, which keeps the wire shape byte-identical for a consumer that\nnever had a base snapshot."
+        },
+        "test_reach": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TestReachFacts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How tests reach the value exports that the diff changes. Advisory,\nnever gates. Absent when the diff changes no value export or no diff\nis known."
         }
       },
       "required": [
@@ -22724,6 +22735,17 @@
             }
           ],
           "description": "Branching conservation across the changeset. Absent when no base\ncomparison ran."
+        },
+        "test_reach": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TestReachFacts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How tests reach the value exports that the diff changes. Advisory,\nnever gates. Absent when the diff changes no value export or no diff\nis known."
         }
       },
       "required": [
@@ -32040,6 +32062,237 @@
         }
       ],
       "description": "The type of a diff-risk action. Every type is a suppression."
+    },
+    "TestReachFacts": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "`measured`, or `no-tests` when the project has no test files.",
+          "$ref": "#/definitions/TestReachStatus"
+        },
+        "masking": {
+          "description": "Whether mock detection is active.",
+          "$ref": "#/definitions/TestReachMasking"
+        },
+        "total": {
+          "type": "integer",
+          "description": "Number of changed value exports."
+        },
+        "counts": {
+          "description": "Number of changed exports per reach class.",
+          "$ref": "#/definitions/TestReachCounts"
+        },
+        "exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExportTestReachFact"
+          },
+          "description": "The exports that need attention (`mocked-only`, `none`, `none-file`,\n`transitive`), at most [`TEST_REACH_EXPORT_CAP`]. The order is reach\nclass, then `modified` before `new`, then file, line and name. Empty\nfor `no-tests`."
+        },
+        "exports_omitted": {
+          "type": "integer",
+          "description": "Number of attention rows left out by the cap."
+        }
+      },
+      "required": [
+        "status",
+        "masking",
+        "total",
+        "counts",
+        "exports",
+        "exports_omitted"
+      ],
+      "description": "How tests reach the value exports that the diff changes.\n\nA changed export is a value export whose declaring statement overlaps an\nadded line. The section is advisory: it never changes the verdict or the\nexit code."
+    },
+    "TestReachStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "measured",
+          "description": "The project has test files, and each changed export has a reach class."
+        },
+        {
+          "type": "string",
+          "const": "no-tests",
+          "description": "The project has no test files. Every changed export counts as\n`none-file`."
+        }
+      ],
+      "description": "Whether the project has tests to measure against."
+    },
+    "TestReachMasking": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "active",
+          "description": "At least one test replaces a module with a closed factory mock, and\n`mocked-only` can be reported."
+        },
+        {
+          "type": "string",
+          "const": "no-mocks",
+          "description": "No test declares a closed factory mock."
+        },
+        {
+          "type": "string",
+          "const": "capped",
+          "description": "Too many distinct mock sets: mock detection is off, so a mocked\nmodule counts as reached."
+        }
+      ],
+      "description": "Why mock detection is or is not active."
+    },
+    "TestReachCounts": {
+      "type": "object",
+      "properties": {
+        "direct": {
+          "type": "integer",
+          "description": "Exports that a test file references."
+        },
+        "transitive": {
+          "type": "integer",
+          "description": "Exports that tests reach only through other modules."
+        },
+        "mocked-only": {
+          "type": "integer",
+          "description": "Exports that only mocking tests reference."
+        },
+        "none": {
+          "type": "integer",
+          "description": "Exports in a test-reached file without a test-reachable reference."
+        },
+        "none-file": {
+          "type": "integer",
+          "description": "Exports in a file that no test loads."
+        },
+        "framework": {
+          "type": "integer",
+          "description": "Framework configuration exports."
+        }
+      },
+      "required": [
+        "direct",
+        "transitive",
+        "mocked-only",
+        "none",
+        "none-file",
+        "framework"
+      ],
+      "description": "Number of changed exports per reach class. The keys are exactly the\n[`TestReachClass`] values."
+    },
+    "ExportTestReachFact": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Root-relative path of the file that declares the export."
+        },
+        "export_name": {
+          "type": "string",
+          "description": "The export name, `default` for a default export."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the export."
+        },
+        "reach": {
+          "description": "The reach class.",
+          "$ref": "#/definitions/TestReachClass"
+        },
+        "change": {
+          "description": "Whether the diff adds or changes the declaration.",
+          "$ref": "#/definitions/ExportChange"
+        },
+        "tests": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Test files that name the export, sorted, at most\n[`TEST_REACH_FILE_CAP`]. On a `mocked-only` row these are the mocking\ntests. Absent when no test file names the export."
+        },
+        "tests_total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of test files that name the export, before the cap. Present with\n`tests`."
+        },
+        "test_changed": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "True when one of the test files that name the export changed in this\ndiff. Present with `tests`."
+        },
+        "mocked_targets": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "The mocked modules on the import paths, sorted, at most\n[`TEST_REACH_FILE_CAP`]. A mocked module can be a barrel in front of\nthe declaring file. Present only on `mocked-only` rows."
+        }
+      },
+      "required": [
+        "file",
+        "export_name",
+        "line",
+        "reach",
+        "change"
+      ],
+      "description": "One changed export that needs attention."
+    },
+    "TestReachClass": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "mocked-only",
+          "description": "Only tests that replace a module on the import path with a mock\nreference the export. The real code does not run in those tests."
+        },
+        {
+          "type": "string",
+          "const": "none",
+          "description": "Tests load the declaring file, but no test-reachable module references\nthe export."
+        },
+        {
+          "type": "string",
+          "const": "none-file",
+          "description": "No test loads the declaring file."
+        },
+        {
+          "type": "string",
+          "const": "transitive",
+          "description": "Tests reach the export only through other modules."
+        },
+        {
+          "type": "string",
+          "const": "direct",
+          "description": "A test file references the export."
+        },
+        {
+          "type": "string",
+          "const": "framework",
+          "description": "A framework reads the export as configuration with a literal value, so\nit needs no test."
+        }
+      ],
+      "description": "How tests reach one changed export.\n\nTreat this as an open set: a later version can add a class. A consumer\nmust read an unknown value as \"needs attention\"."
+    },
+    "ExportChange": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "modified",
+          "description": "The diff changes some lines of an existing declaration."
+        },
+        {
+          "type": "string",
+          "const": "new",
+          "description": "Every line of the declaration is an added line."
+        }
+      ],
+      "description": "Whether the diff adds the whole declaration or changes an existing one."
     }
   }
 }

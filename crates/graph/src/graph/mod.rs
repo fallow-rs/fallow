@@ -21,6 +21,7 @@ mod public_exports;
 mod re_exports;
 mod reachability;
 mod shortest_import_path;
+mod test_reach;
 pub mod types;
 
 use std::path::Path;
@@ -56,6 +57,7 @@ pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, Revie
 pub use public_exports::PublicExportOrigin;
 pub use re_exports::GraphReExportCycle;
 pub use shortest_import_path::ImportPathHop;
+pub use test_reach::{ExportTestReach, ExportTestReachResult, TestMaskingState};
 pub use types::{
     ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, ReferencePathId, SymbolReference,
 };
@@ -359,6 +361,10 @@ struct TestReachabilityIndex {
     words_per_file: usize,
     reachable_profiles: Vec<u64>,
     masked_profiles: Vec<MaskedTestProfiles>,
+    /// True when test roots declare replacement masks, but the distinct mask
+    /// count passed the profile safety cap. Reachability then ignores the
+    /// masks, so a mocked module counts as reached.
+    masking_capped: bool,
 }
 
 /// Sparse profile-mask row for one replaced target.
@@ -377,6 +383,7 @@ impl TestReachabilityIndex {
             words_per_file,
             reachable_profiles: vec![0; storage_len],
             masked_profiles: Vec::new(),
+            masking_capped: false,
         }
     }
 

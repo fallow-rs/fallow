@@ -24,6 +24,7 @@ mod audit_focus;
 mod audit_ownership;
 mod audit_render;
 mod audit_routing;
+mod audit_test_reach;
 mod audit_walkthrough;
 mod audit_weakening;
 mod baseline_staleness;
@@ -118,6 +119,10 @@ pub use audit_render::{
     styling_audit_context_label, styling_candidate_count,
 };
 pub use audit_routing::{RoutingFacts, RoutingUnit};
+pub use audit_test_reach::{
+    ExportChange, ExportTestReachFact, TEST_REACH_EXPORT_CAP, TEST_REACH_FILE_CAP, TestReachClass,
+    TestReachCounts, TestReachFacts, TestReachMasking, TestReachStatus,
+};
 pub use audit_walkthrough::{
     AcceptedJudgment, AgentJudgment, AgentSchema, AgentWalkthrough, ChangeAnchor, DirectionUnit,
     INJECTION_NOTE, JUDGMENT_ACTIONS, JUDGMENT_CONCERNS, RejectedJudgment, ReviewDirection,

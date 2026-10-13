@@ -800,7 +800,10 @@ fn run_audit_head_analyses(
         check.partition_order = compute_brief_partition_order(opts.root, check, changed_files);
         check.focus_facts = compute_brief_focus_facts(opts.root, check, changed_files);
         check.export_lines = compute_brief_export_lines(opts.root, check, changed_files);
-        check.search_gaps = compute_brief_search_gaps(opts.root, check, changed_files);
+        let changed_exports = compute_brief_changed_exports(opts.root, check, changed_files);
+        check.search_gaps =
+            compute_brief_search_gaps(opts.root, check, changed_files, changed_exports.as_deref());
+        check.test_reach = compute_brief_test_reach(opts.root, check, changed_exports.as_deref());
         check.internal_consumers =
             compute_brief_internal_consumers(opts.root, check, changed_files);
         check.test_adjacency = compute_brief_test_adjacency(opts.root, check, changed_files);
@@ -972,6 +975,23 @@ fn compute_brief_export_lines(
     fallow_engine::module_graph::export_lines_for_changed_paths(graph, root, changed_files)
 }
 
+/// List the exports of the changed files with their declaration lines, BEFORE
+/// health drops the graph. The literal-search gap and the test reach passes
+/// share this one parse. `None` when the graph is not retained.
+fn compute_brief_changed_exports(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<Vec<fallow_engine::module_graph::ChangedExport>> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    fallow_engine::module_graph::changed_exports_for_changed_paths(graph, root, changed_files)
+}
+
 /// Precompute the literal-search gaps of the changed exports for the brief,
 /// BEFORE health drops the graph. The brief keeps only the exports whose
 /// declaration the diff touches. `None` when the graph is not retained.
@@ -979,6 +999,7 @@ fn compute_brief_search_gaps(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
+    changed_exports: Option<&[fallow_engine::module_graph::ChangedExport]>,
 ) -> Option<Vec<fallow_engine::module_graph::ExportSearchGapPaths>> {
     let graph = check
         .shared_parse
@@ -986,7 +1007,35 @@ fn compute_brief_search_gaps(
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::module_graph::search_gaps_for_changed_paths(graph, root, changed_files)
+    fallow_engine::module_graph::search_gaps_for_changed_paths(
+        graph,
+        root,
+        changed_files,
+        changed_exports?,
+    )
+}
+
+/// Precompute how tests reach the value exports of the changed files, BEFORE
+/// health drops the graph. The brief keeps only the exports whose declaration
+/// the diff touches. Uses the same test-path classification as the weakening
+/// scan. `None` when the graph is not retained.
+fn compute_brief_test_reach(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_exports: Option<&[fallow_engine::module_graph::ChangedExport]>,
+) -> Option<fallow_engine::module_graph::TestReachPaths> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    fallow_engine::module_graph::test_reach_for_changed_paths(
+        graph,
+        root,
+        changed_exports?,
+        &|path| fallow_engine::test_paths::is_test_code_path_str(root, path),
+    )
 }
 
 /// Precompute the per-anchor honest consumer count for the decision surface:

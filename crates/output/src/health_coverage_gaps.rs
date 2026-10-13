@@ -91,17 +91,26 @@ impl UntestedExportFinding {
     /// Build the wrapper from a raw [`UntestedExport`] and the project root.
     #[must_use]
     pub fn with_actions(export: UntestedExport, root: &Path) -> Self {
+        Self::with_reach_actions(export, root, false)
+    }
+
+    /// Build the wrapper and say in the primary note when only tests that
+    /// mock the module reference the export.
+    #[must_use]
+    pub fn with_reach_actions(export: UntestedExport, root: &Path, mocked_only: bool) -> Self {
         let display_path = relative_display(&export.path, root);
         let export_name = export.export_name.clone();
+        let note = if mocked_only {
+            "This export is runtime-reachable, but only tests that mock this module reference it"
+        } else {
+            "This export is runtime-reachable but no test-reachable module references it"
+        };
         let actions = vec![
             UntestedExportAction {
                 kind: UntestedExportActionType::AddTestImport,
                 auto_fixable: false,
                 description: format!("Import and test `{export_name}` from `{display_path}`"),
-                note: Some(
-                    "This export is runtime-reachable but no test-reachable module references it"
-                        .to_string(),
-                ),
+                note: Some(note.to_string()),
                 comment: None,
             },
             UntestedExportAction {
@@ -184,6 +193,30 @@ mod tests {
 
         assert_eq!(finding.actions.len(), 2);
         assert!(finding.actions[0].description.contains("src/api.ts"));
+    }
+
+    #[test]
+    fn mocked_only_export_note_names_the_mock() {
+        let export = || UntestedExport {
+            path: PathBuf::from("/repo/src/queue.ts"),
+            export_name: "enqueue".to_string(),
+            line: 1,
+            col: 0,
+        };
+        let root = Path::new("/repo");
+        let mocked = UntestedExportFinding::with_reach_actions(export(), root, true);
+        let plain = UntestedExportFinding::with_actions(export(), root);
+
+        assert_eq!(
+            mocked.actions[0].note.as_deref(),
+            Some(
+                "This export is runtime-reachable, but only tests that mock this module reference it"
+            )
+        );
+        assert_eq!(
+            plain.actions[0].note.as_deref(),
+            Some("This export is runtime-reachable but no test-reachable module references it")
+        );
     }
 
     #[test]

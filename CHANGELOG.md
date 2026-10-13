@@ -41,6 +41,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     its renderers.
 
   Thanks @cr101 for the request. (#3381)
+- **The review brief reports test reach for changed exports.** `fallow audit
+  --brief` and `fallow review` add a `test_reach` section. For each value
+  export that the diff changes, it states how tests reach it:
+  - `direct`: a test file references the export.
+  - `transitive`: tests reach it only through other modules.
+  - `mocked-only`: only tests that mock a module on the import path reference
+    it, so the real code does not run in a test.
+  - `none` or `none-file`: no test references it, or no test loads the file.
+  - `framework`: a framework configuration export with a literal value, such
+    as the Next.js `dynamic` option.
+
+  The JSON lists at most 25 exports that need attention, with the mocking
+  tests and the mocked module of a `mocked-only` export. The human brief shows
+  the counts and the first three rows. A project without test files gets one
+  `no-tests` line. The section is advisory and never changes the exit code.
 
 - **Effect dead-code findings.** Projects that declare `effect` get three new
   rules, each at `warn` by default:
@@ -217,6 +232,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   static test signal of runtime coverage changes the same way. File-level
   reach does not change. A test with only type references to a module still
   makes that file test-reachable.
+- **The coverage-gap note names mocked exports.** `fallow health
+  --coverage-gaps` now says "only tests that mock this module reference it"
+  when the only test references to an untested export go through a closed
+  factory mock. Before, the note said that no test-reachable module references
+  the export.
 
 - **The MCP `audit` tool and `fallow_api::run_audit` read the `audit` config
   section.** The typed route ignored `audit.gate`, `audit.css` and

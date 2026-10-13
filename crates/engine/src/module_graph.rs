@@ -21,6 +21,10 @@ use fallow_graph::graph::{
     DirectImporterSummary as GraphDirectImporterSummary,
     ImportedSymbolSummary as GraphImportedSymbolSummary,
 };
+use fallow_graph::graph::{
+    ExportTestReach as GraphExportTestReach, ExportTestReachResult as GraphExportTestReachResult,
+    TestMaskingState as GraphTestMaskingState,
+};
 
 /// Engine-owned retained graph handle.
 ///
@@ -109,6 +113,21 @@ impl<'a> StaticTestCoverage<'a> {
 
     pub(crate) fn covers_any_reference(self, export: &fallow_graph::graph::ExportSymbol) -> bool {
         self.graph.is_any_test_reference_covered(export)
+    }
+
+    /// Whether only tests that mock a module on the reference path reference
+    /// `export`. Call it for an export without a covered reference.
+    pub(crate) fn is_mocked_only(
+        self,
+        file_id: FileId,
+        export: &fallow_graph::graph::ExportSymbol,
+    ) -> bool {
+        self.graph.test_masking_state() == GraphTestMaskingState::Active
+            && self
+                .graph
+                .export_test_reach(file_id, export, &|_| false)
+                .reach
+                == GraphExportTestReach::MockedOnly
     }
 }
 
@@ -428,32 +447,52 @@ pub struct ExportSearchGapPaths {
     pub consumers: Vec<ConsumerSearchGapPaths>,
 }
 
-/// Compute the literal-search gaps of the exports of absolute changed paths.
+/// One export of a changed file, with the line facts that the review brief
+/// joins on the diff.
 ///
-/// For each export of a changed file, the consumers outside the changed set
-/// are checked against a whole-word text search for the export name. Only
-/// exports with at least one `missed` or `renamed` consumer are returned. The
-/// consumer sources are read on demand.
+/// [`changed_exports_for_changed_paths`] reads and parses each changed file
+/// once. The literal-search gap pass and the test reach pass share the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedExport {
+    file_id: FileId,
+    export_index: usize,
+    /// Root-relative path of the changed file, forward-slashed.
+    pub file: String,
+    /// The export name, `default` for a default export.
+    pub export_name: String,
+    /// 1-based line of the export.
+    pub line: u32,
+    /// 1-based first and last line of the top-level statement that declares
+    /// the export.
+    pub declaration_lines: (u32, u32),
+    /// True for a type-only export.
+    pub is_type_only: bool,
+    /// True when the export is a variable whose initializer is a literal, or
+    /// an object or array of literals.
+    pub literal_value: bool,
+    /// True when a re-export statement (`export { x } from`) makes the export.
+    pub is_re_export: bool,
+}
+
+/// List the exports of absolute changed paths with their declaration lines.
+///
+/// Each changed file is read and parsed once. The exports keep graph order
+/// within a file, and the files are in `FileId` order. `None` when no module
+/// matches a changed path.
 #[must_use]
-pub fn search_gaps_for_changed_paths(
+pub fn changed_exports_for_changed_paths(
     graph: &RetainedModuleGraph,
     root: &Path,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<Vec<ExportSearchGapPaths>> {
-    use crate::search_visibility::{SearchTarget, SourceCache, declaration_line_ranges};
-    use fallow_graph::graph::ExportNamespace;
-    use fallow_types::trace::SearchVisibility;
-
+) -> Option<Vec<ChangedExport>> {
     let graph = graph.as_graph();
     let mut changed_ids = changed_file_ids(graph, changed_files);
     if changed_ids.is_empty() {
         return None;
     }
     changed_ids.sort_unstable_by_key(|id| id.0);
-    let changed_set: FxHashSet<FileId> = changed_ids.iter().copied().collect();
-    let mut sources = SourceCache::new(graph);
-    let mut gaps = Vec::new();
-    for &file_id in &changed_ids {
+    let mut changed_exports = Vec::new();
+    for file_id in changed_ids {
         let Some(module) = graph.modules.get(file_id.0 as usize) else {
             continue;
         };
@@ -469,64 +508,308 @@ pub fn search_gaps_for_changed_paths(
             .iter()
             .map(|export| export.span.start)
             .collect();
-        let ranges = declaration_line_ranges(&module.path, &source, &starts);
-        for export in &module.exports {
-            let mut seen = FxHashSet::default();
-            let candidates: Vec<_> = export
-                .references
-                .iter()
-                .filter(|reference| {
-                    !changed_set.contains(&reference.from_file)
-                        && graph
-                            .modules
-                            .get(reference.from_file.0 as usize)
-                            .is_some_and(fallow_graph::graph::ModuleNode::is_reachable)
-                        && seen.insert(reference.from_file)
-                })
-                .collect();
-            if candidates.is_empty() {
-                continue;
-            }
-            let name = export.name.to_string();
-            let namespace = if export.is_type_only {
-                ExportNamespace::Type
-            } else {
-                ExportNamespace::Value
-            };
-            let target = SearchTarget::new(graph, &mut sources, file_id, &name, namespace);
-            let mut consumers: Vec<ConsumerSearchGapPaths> = candidates
-                .into_iter()
-                .filter_map(|reference| {
-                    let check = target.check(graph, &mut sources, reference)?;
-                    if check.visibility == SearchVisibility::Found {
-                        return None;
-                    }
-                    let consumer = graph.modules.get(reference.from_file.0 as usize)?;
-                    Some(ConsumerSearchGapPaths {
-                        consumer_file: relative_key_path(&consumer.path, root),
-                        check,
-                    })
-                })
-                .collect();
-            if consumers.is_empty() {
-                continue;
-            }
-            consumers.sort_by(|a, b| a.consumer_file.cmp(&b.consumer_file));
+        let declarations =
+            crate::search_visibility::export_declarations(&module.path, &source, &starts);
+        let file = relative_key_path(&module.path, root);
+        for (export_index, export) in module.exports.iter().enumerate() {
             let line =
                 fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start).0;
-            gaps.push(ExportSearchGapPaths {
-                file: relative_key_path(&module.path, root),
-                export_name: name,
+            let declaration = declarations.get(&export.span.start);
+            changed_exports.push(ChangedExport {
+                file_id,
+                export_index,
+                file: file.clone(),
+                export_name: export.name.to_string(),
                 line,
-                declaration_lines: ranges
-                    .get(&export.span.start)
-                    .copied()
-                    .unwrap_or((line, line)),
-                consumers,
+                declaration_lines: declaration.map_or((line, line), |found| found.lines),
+                is_type_only: export.is_type_only,
+                literal_value: declaration.is_some_and(|found| found.literal_value),
+                is_re_export: declaration.is_some_and(|found| found.is_re_export),
             });
         }
     }
+    Some(changed_exports)
+}
+
+/// Compute the literal-search gaps of the changed exports.
+///
+/// For each export of a changed file, the consumers outside the changed set
+/// are checked against a whole-word text search for the export name. Only
+/// exports with at least one `missed` or `renamed` consumer are returned. The
+/// consumer sources are read on demand.
+#[must_use]
+pub fn search_gaps_for_changed_paths(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    changed_files: &FxHashSet<PathBuf>,
+    changed_exports: &[ChangedExport],
+) -> Option<Vec<ExportSearchGapPaths>> {
+    use crate::search_visibility::{SearchTarget, SourceCache};
+    use fallow_graph::graph::ExportNamespace;
+    use fallow_types::trace::SearchVisibility;
+
+    let graph = graph.as_graph();
+    let changed_set: FxHashSet<FileId> =
+        changed_file_ids(graph, changed_files).into_iter().collect();
+    if changed_set.is_empty() {
+        return None;
+    }
+    let mut sources = SourceCache::new(graph);
+    let mut gaps = Vec::new();
+    for changed in changed_exports {
+        let Some(export) = graph
+            .modules
+            .get(changed.file_id.0 as usize)
+            .and_then(|module| module.exports.get(changed.export_index))
+        else {
+            continue;
+        };
+        let mut seen = FxHashSet::default();
+        let candidates: Vec<_> = export
+            .references
+            .iter()
+            .filter(|reference| {
+                !changed_set.contains(&reference.from_file)
+                    && graph
+                        .modules
+                        .get(reference.from_file.0 as usize)
+                        .is_some_and(fallow_graph::graph::ModuleNode::is_reachable)
+                    && seen.insert(reference.from_file)
+            })
+            .collect();
+        if candidates.is_empty() {
+            continue;
+        }
+        let namespace = if export.is_type_only {
+            ExportNamespace::Type
+        } else {
+            ExportNamespace::Value
+        };
+        let target = SearchTarget::new(
+            graph,
+            &mut sources,
+            changed.file_id,
+            &changed.export_name,
+            namespace,
+        );
+        let mut consumers: Vec<ConsumerSearchGapPaths> = candidates
+            .into_iter()
+            .filter_map(|reference| {
+                let check = target.check(graph, &mut sources, reference)?;
+                if check.visibility == SearchVisibility::Found {
+                    return None;
+                }
+                let consumer = graph.modules.get(reference.from_file.0 as usize)?;
+                Some(ConsumerSearchGapPaths {
+                    consumer_file: relative_key_path(&consumer.path, root),
+                    check,
+                })
+            })
+            .collect();
+        if consumers.is_empty() {
+            continue;
+        }
+        consumers.sort_by(|a, b| a.consumer_file.cmp(&b.consumer_file));
+        gaps.push(ExportSearchGapPaths {
+            file: changed.file.clone(),
+            export_name: changed.export_name.clone(),
+            line: changed.line,
+            declaration_lines: changed.declaration_lines,
+            consumers,
+        });
+    }
     Some(gaps)
+}
+
+/// Package names whose presence marks an end-to-end test runner. Such tests
+/// drive a running app and do not import the source files.
+const E2E_RUNNER_PACKAGES: &[&str] = &["@playwright/test", "playwright", "cypress"];
+
+/// How tests reach one export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExportTestReach {
+    /// A test file references the export, and a test root covers it.
+    Direct,
+    /// A covered reference exists, but no test file names the export.
+    Transitive,
+    /// No reference is covered, and a mock replaces a module on a reference
+    /// path.
+    MockedOnly,
+    /// A test root reaches the declaring file, but no reference is covered.
+    None,
+    /// No test root reaches the declaring file.
+    NoneFile,
+}
+
+impl From<GraphExportTestReach> for ExportTestReach {
+    fn from(reach: GraphExportTestReach) -> Self {
+        match reach {
+            GraphExportTestReach::Direct => Self::Direct,
+            GraphExportTestReach::Transitive => Self::Transitive,
+            GraphExportTestReach::MockedOnly => Self::MockedOnly,
+            GraphExportTestReach::None => Self::None,
+            GraphExportTestReach::NoneFile => Self::NoneFile,
+        }
+    }
+}
+
+/// Why replacement masking is or is not active for test reachability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TestMaskingState {
+    /// At least one test root replaces a module with a closed factory mock.
+    Active,
+    /// No test root declares a closed factory mock.
+    NoMocks,
+    /// Too many distinct mock sets, so masking is off.
+    Capped,
+}
+
+impl From<GraphTestMaskingState> for TestMaskingState {
+    fn from(state: GraphTestMaskingState) -> Self {
+        match state {
+            GraphTestMaskingState::Active => Self::Active,
+            GraphTestMaskingState::NoMocks => Self::NoMocks,
+            GraphTestMaskingState::Capped => Self::Capped,
+        }
+    }
+}
+
+/// How tests reach one changed value export.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportTestReachPaths {
+    /// Root-relative path of the changed file, forward-slashed.
+    pub file: String,
+    /// The export name, `default` for a default export.
+    pub export_name: String,
+    /// 1-based line of the export.
+    pub line: u32,
+    /// 1-based first and last line of the declaring statement.
+    pub declaration_lines: (u32, u32),
+    /// True when the export is a variable with a literal initializer.
+    pub literal_value: bool,
+    /// The reach class.
+    pub reach: ExportTestReach,
+    /// Test files that name the export, sorted: the covered test references
+    /// for `Direct`, the masked test references for `MockedOnly`.
+    pub tests: Vec<String>,
+    /// For `MockedOnly`: the masked modules on the reference paths, sorted.
+    pub mocked_targets: Vec<String>,
+}
+
+/// Test reach of the changed value exports of a diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestReachPaths {
+    /// False when the project has no test entry points. Every export is then
+    /// `NoneFile`.
+    pub has_tests: bool,
+    /// Whether test reachability applies replacement masks.
+    pub masking: TestMaskingState,
+    /// True when the project imports an end-to-end test runner package.
+    pub has_e2e_runner: bool,
+    /// One row per changed value export of a changed source file.
+    pub exports: Vec<ExportTestReachPaths>,
+}
+
+/// Classify how tests reach the value exports in `changed_exports`.
+///
+/// Type-only exports, re-exports, exports of test files, of declaration files
+/// and of stylesheets are skipped. `is_test_path` classifies a root-relative,
+/// forward-slashed path; a test entry point always counts as a test file.
+/// The rows keep the order of `changed_exports`. `None` when the list holds no
+/// such export.
+#[must_use]
+pub fn test_reach_for_changed_paths(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    changed_exports: &[ChangedExport],
+    is_test_path: &dyn Fn(&str) -> bool,
+) -> Option<TestReachPaths> {
+    let graph = graph.as_graph();
+    let mut test_files: FxHashMap<FileId, bool> = FxHashMap::default();
+    let mut is_test_file = |file_id: FileId| -> bool {
+        *test_files.entry(file_id).or_insert_with(|| {
+            graph.test_entry_points.contains(&file_id)
+                || graph
+                    .modules
+                    .get(file_id.0 as usize)
+                    .is_some_and(|module| is_test_path(&relative_key_path(&module.path, root)))
+        })
+    };
+    let has_tests = !graph.test_entry_points.is_empty();
+    let mut exports = Vec::new();
+    for changed in changed_exports {
+        if changed.is_type_only || changed.is_re_export {
+            continue;
+        }
+        let Some(module) = graph.modules.get(changed.file_id.0 as usize) else {
+            continue;
+        };
+        let Some(export) = module.exports.get(changed.export_index) else {
+            continue;
+        };
+        if !is_reach_subject(&module.path) || is_test_file(changed.file_id) {
+            continue;
+        }
+        let result = if has_tests {
+            let test_flags: FxHashMap<FileId, bool> = export
+                .references
+                .iter()
+                .map(|reference| (reference.from_file, is_test_file(reference.from_file)))
+                .collect();
+            graph.export_test_reach(changed.file_id, export, &|file_id| {
+                test_flags.get(&file_id).copied().unwrap_or(false)
+            })
+        } else {
+            GraphExportTestReachResult {
+                reach: GraphExportTestReach::NoneFile,
+                tests: Vec::new(),
+                mocked_targets: Vec::new(),
+            }
+        };
+        let paths_of = |files: &[FileId]| -> Vec<String> {
+            let mut paths: Vec<String> = files
+                .iter()
+                .filter_map(|file_id| graph.modules.get(file_id.0 as usize))
+                .map(|node| relative_key_path(&node.path, root))
+                .collect();
+            paths.sort_unstable();
+            paths
+        };
+        exports.push(ExportTestReachPaths {
+            file: changed.file.clone(),
+            export_name: changed.export_name.clone(),
+            line: changed.line,
+            declaration_lines: changed.declaration_lines,
+            literal_value: changed.literal_value,
+            reach: result.reach.into(),
+            tests: paths_of(&result.tests),
+            mocked_targets: paths_of(&result.mocked_targets),
+        });
+    }
+    if exports.is_empty() {
+        return None;
+    }
+    let has_e2e_runner = E2E_RUNNER_PACKAGES.iter().any(|name| {
+        graph.package_usage.contains_key(*name) || graph.type_only_package_usage.contains_key(*name)
+    });
+    Some(TestReachPaths {
+        has_tests,
+        masking: graph.test_masking_state().into(),
+        has_e2e_runner,
+        exports,
+    })
+}
+
+/// Whether test reach applies to a file: runtime source code, not a
+/// declaration file or a stylesheet.
+fn is_reach_subject(path: &Path) -> bool {
+    if fallow_graph::graph::is_declaration_file_path(path) {
+        return false;
+    }
+    !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "css" | "scss" | "less" | "sass"))
 }
 
 /// Compute direct non-diff internal consumer counts for absolute changed paths.

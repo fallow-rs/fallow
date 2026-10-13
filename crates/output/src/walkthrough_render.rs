@@ -361,6 +361,7 @@ mod tests {
         let units: Vec<DirectionUnit> = order.iter().map(|f| dir_unit(f)).collect();
         let digest = StandardReviewBriefOutput {
             branching: None,
+            test_reach: None,
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "test".to_string(),
             command: "audit-brief".to_string(),
