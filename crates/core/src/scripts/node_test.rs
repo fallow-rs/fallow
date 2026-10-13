@@ -15,6 +15,12 @@
 //! directory and `cd` targets only later. An argument that ends with `/`, or
 //! whose last segment has no extension and no glob character, is a
 //! directory. A pattern for a directory that does not exist matches nothing.
+//! Thus an extensionless file argument, such as `node --test scripts/run`,
+//! counts as a directory and gets no entry-point credit.
+//!
+//! The `node --test` directory search follows Node 20. Node 21 and later
+//! read each positional argument as a glob and do not search a directory, so
+//! `node --test test/` reports an error there.
 
 /// The source extensions of the `node --test` defaults. The TypeScript
 /// extensions apply when Node strips types.
@@ -224,7 +230,10 @@ impl TestRunner {
                 "{prefix}**/{NODE_TEST_DIRECTORY}/**/*.{extensions}"
             ));
             // Node runs every source file below a directory named `test`.
-            if dir.split('/').any(|segment| segment == NODE_TEST_DIRECTORY) {
+            // Only the argument itself counts here: an ancestor named `test`
+            // has no effect, and the pattern above covers `test`
+            // directories below the argument.
+            if dir.rsplit('/').next() == Some(NODE_TEST_DIRECTORY) {
                 patterns.push(format!("{prefix}**/*.{extensions}"));
             }
         }
@@ -233,7 +242,8 @@ impl TestRunner {
 
     /// Return the positional arguments of the test run: the tokens after
     /// the flags, the flag values and, for Bun and Deno, the `test`
-    /// subcommand.
+    /// subcommand. For Bun and Deno, the tokens after `--` go to the test
+    /// process, so the scan stops there. Node can read them as files.
     fn positionals<'a>(self, args: &[&'a str]) -> Vec<&'a str> {
         let (start, value_flags) = match self {
             Self::Node => (0, NODE_VALUE_FLAGS),
@@ -249,6 +259,9 @@ impl TestRunner {
         let mut positionals = Vec::new();
         let mut idx = start;
         while let Some(&token) = args.get(idx) {
+            if token == "--" && self != Self::Node {
+                break;
+            }
             if value_flags.contains(&token) {
                 idx += 1;
             } else if !token.starts_with('-') {
@@ -264,12 +277,18 @@ impl TestRunner {
 /// <https://bun.com/docs/cli/test>.
 const BUN_TEST_VALUE_FLAGS: &[&str] = &[
     "-c",
+    "-d",
+    "-l",
     "-r",
     "-t",
+    "--conditions",
     "--config",
     "--coverage-dir",
     "--coverage-reporter",
     "--cwd",
+    "--define",
+    "--env-file",
+    "--loader",
     "--max-concurrency",
     "--preload",
     "--reporter",
@@ -279,10 +298,12 @@ const BUN_TEST_VALUE_FLAGS: &[&str] = &[
     "--seed",
     "--test-name-pattern",
     "--timeout",
+    "--tsconfig-override",
 ];
 
 /// Deno test flags that take their value from the next token.
 const DENO_TEST_VALUE_FLAGS: &[&str] = &[
+    "-L",
     "-c",
     "--cert",
     "--config",
@@ -291,6 +312,7 @@ const DENO_TEST_VALUE_FLAGS: &[&str] = &[
     "--import-map",
     "--junit-path",
     "--location",
+    "--log-level",
     "--preload",
     "--reporter",
     "--seed",
@@ -560,6 +582,58 @@ mod tests {
         let found = run_patterns("node", "--test spec/unit");
         assert!(found.contains(&"spec/unit/**/*.test.{js,mjs,cjs,ts,mts,cts}".to_string()));
         assert!(!found.contains(&"spec/unit/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
+    }
+
+    #[test]
+    fn node_test_ancestor_directory_does_not_run_every_source_file() {
+        let found = run_patterns("node", "--test test/unit");
+        assert!(found.contains(&"test/unit/**/*.test.{js,mjs,cjs,ts,mts,cts}".to_string()));
+        assert!(found.contains(&"test/unit/**/test/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
+        assert!(!found.contains(&"test/unit/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
+        let found = run_patterns("node", "--test packages/core/test");
+        assert!(found.contains(&"packages/core/test/**/*.{js,mjs,cjs,ts,mts,cts}".to_string()));
+    }
+
+    fn keeps_defaults(binary: &str, script_args: &str) -> bool {
+        let found = run_patterns(binary, script_args);
+        run_patterns(binary, "test")
+            .iter()
+            .all(|pattern| found.contains(pattern))
+    }
+
+    #[test]
+    fn bun_and_deno_value_flags_are_not_directories() {
+        for (binary, args) in [
+            ("bun", "test --env-file .env.test"),
+            (
+                "bun",
+                "test --define process.env.CI:true --conditions development",
+            ),
+            (
+                "bun",
+                "test -l .svg:file --tsconfig-override tsconfig.test.json",
+            ),
+            ("deno", "test -A --log-level debug"),
+            ("deno", "test -A -L info"),
+        ] {
+            assert!(keeps_defaults(binary, args), "`{binary} {args}`");
+        }
+    }
+
+    #[test]
+    fn bun_and_deno_arguments_after_a_terminator_go_to_the_tests() {
+        assert_eq!(
+            run_patterns("deno", "test -A -- update"),
+            run_patterns("deno", "test")
+        );
+        assert_eq!(
+            run_patterns("bun", "test -- fixtures"),
+            run_patterns("bun", "test")
+        );
+        assert_eq!(
+            run_patterns("deno", "test tests -- update"),
+            run_patterns("deno", "test tests")
+        );
     }
 
     #[test]

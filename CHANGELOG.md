@@ -155,8 +155,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default patterns of the working directory. Fallow tells a directory from a
   file by its syntax: the argument ends with `/`, or its last segment has no
   extension and no glob character. Other files in the directory do not
-  become entry points. A Bun name filter such as `bun test parser` adds no
-  pattern.
+  become entry points, except below a directory named `test`, where
+  `node --test` runs every source file. The `node --test <dir>` form follows
+  Node 20. Node 21 and later report an error for a directory argument. A Bun
+  name filter such as `bun test parser` adds no pattern. The test files that
+  these runs find, and the files that they import, are no longer reported as
+  unused files in `fallow dead-code`.
 - **The config schema now describes `warn` correctly.** The descriptions of
   `Severity` and of the rules that default to `warn` said that `warn` does not
   fail CI. A `warn` finding does not change the CLI exit code unless
