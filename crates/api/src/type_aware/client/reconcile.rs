@@ -51,10 +51,108 @@ impl DeadCodeResponsePlan {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the transaction plans every capability delta before its infallible commit"
-)]
+#[derive(Default)]
+struct CandidateResponsePlan {
+    class_decisions: Vec<(usize, SemanticCandidateDecision)>,
+    export_decisions: Vec<(usize, SemanticCandidateDecision)>,
+    type_decisions: Vec<(usize, SemanticCandidateDecision)>,
+    confirmed_class: BTreeSet<usize>,
+    confirmed_exports: BTreeSet<usize>,
+    confirmed_types: BTreeSet<usize>,
+    candidate_decisions: Vec<SemanticCandidateDecision>,
+    decision_stats: CandidateDecisionStats,
+}
+
+impl CandidateResponsePlan {
+    fn record_class(
+        &mut self,
+        results: &AnalysisResults,
+        index: usize,
+        decision: SemanticCandidateDecision,
+    ) -> Result<(), TypeAwareError> {
+        let finding = results.unused_class_members.get(index).ok_or_else(|| {
+            TypeAwareError::from("type-aware class-member target no longer exists".to_string())
+        })?;
+        let semantic_only = finding.semantic_only_candidate;
+        record_candidate_decision(
+            &decision,
+            index,
+            &mut self.confirmed_class,
+            &mut self.decision_stats,
+        );
+        if semantic_only_candidate_stays_hidden(semantic_only, decision.decision) {
+            self.confirmed_class.insert(index);
+        }
+        self.class_decisions.push((index, decision.clone()));
+        self.candidate_decisions.push(decision);
+        Ok(())
+    }
+
+    fn record_export(
+        &mut self,
+        results: &AnalysisResults,
+        index: usize,
+        decision: SemanticCandidateDecision,
+    ) -> Result<(), TypeAwareError> {
+        results.unused_exports.get(index).ok_or_else(|| {
+            TypeAwareError::from("type-aware export target no longer exists".to_string())
+        })?;
+        record_candidate_decision(
+            &decision,
+            index,
+            &mut self.confirmed_exports,
+            &mut self.decision_stats,
+        );
+        self.export_decisions.push((index, decision.clone()));
+        self.candidate_decisions.push(decision);
+        Ok(())
+    }
+
+    fn record_type(
+        &mut self,
+        results: &AnalysisResults,
+        index: usize,
+        decision: SemanticCandidateDecision,
+    ) -> Result<(), TypeAwareError> {
+        results.unused_types.get(index).ok_or_else(|| {
+            TypeAwareError::from("type-aware type target no longer exists".to_string())
+        })?;
+        record_candidate_decision(
+            &decision,
+            index,
+            &mut self.confirmed_types,
+            &mut self.decision_stats,
+        );
+        self.type_decisions.push((index, decision.clone()));
+        self.candidate_decisions.push(decision);
+        Ok(())
+    }
+
+    fn hide_unverified_class_candidates(&mut self, results: &AnalysisResults) {
+        let planned_class_decisions = self
+            .class_decisions
+            .iter()
+            .map(|(index, _)| *index)
+            .collect::<BTreeSet<_>>();
+        for (index, finding) in results.unused_class_members.iter().enumerate() {
+            if finding.semantic_only_candidate
+                && finding.semantic.is_none()
+                && !planned_class_decisions.contains(&index)
+            {
+                self.confirmed_class.insert(index);
+            }
+        }
+    }
+}
+
+struct PlannedResponse {
+    candidates: CandidateResponsePlan,
+    api_surface: Option<ApiSurfaceResult>,
+    api_surface_mutation: Option<ApiSurfaceMutation>,
+    type_coupling: Option<TypeCouplingReport>,
+    query_summaries: Vec<SemanticQuerySummary>,
+}
+
 fn build_dead_code_response_plan(
     root: &Path,
     results: &AnalysisResults,
@@ -62,23 +160,45 @@ fn build_dead_code_response_plan(
     response: SemanticResponse,
     requested_capabilities: Vec<SemanticCapability>,
 ) -> Result<DeadCodeResponsePlan, TypeAwareError> {
-    let DeadCodeReconciliation {
-        request,
-        targets,
-        capacity: local_capacity,
-    } = reconciliation;
-    let mut confirmed_class = BTreeSet::new();
-    let mut confirmed_exports = BTreeSet::new();
-    let mut confirmed_types = BTreeSet::new();
-    let mut class_decisions = Vec::new();
-    let mut export_decisions = Vec::new();
-    let mut type_decisions = Vec::new();
+    let mut planned = plan_response_results(root, results, reconciliation, &response)?;
+    apply_symbol_capacity(&mut planned, reconciliation.capacity);
+    planned.candidates.hide_unverified_class_candidates(results);
+    let completeness = response_completeness(&response, reconciliation);
+    let type_aware = build_type_aware_outcome(
+        response,
+        reconciliation,
+        requested_capabilities,
+        completeness,
+        &mut planned,
+    );
+    Ok(DeadCodeResponsePlan {
+        class_decisions: planned.candidates.class_decisions,
+        export_decisions: planned.candidates.export_decisions,
+        type_decisions: planned.candidates.type_decisions,
+        remove_class: planned.candidates.confirmed_class,
+        remove_exports: planned.candidates.confirmed_exports,
+        remove_types: planned.candidates.confirmed_types,
+        api_surface: planned.api_surface_mutation,
+        outcome: SemanticDeadCodeOutcome {
+            type_aware,
+            type_coupling: planned.type_coupling,
+        },
+    })
+}
+
+fn plan_response_results(
+    root: &Path,
+    results: &AnalysisResults,
+    reconciliation: DeadCodeReconciliation<'_>,
+    response: &SemanticResponse,
+) -> Result<PlannedResponse, TypeAwareError> {
+    let request = reconciliation.request;
+    let targets = reconciliation.targets;
+    let mut candidates = CandidateResponsePlan::default();
     let mut api_surface = None;
     let mut api_surface_mutation = None;
     let mut type_coupling = None;
     let mut query_summaries = Vec::new();
-    let mut candidate_decisions = Vec::new();
-    let mut decision_stats = CandidateDecisionStats::default();
     let mut source_cache = FxHashMap::default();
     let unreachable_files = results
         .unused_files
@@ -115,23 +235,7 @@ fn build_dead_code_response_plan(
                     &unreachable_files,
                     &mut summary,
                 );
-                let finding = results.unused_class_members.get(*index).ok_or_else(|| {
-                    TypeAwareError::from(
-                        "type-aware class-member target no longer exists".to_string(),
-                    )
-                })?;
-                let semantic_only = finding.semantic_only_candidate;
-                record_candidate_decision(
-                    &decision,
-                    *index,
-                    &mut confirmed_class,
-                    &mut decision_stats,
-                );
-                if semantic_only_candidate_stays_hidden(semantic_only, decision.decision) {
-                    confirmed_class.insert(*index);
-                }
-                class_decisions.push((*index, decision.clone()));
-                candidate_decisions.push(decision);
+                candidates.record_class(results, *index, decision)?;
             }
             QueryTarget::UnusedExport(index) => {
                 let decision = retain_non_crediting_evidence(
@@ -139,17 +243,7 @@ fn build_dead_code_response_plan(
                     &unreachable_files,
                     &mut summary,
                 );
-                results.unused_exports.get(*index).ok_or_else(|| {
-                    TypeAwareError::from("type-aware export target no longer exists".to_string())
-                })?;
-                record_candidate_decision(
-                    &decision,
-                    *index,
-                    &mut confirmed_exports,
-                    &mut decision_stats,
-                );
-                export_decisions.push((*index, decision.clone()));
-                candidate_decisions.push(decision);
+                candidates.record_export(results, *index, decision)?;
             }
             QueryTarget::UnusedType(index) => {
                 let decision = retain_non_crediting_evidence(
@@ -157,17 +251,7 @@ fn build_dead_code_response_plan(
                     &unreachable_files,
                     &mut summary,
                 );
-                results.unused_types.get(*index).ok_or_else(|| {
-                    TypeAwareError::from("type-aware type target no longer exists".to_string())
-                })?;
-                record_candidate_decision(
-                    &decision,
-                    *index,
-                    &mut confirmed_types,
-                    &mut decision_stats,
-                );
-                type_decisions.push((*index, decision.clone()));
-                candidate_decisions.push(decision);
+                candidates.record_type(results, *index, decision)?;
             }
             QueryTarget::ApiSurface {
                 unrequested_candidate_count,
@@ -180,37 +264,40 @@ fn build_dead_code_response_plan(
                 api_surface_mutation = Some(mutation);
             }
             QueryTarget::TypeCoupling => {
-                type_coupling = Some(decode_type_coupling(&response, request, result)?);
+                type_coupling = Some(decode_type_coupling(response, request, result)?);
             }
         }
         query_summaries.push(summary);
     }
+    Ok(PlannedResponse {
+        candidates,
+        api_surface,
+        api_surface_mutation,
+        type_coupling,
+        query_summaries,
+    })
+}
+
+fn apply_symbol_capacity(planned: &mut PlannedResponse, local_capacity: LocalCapacity) {
     if local_capacity.unrequested_symbol_count > 0
-        && let Some(summary) = query_summaries
+        && let Some(summary) = planned
+            .query_summaries
             .iter_mut()
             .rev()
             .find(|summary| summary.capability == SemanticCapability::SymbolUse)
     {
         add_summary_capacity_gap(summary, local_capacity.unrequested_symbol_count);
     }
+}
 
-    let planned_class_decisions = class_decisions
-        .iter()
-        .map(|(index, _)| *index)
-        .collect::<BTreeSet<_>>();
-    for (index, finding) in results.unused_class_members.iter().enumerate() {
-        if finding.semantic_only_candidate
-            && finding.semantic.is_none()
-            && !planned_class_decisions.contains(&index)
-        {
-            confirmed_class.insert(index);
-        }
-    }
-
+fn response_completeness(
+    response: &SemanticResponse,
+    reconciliation: DeadCodeReconciliation<'_>,
+) -> SemanticCompleteness {
     let mut completeness = aggregate_completeness(&response.results);
     if completeness == SemanticCompleteness::Complete
-        && (local_capacity.unrequested_symbol_count > 0
-            || targets.values().any(|target| {
+        && (reconciliation.capacity.unrequested_symbol_count > 0
+            || reconciliation.targets.values().any(|target| {
                 matches!(
                     target,
                     QueryTarget::ApiSurface {
@@ -221,6 +308,22 @@ fn build_dead_code_response_plan(
     {
         completeness = SemanticCompleteness::Partial;
     }
+    completeness
+}
+
+fn build_type_aware_outcome(
+    response: SemanticResponse,
+    reconciliation: DeadCodeReconciliation<'_>,
+    requested_capabilities: Vec<SemanticCapability>,
+    completeness: SemanticCompleteness,
+    planned: &mut PlannedResponse,
+) -> TypeAwareOutcome {
+    let request = reconciliation.request;
+    let local_capacity = reconciliation.capacity;
+    let query_summaries = std::mem::take(&mut planned.query_summaries);
+    let candidate_decisions = std::mem::take(&mut planned.candidates.candidate_decisions);
+    let mut decision_stats = std::mem::take(&mut planned.candidates.decision_stats);
+    let api_surface = planned.api_surface.take();
     let capabilities = requested_capabilities
         .into_iter()
         .collect::<BTreeSet<_>>()
@@ -244,32 +347,8 @@ fn build_dead_code_response_plan(
         backend_family: response.backend.clone(),
         completeness,
     };
-    let projects = response
-        .projects
-        .into_iter()
-        .map(|project| TypeAwareProjectMeta {
-            config: project.config,
-            source: project.source,
-            status: project.status,
-            candidate_count: project.candidate_count,
-            confirmed_used_count: project.confirmed_used_count,
-            contract_preserved_count: project.contract_preserved_count,
-            no_static_references_count: project.no_static_references_count,
-            fix_eligible_count: project.fix_eligible_count,
-            unresolved_count: project.unresolved_count,
-            abstained_count: project.abstained_count,
-            blocking_diagnostic_count: project.blocking_diagnostic_count,
-            source_file_count: project.source_file_count,
-            program_reused: Some(project.program_reused),
-            program_shared_across_queries: Some(project.program_reused),
-            program_reused_from_previous_snapshot: project.program_reused_from_previous_snapshot,
-            snapshot_revision: project.snapshot_revision,
-            invalidation_kind: project.invalidation_kind,
-            reason_code: project.reason_code,
-            abstain_reason: None,
-        })
-        .collect();
-    let type_aware = TypeAwareOutcome {
+    let projects = project_metadata(response.projects);
+    TypeAwareOutcome {
         meta: TypeAwareMeta {
             identity: Some(identity),
             required_completeness: None,
@@ -278,7 +357,7 @@ fn build_dead_code_response_plan(
             symbol_traces: Vec::new(),
             api_surface,
             symbol_impacts: Vec::new(),
-            type_coupling: type_coupling.clone(),
+            type_coupling: planned.type_coupling.clone(),
             executed: true,
             protocol_version: response.protocol_version,
             sidecar_version: Some(response.sidecar_version),
@@ -304,20 +383,34 @@ fn build_dead_code_response_plan(
             },
         },
         warnings,
-    };
-    Ok(DeadCodeResponsePlan {
-        class_decisions,
-        export_decisions,
-        type_decisions,
-        remove_class: confirmed_class,
-        remove_exports: confirmed_exports,
-        remove_types: confirmed_types,
-        api_surface: api_surface_mutation,
-        outcome: SemanticDeadCodeOutcome {
-            type_aware,
-            type_coupling,
-        },
-    })
+    }
+}
+
+fn project_metadata(projects: Vec<SemanticProjectResponse>) -> Vec<TypeAwareProjectMeta> {
+    projects
+        .into_iter()
+        .map(|project| TypeAwareProjectMeta {
+            config: project.config,
+            source: project.source,
+            status: project.status,
+            candidate_count: project.candidate_count,
+            confirmed_used_count: project.confirmed_used_count,
+            contract_preserved_count: project.contract_preserved_count,
+            no_static_references_count: project.no_static_references_count,
+            fix_eligible_count: project.fix_eligible_count,
+            unresolved_count: project.unresolved_count,
+            abstained_count: project.abstained_count,
+            blocking_diagnostic_count: project.blocking_diagnostic_count,
+            source_file_count: project.source_file_count,
+            program_reused: Some(project.program_reused),
+            program_shared_across_queries: Some(project.program_reused),
+            program_reused_from_previous_snapshot: project.program_reused_from_previous_snapshot,
+            snapshot_revision: project.snapshot_revision,
+            invalidation_kind: project.invalidation_kind,
+            reason_code: project.reason_code,
+            abstain_reason: None,
+        })
+        .collect()
 }
 
 fn retain_non_crediting_evidence(
