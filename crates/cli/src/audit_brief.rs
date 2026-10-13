@@ -1972,6 +1972,9 @@ mod tests {
             summary: AuditSummary {
                 dead_code_issues: 0,
                 dead_code_has_errors: false,
+                dead_code_skipped: false,
+                complexity_skipped: false,
+                duplication_skipped: false,
                 complexity_findings: 0,
                 max_cyclomatic: None,
                 duplication_clone_groups: 0,

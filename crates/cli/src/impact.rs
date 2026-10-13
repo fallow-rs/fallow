@@ -2876,6 +2876,9 @@ mod tests {
         AuditSummary {
             dead_code_issues: dead,
             dead_code_has_errors: dead > 0,
+            dead_code_skipped: false,
+            complexity_skipped: false,
+            duplication_skipped: false,
             complexity_findings: complexity,
             max_cyclomatic: None,
             duplication_clone_groups: dupes,

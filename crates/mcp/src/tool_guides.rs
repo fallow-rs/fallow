@@ -215,6 +215,11 @@ const AUDIT_SECTIONS: &[ToolGuideSection] = &[
 Each finding carries `rule`, `path`, an optional `line`, `message`, `evidence`, `severity`, and `actions`. An `error` finding fails the verdict, and a `warn` finding turns `pass` into `warn`. `attribution.diff_risk_introduced` counts the findings. The `rules` config sets the severity of each rule, and the rule name is also the suppression token. The actions only suppress (`suppress-line`, `suppress-file`, or `suppress-in-config`); none is auto-fixable. Review the change before you suppress a finding.",
     },
     ToolGuideSection {
+        topic: "selection",
+        summary: "How only and skip choose the audit sub-analyses, as bare fallow --only/--skip does.",
+        detail: r"Audit runs three sub-analyses: `dead-code`, `health` and `dupes`. The config keys `audit.deadCode`, `audit.health` and `audit.dupes` turn each one off. Set skip to leave sub-analyses out of one run, or only to choose them and replace the config selection. `architecture` narrows the dead-code findings: skip=[architecture] drops cycles, boundary and policy violations, and only=[architecture] keeps only those. A skipped sub-analysis is skipped on the head and on the base snapshot. Its block is absent from the response, and `summary.dead_code_skipped`, `complexity_skipped` or `duplication_skipped` is true. Its counts are then 0, which does not mean the code is clean. Styling findings come from the health sub-analysis. A baseline for a skipped sub-analysis is an error.",
+    },
+    ToolGuideSection {
         topic: "styling",
         summary: "What the default styling pass adds, and how css_deep changes it.",
         detail: r"Styling analytics are on by default in audit. CSS and CSS-in-JS evidence can add `styling_findings`, `css_analytics`, and `styling_health` inside the nested `complexity` block. Set css_deep=false to skip project-wide styling reachability and keep the local styling checks. Set css_deep=true to turn it on again when the config turns it off. An unset css or css_deep uses `audit.css` or `audit.cssDeep` from the config. Set css=false to skip all styling analytics; css=true cannot turn them on when `audit.css` is false. Styling actions are report-only: verify each one before you edit.",

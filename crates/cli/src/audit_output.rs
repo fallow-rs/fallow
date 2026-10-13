@@ -966,8 +966,15 @@ fn print_audit_vital_signs(result: &AuditResult) {
 
 fn build_vital_sign_parts(summary: &AuditSummary) -> Vec<String> {
     let mut parts = Vec::new();
-    parts.push(format!("dead code {}", summary.dead_code_issues));
-    if let Some(max) = summary.max_cyclomatic {
+    // A skipped pass reports 0 issues, which must not read as a clean result.
+    if summary.dead_code_skipped {
+        parts.push("dead code skipped".to_string());
+    } else {
+        parts.push(format!("dead code {}", summary.dead_code_issues));
+    }
+    if summary.complexity_skipped {
+        parts.push("complexity skipped".to_string());
+    } else if let Some(max) = summary.max_cyclomatic {
         parts.push(format!(
             "complexity {} (warn, max cyclomatic: {max})",
             summary.complexity_findings
@@ -975,7 +982,11 @@ fn build_vital_sign_parts(summary: &AuditSummary) -> Vec<String> {
     } else {
         parts.push(format!("complexity {}", summary.complexity_findings));
     }
-    parts.push(format!("duplication {}", summary.duplication_clone_groups));
+    if summary.duplication_skipped {
+        parts.push("duplication skipped".to_string());
+    } else {
+        parts.push(format!("duplication {}", summary.duplication_clone_groups));
+    }
     parts
 }
 
@@ -1468,6 +1479,9 @@ mod tests {
             summary: AuditSummary {
                 dead_code_issues: 0,
                 dead_code_has_errors: false,
+                dead_code_skipped: false,
+                complexity_skipped: false,
+                duplication_skipped: false,
                 complexity_findings: 0,
                 max_cyclomatic: None,
                 duplication_clone_groups: 0,
@@ -1578,6 +1592,9 @@ mod tests {
         let summary = AuditSummary {
             dead_code_issues: 1,
             dead_code_has_errors: true,
+            dead_code_skipped: false,
+            complexity_skipped: false,
+            duplication_skipped: false,
             complexity_findings: 2,
             max_cyclomatic: Some(12),
             duplication_clone_groups: 3,
@@ -1596,6 +1613,9 @@ mod tests {
         let empty = AuditSummary {
             dead_code_issues: 0,
             dead_code_has_errors: false,
+            dead_code_skipped: false,
+            complexity_skipped: false,
+            duplication_skipped: false,
             complexity_findings: 0,
             max_cyclomatic: None,
             duplication_clone_groups: 0,
@@ -1608,6 +1628,9 @@ mod tests {
         let empty = AuditSummary {
             dead_code_issues: 0,
             dead_code_has_errors: false,
+            dead_code_skipped: false,
+            complexity_skipped: false,
+            duplication_skipped: false,
             complexity_findings: 0,
             max_cyclomatic: None,
             duplication_clone_groups: 0,
@@ -1645,6 +1668,9 @@ mod tests {
         let summary = AuditSummary {
             dead_code_issues: 0,
             dead_code_has_errors: false,
+            dead_code_skipped: false,
+            complexity_skipped: false,
+            duplication_skipped: false,
             complexity_findings: 2,
             max_cyclomatic: Some(18),
             duplication_clone_groups: 1,
@@ -1665,6 +1691,9 @@ mod tests {
         let summary = AuditSummary {
             dead_code_issues: 3,
             dead_code_has_errors: false,
+            dead_code_skipped: false,
+            complexity_skipped: false,
+            duplication_skipped: false,
             complexity_findings: 0,
             max_cyclomatic: None,
             duplication_clone_groups: 0,
@@ -1676,6 +1705,37 @@ mod tests {
                 "dead code 3".to_string(),
                 "complexity 0".to_string(),
                 "duplication 0".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_vital_sign_parts_marks_skipped_sub_analyses() {
+        let summary = |dead_code_skipped, complexity_skipped, duplication_skipped| AuditSummary {
+            dead_code_issues: 0,
+            dead_code_has_errors: false,
+            dead_code_skipped,
+            complexity_skipped,
+            duplication_skipped,
+            complexity_findings: 1,
+            max_cyclomatic: None,
+            duplication_clone_groups: 0,
+        };
+
+        assert_eq!(
+            build_vital_sign_parts(&summary(true, false, false)),
+            vec![
+                "dead code skipped".to_string(),
+                "complexity 1".to_string(),
+                "duplication 0".to_string(),
+            ]
+        );
+        assert_eq!(
+            build_vital_sign_parts(&summary(false, true, true)),
+            vec![
+                "dead code 0".to_string(),
+                "complexity skipped".to_string(),
+                "duplication skipped".to_string(),
             ]
         );
     }
@@ -1722,6 +1782,9 @@ mod tests {
         result.summary = AuditSummary {
             dead_code_issues: 2,
             dead_code_has_errors: true,
+            dead_code_skipped: false,
+            complexity_skipped: false,
+            duplication_skipped: false,
             complexity_findings: 1,
             max_cyclomatic: Some(14),
             duplication_clone_groups: 3,

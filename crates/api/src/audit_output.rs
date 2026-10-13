@@ -28,6 +28,21 @@ pub struct AuditSummary {
     pub dead_code_issues: usize,
     /// Whether any reported dead-code issue has error severity.
     pub dead_code_has_errors: bool,
+    /// True when `--only`, `--skip` or `audit.deadCode = false` skipped the
+    /// dead-code sub-analysis. The dead-code counts are then 0 and do not mean
+    /// a clean result. Omitted when the sub-analysis ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dead_code_skipped: bool,
+    /// True when `--only`, `--skip` or `audit.health = false` skipped the
+    /// health sub-analysis. The complexity and styling counts are then 0 and
+    /// do not mean a clean result. Omitted when the sub-analysis ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub complexity_skipped: bool,
+    /// True when `--only`, `--skip` or `audit.dupes = false` skipped the
+    /// duplication sub-analysis. The clone-group counts are then 0 and do not
+    /// mean a clean result. Omitted when the sub-analysis ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub duplication_skipped: bool,
     /// Total complexity findings reported for the changed files.
     pub complexity_findings: usize,
     /// Highest cyclomatic complexity among the findings; `None` when there
@@ -578,6 +593,9 @@ mod tests {
             summary: AuditSummary {
                 dead_code_issues: 0,
                 dead_code_has_errors: false,
+                dead_code_skipped: false,
+                complexity_skipped: false,
+                duplication_skipped: false,
                 complexity_findings: 0,
                 max_cyclomatic: None,
                 duplication_clone_groups: 0,

@@ -2609,6 +2609,8 @@ fn audit_args_with_all_options() {
         production_dead_code: None,
         production_health: Some(true),
         production_dupes: None,
+        only: None,
+        skip: None,
         css: None,
         css_deep: Some(true),
         workspace: Some("@app/core".to_string()),
@@ -2678,6 +2680,104 @@ fn audit_args_css_opt_outs_forward_to_cli() {
 
     assert!(args.contains(&"--no-css".to_string()));
     assert!(args.contains(&"--no-css-deep".to_string()));
+}
+
+#[test]
+fn audit_args_forward_the_sub_analysis_selection() {
+    let skip = |values: &[&str]| AuditParams {
+        skip: Some(values.iter().map(ToString::to_string).collect()),
+        ..Default::default()
+    };
+    let args = build_audit_args(&skip(&["dead-code", "dupes"])).expect("skip is valid");
+    assert!(args.windows(2).any(|w| w == ["--skip", "dead-code,dupes"]));
+
+    let args = build_audit_args(&AuditParams {
+        only: Some(vec!["health".to_string()]),
+        ..Default::default()
+    })
+    .expect("only is valid");
+    assert!(args.windows(2).any(|w| w == ["--only", "health"]));
+
+    let unset = build_audit_args(&AuditParams::default()).expect("defaults are valid");
+    assert!(!unset.iter().any(|arg| arg == "--only" || arg == "--skip"));
+}
+
+#[test]
+fn audit_args_reject_an_invalid_sub_analysis_selection() {
+    let both = build_audit_args(&AuditParams {
+        only: Some(vec!["health".to_string()]),
+        skip: Some(vec!["dupes".to_string()]),
+        ..Default::default()
+    })
+    .expect_err("only and skip are exclusive");
+    assert!(both.contains("mutually exclusive"), "{both}");
+
+    let unknown = build_audit_args(&AuditParams {
+        skip: Some(vec!["styling".to_string()]),
+        ..Default::default()
+    })
+    .expect_err("styling is not a sub-analysis");
+    assert!(
+        unknown.contains("Invalid sub-analysis 'styling'"),
+        "{unknown}"
+    );
+}
+
+#[test]
+fn audit_args_reject_a_baseline_for_a_left_out_sub_analysis() {
+    let err = build_audit_args(&AuditParams {
+        skip: Some(vec!["dead-code".to_string()]),
+        dead_code_baseline: Some("baseline.json".to_string()),
+        ..Default::default()
+    })
+    .expect_err("a skipped sub-analysis reads no baseline");
+    assert!(err.contains("dead_code_baseline"), "{err}");
+
+    let err = build_audit_args(&AuditParams {
+        only: Some(vec!["dead-code".to_string()]),
+        health_baseline: Some("health.json".to_string()),
+        ..Default::default()
+    })
+    .expect_err("only leaves health out");
+    assert!(err.contains("health_baseline"), "{err}");
+
+    build_audit_args(&AuditParams {
+        skip: Some(vec!["architecture".to_string()]),
+        dead_code_baseline: Some("baseline.json".to_string()),
+        ..Default::default()
+    })
+    .expect("skipping architecture keeps the dead-code pass");
+
+    let err = build_audit_args(&AuditParams {
+        skip: Some(vec!["check".to_string()]),
+        dead_code_baseline: Some("baseline.json".to_string()),
+        ..Default::default()
+    })
+    .expect_err("check is the dead-code alias");
+    assert!(err.contains("dead_code_baseline"), "{err}");
+
+    for (only, baseline) in [
+        ("architecture", "dead_code_baseline"),
+        ("dupes", "dupes_baseline"),
+    ] {
+        let mut params = AuditParams {
+            only: Some(vec![only.to_string()]),
+            ..Default::default()
+        };
+        match baseline {
+            "dead_code_baseline" => params.dead_code_baseline = Some("b.json".to_string()),
+            _ => params.dupes_baseline = Some("b.json".to_string()),
+        }
+        build_audit_args(&params)
+            .unwrap_or_else(|err| panic!("only={only} runs the pass {baseline} reads: {err}"));
+    }
+
+    build_audit_args(&AuditParams {
+        only: Some(Vec::new()),
+        skip: Some(vec!["dupes".to_string()]),
+        ..Default::default()
+    })
+    .expect("an empty only is unset");
 }
 
 #[test]

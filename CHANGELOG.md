@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
+  `--only` and `--skip` with the values and rules of bare `fallow --only` /
+  `--skip`: `dead-code`, `architecture`, `dupes` and `health`. The new config
+  keys `audit.deadCode`, `audit.health` and `audit.dupes` set the default
+  selection. `--skip` removes from it, and `--only` replaces it. A skipped
+  sub-analysis is skipped on the head and on the base snapshot, so it leaves
+  the verdict, `summary` and `attribution`. A warn-only gate for complexity and
+  duplication is now `fallow audit --skip dead-code` with the complexity rules
+  at `warn`.
+  - The JSON report omits the block of a skipped sub-analysis and sets
+    `summary.dead_code_skipped`, `complexity_skipped` or
+    `duplication_skipped`. The human output and the GitHub step summary show
+    the row as skipped.
+  - `architecture` narrows the dead-code findings to, or away from, cycles,
+    boundary violations and policy violations. Styling findings come from the
+    health sub-analysis.
+  - A baseline flag for a skipped sub-analysis exits 2. A configured baseline
+    for it is ignored. `--max-crap`, `--coverage`, `--coverage-root` and
+    `--runtime-coverage` print a note when the health sub-analysis is skipped.
+  - A selection that leaves no sub-analysis exits 2. The bare
+    `fallow --skip dead-code,dupes,health` now exits 2 too, instead of
+    printing an empty report.
+  - A partial selection does not write the Impact record, as for the bare run.
+  - The review brief (`--brief`, `fallow review`) keeps every sub-analysis.
+  - The GitHub Action `only` / `skip` inputs and the GitLab `FALLOW_ONLY` /
+    `FALLOW_SKIP` variables now apply to `audit` too. The MCP `audit` tool
+    takes `only` and `skip`, and the programmatic `run_audit` reads the three
+    config keys.
+  - The GitHub step summary of `audit` now has the `Styling` row in both of
+    its renderers.
+
+  Thanks @cr101 for the request. (#3381)
+
 - **Effect dead-code findings.** Projects that declare `effect` get three new
   rules, each at `warn` by default:
   - `unused-effect-layer` reports a layer that only unused layers compose.

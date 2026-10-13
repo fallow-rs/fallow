@@ -216,7 +216,7 @@
               "type": "null"
             }
           ],
-          "description": "Dead-code findings scoped to the audit changeset."
+          "description": "Dead-code findings scoped to the audit changeset. Absent when no file\nchanged, or when `summary.dead_code_skipped` says the pass was skipped."
         },
         "duplication": {
           "anyOf": [
@@ -8540,6 +8540,18 @@
         "dead_code_has_errors": {
           "type": "boolean",
           "description": "Whether any reported dead-code issue has error severity."
+        },
+        "dead_code_skipped": {
+          "type": "boolean",
+          "description": "True when `--only`, `--skip` or `audit.deadCode = false` skipped the\ndead-code sub-analysis. The dead-code counts are then 0 and do not mean\na clean result. Omitted when the sub-analysis ran."
+        },
+        "complexity_skipped": {
+          "type": "boolean",
+          "description": "True when `--only`, `--skip` or `audit.health = false` skipped the\nhealth sub-analysis. The complexity and styling counts are then 0 and\ndo not mean a clean result. Omitted when the sub-analysis ran."
+        },
+        "duplication_skipped": {
+          "type": "boolean",
+          "description": "True when `--only`, `--skip` or `audit.dupes = false` skipped the\nduplication sub-analysis. The clone-group counts are then 0 and do not\nmean a clean result. Omitted when the sub-analysis ran."
         },
         "complexity_findings": {
           "type": "integer",

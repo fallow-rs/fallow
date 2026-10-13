@@ -102,6 +102,7 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
             "Invalid gate '{gate}'. Valid values: new-only, all"
         )));
     }
+    validate_audit_selection(params)?;
 
     let mut args = vec![
         "audit".to_string(),
@@ -128,6 +129,8 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     push_str_flag(&mut args, "--base", params.base.as_deref());
     push_scope(&mut args, params.production, params.workspace.as_deref());
     push_audit_production_flags(&mut args, params);
+    push_selection(&mut args, "--only", params.only.as_deref());
+    push_selection(&mut args, "--skip", params.skip.as_deref());
     if params.css == Some(false) {
         args.push("--no-css".to_string());
     }
@@ -202,10 +205,88 @@ fn push_audit_coverage_flags(args: &mut Vec<String>, params: &AuditParams) {
     }
 }
 
-/// An invalid `gate` also takes the CLI, so the CLI reports the error.
+/// The values of `only` and `skip`, as bare `fallow --only` takes them.
+const AUDIT_SELECTION_VALUES: [&str; 5] = ["dead-code", "check", "architecture", "dupes", "health"];
+
+/// Reject a selection the CLI would reject, with the MCP parameter names.
+fn validate_audit_selection(params: &AuditParams) -> Result<(), String> {
+    let only = params.only.as_deref().unwrap_or_default();
+    let skip = params.skip.as_deref().unwrap_or_default();
+    if !only.is_empty() && !skip.is_empty() {
+        return Err(validation_error_body(
+            "only and skip are mutually exclusive. Remove one of the two parameters.",
+        ));
+    }
+    if let Some(value) = only
+        .iter()
+        .chain(skip)
+        .find(|value| !AUDIT_SELECTION_VALUES.contains(&value.as_str()))
+    {
+        return Err(validation_error_body(format!(
+            "Invalid sub-analysis '{value}'. Valid values: dead-code, architecture, dupes, health"
+        )));
+    }
+    let left_out = |names: &[&str]| {
+        if only.is_empty() {
+            skip.iter().any(|value| names.contains(&value.as_str()))
+        } else {
+            !only.iter().any(|value| names.contains(&value.as_str()))
+        }
+    };
+    for (names, param, baseline) in [
+        (
+            &["dead-code", "check", "architecture"][..],
+            "dead_code_baseline",
+            params.dead_code_baseline.as_deref(),
+        ),
+        (
+            &["health"][..],
+            "health_baseline",
+            params.health_baseline.as_deref(),
+        ),
+        (
+            &["dupes"][..],
+            "dupes_baseline",
+            params.dupes_baseline.as_deref(),
+        ),
+    ] {
+        // `skip: ["architecture"]` keeps the dead-code pass, so only the
+        // dead-code names count on the skip side.
+        let names = if only.is_empty() {
+            &names[..names.len().min(2)]
+        } else {
+            names
+        };
+        if filled(baseline) && left_out(names) {
+            return Err(validation_error_body(format!(
+                "{param} has no effect: only or skip leaves that sub-analysis out. Remove one of the parameters."
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Push `--only` or `--skip` with a comma-separated value list.
+fn push_selection(args: &mut Vec<String>, flag: &str, values: Option<&[String]>) {
+    if let Some(values) = values.filter(|values| !values.is_empty()) {
+        args.extend([flag.to_string(), values.join(",")]);
+    }
+}
+
+/// An invalid `gate` also takes the CLI, so the CLI reports the error. A
+/// sub-analysis selection takes the CLI too, so `only` and `skip` keep the
+/// exact bare `fallow` semantics, including `architecture`.
 fn requires_cli_fallback(params: &AuditParams) -> bool {
     let gate = params.gate.as_deref().unwrap_or("new-only");
     !VALID_AUDIT_GATES.contains(&gate)
+        || params
+            .only
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
+        || params
+            .skip
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
         || type_aware_requested(
             params.type_aware,
             params.type_aware_projects.as_deref(),
@@ -245,6 +326,11 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
         production_dead_code: params.production_dead_code,
         production_health: params.production_health,
         production_dupes: params.production_dupes,
+        // The typed route runs only without `only` and `skip`, so the config
+        // decides the selection.
+        dead_code: None,
+        health: None,
+        duplication: None,
         css: params.css,
         css_deep: params.css_deep,
         gate,

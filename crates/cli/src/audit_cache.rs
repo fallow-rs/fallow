@@ -496,6 +496,12 @@ pub(super) fn audit_base_snapshot_cache_key(
         coverage_file,
         opts.coverage_root.map(|p| p.to_string_lossy().to_string()),
     )
+    .analyses(
+        opts.analyses.dead_code,
+        opts.analyses.health,
+        opts.analyses.dupes,
+        opts.analyses.architecture_label(),
+    )
     .styling(opts.css, opts.css_deep)
     .baselines(
         opts.dead_code_baseline
