@@ -136,6 +136,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A static member read through a namespace is no longer an unused class
+  member.** Code such as `Layer.provide(Discord.ApiClient.layer)` did not count
+  as a use of `ApiClient.layer`. Now a read of `Ns.Class.member` credits the
+  member when `Ns` is a namespace import or a named import of
+  `export * as Ns from`. Re-export barrels between the namespace and the class
+  are followed. A local binding that shadows the namespace does not credit the
+  member.
 - **The config JSON Schema now accepts `extends` as a single string.** The
   loader already accepted `"extends": "./base.json"` and the array form. The
   schema allowed only the array, so editors flagged a valid config. The

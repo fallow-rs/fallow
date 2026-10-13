@@ -1,0 +1,4 @@
+{
+  "name": "namespace-class-static-member-fixture",
+  "main": "src/app.ts"
+}

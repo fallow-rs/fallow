@@ -63,6 +63,17 @@ impl ModuleInfoExtractor {
             .any(|scope| scope.contains(name))
     }
 
+    /// Whether a dotted receiver (`Ns.Class`) starts with an import local that
+    /// a nested declaration shadows. The analysis credits `Ns.Class.member`
+    /// through the import of `Ns`, so a shadowed root must not emit the access.
+    pub(in crate::visitor) fn namespace_import_root_is_shadowed(&self, object: &str) -> bool {
+        object.split_once('.').is_some_and(|(root, _)| {
+            self.nested_scope_shadows(root)
+                && (self.namespace_import_locals.contains(root)
+                    || self.imports.iter().any(|import| import.local_name == root))
+        })
+    }
+
     pub(in crate::visitor) fn namespace_like_binding_is_shadowed(&self, name: &str) -> bool {
         if let Some(owner) = self
             .scoped_namespace_binding_names

@@ -2497,7 +2497,9 @@ impl<'a> ModuleInfoExtractor {
         // it resolves against the same class's binding key (issue #1821);
         // stripped back to `this.` before emission. A bare `this` object and
         // any non-`this` receiver pass through unchanged.
-        if !self.namespace_like_binding_is_shadowed(object_name) {
+        if !self.namespace_like_binding_is_shadowed(object_name)
+            && !self.namespace_import_root_is_shadowed(object_name)
+        {
             let object = self.qualify_this_scope(object_name);
             if !self.record_walk_order_member_access(&object, member) {
                 self.member_accesses.push(MemberAccess {
