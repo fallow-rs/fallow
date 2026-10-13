@@ -236,8 +236,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `clone_families[]` by file set. `fallow dupes`, the MCP tools and
   `fallow_api` already used this order. Before, these three commands ordered
   the families by duplicated lines. The `suggestions[]` of a family now follow
-  the order of its `groups[]` on every surface. The family set and the values
-  do not change.
+  the order of its `groups[]` on every surface. Two `mirrored_directories[]`
+  entries with the same `total_lines` are now ordered by directory pair. The
+  family set and the values do not change.
 
 - **The review brief and the audit report the same weakened guardrails.**
   The `weakening` section of `fallow audit --brief` and `fallow review` now
