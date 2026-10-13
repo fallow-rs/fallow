@@ -279,7 +279,7 @@
         "weakened-tests": "warn",
         "added-suppression": "warn",
         "test-only-branch": "warn",
-        "diverged-clone-sibling": "warn",
+        "diverged-clone-sibling": "off",
         "added-dependency": "off"
       }
     },
@@ -1449,22 +1449,22 @@
           "default": "error"
         },
         "unused-store-members": {
-          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an OPEN declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower; warn encodes that without failing CI. Promotable to\n`error` once validated on a codebase.",
+          "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an OPEN declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower. A `warn` finding does not change the CLI exit code\nunless `--fail-on-issues` is set. The dead-code count gate of the GitHub\nAction counts it unless `fail-on-issues` is `false`. Promotable to\n`error` once validated on a codebase.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unprovided-injects": {
-          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` whose symbol KEY is\n`provide`/`setContext`'d nowhere in the project (the\ninjected-never-provided dead-half). Defaults to `warn`, not `error`:\na DI key has an open provide surface (plugins, app-level provide) so\nanalyzer confidence is lower; warn encodes that without failing CI.",
+          "description": "Vue `inject(KEY)` / Svelte `getContext(KEY)` whose symbol KEY is\n`provide`/`setContext`'d nowhere in the project (the\ninjected-never-provided dead-half). Defaults to `warn`, not `error`: a\nDI key has an open provide surface (plugins, app-level provide) so\nanalyzer confidence is lower. A `warn` finding does not change the CLI\nexit code unless `--fail-on-issues` is set. The dead-code count gate of\nthe GitHub Action counts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unrendered-components": {
-          "description": "Vue/Svelte single-file component reachable in the module graph but\nrendered nowhere in the project (the imported-but-never-rendered\ndead-half). Defaults to `warn`, not `error`: a component can be rendered\nreflectively (dynamic `<component :is>`), so analyzer confidence is\nlower; warn encodes that without failing CI.",
+          "description": "Vue/Svelte single-file component reachable in the module graph but\nrendered nowhere in the project (the imported-but-never-rendered\ndead-half). Defaults to `warn`, not `error`: a component can be rendered\nreflectively (dynamic `<component :is>`), so analyzer confidence is\nlower. A `warn` finding does not change the CLI exit code unless\n`--fail-on-issues` is set. The dead-code count gate of the GitHub Action\ncounts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unused-component-props": {
-          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React\ndeclared prop referenced nowhere inside its own component. The\nsingle-component dead-input direction. Defaults to `warn`, not `error`: a\nprop can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower; warn encodes that without failing CI.",
+          "description": "Vue `<script setup>` `defineProps`, Svelte 5 `$props()`, or React\ndeclared prop referenced nowhere inside its own component. The\nsingle-component dead-input direction. Defaults to `warn`, not `error`:\na prop can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower. A `warn` finding does not change the CLI\nexit code unless `--fail-on-issues` is set. The dead-code count gate of\nthe GitHub Action counts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -1474,22 +1474,22 @@
           "default": "off"
         },
         "unused-component-emits": {
-          "description": "Vue `<script setup>` `defineEmits` declared event emitted nowhere inside\nits own single-file component (no `emit('<name>')` call). The single-file\ndead-input direction. Defaults to `warn`, not `error`: an emit can be part\nof a deliberately-stable public component API, so analyzer confidence is\nlower; warn encodes that without failing CI.",
+          "description": "Vue `<script setup>` `defineEmits` declared event emitted nowhere inside\nits own single-file component (no `emit('<name>')` call). The\nsingle-file dead-input direction. Defaults to `warn`, not `error`: an\nemit can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower. A `warn` finding does not change the CLI\nexit code unless `--fail-on-issues` is set. The dead-code count gate of\nthe GitHub Action counts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unused-component-inputs": {
-          "description": "Angular `@Input()` / signal `input()` / `model()` declared input read\nnowhere inside its own component (neither the inline/external template nor\nthe class body). The single-file dead-input direction, the Angular\nanalogue of `unused-component-prop`. Defaults to `warn`, not `error`: an\ninput can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower; warn encodes that without failing CI.",
+          "description": "Angular `@Input()` / signal `input()` / `model()` declared input read\nnowhere inside its own component (neither the inline/external template\nnor the class body). The single-file dead-input direction, the Angular\nanalogue of `unused-component-prop`. Defaults to `warn`, not `error`: an\ninput can be part of a deliberately-stable public component API, so\nanalyzer confidence is lower. A `warn` finding does not change the CLI\nexit code unless `--fail-on-issues` is set. The dead-code count gate of\nthe GitHub Action counts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unused-component-outputs": {
-          "description": "Angular `@Output()` / signal `output()` declared output emitted nowhere\ninside its own component (no `this.<output>.emit(...)`). The single-file\ndead-output direction, the Angular analogue of `unused-component-emit`.\nDefaults to `warn`, not `error`: an output can be part of a\ndeliberately-stable public component API, so analyzer confidence is lower;\nwarn encodes that without failing CI.",
+          "description": "Angular `@Output()` / signal `output()` declared output emitted nowhere\ninside its own component (no `this.<output>.emit(...)`). The single-file\ndead-output direction, the Angular analogue of `unused-component-emit`.\nDefaults to `warn`, not `error`: an output can be part of a\ndeliberately-stable public component API, so analyzer confidence is\nlower. A `warn` finding does not change the CLI exit code unless\n`--fail-on-issues` is set. The dead-code count gate of the GitHub Action\ncounts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unused-svelte-events": {
-          "description": "Svelte component dispatching a custom event via `createEventDispatcher()`\nwhose event name is listened to nowhere in the analyzed project. The\ncross-file dead-output direction (no eslint-plugin-svelte / svelte-check\nrule covers the listener side). Defaults to `warn`, not `error`: a\ndispatched event can be part of a deliberately-stable public component\nAPI, or a listener may be added later, so analyzer confidence is lower;\nwarn encodes that without failing CI.",
+          "description": "Svelte component dispatching a custom event via\n`createEventDispatcher()` whose event name is listened to nowhere in the\nanalyzed project. The cross-file dead-output direction (no\neslint-plugin-svelte / svelte-check rule covers the listener side).\nDefaults to `warn`, not `error`: a dispatched event can be part of a\ndeliberately-stable public component API, or a listener may be added\nlater, so analyzer confidence is lower. A `warn` finding does not change\nthe CLI exit code unless `--fail-on-issues` is set. The dead-code count\ngate of the GitHub Action counts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -1509,12 +1509,12 @@
           "default": "warn"
         },
         "unused-server-actions": {
-          "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified out\nof `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer; warn encodes that\nwithout failing CI until corpus-validated.",
+          "description": "Next.js Server Action (an export of a `\"use server\"` file) referenced by\nno code in the project: no import-and-call, no `action={fn}` binding, no\n`<form action={fn}>`. Cross-graph dead-export direction, reclassified\nout of `unused-export` for `\"use server\"` files. Defaults to `warn`, not\n`error`: the rule is new and false-negative-preferring, and reflective\naction-dispatch shapes can hide a real consumer. The rule stays at\n`warn` until corpus validation. A `warn` finding does not change the CLI\nexit code unless `--fail-on-issues` is set. The dead-code count gate of\nthe GitHub Action counts it unless `fail-on-issues` is `false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
         "unused-load-data-keys": {
-          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key\nread by no consumer: not off the sibling `+page.svelte`'s `data.<key>`,\nnor project-wide via `page.data.<key>` / `$page.data.<key>`. Cross-file\ndead-input direction. Defaults to `warn`, not `error`: the rule is new and\nfalse-negative-preferring (a whole-object `data` pass abstains), and a\nload fetch can have side effects so deletion is a human call; warn encodes\nthat without failing CI until corpus-validated.",
+          "description": "SvelteKit `+page.{ts,server.ts,js,server.js}` `load()` return-object key\nread by no consumer: not off the sibling `+page.svelte`'s `data.<key>`,\nnor project-wide via `page.data.<key>` / `$page.data.<key>`. Cross-file\ndead-input direction. Defaults to `warn`, not `error`: the rule is new\nand false-negative-preferring (a whole-object `data` pass abstains), and\na load fetch can have side effects so deletion is a human call. The rule\nstays at `warn` until corpus validation. A `warn` finding does not\nchange the CLI exit code unless `--fail-on-issues` is set. The dead-code\ncount gate of the GitHub Action counts it unless `fail-on-issues` is\n`false`.",
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
@@ -1724,9 +1724,9 @@
           "default": "warn"
         },
         "diverged-clone-sibling": {
-          "description": "An audit diff that edits one copy of a base clone group so that it no\nlonger matches its siblings, while no sibling changed. `fallow audit`\nonly. Defaults to `warn`.",
+          "description": "An audit diff that edits one copy of a base clone group so that it no\nlonger matches its siblings, while no sibling changed. `fallow audit`\nonly. Opt-in; defaults to `off`, because copies often differ on\npurpose.",
           "$ref": "#/$defs/Severity",
-          "default": "warn"
+          "default": "off"
         },
         "added-dependency": {
           "description": "An audit diff that adds a dependency to a `package.json`. `fallow\naudit` only. Opt-in; defaults to `off`.",
@@ -1736,15 +1736,15 @@
       }
     },
     "Severity": {
-      "description": "Severity level for rules.\n\nControls whether an issue type causes CI failure (`error`), is reported\nwithout failing (`warn`), or is suppressed entirely (`off`).",
+      "description": "Severity level for rules.\n\nControls whether an issue type sets a non-zero exit code (`error`), is\nreported without an effect on the exit code (`warn`), or is suppressed\nentirely (`off`). `--fail-on-issues` promotes `warn` to `error`. The\ndead-code count gate of the GitHub Action counts `warn` findings unless its\n`fail-on-issues` input is `false`.",
       "oneOf": [
         {
-          "description": "Report and fail CI (non-zero exit code).",
+          "description": "Report and set a non-zero exit code.",
           "type": "string",
           "const": "error"
         },
         {
-          "description": "Report but don't fail CI.",
+          "description": "Report without an effect on the exit code.",
           "type": "string",
           "const": "warn"
         },

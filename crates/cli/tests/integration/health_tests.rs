@@ -11171,3 +11171,138 @@ fn health_css_invalid_animation_value_adds_no_undefined_keyframe() {
         "invalid values and composition keywords are not keyframe references"
     );
 }
+
+#[test]
+fn node_test_file_arguments_credit_imported_code_with_static_coverage() {
+    let output = run_fallow(
+        "health",
+        "node-test-script-entries",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "9999",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let tier_of = |name: &str| -> String {
+        findings
+            .iter()
+            .find(|finding| finding["name"] == name)
+            .and_then(|finding| finding["coverage_tier"].as_str())
+            .unwrap_or_else(|| panic!("expected a {name} finding, got: {findings:#?}"))
+            .to_owned()
+    };
+
+    // `node --test ... test/math.test.mjs` in a package.json script.
+    assert_ne!(tier_of("clamp"), "none", "{findings:#?}");
+    // `node --test ... ci-tests/*.test.mjs` in a GitHub Actions run line.
+    assert_ne!(tier_of("formatCount"), "none", "{findings:#?}");
+    // `node scripts/build.mjs` is not a test run.
+    assert_eq!(tier_of("releaseChannel"), "none", "{findings:#?}");
+    // A reporter runs in the parent process, not as a test.
+    assert_eq!(tier_of("describeEvent"), "none", "{findings:#?}");
+    // A `--test-coverage-include` glob names no test file.
+    assert_eq!(tier_of("lonely"), "none", "{findings:#?}");
+}
+
+#[test]
+fn bun_test_in_a_script_named_test_credits_imported_code() {
+    let output = run_fallow(
+        "health",
+        "bun-test-script-entries",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "9999",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let total = findings
+        .iter()
+        .find(|finding| finding["name"] == "total")
+        .unwrap_or_else(|| panic!("expected a total finding, got: {findings:#?}"));
+    assert_ne!(total["coverage_tier"], "none", "{findings:#?}");
+}
+
+#[test]
+fn test_runner_directories_and_default_patterns_credit_imported_code() {
+    let output = run_fallow(
+        "health",
+        "test-runner-directory-entries",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "9999",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let tier_of = |name: &str| -> String {
+        findings
+            .iter()
+            .find(|finding| finding["name"] == name)
+            .and_then(|finding| finding["coverage_tier"].as_str())
+            .unwrap_or_else(|| panic!("expected a {name} finding, got: {findings:#?}"))
+            .to_owned()
+    };
+
+    // `bun test src/` runs `src/total.test.mjs`.
+    assert_ne!(tier_of("total"), "none", "{findings:#?}");
+    // `cd deno && deno test` runs `deno/sum_test.ts` by the Deno defaults.
+    assert_ne!(tier_of("sum"), "none", "{findings:#?}");
+    // `node --test test/` runs every module in a directory named `test`.
+    assert_ne!(tier_of("formatTotal"), "none", "{findings:#?}");
+    // `deno test ci-checks` in a CI run line.
+    assert_ne!(tier_of("span"), "none", "{findings:#?}");
+    // Files in a test directory that match no test pattern are not tests.
+    assert_eq!(tier_of("orphan"), "none", "{findings:#?}");
+    assert_eq!(tier_of("notes"), "none", "{findings:#?}");
+}
+
+#[test]
+fn test_runner_directories_do_not_make_non_test_files_entry_points() {
+    let output = run_fallow(
+        "dead-code",
+        "test-runner-directory-entries",
+        &[
+            "--unused-files",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&output);
+    let mut unused: Vec<&str> = json["unused_files"]
+        .as_array()
+        .expect("unused_files array")
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(unused, vec!["deno/notes.ts", "src/orphan.mjs"]);
+}

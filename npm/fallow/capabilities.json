@@ -6775,8 +6775,8 @@
       "fixable": false,
       "suppressible": true,
       "suppress_comment": "// fallow-ignore-next-line diverged-clone-sibling",
-      "default_severity": "warn",
-      "opt_in": false,
+      "default_severity": "off",
+      "opt_in": true,
       "frameworks": [],
       "note": null,
       "license": "free",
@@ -8091,7 +8091,7 @@
     ]
   },
   "plugins": {
-    "count": 135,
+    "count": 136,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -8205,6 +8205,7 @@
       "alchemy",
       "opennext-cloudflare",
       "sentry",
+      "opentelemetry",
       "husky",
       "lint-staged",
       "lefthook",

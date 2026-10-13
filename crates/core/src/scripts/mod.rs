@@ -1284,6 +1284,9 @@ pub struct ScriptAnalysis {
     pub binary_config_files: Vec<BinaryConfigFile>,
     /// File paths extracted as positional arguments (entry point candidates).
     pub entry_files: Vec<String>,
+    /// The subset of `entry_files` that a built-in test runner runs as tests
+    /// (`node --test`, `bun test`, `deno test`). These are test entry points.
+    pub test_entry_files: Vec<String>,
 }
 
 impl ScriptAnalysis {
@@ -1296,6 +1299,7 @@ impl ScriptAnalysis {
         retain_first_seen(&mut self.config_files);
         retain_first_seen(&mut self.binary_config_files);
         retain_first_seen(&mut self.entry_files);
+        retain_first_seen(&mut self.test_entry_files);
     }
 }
 
@@ -1383,6 +1387,10 @@ pub struct ScriptCommand {
     pub flag_packages: Vec<String>,
     /// A package whose CLI subcommand runs the production application.
     pub production_runtime_host: Option<&'static str>,
+    /// The subset of `file_args` that `file_args_command` runs as tests with
+    /// the built-in test runner of a runtime (`node --test`, `bun test`,
+    /// `deno test`). These files are test entry points.
+    pub test_file_args: Vec<String>,
 }
 
 impl ScriptCommand {
@@ -1395,6 +1403,24 @@ impl ScriptCommand {
         } else {
             &self.file_args
         }
+    }
+
+    /// Return the test file arguments that become test entry points: none
+    /// when `ignored` lists the command that receives them.
+    #[must_use]
+    pub fn test_entry_files(&self, ignored: IgnoredCommandEntries<'_>) -> &[String] {
+        if ignored.contains(&self.file_args_command) {
+            &[]
+        } else {
+            &self.test_file_args
+        }
+    }
+
+    /// Apply `map` to every path argument of the command.
+    fn map_paths(&mut self, map: impl Fn(Vec<String>) -> Vec<String>) {
+        self.config_args = map(std::mem::take(&mut self.config_args));
+        self.file_args = map(std::mem::take(&mut self.file_args));
+        self.test_file_args = map(std::mem::take(&mut self.test_file_args));
     }
 }
 
@@ -1625,6 +1651,9 @@ fn accumulate_parsed_commands(
         }
 
         result
+            .test_entry_files
+            .extend_from_slice(cmd.test_entry_files(ignored));
+        result
             .entry_files
             .extend_from_slice(cmd.entry_files(ignored));
         result.used_packages.extend(cmd.flag_packages);
@@ -1660,8 +1689,8 @@ pub fn parse_script_with_catalog(script: &str, catalog: &ScriptCatalog) -> Vec<S
     parse_script_internal(
         script,
         &|tokens, idx, catalog| {
-            script_invocation_target(tokens, idx, catalog)
-                .or_else(|| bun_file_runner_target(tokens, idx, catalog))
+            bun_file_runner_target(tokens, idx, catalog)
+                .or_else(|| script_invocation_target(tokens, idx, catalog))
                 .or_else(|| {
                     package_manager_exec_binary(tokens, idx).map(|(binary_idx, location)| {
                         PackageManagerTarget::Binary(binary_idx, location)
@@ -1810,6 +1839,7 @@ fn parse_script_internal(
                     if !state.local_paths {
                         cmd.config_args.clear();
                         cmd.file_args.clear();
+                        cmd.test_file_args.clear();
                     }
                     commands.push(cmd);
                 }
@@ -1831,9 +1861,7 @@ fn parse_script_internal(
                             commands,
                         );
                         for cmd in &mut commands[start..] {
-                            cmd.config_args =
-                                rebase_all(std::slice::from_ref(&dir), &cmd.config_args);
-                            cmd.file_args = rebase_all(std::slice::from_ref(&dir), &cmd.file_args);
+                            cmd.map_paths(|paths| rebase_all(std::slice::from_ref(&dir), &paths));
                         }
                     }
                 }
@@ -1847,10 +1875,7 @@ fn parse_script_internal(
                         commands,
                     );
                     for cmd in &mut commands[start..] {
-                        cmd.config_args =
-                            location.resolve_all(std::mem::take(&mut cmd.config_args), catalog);
-                        cmd.file_args =
-                            location.resolve_all(std::mem::take(&mut cmd.file_args), catalog);
+                        cmd.map_paths(|paths| location.resolve_all(paths, catalog));
                     }
                 }
                 SegmentOutcome::ScriptCall {
@@ -1952,6 +1977,11 @@ fn extract_args_for_binary(
             continue;
         }
 
+        if is_node_runner && node_test::takes_non_module_value(token) {
+            idx += 2;
+            continue;
+        }
+
         if let Some(config) = extract_config_arg(token, tokens.get(idx + 1).copied()) {
             config_args.push(config);
             if token.contains('=') || token.starts_with("--config=") || token.starts_with("-c=") {
@@ -1999,11 +2029,13 @@ fn advance_past_package_manager_with_context(
     context: &ScriptCommandContext<'_>,
     catalog: &ScriptCatalog,
 ) -> Option<PackageManagerTarget> {
-    if let Some(target) = script_invocation_target(tokens, idx, catalog) {
+    // `bun test` runs the built-in test runner also when a script named
+    // `test` exists, so the Bun forms come before the script calls.
+    if let Some(target) = bun_file_runner_target(tokens, idx, catalog) {
         return Some(target);
     }
 
-    if let Some(target) = bun_file_runner_target(tokens, idx, catalog) {
+    if let Some(target) = script_invocation_target(tokens, idx, catalog) {
         return Some(target);
     }
 
@@ -2031,7 +2063,9 @@ fn advance_past_package_manager_with_context(
 /// Recognize `bun <file>`, `bun run <file>`, and `bun --watch <file>`, where
 /// Bun runs a script file. Bun runs a declared script with that name first, so
 /// a declared name is not a file. The target is `bun` itself, which then takes
-/// the file as a node-runner argument.
+/// the file as a node-runner argument. `bun test` always runs the built-in
+/// test runner, also when a script named `test` exists, so its target is
+/// `bun` too.
 fn bun_file_runner_target(
     tokens: &[&str],
     idx: usize,
@@ -2050,6 +2084,9 @@ fn bun_file_runner_target(
         i
     };
     let mut next = skip_runtime_flags(idx + 1);
+    if tokens.get(next) == Some(&"test") {
+        return Some(PackageManagerTarget::Binary(idx, RunLocation::Here));
+    }
     if matches!(tokens.get(next), Some(&("run" | "run-script"))) {
         next = skip_runtime_flags(next + 1);
     }
@@ -2792,15 +2829,16 @@ fn parse_command_segment(
         let Some(command_start) = command_wrapper_child_index(&tokens, idx) else {
             break;
         };
-        let (file_args, config_args, child) =
+        let wrapped =
             wrapped_command_args(&tokens, command_start, advance_package_manager, catalog);
         outcomes.push(SegmentOutcome::Command(ScriptCommand {
             binary: tokens[idx].to_string(),
-            config_args: location.resolve_all(config_args, catalog),
-            file_args: location.resolve_all(file_args, catalog),
-            file_args_command: child.to_string(),
+            config_args: location.resolve_all(wrapped.config_args, catalog),
+            file_args: location.resolve_all(wrapped.file_args, catalog),
+            file_args_command: wrapped.command.to_string(),
             flag_packages: Vec::new(),
             production_runtime_host: None,
+            test_file_args: location.resolve_all(wrapped.test_file_args, catalog),
         }));
         let Some(next) = shell::skip_initial_wrappers(&tokens, command_start) else {
             return outcomes;
@@ -2823,6 +2861,7 @@ fn parse_command_segment(
             file_args: Vec::new(),
             flag_packages: Vec::new(),
             production_runtime_host: None,
+            test_file_args: Vec::new(),
         }));
         outcomes.extend(
             inline_commands
@@ -2835,24 +2874,13 @@ fn parse_command_segment(
         return outcomes;
     }
 
-    let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
-    let (mut file_args, mut config_args) =
-        extract_args_for_binary(&tokens, idx + 1, is_node_runner);
-    if is_file_target_tool(&binary) {
-        file_args = file_target_tool_loaded_files(&binary, &tokens[idx + 1..]);
-    }
-    if is_task_runner(&binary) {
-        file_args.clear();
-        config_args.clear();
-    }
-    file_args.extend(node_test::default_test_patterns(
-        &binary,
-        &tokens[idx + 1..],
-    ));
+    let (file_args, config_args) = binary_path_args(&binary, &tokens, idx);
     let flag_packages = flag_credits::flag_referenced_packages(&binary, &tokens[idx + 1..]);
 
     let production_runtime_host = command_runtime_host(&binary, &tokens[idx + 1..], &location);
+    let test_file_args = node_test::test_file_args(&binary, &tokens[idx + 1..], &file_args);
     outcomes.push(SegmentOutcome::Command(ScriptCommand {
+        test_file_args: location.resolve_all(test_file_args, catalog),
         file_args_command: binary.clone(),
         binary,
         config_args: location.resolve_all(config_args, catalog),
@@ -2861,6 +2889,44 @@ fn parse_command_segment(
         production_runtime_host,
     }));
     outcomes
+}
+
+/// Return the file and config arguments of `binary` at `idx` in `tokens`.
+fn binary_path_args(binary: &str, tokens: &[&str], idx: usize) -> (Vec<String>, Vec<String>) {
+    let args = &tokens[idx + 1..];
+    let (mut file_args, mut config_args) =
+        extract_args_for_binary(tokens, idx + 1, NODE_RUNNERS.contains(&binary));
+    if is_file_target_tool(binary) {
+        file_args = file_target_tool_loaded_files(binary, args);
+    }
+    if is_task_runner(binary) {
+        file_args.clear();
+        config_args.clear();
+    }
+    let file_args = node_test::with_default_test_patterns(binary, args, file_args);
+    (file_args, config_args)
+}
+
+/// The file and config arguments that a command wrapper records for the
+/// command it runs.
+struct WrappedCommandArgs<'a> {
+    file_args: Vec<String>,
+    config_args: Vec<String>,
+    /// The name of the command that the wrapper runs.
+    command: &'a str,
+    /// The subset of `file_args` that the command runs as tests.
+    test_file_args: Vec<String>,
+}
+
+impl<'a> WrappedCommandArgs<'a> {
+    const fn without_args(command: &'a str) -> Self {
+        Self {
+            file_args: Vec::new(),
+            config_args: Vec::new(),
+            command,
+            test_file_args: Vec::new(),
+        }
+    }
 }
 
 /// Return the file and config arguments that a command wrapper records for
@@ -2876,14 +2942,14 @@ fn wrapped_command_args<'a>(
     command_start: usize,
     advance_package_manager: &impl Fn(&[&str], usize, &ScriptCatalog) -> Option<PackageManagerTarget>,
     catalog: &ScriptCatalog,
-) -> (Vec<String>, Vec<String>, &'a str) {
+) -> WrappedCommandArgs<'a> {
     let (child_idx, runs_here) =
         match wrapped_command_target(tokens, command_start, advance_package_manager, catalog) {
             Some(PackageManagerTarget::Binary(child_idx, location)) => {
                 (child_idx, location == RunLocation::Here)
             }
             Some(PackageManagerTarget::Script { .. }) => {
-                return (Vec::new(), Vec::new(), tokens[command_start]);
+                return WrappedCommandArgs::without_args(tokens[command_start]);
             }
             None => invoked_command(tokens, command_start, &ScriptCatalog::default())
                 .map_or((command_start, true), |invoked| {
@@ -2892,7 +2958,7 @@ fn wrapped_command_args<'a>(
         };
     let child = tokens[child_idx];
     if !runs_here {
-        return (Vec::new(), Vec::new(), child);
+        return WrappedCommandArgs::without_args(child);
     }
     let (mut file_args, mut config_args) = extract_args_for_binary(tokens, command_start, false);
     if is_file_target_tool(child) {
@@ -2902,11 +2968,14 @@ fn wrapped_command_args<'a>(
         file_args.clear();
         config_args.clear();
     }
-    file_args.extend(node_test::default_test_patterns(
-        child,
-        &tokens[child_idx + 1..],
-    ));
-    (file_args, config_args, child)
+    let file_args =
+        node_test::with_default_test_patterns(child, &tokens[child_idx + 1..], file_args);
+    WrappedCommandArgs {
+        test_file_args: node_test::test_file_args(child, &tokens[child_idx + 1..], &file_args),
+        file_args,
+        config_args,
+        command: child,
+    }
 }
 
 /// Return `true` when `binary` is a monorepo task runner such as `turbo`,
@@ -5250,6 +5319,138 @@ mod tests {
                 .entry_files(IgnoredCommandEntries::new(&ignored))
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn test_runner_file_arguments_are_test_entry_files() {
+        for (script, expected) in [
+            (
+                "node --test --test-reporter=spec test/a.test.mjs test/b.test.mjs",
+                vec!["test/a.test.mjs", "test/b.test.mjs"],
+            ),
+            (
+                "node --experimental-test-coverage --test 'scripts/*.test.mjs'",
+                vec!["scripts/*.test.mjs"],
+            ),
+            (
+                "node --test --import tsx src/a.test.ts",
+                vec!["src/a.test.ts"],
+            ),
+            ("bun test ./test/a.test.ts", vec!["./test/a.test.ts"]),
+            (
+                "deno test --allow-read tests/a_test.ts",
+                vec!["tests/a_test.ts"],
+            ),
+            (
+                "cross-env TZ=UTC node --test test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "varlock run -- node --test test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+        ] {
+            let result = analyze_command(script, Path::new("/nonexistent"), &FxHashMap::default());
+            assert_eq!(result.test_entry_files, expected, "`{script}`");
+            assert!(
+                expected
+                    .iter()
+                    .all(|file| result.entry_files.contains(&(*file).to_string())),
+                "`{script}` keeps the files as entry files: {:?}",
+                result.entry_files
+            );
+        }
+    }
+
+    #[test]
+    fn node_flag_values_are_not_test_entry_files() {
+        for (script, tests) in [
+            (
+                "node --test --test-coverage-include 'src/**/*.mjs' test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --test-reporter ./test/reporter.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --experimental-loader ./loader.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --test-global-setup ./test/global.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+            (
+                "node --test --import ./test/setup.mjs test/a.test.mjs",
+                vec!["./test/setup.mjs", "test/a.test.mjs"],
+            ),
+            (
+                "cross-env CI=1 node --test --test-reporter ./test/reporter.mjs test/a.test.mjs",
+                vec!["test/a.test.mjs"],
+            ),
+        ] {
+            let result = analyze_command(script, Path::new("/nonexistent"), &FxHashMap::default());
+            assert_eq!(result.test_entry_files, tests, "`{script}`");
+        }
+    }
+
+    #[test]
+    fn node_flag_values_that_name_no_module_are_not_entry_files() {
+        let result = analyze_command(
+            "node --test --test-coverage-include 'src/**/*.mjs' --test-coverage-exclude test/fixtures/a.mjs test/a.test.mjs",
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+        );
+        assert_eq!(result.entry_files, vec!["test/a.test.mjs"]);
+    }
+
+    #[test]
+    fn node_flag_values_that_name_a_module_stay_entry_files() {
+        let result = analyze_command(
+            "node --test --test-reporter ./test/reporter.mjs --experimental-loader ./loader.mjs test/a.test.mjs",
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+        );
+        for file in ["./test/reporter.mjs", "./loader.mjs", "test/a.test.mjs"] {
+            assert!(
+                result.entry_files.contains(&file.to_string()),
+                "{file} in {:?}",
+                result.entry_files
+            );
+        }
+    }
+
+    #[test]
+    fn bun_test_in_a_script_named_test_runs_the_test_runner() {
+        let scripts =
+            HashMap::from([("test".to_string(), "bun test ./test/a.test.ts".to_string())]);
+        let result = analyze_scripts_with_dependencies(
+            &scripts,
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+            &FxHashSet::default(),
+        );
+        assert_eq!(result.test_entry_files, vec!["./test/a.test.ts"]);
+        assert!(result.entry_files.contains(&"./test/a.test.ts".to_string()));
+    }
+
+    #[test]
+    fn other_script_file_arguments_are_not_test_entry_files() {
+        for script in [
+            "node scripts/build.mjs --test",
+            "tsx scripts/test.ts",
+            "bun run test",
+            "deno run scripts/test.ts",
+            "node --test-reporter=spec scripts/run.mjs",
+        ] {
+            let result = analyze_command(script, Path::new("/nonexistent"), &FxHashMap::default());
+            assert!(
+                result.test_entry_files.is_empty(),
+                "`{script}` produced {:?}",
+                result.test_entry_files
+            );
+        }
     }
 
     #[test]

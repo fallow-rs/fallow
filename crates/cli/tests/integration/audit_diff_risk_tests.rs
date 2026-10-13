@@ -289,7 +289,7 @@ fn added_dependency_reports_only_when_enabled() {
 const CLONE: &str = "export function total(items: { price: number; quantity: number }[]): number {\n  let sum = 0;\n  for (const item of items) {\n    if (item.quantity > 0) {\n      sum += item.price * item.quantity;\n    }\n  }\n  const rounded = Math.round(sum * 100) / 100;\n  if (rounded < 0) {\n    throw new Error('negative total');\n  }\n  return rounded;\n}\n";
 
 #[test]
-fn edited_clone_copy_with_unchanged_sibling_reports_diverged_clone() {
+fn edited_clone_copy_with_unchanged_sibling_reports_diverged_clone_when_enabled() {
     let tmp = fixture(None);
     let dir = tmp.path();
     fs::create_dir_all(dir.join("src/a")).unwrap();
@@ -309,6 +309,19 @@ fn edited_clone_copy_with_unchanged_sibling_reports_diverged_clone() {
     );
     fs::write(dir.join("src/a/total.ts"), edited).unwrap();
 
+    let (_, json) = audit_json(dir, &[]);
+    assert!(
+        !rule_lines(&json)
+            .iter()
+            .any(|row| row.0 == "diverged-clone-sibling"),
+        "off by default: {json}"
+    );
+
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"rules": {"diverged-clone-sibling": "warn"}}"#,
+    )
+    .unwrap();
     let (_, json) = audit_json(dir, &[]);
     let found: Vec<serde_json::Value> = findings(&json)
         .into_iter()

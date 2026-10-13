@@ -15483,12 +15483,12 @@
         {
           "type": "string",
           "const": "error",
-          "description": "Report and fail CI (non-zero exit code)."
+          "description": "Report and set a non-zero exit code."
         },
         {
           "type": "string",
           "const": "warn",
-          "description": "Report but don't fail CI."
+          "description": "Report without an effect on the exit code."
         },
         {
           "type": "string",
@@ -15496,7 +15496,7 @@
           "description": "Don't detect or report."
         }
       ],
-      "description": "Severity level for rules.\n\nControls whether an issue type causes CI failure (`error`), is reported\nwithout failing (`warn`), or is suppressed entirely (`off`)."
+      "description": "Severity level for rules.\n\nControls whether an issue type sets a non-zero exit code (`error`), is\nreported without an effect on the exit code (`warn`), or is suppressed\nentirely (`off`). `--fail-on-issues` promotes `warn` to `error`. The\ndead-code count gate of the GitHub Action counts `warn` findings unless its\n`fail-on-issues` input is `false`."
     },
     "SecuritySummaryOutput": {
       "type": "object",
@@ -16230,12 +16230,12 @@
         {
           "type": "string",
           "const": "error",
-          "description": "Fails CI (non-zero exit code)."
+          "description": "Sets a non-zero exit code."
         },
         {
           "type": "string",
           "const": "warn",
-          "description": "Reported without failing CI."
+          "description": "Reported without an effect on the exit code. The dead-code count gate\nof the GitHub Action counts it unless `fail-on-issues` is `false`."
         }
       ],
       "description": "Effective severity of a single [`PolicyViolation`]. Per-rule `severity`\noverrides the `rules.\"policy-violation\"` master; `off` rules emit nothing,\nso only `error` and `warn` appear on the wire. The exit-code gate inspects\nthis per-finding value, not the master severity."

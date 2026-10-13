@@ -1,0 +1,6 @@
+import { expect, test } from "bun:test";
+import { total } from "./total.mjs";
+
+test("total", () => {
+  expect(total([1, 2])).toBe(3);
+});

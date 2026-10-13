@@ -23,6 +23,9 @@ pub struct CiAnalysis {
     /// (e.g., `node scripts/deploy.ts` in a GitHub Actions `run:` block).
     /// Paths are project-root-relative; CI files always live at the root.
     pub entry_files: Vec<String>,
+    /// The subset of `entry_files` that a built-in test runner runs as tests
+    /// (`node --test scripts/*.test.mjs`). These are test entry points.
+    pub test_entry_files: Vec<String>,
 }
 
 /// Inputs shared by every CI file of one analysis.
@@ -84,6 +87,8 @@ pub fn analyze_ci_files(
 
     analysis.entry_files.sort();
     analysis.entry_files.dedup();
+    analysis.test_entry_files.sort();
+    analysis.test_entry_files.dedup();
     analysis
 }
 
@@ -113,6 +118,7 @@ fn extract_ci_signals(content: &str, context: &CiContext<'_>, analysis: &mut CiA
             .filter(|s| could_be_file_path(s)),
     );
     analysis.entry_files.extend(parsed.entry_files);
+    analysis.test_entry_files.extend(parsed.test_entry_files);
 }
 
 /// Extract shell command strings from a CI config file.
@@ -685,6 +691,39 @@ jobs:
         );
         assert!(analysis.used_packages.contains("esbuild"));
         assert!(!analysis.used_packages.contains("bun"));
+    }
+
+    #[test]
+    fn node_test_run_lines_record_test_entry_files() {
+        let content = "
+jobs:
+  test:
+    steps:
+      - run: node --test .github/scripts/*.test.mjs
+      - run: node --test --experimental-test-coverage scripts/a.test.mjs
+      - run: node scripts/release.mjs
+";
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
+            content,
+            &CiContext {
+                root: Path::new("/nonexistent"),
+                bin_map: &FxHashMap::default(),
+                declared_packages: &FxHashSet::default(),
+                scripts: &ScriptCatalog::default(),
+                ignored: IgnoredCommandEntries::NONE,
+            },
+            &mut analysis,
+        );
+        assert_eq!(
+            analysis.test_entry_files,
+            vec![".github/scripts/*.test.mjs", "scripts/a.test.mjs"]
+        );
+        assert!(
+            analysis
+                .entry_files
+                .contains(&"scripts/release.mjs".to_string())
+        );
     }
 
     #[test]

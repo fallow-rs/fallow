@@ -1,0 +1,8 @@
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --test --experimental-test-coverage ci-tests/*.test.mjs
