@@ -1,0 +1,15 @@
+---
+source: crates/mutation/tests/instrument.rs
+expression: result.code
+---
+// @ts-nocheck
+function __fallow_m_a(id) { const m = globalThis.__fallowMutation; return m ? m.a(id) : false; } function __fallow_m_c(id) { const m = globalThis.__fallowMutation; if (m) m.c(id); }
+
+interface Opts { retries: number }
+export class Client {
+  constructor(private readonly opts: Opts) {}
+  async send(body: string): Promise<boolean> {
+    const ok = await this.post((__fallow_m_a("0cafc253f35d9c9d") ? (body && '') : (__fallow_m_c("0cafc253f35d9c9d"), (body ?? (__fallow_m_a("0385aa4a7db2bf46") ? ('fallow') : (__fallow_m_c("0385aa4a7db2bf46"), ('')))))));
+    return (__fallow_m_a("f2b313653fd27e88") ? (undefined) : (__fallow_m_c("f2b313653fd27e88"), (ok satisfies boolean)));
+  }
+}

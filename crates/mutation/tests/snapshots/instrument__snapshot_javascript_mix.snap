@@ -1,0 +1,17 @@
+---
+source: crates/mutation/tests/instrument.rs
+expression: result.code
+---
+#!/usr/bin/env node
+// @ts-nocheck
+"use strict";function __fallow_m_a(id) { const m = globalThis.__fallowMutation; return m ? m.a(id) : false; } function __fallow_m_c(id) { const m = globalThis.__fallowMutation; if (m) m.c(id); }
+export function check(items, limit) {
+  let count = 0;
+  for (let i = 0; (__fallow_m_a("606bcda3f5b3810c") ? (false) : __fallow_m_a("15386f925e1fa7c2") ? (i <= items.length) : __fallow_m_a("70f0300922844bed") ? (i != items.length) : (__fallow_m_c("606bcda3f5b3810c"), __fallow_m_c("15386f925e1fa7c2"), __fallow_m_c("70f0300922844bed"), (i < items.length))); (__fallow_m_a("01bca12fe52231aa") ? (i--) : (__fallow_m_c("01bca12fe52231aa"), (i++)))) {
+    if ((__fallow_m_a("384cdfead23a6dba") ? (items[i]?.active || !items[i].hidden) : (__fallow_m_c("384cdfead23a6dba"), ((__fallow_m_a("c034986c5c2a6089") ? (items[i].active) : (__fallow_m_c("c034986c5c2a6089"), (items[i]?.active))) && (__fallow_m_a("7e045cc78ebb7dcb") ? (items[i].hidden) : (__fallow_m_c("7e045cc78ebb7dcb"), (!items[i].hidden))))))) {
+      void (__fallow_m_a("3c289f1dbc0b7581") ? (count -= 1) : (__fallow_m_c("3c289f1dbc0b7581"), (count += 1)));
+    }
+  }
+  void (__fallow_m_a("82e788f45cbf381a") ? (void 0) : (__fallow_m_c("82e788f45cbf381a"), (notify((__fallow_m_a("147091e69dbcc279") ? ("") : (__fallow_m_c("147091e69dbcc279"), ("done")))))));
+  return (__fallow_m_a("5d629e1ed795528a") ? (undefined) : __fallow_m_a("f1e5bb874eb8d992") ? (false) : __fallow_m_a("8c76397e68995c06") ? (count >= limit) : __fallow_m_a("b95f7fc95a94d1b3") ? (count != limit) : (__fallow_m_c("5d629e1ed795528a"), __fallow_m_c("f1e5bb874eb8d992"), __fallow_m_c("8c76397e68995c06"), __fallow_m_c("b95f7fc95a94d1b3"), (count > limit)));
+}

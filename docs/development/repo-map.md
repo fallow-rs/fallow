@@ -28,6 +28,9 @@ Use this file for a fast architectural map before editing or reviewing.
   modes.
 - `crates/license/`: offline license verification and feature entitlements.
 - `crates/security/`: data-driven security source and sink catalogue.
+- `crates/mutation/`: pure mutant site discovery, mutant ids, and
+  mutation-switching instrumentation by text splice. It depends only on Oxc
+  crates, not on other workspace crates.
 - `crates/v8-coverage/`: V8 coverage parsing and normalization.
 - `tools/similar-code-sidecar/`: pinned local Candle inference and model setup
   for opt-in semantic similar-code discovery.

@@ -20,6 +20,7 @@ fallow-config = { version = "3.33.1", path = "crates/config" }
 fallow-extract = { version = "3.33.1", path = "crates/extract" }
 fallow-engine = { version = "3.33.1", path = "crates/engine" }
 fallow-graph = { version = "3.33.1", path = "crates/graph" }
+fallow-mutation = { version = "3.33.1", path = "crates/mutation" }
 fallow-output = { version = "3.33.1", path = "crates/output" }
 fallow-process = { version = "3.33.1", path = "crates/process" }
 fallow-security = { version = "3.33.1", path = "crates/security" }

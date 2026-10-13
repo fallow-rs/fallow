@@ -15,6 +15,7 @@ const FOUNDATION_CRATES = new Set([
   "fallow-engine",
   "fallow-output",
   "fallow-process",
+  "fallow-mutation",
   "fallow-api",
 ]);
 const ANALYSIS_STARTERS = new Set(["fallow-core", "fallow-engine", "fallow-api"]);
@@ -25,6 +26,11 @@ const boundaryRules = [
     rule: "process-must-remain-independent",
     matches: ({ from }) => from === "fallow-process",
     message: ({ to }) => `fallow-process must not depend on workspace crate ${to}`,
+  },
+  {
+    rule: "mutation-must-remain-independent",
+    matches: ({ from }) => from === "fallow-mutation",
+    message: ({ to }) => `fallow-mutation must not depend on workspace crate ${to}`,
   },
   {
     rule: "foundation-must-not-depend-on-protocol",

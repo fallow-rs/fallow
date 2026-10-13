@@ -1,0 +1,33 @@
+[package]
+name = "fallow-mutation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Mutant site discovery and mutation-switching instrumentation for fallow"
+readme = "../../README.md"
+
+[lib]
+doctest = false
+
+[dependencies]
+oxc_allocator = { workspace = true }
+oxc_ast = { workspace = true }
+oxc_ast_visit = { workspace = true }
+oxc_parser = { workspace = true }
+oxc_span = { workspace = true }
+oxc_syntax = { workspace = true }
+serde = { workspace = true }
+xxhash-rust = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+oxc_semantic = { workspace = true }
+
+[lints]
+workspace = true

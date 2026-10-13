@@ -18,6 +18,7 @@ The core crates are:
 | `fallow-types` | Shared typed contracts, issue metadata, suppressions, and envelope data. |
 | `fallow-config` | Config loading and typed configuration. |
 | `fallow-process` | Shared child-process lifecycle and process-tree termination. |
+| `fallow-mutation` | Pure mutant site discovery, mutant ids, and mutation-switching instrumentation. It depends only on Oxc crates. |
 | `fallow-extract` | Parser-facing facts from source files. |
 | `fallow-graph` | Module graph, dependency traversal, cycles, and impact facts. |
 | `fallow-security` | Security matcher catalogue and candidate helpers. |

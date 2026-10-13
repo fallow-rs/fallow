@@ -39,6 +39,7 @@ test("findCrateBoundaryViolations accepts current intended layering", () => {
   const metadata = metadataFor({
     "fallow-types": [],
     "fallow-process": [],
+    "fallow-mutation": [],
     "fallow-config": ["fallow-types"],
     "fallow-output": ["fallow-types"],
     "fallow-engine": ["fallow-core", "fallow-output"],
@@ -55,6 +56,7 @@ test("findCrateBoundaryViolations accepts current intended layering", () => {
 test("findCrateBoundaryViolations rejects protocol and analysis back-edges", () => {
   const metadata = metadataFor({
     "fallow-process": ["fallow-types"],
+    "fallow-mutation": ["fallow-types"],
     "fallow-types": ["fallow-cli"],
     "fallow-output": ["fallow-engine"],
     "fallow-lsp": ["fallow-core"],
@@ -67,6 +69,7 @@ test("findCrateBoundaryViolations rejects protocol and analysis back-edges", () 
     findCrateBoundaryViolations(metadata).map((violation) => violation.rule),
     [
       "process-must-remain-independent",
+      "mutation-must-remain-independent",
       "foundation-must-not-depend-on-protocol",
       "output-must-not-start-analysis",
       "protocol-must-use-api-or-engine",

@@ -1422,6 +1422,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallow-mutation"
+version = "3.33.1"
+dependencies = [
+ "insta",
+ "oxc_allocator 0.152.0",
+ "oxc_ast 0.152.0",
+ "oxc_ast_visit 0.152.0",
+ "oxc_parser 0.152.0",
+ "oxc_semantic 0.152.0",
+ "oxc_span 0.152.0",
+ "oxc_syntax 0.152.0",
+ "serde",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "fallow-node"
 version = "3.33.1"
 dependencies = [
