@@ -8,9 +8,9 @@ use std::time::Instant;
 
 use fallow_engine::session::AnalysisSession;
 use fallow_engine::similar_code::{
-    FunctionVector, SimilarCodeLimits as EngineLimits, SimilarCodeSelectionInput,
-    SimilarCodeSkipReason as EngineSkipReason, evaluate_selected_similar_code,
-    select_similar_code_corpus,
+    FunctionVector, SimilarCodeCorpusSelection, SimilarCodeLimits as EngineLimits,
+    SimilarCodeSelectionInput, SimilarCodeSkipReason as EngineSkipReason,
+    evaluate_selected_similar_code, select_similar_code_corpus,
 };
 use fallow_engine::source::similar_code::{
     ExtractedSimilarCodeFunction, SIMILAR_CODE_EXTRACTION_SEMANTICS_VERSION,
@@ -391,10 +391,19 @@ fn run_similar_code_inner(
     run_similar_code_inner_with_embedder(options, resolved, &provider.status, &mut embedder)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the orchestration keeps one auditable sequence of bounded analysis phases"
-)]
+struct FileAdmission<'a> {
+    files: Vec<(&'a fallow_types::discover::DiscoveredFile, String)>,
+    total_eligible_files: usize,
+    scope: SimilarCodeScopeProvenance,
+}
+
+struct ExtractedCorpus {
+    functions: Vec<ExtractedSimilarCodeFunction>,
+    limits: SimilarCodeExtractionLimits,
+    skips: BTreeMap<SimilarCodeSkipReason, usize>,
+    source_read_failures: usize,
+}
+
 fn run_similar_code_inner_with_embedder(
     options: &SimilarCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
@@ -403,6 +412,82 @@ fn run_similar_code_inner_with_embedder(
 ) -> ProgrammaticResult<SimilarCodeOutput> {
     let started = Instant::now();
     let session = load_session(resolved)?;
+    let (threshold, min_lines) = detection_parameters(options, &session)?;
+    let changed_files = changed_files_for_run(resolved)?;
+    let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
+    let scope_active = similar_code_scope_active(
+        options,
+        resolved,
+        changed_files.as_ref(),
+        workspace_roots.as_deref(),
+    );
+    let in_scope = |path: &str| {
+        !scope_active
+            || similar_code_path_in_scope(
+                path,
+                options,
+                resolved,
+                changed_files.as_ref(),
+                workspace_roots.as_deref(),
+            )
+    };
+    let ignore = build_ignore_set(&session.config().similar_code.ignore)?;
+    let extraction_limits = SimilarCodeExtractionLimits::default();
+    let mut diagnostics = Vec::new();
+    let admission = admit_source_files(&session, &ignore, scope_active, in_scope);
+    let extraction = extract_corpus(&admission, extraction_limits, min_lines, &mut diagnostics);
+    let engine_limits = EngineLimits::for_dimensions(provider.dimensions);
+    let selection = select_corpus(
+        &extraction.functions,
+        engine_limits,
+        scope_active,
+        in_scope,
+        &mut diagnostics,
+    )?;
+    let selected = selection
+        .selected_indices
+        .iter()
+        .map(|index| &extraction.functions[*index])
+        .collect::<Vec<_>>();
+    let mut embedding = embed_corpus(session.root(), resolved.no_cache(), &selected, embedder)?;
+    let (vectors, effective_selection) = comparison_inputs(&selected, &selection, &mut embedding)?;
+    let evaluation = evaluate_selected_similar_code(
+        &vectors,
+        &effective_selection,
+        threshold,
+        engine_limits,
+        SIMILAR_CODE_EXTRACTION_SEMANTICS_VERSION,
+    )
+    .map_err(engine_error)?;
+    let candidates = output_candidates(
+        evaluation.candidates,
+        &extraction.functions,
+        in_scope,
+        options.top,
+    );
+    let completion = build_completion(
+        &admission,
+        &extraction,
+        &selection,
+        &mut embedding,
+        &evaluation.completion,
+        &mut diagnostics,
+    );
+    Ok(SimilarCodeOutput {
+        schema_version: SimilarCodeSchemaVersion::V1,
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_owned()),
+        elapsed_ms: ElapsedMs(duration_ms(started)),
+        generation: generation(provider, threshold, min_lines, admission.scope),
+        candidates,
+        completion,
+        diagnostics,
+    })
+}
+
+fn detection_parameters(
+    options: &SimilarCodeOptions,
+    session: &AnalysisSession,
+) -> ProgrammaticResult<(f64, usize)> {
     let threshold = options
         .threshold
         .unwrap_or_else(|| session.config().similar_code.threshold);
@@ -417,58 +502,30 @@ fn run_similar_code_inner_with_embedder(
                 .with_context("similarCode.minLines"),
         );
     }
-    let changed_files = changed_files_for_run(resolved)?;
-    let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
-    let scope_active = similar_code_scope_active(
-        options,
-        resolved,
-        changed_files.as_ref(),
-        workspace_roots.as_deref(),
-    );
+    Ok((threshold, min_lines))
+}
 
-    let ignore = build_ignore_set(&session.config().similar_code.ignore)?;
-    let extraction_limits = SimilarCodeExtractionLimits::default();
-    let mut functions = Vec::new();
-    let mut extracted_source_bytes = 0usize;
-    let mut extraction_skips = BTreeMap::new();
-    let mut source_read_failures = 0usize;
-    let mut diagnostics = Vec::new();
-    let files = session.files();
-    let mut eligible_files = files
+fn admit_source_files<'a>(
+    session: &'a AnalysisSession,
+    ignore: &GlobSet,
+    scope_active: bool,
+    in_scope: impl Fn(&str) -> bool,
+) -> FileAdmission<'a> {
+    let mut eligible_files = session
+        .files()
         .iter()
         .filter_map(|file| {
             let relative = root_relative(session.root(), &file.path);
             (!ignore.is_match(&relative)).then_some((file, relative))
         })
         .collect::<Vec<_>>();
-    eligible_files.sort_by_key(|(_, relative)| {
-        usize::from(
-            scope_active
-                && !similar_code_path_in_scope(
-                    relative,
-                    options,
-                    resolved,
-                    changed_files.as_ref(),
-                    workspace_roots.as_deref(),
-                ),
-        )
-    });
+    eligible_files.sort_by_key(|(_, relative)| usize::from(!in_scope(relative)));
     let total_eligible_files = eligible_files.len();
-    let admitted_files = total_eligible_files.min(MAX_FILES);
-    let omitted_files = total_eligible_files.saturating_sub(admitted_files);
-    eligible_files.truncate(admitted_files);
+    eligible_files.truncate(total_eligible_files.min(MAX_FILES));
     let mut effective_scope_paths = if scope_active {
         eligible_files
             .iter()
-            .filter(|(_, relative)| {
-                similar_code_path_in_scope(
-                    relative,
-                    options,
-                    resolved,
-                    changed_files.as_ref(),
-                    workspace_roots.as_deref(),
-                )
-            })
+            .filter(|(_, relative)| in_scope(relative))
             .map(|(_, relative)| relative.clone())
             .collect::<Vec<_>>()
     } else {
@@ -476,7 +533,27 @@ fn run_similar_code_inner_with_embedder(
     };
     effective_scope_paths.sort();
     effective_scope_paths.dedup();
-    for (file_index, (file, relative)) in eligible_files.iter().enumerate() {
+    FileAdmission {
+        files: eligible_files,
+        total_eligible_files,
+        scope: SimilarCodeScopeProvenance {
+            active: scope_active,
+            paths: effective_scope_paths,
+        },
+    }
+}
+
+fn extract_corpus(
+    admission: &FileAdmission<'_>,
+    extraction_limits: SimilarCodeExtractionLimits,
+    min_lines: usize,
+    diagnostics: &mut Vec<SimilarCodeDiagnostic>,
+) -> ExtractedCorpus {
+    let mut functions = Vec::new();
+    let mut extracted_source_bytes = 0usize;
+    let mut extraction_skips = BTreeMap::new();
+    let mut source_read_failures = 0usize;
+    for (file_index, (file, relative)) in admission.files.iter().enumerate() {
         let remaining_functions = extraction_limits
             .max_functions
             .saturating_sub(functions.len());
@@ -487,7 +564,7 @@ fn run_similar_code_inner_with_embedder(
             add_skip(
                 &mut extraction_skips,
                 reason,
-                remaining_extraction_inputs(eligible_files.len(), file_index),
+                remaining_extraction_inputs(admission.files.len(), file_index),
             );
             break;
         }
@@ -539,21 +616,27 @@ fn run_similar_code_inner_with_embedder(
             }
         }
     }
+    ExtractedCorpus {
+        functions,
+        limits: extraction_limits,
+        skips: extraction_skips,
+        source_read_failures,
+    }
+}
 
-    let engine_limits = EngineLimits::for_dimensions(provider.dimensions);
+fn select_corpus(
+    functions: &[ExtractedSimilarCodeFunction],
+    engine_limits: EngineLimits,
+    scope_active: bool,
+    in_scope: impl Fn(&str) -> bool,
+    diagnostics: &mut Vec<SimilarCodeDiagnostic>,
+) -> ProgrammaticResult<SimilarCodeCorpusSelection> {
     let selection_inputs = functions
         .iter()
         .map(|function| SimilarCodeSelectionInput {
             location: &function.location,
             source_sha256: function.source_sha256,
-            in_scope: !scope_active
-                || similar_code_path_in_scope(
-                    &function.location.file,
-                    options,
-                    resolved,
-                    changed_files.as_ref(),
-                    workspace_roots.as_deref(),
-                ),
+            in_scope: in_scope(&function.location.file),
         })
         .collect::<Vec<_>>();
     let selection =
@@ -577,11 +660,15 @@ fn run_similar_code_inner_with_embedder(
             path: None,
         });
     }
-    let selected = selection
-        .selected_indices
-        .iter()
-        .map(|index| &functions[*index])
-        .collect::<Vec<_>>();
+    Ok(selection)
+}
+
+fn embed_corpus(
+    root: &Path,
+    no_cache: bool,
+    selected: &[&ExtractedSimilarCodeFunction],
+    embedder: &mut dyn RuntimeEmbedder,
+) -> ProgrammaticResult<EmbeddingResult> {
     let embedding_inputs = selected
         .iter()
         .map(|function| EmbeddingInput {
@@ -589,13 +676,22 @@ fn run_similar_code_inner_with_embedder(
             source: &function.source,
         })
         .collect::<Vec<_>>();
-    let embedding = embedder
-        .embed(session.root(), resolved.no_cache(), &embedding_inputs)
-        .map_err(provider_error)?;
+    embedder
+        .embed(root, no_cache, &embedding_inputs)
+        .map_err(provider_error)
+}
 
+fn comparison_inputs(
+    selected: &[&ExtractedSimilarCodeFunction],
+    selection: &SimilarCodeCorpusSelection,
+    embedding: &mut EmbeddingResult,
+) -> ProgrammaticResult<(Vec<FunctionVector>, SimilarCodeCorpusSelection)> {
     let mut vectors = Vec::new();
     let mut effective_scope = Vec::new();
-    for (selected_index, values) in embedding.vectors.into_iter().enumerate() {
+    for (selected_index, values) in std::mem::take(&mut embedding.vectors)
+        .into_iter()
+        .enumerate()
+    {
         if let Some(values) = values {
             let function = selected[selected_index];
             vectors.push(FunctionVector {
@@ -609,7 +705,7 @@ fn run_similar_code_inner_with_embedder(
     }
     if vectors.len() < 2 && selected.len() >= 2 {
         return Err(ProgrammaticError::new(
-            embedding.provider_problem.unwrap_or_else(|| {
+            embedding.provider_problem.take().unwrap_or_else(|| {
                 "the local similar-code provider returned fewer than two usable vectors".to_owned()
             }),
             2,
@@ -618,56 +714,48 @@ fn run_similar_code_inner_with_embedder(
         .with_context("similarCode.provider"));
     }
 
-    let effective_selection = fallow_engine::similar_code::SimilarCodeCorpusSelection {
+    let effective_selection = SimilarCodeCorpusSelection {
         selected_indices: (0..vectors.len()).collect(),
         selected_in_scope: effective_scope,
         skipped: selection.skipped.clone(),
     };
-    let evaluation = evaluate_selected_similar_code(
-        &vectors,
-        &effective_selection,
-        threshold,
-        engine_limits,
-        SIMILAR_CODE_EXTRACTION_SEMANTICS_VERSION,
-    )
-    .map_err(engine_error)?;
+    Ok((vectors, effective_selection))
+}
+
+fn output_candidates(
+    candidates: Vec<fallow_engine::similar_code::SimilarCodeCandidate>,
+    functions: &[ExtractedSimilarCodeFunction],
+    in_scope: impl Fn(&str) -> bool,
+    top: Option<usize>,
+) -> Vec<SimilarCodeCandidate> {
     let metadata = functions
         .iter()
         .map(|function| (location_key(&function.location), function))
         .collect::<FxHashMap<_, _>>();
-    let mut candidates = evaluation
-        .candidates
+    let mut candidates = candidates
         .into_iter()
-        .filter(|candidate| {
-            !scope_active
-                || similar_code_path_in_scope(
-                    &candidate.left.file,
-                    options,
-                    resolved,
-                    changed_files.as_ref(),
-                    workspace_roots.as_deref(),
-                )
-                || similar_code_path_in_scope(
-                    &candidate.right.file,
-                    options,
-                    resolved,
-                    changed_files.as_ref(),
-                    workspace_roots.as_deref(),
-                )
-        })
+        .filter(|candidate| in_scope(&candidate.left.file) || in_scope(&candidate.right.file))
         .filter_map(|candidate| map_candidate(candidate, &metadata))
         .collect::<Vec<_>>();
-    if let Some(top) = options.top {
+    if let Some(top) = top {
         candidates.truncate(top);
     }
+    candidates
+}
 
-    let extraction_complete = extraction_is_complete(&extraction_skips, source_read_failures);
+fn completion_skips(
+    extraction_skips: &BTreeMap<SimilarCodeSkipReason, usize>,
+    omitted_files: usize,
+    comparison: &fallow_engine::similar_code::SimilarCodeCompletion,
+    embedding: &EmbeddingResult,
+    missing_vectors: usize,
+) -> Vec<SimilarCodeSkip> {
     let mut skips = extraction_skips
-        .into_iter()
+        .iter()
         .map(|(reason, count)| SimilarCodeSkip {
             phase: SimilarCodePhase::Extraction,
-            reason,
-            count: usize_to_u64(count),
+            reason: *reason,
+            count: usize_to_u64(*count),
         })
         .collect::<Vec<_>>();
     if omitted_files > 0 {
@@ -677,18 +765,11 @@ fn run_similar_code_inner_with_embedder(
             count: usize_to_u64(omitted_files),
         });
     }
-    skips.extend(
-        evaluation
-            .completion
-            .skipped
-            .iter()
-            .map(|skip| SimilarCodeSkip {
-                phase: SimilarCodePhase::Comparison,
-                reason: map_engine_skip(skip.reason),
-                count: usize_to_u64(skip.count),
-            }),
-    );
-    let missing_vectors = selected.len().saturating_sub(vectors.len());
+    skips.extend(comparison.skipped.iter().map(|skip| SimilarCodeSkip {
+        phase: SimilarCodePhase::Comparison,
+        reason: map_engine_skip(skip.reason),
+        count: usize_to_u64(skip.count),
+    }));
     if missing_vectors > 0 {
         skips.push(SimilarCodeSkip {
             phase: SimilarCodePhase::Embedding,
@@ -712,7 +793,33 @@ fn run_similar_code_inner_with_embedder(
         });
     }
     skips.sort_by_key(|skip| (skip.phase as u8, skip.reason as u8));
-    if let Some(problem) = embedding.provider_problem {
+    skips
+}
+
+fn build_completion(
+    admission: &FileAdmission<'_>,
+    extraction: &ExtractedCorpus,
+    selection: &SimilarCodeCorpusSelection,
+    embedding: &mut EmbeddingResult,
+    comparison: &fallow_engine::similar_code::SimilarCodeCompletion,
+    diagnostics: &mut Vec<SimilarCodeDiagnostic>,
+) -> SimilarCodeCompletion {
+    let omitted_files = admission
+        .total_eligible_files
+        .saturating_sub(admission.files.len());
+    let embedded_functions = comparison.functions_considered;
+    let missing_vectors = selection
+        .selected_indices
+        .len()
+        .saturating_sub(embedded_functions);
+    let skips = completion_skips(
+        &extraction.skips,
+        omitted_files,
+        comparison,
+        embedding,
+        missing_vectors,
+    );
+    if let Some(problem) = embedding.provider_problem.take() {
         diagnostics.push(SimilarCodeDiagnostic {
             domain: SimilarCodeDiagnosticDomain::Provider,
             code: "FALLOW_SIMILAR_CODE_PROVIDER_PARTIAL".to_owned(),
@@ -720,7 +827,7 @@ fn run_similar_code_inner_with_embedder(
             path: None,
         });
     }
-    if let Some(problem) = embedding.cache_problem {
+    if let Some(problem) = embedding.cache_problem.take() {
         diagnostics.push(SimilarCodeDiagnostic {
             domain: SimilarCodeDiagnosticDomain::Cache,
             code: "FALLOW_SIMILAR_CODE_CACHE_ADVISORY".to_owned(),
@@ -730,9 +837,9 @@ fn run_similar_code_inner_with_embedder(
     }
     let phase_completeness = PhaseCompleteness {
         discovery: omitted_files == 0,
-        extraction: extraction_complete,
+        extraction: extraction_is_complete(&extraction.skips, extraction.source_read_failures),
         embedding: missing_vectors == 0 && embedding.truncated_functions == 0,
-        comparison: evaluation.completion.status
+        comparison: comparison.status
             == fallow_engine::similar_code::SimilarCodeCompletionStatus::Complete,
     };
     let complete = phase_completeness.all_complete()
@@ -744,25 +851,25 @@ fn run_similar_code_inner_with_embedder(
         embedding.cache_hits,
         embedding.cache_misses,
     );
-    let completion = SimilarCodeCompletion {
+    SimilarCodeCompletion {
         status: if complete {
             SimilarCodeCompletionStatus::Complete
         } else {
             SimilarCodeCompletionStatus::Partial
         },
         phases: phases(
-            admitted_files,
-            total_eligible_files,
-            functions.len(),
-            selected.len(),
-            vectors.len(),
-            evaluation.completion.comparisons_performed,
+            admission.files.len(),
+            admission.total_eligible_files,
+            extraction.functions.len(),
+            selection.selected_indices.len(),
+            embedded_functions,
+            comparison.comparisons_performed,
             phase_completeness,
             missing_vectors,
             embedding.truncated_functions,
-            source_read_failures,
+            extraction.source_read_failures,
         ),
-        limits: output_limits(engine_limits, extraction_limits),
+        limits: output_limits(comparison.limits, extraction.limits),
         skips,
         cache: SimilarCodeCacheSummary {
             status: cache_status,
@@ -772,25 +879,7 @@ fn run_similar_code_inner_with_embedder(
             invalid_entries: usize_to_u64(embedding.cache_invalid_entries),
         },
         provider_inference_ms: finite_f64_to_u64(embedding.inference_ms),
-    };
-
-    Ok(SimilarCodeOutput {
-        schema_version: SimilarCodeSchemaVersion::V1,
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_owned()),
-        elapsed_ms: ElapsedMs(duration_ms(started)),
-        generation: generation(
-            provider,
-            threshold,
-            min_lines,
-            SimilarCodeScopeProvenance {
-                active: scope_active,
-                paths: effective_scope_paths,
-            },
-        ),
-        candidates,
-        completion,
-        diagnostics,
-    })
+    }
 }
 
 fn inspect_side(
