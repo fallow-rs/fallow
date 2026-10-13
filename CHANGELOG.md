@@ -161,6 +161,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The MCP `audit` tool and `fallow_api::run_audit` read the `audit` config
+  section.** The typed route ignored `audit.gate`, `audit.css` and
+  `audit.cssDeep`. A project with `"gate": "all"` got the `new-only` verdict
+  from the MCP tool, and the CLI gave `all`. The typed route now uses these
+  keys when the tool parameter is not set, the same as `fallow audit`. The
+  typed route cannot apply `audit.deadCodeBaseline`, `audit.healthBaseline`
+  or `audit.dupesBaseline`. When the config sets one of them, the MCP tool
+  now runs the CLI, which applies the baseline. `fallow_api::run_audit`
+  returns the error code `FALLOW_AUDIT_BASELINE_UNSUPPORTED` for these keys.
+  It does not ignore them.
+
 - **The review brief and the audit report the same weakened guardrails.**
   The `weakening` section of `fallow audit --brief` and `fallow review` now
   reads its test, threshold and suppression signals from the `diff_risk`

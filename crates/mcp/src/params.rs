@@ -1737,13 +1737,15 @@ pub struct AuditParams {
     /// Run only the duplication sub-analysis in production mode.
     pub production_dupes: Option<bool>,
 
-    /// Enable or disable styling analytics in audit. Defaults to enabled.
+    /// Set `false` to skip styling analytics in audit. Unset or `true` uses
+    /// `audit.css` from the config, which defaults to enabled.
     pub css: Option<bool>,
 
     /// Enable or disable deep CSS analysis for audit: project-wide styling
     /// reachability and near-duplicate theme-token candidates, narrowed back to
-    /// changed anchors. Defaults to enabled; set `false` to pass
-    /// `--no-css-deep` on the CLI fallback path.
+    /// changed anchors. Unset uses `audit.cssDeep` from the config, which
+    /// defaults to enabled; `true` or `false` overrides the config. No effect
+    /// when styling analytics are off.
     pub css_deep: Option<bool>,
 
     /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
@@ -1772,8 +1774,9 @@ pub struct AuditParams {
     /// dupes, health) that audit runs.
     pub group_by: Option<String>,
 
-    /// Which findings affect the audit verdict. Values: "new-only" (default)
-    /// or "all". Passed through to the CLI's `--gate` flag.
+    /// Which findings affect the audit verdict. Values: "new-only" or "all".
+    /// Unset uses `audit.gate` from the config, which defaults to "new-only".
+    /// Passed through to the CLI's `--gate` flag.
     pub gate: Option<String>,
 
     /// Path to a dead-code baseline file (produced by `fallow dead-code

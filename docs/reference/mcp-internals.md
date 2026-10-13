@@ -307,6 +307,17 @@ Contract rules:
   validation, so a call that is invalid in two ways (a rejected coverage input
   and, say, `threads: 0`) reports the coverage error, which is also the order
   the CLI reports them in.
+- The `audit` typed route reads the `audit` config section with the CLI's
+  precedence: a `gate` or `css_deep` parameter wins, then `audit.gate`,
+  `audit.css` and `audit.cssDeep`, then the defaults. `css: false` turns
+  styling off, as `--no-css` does, but `css: true` cannot override
+  `audit.css: false`, because the CLI has no flag for that. `fallow_api::run_audit` resolves the
+  section after it loads the config, so an unset `AuditOptions` field means
+  "use the config". The baseline keys of the section are CLI-only: on a
+  non-empty changeset the API returns `FALLOW_AUDIT_BASELINE_UNSUPPORTED` and
+  the tool runs the CLI. The
+  drift case `i5_audit_config_section_agrees_across_surfaces` holds both
+  routes to the CLI result.
 - `trace_symbol` and `symbol_impact` expose exact TypeScript evidence for
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.

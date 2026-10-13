@@ -1110,6 +1110,91 @@ fn audit_controls_see_renames_and_manifests() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
+/// I5 under an `audit` config section. The generator writes no config file,
+/// so without this case no surface reads `audit.gate`, `audit.css`,
+/// `audit.cssDeep` or an `audit` baseline key.
+///
+/// - Gate and styling keys: every surface takes its typed or CLI path and
+///   reports the gate of the config.
+/// - Baseline key: `fallow_api` refuses it with a stable code, and the MCP
+///   tool falls back to the CLI, so MCP and CLI give the same result.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i5_audit_config_section_agrees_across_surfaces() {
+    let with_config = |config: &str| {
+        let mut files = audit_control_model(true).materialize(true);
+        files
+            .base
+            .insert(".fallowrc.json".to_string(), config.to_string());
+        files
+            .head
+            .insert(".fallowrc.json".to_string(), config.to_string());
+        Project::from_files(files)
+    };
+
+    let project = with_config(r#"{ "audit": { "gate": "all", "css": false, "cssDeep": false } }"#);
+    let envelopes = vec![
+        ("CLI".to_string(), cli_audit(&project.root)),
+        (
+            "MCP Typed".to_string(),
+            with_typed_server(|server| mcp_audit(server, &project.root)),
+        ),
+        ("fallow_api".to_string(), api_audit(&project.root)),
+    ];
+    for (surface, envelope) in &envelopes {
+        assert_eq!(
+            envelope["attribution"]["gate"], "all",
+            "{surface} audit ignored `audit.gate`: {envelope}"
+        );
+    }
+    let results: Vec<(String, AuditKeys)> = envelopes
+        .iter()
+        .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
+        .collect();
+    project
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
+
+    let unbaselined = with_config("{}");
+    let baseline = unbaselined.scratch.join("dead-code-baseline.json");
+    cli_save_baseline(Analysis::DeadCode, &unbaselined.root, &baseline);
+    let project = with_config(&format!(
+        r#"{{ "audit": {{ "deadCodeBaseline": {} }} }}"#,
+        Value::String(baseline.display().to_string())
+    ));
+    let err = fallow_api::run_audit(&fallow_api::AuditOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(project.root.clone()),
+            no_cache: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        base: Some(surfaces::AUDIT_BASE_REF.to_string()),
+        ..fallow_api::AuditOptions::default()
+    })
+    .expect_err("fallow_api must refuse an `audit` baseline key");
+    assert_eq!(
+        err.code.as_deref(),
+        Some(fallow_api::AUDIT_CONFIG_BASELINE_UNSUPPORTED),
+        "{err:?}"
+    );
+    let cli = audit_keys(&cli_audit(&project.root));
+    assert_ne!(
+        cli,
+        audit_keys(&cli_audit(&unbaselined.root)),
+        "the `audit.deadCodeBaseline` baseline changed no CLI audit finding"
+    );
+    let results = vec![
+        ("CLI".to_string(), cli),
+        (
+            "MCP".to_string(),
+            audit_keys(&with_server(|server| mcp_audit(server, &project.root))),
+        ),
+    ];
+    project
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
+}
+
 /// Positive control of the clone-group rules of I4. A clone that grows with
 /// an added line in each instance is a new clone group, so audit reports it
 /// as introduced. A clone that changes shape only because a deleted file took

@@ -37,6 +37,11 @@ use super::{
     run_health_with_session_artifacts,
 };
 
+/// Error code of [`run_audit`] when the project config sets an `audit`
+/// baseline key, which the typed audit cannot apply. Callers that can run
+/// `fallow audit` instead, such as the MCP `audit` tool, fall back on it.
+pub const AUDIT_CONFIG_BASELINE_UNSUPPORTED: &str = "FALLOW_AUDIT_BASELINE_UNSUPPORTED";
+
 /// Run changed-code audit through typed programmatic runners.
 ///
 /// The audit itself is [`crate::audit_run::run`], the same implementation as
@@ -46,13 +51,17 @@ use super::{
 /// # Errors
 ///
 /// Returns a structured error for invalid options, base-ref discovery failures,
-/// unsupported CLI-only audit surfaces, or analysis failures.
+/// unsupported CLI-only audit surfaces (including the baseline keys of the
+/// `audit` config section, see [`AUDIT_CONFIG_BASELINE_UNSUPPORTED`]), or
+/// analysis failures.
 pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammaticOutput> {
     validate_audit_api_options(options)?;
     let start = Instant::now();
     let resolved_base = resolve_audit_base_ref(options)?;
     let analysis = analysis_options_for_audit(options, &resolved_base.git_ref);
     let resolved = audit_section_context(&analysis)?;
+    let config = load_programmatic_audit_config(&resolved)?;
+    let options = &options_with_audit_config(options, &config.audit);
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     let changed_files_count = changed_files.len();
 
@@ -66,7 +75,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         ));
     }
 
-    let config = load_programmatic_audit_config(&resolved)?;
+    reject_config_baselines(&config.audit)?;
     let backend = ProgrammaticAuditBackend {
         options,
         analysis: &analysis,
@@ -81,7 +90,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         &backend,
         AuditRunInput {
             root: resolved.root(),
-            gate: options.gate,
+            gate: options.gate.unwrap_or_default(),
             base_ref: &resolved_base.git_ref,
             cache_dir: Some(&config.cache_dir),
             changed_files,
@@ -290,6 +299,46 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
     }
 }
 
+/// Resolve the options against the `audit` config section with the
+/// precedence of `fallow audit`. `gate` and `css_deep` win over the config,
+/// as `--gate` and `--css-deep` / `--no-css-deep` do. `css` can only turn
+/// styling off, as `--no-css` does: the CLI has no flag that overrides
+/// `audit.css: false`.
+fn options_with_audit_config(
+    options: &AuditOptions,
+    config: &fallow_config::AuditConfig,
+) -> AuditOptions {
+    let css = options.css != Some(false) && config.css.unwrap_or(true);
+    let css_deep = css && options.css_deep.or(config.css_deep).unwrap_or(true);
+    AuditOptions {
+        gate: Some(options.gate.unwrap_or(config.gate)),
+        css: Some(css),
+        css_deep: Some(css_deep),
+        ..options.clone()
+    }
+}
+
+/// The typed audit cannot apply the health and duplication baselines of the
+/// `audit` config section. Fail instead of ignoring them: an ignored baseline
+/// reports suppressed findings again and can fail the gate. The MCP `audit`
+/// tool reads this code and runs the CLI, which applies the baselines.
+fn reject_config_baselines(config: &fallow_config::AuditConfig) -> ProgrammaticResult<()> {
+    let keys = [
+        ("audit.deadCodeBaseline", &config.dead_code_baseline),
+        ("audit.healthBaseline", &config.health_baseline),
+        ("audit.dupesBaseline", &config.dupes_baseline),
+    ];
+    let Some((key, _)) = keys.iter().find(|(_, value)| value.is_some()) else {
+        return Ok(());
+    };
+    Err(ProgrammaticError::new(
+        format!("programmatic audit does not yet support the `{key}` config key; use the CLI path"),
+        2,
+    )
+    .with_code(AUDIT_CONFIG_BASELINE_UNSUPPORTED)
+    .with_context(*key))
+}
+
 fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> {
     if let Err(err) =
         fallow_engine::health::validate_coverage_root_absolute(options.coverage_root.as_deref())
@@ -383,7 +432,7 @@ fn empty_audit_output(
             duplication_clone_groups: 0,
         },
         attribution: AuditAttribution {
-            gate: options.gate,
+            gate: options.gate.unwrap_or_default(),
             ..AuditAttribution::default()
         },
         changed_files_count,
@@ -916,7 +965,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::NewOnly,
+            gate: Some(AuditGate::NewOnly),
             ..AuditOptions::default()
         })
         .expect("audit output");
@@ -950,7 +999,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::NewOnly,
+            gate: Some(AuditGate::NewOnly),
             ..AuditOptions::default()
         })
         .expect("audit output");
@@ -982,7 +1031,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::All,
+            gate: Some(AuditGate::All),
             ..AuditOptions::default()
         })
         .expect("audit output");
@@ -1008,7 +1057,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::All,
+            gate: Some(AuditGate::All),
             ..AuditOptions::default()
         })
         .expect("all-gate audit");
@@ -1021,7 +1070,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::NewOnly,
+            gate: Some(AuditGate::NewOnly),
             ..AuditOptions::default()
         })
         .expect("new-only inherited audit");
@@ -1046,7 +1095,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::NewOnly,
+            gate: Some(AuditGate::NewOnly),
             ..AuditOptions::default()
         })
         .expect("new-only introduced audit");
@@ -1142,7 +1191,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::NewOnly,
+            gate: Some(AuditGate::NewOnly),
             max_crap: Some(10.0),
             coverage: Some(root.join("artifacts/coverage-final.json")),
             ..AuditOptions::default()
@@ -1225,7 +1274,7 @@ mod tests {
                 ..AnalysisOptions::default()
             },
             base: Some("HEAD".to_string()),
-            gate: AuditGate::All,
+            gate: Some(AuditGate::All),
             include_entry_exports: true,
             ..AuditOptions::default()
         }
@@ -1295,7 +1344,7 @@ mod tests {
                     ..AnalysisOptions::default()
                 },
                 base: Some("HEAD".to_string()),
-                gate: AuditGate::NewOnly,
+                gate: Some(AuditGate::NewOnly),
                 ..AuditOptions::default()
             },
             ResolvedAuditBase {

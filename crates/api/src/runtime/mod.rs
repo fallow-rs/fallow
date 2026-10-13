@@ -36,7 +36,7 @@ pub use crate::runtime_output::{
     TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
     serialize_health_report_json,
 };
-pub use audit::run_audit;
+pub use audit::{AUDIT_CONFIG_BASELINE_UNSUPPORTED, run_audit};
 pub use combined::run_combined;
 pub use dead_code::{
     run_architecture, run_boundary_violations, run_circular_dependencies, run_dead_code,
