@@ -44,7 +44,9 @@ pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
 ///
 /// Returns a structured programmatic error for unsupported options, invalid
 /// options, config load failures, analysis failures, or git changed-file
-/// failures.
+/// failures. When the environment or `typeAware.enabled` turns on type-aware
+/// analysis that the options leave off, it returns
+/// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
 pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     run_dead_code_with_baseline(options, None)
 }
@@ -66,7 +68,22 @@ pub fn run_dead_code_with_baseline(
     baseline: Option<&Path>,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    reject_config_type_aware(options, &resolved)?;
     run_dead_code_in_context(options, baseline, &resolved)
+}
+
+/// `fallow dead-code` turns type-aware analysis on from the environment and
+/// `typeAware.enabled`. The typed route runs it only on request, see
+/// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
+fn reject_config_type_aware(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<()> {
+    super::type_aware_config::reject_config_type_aware(
+        &options.analysis.type_aware,
+        resolved,
+        super::type_aware_config::TypeAwareCommand::Analysis,
+    )
 }
 
 /// Run dead-code analysis in a context that the caller resolved. Audit uses
@@ -240,6 +257,7 @@ pub fn run_circular_dependencies(
 ) -> ProgrammaticResult<CircularDependenciesProgrammaticOutput> {
     reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    reject_config_type_aware(options, &resolved)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_circular_dependencies).map(Into::into)
     })
@@ -292,6 +310,7 @@ pub fn run_boundary_violations(
 ) -> ProgrammaticResult<BoundaryViolationsProgrammaticOutput> {
     reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    reject_config_type_aware(options, &resolved)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_boundary_violations).map(Into::into)
     })

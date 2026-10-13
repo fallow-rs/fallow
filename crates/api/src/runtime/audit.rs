@@ -33,8 +33,8 @@ use crate::{
 use super::{
     ProgrammaticResult, dead_code::run_dead_code_in_context,
     duplication::run_duplication_in_context, health_may_consume_dead_code_artifacts,
-    health_may_consume_duplication_report, resolve_effective_production_modes, run_health,
-    run_health_with_session_artifacts,
+    health_may_consume_duplication_report, resolve_effective_production_modes,
+    run_health_for_audit, run_health_with_session_artifacts, type_aware_config,
 };
 
 /// Error code of [`run_audit`] when the project config sets an `audit`
@@ -53,7 +53,9 @@ pub const AUDIT_CONFIG_BASELINE_UNSUPPORTED: &str = "FALLOW_AUDIT_BASELINE_UNSUP
 /// Returns a structured error for invalid options, base-ref discovery failures,
 /// unsupported CLI-only audit surfaces (including the baseline keys of the
 /// `audit` config section, see [`AUDIT_CONFIG_BASELINE_UNSUPPORTED`]), or
-/// analysis failures.
+/// analysis failures. When the environment, `audit.typeAware` or
+/// `typeAware.enabled` turns on type-aware analysis that the options leave
+/// off, it returns [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
 pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammaticOutput> {
     validate_audit_api_options(options)?;
     let start = Instant::now();
@@ -76,6 +78,11 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     }
 
     reject_config_baselines(&config.audit)?;
+    type_aware_config::reject_config_type_aware(
+        &options.analysis.type_aware,
+        &resolved,
+        type_aware_config::TypeAwareCommand::Audit,
+    )?;
     let backend = ProgrammaticAuditBackend {
         options,
         analysis: &analysis,
@@ -570,7 +577,7 @@ fn run_audit_subanalyses_in_context(
             &subanalysis_options.duplication,
             &audit_section_context(&subanalysis_options.duplication.analysis)?,
         )?,
-        complexity: run_health(&subanalysis_options.complexity)?,
+        complexity: run_health_for_audit(&subanalysis_options.complexity)?,
     })
 }
 
@@ -640,7 +647,7 @@ fn run_shared_dead_code_dupes_audit_subanalyses(
         Ok(AuditSubanalyses {
             dead_code,
             duplication,
-            complexity: run_health(&options.complexity)?,
+            complexity: run_health_for_audit(&options.complexity)?,
         })
     })
 }

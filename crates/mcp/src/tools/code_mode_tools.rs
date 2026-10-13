@@ -20,7 +20,8 @@ use super::super::{
     VALID_DUPES_MODES,
     api_runtime::{
         env_changed_since, env_diff_file, non_empty_path, non_empty_string,
-        programmatic_error_body, resolve_typed_coverage_inputs, workspace_patterns_from_param,
+        programmatic_error_body, resolve_typed_coverage_inputs, typed_api_value,
+        workspace_patterns_from_param,
     },
     build_analyze_args, build_architecture_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -561,11 +562,7 @@ fn run_combined_api_value(
 ) -> Result<Option<serde_json::Value>, String> {
     let mut options = combined_options_from_params(params)?;
     options.analysis.cancellation = cancellation;
-    let value = run_combined(&options)
-        .and_then(serialize_combined_programmatic_json)
-        .map_err(|err| programmatic_error_body(&err))?;
-
-    Ok(Some(value))
+    typed_api_value(run_combined(&options).and_then(serialize_combined_programmatic_json))
 }
 
 fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptions, String> {

@@ -173,6 +173,7 @@ pub use output_contracts::{
     SecurityOutput, SecurityOutputConfig, SecuritySummaryOutput, SimilarCodeCandidateSnapshot,
     SimilarCodeOutput, TraceOutput, WorkspacesOutput,
 };
+pub use runtime::TYPE_AWARE_CONFIG_UNSUPPORTED;
 pub use runtime::{
     AUDIT_CONFIG_BASELINE_UNSUPPORTED, ArchitectureOutput, ArchitectureProgrammaticOutput,
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,

@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use fallow_api::{
-    AnalysisOptions, CoverageInputs, ProgrammaticError, load_health_config, resolve_coverage_inputs,
+    AUDIT_CONFIG_BASELINE_UNSUPPORTED, AnalysisOptions, CoverageInputs, ProgrammaticError,
+    TYPE_AWARE_CONFIG_UNSUPPORTED, load_health_config, resolve_coverage_inputs,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -169,6 +170,42 @@ pub(super) fn json_success(value: &serde_json::Value) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
+/// The typed route refused a run that only the CLI reproduces: the
+/// environment or the project config turns on type-aware analysis, or the
+/// config sets an `audit` baseline key. The tool then runs the CLI.
+pub(super) fn typed_error_needs_cli(error: &ProgrammaticError) -> bool {
+    matches!(
+        error.code.as_deref(),
+        Some(TYPE_AWARE_CONFIG_UNSUPPORTED | AUDIT_CONFIG_BASELINE_UNSUPPORTED)
+    )
+}
+
+/// Render a finished typed-route result, or `None` when the tool must run the
+/// CLI instead (see [`typed_error_needs_cli`]).
+pub(super) fn typed_tool_result(
+    result: Result<serde_json::Value, ProgrammaticError>,
+) -> Option<CallToolResult> {
+    match result {
+        Ok(value) => Some(json_success(&value)),
+        Err(err) if typed_error_needs_cli(&err) => None,
+        Err(err) => Some(CallToolResult::error(vec![ContentBlock::text(
+            programmatic_error_body(&err),
+        )])),
+    }
+}
+
+/// The `_api_value` form of [`typed_tool_result`]: `Ok(None)` asks the caller
+/// to run the CLI.
+pub(super) fn typed_api_value(
+    result: Result<serde_json::Value, ProgrammaticError>,
+) -> Result<Option<serde_json::Value>, String> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(err) if typed_error_needs_cli(&err) => Ok(None),
+        Err(err) => Err(programmatic_error_body(&err)),
+    }
+}
+
 pub(super) fn programmatic_error_body(error: &ProgrammaticError) -> String {
     serde_json::json!({
         "error": true,
@@ -179,6 +216,31 @@ pub(super) fn programmatic_error_body(error: &ProgrammaticError) -> String {
         "context": error.context,
     })
     .to_string()
+}
+
+/// A binary that does not exist. A tool test that passes it proves the CLI
+/// fallback ran when the result is the spawn error.
+#[cfg(test)]
+pub(super) const MISSING_FALLBACK_BINARY: &str = "missing-fallow-binary-for-fallback";
+
+/// Assert that the tool ran the CLI: it got as far as the spawn of
+/// [`MISSING_FALLBACK_BINARY`].
+#[cfg(test)]
+#[track_caller]
+pub(super) fn assert_cli_fallback_ran(result: Result<CallToolResult, McpError>) {
+    let err = result.expect_err("the CLI fallback cannot start");
+    assert!(
+        err.message.contains(&format!(
+            "Failed to execute fallow binary '{MISSING_FALLBACK_BINARY}'"
+        )),
+        "{err:?}"
+    );
+}
+
+/// Write a project config that turns on type-aware analysis.
+#[cfg(test)]
+pub(super) fn write_type_aware_config(root: &std::path::Path, config: &str) {
+    std::fs::write(root.join(".fallowrc.json"), config).expect("write type-aware config");
 }
 
 #[cfg(test)]

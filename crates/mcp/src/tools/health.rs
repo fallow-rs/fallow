@@ -10,8 +10,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        env_changed_since, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
+        env_changed_since, env_diff_file, non_empty_path, non_empty_string,
+        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result,
         workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
@@ -22,23 +22,20 @@ use super::{
 /// Run `check_health` through the typed API when parameters map cleanly to the
 /// programmatic contract, falling back to the CLI for CLI-only surfaces.
 pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolResult, McpError> {
-    if requires_cli_fallback(&params) {
-        let args = build_health_args(&params);
-        return run_tool(binary, "check_health", &args).await;
+    if !requires_cli_fallback(&params) {
+        let options = match health_options_from_params(&params) {
+            Ok(options) => options,
+            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+        };
+        let result =
+            run_api_blocking("check_health", move || health_typed_value(options, None)).await?;
+        if let Some(result) = typed_tool_result(result) {
+            return Ok(result);
+        }
     }
 
-    let options = match health_options_from_params(&params) {
-        Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
-    };
-
-    let result = run_api_blocking("check_health", move || health_typed_value(options, None))
-        .await?
-        .map_or_else(
-            |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-            |value| json_success(&value),
-        );
-    Ok(result)
+    let args = build_health_args(&params);
+    run_tool(binary, "check_health", &args).await
 }
 
 /// The typed route's blocking body: resolve the coverage inputs with the CLI's
@@ -69,9 +66,7 @@ fn run_health_api_value_with_env(
     }
 
     let options = health_options_from_params(params)?;
-    health_typed_value(options, env)
-        .map(Some)
-        .map_err(|err| programmatic_error_body(&err))
+    super::api_runtime::typed_api_value(health_typed_value(options, env))
 }
 
 /// Fill the typed route's coverage inputs from the explicit parameters, the
@@ -770,5 +765,43 @@ mod tests {
             no_cache: Some(true),
             ..HealthParams::default()
         }
+    }
+
+    /// `typeAware.enabled` in config makes `fallow health` without a section
+    /// add type coupling. The typed route cannot run that, so the tool runs
+    /// the CLI. With a section selected, the CLI skips type coupling and the
+    /// typed route answers.
+    #[tokio::test]
+    async fn config_type_aware_falls_back_to_the_cli() {
+        use super::super::api_runtime::{
+            MISSING_FALLBACK_BINARY, assert_cli_fallback_ran, write_type_aware_config,
+        };
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("index.ts"),
+            "export function score(value: number) {\n  return value;\n}\n",
+        )
+        .expect("write source");
+        write_type_aware_config(project.path(), r#"{"typeAware":{"enabled":true}}"#);
+        let params = || HealthParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            ..HealthParams::default()
+        };
+        assert!(!requires_cli_fallback(&params()));
+        assert_eq!(
+            run_health_api_value_with_env(&params(), Some(CoverageInputs::default())),
+            Ok(None)
+        );
+        assert_cli_fallback_ran(run_health(MISSING_FALLBACK_BINARY, params()).await);
+
+        let section = HealthParams {
+            complexity: Some(true),
+            ..params()
+        };
+        let value = run_health_api_value_with_env(&section, Some(CoverageInputs::default()))
+            .expect("typed health")
+            .expect("a health section stays on the typed route");
+        assert_eq!(value["kind"], "health");
     }
 }

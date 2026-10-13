@@ -1,8 +1,8 @@
 use crate::params::AuditParams;
 
 use fallow_api::{
-    AUDIT_CONFIG_BASELINE_UNSUPPORTED, AnalysisOptions, AuditGate, AuditOptions, CoverageInputs,
-    ProgrammaticError, run_audit as run_audit_api, serialize_audit_programmatic_json,
+    AnalysisOptions, AuditGate, AuditOptions, CoverageInputs, ProgrammaticError,
+    run_audit as run_audit_api, serialize_audit_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -10,8 +10,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_AUDIT_GATES,
     api_runtime::{
-        env_changed_since, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, resolve_typed_coverage_inputs, run_api_blocking,
+        env_changed_since, env_diff_file, non_empty_path, non_empty_string,
+        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result,
         workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
@@ -20,22 +20,18 @@ use super::{
 
 /// Run the `audit` tool through the typed API when parameters map cleanly to
 /// the programmatic contract, falling back to the CLI for CLI-only surfaces.
-/// The baseline keys of the `audit` config section are CLI-only too; the typed
-/// route reports them with [`AUDIT_CONFIG_BASELINE_UNSUPPORTED`].
+/// The baseline keys of the `audit` config section and config-sourced
+/// type-aware analysis are CLI-only too; see
+/// [`super::api_runtime::typed_error_needs_cli`].
 pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
         let options = match audit_options_from_params(&params) {
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        match run_api_blocking("audit", move || audit_typed_value(options, None)).await? {
-            Ok(value) => return Ok(json_success(&value)),
-            Err(err) if !config_requires_cli(&err) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(
-                    programmatic_error_body(&err),
-                )]));
-            }
-            Err(_) => {}
+        let result = run_api_blocking("audit", move || audit_typed_value(options, None)).await?;
+        if let Some(result) = typed_tool_result(result) {
+            return Ok(result);
         }
     }
 
@@ -43,11 +39,6 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
         Ok(args) => run_tool(binary, "audit", &args).await,
         Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     }
-}
-
-/// The project config sets an `audit` baseline key that only the CLI applies.
-fn config_requires_cli(err: &ProgrammaticError) -> bool {
-    err.code.as_deref() == Some(AUDIT_CONFIG_BASELINE_UNSUPPORTED)
 }
 
 /// The typed route's blocking body: resolve the coverage inputs with the CLI's
@@ -82,11 +73,7 @@ fn run_audit_api_value_with_env(
         return Ok(None);
     }
     let options = audit_options_from_params(params)?;
-    match audit_typed_value(options, env) {
-        Ok(value) => Ok(Some(value)),
-        Err(err) if config_requires_cli(&err) => Ok(None),
-        Err(err) => Err(programmatic_error_body(&err)),
-    }
+    super::api_runtime::typed_api_value(audit_typed_value(options, env))
 }
 
 /// Fill the typed route's coverage inputs from the explicit parameters, the
@@ -904,5 +891,46 @@ mod tests {
             ],
         );
         project
+    }
+
+    /// `typeAware.enabled` and `audit.typeAware` in config make `fallow
+    /// audit` type-aware. The typed route cannot run that, so the tool runs
+    /// the CLI. `audit.typeAware: false` keeps the audit on the typed route.
+    #[tokio::test]
+    async fn config_type_aware_falls_back_to_the_cli() {
+        use super::super::api_runtime::{
+            MISSING_FALLBACK_BINARY, assert_cli_fallback_ran, write_type_aware_config,
+        };
+        for config in [
+            r#"{"typeAware":{"enabled":true}}"#,
+            r#"{"audit":{"typeAware":true}}"#,
+        ] {
+            let project = audit_fixture();
+            write_type_aware_config(project.path(), config);
+            let params = AuditParams {
+                root: Some(project.path().display().to_string()),
+                base: Some("HEAD".to_string()),
+                no_cache: Some(true),
+                ..AuditParams::default()
+            };
+            assert!(!requires_cli_fallback(&params));
+            assert_eq!(run_audit_api_value(&params), Ok(None), "{config}");
+            assert_cli_fallback_ran(run_audit(MISSING_FALLBACK_BINARY, params).await);
+        }
+
+        let project = audit_fixture();
+        write_type_aware_config(
+            project.path(),
+            r#"{"typeAware":{"enabled":true},"audit":{"typeAware":false}}"#,
+        );
+        let value = run_audit_api_value(&AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            no_cache: Some(true),
+            ..AuditParams::default()
+        })
+        .expect("typed audit")
+        .expect("a syntactic audit stays on the typed route");
+        assert!(value["verdict"].is_string(), "{value}");
     }
 }

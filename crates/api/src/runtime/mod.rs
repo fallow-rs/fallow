@@ -22,6 +22,7 @@ mod duplication;
 mod feature_flags;
 mod similar_code;
 mod trace;
+mod type_aware_config;
 
 pub use crate::runtime_output::{
     ArchitectureOutput, ArchitectureProgrammaticOutput, AuditProgrammaticKeySnapshot,
@@ -54,6 +55,7 @@ pub use trace::{
     benchmark_trace_graph_family_compact_json, run_trace_clone, run_trace_dependency,
     run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
 };
+pub use type_aware_config::TYPE_AWARE_CONFIG_UNSUPPORTED;
 
 use crate::{
     ComplexityOptions, ProgrammaticError,
@@ -441,12 +443,52 @@ fn derive_programmatic_health_execution_options<'a>(
 /// # Errors
 ///
 /// Returns a structured programmatic error for invalid options or runner
-/// failures.
+/// failures. When no section is selected and the environment or
+/// `typeAware.enabled` turns on type-aware analysis that the options leave
+/// off, it returns [`TYPE_AWARE_CONFIG_UNSUPPORTED`].
 pub fn run_complexity_with_runner(
     options: &ComplexityOptions,
     runner: &impl ProgrammaticHealthRunner,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
+    reject_health_config_type_aware(options)?;
+    run_validated_complexity(options, runner)
+}
+
+/// The health section of `fallow audit`. Audit resolves type-aware analysis
+/// with its own precedence, so the `fallow health` check does not apply.
+pub(super) fn run_health_for_audit(
+    options: &ComplexityOptions,
+) -> ProgrammaticResult<HealthProgrammaticOutput> {
+    crate::validate_complexity_options(options)?;
+    run_validated_complexity(options, &EngineHealthRunner)
+}
+
+/// `fallow health` runs type coupling from config only when no section is
+/// selected (`health_type_coupling_is_default_section` in the CLI).
+fn reject_health_config_type_aware(options: &ComplexityOptions) -> ProgrammaticResult<()> {
+    if options.css || crate::derive_complexity_options(options).any_section {
+        return Ok(());
+    }
+    let root = crate::analysis_context::resolve_analysis_root(options.analysis.root.as_deref())?;
+    crate::analysis_context::validate_analysis_config_path(
+        options.analysis.config_path.as_deref(),
+    )?;
+    type_aware_config::reject_config_type_aware_at(
+        &options.analysis.type_aware,
+        type_aware_config::ConfigLocation {
+            root: &root,
+            config_path: options.analysis.config_path.as_deref(),
+            allow_remote_extends: options.analysis.allow_remote_extends,
+        },
+        type_aware_config::TypeAwareCommand::Analysis,
+    )
+}
+
+fn run_validated_complexity(
+    options: &ComplexityOptions,
+    runner: &impl ProgrammaticHealthRunner,
+) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::analysis_context::ensure_options_not_cancelled(&options.analysis, "health analysis")?;
     Ok(assemble_health_programmatic_output(
         options,
