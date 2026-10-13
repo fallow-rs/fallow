@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -10180,6 +10180,66 @@
                 "kind": {
                   "type": "string",
                   "const": "similar-code-cache-clear"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow mutation --format json`. Independently versioned mutation testing\nresults: one status per mutant, the score, and the completion status. No\nsource text.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MutationReport"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "mutation"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow mutation --plan --format json`. The static mutation plan: ranked\nmutants, prune reasons and file digests. Runs no project code.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MutationPlanOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "mutation-plan"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow mutation inspect --format json`. One mutant of a saved report against\nthe current file, with a fresh or stale status. Runs no project code.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/MutationInspectOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "mutation-inspect"
                 }
               },
               "required": [
@@ -32028,6 +32088,1387 @@
         }
       ],
       "description": "The type of a diff-risk action. Every type is a suppression."
+    },
+    "MutationReport": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Independent schema version.",
+          "$ref": "#/definitions/MutationSchemaVersion"
+        },
+        "version": {
+          "description": "The Fallow version.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "The total wall time.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "completion": {
+          "description": "Whether the result is conclusive.",
+          "$ref": "#/definitions/MutationCompletion"
+        },
+        "scope": {
+          "description": "The mutated code.",
+          "$ref": "#/definitions/MutationScopeOutput"
+        },
+        "runner": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationRunnerOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The runner, when a companion started."
+        },
+        "summary": {
+          "description": "The totals.",
+          "$ref": "#/definitions/MutationSummary"
+        },
+        "mutants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutantResult"
+          },
+          "description": "Each mutant, ranked mutants first."
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationFunctionResult"
+          },
+          "description": "The results per enclosing function, by file and line."
+        },
+        "no_test_files": {
+          "type": "boolean",
+          "description": "True when the project has no test files."
+        },
+        "baseline_failures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationBaselineFailure"
+          },
+          "description": "The tests and test files that failed with no active mutant."
+        },
+        "skipped_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationSkippedFile"
+          },
+          "description": "The selected files that the plan did not instrument."
+        },
+        "unmatched_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The paths of a `paths` scope that select no file."
+        },
+        "unloaded_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The instrumented files that the runner never loaded."
+        },
+        "worktree": {
+          "description": "The git worktree check.",
+          "$ref": "#/definitions/MutationWorktreeCheck"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationRunIssue"
+          },
+          "description": "The errors that did not stop the run."
+        },
+        "timings": {
+          "description": "The wall time of each phase.",
+          "$ref": "#/definitions/MutationTimings"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationPlanFile"
+          },
+          "description": "The mutated files with their SHA-256 digest at plan time, sorted by\npath. `fallow mutation inspect` compares the digest with the current\nfile."
+        },
+        "verdicts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationVerdictJoin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The join with a verdict document. Absent when the run read no verdict\ndocument (`--verdicts` not set)."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "elapsed_ms",
+        "completion",
+        "scope",
+        "summary",
+        "mutants",
+        "functions",
+        "no_test_files",
+        "baseline_failures",
+        "skipped_files",
+        "unmatched_paths",
+        "unloaded_paths",
+        "worktree",
+        "errors",
+        "timings",
+        "files"
+      ],
+      "description": "The envelope of `fallow mutation`."
+    },
+    "MutationPlanOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Independent schema version.",
+          "$ref": "#/definitions/MutationPlanSchemaVersion"
+        },
+        "version": {
+          "description": "The Fallow version.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "description": "The total wall time.",
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "scope": {
+          "description": "The mutated code.",
+          "$ref": "#/definitions/MutationScopeOutput"
+        },
+        "counts": {
+          "description": "The totals.",
+          "$ref": "#/definitions/MutationPlanCountsOutput"
+        },
+        "mutants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationPlanMutant"
+          },
+          "description": "Each mutant, ranked mutants first."
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationPlanFile"
+          },
+          "description": "The instrumented files."
+        },
+        "test_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The union of the static test files, sorted."
+        },
+        "no_test_files": {
+          "type": "boolean",
+          "description": "True when the project has no test files."
+        },
+        "framework_config_checked": {
+          "type": "boolean",
+          "description": "True when the plan applied the `framework-config` prune rule."
+        },
+        "skipped_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationSkippedFile"
+          },
+          "description": "The selected files that the plan did not instrument."
+        },
+        "unmatched_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The paths of a `paths` scope that select no file."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "elapsed_ms",
+        "scope",
+        "counts",
+        "mutants",
+        "files",
+        "test_files",
+        "no_test_files",
+        "framework_config_checked",
+        "skipped_files",
+        "unmatched_paths"
+      ],
+      "description": "The envelope of `fallow mutation --plan`. It runs no user code."
+    },
+    "MutationInspectOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Independent schema version.",
+          "$ref": "#/definitions/MutationInspectSchemaVersion"
+        },
+        "version": {
+          "description": "The Fallow version.",
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "status": {
+          "description": "Whether the report still describes the current file.",
+          "$ref": "#/definitions/MutationInspectStatus"
+        },
+        "stale_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationStaleReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the packet is stale. Absent for a fresh packet."
+        },
+        "mutant_id": {
+          "type": "string",
+          "description": "The stable mutant id."
+        },
+        "file": {
+          "type": "string",
+          "description": "The root-relative path, with forward slashes."
+        },
+        "line": {
+          "type": "integer",
+          "description": "The 1-based line."
+        },
+        "column": {
+          "type": "integer",
+          "description": "The 1-based column."
+        },
+        "span": {
+          "type": "array",
+          "description": "The byte span in the original file.",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "integer"
+            }
+          ]
+        },
+        "operator": {
+          "type": "string",
+          "description": "The operator name, kebab-case."
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name of the enclosing function."
+        },
+        "function_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based first line of the enclosing function."
+        },
+        "rank": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based execution rank of a planned mutant."
+        },
+        "report_status": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The status of the mutant in the report. Absent for a plan."
+        },
+        "report_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The SHA-256 digest of the file in the report."
+        },
+        "current_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The SHA-256 digest of the current file. `null` when the file is\nmissing."
+        },
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationInspectCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The original and mutated code. `null` for a stale packet."
+        },
+        "covering_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The tests that reached the mutant in the dry run, sorted."
+        },
+        "static_test_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The test files that reach the file in the module graph, sorted."
+        },
+        "killed_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The test that killed the mutant in the run of the report."
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "status",
+        "mutant_id",
+        "file",
+        "line",
+        "column",
+        "span",
+        "operator",
+        "covering_tests",
+        "static_test_files"
+      ],
+      "description": "The envelope of `fallow mutation inspect`. It runs no user code."
+    },
+    "MutationVerdictInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "description": "Independent verdict document schema version.",
+          "$ref": "#/definitions/MutationVerdictSchemaVersion"
+        },
+        "verdicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationVerdict"
+          },
+          "description": "The verdicts. Each `review_key` occurs one time."
+        }
+      },
+      "required": [
+        "schema_version",
+        "verdicts"
+      ],
+      "description": "A versioned verdict document, authored by a person or an agent, for\n`fallow mutation --verdicts <file>`."
+    },
+    "MutationSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "Initial independent contract."
+        }
+      ],
+      "description": "Version singleton for a mutation report."
+    },
+    "MutationPlanSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "Initial independent contract."
+        }
+      ],
+      "description": "Version singleton for a mutation plan."
+    },
+    "MutationInspectSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "Initial independent contract."
+        }
+      ],
+      "description": "Version singleton for a mutation inspect packet."
+    },
+    "MutationVerdictSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "Initial independent contract."
+        }
+      ],
+      "description": "Version singleton for a mutation verdict document."
+    },
+    "MutantStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "killed",
+          "description": "A covering test failed."
+        },
+        {
+          "type": "string",
+          "const": "timeout",
+          "description": "The run passed its timeout. The mutant counts as detected."
+        },
+        {
+          "type": "string",
+          "const": "survived",
+          "description": "Each covering test passed, also in a second run in a new companion."
+        },
+        {
+          "type": "string",
+          "const": "no_coverage",
+          "description": "No test reaches the mutant."
+        },
+        {
+          "type": "string",
+          "const": "runtime_error",
+          "description": "The runner failed for a reason outside the tests."
+        },
+        {
+          "type": "string",
+          "const": "flaky",
+          "description": "The second run gave a different result than the first run."
+        },
+        {
+          "type": "string",
+          "const": "pruned",
+          "description": "A static rule removed the mutant."
+        },
+        {
+          "type": "string",
+          "const": "pending",
+          "description": "The mutant did not run: the mutant limit or the time budget ended first."
+        },
+        {
+          "type": "string",
+          "const": "equivalent",
+          "description": "A verdict marks the mutant as equivalent to the original code: no\ntest can detect it."
+        }
+      ],
+      "description": "The result of one mutant."
+    },
+    "MutationStatusCounts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "description": "Each mutant."
+        },
+        "killed": {
+          "type": "integer",
+          "description": "Killed mutants."
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Mutants that passed their timeout."
+        },
+        "survived": {
+          "type": "integer",
+          "description": "Mutants that each covering test let pass."
+        },
+        "no_coverage": {
+          "type": "integer",
+          "description": "Mutants that no test reaches."
+        },
+        "runtime_error": {
+          "type": "integer",
+          "description": "Mutants with a runner fault."
+        },
+        "flaky": {
+          "type": "integer",
+          "description": "Mutants with a different result in the second run."
+        },
+        "pruned": {
+          "type": "integer",
+          "description": "Mutants that a static rule removed."
+        },
+        "pending": {
+          "type": "integer",
+          "description": "Mutants that did not run."
+        },
+        "equivalent": {
+          "type": "integer",
+          "description": "Mutants that a verdict marks as equivalent."
+        }
+      },
+      "required": [
+        "total",
+        "killed",
+        "timeout",
+        "survived",
+        "no_coverage",
+        "runtime_error",
+        "flaky",
+        "pruned",
+        "pending",
+        "equivalent"
+      ],
+      "description": "The number of mutants for each status, and the mutation score."
+    },
+    "MutationCompletion": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "`complete` or `partial`.",
+          "$ref": "#/definitions/MutationCompletionStatus"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationIncompleteReason"
+          },
+          "description": "Why the run is partial, sorted. Empty for a complete run."
+        }
+      },
+      "required": [
+        "status",
+        "reasons"
+      ],
+      "description": "The completion status of a run."
+    },
+    "MutationCompletionStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "complete",
+          "description": "Each planned mutant has a final status. An empty survivor list is\nconclusive."
+        },
+        {
+          "type": "string",
+          "const": "partial",
+          "description": "At least one planned mutant has no final status."
+        }
+      ],
+      "description": "Whether the result is conclusive."
+    },
+    "MutationIncompleteReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "runtime-error",
+          "description": "At least one mutant has the status `runtime_error`."
+        },
+        {
+          "type": "string",
+          "const": "mutant-limit",
+          "description": "The mutant limit left mutants `pending`."
+        },
+        {
+          "type": "string",
+          "const": "time-budget",
+          "description": "The time budget ended before each mutant ran."
+        },
+        {
+          "type": "string",
+          "const": "skipped-files",
+          "description": "The plan did not instrument at least one selected file."
+        },
+        {
+          "type": "string",
+          "const": "unloaded-files",
+          "description": "The runner never loaded at least one instrumented file that has a\nplanned mutant and a static test file."
+        },
+        {
+          "type": "string",
+          "const": "baseline-failure",
+          "description": "A test or a test file failed before any mutant was active."
+        },
+        {
+          "type": "string",
+          "const": "worktree-changed",
+          "description": "The run changed the git worktree."
+        },
+        {
+          "type": "string",
+          "const": "worktree-unchecked",
+          "description": "The end-of-run worktree check failed, so stray writes are unknown."
+        }
+      ],
+      "description": "Why a run is partial."
+    },
+    "MutationScopeKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "changed",
+          "description": "The added lines against a base ref."
+        },
+        {
+          "type": "string",
+          "const": "all",
+          "description": "Each source file of the project."
+        },
+        {
+          "type": "string",
+          "const": "paths",
+          "description": "The files at the given paths."
+        }
+      ],
+      "description": "Which code a run mutates."
+    },
+    "MutationScopeOutput": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The kind of scope.",
+          "$ref": "#/definitions/MutationScopeKind"
+        },
+        "base_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The base ref of a `changed` scope."
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "description": "The scope of a plan or a run."
+    },
+    "MutationRunnerOutput": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The runner name, for example `vitest`."
+        },
+        "version": {
+          "type": "string",
+          "description": "The runner version from the project."
+        },
+        "protocol_version": {
+          "type": "integer",
+          "description": "The wire protocol version of the companion."
+        },
+        "runtime": {
+          "description": "The runtime of the companion.",
+          "$ref": "#/definitions/MutationRuntimeOutput"
+        },
+        "concurrency": {
+          "type": "integer",
+          "description": "The number of companion processes that ran mutants."
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "protocol_version",
+        "runtime",
+        "concurrency"
+      ],
+      "description": "The test runner of a run."
+    },
+    "MutationRuntimeOutput": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "`node` or `bun`."
+        },
+        "version": {
+          "type": "string",
+          "description": "The version that the runtime reports."
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "description": "The JavaScript runtime that ran the companion."
+    },
+    "MutantResult": {
+      "type": "object",
+      "properties": {
+        "mutant_id": {
+          "type": "string",
+          "description": "The stable mutant id."
+        },
+        "file": {
+          "type": "string",
+          "description": "The root-relative path, with forward slashes."
+        },
+        "line": {
+          "type": "integer",
+          "description": "The 1-based line."
+        },
+        "column": {
+          "type": "integer",
+          "description": "The 1-based column."
+        },
+        "span": {
+          "type": "array",
+          "description": "The byte span in the original file.",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "integer"
+            }
+          ]
+        },
+        "operator": {
+          "type": "string",
+          "description": "The operator name, kebab-case."
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name of the enclosing function."
+        },
+        "function_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based first line of the enclosing function."
+        },
+        "rank": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based execution rank of a planned mutant."
+        },
+        "status": {
+          "description": "The final status.",
+          "$ref": "#/definitions/MutantStatus"
+        },
+        "prune_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The static rule of a `pruned` mutant, kebab-case."
+        },
+        "killed_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The test that killed the mutant in this run. Absent for a kill by an\nerror outside a test.\n\nThis is evidence of one run, not a stable fact. A run stops at the\nfirst failing test, and it runs the fastest covering test first, so a\nsecond run on the same code can name another covering test. No\nfingerprint or baseline comparison uses this field."
+        },
+        "covering_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The tests that reached the mutant in the dry run, sorted by test id."
+        },
+        "static_mutant": {
+          "type": "boolean",
+          "description": "True when the mutant runs while a module loads, outside each test."
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The duration of the deciding run."
+        }
+      },
+      "required": [
+        "mutant_id",
+        "file",
+        "line",
+        "column",
+        "span",
+        "operator",
+        "status"
+      ],
+      "description": "One mutant of a run."
+    },
+    "MutationFunctionResult": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The root-relative path, with forward slashes."
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The function name. `null` for code outside each function, and for an\nanonymous function."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based first line. `null` for code outside each function."
+        },
+        "end_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based last line. `null` for code outside each function."
+        },
+        "in_diff": {
+          "type": "boolean",
+          "description": "True when an added line of the diff is in the function."
+        },
+        "cyclomatic": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The cyclomatic complexity, when the analysis measured the function."
+        },
+        "counts": {
+          "description": "The number of mutants for each status.",
+          "$ref": "#/definitions/MutationStatusCounts"
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The mutation score of the function."
+        },
+        "survived": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The ids of the survived mutants, in rank order."
+        }
+      },
+      "required": [
+        "file",
+        "in_diff",
+        "counts"
+      ],
+      "description": "The results of the mutants of one function."
+    },
+    "MutationSummary": {
+      "type": "object",
+      "properties": {
+        "counts": {
+          "description": "The number of mutants for each status.",
+          "$ref": "#/definitions/MutationStatusCounts"
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The mutation score: `(killed + timeout) / (killed + timeout + survived\n+ no_coverage)`. `null` when no mutant counts."
+        }
+      },
+      "required": [
+        "counts"
+      ],
+      "description": "The totals of a run."
+    },
+    "MutationBaselineFailure": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The test file, root-relative. `null` for an error outside each test\nfile."
+        },
+        "test_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The test id, for a failed test."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The error message, for an error outside a test."
+        }
+      },
+      "description": "A test or a test file that failed with no active mutant. Its tests do not\ndecide a mutant status."
+    },
+    "MutationSkippedFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The root-relative path, with forward slashes."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the plan skipped the file, kebab-case."
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "description": "A selected file that the plan did not instrument."
+    },
+    "MutationWorktreeCheck": {
+      "type": "object",
+      "properties": {
+        "checked": {
+          "type": "boolean",
+          "description": "False when the root is not in a git worktree, so no check ran."
+        },
+        "allow_dirty": {
+          "type": "boolean",
+          "description": "True when the caller allowed a dirty worktree."
+        },
+        "dirty_at_start": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The paths that were dirty before the run, sorted."
+        },
+        "changed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The paths that the run changed, sorted. A non-empty list is an error."
+        }
+      },
+      "required": [
+        "checked",
+        "allow_dirty",
+        "changed_paths"
+      ],
+      "description": "The git worktree check of a run (decision 4)."
+    },
+    "MutationRunIssue": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable kebab-case code: `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `worktree-changed` or\n`worktree-check-failed`."
+        },
+        "message": {
+          "type": "string",
+          "description": "A description."
+        },
+        "mutant_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The mutant of the issue."
+        },
+        "stderr_tail": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The last part of the companion stderr."
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "description": "An error of a run that did not stop the run."
+    },
+    "MutationTimings": {
+      "type": "object",
+      "properties": {
+        "plan_ms": {
+          "type": "integer",
+          "description": "The analysis and the plan."
+        },
+        "setup_ms": {
+          "type": "integer",
+          "description": "The companion install, the run directory, and the first `init`."
+        },
+        "dry_run_ms": {
+          "type": "integer",
+          "description": "The dry run."
+        },
+        "mutants_ms": {
+          "type": "integer",
+          "description": "The mutant runs."
+        },
+        "retry_ms": {
+          "type": "integer",
+          "description": "The second runs of survived mutants."
+        }
+      },
+      "required": [
+        "plan_ms",
+        "setup_ms",
+        "dry_run_ms",
+        "mutants_ms",
+        "retry_ms"
+      ],
+      "description": "The wall time of each phase, in milliseconds."
+    },
+    "MutationPlanFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The root-relative path, with forward slashes."
+        },
+        "source_sha256": {
+          "type": "string",
+          "description": "The SHA-256 digest of the file, lowercase hex."
+        },
+        "static_test_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The test files that reach the file in the module graph, sorted."
+        }
+      },
+      "required": [
+        "path",
+        "source_sha256",
+        "static_test_files"
+      ],
+      "description": "One instrumented file of a plan."
+    },
+    "MutationVerdictJoin": {
+      "type": "object",
+      "properties": {
+        "verdicts_sha256": {
+          "type": "string",
+          "description": "The SHA-256 digest of the verdict document, lowercase hex."
+        },
+        "applied": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The mutants that got the status `equivalent`, sorted."
+        },
+        "contradicted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The verdicts that a test contradicts, sorted: the mutant was killed or\ntimed out, so it is not equivalent. The status stays."
+        },
+        "deferred": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The verdicts for mutants with no tested result (`pending`,\n`runtime_error` or `pruned`), sorted. The status stays."
+        },
+        "unmatched": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The verdicts that match no mutant of this run, sorted. A verdict\ndocument can hold keys for code outside the scope of the run, and an\nedit of a function gives its mutants new keys."
+        }
+      },
+      "required": [
+        "verdicts_sha256",
+        "applied",
+        "contradicted",
+        "deferred",
+        "unmatched"
+      ],
+      "description": "The result of the join of a run with a verdict document."
+    },
+    "MutationVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "review_key": {
+          "type": "string",
+          "description": "The review key of the mutant. It is the `mutant_id`: the id hashes the\npath, the text of the enclosing function, the relative span, the\noperator and the replacement, so it stays the same until the function\nchanges."
+        },
+        "verdict": {
+          "description": "The judgment.",
+          "$ref": "#/definitions/MutationVerdictKind"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A short reason, for human review."
+        }
+      },
+      "required": [
+        "review_key",
+        "verdict"
+      ],
+      "description": "One reviewed mutant."
+    },
+    "MutationVerdictKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "equivalent",
+          "description": "The mutant behaves the same as the original code, so no test can kill\nit. It gets the status `equivalent` and leaves the score."
+        }
+      ],
+      "description": "The judgment of a mutation verdict."
+    },
+    "MutationPlanDisposition": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "planned",
+          "description": "A run executes the mutant."
+        },
+        {
+          "type": "string",
+          "const": "pending",
+          "description": "The mutant is after the mutant limit."
+        },
+        {
+          "type": "string",
+          "const": "no_coverage",
+          "description": "No test file reaches the file of the mutant."
+        },
+        {
+          "type": "string",
+          "const": "pruned",
+          "description": "A static rule removes the mutant."
+        }
+      ],
+      "description": "The status of a mutant in a plan."
+    },
+    "MutationPlanMutant": {
+      "type": "object",
+      "properties": {
+        "mutant_id": {
+          "type": "string",
+          "description": "The stable mutant id."
+        },
+        "file": {
+          "type": "string",
+          "description": "The root-relative path, with forward slashes."
+        },
+        "line": {
+          "type": "integer",
+          "description": "The 1-based line."
+        },
+        "column": {
+          "type": "integer",
+          "description": "The 1-based column."
+        },
+        "span": {
+          "type": "array",
+          "description": "The byte span in the original file.",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "integer"
+            }
+          ]
+        },
+        "operator": {
+          "type": "string",
+          "description": "The operator name, kebab-case."
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The name of the enclosing function."
+        },
+        "function_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based first line of the enclosing function."
+        },
+        "rank": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The 1-based execution rank of a planned mutant."
+        },
+        "disposition": {
+          "description": "The status in the plan.",
+          "$ref": "#/definitions/MutationPlanDisposition"
+        },
+        "prune_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The static rule of a `pruned` mutant, kebab-case."
+        }
+      },
+      "required": [
+        "mutant_id",
+        "file",
+        "line",
+        "column",
+        "span",
+        "operator",
+        "disposition"
+      ],
+      "description": "One mutant of a plan."
+    },
+    "MutationPlanCountsOutput": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "description": "Each mutant."
+        },
+        "planned": {
+          "type": "integer",
+          "description": "Planned mutants."
+        },
+        "pending": {
+          "type": "integer",
+          "description": "Mutants after the mutant limit."
+        },
+        "no_coverage": {
+          "type": "integer",
+          "description": "Mutants that no test file reaches."
+        },
+        "pruned_dead_code": {
+          "type": "integer",
+          "description": "Mutants in unused files."
+        },
+        "pruned_generated": {
+          "type": "integer",
+          "description": "Mutants in generated files."
+        },
+        "pruned_side_effect_sink": {
+          "type": "integer",
+          "description": "Mutants near a file system, process, network or database sink."
+        },
+        "pruned_framework_config": {
+          "type": "integer",
+          "description": "Mutants in framework config exports."
+        }
+      },
+      "required": [
+        "total",
+        "planned",
+        "pending",
+        "no_coverage",
+        "pruned_dead_code",
+        "pruned_generated",
+        "pruned_side_effect_sink",
+        "pruned_framework_config"
+      ],
+      "description": "The totals of a plan."
+    },
+    "MutationInspectStatus": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "fresh",
+          "description": "The file has the digest of the report, and the mutant is reproduced."
+        },
+        {
+          "type": "string",
+          "const": "stale",
+          "description": "The file changed, is missing, or no longer gives the mutant. The\npacket then has no code."
+        }
+      ],
+      "description": "Whether the saved report still describes the current file."
+    },
+    "MutationStaleReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "file-missing",
+          "description": "The file does not exist or cannot be read."
+        },
+        {
+          "type": "string",
+          "const": "no-digest",
+          "description": "The report has no digest for the file."
+        },
+        {
+          "type": "string",
+          "const": "source-changed",
+          "description": "The SHA-256 digest of the file differs from the report."
+        },
+        {
+          "type": "string",
+          "const": "mutant-not-reproduced",
+          "description": "The file has the digest of the report, but the instrumentation does\nnot give the mutant."
+        }
+      ],
+      "description": "Why an inspect packet is stale."
+    },
+    "MutationInspectCode": {
+      "type": "object",
+      "properties": {
+        "original": {
+          "type": "string",
+          "description": "The original text of the span."
+        },
+        "replacement": {
+          "type": "string",
+          "description": "The text that replaces the span."
+        },
+        "original_lines": {
+          "type": "string",
+          "description": "The source lines that contain the span, before the mutation."
+        },
+        "mutated_lines": {
+          "type": "string",
+          "description": "The same lines with the replacement applied."
+        }
+      },
+      "required": [
+        "original",
+        "replacement",
+        "original_lines",
+        "mutated_lines"
+      ],
+      "description": "The code of one mutant, from the current file."
     }
   }
 }

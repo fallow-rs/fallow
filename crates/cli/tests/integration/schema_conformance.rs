@@ -177,10 +177,16 @@ fn run_and_validate_with(
 }
 
 /// Command kinds that this suite cannot produce, with the reason.
-const CONFORMANCE_EXEMPT_KINDS: &[(&str, &str)] = &[(
-    "similar-code",
-    "needs the local similar-code companion and model; the typed output is pinned by the schema drift tests",
-)];
+const CONFORMANCE_EXEMPT_KINDS: &[(&str, &str)] = &[
+    (
+        "similar-code",
+        "needs the local similar-code companion and model; the typed output is pinned by the schema drift tests",
+    ),
+    (
+        "mutation",
+        "needs an installed Vitest project to run the tests; the typed output is pinned by the schema drift tests",
+    ),
+];
 
 thread_local! {
     /// The `kind` of every document that `run_and_validate_with` validated on

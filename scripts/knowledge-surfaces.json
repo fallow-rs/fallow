@@ -130,6 +130,10 @@
         "section": "architecture"
       },
       {
+        "path": "docs/mutation-testing.md",
+        "section": "architecture"
+      },
+      {
         "path": "docs/plugin-authoring.md",
         "section": "architecture"
       },

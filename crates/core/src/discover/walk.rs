@@ -2793,6 +2793,7 @@ mod tests {
                 circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
                 duplicates: DuplicatesConfig::default(),
                 similar_code: fallow_config::SimilarCodeConfig::default(),
+                mutation: fallow_config::MutationConfig::default(),
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),
                 boundaries: fallow_config::BoundaryConfig::default(),

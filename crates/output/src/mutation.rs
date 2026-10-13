@@ -5,12 +5,16 @@
 //! The `inspect` command shows the code of one mutant.
 
 use fallow_types::envelope::{ElapsedMs, ToolVersion};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+use crate::root_envelopes::serialize_named_json_output;
 
 /// Current mutation report schema version.
 pub const MUTATION_SCHEMA_VERSION: u32 = 1;
 /// Current mutation plan schema version.
 pub const MUTATION_PLAN_SCHEMA_VERSION: u32 = 1;
+/// Current mutation inspect schema version.
+pub const MUTATION_INSPECT_SCHEMA_VERSION: u32 = 1;
 
 /// Version singleton for a mutation report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -31,7 +35,7 @@ pub enum MutationPlanSchemaVersion {
 }
 
 /// The result of one mutant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MutantStatus {
@@ -51,6 +55,9 @@ pub enum MutantStatus {
     Pruned,
     /// The mutant did not run: the mutant limit or the time budget ended first.
     Pending,
+    /// A verdict marks the mutant as equivalent to the original code: no
+    /// test can detect it.
+    Equivalent,
 }
 
 /// The number of mutants for each status, and the mutation score.
@@ -75,6 +82,8 @@ pub struct MutationStatusCounts {
     pub pruned: usize,
     /// Mutants that did not run.
     pub pending: usize,
+    /// Mutants that a verdict marks as equivalent.
+    pub equivalent: usize,
 }
 
 impl MutationStatusCounts {
@@ -90,13 +99,34 @@ impl MutationStatusCounts {
             MutantStatus::Flaky => self.flaky += 1,
             MutantStatus::Pruned => self.pruned += 1,
             MutantStatus::Pending => self.pending += 1,
+            MutantStatus::Equivalent => self.equivalent += 1,
+        }
+    }
+
+    /// Removes one mutant with `status`. The count never goes below zero.
+    pub const fn remove(&mut self, status: MutantStatus) {
+        let count = match status {
+            MutantStatus::Killed => &mut self.killed,
+            MutantStatus::Timeout => &mut self.timeout,
+            MutantStatus::Survived => &mut self.survived,
+            MutantStatus::NoCoverage => &mut self.no_coverage,
+            MutantStatus::RuntimeError => &mut self.runtime_error,
+            MutantStatus::Flaky => &mut self.flaky,
+            MutantStatus::Pruned => &mut self.pruned,
+            MutantStatus::Pending => &mut self.pending,
+            MutantStatus::Equivalent => &mut self.equivalent,
+        };
+        if *count > 0 {
+            *count -= 1;
+            self.total -= 1;
         }
     }
 
     /// The mutation score: `(killed + timeout) / (killed + timeout + survived
     /// + no_coverage)`, from 0 to 1. `None` when no mutant counts.
     ///
-    /// Runtime errors, flaky, pruned and pending mutants do not count.
+    /// Runtime errors, flaky, pruned, pending and equivalent mutants do not
+    /// count.
     #[must_use]
     #[expect(
         clippy::cast_precision_loss,
@@ -431,6 +461,82 @@ pub struct MutationReport {
     pub errors: Vec<MutationRunIssue>,
     /// The wall time of each phase.
     pub timings: MutationTimings,
+    /// The mutated files with their SHA-256 digest at plan time, sorted by
+    /// path. `fallow mutation inspect` compares the digest with the current
+    /// file.
+    pub files: Vec<MutationPlanFile>,
+    /// The join with a verdict document. Absent when the run read no verdict
+    /// document (`--verdicts` not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdicts: Option<MutationVerdictJoin>,
+}
+
+/// Version singleton for a mutation verdict document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum MutationVerdictSchemaVersion {
+    /// Initial independent contract.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// The judgment of a mutation verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationVerdictKind {
+    /// The mutant behaves the same as the original code, so no test can kill
+    /// it. It gets the status `equivalent` and leaves the score.
+    Equivalent,
+}
+
+/// One reviewed mutant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct MutationVerdict {
+    /// The review key of the mutant. It is the `mutant_id`: the id hashes the
+    /// path, the text of the enclosing function, the relative span, the
+    /// operator and the replacement, so it stays the same until the function
+    /// changes.
+    pub review_key: String,
+    /// The judgment.
+    pub verdict: MutationVerdictKind,
+    /// A short reason, for human review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// A versioned verdict document, authored by a person or an agent, for
+/// `fallow mutation --verdicts <file>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct MutationVerdictInput {
+    /// Independent verdict document schema version.
+    pub schema_version: MutationVerdictSchemaVersion,
+    /// The verdicts. Each `review_key` occurs one time.
+    pub verdicts: Vec<MutationVerdict>,
+}
+
+/// The result of the join of a run with a verdict document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationVerdictJoin {
+    /// The SHA-256 digest of the verdict document, lowercase hex.
+    pub verdicts_sha256: String,
+    /// The mutants that got the status `equivalent`, sorted.
+    pub applied: Vec<String>,
+    /// The verdicts that a test contradicts, sorted: the mutant was killed or
+    /// timed out, so it is not equivalent. The status stays.
+    pub contradicted: Vec<String>,
+    /// The verdicts for mutants with no tested result (`pending`,
+    /// `runtime_error` or `pruned`), sorted. The status stays.
+    pub deferred: Vec<String>,
+    /// The verdicts that match no mutant of this run, sorted. A verdict
+    /// document can hold keys for code outside the scope of the run, and an
+    /// edit of a function gives its mutants new keys.
+    pub unmatched: Vec<String>,
 }
 
 /// The status of a mutant in a plan.
@@ -526,6 +632,124 @@ pub struct MutationPlanOutput {
     pub unmatched_paths: Vec<String>,
 }
 
+/// Version singleton for a mutation inspect packet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum MutationInspectSchemaVersion {
+    /// Initial independent contract.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// Whether the saved report still describes the current file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationInspectStatus {
+    /// The file has the digest of the report, and the mutant is reproduced.
+    Fresh,
+    /// The file changed, is missing, or no longer gives the mutant. The
+    /// packet then has no code.
+    Stale,
+}
+
+/// Why an inspect packet is stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationStaleReason {
+    /// The file does not exist or cannot be read.
+    FileMissing,
+    /// The report has no digest for the file.
+    NoDigest,
+    /// The SHA-256 digest of the file differs from the report.
+    SourceChanged,
+    /// The file has the digest of the report, but the instrumentation does
+    /// not give the mutant.
+    MutantNotReproduced,
+}
+
+/// The code of one mutant, from the current file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationInspectCode {
+    /// The original text of the span.
+    pub original: String,
+    /// The text that replaces the span.
+    pub replacement: String,
+    /// The source lines that contain the span, before the mutation.
+    pub original_lines: String,
+    /// The same lines with the replacement applied.
+    pub mutated_lines: String,
+}
+
+/// The envelope of `fallow mutation inspect`. It runs no user code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationInspectOutput {
+    /// Independent schema version.
+    pub schema_version: MutationInspectSchemaVersion,
+    /// The Fallow version.
+    pub version: ToolVersion,
+    /// Whether the report still describes the current file.
+    pub status: MutationInspectStatus,
+    /// Why the packet is stale. Absent for a fresh packet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_reason: Option<MutationStaleReason>,
+    /// The mutant and its position, from the report.
+    #[serde(flatten)]
+    pub location: MutantLocation,
+    /// The status of the mutant in the report. Absent for a plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_status: Option<MutantStatus>,
+    /// The SHA-256 digest of the file in the report.
+    pub report_sha256: Option<String>,
+    /// The SHA-256 digest of the current file. `null` when the file is
+    /// missing.
+    pub current_sha256: Option<String>,
+    /// The original and mutated code. `null` for a stale packet.
+    pub code: Option<MutationInspectCode>,
+    /// The tests that reached the mutant in the dry run, sorted.
+    pub covering_tests: Vec<String>,
+    /// The test files that reach the file in the module graph, sorted.
+    pub static_test_files: Vec<String>,
+    /// The test that killed the mutant in the run of the report.
+    pub killed_by: Option<String>,
+}
+
+/// Serialize a mutation report with its root discriminator.
+///
+/// # Errors
+///
+/// Returns a serde error when the envelope cannot be converted to JSON.
+pub fn serialize_mutation_json_output(
+    output: MutationReport,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_named_json_output(output, "mutation")
+}
+
+/// Serialize a mutation plan with its root discriminator.
+///
+/// # Errors
+///
+/// Returns a serde error when the envelope cannot be converted to JSON.
+pub fn serialize_mutation_plan_json_output(
+    output: MutationPlanOutput,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_named_json_output(output, "mutation-plan")
+}
+
+/// Serialize a mutation inspect packet with its root discriminator.
+///
+/// # Errors
+///
+/// Returns a serde error when the envelope cannot be converted to JSON.
+pub fn serialize_mutation_inspect_json_output(
+    output: MutationInspectOutput,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_named_json_output(output, "mutation-inspect")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,6 +786,45 @@ mod tests {
         assert_eq!(counts.pruned, 1);
         assert_eq!(counts.pending, 1);
         assert_eq!(counts.score(), Some(0.5));
+    }
+
+    #[test]
+    fn equivalent_mutants_leave_the_score() {
+        let mut counts = counts(&[
+            MutantStatus::Killed,
+            MutantStatus::Survived,
+            MutantStatus::Survived,
+        ]);
+        assert_eq!(counts.score(), Some(1.0 / 3.0));
+        counts.remove(MutantStatus::Survived);
+        counts.add(MutantStatus::Equivalent);
+        assert_eq!(counts.total, 3);
+        assert_eq!(counts.survived, 1);
+        assert_eq!(counts.equivalent, 1);
+        assert_eq!(counts.score(), Some(0.5));
+        counts.remove(MutantStatus::Timeout);
+        assert_eq!(counts.total, 3, "removing an absent status changes nothing");
+    }
+
+    #[test]
+    fn verdict_documents_reject_unknown_fields_and_verdicts() {
+        let valid: MutationVerdictInput = serde_json::from_value(serde_json::json!({
+            "schema_version": "1",
+            "verdicts": [{ "review_key": "abc", "verdict": "equivalent", "note": "same result" }]
+        }))
+        .expect("valid document");
+        assert_eq!(valid.verdicts[0].verdict, MutationVerdictKind::Equivalent);
+        for invalid in [
+            serde_json::json!({ "schema_version": "1", "verdicts": [{ "review_key": "a", "verdict": "killed" }] }),
+            serde_json::json!({ "schema_version": "1", "verdicts": [{ "review_key": "a", "verdict": "equivalent", "extra": 1 }] }),
+            serde_json::json!({ "schema_version": "2", "verdicts": [] }),
+            serde_json::json!({ "verdicts": [] }),
+        ] {
+            assert!(
+                serde_json::from_value::<MutationVerdictInput>(invalid.clone()).is_err(),
+                "{invalid}"
+            );
+        }
     }
 
     #[test]

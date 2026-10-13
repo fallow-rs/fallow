@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::EffectKind;
 use fallow_mutation::{Instrumented, MutationError, MutationOptions, Operator, SourceKind};
+use fallow_security::ProvenanceBindings;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{FunctionComplexity, ModuleInfo, SinkSite, byte_offset_to_line_col};
 use rayon::prelude::*;
@@ -388,7 +389,7 @@ impl<'a> FileFacts<'a> {
             module
                 .security_sinks
                 .iter()
-                .filter(|site| is_side_effect_sink(site))
+                .filter(|site| is_side_effect_sink(module, site))
                 .map(|site| site.span_start)
                 .collect()
         };
@@ -525,7 +526,12 @@ fn is_generated(path: &Path, source: &str) -> bool {
 }
 
 /// A captured sink site that matches a catalogue row with an IO effect.
-fn is_side_effect_sink(site: &SinkSite) -> bool {
+///
+/// A row with an import provenance matches only when the module can import
+/// that source, so a local `get(object, key)` does not match the `https.get`
+/// row. The modules are released, so an identifier that no ES import and no
+/// export binds still matches: it can be a `require()` binding.
+fn is_side_effect_sink(module: &ModuleInfo, site: &SinkSite) -> bool {
     if PURE_CALLEE_PREFIXES
         .iter()
         .any(|prefix| site.callee_path.starts_with(prefix))
@@ -540,6 +546,11 @@ fn is_side_effect_sink(site: &SinkSite) -> bool {
                 && SIDE_EFFECTS.contains(&matcher.effect)
                 && !RESPONSE_SHAPING_ROWS.contains(&matcher.id.as_str())
                 && matcher.first_matching_pattern(&site.callee_path).is_some()
+                && matcher.provenance_satisfied(
+                    module,
+                    &site.callee_path,
+                    ProvenanceBindings::ReleasedModule,
+                )
         })
 }
 

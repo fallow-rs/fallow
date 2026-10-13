@@ -612,6 +612,7 @@ mod tests {
             circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
             similar_code: fallow_config::SimilarCodeConfig::default(),
+            mutation: fallow_config::MutationConfig::default(),
             health: fallow_config::HealthConfig::default(),
             type_aware: fallow_config::TypeAwareConfig::default(),
             rules: fallow_config::RulesConfig::default(),

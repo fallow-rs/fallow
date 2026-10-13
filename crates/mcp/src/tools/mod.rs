@@ -23,6 +23,7 @@ mod health;
 mod impact;
 mod inspect_target;
 mod list_boundaries;
+mod mutation;
 mod project_info;
 mod recommend;
 mod security;
@@ -72,6 +73,7 @@ pub use impact::{
 };
 pub use inspect_target::inspect_target;
 pub use list_boundaries::{build_list_boundaries_args, run_list_boundaries};
+pub use mutation::{run_mutation_inspect, run_mutation_plan};
 pub use project_info::{build_project_info_args, run_project_info};
 pub use recommend::run_recommend;
 pub use security::{build_security_candidates_args, run_security_candidates};

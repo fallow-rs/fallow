@@ -1,0 +1,13 @@
+---
+source: crates/cli/src/mutation_cli_tests.rs
+expression: render_plan(&plan)
+---
+Mutation plan (no code runs)
+Scope: all source files
+Mutants: 2 planned, 0 pending, 0 no coverage, 2 pruned
+Files: 1 mutated, 1 test file reaches them
+Pruned: 1 generated, 1 side-effect-sink
+
+Planned, in run order
+  #1 src/a.ts:2:10  add  arithmetic-operator  m1
+  #2 src/a.ts:3:10  add  arithmetic-operator  m2

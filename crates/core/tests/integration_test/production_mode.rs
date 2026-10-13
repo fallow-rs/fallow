@@ -25,6 +25,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: fallow_config::DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
         boundaries: fallow_config::BoundaryConfig::default(),

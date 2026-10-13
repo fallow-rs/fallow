@@ -174,6 +174,10 @@
         "ignore": []
       }
     },
+    "mutation": {
+      "description": "Configures the explicit `fallow mutation` workflow: `runner` (`auto`\nor `vitest`), `operators` (kebab-case names, default each operator),\n`minScore` (0 to 100; a lower score exits with code 1), and\n`concurrency` (half the logical cores). No key starts a run, and the\nside-effect override is a CLI flag only.",
+      "$ref": "#/$defs/MutationConfig"
+    },
     "health": {
       "description": "Sets complexity and health thresholds for `fallow health` (also applied in combined `fallow` and `fallow audit`): `maxCyclomatic` (20), `maxCognitive` (15), `maxCrap` (30.0, findings at or above this are reported), `crapRefactorBand` (5, cyclomatic band below `maxCyclomatic` where a secondary refactor action is added), `maxUnitSize` (max function lines before a large-function finding, 60), `coverage`/`coverageRoot` (Istanbul coverage path and path-prefix strip for accurate CRAP), `ignore` globs (remove files from findings AND the health score), `thresholdOverrides` (per-file/per-function ceilings via `files`/`functions`/`maxCyclomatic`/`maxCognitive`/`maxCrap`/`maxUnitSize`/`reason`), `ownership` (`botPatterns` and `emailMode` for `--ownership`), and `suggestInlineSuppression` (true, emit `suppress-line` action hints in JSON). Raise thresholds to relax which functions are flagged, wire `coverage` for real CRAP scores, or exempt generated/test files via `ignore` (drops them from the score too) or `thresholdOverrides` (keeps them visible under a higher ceiling). The four `max*` thresholds govern findings only and never move `health_score`: its penalties use fixed calibration so grades stay comparable across projects, and `ignore` is the lever that removes files from the score.",
       "$ref": "#/$defs/HealthConfig",
@@ -1094,6 +1098,122 @@
         }
       },
       "additionalProperties": false
+    },
+    "MutationConfig": {
+      "description": "Project settings for `fallow mutation`.\n\nProject config cannot widen what a run executes: the override that keeps\nmutants near file system, process, network or database sinks is a CLI\nflag only (`--allow-side-effects`), and no key starts a run.",
+      "type": "object",
+      "properties": {
+        "runner": {
+          "description": "The test runner. `auto` detects it; version 1 supports Vitest only.",
+          "$ref": "#/$defs/MutationRunner",
+          "default": "auto"
+        },
+        "operators": {
+          "description": "The operators to use. Unset uses each operator. `--operators` wins.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/MutationOperatorName"
+          }
+        },
+        "minScore": {
+          "description": "The minimum mutation score, from 0 to 100. When the score of a run is\nlower, `fallow mutation` exits with code 1. Unset never fails a run.\n`--min-score` wins.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "minimum": 0.0,
+          "maximum": 100.0
+        },
+        "concurrency": {
+          "description": "The number of companion processes. Unset uses half the logical cores.\n`--concurrency` wins.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "MutationRunner": {
+      "description": "The test runner of `fallow mutation`.",
+      "oneOf": [
+        {
+          "description": "Detect the runner from the project. Version 1 supports Vitest only.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Vitest 4 or 5 from the project `node_modules`.",
+          "type": "string",
+          "const": "vitest"
+        }
+      ]
+    },
+    "MutationOperatorName": {
+      "description": "A mutation operator name, kebab-case.",
+      "oneOf": [
+        {
+          "description": "`a + b` to `a - b`, and the other arithmetic pairs.",
+          "type": "string",
+          "const": "arithmetic-operator"
+        },
+        {
+          "description": "`a < b` to `a <= b`, and the other relational pairs.",
+          "type": "string",
+          "const": "relational-operator"
+        },
+        {
+          "description": "`a && b` to `a || b`, and the reverse.",
+          "type": "string",
+          "const": "logical-operator"
+        },
+        {
+          "description": "A condition to its negation.",
+          "type": "string",
+          "const": "negate-condition"
+        },
+        {
+          "description": "A unary operator removed or changed.",
+          "type": "string",
+          "const": "unary-operator"
+        },
+        {
+          "description": "`i++` to `i--`, and the reverse.",
+          "type": "string",
+          "const": "update-operator"
+        },
+        {
+          "description": "A call statement removed.",
+          "type": "string",
+          "const": "removed-call"
+        },
+        {
+          "description": "A return value changed.",
+          "type": "string",
+          "const": "return-value"
+        },
+        {
+          "description": "`true` to `false`, and the reverse.",
+          "type": "string",
+          "const": "boolean-literal"
+        },
+        {
+          "description": "A string literal emptied or filled.",
+          "type": "string",
+          "const": "string-literal"
+        },
+        {
+          "description": "`a?.b` to `a.b`.",
+          "type": "string",
+          "const": "optional-chaining"
+        }
+      ]
     },
     "HealthConfig": {
       "description": "Configuration for complexity health metrics (`fallow health`).",

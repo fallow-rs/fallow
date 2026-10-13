@@ -301,14 +301,18 @@ pub use list_envelopes::{
     WorkspacesOutput, serialize_list_boundaries_json_output, serialize_list_workspaces_json_output,
 };
 pub use mutation::{
-    MUTATION_PLAN_SCHEMA_VERSION, MUTATION_SCHEMA_VERSION, MutantLocation, MutantResult,
-    MutantStatus, MutationBaselineFailure, MutationCompletion, MutationCompletionStatus,
-    MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
-    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationPlanOutput,
-    MutationPlanSchemaVersion, MutationReport, MutationRunIssue, MutationRunnerOutput,
-    MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind, MutationScopeOutput,
-    MutationSkippedFile, MutationStatusCounts, MutationSummary, MutationTimings,
-    MutationWorktreeCheck,
+    MUTATION_INSPECT_SCHEMA_VERSION, MUTATION_PLAN_SCHEMA_VERSION, MUTATION_SCHEMA_VERSION,
+    MutantLocation, MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
+    MutationCompletionStatus, MutationFunctionResult, MutationIncompleteReason,
+    MutationInspectCode, MutationInspectOutput, MutationInspectSchemaVersion,
+    MutationInspectStatus, MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile,
+    MutationPlanMutant, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
+    MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
+    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
+    MutationStatusCounts, MutationSummary, MutationTimings, MutationVerdict, MutationVerdictInput,
+    MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
+    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    serialize_mutation_plan_json_output,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

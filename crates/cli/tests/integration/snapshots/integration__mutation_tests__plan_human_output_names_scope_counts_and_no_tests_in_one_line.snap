@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/integration/mutation_tests.rs
+expression: "redact_all(&output.stdout, project.path())"
+---
+Mutation plan (no code runs)
+Scope: all source files
+Mutants: 0 planned, 0 pending, 6 no coverage, 0 pruned
+Files: 0 mutated, 0 test files reach them
+No tests: the project has no test files, so no mutant can be killed.

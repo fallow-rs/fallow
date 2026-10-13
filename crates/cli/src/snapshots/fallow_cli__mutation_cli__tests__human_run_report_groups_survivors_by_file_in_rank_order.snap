@@ -1,0 +1,31 @@
+---
+source: crates/cli/src/mutation_cli_tests.rs
+expression: text
+---
+Mutation testing (ran the project tests)
+Scope: changed code against origin/main
+Score 20.0%  killed 1  survived 3  no coverage 1  timeout 0  partial (time-budget)
+Minimum score 50%: missed
+
+Survived (3)
+  src/b.ts
+    #2 3:10  add  arithmetic-operator  return a + b; -> return a - b;
+      id m4
+      covered by test/a.test.ts::adds, test/a.test.ts::subtracts
+    #4 5:10  add  arithmetic-operator
+      id m2
+      covered by test/a.test.ts::adds, test/a.test.ts::subtracts
+  src/a.ts
+    #3 4:10  add  arithmetic-operator
+      id m3
+      covered by test/a.test.ts::adds, test/a.test.ts::subtracts
+
+No coverage (1): no test reaches these mutants
+  src/c.ts
+    6:10  add  arithmetic-operator  log(x); -> (empty line)
+
+Pruned: 1 side-effect-sink
+
+Next
+  Save a JSON report (runs the tests again): fallow mutation --format json --quiet > mutation.json
+  Inspect a survivor (runs no code): fallow mutation inspect m4 --report mutation.json

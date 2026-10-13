@@ -25,13 +25,11 @@ use fallow_types::results::{
 };
 use fallow_types::suppress::IssueKind;
 
-use super::{
-    LineOffsetsMap, byte_offset_to_line_col, import_source_matches, requires_binding_trace,
-};
+use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
-use fallow_security::{CalleePattern, Matcher, catalogue};
+use fallow_security::{CalleePattern, Matcher, ProvenanceBindings, catalogue};
 
 /// The inline suppression kind token for the tainted-sink catalogue rule. ONE
 /// token covers every catalogue category.
@@ -108,32 +106,6 @@ pub(super) fn build_actions() -> Vec<IssueAction> {
         description: "Suppress with a file-level comment at the top of the file".to_string(),
         comment: format!("// fallow-ignore-file {SUPPRESS_KIND}"),
     })]
-}
-
-/// Whether the matcher's import provenance is satisfied by the module.
-///
-/// `None` provenance is always satisfied. Otherwise the module must import a
-/// source matching the spec (tolerant of the `node:` prefix on either side).
-/// For binding-sensitive rows, the binding's `local_name` must also be the
-/// leading identifier of the callee path, matching the `child_process.fork()`
-/// provenance precedent.
-fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &str) -> bool {
-    let Some(spec) = &matcher.import_provenance else {
-        return true;
-    };
-    let leading_ident = callee_path.split('.').next().unwrap_or(callee_path);
-    let want_binding_trace = requires_binding_trace(matcher);
-    module.imports.iter().any(|imp| {
-        let source_matches = import_source_matches(&imp.source, spec);
-        if !source_matches {
-            return false;
-        }
-        if want_binding_trace {
-            imp.local_name == leading_ident
-        } else {
-            true
-        }
-    })
 }
 
 /// Compiled glob set over [`PRODUCTION_EXCLUDE_PATTERNS`](crate::discover::PRODUCTION_EXCLUDE_PATTERNS),
@@ -645,7 +617,7 @@ fn match_tainted_sink<'a>(
     let source_id = source.map(|(id, title, _)| (id, title));
     let matcher = run.active.iter().copied().find(|m| {
         matcher_admits_sink(m, sink, source_id)
-            && provenance_satisfied(m, module, &sink.callee_path)
+            && m.provenance_satisfied(module, &sink.callee_path, ProvenanceBindings::Imports)
     })?;
 
     Some((matcher, source))

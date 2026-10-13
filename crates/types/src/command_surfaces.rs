@@ -141,6 +141,20 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
             "similar-code candidates are unverified and never feed a CI surface",
         ),
     },
+    CommandEnvelope {
+        command: "mutation",
+        kind: "mutation",
+        grouped_kind: None,
+        report_from: ReportFrom::Refused(
+            "mutation results come from one opt-in test run and feed no CI surface in version 1",
+        ),
+        mcp_tool: Some("mutation_plan"),
+        mcp_omission: None,
+        verdict: false,
+        ci: CiIntegration::Omitted(
+            "mutation testing runs the project tests; only an explicit local command starts a run",
+        ),
+    },
 ];
 
 /// Visible subcommands that write no analysis report, with the reason.

@@ -1182,6 +1182,100 @@
       ]
     },
     {
+      "name": "mutation",
+      "description": "Measure how well the tests detect changes in the code (opt-in)",
+      "flags": [
+        {
+          "name": "--all",
+          "type": "bool",
+          "required": false,
+          "description": "Mutate every source file instead of the changed code",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--plan",
+          "type": "bool",
+          "required": false,
+          "description": "Build the plan only: select, map and rank mutants. Runs no code",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--max-mutants",
+          "type": "string",
+          "required": false,
+          "description": "Run at most N mutants, in rank order. The others are `pending`"
+        },
+        {
+          "name": "--time-budget",
+          "type": "string",
+          "required": false,
+          "description": "Stop starting mutants after this time, for example `90s`, `10m` or `1h`. The others are `pending`"
+        },
+        {
+          "name": "--concurrency",
+          "type": "string",
+          "required": false,
+          "description": "The number of companion processes (default: half the logical cores)"
+        },
+        {
+          "name": "--runtime",
+          "type": "string",
+          "required": false,
+          "description": "The JavaScript runtime (default: `node`, then `bun`, from PATH)"
+        },
+        {
+          "name": "--allow-dirty",
+          "type": "bool",
+          "required": false,
+          "description": "Run in a dirty git worktree. The run still reports the paths that it changed",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--allow-side-effects",
+          "type": "bool",
+          "required": false,
+          "description": "Keep mutants in functions that reach a file system, process, network or database sink. A mutant can then remove a guard of a real side effect. This is a flag only, never a config key",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--min-score",
+          "type": "string",
+          "required": false,
+          "description": "Exit with code 1 when the mutation score is below this percentage"
+        },
+        {
+          "name": "--operators",
+          "type": "string",
+          "required": false,
+          "description": "The operators to use, comma-separated (default: each operator)"
+        },
+        {
+          "name": "--verdicts",
+          "type": "string",
+          "required": false,
+          "description": "A verdict document that marks mutants as equivalent. Equivalent mutants leave the score"
+        },
+        {
+          "name": "paths",
+          "type": "string",
+          "required": false,
+          "description": "Mutate only these files or directories instead of the changed code"
+        }
+      ]
+    },
+    {
       "name": "inspect",
       "description": "Inspect one file or exported symbol as a bundled evidence query",
       "flags": [
@@ -7491,6 +7585,37 @@
         "key_params": [
           "candidate_id",
           "snapshot"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true,
+        "code_mode_alias": null
+      },
+      {
+        "name": "mutation_plan",
+        "kind": "analysis",
+        "description": "Static mutation plan for changed code: mutant ids, operators, dispositions, and static test files; runs no tests",
+        "cli_command": "fallow mutation --plan --format json --quiet",
+        "key_params": [
+          "changed_since",
+          "all",
+          "paths",
+          "max_mutants",
+          "operators"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true,
+        "code_mode_alias": null
+      },
+      {
+        "name": "mutation_inspect",
+        "kind": "trace",
+        "description": "Inspect one mutant of a saved mutation report, with a stale status when its source changed; runs no tests",
+        "cli_command": "fallow mutation inspect <mutant-id> --report <report.json> --format json --quiet",
+        "key_params": [
+          "mutant_id",
+          "report"
         ],
         "license": "free",
         "license_note": null,

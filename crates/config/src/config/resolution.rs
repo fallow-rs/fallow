@@ -14,6 +14,7 @@ use super::duplicates_config::DuplicatesConfig;
 use super::flags::FlagsConfig;
 use super::format::OutputFormat;
 use super::health::HealthConfig;
+use super::mutation::MutationConfig;
 use super::resolve::ResolveConfig;
 use super::rules::{PartialRulesConfig, RulesConfig, Severity};
 use super::similar_code::SimilarCodeConfig;
@@ -284,6 +285,8 @@ pub struct ResolvedConfig {
     pub duplicates: DuplicatesConfig,
     /// Explicit similar-code candidate settings, passed through unchanged.
     pub similar_code: SimilarCodeConfig,
+    /// Explicit mutation-testing settings, passed through unchanged.
+    pub mutation: MutationConfig,
     /// Health and complexity thresholds, passed through unchanged.
     pub health: HealthConfig,
     /// TypeScript semantic-analysis opt-in, passed through unchanged.
@@ -392,6 +395,7 @@ const NON_DETECTION_CONFIG_KEYS: &[&str] = &[
     "minimumVersion",
     "duplicates",
     "similarCode",
+    "mutation",
     "health",
     "security",
     "fix",
@@ -1055,6 +1059,7 @@ impl FallowConfig {
             circular_dependencies: self.circular_dependencies,
             duplicates: self.duplicates,
             similar_code: self.similar_code,
+            mutation: self.mutation,
             health: self.health,
             type_aware: self.type_aware,
             rules: production_rules.rules,
@@ -1151,6 +1156,37 @@ mod tests {
     use crate::CacheConfig;
     use crate::config::boundaries::BoundaryConfig;
     use crate::config::health::HealthConfig;
+
+    #[test]
+    fn mutation_section_reaches_resolved_config_and_leaves_the_detection_digest() {
+        let resolve = |json: &str| {
+            let authored: FallowConfig = serde_json::from_str(json).expect("config deserializes");
+            authored.resolve(
+                PathBuf::from("/project"),
+                OutputFormat::Json,
+                1,
+                true,
+                true,
+                None,
+            )
+        };
+        let plain = resolve("{}");
+        let with_mutation = resolve(r#"{"mutation":{"minScore":75,"operators":["removed-call"]}}"#);
+        assert_eq!(with_mutation.mutation.min_score, Some(75.0));
+        assert_eq!(
+            with_mutation.mutation.operators,
+            Some(vec![crate::MutationOperatorName::RemovedCall])
+        );
+        assert_eq!(
+            plain.detection_config_digest,
+            with_mutation.detection_config_digest
+        );
+        let detecting = resolve(r#"{"ignorePatterns":["gen/**"]}"#);
+        assert_ne!(
+            plain.detection_config_digest,
+            detecting.detection_config_digest
+        );
+    }
 
     #[test]
     fn workspace_patterns_reach_resolved_config() {
@@ -1280,6 +1316,7 @@ mod tests {
             circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
+            mutation: MutationConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
@@ -1340,6 +1377,7 @@ mod tests {
             circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
+            mutation: MutationConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
@@ -1411,6 +1449,7 @@ mod tests {
             circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
+            mutation: MutationConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
@@ -1490,6 +1529,7 @@ mod tests {
             circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
+            mutation: MutationConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
@@ -1621,6 +1661,7 @@ mod tests {
             circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
+            mutation: MutationConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
@@ -1691,6 +1732,7 @@ mod tests {
             circular_dependencies: crate::CircularDependenciesConfig::default(),
             duplicates: DuplicatesConfig::default(),
             similar_code: SimilarCodeConfig::default(),
+            mutation: MutationConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),

@@ -13,9 +13,7 @@ use crate::resolve::ResolvedModule;
 use crate::suppress::SuppressionContext;
 
 use super::boundary_calls::canonical_callee_path;
-use super::security::{
-    CalleePattern, catalogue_matchers, import_source_matches, requires_binding_trace,
-};
+use super::security::{CalleePattern, catalogue_matchers};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// One rule-pack rule with its matchers compiled for evaluation.
@@ -650,31 +648,12 @@ fn matcher_matches_callee(
     declared_deps: &FxHashSet<String>,
 ) -> bool {
     matcher.enabler_satisfied(declared_deps)
-        && provenance_satisfied(matcher, module, callee_path)
+        && matcher.provenance_satisfied(
+            module,
+            callee_path,
+            fallow_security::ProvenanceBindings::ImportsAndRequires,
+        )
         && matcher.first_matching_pattern(callee_path).is_some()
-}
-
-fn provenance_satisfied(
-    matcher: &super::security::Matcher,
-    module: &ModuleInfo,
-    callee_path: &str,
-) -> bool {
-    let Some(spec) = &matcher.import_provenance else {
-        return true;
-    };
-    let leading_ident = callee_path.split('.').next().unwrap_or(callee_path);
-    module.imports.iter().any(|imp| {
-        import_source_matches(&imp.source, spec)
-            && (!requires_binding_trace(matcher) || imp.local_name == leading_ident)
-    }) || module.require_calls.iter().any(|call| {
-        import_source_matches(&call.source, spec)
-            && (!requires_binding_trace(matcher)
-                || call.local_name.as_deref() == Some(leading_ident)
-                || call
-                    .destructured_names
-                    .iter()
-                    .any(|name| name == leading_ident))
-    })
 }
 
 /// Segment-aware raw-specifier match: the pattern matches exactly or at a

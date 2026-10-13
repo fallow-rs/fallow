@@ -167,7 +167,9 @@ pub use markdown_output::{
     ComplexityListing, build_diff_risk_markdown, build_duplication_markdown,
     build_grouped_markdown, build_health_markdown, build_markdown, build_walkthrough_markdown,
 };
-pub use mutation::{MutationRunOptions, MutationRunScope};
+pub use mutation::{
+    MutationRunOptions, MutationRunScope, apply_mutation_verdicts, validate_mutation_verdicts,
+};
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, CombinedOutput, FallowOutput, ImpactOutput, ListBoundariesOutput,

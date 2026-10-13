@@ -626,7 +626,8 @@ fn inspect_command(candidate_id: &str) -> String {
     arguments.join(" ")
 }
 
-fn render_cli_argument(argument: &str) -> String {
+/// Quotes one argument of a suggested command for the current shell.
+pub fn render_cli_argument(argument: &str) -> String {
     if !argument.is_empty()
         && argument
             .bytes()

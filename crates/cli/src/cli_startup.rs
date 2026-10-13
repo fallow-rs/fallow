@@ -678,6 +678,7 @@ pub fn command_without_global_baseline(command: &Command) -> Option<&'static str
         Command::Coverage { .. } => Some("coverage"),
         Command::SetupHooks { .. } => Some("setup-hooks"),
         Command::Viz { .. } => Some("viz"),
+        Command::Mutation { .. } => Some("mutation"),
     }
 }
 

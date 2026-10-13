@@ -78,7 +78,9 @@ fn all_tools_registered() {
     assert!(names.contains(&"recommend".to_string()));
     assert!(names.contains(&"trace_import_path".to_string()));
     assert!(names.contains(&"trace_error".to_string()));
-    assert_eq!(tools.len(), 41);
+    assert!(names.contains(&"mutation_plan".to_string()));
+    assert!(names.contains(&"mutation_inspect".to_string()));
+    assert_eq!(tools.len(), 43);
 }
 
 #[test]
@@ -91,6 +93,8 @@ fn read_only_tools_have_annotations() {
         "security_candidates",
         "find_similar_code",
         "inspect_similar_code",
+        "mutation_plan",
+        "mutation_inspect",
         "inspect_target",
         "guard",
         "fix_preview",
@@ -708,6 +712,33 @@ const TOOL_SCHEMA_EXPECTATIONS: &[(&str, &[&str], &[&str])] = &[
         &[],
     ),
     (
+        "mutation_plan",
+        &[
+            "root",
+            "config",
+            "allow_remote_extends",
+            "changed_since",
+            "all",
+            "paths",
+            "max_mutants",
+            "operators",
+            "no_cache",
+            "threads",
+        ],
+        &[],
+    ),
+    (
+        "mutation_inspect",
+        &[
+            "mutant_id",
+            "report",
+            "root",
+            "config",
+            "allow_remote_extends",
+        ],
+        &["mutant_id", "report"],
+    ),
+    (
         "list_suppressions",
         &[
             "root",
@@ -792,6 +823,8 @@ fn required_path_params_reject_empty_strings() {
         ("trace_file", "file"),
         ("impact_closure", "path"),
         ("trace_dependency", "package_name"),
+        ("mutation_inspect", "mutant_id"),
+        ("mutation_inspect", "report"),
     ] {
         let schema = tool_schema(&tools, name);
         assert_eq!(
@@ -973,16 +1006,49 @@ fn code_execute_description_matches_the_manifest_code_mode_allowlist() {
         );
     }
 
-    for wire_name in ["find_similar_code", "inspect_similar_code"] {
+    for wire_name in [
+        "find_similar_code",
+        "inspect_similar_code",
+        "mutation_plan",
+        "mutation_inspect",
+    ] {
         assert!(
             description.contains(wire_name),
-            "the description must route similar-code to the standalone {wire_name} MCP tool"
+            "the description must route {wire_name} to its standalone MCP tool"
         );
     }
     assert!(
         description.contains("standalone"),
         "the description must name the similar-code tools as standalone: {description}"
     );
+}
+
+/// MCP never runs mutants in version 1 (mutation decision 2). The two
+/// mutation tools must say so, and must name the CLI command that runs the
+/// tests, so an agent can ask its host before it executes project code.
+#[test]
+fn mutation_descriptions_route_test_execution_to_the_cli() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    for name in ["mutation_plan", "mutation_inspect"] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .unwrap_or_else(|| panic!("{name} is registered"));
+        let description = tool.description.as_deref().expect("description");
+        assert!(
+            description.contains("`fallow mutation`"),
+            "{name} must name the CLI command that runs mutants: {description}"
+        );
+        assert!(
+            description.contains("executes the project's tests"),
+            "{name} must say that a run executes the project's tests: {description}"
+        );
+        assert!(
+            description.contains("never runs tests"),
+            "{name} must say that the tool itself runs no tests: {description}"
+        );
+    }
 }
 
 #[test]

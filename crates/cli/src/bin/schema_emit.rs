@@ -54,7 +54,8 @@ use fallow_output::{
     HotspotSummary, ImpactCounts, ImpactReport, ImpactReportSchemaVersion, ImpactTrendDirection,
     InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
     InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
-    InspectTargetDescriptor, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
+    InspectTargetDescriptor, LargeFunctionEntry, MutationInspectOutput, MutationPlanOutput,
+    MutationReport, MutationVerdictInput, OwnershipMetrics, RecommendationCategory,
     RefactoringTarget, RefactoringTargetFinding, RejectedJudgment, RequestName, ResolutionEvent,
     ReviewBriefSchemaVersion, ReviewCheckConclusion, ReviewComment, ReviewDirection, ReviewEffort,
     ReviewEnvelopeEvent, ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewEnvelopeWireOutput,
@@ -580,6 +581,41 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "SimilarCodeVerdictMatch",
     "SimilarCodeReviewedCandidate",
     "SimilarCodeReviewProvenance",
+    "MutationReport",
+    "MutationPlanOutput",
+    "MutationInspectOutput",
+    "MutationVerdictInput",
+    "MutationSchemaVersion",
+    "MutationPlanSchemaVersion",
+    "MutationInspectSchemaVersion",
+    "MutationVerdictSchemaVersion",
+    "MutantStatus",
+    "MutationStatusCounts",
+    "MutationCompletion",
+    "MutationCompletionStatus",
+    "MutationIncompleteReason",
+    "MutationScopeKind",
+    "MutationScopeOutput",
+    "MutationRunnerOutput",
+    "MutationRuntimeOutput",
+    "MutantResult",
+    "MutationFunctionResult",
+    "MutationSummary",
+    "MutationBaselineFailure",
+    "MutationSkippedFile",
+    "MutationWorktreeCheck",
+    "MutationRunIssue",
+    "MutationTimings",
+    "MutationPlanFile",
+    "MutationVerdictJoin",
+    "MutationVerdict",
+    "MutationVerdictKind",
+    "MutationPlanDisposition",
+    "MutationPlanMutant",
+    "MutationPlanCountsOutput",
+    "MutationInspectStatus",
+    "MutationStaleReason",
+    "MutationInspectCode",
 ];
 
 pub(crate) fn derived_definition_names() -> &'static [&'static str] {
@@ -635,6 +671,7 @@ fn derived_definitions() -> Map<String, Value> {
     register_security_definitions(&mut generator);
     register_suppression_inventory_definitions(&mut generator);
     register_similar_code_definitions(&mut generator);
+    register_mutation_definitions(&mut generator);
     let _ = generator.subschema_for::<FallowOutput>();
     register_list_boundaries_definitions(&mut generator);
     register_health_action_definitions(&mut generator);
@@ -993,6 +1030,14 @@ fn register_suppression_inventory_definitions(generator: &mut schemars::SchemaGe
     let _ = generator.subschema_for::<SuppressionKindCount>();
     let _ = generator.subschema_for::<SuppressionInventorySummary>();
     let _ = generator.subschema_for::<SuppressionInventoryOutput>();
+}
+
+/// Register the independent mutation report, plan, inspect, and verdict contracts.
+fn register_mutation_definitions(generator: &mut schemars::SchemaGenerator) {
+    let _ = generator.subschema_for::<MutationReport>();
+    let _ = generator.subschema_for::<MutationPlanOutput>();
+    let _ = generator.subschema_for::<MutationInspectOutput>();
+    let _ = generator.subschema_for::<MutationVerdictInput>();
 }
 
 /// Register the independent similar-code candidate, inspect, and review contracts.
@@ -1410,6 +1455,21 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "similar-code-cache-clear",
         &["SimilarCodeCacheClearOutput"],
         "`fallow similar-code cache clear --format json`. Project-local vector-cache\nclear result.",
+    ),
+    (
+        "mutation",
+        &["MutationReport"],
+        "`fallow mutation --format json`. Independently versioned mutation testing\nresults: one status per mutant, the score, and the completion status. No\nsource text.",
+    ),
+    (
+        "mutation-plan",
+        &["MutationPlanOutput"],
+        "`fallow mutation --plan --format json`. The static mutation plan: ranked\nmutants, prune reasons and file digests. Runs no project code.",
+    ),
+    (
+        "mutation-inspect",
+        &["MutationInspectOutput"],
+        "`fallow mutation inspect --format json`. One mutant of a saved report against\nthe current file, with a fresh or stale status. Runs no project code.",
     ),
 ];
 
@@ -1878,6 +1938,9 @@ mod drift_tests {
             ("SimilarCodeReview", "SimilarCodeReviewOutput"),
             ("SimilarCodeStatus", "SimilarCodeStatusOutput"),
             ("SimilarCodeCacheClear", "SimilarCodeCacheClearOutput"),
+            ("Mutation", "MutationReport"),
+            ("MutationPlan", "MutationPlanOutput"),
+            ("MutationInspect", "MutationInspectOutput"),
         ];
 
         #[expect(
@@ -1923,6 +1986,9 @@ mod drift_tests {
                 FallowOutput::SimilarCodeReview(_) => "SimilarCodeReview",
                 FallowOutput::SimilarCodeStatus(_) => "SimilarCodeStatus",
                 FallowOutput::SimilarCodeCacheClear(_) => "SimilarCodeCacheClear",
+                FallowOutput::Mutation(_) => "Mutation",
+                FallowOutput::MutationPlan(_) => "MutationPlan",
+                FallowOutput::MutationInspect(_) => "MutationInspect",
             }
         }
 

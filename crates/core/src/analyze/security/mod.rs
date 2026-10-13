@@ -79,41 +79,10 @@ pub fn catalogue_matchers() -> &'static [Matcher] {
     fallow_security::catalogue().matchers()
 }
 
-/// Whether a catalogue rule requires the provenance import's local binding to
-/// be the leading identifier of the callee path, instead of accepting any module
-/// that merely imports the provenance source (the `child_process.fork()`
-/// precedent). Shared by the tainted-sink and policy provenance checks, which
-/// index the single rule-id space produced by [`catalogue_matchers`].
-pub(in crate::analyze) fn requires_binding_trace(matcher: &Matcher) -> bool {
-    matches!(
-        matcher.id.as_str(),
-        "command-injection"
-            | "permissive-cors"
-            | "electron-unsafe-webpreferences"
-            | "insecure-temp-file"
-            | "jwt-alg-none"
-            | "jwt-verify-missing-algorithms"
-            | "tls-validation-disabled"
-            | "mysql-multiple-statements"
-            | "world-writable-permission"
-    ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware())
-}
-
-/// Compare an import source against a provenance spec, tolerant of the `node:`
-/// prefix on either side (`node:child_process` matches `child_process`) and
-/// package subpath imports (`mysql2/promise` matches `mysql2`).
-pub(in crate::analyze) fn import_source_matches(source: &str, spec: &str) -> bool {
-    fn strip_node_prefix(value: &str) -> &str {
-        value.strip_prefix("node:").unwrap_or(value)
-    }
-
-    let source = strip_node_prefix(source);
-    let spec = strip_node_prefix(spec);
-    source == spec
-        || source
-            .strip_prefix(spec)
-            .is_some_and(|rest| rest.starts_with('/'))
-}
+// The provenance predicate lives in `fallow-security` so that the mutation
+// plan applies the same import check as the detectors.
+#[cfg(test)]
+use fallow_security::import_source_matches;
 
 /// The inline suppression kind token for the client-server-leak rule.
 const SUPPRESS_KIND: &str = "security-client-server-leak";

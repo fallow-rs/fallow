@@ -1153,6 +1153,7 @@ dependencies = [
  "fallow-cov-protocol",
  "fallow-engine",
  "fallow-license",
+ "fallow-mutation",
  "fallow-output",
  "fallow-process",
  "fallow-security",
@@ -1396,6 +1397,8 @@ name = "fallow-mcp"
 version = "3.33.1"
 dependencies = [
  "fallow-api",
+ "fallow-config",
+ "fallow-output",
  "fallow-process",
  "fallow-types",
  "mimalloc",
@@ -1482,6 +1485,7 @@ version = "3.33.1"
 dependencies = [
  "fallow-config",
  "fallow-types",
+ "oxc_span 0.152.0",
  "rustc-hash",
  "serde",
  "tempfile",

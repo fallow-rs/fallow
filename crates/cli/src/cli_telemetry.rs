@@ -275,6 +275,9 @@ pub fn telemetry_workflow_for_command(
                 ),
             ..
         }) => telemetry::Workflow::SimilarCode,
+        // Mutation testing has no telemetry workflow yet; adding one changes
+        // the telemetry contract.
+        Some(Command::Mutation { .. }) => telemetry::Workflow::Unknown,
         Some(Command::Fix { .. }) => telemetry::Workflow::Fix,
         Some(Command::Explain { .. }) => telemetry::Workflow::Explain,
         Some(

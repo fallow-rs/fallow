@@ -1,0 +1,8 @@
+---
+source: crates/cli/src/mutation_cli_tests.rs
+expression: text
+---
+Mutation testing (no test ran)
+Scope: changed code against origin/main
+Score n/a  killed 0  survived 0  no coverage 0  timeout 0  complete
+No mutation data: the changed code against origin/main has no mutant. Use --all or pass paths to widen the scope.

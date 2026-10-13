@@ -218,6 +218,30 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         code_mode_alias: None,
     },
     McpToolInfo {
+        name: "mutation_plan",
+        kind: "analysis",
+        description: "Static mutation plan for changed code: mutant ids, operators, dispositions, and static test files; runs no tests",
+        cli_command: Some("fallow mutation --plan --format json --quiet"),
+        key_params: &["changed_since", "all", "paths", "max_mutants", "operators"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+        code_mode_alias: None,
+    },
+    McpToolInfo {
+        name: "mutation_inspect",
+        kind: "trace",
+        description: "Inspect one mutant of a saved mutation report, with a stale status when its source changed; runs no tests",
+        cli_command: Some(
+            "fallow mutation inspect <mutant-id> --report <report.json> --format json --quiet",
+        ),
+        key_params: &["mutant_id", "report"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+        code_mode_alias: None,
+    },
+    McpToolInfo {
         name: "inspect_target",
         kind: "analysis",
         description: "One evidence bundle for a file or exported symbol: trace, dead-code actions, duplication, complexity, and security candidates",
@@ -1086,7 +1110,25 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         napi_export: None,
         mcp_tool: None,
         omission_note: Some(
-            "Mutation testing runs the project's own tests, so it is available through the CLI (`fallow mutation`) and the Rust api only. plan_mutation is the api plan entry point for `fallow mutation --plan`. A test run is a host permission decision: no napi export, and no MCP run tool in version 1.",
+            "Mutation testing runs the project's own tests, so it is available through the CLI (`fallow mutation`) and the Rust api only. A test run is a host permission decision: no napi export, and no MCP run tool in version 1. The read-only plan and inspect halves are the mutation_plan and mutation_inspect MCP tools.",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "mutation plan",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("mutation_plan"),
+        omission_note: Some(
+            "Static mutation plan that runs no tests. MCP calls fallow_api::plan_mutation in process; plan_mutation is not a run_* runner, and the napi addon has no mutation surface in version 1.",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "mutation inspection",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("mutation_inspect"),
+        omission_note: Some(
+            "One mutant of a saved mutation report, with a stale status when the source changed. MCP shells out to `fallow mutation inspect`; no run_* API runner and no napi export.",
         ),
     },
     // -- MCP-only tools that shell out to the CLI: no api runner, no napi
@@ -1474,17 +1516,19 @@ mod tests {
     }
 
     /// Code Mode's exclusions are routing decisions, not omissions: the
-    /// sandbox is read-only and capped at 30 seconds, so fix tools and
-    /// similar-code must stay off the allowlist, and the meta-tool cannot
-    /// call itself.
+    /// sandbox is read-only and capped at 30 seconds, so fix tools,
+    /// similar-code and mutation must stay off the allowlist, and the
+    /// meta-tool cannot call itself.
     #[test]
-    fn code_mode_excludes_fix_similar_code_and_the_meta_tool() {
+    fn code_mode_excludes_fix_similar_code_mutation_and_the_meta_tool() {
         for name in [
             "code_execute",
             "fix_preview",
             "fix_apply",
             "find_similar_code",
             "inspect_similar_code",
+            "mutation_plan",
+            "mutation_inspect",
         ] {
             let tool = MCP_TOOLS
                 .iter()

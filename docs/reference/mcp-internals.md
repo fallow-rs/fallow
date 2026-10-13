@@ -155,6 +155,17 @@ Contract rules:
   `analyze`. The `analyze` tool keeps the architecture findings in its
   `kind: "dead-code"` result. Drift invariant I2 compares the CLI,
   `fallow_api` and both MCP paths for this command.
+- `mutation_plan` and `mutation_inspect` are the read-only halves of
+  `fallow mutation`. `mutation_plan` calls `fallow_api::plan_mutation` in
+  process and serializes with
+  `fallow_output::serialize_mutation_plan_json_output`, so its envelope is the
+  `fallow mutation --plan` JSON, with `kind: "mutation-plan"`.
+  `mutation_inspect` runs `fallow mutation inspect <id> --report <file>` as a
+  subprocess. A plan document is a valid `--report` input. No MCP tool runs
+  mutants in version 1: a run executes the tests of the project, so the agent
+  host decides it through the CLI. Both descriptions name `fallow mutation`
+  for that reason. Code Mode refuses both tools and names the standalone
+  tools.
 - The `analyze` description keeps the routing summary and the `finding_id`
   contract. The `fallow://tools/analyze` guide (`crates/mcp/src/tool_guides.rs`)
   holds the per-flag prose: the `boundary_violations` alias, the `group_by`
@@ -187,7 +198,8 @@ Contract rules:
   MCP tools receive an already-resolved result set and must not filter by rule
   themselves; that would put project policy in a protocol adapter and let the
   two implementations drift.
-- Mutation tools expose preview and explicit confirmation semantics.
+- Fix tools that change source expose preview and explicit confirmation
+  semantics.
 - Apply bounded timeouts and clean up the complete owned process tree on
   completion, cancellation, or timeout.
 - Never inherit unbounded environment or filesystem authority into code mode.

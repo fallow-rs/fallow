@@ -43,6 +43,8 @@ for contributors and maintainers of the open-source codebase.
   boundaries, evidence policy, packaging, and corpus validation.
 - [Similar-code analysis](similar-code-analysis.md): local semantic discovery,
   inspect and verdict flow, privacy boundary, packaging, and version 1 scope.
+- [Mutation testing](mutation-testing.md): the opt-in `fallow mutation`
+  command, its safety boundary, exit codes, verdicts, inspect, and config.
 
 ## Internal implementation references
 

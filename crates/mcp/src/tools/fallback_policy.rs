@@ -68,6 +68,9 @@ mod tests {
             "impact.rs",
             "inspect_target.rs",
             "mod.rs",
+            // `mutation_plan` is API-backed; `mutation_inspect` always runs
+            // `fallow mutation inspect`.
+            "mutation.rs",
             "recommend.rs",
             "security.rs",
             "semantic.rs",

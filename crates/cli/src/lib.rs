@@ -73,6 +73,9 @@ mod json_style;
 mod license;
 mod list;
 mod migrate;
+mod mutation_cli;
+mod mutation_human;
+mod mutation_inspect;
 mod onboarding;
 #[cfg(test)]
 mod output_envelope;
@@ -192,6 +195,7 @@ Analysis:
   flags          Detect feature flag usage patterns
   security       Surface local security candidates for agent verification (opt-in)
   similar-code   Find semantic implementation overlap for verification (opt-in, local)
+  mutation       Measure how well the tests detect code changes (opt-in, runs tests)
   audit          Review changed files for dead code, complexity, duplication, and styling
 
 Workflow:
@@ -1124,6 +1128,20 @@ enum Command {
         /// The full project graph is still built; only reported items are narrowed.
         #[arg(value_name = "PATH")]
         path: Option<PathBuf>,
+    },
+
+    /// Measure how well the tests detect changes in the code (opt-in).
+    ///
+    /// Changes the code in small ways (mutants) and runs the project tests
+    /// against each mutant. A mutant that no test fails on survives. The
+    /// default scope is the changed code against the base ref, as `audit`.
+    /// `--plan` and `inspect` run no code. The project files on disk never
+    /// change.
+    Mutation {
+        #[command(subcommand)]
+        subcommand: Option<mutation_cli::MutationSubcommand>,
+        #[command(flatten)]
+        args: mutation_cli::MutationArgs,
     },
 
     /// Inspect one file or exported symbol as a bundled evidence query
@@ -4332,6 +4350,71 @@ fn run_combined_scoped(
     })
 }
 
+fn dispatch_mutation_command(
+    dispatch: &DispatchContext<'_>,
+    subcommand: Option<mutation_cli::MutationSubcommand>,
+    args: mutation_cli::MutationArgs,
+) -> ExitCode {
+    let cli = dispatch.cli;
+    let workspace_flag = if cli.workspace.is_some() {
+        Some("--workspace")
+    } else if cli.changed_workspaces.is_some() {
+        Some("--changed-workspaces")
+    } else {
+        None
+    };
+    if let Some(flag) = workspace_flag {
+        return error::emit_error_with_style(
+            &format!(
+                "{flag} does not narrow `fallow mutation` yet; pass the workspace directory as a path, for example `fallow mutation packages/app`"
+            ),
+            2,
+            dispatch.output,
+            dispatch.json_style,
+        );
+    }
+    let config = if matches!(
+        subcommand,
+        Some(mutation_cli::MutationSubcommand::Inspect { .. })
+    ) {
+        fallow_config::MutationConfig::default()
+    } else {
+        match fallow_engine::project_config::config_for_project_with_load_options(
+            dispatch.root,
+            cli.config.as_deref(),
+            fallow_config::ConfigLoadOptions {
+                allow_remote_extends: cli.allow_remote_extends,
+            },
+        ) {
+            Ok(project) => project.config.mutation,
+            Err(error) => {
+                return error::emit_error_with_style(
+                    &format!("failed to load config: {error}"),
+                    2,
+                    dispatch.output,
+                    dispatch.json_style,
+                );
+            }
+        }
+    };
+    mutation_cli::run(&mutation_cli::MutationCliInput {
+        root: dispatch.root,
+        config_path: cli.config.as_deref(),
+        root_flag: cli.root.as_deref(),
+        allow_remote_extends: cli.allow_remote_extends,
+        no_cache: cli.no_cache,
+        threads: dispatch.threads,
+        changed_since: cli.changed_since.as_deref(),
+        diff_file: cli.diff_file.as_deref(),
+        quiet: dispatch.quiet,
+        output: dispatch.output,
+        json_style: dispatch.json_style,
+        config,
+        args,
+        subcommand,
+    })
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "the command router is intentionally an exhaustive top-level dispatch table"
@@ -4386,6 +4469,9 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 scope,
                 subcommand,
             })
+        }
+        Command::Mutation { subcommand, args } => {
+            dispatch_mutation_command(dispatch, subcommand, args)
         }
         Command::Inspect {
             file,

@@ -387,6 +387,9 @@ pub enum FallowOutput<
     SimilarCodeReview,
     SimilarCodeStatus,
     SimilarCodeCacheClear,
+    Mutation,
+    MutationPlan,
+    MutationInspect,
 > {
     /// `fallow audit --format json`.
     #[serde(rename = "audit")]
@@ -499,6 +502,15 @@ pub enum FallowOutput<
     /// `fallow similar-code cache clear --format json`.
     #[serde(rename = "similar-code-cache-clear")]
     SimilarCodeCacheClear(SimilarCodeCacheClear),
+    /// `fallow mutation --format json`.
+    #[serde(rename = "mutation")]
+    Mutation(Mutation),
+    /// `fallow mutation --plan --format json`.
+    #[serde(rename = "mutation-plan")]
+    MutationPlan(MutationPlan),
+    /// `fallow mutation inspect --format json`.
+    #[serde(rename = "mutation-inspect")]
+    MutationInspect(MutationInspect),
 }
 
 #[cfg(test)]

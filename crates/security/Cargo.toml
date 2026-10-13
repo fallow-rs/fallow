@@ -23,6 +23,7 @@ serde = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+oxc_span = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

@@ -1,0 +1,115 @@
+---
+source: crates/cli/tests/integration/mutation_tests.rs
+expression: "serde_json::to_string_pretty(&value).unwrap()"
+---
+{
+  "kind": "mutation-plan",
+  "schema_version": "1",
+  "version": "[version]",
+  "elapsed_ms": 0,
+  "scope": {
+    "kind": "all"
+  },
+  "counts": {
+    "total": 6,
+    "planned": 0,
+    "pending": 0,
+    "no_coverage": 6,
+    "pruned_dead_code": 0,
+    "pruned_generated": 0,
+    "pruned_side_effect_sink": 0,
+    "pruned_framework_config": 0
+  },
+  "mutants": [
+    {
+      "mutant_id": "97e6b4584975b297",
+      "file": "src/math.ts",
+      "line": 2,
+      "column": 10,
+      "span": [
+        61,
+        66
+      ],
+      "operator": "return-value",
+      "function": "add",
+      "function_line": 1,
+      "disposition": "no_coverage"
+    },
+    {
+      "mutant_id": "3fc446a8dd3213b8",
+      "file": "src/math.ts",
+      "line": 2,
+      "column": 12,
+      "span": [
+        63,
+        64
+      ],
+      "operator": "arithmetic-operator",
+      "function": "add",
+      "function_line": 1,
+      "disposition": "no_coverage"
+    },
+    {
+      "mutant_id": "2738a05b79088e86",
+      "file": "src/math.ts",
+      "line": 6,
+      "column": 10,
+      "span": [
+        129,
+        134
+      ],
+      "operator": "return-value",
+      "function": "isPositive",
+      "function_line": 5,
+      "disposition": "no_coverage"
+    },
+    {
+      "mutant_id": "5421493beb3910ac",
+      "file": "src/math.ts",
+      "line": 6,
+      "column": 10,
+      "span": [
+        129,
+        134
+      ],
+      "operator": "relational-operator",
+      "function": "isPositive",
+      "function_line": 5,
+      "disposition": "no_coverage"
+    },
+    {
+      "mutant_id": "6dc3c6f031114a55",
+      "file": "src/math.ts",
+      "line": 6,
+      "column": 12,
+      "span": [
+        131,
+        132
+      ],
+      "operator": "relational-operator",
+      "function": "isPositive",
+      "function_line": 5,
+      "disposition": "no_coverage"
+    },
+    {
+      "mutant_id": "a95119edeb1e9ac4",
+      "file": "src/math.ts",
+      "line": 6,
+      "column": 12,
+      "span": [
+        131,
+        132
+      ],
+      "operator": "relational-operator",
+      "function": "isPositive",
+      "function_line": 5,
+      "disposition": "no_coverage"
+    }
+  ],
+  "files": [],
+  "test_files": [],
+  "no_test_files": true,
+  "framework_config_checked": true,
+  "skipped_files": [],
+  "unmatched_paths": []
+}

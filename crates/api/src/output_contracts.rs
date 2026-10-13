@@ -193,4 +193,7 @@ pub type FallowOutput = fallow_output::FallowOutput<
     SimilarCodeReviewOutput,
     SimilarCodeStatusOutput,
     SimilarCodeCacheClearOutput,
+    fallow_output::MutationReport,
+    fallow_output::MutationPlanOutput,
+    fallow_output::MutationInspectOutput,
 >;

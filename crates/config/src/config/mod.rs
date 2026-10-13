@@ -8,6 +8,7 @@ mod format;
 pub mod glob_validation;
 mod health;
 mod ignore_patterns;
+mod mutation;
 mod parsing;
 mod resolution;
 mod resolve;
@@ -39,6 +40,7 @@ pub use health::{
     ChangeCouplingConfig, EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig,
 };
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
+pub use mutation::{MutationConfig, MutationOperatorName, MutationRunner};
 pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions};
 pub use resolution::{
     AnalysisSnapshot, CACHE_DIR_ENV, CACHE_MAX_SIZE_ENV, CompiledIgnoreCatalogReferenceRule,
@@ -386,6 +388,14 @@ pub struct FallowConfig {
     /// endpoints, credentials, and consent cannot be set by project config.
     #[serde(default)]
     pub similar_code: SimilarCodeConfig,
+
+    /// Configures the explicit `fallow mutation` workflow: `runner` (`auto`
+    /// or `vitest`), `operators` (kebab-case names, default each operator),
+    /// `minScore` (0 to 100; a lower score exits with code 1), and
+    /// `concurrency` (half the logical cores). No key starts a run, and the
+    /// side-effect override is a CLI flag only.
+    #[serde(default, skip_serializing_if = "MutationConfig::is_default")]
+    pub mutation: MutationConfig,
 
     /// Sets complexity and health thresholds for `fallow health` (also applied in combined `fallow` and `fallow audit`): `maxCyclomatic` (20), `maxCognitive` (15), `maxCrap` (30.0, findings at or above this are reported), `crapRefactorBand` (5, cyclomatic band below `maxCyclomatic` where a secondary refactor action is added), `maxUnitSize` (max function lines before a large-function finding, 60), `coverage`/`coverageRoot` (Istanbul coverage path and path-prefix strip for accurate CRAP), `ignore` globs (remove files from findings AND the health score), `thresholdOverrides` (per-file/per-function ceilings via `files`/`functions`/`maxCyclomatic`/`maxCognitive`/`maxCrap`/`maxUnitSize`/`reason`), `ownership` (`botPatterns` and `emailMode` for `--ownership`), and `suggestInlineSuppression` (true, emit `suppress-line` action hints in JSON). Raise thresholds to relax which functions are flagged, wire `coverage` for real CRAP scores, or exempt generated/test files via `ignore` (drops them from the score too) or `thresholdOverrides` (keeps them visible under a higher ceiling). The four `max*` thresholds govern findings only and never move `health_score`: its penalties use fixed calibration so grades stay comparable across projects, and `ignore` is the lever that removes files from the score.
     #[serde(default)]

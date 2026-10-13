@@ -747,3 +747,34 @@ fn each_response_shaping_row_names_a_catalogue_row_with_an_io_effect() {
         );
     }
 }
+
+#[test]
+fn a_provenance_row_prunes_only_the_calls_of_its_import_source() {
+    let plan = plan_all(&fixture("mutation-plan-provenance"));
+    let pruned = MutantDisposition::Pruned(PruneReason::SideEffectSink);
+    let all = plan
+        .mutants
+        .iter()
+        .filter(|entry| entry.file.starts_with("src/") && !entry.file.ends_with(".test.ts"))
+        .fold(BTreeMap::new(), |mut map, entry| {
+            let name = entry
+                .function
+                .as_ref()
+                .and_then(|function| function.name.clone())
+                .unwrap_or_else(|| "<top-level>".to_owned());
+            map.insert(format!("{}::{name}", entry.file), entry.disposition);
+            map
+        });
+    assert_eq!(
+        all,
+        BTreeMap::from([
+            ("src/download.ts::download".to_owned(), pruned),
+            ("src/download.ts::fetchNamed".to_owned(), pruned),
+            ("src/get.ts::get".to_owned(), PLANNED),
+            ("src/get.ts::getOr".to_owned(), PLANNED),
+            ("src/legacy.ts::legacyDownload".to_owned(), pruned),
+            ("src/pick.ts::<arrow>".to_owned(), PLANNED),
+            ("src/pick.ts::pick".to_owned(), PLANNED),
+        ])
+    );
+}

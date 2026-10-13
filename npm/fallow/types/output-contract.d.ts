@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `architecture-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `architecture`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`, `similar-code-status`, `similar-code-cache-clear`, `mutation`, `mutation-plan`, `mutation-inspect`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -116,6 +116,12 @@ kind: "similar-code-review"
 kind: "similar-code-status"
 }) | (SimilarCodeCacheClearOutput & {
 kind: "similar-code-cache-clear"
+}) | (MutationReport & {
+kind: "mutation"
+}) | (MutationPlanOutput & {
+kind: "mutation-plan"
+}) | (MutationInspectOutput & {
+kind: "mutation-inspect"
 }))
 /**
  * Schema projection for the audit envelope's exact version.
@@ -1641,6 +1647,46 @@ export type SimilarCodeStatusSchemaVersion = "1"
  * Version singleton for vector-cache clear output.
  */
 export type SimilarCodeCacheClearSchemaVersion = "1"
+/**
+ * Version singleton for a mutation report.
+ */
+export type MutationSchemaVersion = "1"
+/**
+ * Whether the result is conclusive.
+ */
+export type MutationCompletionStatus = ("complete" | "partial")
+/**
+ * Why a run is partial.
+ */
+export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "baseline-failure" | "worktree-changed" | "worktree-unchecked")
+/**
+ * Which code a run mutates.
+ */
+export type MutationScopeKind = ("changed" | "all" | "paths")
+/**
+ * The result of one mutant.
+ */
+export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | "runtime_error" | "flaky" | "pruned" | "pending" | "equivalent")
+/**
+ * Version singleton for a mutation plan.
+ */
+export type MutationPlanSchemaVersion = "1"
+/**
+ * The status of a mutant in a plan.
+ */
+export type MutationPlanDisposition = ("planned" | "pending" | "no_coverage" | "pruned")
+/**
+ * Version singleton for a mutation inspect packet.
+ */
+export type MutationInspectSchemaVersion = "1"
+/**
+ * Whether the saved report still describes the current file.
+ */
+export type MutationInspectStatus = ("fresh" | "stale")
+/**
+ * Why an inspect packet is stale.
+ */
+export type MutationStaleReason = ("file-missing" | "no-digest" | "source-changed" | "mutant-not-reproduced")
 /**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
@@ -19354,6 +19400,659 @@ removed: boolean
  * Whether model artifacts were removed. Version 1 always emits false.
  */
 model_removed: boolean
+}
+/**
+ * The envelope of `fallow mutation`.
+ */
+export interface MutationReport {
+schema_version: MutationSchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+completion: MutationCompletion
+scope: MutationScopeOutput
+/**
+ * The runner, when a companion started.
+ */
+runner?: (MutationRunnerOutput | null)
+summary: MutationSummary
+/**
+ * Each mutant, ranked mutants first.
+ */
+mutants: MutantResult[]
+/**
+ * The results per enclosing function, by file and line.
+ */
+functions: MutationFunctionResult[]
+/**
+ * True when the project has no test files.
+ */
+no_test_files: boolean
+/**
+ * The tests and test files that failed with no active mutant.
+ */
+baseline_failures: MutationBaselineFailure[]
+/**
+ * The selected files that the plan did not instrument.
+ */
+skipped_files: MutationSkippedFile[]
+/**
+ * The paths of a `paths` scope that select no file.
+ */
+unmatched_paths: string[]
+/**
+ * The instrumented files that the runner never loaded.
+ */
+unloaded_paths: string[]
+worktree: MutationWorktreeCheck
+/**
+ * The errors that did not stop the run.
+ */
+errors: MutationRunIssue[]
+timings: MutationTimings
+/**
+ * The mutated files with their SHA-256 digest at plan time, sorted by
+ * path. `fallow mutation inspect` compares the digest with the current
+ * file.
+ */
+files: MutationPlanFile[]
+/**
+ * The join with a verdict document. Absent when the run read no verdict
+ * document (`--verdicts` not set).
+ */
+verdicts?: (MutationVerdictJoin | null)
+}
+/**
+ * The completion status of a run.
+ */
+export interface MutationCompletion {
+status: MutationCompletionStatus
+/**
+ * Why the run is partial, sorted. Empty for a complete run.
+ */
+reasons: MutationIncompleteReason[]
+}
+/**
+ * The scope of a plan or a run.
+ */
+export interface MutationScopeOutput {
+kind: MutationScopeKind
+/**
+ * The base ref of a `changed` scope.
+ */
+base_ref?: (string | null)
+}
+/**
+ * The test runner of a run.
+ */
+export interface MutationRunnerOutput {
+/**
+ * The runner name, for example `vitest`.
+ */
+name: string
+/**
+ * The runner version from the project.
+ */
+version: string
+/**
+ * The wire protocol version of the companion.
+ */
+protocol_version: number
+runtime: MutationRuntimeOutput
+/**
+ * The number of companion processes that ran mutants.
+ */
+concurrency: number
+}
+/**
+ * The JavaScript runtime that ran the companion.
+ */
+export interface MutationRuntimeOutput {
+/**
+ * `node` or `bun`.
+ */
+name: string
+/**
+ * The version that the runtime reports.
+ */
+version: string
+}
+/**
+ * The totals of a run.
+ */
+export interface MutationSummary {
+counts: MutationStatusCounts
+/**
+ * The mutation score: `(killed + timeout) / (killed + timeout + survived
+ * + no_coverage)`. `null` when no mutant counts.
+ */
+score?: (number | null)
+}
+/**
+ * The number of mutants for each status, and the mutation score.
+ */
+export interface MutationStatusCounts {
+/**
+ * Each mutant.
+ */
+total: number
+/**
+ * Killed mutants.
+ */
+killed: number
+/**
+ * Mutants that passed their timeout.
+ */
+timeout: number
+/**
+ * Mutants that each covering test let pass.
+ */
+survived: number
+/**
+ * Mutants that no test reaches.
+ */
+no_coverage: number
+/**
+ * Mutants with a runner fault.
+ */
+runtime_error: number
+/**
+ * Mutants with a different result in the second run.
+ */
+flaky: number
+/**
+ * Mutants that a static rule removed.
+ */
+pruned: number
+/**
+ * Mutants that did not run.
+ */
+pending: number
+/**
+ * Mutants that a verdict marks as equivalent.
+ */
+equivalent: number
+}
+/**
+ * One mutant of a run.
+ */
+export interface MutantResult {
+/**
+ * The stable mutant id.
+ */
+mutant_id: string
+/**
+ * The root-relative path, with forward slashes.
+ */
+file: string
+/**
+ * The 1-based line.
+ */
+line: number
+/**
+ * The 1-based column.
+ */
+column: number
+/**
+ * The byte span in the original file.
+ *
+ * @minItems 2
+ * @maxItems 2
+ */
+span: [number, number]
+/**
+ * The operator name, kebab-case.
+ */
+operator: string
+/**
+ * The name of the enclosing function.
+ */
+function?: (string | null)
+/**
+ * The 1-based first line of the enclosing function.
+ */
+function_line?: (number | null)
+/**
+ * The 1-based execution rank of a planned mutant.
+ */
+rank?: (number | null)
+status: MutantStatus
+/**
+ * The static rule of a `pruned` mutant, kebab-case.
+ */
+prune_reason?: (string | null)
+/**
+ * The test that killed the mutant in this run. Absent for a kill by an
+ * error outside a test.
+ *
+ * This is evidence of one run, not a stable fact. A run stops at the
+ * first failing test, and it runs the fastest covering test first, so a
+ * second run on the same code can name another covering test. No
+ * fingerprint or baseline comparison uses this field.
+ */
+killed_by?: (string | null)
+/**
+ * The tests that reached the mutant in the dry run, sorted by test id.
+ */
+covering_tests?: string[]
+/**
+ * True when the mutant runs while a module loads, outside each test.
+ */
+static_mutant?: boolean
+/**
+ * The duration of the deciding run.
+ */
+duration_ms?: (number | null)
+}
+/**
+ * The results of the mutants of one function.
+ */
+export interface MutationFunctionResult {
+/**
+ * The root-relative path, with forward slashes.
+ */
+file: string
+/**
+ * The function name. `null` for code outside each function, and for an
+ * anonymous function.
+ */
+name?: (string | null)
+/**
+ * The 1-based first line. `null` for code outside each function.
+ */
+line?: (number | null)
+/**
+ * The 1-based last line. `null` for code outside each function.
+ */
+end_line?: (number | null)
+/**
+ * True when an added line of the diff is in the function.
+ */
+in_diff: boolean
+/**
+ * The cyclomatic complexity, when the analysis measured the function.
+ */
+cyclomatic?: (number | null)
+counts: MutationStatusCounts
+/**
+ * The mutation score of the function.
+ */
+score?: (number | null)
+/**
+ * The ids of the survived mutants, in rank order.
+ */
+survived?: string[]
+}
+/**
+ * A test or a test file that failed with no active mutant. Its tests do not
+ * decide a mutant status.
+ */
+export interface MutationBaselineFailure {
+/**
+ * The test file, root-relative. `null` for an error outside each test
+ * file.
+ */
+file?: (string | null)
+/**
+ * The test id, for a failed test.
+ */
+test_id?: (string | null)
+/**
+ * The error message, for an error outside a test.
+ */
+message?: (string | null)
+}
+/**
+ * A selected file that the plan did not instrument.
+ */
+export interface MutationSkippedFile {
+/**
+ * The root-relative path, with forward slashes.
+ */
+path: string
+/**
+ * Why the plan skipped the file, kebab-case.
+ */
+reason: string
+}
+/**
+ * The git worktree check of a run (decision 4).
+ */
+export interface MutationWorktreeCheck {
+/**
+ * False when the root is not in a git worktree, so no check ran.
+ */
+checked: boolean
+/**
+ * True when the caller allowed a dirty worktree.
+ */
+allow_dirty: boolean
+/**
+ * The paths that were dirty before the run, sorted.
+ */
+dirty_at_start?: string[]
+/**
+ * The paths that the run changed, sorted. A non-empty list is an error.
+ */
+changed_paths: string[]
+}
+/**
+ * An error of a run that did not stop the run.
+ */
+export interface MutationRunIssue {
+/**
+ * A stable kebab-case code: `runtime-error`, `static-map-miss`,
+ * `test-files-not-discovered`, `worktree-changed` or
+ * `worktree-check-failed`.
+ */
+code: string
+/**
+ * A description.
+ */
+message: string
+/**
+ * The mutant of the issue.
+ */
+mutant_id?: (string | null)
+/**
+ * The last part of the companion stderr.
+ */
+stderr_tail?: (string | null)
+}
+/**
+ * The wall time of each phase, in milliseconds.
+ */
+export interface MutationTimings {
+/**
+ * The analysis and the plan.
+ */
+plan_ms: number
+/**
+ * The companion install, the run directory, and the first `init`.
+ */
+setup_ms: number
+/**
+ * The dry run.
+ */
+dry_run_ms: number
+/**
+ * The mutant runs.
+ */
+mutants_ms: number
+/**
+ * The second runs of survived mutants.
+ */
+retry_ms: number
+}
+/**
+ * One instrumented file of a plan.
+ */
+export interface MutationPlanFile {
+/**
+ * The root-relative path, with forward slashes.
+ */
+path: string
+/**
+ * The SHA-256 digest of the file, lowercase hex.
+ */
+source_sha256: string
+/**
+ * The test files that reach the file in the module graph, sorted.
+ */
+static_test_files: string[]
+}
+/**
+ * The result of the join of a run with a verdict document.
+ */
+export interface MutationVerdictJoin {
+/**
+ * The SHA-256 digest of the verdict document, lowercase hex.
+ */
+verdicts_sha256: string
+/**
+ * The mutants that got the status `equivalent`, sorted.
+ */
+applied: string[]
+/**
+ * The verdicts that a test contradicts, sorted: the mutant was killed or
+ * timed out, so it is not equivalent. The status stays.
+ */
+contradicted: string[]
+/**
+ * The verdicts for mutants with no tested result (`pending`,
+ * `runtime_error` or `pruned`), sorted. The status stays.
+ */
+deferred: string[]
+/**
+ * The verdicts that match no mutant of this run, sorted. A verdict
+ * document can hold keys for code outside the scope of the run, and an
+ * edit of a function gives its mutants new keys.
+ */
+unmatched: string[]
+}
+/**
+ * The envelope of `fallow mutation --plan`. It runs no user code.
+ */
+export interface MutationPlanOutput {
+schema_version: MutationPlanSchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+scope: MutationScopeOutput
+counts: MutationPlanCountsOutput
+/**
+ * Each mutant, ranked mutants first.
+ */
+mutants: MutationPlanMutant[]
+/**
+ * The instrumented files.
+ */
+files: MutationPlanFile[]
+/**
+ * The union of the static test files, sorted.
+ */
+test_files: string[]
+/**
+ * True when the project has no test files.
+ */
+no_test_files: boolean
+/**
+ * True when the plan applied the `framework-config` prune rule.
+ */
+framework_config_checked: boolean
+/**
+ * The selected files that the plan did not instrument.
+ */
+skipped_files: MutationSkippedFile[]
+/**
+ * The paths of a `paths` scope that select no file.
+ */
+unmatched_paths: string[]
+}
+/**
+ * The totals of a plan.
+ */
+export interface MutationPlanCountsOutput {
+/**
+ * Each mutant.
+ */
+total: number
+/**
+ * Planned mutants.
+ */
+planned: number
+/**
+ * Mutants after the mutant limit.
+ */
+pending: number
+/**
+ * Mutants that no test file reaches.
+ */
+no_coverage: number
+/**
+ * Mutants in unused files.
+ */
+pruned_dead_code: number
+/**
+ * Mutants in generated files.
+ */
+pruned_generated: number
+/**
+ * Mutants near a file system, process, network or database sink.
+ */
+pruned_side_effect_sink: number
+/**
+ * Mutants in framework config exports.
+ */
+pruned_framework_config: number
+}
+/**
+ * One mutant of a plan.
+ */
+export interface MutationPlanMutant {
+/**
+ * The stable mutant id.
+ */
+mutant_id: string
+/**
+ * The root-relative path, with forward slashes.
+ */
+file: string
+/**
+ * The 1-based line.
+ */
+line: number
+/**
+ * The 1-based column.
+ */
+column: number
+/**
+ * The byte span in the original file.
+ *
+ * @minItems 2
+ * @maxItems 2
+ */
+span: [number, number]
+/**
+ * The operator name, kebab-case.
+ */
+operator: string
+/**
+ * The name of the enclosing function.
+ */
+function?: (string | null)
+/**
+ * The 1-based first line of the enclosing function.
+ */
+function_line?: (number | null)
+/**
+ * The 1-based execution rank of a planned mutant.
+ */
+rank?: (number | null)
+disposition: MutationPlanDisposition
+/**
+ * The static rule of a `pruned` mutant, kebab-case.
+ */
+prune_reason?: (string | null)
+}
+/**
+ * The envelope of `fallow mutation inspect`. It runs no user code.
+ */
+export interface MutationInspectOutput {
+schema_version: MutationInspectSchemaVersion
+version: ToolVersion
+status: MutationInspectStatus
+/**
+ * Why the packet is stale. Absent for a fresh packet.
+ */
+stale_reason?: (MutationStaleReason | null)
+/**
+ * The stable mutant id.
+ */
+mutant_id: string
+/**
+ * The root-relative path, with forward slashes.
+ */
+file: string
+/**
+ * The 1-based line.
+ */
+line: number
+/**
+ * The 1-based column.
+ */
+column: number
+/**
+ * The byte span in the original file.
+ *
+ * @minItems 2
+ * @maxItems 2
+ */
+span: [number, number]
+/**
+ * The operator name, kebab-case.
+ */
+operator: string
+/**
+ * The name of the enclosing function.
+ */
+function?: (string | null)
+/**
+ * The 1-based first line of the enclosing function.
+ */
+function_line?: (number | null)
+/**
+ * The 1-based execution rank of a planned mutant.
+ */
+rank?: (number | null)
+/**
+ * The status of the mutant in the report. Absent for a plan.
+ */
+report_status?: (MutantStatus | null)
+/**
+ * The SHA-256 digest of the file in the report.
+ */
+report_sha256?: (string | null)
+/**
+ * The SHA-256 digest of the current file. `null` when the file is
+ * missing.
+ */
+current_sha256?: (string | null)
+/**
+ * The original and mutated code. `null` for a stale packet.
+ */
+code?: (MutationInspectCode | null)
+/**
+ * The tests that reached the mutant in the dry run, sorted.
+ */
+covering_tests: string[]
+/**
+ * The test files that reach the file in the module graph, sorted.
+ */
+static_test_files: string[]
+/**
+ * The test that killed the mutant in the run of the report.
+ */
+killed_by?: (string | null)
+}
+/**
+ * The code of one mutant, from the current file.
+ */
+export interface MutationInspectCode {
+/**
+ * The original text of the span.
+ */
+original: string
+/**
+ * The text that replaces the span.
+ */
+replacement: string
+/**
+ * The source lines that contain the span, before the mutation.
+ */
+original_lines: string
+/**
+ * The same lines with the replacement applied.
+ */
+mutated_lines: string
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

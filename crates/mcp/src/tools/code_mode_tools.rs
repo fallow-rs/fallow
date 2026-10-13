@@ -157,6 +157,10 @@ impl CodeModeTool {
                 "similar-code is not exposed through Code Mode's 30-second window; use the standalone MCP find_similar_code or inspect_similar_code tool, which has a dedicated 15-minute timeout"
                     .to_string(),
             ),
+            "mutation_plan" | "mutation_inspect" => Err(
+                "mutation testing is not exposed through Code Mode; use the standalone MCP mutation_plan or mutation_inspect tool"
+                    .to_string(),
+            ),
             "find_dupes" => Ok(Self::FindDupes),
             "project_info" => Ok(Self::ProjectInfo),
             "trace_export" => Ok(Self::TraceExport),
@@ -832,6 +836,13 @@ mod tests {
             let err = CodeModeTool::from_name(name).expect_err("fix tools stay out of Code Mode");
             assert!(
                 err.contains("code mode does not expose fix tools"),
+                "error was: {err}"
+            );
+        }
+        for name in ["mutation_plan", "mutation_inspect"] {
+            let err = CodeModeTool::from_name(name).expect_err("mutation stays out of Code Mode");
+            assert!(
+                err.contains("standalone MCP mutation_plan or mutation_inspect"),
                 "error was: {err}"
             );
         }

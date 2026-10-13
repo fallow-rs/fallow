@@ -1336,6 +1336,7 @@ fn classify_host_error(message: &str) -> &'static str {
     if message.contains("does not expose fix tools")
         || message.contains("unsupported code mode fallow tool")
         || message.contains("similar-code is not exposed through Code Mode")
+        || message.contains("mutation testing is not exposed through Code Mode")
     {
         return "unsupported_tool";
     }
@@ -2108,6 +2109,12 @@ mod tests {
             classify_host_error("unsupported code mode fallow tool 'bad_name'"),
             "unsupported_tool"
         );
+    }
+
+    #[test]
+    fn classify_mutation_guidance_as_unsupported_tool() {
+        let guidance = CodeModeTool::from_name("mutation_plan").expect_err("mutation is refused");
+        assert_eq!(classify_host_error(&guidance), "unsupported_tool");
     }
 
     #[test]

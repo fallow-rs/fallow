@@ -13,6 +13,7 @@ pub(crate) mod report;
 pub(crate) mod run_dir;
 pub(crate) mod scheduler;
 pub(crate) mod transport;
+pub(crate) mod verdicts;
 pub(crate) mod worktree;
 
 #[cfg(test)]
@@ -23,6 +24,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub use fallow_engine::mutation::Operator;
+pub use verdicts::{MAX_VERDICT_INPUT_BYTES, apply_mutation_verdicts, validate_mutation_verdicts};
 
 use crate::AnalysisOptions;
 

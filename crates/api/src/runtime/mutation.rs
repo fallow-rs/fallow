@@ -581,6 +581,8 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         },
         errors,
         timings,
+        files: plan_files(plan),
+        verdicts: None,
     })
 }
 

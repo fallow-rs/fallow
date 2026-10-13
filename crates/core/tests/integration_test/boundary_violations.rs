@@ -41,6 +41,7 @@ fn create_boundary_config_with_entry(
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Error,
@@ -378,6 +379,7 @@ fn no_violations_when_rule_is_off() {
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Off,
@@ -446,6 +448,7 @@ fn preset_detects_boundary_violation() {
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Error,
@@ -554,6 +557,7 @@ fn root_field_classifies_per_subtree() {
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Error,
@@ -666,6 +670,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Error,
@@ -746,6 +751,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Error,
@@ -894,6 +900,7 @@ fn bulletproof_preset_detects_violation() {
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Error,
@@ -1007,6 +1014,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
         duplicates: DuplicatesConfig::default(),
         similar_code: fallow_config::SimilarCodeConfig::default(),
+        mutation: fallow_config::MutationConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
             boundary_violation: Severity::Error,

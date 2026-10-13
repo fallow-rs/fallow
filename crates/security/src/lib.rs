@@ -17,10 +17,12 @@ use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, S
 use rustc_hash::FxHashSet;
 
 mod identity;
+mod provenance;
 mod rules;
 mod severity;
 
 pub use identity::{security_finding_id, security_rule_id, stamp_security_finding_ids};
+pub use provenance::{ProvenanceBindings, import_source_matches};
 pub use rules::{
     enable_security_rules, resolve_security_finding_severity, retain_enabled_security_findings,
     security_rules_can_error,

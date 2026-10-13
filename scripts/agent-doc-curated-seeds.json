@@ -328,6 +328,18 @@
     },
     {
       "section": "commands",
+      "row": "mutation",
+      "column": "Key Flags",
+      "seed": "`--all`, `--plan`, `--max-mutants`, `--time-budget`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`"
+    },
+    {
+      "section": "commands",
+      "row": "mutation",
+      "column": "Purpose",
+      "seed": "Measure how well the tests detect changes in the code (opt-in)"
+    },
+    {
+      "section": "commands",
       "row": "plugin-check",
       "column": "Key Flags",
       "seed": ""
@@ -2737,6 +2749,18 @@
       "row": "list_suppressions",
       "column": "Description",
       "seed": "List active fallow-ignore suppression markers grouped per file (line, kind, level, reason, and a stale cross-reference); a read-only governance inventory that always exits 0"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "mutation_inspect",
+      "column": "Description",
+      "seed": "Inspect one mutant of a saved mutation report, with a stale status when its source changed; runs no tests"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "mutation_plan",
+      "column": "Description",
+      "seed": "Static mutation plan for changed code: mutant ids, operators, dispositions, and static test files; runs no tests"
     },
     {
       "section": "mcp-tools",
