@@ -219,7 +219,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trace only. They now run the CLI in this case. `fallow_api::run_trace_export`
   returns the error code `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` when type-aware
   analysis is on, also for `type_aware.enabled: Some(true)`. Set
-  `Some(false)` to get the syntactic trace.
+  `Some(false)` to get the syntactic trace. When `typeAware.require:
+  complete` comes from the config, an incomplete semantic trace or symbol
+  impact is now an MCP error, as the CLI exit 1 says. Before, only the
+  `type_aware_require` parameter made it an error.
 
 - **Search gaps no longer count files that only forward an export.** A file
   that imports an export and only exports it again needs no edit when the
