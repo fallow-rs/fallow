@@ -23,8 +23,8 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `npm-root-approved` | Wait until the maintainer-approved `fallow` root is public with the staged bytes | Read only |
 | `vscode-prep` | Build seven VSIX targets plus their inventory and checksums | Read only |
 | `vscode-host-smoke` | Run the exact prepared x64 target VSIX on Linux, Windows, and macOS with matching release binaries | Read only |
-| `vscode-publish-marketplace` | Publish the closed VSIX set to Visual Studio Marketplace | VSCE token only |
-| `vscode-publish-open-vsx` | Publish the closed VSIX set to Open VSX | OVSX token only |
+| `vscode-publish-marketplace` | Publish the closed VSIX set to Visual Studio Marketplace | VSCE PAT or Marketplace OIDC |
+| `vscode-publish-open-vsx` | Publish the closed VSIX set to Open VSX | OVSX PAT or Open VSX OIDC |
 | `vscode-public-verify` | Verify exact public target payloads from both registries | Read only |
 
 Preparation jobs may execute dependency code because they have no publication
@@ -38,6 +38,37 @@ publication tokens appear only on the final publication step.
 The Open VSX graph overrides its VSCE packaging dependency to the same reviewed
 version used for Marketplace, avoiding its older vulnerable secret-scanning
 graph. Publication uses prepared VSIX files, with no packaging step.
+
+## VSIX publisher authorization
+
+The `release` environment variables `VSCE_AUTH_MODE` and `OVSX_AUTH_MODE`
+independently select `pat` or `oidc`; an unset variable preserves `pat`.
+Unknown modes, a missing selected PAT, or unavailable GitHub OIDC identity
+fail before upload. In `oidc` mode the workflow excludes the legacy PAT from
+the step environment and explicitly requests trusted publishing. Registry
+authorization failures never switch back to PAT authentication.
+
+Before selecting `oidc`, the publisher or namespace owner must register and
+verify the provider policy for `fallow-rs/fallow`, `release.yml`, the existing
+publisher `fallow-rs`, and the protected `release` environment. Require that
+environment in the provider binding; a repository/workflow-only policy does
+not stop an edited workflow on another ref. Do not activate the mode until
+the provider's binding fields and rights are confirmed. The extension is
+`fallow-rs.fallow-vscode`.
+
+CLI support does not establish that a registry exposes policy configuration
+for this account. If Marketplace has no available trusted-publisher policy
+control, leave `VSCE_AUTH_MODE` at `pat`; a prepared `--oidc` route is not an
+activated publisher identity. Open VSX namespace policy configuration is a
+separate owner action.
+
+The frozen `@vscode/vsce@4.0.0` supports `--oidc`, requesting audience
+`marketplace.visualstudio.com`. The frozen `ovsx@1.2.0` supports
+`--trusted-publishing`, requesting the registry URL audience
+`https://open-vsx.org`. Both exchange the identity for short-lived publication
+authority. Their graphs and binary signing keys are independent of this mode
+selection. Account policies, mode activation, legacy-token revocation and
+real publication require separate owner actions.
 
 ## Invariants
 

@@ -2266,7 +2266,12 @@ test("VSIX publishers use reviewed frozen graphs from the validated source commi
     assert.doesNotMatch(job, /cache:|actions\/cache|npm install|pnpm|cargo /u);
     assert.match(job, /permissions:\n\s+contents: read/u);
     assert.equal(job.match(/secrets\./gu)?.length, 1);
-    assert.match(job, new RegExp(`env:\\n\\s+${token}: \\$\\{\\{ secrets\\.${token} \\}\\}`, "u"));
+    const authMode = cli === "ovsx" ? "OVSX_AUTH_MODE" : "VSCE_AUTH_MODE";
+    assert.ok(job.includes(`${authMode}: \${{ vars.${authMode} || 'pat' }}`));
+    assert.ok(
+      job.includes(`${token}: \${{ vars.${authMode} != 'oidc' && secrets.${token} || '' }}`),
+    );
+    assert.match(job, /id-token: write/u);
 
     const manifest = JSON.parse(readFileSync(`${prefix}/package.json`, "utf8"));
     const lock = JSON.parse(readFileSync(`${prefix}/package-lock.json`, "utf8"));

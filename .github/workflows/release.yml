@@ -2005,6 +2005,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout reviewed Marketplace publisher graph
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2030,9 +2031,33 @@ jobs:
       - name: Publish every target to VS Code Marketplace
         shell: bash
         env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          VSCE_AUTH_MODE: ${{ vars.VSCE_AUTH_MODE || 'pat' }}
+          VSCE_PAT: ${{ vars.VSCE_AUTH_MODE != 'oidc' && secrets.VSCE_PAT || '' }}
         run: |
           set -u
+          auth_args=()
+          case "$VSCE_AUTH_MODE" in
+            pat)
+              if [ -z "${VSCE_PAT:-}" ]; then
+                echo "::error::Selected PAT authorization is not configured"
+                exit 1
+              fi
+              ;;
+            oidc)
+              unset VSCE_PAT
+              if [ "${GITHUB_ACTIONS:-}" != "true" ] || \
+                  [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || \
+                  [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+                echo "::error::Selected OIDC authorization is not available"
+                exit 1
+              fi
+              auth_args=(--oidc)
+              ;;
+            *)
+              echo "::error::Unsupported publication authorization mode"
+              exit 1
+              ;;
+          esac
           version="${RELEASE_TAG#v}"
           targets=(universal darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64)
           mapfile -t files < <(jq -er '.entries[].file' vscode-targets/inventory.json)
@@ -2065,7 +2090,7 @@ jobs:
           while [ "${#pending[@]}" -ne 0 ]; do
             remaining=()
             for file in "${pending[@]}"; do
-              if ! npx --no-install --prefix .github/publishers/marketplace vsce publish \
+              if ! npx --no-install --prefix .github/publishers/marketplace vsce publish "${auth_args[@]}" \
                   --packagePath "vscode-targets/$file" \
                   --no-dependencies \
                   --skip-duplicate; then
@@ -2098,6 +2123,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout reviewed Open VSX publisher graph
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2123,9 +2149,33 @@ jobs:
       - name: Publish every target to Open VSX
         shell: bash
         env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          OVSX_AUTH_MODE: ${{ vars.OVSX_AUTH_MODE || 'pat' }}
+          OVSX_PAT: ${{ vars.OVSX_AUTH_MODE != 'oidc' && secrets.OVSX_PAT || '' }}
         run: |
           set -u
+          auth_args=()
+          case "$OVSX_AUTH_MODE" in
+            pat)
+              if [ -z "${OVSX_PAT:-}" ]; then
+                echo "::error::Selected PAT authorization is not configured"
+                exit 1
+              fi
+              ;;
+            oidc)
+              unset OVSX_PAT
+              if [ "${GITHUB_ACTIONS:-}" != "true" ] || \
+                  [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || \
+                  [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+                echo "::error::Selected OIDC authorization is not available"
+                exit 1
+              fi
+              auth_args=(--trusted-publishing)
+              ;;
+            *)
+              echo "::error::Unsupported publication authorization mode"
+              exit 1
+              ;;
+          esac
           version="${RELEASE_TAG#v}"
           targets=(universal darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64)
           mapfile -t files < <(jq -er '.entries[].file' vscode-targets/inventory.json)
@@ -2158,7 +2208,7 @@ jobs:
           while [ "${#pending[@]}" -ne 0 ]; do
             remaining=()
             for file in "${pending[@]}"; do
-              if ! npx --no-install --prefix .github/publishers/open-vsx ovsx publish \
+              if ! npx --no-install --prefix .github/publishers/open-vsx ovsx publish "${auth_args[@]}" \
                   "vscode-targets/$file" \
                   --no-dependencies \
                   --skip-duplicate; then
