@@ -371,8 +371,11 @@ error by suppressing a downstream detector.
 ## Value references and test reach
 
 `ModuleGraph::is_test_reference_covered` accepts only a reference with
-`namespace == ExportNamespace::Value`. A type reference (`import type`, or a
-`type` specifier) never runs the export, so it never gives test coverage.
+`namespace == ExportNamespace::Value`. A type reference never runs the
+export, so it never gives test coverage. The graph attaches a type reference
+for `import type`, for a `type` specifier, and for a plain `import` whose
+binding the file uses only in type positions (`desired_import_namespaces` in
+`narrowing.rs`).
 Coverage gaps, the static CRAP estimate, and the static test signal of
 runtime coverage read this predicate through `StaticTestCoverage`.
 

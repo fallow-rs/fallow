@@ -876,8 +876,9 @@ impl ModuleGraph {
     /// hop target; CommonJS hops remain active because Vitest replacement mocks
     /// do not intercept `require()`.
     ///
-    /// Only a value reference can give coverage. A type reference (`import
-    /// type`) never runs the export, so it never gives coverage.
+    /// Only a value reference can give coverage. A type reference never runs
+    /// the export, so it never gives coverage. This includes `import type` and
+    /// a plain import that the test uses only in type positions.
     #[must_use]
     pub fn is_test_reference_covered(&self, export: &ExportSymbol, reference_index: usize) -> bool {
         let Some(reference) = export.references.get(reference_index) else {

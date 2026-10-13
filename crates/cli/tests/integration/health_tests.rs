@@ -4646,7 +4646,7 @@ fn health_coverage_gaps_ignore_type_only_test_references() {
 
     let json = parse_json(&output);
     let coverage = &json["coverage_gaps"];
-    assert_eq!(coverage["summary"]["runtime_files"].as_u64(), Some(3));
+    assert_eq!(coverage["summary"]["runtime_files"].as_u64(), Some(4));
 
     let mut export_names: Vec<_> = coverage["exports"]
         .as_array()
@@ -4657,8 +4657,8 @@ fn health_coverage_gaps_ignore_type_only_test_references() {
     export_names.sort_unstable();
     assert_eq!(
         export_names,
-        ["renderEntry", "typed"],
-        "an import type of a value export does not cover it"
+        ["renderEntry", "shaped", "typed"],
+        "a test reference used only as a type does not cover the export"
     );
 }
 
@@ -4697,6 +4697,7 @@ fn health_crap_estimation_ignores_type_only_test_references() {
     };
     let called = crap_for("src/called.ts", "called");
     let typed = crap_for("src/typed.ts", "typed");
+    let shaped = crap_for("src/shaped.ts", "shaped");
 
     assert_eq!(called["coverage_tier"], "high");
     assert_eq!(called["crap"].as_f64(), Some(1.0));
@@ -4705,6 +4706,11 @@ fn health_crap_estimation_ignores_type_only_test_references() {
         "an import type must not give the direct test estimate: {typed:#?}"
     );
     assert_eq!(typed["crap"].as_f64(), Some(1.2));
+    assert_eq!(
+        shaped["coverage_tier"], "partial",
+        "a plain import used only as a type must not give the direct test estimate: {shaped:#?}"
+    );
+    assert_eq!(shaped["crap"].as_f64(), Some(1.2));
 }
 
 #[test]
