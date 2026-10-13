@@ -24,7 +24,12 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    failed job, confirm that the branch contains the current base
    (`git merge-base --is-ancestor origin/main HEAD`). A second identical
    failure is a defect, not a flake: diagnose it instead of a third retry.
-7. Inspect the merged tree for conflict markers and generated drift.
+7. Inspect the merged tree for conflict markers and generated drift. Then
+   run `git diff <reviewed head> <merge commit>`. A pull request that merged
+   after your last rebase shows there, also when it did not conflict. Read
+   each hunk in a file that your pull request changed. Such a merge can make
+   your code, a comment or a doc wrong without a text conflict. Fix that in
+   a follow-up pull request.
 8. Return every touched checkout to a clean, synchronized state.
 
 Do not call work complete while required merged-commit workflows are still
