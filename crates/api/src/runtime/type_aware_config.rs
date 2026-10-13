@@ -93,7 +93,7 @@ pub(super) fn reject_config_type_aware_at(
     };
     Err(ProgrammaticError::new(
         format!(
-            "`{source}` turns on type-aware analysis, which the programmatic route runs only when the caller requests it; use the CLI path"
+            "`{source}` turns on type-aware analysis, which the programmatic API runs only when the `type_aware` option requests it; set that option or run the `fallow` CLI"
         ),
         2,
     )

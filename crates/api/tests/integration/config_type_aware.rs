@@ -14,9 +14,9 @@
 use std::path::{Path, PathBuf};
 
 use fallow_api::{
-    AnalysisOptions, AuditOptions, ComplexityOptions, DeadCodeOptions, ProgrammaticError,
-    TYPE_AWARE_CONFIG_UNSUPPORTED, run_audit, run_boundary_violations, run_circular_dependencies,
-    run_dead_code, run_health,
+    AnalysisOptions, AuditOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions,
+    ProgrammaticError, TYPE_AWARE_CONFIG_UNSUPPORTED, run_audit, run_boundary_violations,
+    run_circular_dependencies, run_combined, run_dead_code, run_health,
 };
 
 use crate::common::{commit, git, write};
@@ -110,6 +110,27 @@ fn type_aware_enabled_in_config_is_refused_by_every_runner() {
     );
     assert_refused(health(&root), "typeAware.enabled");
     assert_refused(audit(&root), "typeAware.enabled");
+}
+
+/// Bare `fallow` makes dead code type-aware and adds type coupling to health
+/// from config. The default sections share one session, which does not pass
+/// through `run_dead_code` or `run_health`, so `run_combined` checks itself.
+#[test]
+fn combined_refuses_when_dead_code_or_health_runs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = project(dir.path(), r#"{"typeAware":{"enabled":true}}"#);
+    let combined = |dead_code: bool, health: bool| {
+        run_combined(&CombinedOptions {
+            analysis: analysis(&root),
+            dead_code,
+            health,
+            ..CombinedOptions::default()
+        })
+        .map(drop)
+    };
+    assert_refused(combined(true, true), "typeAware.enabled");
+    assert_refused(combined(false, true), "typeAware.enabled");
+    combined(false, false).expect("duplication alone runs without type-aware analysis");
 }
 
 /// `audit.typeAware` applies to audit only, and it wins over

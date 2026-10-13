@@ -946,6 +946,31 @@ mod tests {
         );
     }
 
+    /// Bare `fallow` runs type-aware analysis when the config turns it on.
+    /// The in-process route declines the call, so Code Mode runs the
+    /// subprocess.
+    #[test]
+    fn combined_declines_config_type_aware_analysis() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","main":"index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(project.path().join("index.ts"), "export const a = 1;\n")
+            .expect("write source");
+        crate::tools::api_runtime::write_type_aware_config(
+            project.path(),
+            r#"{"typeAware":{"enabled":true}}"#,
+        );
+        let params = CombinedParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            ..CombinedParams::default()
+        };
+        assert_eq!(run_combined_api_value(&params, None), Ok(None));
+    }
+
     #[test]
     fn combined_forwards_near_detection() {
         let params = CombinedParams {
