@@ -2413,6 +2413,62 @@ mod tests {
         assert_eq!(triage.review_effort, ReviewEffort::Review);
     }
 
+    fn reach_export(
+        name: &str,
+        lines: (u32, u32),
+    ) -> fallow_engine::module_graph::ExportTestReachPaths {
+        fallow_engine::module_graph::ExportTestReachPaths {
+            file: "src/a.ts".to_owned(),
+            export_name: name.to_owned(),
+            line: lines.0,
+            declaration_lines: lines,
+            literal_value: false,
+            reach: fallow_engine::module_graph::ExportTestReach::None,
+            tests: Vec::new(),
+            mocked_targets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn export_change_falls_back_to_added_lines_without_base_exports() {
+        use fallow_output::ExportChange;
+        // Line 2 is the only added line: a one-line edit of a three-line
+        // declaration, and a one-line declaration that is all added.
+        let index = fallow_output::DiffIndex::from_unified_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n line one\n-old\n+new\n line three\n",
+        );
+        let edited = reach_export("edited", (1, 3));
+        let one_line = reach_export("oneLine", (2, 2));
+        let other_file: rustc_hash::FxHashMap<String, FxHashSet<String>> =
+            std::iter::once(("src/b.ts".to_owned(), FxHashSet::default())).collect();
+
+        for base in [None, Some(&other_file)] {
+            assert_eq!(
+                super::export_change(base, &index, "src/a.ts", &edited),
+                ExportChange::Modified
+            );
+            // The fallback cannot tell a one-line edit from a new export.
+            assert_eq!(
+                super::export_change(base, &index, "src/a.ts", &one_line),
+                ExportChange::New
+            );
+        }
+
+        let with_base: rustc_hash::FxHashMap<String, FxHashSet<String>> = std::iter::once((
+            "src/a.ts".to_owned(),
+            std::iter::once("oneLine".to_owned()).collect(),
+        ))
+        .collect();
+        assert_eq!(
+            super::export_change(Some(&with_base), &index, "src/a.ts", &one_line),
+            ExportChange::Modified
+        );
+        assert_eq!(
+            super::export_change(Some(&with_base), &index, "src/a.ts", &edited),
+            ExportChange::New
+        );
+    }
+
     #[test]
     fn no_diff_brief_keeps_optional_triage_fields_absent() {
         let result = audit_result(AuditVerdict::Warn, OutputFormat::Json);

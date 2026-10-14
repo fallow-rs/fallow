@@ -469,11 +469,11 @@ fn brief_orders_default_sfc_and_multi_declarator_exports() {
         ),
         (
             "src/pair.ts",
-            "export const a = 1, b = 2;\nexport default function Widget(): string {\n  return 'w';\n}\n",
+            "export const a = 1, b = 2;\nexport default function Widget(): string { return 'w'; }\n",
         ),
         (
             "src/Gauge.vue",
-            "<template>\n  <div />\n</template>\n\n<script lang=\"ts\">\nexport function scale(n: number): number {\n  return n * 2;\n}\nexport default {};\n</script>\n",
+            "<template>\n  <div />\n</template>\n\n<script lang=\"ts\">\nexport function scale(n: number): number { return n * 2; }\nexport default {};\n</script>\n",
         ),
         ("src/kept.ts", "export const kept = 1;\n"),
         (
@@ -484,11 +484,11 @@ fn brief_orders_default_sfc_and_multi_declarator_exports() {
     let head: Vec<(&str, &str)> = vec![
         (
             "src/pair.ts",
-            "export const a = 10, b = 20;\nexport default function Widget(): string {\n  return 'W';\n}\n",
+            "export const a = 10, b = 20;\nexport default function Widget(): string { return 'W'; }\n",
         ),
         (
             "src/Gauge.vue",
-            "<template>\n  <div />\n</template>\n\n<script lang=\"ts\">\nexport function scale(n: number): number {\n  return n * 3;\n}\nexport default {};\n</script>\n",
+            "<template>\n  <div />\n</template>\n\n<script lang=\"ts\">\nexport function scale(n: number): number { return n * 3; }\nexport default {};\n</script>\n",
         ),
     ];
     two_commit_project(root, &base, &head);
@@ -511,12 +511,14 @@ fn brief_orders_default_sfc_and_multi_declarator_exports() {
         "file, line and name: {reach}"
     );
     assert_eq!(row(&reach, "src/Gauge.vue", "scale")["line"], 6);
-    // The diff replaces the one-line declaration, but both names existed at
-    // the base, so both declarators are modified. They share the line, so
-    // the name decides.
+    // Each diff replaces a one-line declaration, but every name existed at
+    // the base, so every row is modified. The base names of the SFC come
+    // from its script block. The declarators share the line, so the name
+    // decides.
     assert_eq!(row(&reach, "src/pair.ts", "a")["change"], "modified");
     assert_eq!(row(&reach, "src/pair.ts", "b")["change"], "modified");
     assert_eq!(row(&reach, "src/pair.ts", "default")["change"], "modified");
+    assert_eq!(row(&reach, "src/Gauge.vue", "scale")["change"], "modified");
 }
 
 #[test]
