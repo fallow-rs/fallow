@@ -250,6 +250,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         test_reach: None,
         retried: false,
         cached: false,
+        type_error_codes: Vec::new(),
     }
 }
 
@@ -287,6 +288,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         timings: MutationTimings::default(),
         files: Vec::new(),
         verdicts: None,
+        typecheck: None,
     }
 }
 
@@ -713,6 +715,50 @@ fn cached_results_get_one_line_with_the_opt_out() {
         text.contains(
             "Cache: 2 results came from an earlier run. Pass --no-cache to run each mutant.\n"
         ),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_survivor_type_check_shows_its_counts_and_a_failed_check_says_so() {
+    let mut checked = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::Killed),
+            mutant("m2", "src/a.ts", 2, MutantStatus::CompileError),
+            mutant("m3", "src/a.ts", 3, MutantStatus::Survived),
+        ],
+        Vec::new(),
+    );
+    let text = run_text(&checked, &OPTIONS);
+    assert!(text.contains("  compile error 1  "), "{text}");
+    assert!(!text.contains("Survivor type check"), "{text}");
+    checked.typecheck = Some(fallow_output::MutationTypecheckOutput {
+        completed: true,
+        survivors: 3,
+        checked: 2,
+        compile_errors: 1,
+        skipped: vec![fallow_output::MutationTypecheckSkip {
+            reason: fallow_output::MutationTypecheckSkipReason::NoProject,
+            count: 1,
+        }],
+    });
+    let text = run_text(&checked, &OPTIONS);
+    assert!(
+        text.contains(
+            "Survivor type check: 2 checked, 1 does not type-check, 1 not checked (no-project 1)\n"
+        ),
+        "{text}"
+    );
+    checked.typecheck = Some(fallow_output::MutationTypecheckOutput {
+        completed: false,
+        survivors: 2,
+        checked: 0,
+        compile_errors: 0,
+        skipped: Vec::new(),
+    });
+    let text = run_text(&checked, &OPTIONS);
+    assert!(
+        text.contains("Survivor type check: failed, so the 2 survivors keep the status survived\n"),
         "{text}"
     );
 }

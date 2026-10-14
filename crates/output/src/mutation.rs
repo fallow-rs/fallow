@@ -63,6 +63,10 @@ pub enum MutantStatus {
     /// A verdict marks the mutant as equivalent to the original code: no
     /// test can detect it.
     Equivalent,
+    /// Each covering test passed, but the mutated file does not type-check.
+    /// Only a run with the type check of survivors gives this status. The
+    /// mutant does not count in the score.
+    CompileError,
 }
 
 /// The number of mutants for each status, and the mutation score.
@@ -90,6 +94,8 @@ pub struct MutationStatusCounts {
     pub pending: usize,
     /// Mutants that a verdict marks as equivalent.
     pub equivalent: usize,
+    /// Survived mutants that do not type-check.
+    pub compile_error: usize,
 }
 
 impl MutationStatusCounts {
@@ -106,6 +112,7 @@ impl MutationStatusCounts {
             MutantStatus::Pruned => self.pruned += 1,
             MutantStatus::Pending => self.pending += 1,
             MutantStatus::Equivalent => self.equivalent += 1,
+            MutantStatus::CompileError => self.compile_error += 1,
         }
     }
 
@@ -121,6 +128,7 @@ impl MutationStatusCounts {
             MutantStatus::Pruned => &mut self.pruned,
             MutantStatus::Pending => &mut self.pending,
             MutantStatus::Equivalent => &mut self.equivalent,
+            MutantStatus::CompileError => &mut self.compile_error,
         };
         if *count > 0 {
             *count -= 1;
@@ -134,7 +142,7 @@ impl MutationStatusCounts {
     ///
     /// `no_coverage` mutants stay out of the score;
     /// [`MutationSummary::coverage`] reports them. Runtime errors, flaky, pruned,
-    /// pending and equivalent mutants never count.
+    /// pending, equivalent and compile-error mutants never count.
     #[must_use]
     #[expect(
         clippy::cast_precision_loss,
@@ -179,6 +187,9 @@ pub enum MutationIncompleteReason {
     BaselineFailure,
     /// The run changed the git worktree.
     WorktreeChanged,
+    /// The type check of the survivors failed, so a survivor can be a
+    /// mutant that does not type-check.
+    TypecheckFailed,
     /// The end-of-run worktree check failed, so stray writes are unknown.
     WorktreeUnchecked,
 }
@@ -336,6 +347,10 @@ pub struct MutantResult {
     /// The mutant did not run in this run. `--no-cache` runs each mutant.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cached: bool,
+    /// The TypeScript diagnostic codes of the new errors of a
+    /// `compile_error` mutant, sorted, at most 8.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub type_error_codes: Vec<u32>,
 }
 
 /// How tests reach the code of one mutant in the module graph. The class
@@ -444,6 +459,7 @@ impl MutationSummary {
                 | MutantStatus::Survived
                 | MutantStatus::RuntimeError
                 | MutantStatus::Flaky
+                | MutantStatus::CompileError
                     if !result.covering_tests.is_empty() || result.static_mutant =>
                 {
                     covered += 1;
@@ -520,8 +536,8 @@ pub struct MutationWorktreeCheck {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationRunIssue {
     /// A stable kebab-case code: `runtime-error`, `static-map-miss`,
-    /// `test-files-not-discovered`, `worktree-changed` or
-    /// `worktree-check-failed`.
+    /// `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
+    /// or `worktree-check-failed`.
     pub code: String,
     /// A description.
     pub message: String,
@@ -547,6 +563,55 @@ pub struct MutationTimings {
     pub mutants_ms: u64,
     /// The second runs of survived and timed-out mutants.
     pub retry_ms: u64,
+    /// The type check of the survivors. Zero when the run did not check
+    /// them.
+    pub typecheck_ms: u64,
+}
+
+/// Why the type check did not check a survivor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationTypecheckSkipReason {
+    /// No TypeScript project includes the file.
+    NoProject,
+    /// The checker does not check the file: a `// @ts-nocheck` comment, or a
+    /// JavaScript file without `checkJs`.
+    NotTypeChecked,
+    /// The file changed after the plan.
+    SourceChanged,
+    /// The file does not exist.
+    FileMissing,
+}
+
+/// The number of survivors with one skip reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationTypecheckSkip {
+    /// Why the type check did not check these survivors.
+    pub reason: MutationTypecheckSkipReason,
+    /// The number of survivors.
+    pub count: usize,
+}
+
+/// The type check of the survivors (`--typecheck`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationTypecheckOutput {
+    /// True when the type check gave a result for each survivor that it
+    /// received. False when the companion failed; the survivors then keep
+    /// the status `survived`.
+    pub completed: bool,
+    /// The survivors that the type check received.
+    pub survivors: usize,
+    /// The survivors that the checker checked.
+    pub checked: usize,
+    /// The checked survivors that do not type-check. They have the status
+    /// `compile_error`.
+    pub compile_errors: usize,
+    /// The survivors that the checker did not check, by reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<MutationTypecheckSkip>,
 }
 
 /// The envelope of `fallow mutation`.
@@ -601,6 +666,10 @@ pub struct MutationReport {
     /// document (`--verdicts` not set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verdicts: Option<MutationVerdictJoin>,
+    /// The type check of the survivors. Absent when the run did not check
+    /// them (`--typecheck` not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typecheck: Option<MutationTypecheckOutput>,
 }
 
 /// Version singleton for a mutation verdict document.
@@ -949,6 +1018,7 @@ mod tests {
             test_reach: None,
             retried: false,
             cached: false,
+            type_error_codes: Vec::new(),
         }
     }
 
@@ -1084,6 +1154,7 @@ mod tests {
             test_reach: None,
             retried: false,
             cached: false,
+            type_error_codes: Vec::new(),
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

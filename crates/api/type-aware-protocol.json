@@ -4,6 +4,7 @@
   "semantic_schema_version": 3,
   "analysis_operation": "semantic-queries",
   "status_operation": "status",
+  "mutant_typecheck_operation": "mutant-typecheck",
   "query_operations": [
     "symbol-use",
     "symbol-trace",

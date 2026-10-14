@@ -124,6 +124,13 @@ pub struct MutationConfig {
     )]
     #[schemars(range(min = 1))]
     pub concurrency: Option<usize>,
+
+    /// Type-check each survived mutant through the TypeScript-Go companion
+    /// of `--type-aware`. A survivor that does not type-check becomes
+    /// `compile_error` and does not count in the score. Unset or `false`
+    /// checks no survivor. `--typecheck` turns the check on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typecheck: Option<bool>,
 }
 
 impl MutationConfig {
@@ -146,7 +153,7 @@ mod tests {
     fn every_key_parses_in_camel_case() {
         let config = parse(
             r#"{"runner":"vitest","operators":["arithmetic-operator","removed-call"],
-                "minScore":80,"concurrency":4}"#,
+                "minScore":80,"concurrency":4,"typecheck":true}"#,
         )
         .expect("valid config");
         assert_eq!(config.runner, MutationRunner::Vitest);
@@ -159,6 +166,7 @@ mod tests {
         );
         assert_eq!(config.min_score, Some(80.0));
         assert_eq!(config.concurrency, Some(4));
+        assert_eq!(config.typecheck, Some(true));
     }
 
     #[test]

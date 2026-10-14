@@ -39,6 +39,7 @@ use crate::mutation::scheduler::{
     ScheduledMutant, run_schedule,
 };
 use crate::mutation::transport::ProcessSpawner;
+use crate::mutation::typecheck::typecheck_survivors;
 use crate::mutation::worktree::{WorktreeSnapshot, snapshot};
 use crate::mutation::{MutationRunOptions, MutationRunScope};
 
@@ -615,6 +616,19 @@ fn run_issues(
     errors
 }
 
+/// Refuses a run with the survivor type check before the tests start when no
+/// trusted type-aware companion exists.
+fn guard_typecheck_companion(enabled: bool, root: &Path) -> ProgrammaticResult<()> {
+    if !enabled {
+        return Ok(());
+    }
+    crate::type_aware::check_typecheck_companion(root).map_err(|message| {
+        mutation_error("FALLOW_MUTATION_TYPECHECK_UNAVAILABLE", message)
+            .with_help("install the fallow-type-aware companion, or run without --typecheck")
+            .with_context("mutation.typecheck")
+    })
+}
+
 /// Plans the mutants, runs the project tests against each planned mutant,
 /// and reports the result.
 ///
@@ -636,6 +650,7 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         start_snapshot = take_worktree_snapshot(root, cache_dir, &options.output_paths)?;
         guard_worktree(options.allow_dirty, start_snapshot.as_ref())
     })?;
+    guard_typecheck_companion(options.typecheck, planned.resolved.root())?;
     let plan_ms = millis(started.elapsed());
     let execution = execute(options, &planned, deadline);
     let worktree_end = settle_worktree(start_snapshot.as_ref(), || {
@@ -652,7 +667,14 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
     } = worktree_end;
     let plan = &planned.plan;
     let outcome = execution.outcome.as_ref();
-    let results = mutant_results(plan, outcome);
+    let mut results = mutant_results(plan, outcome);
+    let typecheck = typecheck_survivors(
+        options.typecheck,
+        planned.resolved.root(),
+        plan,
+        &mut results,
+    );
+    let typecheck_ms = millis(typecheck.elapsed);
     let baseline = baseline_failures(outcome);
     let completion = completion(&CompletionFacts {
         plan,
@@ -662,11 +684,14 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         worktree_unchecked: check_error.is_some(),
         unretried: outcome.is_some_and(|outcome| !outcome.unretried.is_empty()),
         unloaded_paths: outcome.map_or(&[], |outcome| outcome.unloaded_paths.as_slice()),
+        typecheck_failed: typecheck.issue.is_some(),
     });
-    let errors = run_issues(outcome, &changed_paths, check_error);
+    let mut errors = run_issues(outcome, &changed_paths, check_error);
+    errors.extend(typecheck.issue);
     let timings = outcome.map_or_else(
         || MutationTimings {
             plan_ms,
+            typecheck_ms,
             ..MutationTimings::default()
         },
         |outcome| MutationTimings {
@@ -675,6 +700,7 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
             dry_run_ms: millis(outcome.timings.dry_run),
             mutants_ms: millis(outcome.timings.mutants),
             retry_ms: millis(outcome.timings.retry),
+            typecheck_ms,
         },
     );
     Ok(MutationReport {
@@ -708,6 +734,7 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         timings,
         files: plan_files(plan),
         verdicts: None,
+        typecheck: typecheck.output,
     })
 }
 

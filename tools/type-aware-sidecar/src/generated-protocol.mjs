@@ -5,6 +5,7 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({
   semantic_schema_version: 3,
   analysis_operation: "semantic-queries",
   status_operation: "status",
+  mutant_typecheck_operation: "mutant-typecheck",
   query_operations: ["symbol-use", "symbol-trace", "api-surface", "symbol-impact", "type-coupling"],
   session_envelope_types: ["analyze", "shutdown"],
   backend: {
@@ -20,6 +21,7 @@ export const WIRE_PROTOCOL_VERSION = TYPE_AWARE_PROTOCOL.wire_protocol_version;
 export const SEMANTIC_SCHEMA_VERSION = TYPE_AWARE_PROTOCOL.semantic_schema_version;
 export const ANALYSIS_OPERATION = TYPE_AWARE_PROTOCOL.analysis_operation;
 export const STATUS_OPERATION = TYPE_AWARE_PROTOCOL.status_operation;
+export const MUTANT_TYPECHECK_OPERATION = TYPE_AWARE_PROTOCOL.mutant_typecheck_operation;
 export const QUERY_OPERATIONS = Object.freeze(TYPE_AWARE_PROTOCOL.query_operations);
 export const SESSION_ENVELOPE_TYPES = Object.freeze(TYPE_AWARE_PROTOCOL.session_envelope_types);
 export const BACKEND_FAMILY = TYPE_AWARE_PROTOCOL.backend.family;

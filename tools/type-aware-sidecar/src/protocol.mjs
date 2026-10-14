@@ -7,9 +7,11 @@ import {
   ANALYSIS_OPERATION,
   BACKEND_FAMILY,
   BACKEND_VERSION,
+  MUTANT_TYPECHECK_OPERATION,
   QUERY_OPERATIONS as MANIFEST_QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
 } from "./generated-protocol.mjs";
+import { canonicalFileIdentity } from "./file-identity.mjs";
 import { normalizePhaseTimings, normalizeSemanticResult } from "./response-normalization.mjs";
 
 const require = createRequire(import.meta.url);
@@ -375,8 +377,75 @@ const parseBatchRequest = (value) => {
   return { root, projects, queries, evidenceLimit };
 };
 
+const MUTANT_TYPECHECK_REQUEST_KEYS = new Set(["protocol_version", "operation", "root", "files"]);
+const MUTANT_FILE_KEYS = new Set(["path", "source_sha256", "mutants"]);
+const MUTANT_KEYS = new Set(["id", "start", "end", "replacement"]);
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
+const MAX_MUTANTS = 25_000;
+const MAX_MUTANT_ID_CHARS = 64;
+
+const requireText = (value, field) => {
+  if (typeof value !== "string") throw new Error(`${field} must be a string`);
+  if ([...value].length > MAX_STRING_CHARS) {
+    throw new Error(`${field} exceeds the ${MAX_STRING_CHARS} character limit`);
+  }
+  return value;
+};
+
+const parseMutant = (value, field, ids) => {
+  requireObject(value, field);
+  requireExactKeys(value, MUTANT_KEYS, field);
+  const id = requireString(value.id, `${field}.id`);
+  if (id.length > MAX_MUTANT_ID_CHARS) {
+    throw new Error(`${field}.id exceeds the ${MAX_MUTANT_ID_CHARS} character limit`);
+  }
+  if (ids.has(id)) throw new Error(`duplicate mutant id ${id}`);
+  ids.add(id);
+  const start = requireInteger(value.start, `${field}.start`, 0);
+  const end = requireInteger(value.end, `${field}.end`, start);
+  return { id, start, end, replacement: requireText(value.replacement, `${field}.replacement`) };
+};
+
+const parseMutantFile = (value, field, root, ids) => {
+  requireObject(value, field);
+  requireExactKeys(value, MUTANT_FILE_KEYS, field);
+  const { candidatePath, absolutePath } = parseCandidatePath(value.path, `${field}.path`, root);
+  const sourceSha256 =
+    value.source_sha256 === undefined
+      ? null
+      : requireString(value.source_sha256, `${field}.source_sha256`);
+  if (sourceSha256 !== null && !SHA256_HEX.test(sourceSha256)) {
+    throw new Error(`${field}.source_sha256 must be a lowercase SHA-256 hex digest`);
+  }
+  return {
+    path: candidatePath,
+    absolutePath: canonicalFileIdentity(absolutePath),
+    sourceSha256,
+    mutants: requireBoundedArray(value.mutants, `${field}.mutants`, MAX_MUTANTS).map(
+      (mutant, index) => parseMutant(mutant, `${field}.mutants[${index}]`, ids),
+    ),
+  };
+};
+
+const parseMutantTypecheckRequest = (value) => {
+  requireExactKeys(value, MUTANT_TYPECHECK_REQUEST_KEYS, "request");
+  const root = parseRoot(value.root);
+  const ids = new Set();
+  const files = requireBoundedArray(value.files, "files", MAX_MUTANTS).map((file, index) =>
+    parseMutantFile(file, `files[${index}]`, root, ids),
+  );
+  if (ids.size > MAX_MUTANTS) throw new Error(`mutants exceed the ${MAX_MUTANTS} item limit`);
+  return { operation: MUTANT_TYPECHECK_OPERATION, root, files };
+};
+
 export const parseRequest = (value) => {
   requireObject(value, "request");
+  if (
+    value.protocol_version === WIRE_PROTOCOL_VERSION &&
+    value.operation === MUTANT_TYPECHECK_OPERATION
+  ) {
+    return parseMutantTypecheckRequest(value);
+  }
   if (value.protocol_version === WIRE_PROTOCOL_VERSION) {
     return parseBatchRequest(value);
   }
@@ -403,5 +472,15 @@ export const createSemanticResponse = ({
     .toSorted((left, right) => left.query_id - right.query_id),
   phase_timings_ms: normalizePhaseTimings(phaseTimings),
   warnings: normalizeWarnings(warnings),
+  elapsed_ms: Math.max(0, Math.round(elapsedMs)),
+});
+
+export const createMutantTypecheckResponse = ({ results, elapsedMs }) => ({
+  protocol_version: WIRE_PROTOCOL_VERSION,
+  operation: MUTANT_TYPECHECK_OPERATION,
+  sidecar_version: SIDECAR_VERSION,
+  backend: BACKEND_FAMILY,
+  backend_version: BACKEND_VERSION,
+  results,
   elapsed_ms: Math.max(0, Math.round(elapsedMs)),
 });

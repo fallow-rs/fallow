@@ -13,7 +13,8 @@ use colored::Colorize as _;
 use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
     MutationInspectStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
-    MutationScopeKind, MutationScopeOutput, MutationStaleReason, TestReachClass,
+    MutationScopeKind, MutationScopeOutput, MutationStaleReason, MutationTypecheckOutput,
+    TestReachClass,
 };
 use rustc_hash::FxHashMap;
 
@@ -261,6 +262,7 @@ fn summary_line(report: &MutationReport) -> String {
         ("equivalent", counts.equivalent),
         ("runtime error", counts.runtime_error),
         ("flaky", counts.flaky),
+        ("compile error", counts.compile_error),
     ] {
         if count > 0 {
             let _ = write!(line, "  {label} {count}");
@@ -594,10 +596,19 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
             .iter()
             .any(|note| note == TYPECHECK_NOT_RUN_NOTE)
     });
+    let survivors_checked = report
+        .typecheck
+        .as_ref()
+        .is_some_and(|typecheck| typecheck.completed);
     if typecheck_not_run {
-        out.push_str(
-            "Type check: the project enables the Vitest type-check pass, and this run did not run it. Type-level kills are not counted.\n",
-        );
+        out.push_str(if survivors_checked {
+            "Type check: the project enables the Vitest type-check pass, and this run did not run it. Only type errors in the mutated file are counted.\n"
+        } else {
+            "Type check: the project enables the Vitest type-check pass, and this run did not run it. Type-level kills are not counted.\n"
+        });
+    }
+    if let Some(typecheck) = &report.typecheck {
+        let _ = writeln!(out, "{}", typecheck_line(typecheck));
     }
     if let Some(cache) = report.cache.as_ref().filter(|cache| cache.hits > 0) {
         let _ = writeln!(
@@ -609,11 +620,48 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
     }
 }
 
+/// The line of the survivor type check (`--typecheck`).
+fn typecheck_line(typecheck: &MutationTypecheckOutput) -> String {
+    if !typecheck.completed {
+        return format!(
+            "Survivor type check: failed, so the {} {} keep the status survived",
+            typecheck.survivors,
+            plural(typecheck.survivors, "survivor", "survivors")
+        );
+    }
+    let mut line = format!(
+        "Survivor type check: {} checked, {} {} not type-check",
+        typecheck.checked,
+        typecheck.compile_errors,
+        plural(typecheck.compile_errors, "does", "do")
+    );
+    if !typecheck.skipped.is_empty() {
+        let reasons: Vec<String> = typecheck
+            .skipped
+            .iter()
+            .map(|skip| {
+                let reason = serde_json::to_value(skip.reason)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .unwrap_or_default();
+                format!("{reason} {}", skip.count)
+            })
+            .collect();
+        let skipped: usize = typecheck.skipped.iter().map(|skip| skip.count).sum();
+        let _ = write!(line, ", {skipped} not checked ({})", reasons.join(", "));
+    }
+    line
+}
+
 /// Renders the human report of a run.
 pub fn render_run(report: &MutationReport, options: &RunReportOptions<'_>) -> String {
     let counts = &report.summary.counts;
-    let tested =
-        counts.killed + counts.survived + counts.timeout + counts.runtime_error + counts.flaky;
+    let tested = counts.killed
+        + counts.survived
+        + counts.timeout
+        + counts.runtime_error
+        + counts.flaky
+        + counts.compile_error;
     let mut out = if report.runner.is_some() || tested > 0 {
         String::from("Mutation testing (ran the project tests)\n")
     } else {

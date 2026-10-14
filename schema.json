@@ -1136,6 +1136,13 @@
           ],
           "format": "uint",
           "minimum": 1
+        },
+        "typecheck": {
+          "description": "Type-check each survived mutant through the TypeScript-Go companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. Unset or `false`\nchecks no survivor. `--typecheck` turns the check on.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

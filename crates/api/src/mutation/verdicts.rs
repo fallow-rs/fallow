@@ -50,7 +50,9 @@ const fn effect(status: MutantStatus) -> Effect {
         | MutantStatus::NoCoverage
         | MutantStatus::Flaky
         | MutantStatus::Equivalent => Effect::Applied,
-        MutantStatus::Killed | MutantStatus::Timeout => Effect::Contradicted,
+        MutantStatus::Killed | MutantStatus::Timeout | MutantStatus::CompileError => {
+            Effect::Contradicted
+        }
         MutantStatus::Pending | MutantStatus::RuntimeError | MutantStatus::Pruned => {
             Effect::Deferred
         }
@@ -90,6 +92,7 @@ const fn count_of(counts: &MutationStatusCounts, status: MutantStatus) -> usize 
         MutantStatus::Pruned => counts.pruned,
         MutantStatus::Pending => counts.pending,
         MutantStatus::Equivalent => counts.equivalent,
+        MutantStatus::CompileError => counts.compile_error,
     }
 }
 
@@ -238,6 +241,7 @@ mod tests {
             test_reach: None,
             retried: false,
             cached: false,
+            type_error_codes: Vec::new(),
         }
     }
 
@@ -289,6 +293,7 @@ mod tests {
             timings: MutationTimings::default(),
             files: Vec::new(),
             verdicts: None,
+            typecheck: None,
         }
     }
 

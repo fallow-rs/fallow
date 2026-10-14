@@ -61,6 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     has `cached: true`. `--no-cache` runs each mutant.
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
+  - `--typecheck` or `mutation.typecheck` type-checks each survivor through
+    the `--type-aware` companion after the tests. A survivor that adds a type
+    error to its file gets the status `compile_error` and leaves the score.
+    The check reads only the mutated file and never writes a project file.
+    Without a companion, the run exits with 2 before the tests start.
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /

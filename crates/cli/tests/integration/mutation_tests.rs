@@ -463,6 +463,44 @@ fn inspect_shows_the_mutated_line_when_fresh_and_a_stale_status_after_an_edit() 
 }
 
 #[test]
+fn typecheck_without_a_companion_exits_2_before_the_tests_run() {
+    let project = untested_project();
+    let missing = project.path().join("no-such-companion");
+    let missing = missing.to_str().expect("utf-8 path");
+    let root = project.path().to_str().expect("utf-8 path");
+    let output = crate::common::run_fallow_raw_with_env(
+        &[
+            "mutation",
+            "--root",
+            root,
+            "--typecheck",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_TYPE_AWARE_BIN", missing)],
+    );
+    assert_eq!(output.code, 2, "{}", output.stdout);
+    let value = parse_json(&output);
+    assert_eq!(value["code"], "FALLOW_MUTATION_TYPECHECK_UNAVAILABLE");
+    assert!(
+        !project
+            .path()
+            .join(".fallow/mutation/last-report.json")
+            .exists(),
+        "no run starts without the companion"
+    );
+
+    let plan = mutation(project.path(), &["--plan", "--typecheck", "--quiet"]);
+    assert_eq!(plan.code, 2, "{}", plan.stdout);
+    assert!(
+        plan.stderr.contains("a plan has no survivors"),
+        "{}",
+        plan.stderr
+    );
+}
+
+#[test]
 fn mutation_rejects_unsupported_formats_and_scope_conflicts() {
     let project = untested_project();
     let sarif = mutation(project.path(), &["--plan", "--format", "sarif"]);
@@ -623,6 +661,109 @@ mod end_to_end {
         let coverage = full["summary"]["coverage"].as_f64().expect("a coverage");
         assert!(coverage > 0.0 && coverage < 1.0, "{full}");
         assert_eq!(capped["summary"]["coverage"], full["summary"]["coverage"]);
+    }
+
+    /// The type-aware companion needs `npm ci` in its package.
+    #[expect(
+        clippy::print_stderr,
+        reason = "a skipped end-to-end test says why it did not run"
+    )]
+    fn type_aware_companion_installed() -> bool {
+        let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/type-aware-sidecar");
+        let installed = package
+            .join("node_modules/typescript/package.json")
+            .is_file();
+        if !installed {
+            eprintln!(
+                "skipped: the mutation type check test needs `npm ci` in {}",
+                package.display()
+            );
+        }
+        installed
+    }
+
+    /// `isPositive` returns a boolean, and its test checks no value. The
+    /// `return-value` mutant survives the tests, but `return undefined` does
+    /// not type-check under `strict`, so the type check moves it to
+    /// `compile_error` and out of the score. The run without `--typecheck`
+    /// keeps it a survivor.
+    #[test]
+    fn a_typecheck_run_moves_a_survivor_that_does_not_type_check_out_of_the_score() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        if !type_aware_companion_installed() {
+            return;
+        }
+        let (_project, root) = vitest_project(&package, "");
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"noEmit":true},"include":["src"]}"#,
+        )
+        .expect("tsconfig");
+        commit_all(&root, "tsconfig");
+
+        let args = ["src/math.ts", "--concurrency", "1"];
+        let (plain_output, plain) = json_mutation(&root, &args);
+        assert_eq!(plain_output.code, 0, "{}", plain_output.stderr);
+        assert!(plain.get("typecheck").is_none(), "{plain}");
+        let return_value = |report: &serde_json::Value| -> serde_json::Value {
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .find(|mutant| {
+                    mutant["function"] == "isPositive" && mutant["operator"] == "return-value"
+                })
+                .cloned()
+                .expect("a return-value mutant of isPositive")
+        };
+        assert_eq!(return_value(&plain)["status"], "survived", "{plain}");
+
+        let mut command = std::process::Command::new(crate::common::fallow_bin());
+        command
+            .env("RUST_LOG", "")
+            .env("NO_COLOR", "1")
+            .args(["mutation", "--root"])
+            .arg(&root)
+            .args(args)
+            .args(["--typecheck", "--format", "json", "--quiet"]);
+        crate::common::configure_type_aware_sidecar(&mut command);
+        let output = command.output().expect("fallow runs");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let checked: serde_json::Value = serde_json::from_str(&stdout).expect("json");
+        let mutant = return_value(&checked);
+        assert_eq!(mutant["status"], "compile_error", "{checked}");
+        assert_eq!(mutant["type_error_codes"], serde_json::json!([2322]));
+        assert_eq!(checked["typecheck"]["completed"], true, "{checked}");
+        assert!(checked["typecheck"]["compile_errors"].as_u64() >= Some(1));
+        let counts = &checked["summary"]["counts"];
+        assert_eq!(
+            counts["compile_error"],
+            checked["typecheck"]["compile_errors"]
+        );
+        assert_eq!(
+            counts["survived"].as_u64().expect("survived")
+                + counts["compile_error"].as_u64().expect("compile errors"),
+            plain["summary"]["counts"]["survived"]
+                .as_u64()
+                .expect("survived")
+        );
+        let detected = counts["killed"].as_f64().expect("killed")
+            + counts["timeout"].as_f64().expect("timeout");
+        let executed = detected + counts["survived"].as_f64().expect("survived");
+        assert_eq!(
+            checked["summary"]["score"].as_f64(),
+            Some(detected / executed),
+            "{checked}"
+        );
+        assert_eq!(checked["completion"]["status"], "complete", "{checked}");
     }
 
     #[test]

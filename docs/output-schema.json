@@ -32485,6 +32485,17 @@
             }
           ],
           "description": "The join with a verdict document. Absent when the run read no verdict\ndocument (`--verdicts` not set)."
+        },
+        "typecheck": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationTypecheckOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The type check of the survivors. Absent when the run did not check\nthem (`--typecheck` not set)."
         }
       },
       "required": [
@@ -32853,6 +32864,11 @@
           "type": "string",
           "const": "equivalent",
           "description": "A verdict marks the mutant as equivalent to the original code: no\ntest can detect it."
+        },
+        {
+          "type": "string",
+          "const": "compile_error",
+          "description": "Each covering test passed, but the mutated file does not type-check.\nOnly a run with the type check of survivors gives this status. The\nmutant does not count in the score."
         }
       ],
       "description": "The result of one mutant."
@@ -32899,6 +32915,10 @@
         "equivalent": {
           "type": "integer",
           "description": "Mutants that a verdict marks as equivalent."
+        },
+        "compile_error": {
+          "type": "integer",
+          "description": "Survived mutants that do not type-check."
         }
       },
       "required": [
@@ -32911,7 +32931,8 @@
         "flaky",
         "pruned",
         "pending",
-        "equivalent"
+        "equivalent",
+        "compile_error"
       ],
       "description": "The number of mutants for each status, and the mutation score."
     },
@@ -32987,6 +33008,11 @@
           "type": "string",
           "const": "worktree-changed",
           "description": "The run changed the git worktree."
+        },
+        {
+          "type": "string",
+          "const": "typecheck-failed",
+          "description": "The type check of the survivors failed, so a survivor can be a\nmutant that does not type-check."
         },
         {
           "type": "string",
@@ -33206,6 +33232,13 @@
         "cached": {
           "type": "boolean",
           "description": "True when the status comes from the result cache of an earlier run.\nThe mutant did not run in this run. `--no-cache` runs each mutant."
+        },
+        "type_error_codes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "The TypeScript diagnostic codes of the new errors of a\n`compile_error` mutant, sorted, at most 8."
         }
       },
       "required": [
@@ -33401,7 +33434,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "A stable kebab-case code: `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `worktree-changed` or\n`worktree-check-failed`."
+          "description": "A stable kebab-case code: `runtime-error`, `static-map-miss`,\n`test-files-not-discovered`, `typecheck-failed`, `worktree-changed`\nor `worktree-check-failed`."
         },
         "message": {
           "type": "string",
@@ -33450,6 +33483,10 @@
         "retry_ms": {
           "type": "integer",
           "description": "The second runs of survived and timed-out mutants."
+        },
+        "typecheck_ms": {
+          "type": "integer",
+          "description": "The type check of the survivors. Zero when the run did not check\nthem."
         }
       },
       "required": [
@@ -33457,7 +33494,8 @@
         "setup_ms",
         "dry_run_ms",
         "mutants_ms",
-        "retry_ms"
+        "retry_ms",
+        "typecheck_ms"
       ],
       "description": "The wall time of each phase, in milliseconds."
     },
@@ -33860,6 +33898,84 @@
         "not_keyed"
       ],
       "description": "The result cache facts of a run."
+    },
+    "MutationTypecheckOutput": {
+      "type": "object",
+      "properties": {
+        "completed": {
+          "type": "boolean",
+          "description": "True when the type check gave a result for each survivor that it\nreceived. False when the companion failed; the survivors then keep\nthe status `survived`."
+        },
+        "survivors": {
+          "type": "integer",
+          "description": "The survivors that the type check received."
+        },
+        "checked": {
+          "type": "integer",
+          "description": "The survivors that the checker checked."
+        },
+        "compile_errors": {
+          "type": "integer",
+          "description": "The checked survivors that do not type-check. They have the status\n`compile_error`."
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationTypecheckSkip"
+          },
+          "description": "The survivors that the checker did not check, by reason."
+        }
+      },
+      "required": [
+        "completed",
+        "survivors",
+        "checked",
+        "compile_errors"
+      ],
+      "description": "The type check of the survivors (`--typecheck`)."
+    },
+    "MutationTypecheckSkip": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "description": "Why the type check did not check these survivors.",
+          "$ref": "#/definitions/MutationTypecheckSkipReason"
+        },
+        "count": {
+          "type": "integer",
+          "description": "The number of survivors."
+        }
+      },
+      "required": [
+        "reason",
+        "count"
+      ],
+      "description": "The number of survivors with one skip reason."
+    },
+    "MutationTypecheckSkipReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "no-project",
+          "description": "No TypeScript project includes the file."
+        },
+        {
+          "type": "string",
+          "const": "not-type-checked",
+          "description": "The checker does not check the file: a `// @ts-nocheck` comment, or a\nJavaScript file without `checkJs`."
+        },
+        {
+          "type": "string",
+          "const": "source-changed",
+          "description": "The file changed after the plan."
+        },
+        {
+          "type": "string",
+          "const": "file-missing",
+          "description": "The file does not exist."
+        }
+      ],
+      "description": "Why the type check did not check a survivor."
     }
   }
 }

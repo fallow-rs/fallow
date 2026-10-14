@@ -7,6 +7,7 @@
 
 mod client;
 mod manifest;
+mod mutant_typecheck;
 mod transport;
 
 use fallow_engine::session::AnalysisSession;
@@ -21,6 +22,9 @@ pub use client::{
     discard_unverified_semantic_candidates, inspect_symbol, merge_type_aware_meta,
     refine_dead_code_results, refine_dead_code_results_in_session, symbol_impact, trace_symbol,
     type_coupling,
+};
+pub use mutant_typecheck::{
+    TypecheckFile, TypecheckMutant, TypecheckOutcome, check_typecheck_companion, typecheck_mutants,
 };
 pub use transport::{
     TypeAwareError, TypeAwareFileChanges, TypeAwareOutcome, TypeAwareSession, TypeAwareStatus,

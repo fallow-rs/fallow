@@ -1677,7 +1677,7 @@ export type MutationCompletionStatus = ("complete" | "partial")
 /**
  * Why a run is partial.
  */
-export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "baseline-failure" | "worktree-changed" | "worktree-unchecked")
+export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "baseline-failure" | "worktree-changed" | "typecheck-failed" | "worktree-unchecked")
 /**
  * Which code a run mutates.
  */
@@ -1685,7 +1685,11 @@ export type MutationScopeKind = ("changed" | "all" | "paths")
 /**
  * The result of one mutant.
  */
-export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | "runtime_error" | "flaky" | "pruned" | "pending" | "equivalent")
+export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | "runtime_error" | "flaky" | "pruned" | "pending" | "equivalent" | "compile_error")
+/**
+ * Why the type check did not check a survivor.
+ */
+export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing")
 /**
  * Version singleton for a mutation plan.
  */
@@ -19621,6 +19625,11 @@ files: MutationPlanFile[]
  * document (`--verdicts` not set).
  */
 verdicts?: (MutationVerdictJoin | null)
+/**
+ * The type check of the survivors. Absent when the run did not check
+ * them (`--typecheck` not set).
+ */
+typecheck?: (MutationTypecheckOutput | null)
 }
 /**
  * The completion status of a run.
@@ -19772,6 +19781,10 @@ pending: number
  * Mutants that a verdict marks as equivalent.
  */
 equivalent: number
+/**
+ * Survived mutants that do not type-check.
+ */
+compile_error: number
 }
 /**
  * One mutant of a run.
@@ -19860,6 +19873,11 @@ retried?: boolean
  * The mutant did not run in this run. `--no-cache` runs each mutant.
  */
 cached?: boolean
+/**
+ * The TypeScript diagnostic codes of the new errors of a
+ * `compile_error` mutant, sorted, at most 8.
+ */
+type_error_codes?: number[]
 }
 /**
  * How tests reach the code of one mutant in the module graph. The class
@@ -19995,8 +20013,8 @@ changed_paths: string[]
 export interface MutationRunIssue {
 /**
  * A stable kebab-case code: `runtime-error`, `static-map-miss`,
- * `test-files-not-discovered`, `worktree-changed` or
- * `worktree-check-failed`.
+ * `test-files-not-discovered`, `typecheck-failed`, `worktree-changed`
+ * or `worktree-check-failed`.
  */
 code: string
 /**
@@ -20036,6 +20054,11 @@ mutants_ms: number
  * The second runs of survived and timed-out mutants.
  */
 retry_ms: number
+/**
+ * The type check of the survivors. Zero when the run did not check
+ * them.
+ */
+typecheck_ms: number
 }
 /**
  * One instrumented file of a plan.
@@ -20082,6 +20105,44 @@ deferred: string[]
  * edit of a function gives its mutants new keys.
  */
 unmatched: string[]
+}
+/**
+ * The type check of the survivors (`--typecheck`).
+ */
+export interface MutationTypecheckOutput {
+/**
+ * True when the type check gave a result for each survivor that it
+ * received. False when the companion failed; the survivors then keep
+ * the status `survived`.
+ */
+completed: boolean
+/**
+ * The survivors that the type check received.
+ */
+survivors: number
+/**
+ * The survivors that the checker checked.
+ */
+checked: number
+/**
+ * The checked survivors that do not type-check. They have the status
+ * `compile_error`.
+ */
+compile_errors: number
+/**
+ * The survivors that the checker did not check, by reason.
+ */
+skipped?: MutationTypecheckSkip[]
+}
+/**
+ * The number of survivors with one skip reason.
+ */
+export interface MutationTypecheckSkip {
+reason: MutationTypecheckSkipReason
+/**
+ * The number of survivors.
+ */
+count: number
 }
 /**
  * The envelope of `fallow mutation --plan`. It runs no user code.

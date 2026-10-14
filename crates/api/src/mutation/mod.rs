@@ -15,6 +15,7 @@ pub(crate) mod result_cache;
 pub(crate) mod run_dir;
 pub(crate) mod scheduler;
 pub(crate) mod transport;
+pub(crate) mod typecheck;
 pub(crate) mod verdicts;
 pub(crate) mod worktree;
 
@@ -88,4 +89,9 @@ pub struct MutationRunOptions {
     /// report does not make the worktree dirty. A relative path is relative
     /// to the process directory, as the caller writes it.
     pub output_paths: Vec<PathBuf>,
+    /// Type-check each survived mutant through the TypeScript-Go companion
+    /// of `--type-aware`. A survivor whose mutated file does not type-check
+    /// becomes `compile_error` and leaves the score. The run fails before
+    /// the tests start when no trusted companion exists.
+    pub typecheck: bool,
 }

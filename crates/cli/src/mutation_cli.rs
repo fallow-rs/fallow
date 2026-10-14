@@ -96,6 +96,11 @@ pub struct MutationArgs {
     /// reload, for example `5m` on a slow or busy host (default: `2m`).
     #[arg(long, value_name = "DURATION")]
     pub setup_timeout: Option<String>,
+    /// Type-check each survived mutant through the `--type-aware`
+    /// companion. A survivor that does not type-check becomes
+    /// `compile_error` and leaves the score.
+    #[arg(long)]
+    pub typecheck: bool,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -278,6 +283,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             .map(absolute_output_path)
             .into_iter()
             .collect(),
+        typecheck: input.args.typecheck || input.config.typecheck == Some(true),
     })
 }
 
@@ -451,6 +457,12 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             return Err(input_error(
                 "--verdicts joins the results of a run; a plan has no results",
                 "mutation.verdicts",
+            ));
+        }
+        if input.args.typecheck {
+            return Err(input_error(
+                "--typecheck checks the survivors of a run; a plan has no survivors",
+                "mutation.typecheck",
             ));
         }
         let plan = plan_mutation(&options)?;

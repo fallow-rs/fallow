@@ -156,6 +156,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         test_reach: None,
         retried: false,
         cached: false,
+        type_error_codes: Vec::new(),
     };
     let scheduled = outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
     match (mutant.disposition, scheduled) {
@@ -250,6 +251,8 @@ pub struct CompletionFacts<'a> {
     pub unretried: bool,
     /// The `path_map` keys that the runner did not load in the dry run.
     pub unloaded_paths: &'a [String],
+    /// The type check of the survivors failed.
+    pub typecheck_failed: bool,
 }
 
 /// The completion: `partial` when a planned mutant has no final status or a
@@ -292,6 +295,9 @@ pub fn completion(facts: &CompletionFacts<'_>) -> MutationCompletion {
     }
     if facts.worktree_unchecked {
         reasons.push(MutationIncompleteReason::WorktreeUnchecked);
+    }
+    if facts.typecheck_failed {
+        reasons.push(MutationIncompleteReason::TypecheckFailed);
     }
     MutationCompletion::from_reasons(reasons)
 }
@@ -627,6 +633,7 @@ mod tests {
             worktree_unchecked: false,
             unretried: false,
             unloaded_paths: &[],
+            typecheck_failed: false,
         });
         assert_eq!(
             completion.reasons,
@@ -710,6 +717,7 @@ mod tests {
                 worktree_unchecked: false,
                 unretried: false,
                 unloaded_paths: &[],
+                typecheck_failed: false,
             })
             .reasons,
             Vec::<MutationIncompleteReason>::new()
@@ -742,6 +750,7 @@ mod tests {
             worktree_unchecked: false,
             unretried: false,
             unloaded_paths: &[],
+            typecheck_failed: false,
         });
         assert_eq!(
             completion.reasons,
@@ -771,6 +780,7 @@ mod tests {
             worktree_unchecked: true,
             unretried: true,
             unloaded_paths: &[],
+            typecheck_failed: false,
         });
         assert_eq!(
             completion.reasons,
@@ -803,6 +813,7 @@ mod tests {
                 worktree_unchecked: false,
                 unretried: false,
                 unloaded_paths: unloaded,
+                typecheck_failed: false,
             })
             .reasons
         };

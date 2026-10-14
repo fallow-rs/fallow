@@ -444,6 +444,7 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(manifest.semantic_schema_version, 3);
   assert.equal(manifest.analysis_operation, "semantic-queries");
   assert.equal(manifest.status_operation, "status");
+  assert.equal(manifest.mutant_typecheck_operation, "mutant-typecheck");
   assert.deepEqual(manifest.query_operations, [
     "symbol-use",
     "symbol-trace",

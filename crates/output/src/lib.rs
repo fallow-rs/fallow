@@ -315,10 +315,10 @@ pub use mutation::{
     MutationPlanSchemaVersion, MutationReport, MutationRunIssue, MutationRunnerOutput,
     MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind, MutationScopeOutput,
     MutationSkippedFile, MutationStaleReason, MutationStatusCounts, MutationSummary,
-    MutationTimings, MutationVerdict, MutationVerdictInput, MutationVerdictJoin,
-    MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
-    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
-    serialize_mutation_plan_json_output,
+    MutationTimings, MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason,
+    MutationVerdict, MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind,
+    MutationVerdictSchemaVersion, MutationWorktreeCheck, serialize_mutation_inspect_json_output,
+    serialize_mutation_json_output, serialize_mutation_plan_json_output,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

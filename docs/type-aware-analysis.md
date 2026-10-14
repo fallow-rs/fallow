@@ -58,6 +58,11 @@ affected, and where public signatures create coupling. The companion returns
 only semantic evidence, completeness, omissions, and stable reason codes. It
 never forwards a compiler diagnostic as a Fallow issue.
 
+`fallow mutation --typecheck` uses the same companion with the one-shot
+`mutant-typecheck` operation. It compares the error diagnostics of a mutated
+file with the original file and returns only the diagnostic codes of new
+errors. See [`mutation-testing.md`](mutation-testing.md).
+
 ## Five semantic capabilities
 
 Refine existing dead-code findings conservatively:

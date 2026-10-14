@@ -1274,6 +1274,16 @@
           "description": "Wait this long for each runner process to start, finish its dry run or reload, for example `5m` on a slow or busy host (default: `2m`)"
         },
         {
+          "name": "--typecheck",
+          "type": "bool",
+          "required": false,
+          "description": "Type-check each survived mutant through the `--type-aware` companion. A survivor that does not type-check becomes `compile_error` and leaves the score",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "paths",
           "type": "string",
           "required": false,

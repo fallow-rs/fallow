@@ -25,8 +25,8 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`),
   `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
-  `--min-score`, `--operators` and `--verdicts`. The global `--no-cache` flag
-  also turns off the result cache (see "Result cache").
+  `--min-score`, `--operators`, `--verdicts` and `--typecheck`. The global
+  `--no-cache` flag also turns off the result cache (see "Result cache").
 - Only `--format human` and `--format json` are valid. Version 1 has no SARIF,
   CodeClimate, LSP, gate, GitHub Action or GitLab surface.
 - Each run saves its full JSON report to
@@ -59,7 +59,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document. |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run with no executed mutant has no score and exits `0`, also when
@@ -72,7 +72,8 @@ each mutant is `no_coverage`.
 - `summary.coverage` reports the unreached mutants apart:
   `coverage = covered / (covered + no_coverage)` over the whole plan.
   `covered` counts each executed mutant (`killed`, `timeout`, `survived`,
-  `runtime_error`, `flaky`) with a covering test, and each `pending` mutant
+  `runtime_error`, `flaky`, `compile_error`) with a covering test, and each
+  `pending` mutant
   that a passing dry-run test covers. The dry run loads each mutant of the
   plan, also a mutant after the `--max-mutants` limit. A test covers a
   mutant when it hits the mutant, or when its file loads the module of a
@@ -83,9 +84,9 @@ each mutant is `no_coverage`.
 - `no_coverage` never enters the score. A capped run of 200
   mutants in a project with 20000 unreached mutants still gets a score that
   describes the 200 tested mutants.
-- `pending`, `equivalent`, `flaky`, `runtime_error` and `pruned` mutants never
-  count in the score. `equivalent` and `pruned` mutants never count in the
-  coverage.
+- `pending`, `equivalent`, `flaky`, `runtime_error`, `pruned` and
+  `compile_error` mutants never count in the score. `equivalent` and `pruned`
+  mutants never count in the coverage.
 - Both values are fractions from 0 to 1 in JSON. `--min-score` and
   `mutation.minScore` use percent.
 - Only `completion.status: "complete"` makes an empty survivor list
@@ -246,6 +247,45 @@ report repeats it in `cache.not_keyed`.
   `crates/api/src/mutation/scheduler`. The key and the file live in
   `crates/api/src/mutation/result_cache`.
 
+## Type check of survivors
+
+`--typecheck` (or `mutation.typecheck: true`) sends each `survived` mutant to
+the TypeScript-Go companion of `--type-aware` after the tests. Other mutants
+are not checked, so the cost grows with the number of survivors only.
+
+- The companion applies one mutant at a time to an in-memory copy of its file.
+  It never writes a project file.
+- It compares the error diagnostics of the mutated file with the diagnostics
+  of the original file. The comparison uses the diagnostic code and message,
+  because the positions move. An error that the original file already has
+  does not count.
+- A survivor with a new error gets the status `compile_error`, and
+  `type_error_codes` lists the codes (at most 8). The mutant does not count in
+  the score, and it counts as covered.
+- The check reads only the mutated file. A mutant that breaks only another
+  file, for example a caller of a function with an inferred return type,
+  stays `survived`. The check also does not run Vitest type tests, so the
+  `typecheck-not-run` note stays.
+- A survivor that the checker cannot check stays `survived`. The reasons are
+  `no-project` (no `tsconfig.json` includes the file), `not-type-checked`
+  (`// @ts-nocheck`, or a JavaScript file without `checkJs`),
+  `source-changed` and `file-missing`. `typecheck.skipped` counts them.
+- The run looks for the companion before the tests start. When no trusted
+  companion exists, the run exits with code 2 and
+  `FALLOW_MUTATION_TYPECHECK_UNAVAILABLE`. Discovery is the same as for
+  `--type-aware`: `FALLOW_TYPE_AWARE_BIN`, the npm wrapper, or a sibling of
+  the Fallow executable.
+- When the companion fails after the tests, the survivors keep the status
+  `survived`. The report has `typecheck.completed: false`, an error with the
+  code `typecheck-failed`, and the completion reason `typecheck-failed`.
+- `typecheck` is absent from the report when the option is off. A run
+  without the option never sets `compile_error`.
+- `--plan --typecheck` exits with code 2, because a plan has no survivors.
+  The config key has no effect on a plan.
+- The protocol operation is `mutant-typecheck` in
+  `crates/api/type-aware-protocol.json`. It is a one-shot request; a semantic
+  session refuses it.
+
 ## Verdicts for equivalent mutants
 
 A verdict document replaces an inline suppression comment:
@@ -264,8 +304,8 @@ A verdict document replaces an inline suppression comment:
   replacement. It stays the same until the function changes, so a separate
   `review_key` field would carry no extra information.
 - A verdict for a `survived`, `no_coverage` or `flaky` mutant sets the status
-  `equivalent`. A verdict for a killed or timed-out mutant is `contradicted`,
-  and the status stays. A verdict for a `pending`, `runtime_error` or `pruned`
+  `equivalent`. A verdict for a killed, timed-out or `compile_error` mutant is
+  `contradicted`, and the status stays. A verdict for a `pending`, `runtime_error` or `pruned`
   mutant is `deferred`. A verdict that matches no mutant is `unmatched`; one
   document can serve many scoped runs.
 - A malformed document, an empty `review_key` or a duplicate `review_key` stops
@@ -309,13 +349,17 @@ reaches inspects as `no-digest`.
 - The header says `(ran the project tests)` only when a companion started or a
   mutant has a tested result. Otherwise it says `(no test ran)`.
 - The score line: the score, killed, survived, timeout, and the completion
-  status. The line adds `pending`, `equivalent`, `runtime error` and `flaky`
-  only when the count is not zero.
+  status. The line adds `pending`, `equivalent`, `runtime error`, `flaky` and
+  `compile error` only when the count is not zero.
 - The scope line shows a full 40-character base SHA as its first 12
   characters, as `audit` does. No other line repeats the base ref.
 - The coverage line: the coverage and the no-coverage count.
 - One line when `runner.notes` has `typecheck-not-run`: type-level kills are
-  not counted.
+  not counted. When the survivor type check ran, the line says that only type
+  errors in the mutated file are counted.
+- One line for the survivor type check: the checked count, the count that
+  does not type-check, and the skipped count by reason. A failed check says
+  that the survivors keep the status `survived`.
 - One `Cache:` line when a result came from the result cache. It names
   `--no-cache`.
 - The 10 best-ranked survivors grouped by file, files and mutants in rank
@@ -361,13 +405,16 @@ reaches inspects as `no-digest`.
     "runner": "auto",
     "operators": ["arithmetic-operator", "relational-operator"],
     "minScore": 80,
-    "concurrency": 4
+    "concurrency": 4,
+    "typecheck": true
   }
 }
 ```
 
 - `runner` is `auto` or `vitest`. Version 1 runs Vitest 4 and 5.
 - `operators`, `minScore` and `concurrency` apply to each run. A CLI flag wins.
+- `typecheck: true` turns on the survivor type check for each run.
+  `--typecheck` turns it on for one run. No flag turns it off.
 - The section has no source globs and no timeout keys. `MutationRunOptions`
   has no field for them, and a public key must have an effect. The section
   rejects unknown keys, so a config with `include`, `exclude`, `timeoutFactor`
@@ -380,7 +427,9 @@ reaches inspects as `no-digest`.
 |---|---|
 | Mutant sites and instrumentation | `crates/mutation` |
 | Selection, test map, prune and rank | `crates/engine/src/mutation` |
-| Runner protocol, companion, scheduler, report, verdict join | `crates/api/src/mutation` |
+| Runner protocol, companion, scheduler, report, verdict join, survivor type check | `crates/api/src/mutation` |
+| Type check request and response | `crates/api/src/type_aware/mutant_typecheck.rs` |
+| Type check in the companion | `tools/type-aware-sidecar/src/mutant-typecheck.mjs` |
 | Envelopes | `crates/output/src/mutation.rs` |
 | Config section | `crates/config/src/config/mutation.rs` |
 | CLI adapter, human output, inspect | `crates/cli/src/mutation_cli.rs`, `mutation_human.rs`, `mutation_inspect.rs` |
@@ -395,3 +444,7 @@ reaches inspects as `no-digest`.
   the verdict join and inspect, so they need no JavaScript runtime.
 - The Vitest end-to-end test needs `node` on `PATH` and `npm ci` in
   `tools/mutation-runner`. Without them it prints a skip message and passes.
+  The type check end-to-end test also needs `npm ci` in
+  `tools/type-aware-sidecar`.
+- `node --test test/mutant-typecheck.test.mjs` in `tools/type-aware-sidecar`
+  tests the companion side of the type check.
