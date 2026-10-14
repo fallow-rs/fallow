@@ -11394,3 +11394,53 @@ fn test_runner_directories_do_not_make_non_test_files_entry_points() {
     unused.sort_unstable();
     assert_eq!(unused, vec!["deno/notes.ts", "src/orphan.mjs"]);
 }
+
+#[test]
+fn health_coverage_gaps_skip_type_only_namespace_exports() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"type-only-namespace-gaps","private":true,"main":"src/index.ts","devDependencies":{"vitest":"^3.0.0"}}"#,
+    );
+    write_file(
+        &dir.path().join("src/types.ts"),
+        "export namespace JSX {\n  export interface Element { tag: string }\n}\n\
+         export namespace Runtime {\n  export const version = '1';\n}\n",
+    );
+    write_file(
+        &dir.path().join("src/index.ts"),
+        "import type { JSX } from './types';\nimport { Runtime } from './types';\n\
+         export const render = (element: JSX.Element): string => element.tag + Runtime.version;\n",
+    );
+    write_file(
+        &dir.path().join("src/render.test.ts"),
+        "import { test } from 'vitest';\nimport './types';\ntest('loads', () => {});\n",
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&output);
+    let export_names: Vec<&str> = json["coverage_gaps"]["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item.get("export_name").and_then(serde_json::Value::as_str))
+        .collect();
+    assert!(
+        !export_names.contains(&"JSX"),
+        "a namespace with only types emits no runtime code and is not a coverage gap: {export_names:?}"
+    );
+    assert!(
+        export_names.contains(&"Runtime"),
+        "a namespace with a value member stays a coverage gap: {export_names:?}"
+    );
+}
