@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dry-run time and the worker count. It is at least the runner timeout. A
     loaded host no longer turns the mutants of a restarted companion into
     runtime errors.
+  - Each `no_coverage` mutant has a `test_reach` object with the class of the
+    `audit` test reach: `mocked-only`, `none`, `none-file`, `transitive` or
+    `direct`. A mutant in an exported declaration gets the class of that
+    export and its name. For `mocked-only`, the object lists the tests and
+    the mocked modules. The human no-coverage lines count the mutants of
+    each file by class, and the plan prints one line with these counts.
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
 

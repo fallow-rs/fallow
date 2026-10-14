@@ -116,6 +116,37 @@ tests detect the mutant.
 - A `killed` result after a retry reports the duration of the retry. Each
   other status keeps the duration of the first run.
 
+## Test reach of no-coverage mutants
+
+Each `no_coverage` mutant has a `test_reach` object in the run report and in
+the plan. It gives the static reason why no test covers the mutant. The other
+statuses do not have the field. It never changes the score or the coverage.
+
+- `reach` uses the classes of the `audit` test reach: `mocked-only`, `none`,
+  `none-file`, `transitive` and `direct`. Treat the set as open.
+- A mutant in the top-level statement that declares a value export gets the
+  class of that export, and `export_name` names the export.
+- A mutant outside each value export declaration gets the class of its file
+  and has no `export_name`. The class is `none-file` when no test loads the
+  file, `mocked-only` when no test loads the file and a mock explains an
+  export of the file, and `none` when a test loads the file.
+- `tests` and `mocked_targets` are present only for `mocked-only`. They list
+  the test files whose references a mock removed and the mocked modules.
+- A project with no test files gives `none-file` to each mutant.
+- `direct` or `transitive` on a `no_coverage` mutant is not a conflict. The
+  graph has a covered reference to the export, but no test ran the code of
+  the mutant.
+
+The plan classifies the exports of each instrumented file once, with
+`module_graph::module_exports` (the per-file part of
+`changed_exports_for_changed_paths`) and
+`module_graph::classify_export_test_reach` (the per-export part of the `audit`
+test reach). `ModuleGraph::test_entry_points_reaching` stays a separate query:
+it names each test entry point that loads a file, with the mask of that test,
+and the runner selects the tests from that list. `export_test_reach` reads
+the shared profiles of the reachability index. It names only the test files
+that reference the export, so it cannot give that list.
+
 ## Baseline failures
 
 `baseline_failures` lists the tests and test files that fail with no active
@@ -238,8 +269,12 @@ reaches inspects as `no-digest`.
   is one, and the count and the first test when there are more.
 - Each `Error` line names its mutant when the error belongs to one mutant.
 - A separate no-coverage section with one line for each file and its count.
-  The section shows the 10 files with the most mutants and one
-  `and N more files` line. The JSON report has the full list.
+  The line adds the counts by test reach class, for example
+  `test reach: 2 mocked-only, 1 none-file`, in the class order of the
+  `audit` test reach. The section shows the 10 files with the most
+  mutants and one `and N more files` line. The JSON report has the full list.
+- The plan prints one `No coverage by test reach` line with the same counts
+  when a mutant is `no_coverage` and the project has test files.
 - The pruned counts by reason, and one line for "no tests" or "no mutation
   data", never one line for each function. A project with no test files gets
   the one "no tests" line with the mutant count, and no no-coverage section.

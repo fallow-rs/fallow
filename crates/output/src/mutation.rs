@@ -7,6 +7,7 @@
 use fallow_types::envelope::{ElapsedMs, ToolVersion};
 use serde::{Deserialize, Serialize};
 
+use crate::audit_test_reach::TestReachClass;
 use crate::root_envelopes::serialize_named_json_output;
 
 /// Current mutation report schema version.
@@ -319,6 +320,37 @@ pub struct MutantResult {
     /// The duration of the deciding run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// How tests reach the code of the mutant in the module graph. Only a
+    /// `no_coverage` mutant has this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_reach: Option<MutantTestReach>,
+}
+
+/// How tests reach the code of one mutant in the module graph. The class
+/// gives a static reason why no test covers the mutant.
+///
+/// A mutant in the top-level statement that declares a value export gets the
+/// class of that export. A mutant outside each such statement gets the class
+/// of its file: `none-file` when no test loads the file, `mocked-only` when no
+/// test loads the file and a mock explains an export of the file, and `none`
+/// when a test loads the file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutantTestReach {
+    /// The reach class. The same open set as the test reach of `audit`.
+    pub reach: TestReachClass,
+    /// The export whose declaration holds the mutant. Absent for a mutant
+    /// outside each value export declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_name: Option<String>,
+    /// For `mocked-only`: the test files whose references a mock removed,
+    /// sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<String>,
+    /// For `mocked-only`: the mocked modules on the reference paths, sorted.
+    /// A mocked module can be a barrel in front of the file of the mutant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mocked_targets: Vec<String>,
 }
 
 /// The results of the mutants of one function.
@@ -635,6 +667,10 @@ pub struct MutationPlanMutant {
     /// The static rule of a `pruned` mutant, kebab-case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prune_reason: Option<String>,
+    /// How tests reach the code of the mutant in the module graph. Only a
+    /// `no_coverage` mutant has this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_reach: Option<MutantTestReach>,
 }
 
 /// One instrumented file of a plan.
@@ -879,6 +915,7 @@ mod tests {
                 .collect(),
             static_mutant: false,
             duration_ms: None,
+            test_reach: None,
         }
     }
 
@@ -1011,6 +1048,7 @@ mod tests {
             covering_tests: Vec::new(),
             static_mutant: false,
             duration_ms: None,
+            test_reach: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

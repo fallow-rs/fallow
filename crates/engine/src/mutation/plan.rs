@@ -15,12 +15,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use sha2::{Digest, Sha256};
 
 use super::{
-    FunctionFacts, MutantDisposition, MutationPlan, MutationPlanCounts, MutationPlanInputs,
-    MutationPlanRequest, MutationScope, PlannedFile, PlannedMutant, PruneReason, SkipReason,
-    SkippedFile,
+    FunctionFacts, MutantDisposition, MutantTestReach, MutationPlan, MutationPlanCounts,
+    MutationPlanInputs, MutationPlanRequest, MutationScope, PlannedFile, PlannedMutant,
+    PruneReason, SkipReason, SkippedFile,
 };
 use crate::graph::{ModuleGraph, is_declaration_file_path};
-use crate::module_graph::relative_key_path;
+use crate::module_graph::{
+    ExportTestReach, ExportTestReachPaths, classify_export_test_reach, module_exports,
+    relative_key_path,
+};
 use crate::source::similar_code::{SimilarCodeExtractionLimits, SimilarCodeExtractionSkipReason};
 
 const BOM: char = '\u{feff}';
@@ -281,7 +284,8 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         };
     let covered = context.graph.is_test_reachable(candidate.file_id);
     let facts = FileFacts::new(context, candidate, module, source);
-    let mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
+    let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
+    attach_test_reach(context, candidate, source, covered, &mut mutants);
     let static_test_files = if covered {
         static_test_files(context, candidate.file_id)
     } else {
@@ -504,10 +508,107 @@ fn assign(
                     .map(|function| facts.function(function)),
                 file: candidate.rel.clone(),
                 rank: None,
+                test_reach: None,
                 mutant,
             },
         })
         .collect()
+}
+
+/// Sets the test reach of each mutant that no static rule prunes. The value
+/// exports of the file are classified once, with the same test-file rule as
+/// the test reach of `audit`.
+fn attach_test_reach(
+    context: &Context<'_>,
+    candidate: &Candidate<'_>,
+    source: &str,
+    covered: bool,
+    mutants: &mut [RankEntry],
+) {
+    if mutants
+        .iter()
+        .all(|entry| matches!(entry.planned.disposition, MutantDisposition::Pruned(_)))
+    {
+        return;
+    }
+    let graph = context.graph;
+    let root = context.inputs.root;
+    let mut is_test_file = |file_id: FileId| -> bool {
+        graph.test_entry_points.contains(&file_id)
+            || graph.modules.get(file_id.0 as usize).is_some_and(|node| {
+                crate::test_paths::is_test_code_path_str(root, &relative_key_path(&node.path, root))
+            })
+    };
+    let exports: Vec<ExportTestReachPaths> = module_exports(graph, root, candidate.file_id, source)
+        .iter()
+        .filter_map(|export| classify_export_test_reach(graph, root, export, &mut is_test_file))
+        .collect();
+    let file_reach = file_test_reach(graph, covered, &exports);
+    for entry in mutants
+        .iter_mut()
+        .filter(|entry| !matches!(entry.planned.disposition, MutantDisposition::Pruned(_)))
+    {
+        let line = entry.planned.mutant.line;
+        let reach = exports
+            .iter()
+            .find(|export| {
+                let (first, last) = export.declaration_lines;
+                first <= line && line <= last
+            })
+            .map_or_else(
+                || file_reach.clone(),
+                |export| MutantTestReach {
+                    reach: export.reach,
+                    export_name: Some(export.export_name.clone()),
+                    tests: mocked_only_files(export.reach, &export.tests),
+                    mocked_targets: mocked_only_files(export.reach, &export.mocked_targets),
+                },
+            );
+        entry.planned.test_reach = Some(reach);
+    }
+}
+
+/// The test reach of the code outside each value export declaration.
+fn file_test_reach(
+    graph: &ModuleGraph,
+    covered: bool,
+    exports: &[ExportTestReachPaths],
+) -> MutantTestReach {
+    let mut reach = MutantTestReach {
+        reach: ExportTestReach::NoneFile,
+        export_name: None,
+        tests: Vec::new(),
+        mocked_targets: Vec::new(),
+    };
+    if graph.test_entry_points.is_empty() {
+        return reach;
+    }
+    if covered {
+        reach.reach = ExportTestReach::None;
+        return reach;
+    }
+    let mut tests = BTreeSet::new();
+    let mut mocked_targets = BTreeSet::new();
+    for export in exports
+        .iter()
+        .filter(|export| export.reach == ExportTestReach::MockedOnly)
+    {
+        reach.reach = ExportTestReach::MockedOnly;
+        tests.extend(export.tests.iter().cloned());
+        mocked_targets.extend(export.mocked_targets.iter().cloned());
+    }
+    reach.tests = tests.into_iter().collect();
+    reach.mocked_targets = mocked_targets.into_iter().collect();
+    reach
+}
+
+/// The files of a `mocked-only` class. The other classes list no files.
+fn mocked_only_files(reach: ExportTestReach, files: &[String]) -> Vec<String> {
+    if reach == ExportTestReach::MockedOnly {
+        files.to_vec()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Generated code, by the same path and header rule that similar-code

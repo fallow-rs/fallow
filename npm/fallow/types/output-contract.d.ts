@@ -19818,6 +19818,39 @@ static_mutant?: boolean
  * The duration of the deciding run.
  */
 duration_ms?: (number | null)
+/**
+ * How tests reach the code of the mutant in the module graph. Only a
+ * `no_coverage` mutant has this field.
+ */
+test_reach?: (MutantTestReach | null)
+}
+/**
+ * How tests reach the code of one mutant in the module graph. The class
+ * gives a static reason why no test covers the mutant.
+ *
+ * A mutant in the top-level statement that declares a value export gets the
+ * class of that export. A mutant outside each such statement gets the class
+ * of its file: `none-file` when no test loads the file, `mocked-only` when no
+ * test loads the file and a mock explains an export of the file, and `none`
+ * when a test loads the file.
+ */
+export interface MutantTestReach {
+reach: TestReachClass
+/**
+ * The export whose declaration holds the mutant. Absent for a mutant
+ * outside each value export declaration.
+ */
+export_name?: (string | null)
+/**
+ * For `mocked-only`: the test files whose references a mock removed,
+ * sorted.
+ */
+tests?: string[]
+/**
+ * For `mocked-only`: the mocked modules on the reference paths, sorted.
+ * A mocked module can be a barrel in front of the file of the mutant.
+ */
+mocked_targets?: string[]
 }
 /**
  * The results of the mutants of one function.
@@ -20136,6 +20169,11 @@ disposition: MutationPlanDisposition
  * The static rule of a `pruned` mutant, kebab-case.
  */
 prune_reason?: (string | null)
+/**
+ * How tests reach the code of the mutant in the module graph. Only a
+ * `no_coverage` mutant has this field.
+ */
+test_reach?: (MutantTestReach | null)
 }
 /**
  * The envelope of `fallow mutation inspect`. It runs no user code.

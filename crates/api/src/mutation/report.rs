@@ -2,12 +2,13 @@
 
 use std::collections::BTreeMap;
 
+use fallow_engine::module_graph::ExportTestReach;
 use fallow_engine::mutation::{MutantDisposition, MutationPlan, PlannedMutant, PruneReason};
 use fallow_output::{
-    MutantLocation, MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
-    MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
+    MutantLocation, MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure,
+    MutationCompletion, MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
     MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationRunIssue,
-    MutationSkippedFile, MutationStatusCounts, MutationSummary,
+    MutationSkippedFile, MutationStatusCounts, MutationSummary, TestReachClass,
 };
 use fallow_types::envelope::ToolVersion;
 use rustc_hash::FxHashSet;
@@ -50,6 +51,23 @@ fn prune_reason(mutant: &PlannedMutant) -> Option<String> {
     }
 }
 
+/// The public test reach of a plan mutant.
+fn test_reach(mutant: &PlannedMutant) -> Option<MutantTestReach> {
+    let reach = mutant.test_reach.as_ref()?;
+    Some(MutantTestReach {
+        reach: match reach.reach {
+            ExportTestReach::Direct => TestReachClass::Direct,
+            ExportTestReach::Transitive => TestReachClass::Transitive,
+            ExportTestReach::MockedOnly => TestReachClass::MockedOnly,
+            ExportTestReach::None => TestReachClass::None,
+            ExportTestReach::NoneFile => TestReachClass::NoneFile,
+        },
+        export_name: reach.export_name.clone(),
+        tests: reach.tests.clone(),
+        mocked_targets: reach.mocked_targets.clone(),
+    })
+}
+
 /// The skipped files of a plan.
 pub fn skipped_files(plan: &MutationPlan) -> Vec<MutationSkippedFile> {
     plan.skipped_files
@@ -74,6 +92,9 @@ pub fn plan_mutants(plan: &MutationPlan) -> Vec<MutationPlanMutant> {
                 MutantDisposition::Pruned(_) => MutationPlanDisposition::Pruned,
             },
             prune_reason: prune_reason(mutant),
+            test_reach: (mutant.disposition == MutantDisposition::NoCoverage)
+                .then(|| test_reach(mutant))
+                .flatten(),
         })
         .collect()
 }
@@ -108,54 +129,61 @@ pub fn plan_files(plan: &MutationPlan) -> Vec<MutationPlanFile> {
 /// outcome of a planned mutant. A planned mutant with no outcome is
 /// `pending`. A pending mutant that the dry run never covered is
 /// `no_coverage`. A statically `no_coverage` mutant with an outcome is a static
-/// map miss, and the outcome of the dry-run map wins.
+/// map miss, and the outcome of the dry-run map wins. Each `no_coverage`
+/// result gets the test reach of its plan mutant.
 pub fn mutant_results(plan: &MutationPlan, outcome: Option<&ScheduleOutcome>) -> Vec<MutantResult> {
     plan.mutants
         .iter()
         .map(|mutant| {
-            let base = MutantResult {
-                location: location(mutant),
-                status: MutantStatus::Pending,
-                prune_reason: prune_reason(mutant),
-                killed_by: None,
-                covering_tests: Vec::new(),
-                static_mutant: false,
-                duration_ms: None,
-            };
-            let scheduled =
-                outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
-            match (mutant.disposition, scheduled) {
-                (MutantDisposition::Pruned(_), _) => MutantResult {
-                    status: MutantStatus::Pruned,
-                    ..base
-                },
-                (MutantDisposition::Planned | MutantDisposition::NoCoverage, Some(result)) => {
-                    MutantResult {
-                        status: result.status,
-                        killed_by: result.killed_by.clone(),
-                        covering_tests: result.covering_tests.clone(),
-                        static_mutant: result.static_mutant,
-                        duration_ms: result.duration_ms,
-                        ..base
-                    }
-                }
-                (MutantDisposition::NoCoverage, None) => MutantResult {
-                    status: MutantStatus::NoCoverage,
-                    ..base
-                },
-                (MutantDisposition::Pending, Some(result))
-                    if result.status == MutantStatus::NoCoverage =>
-                {
-                    MutantResult {
-                        status: MutantStatus::NoCoverage,
-                        static_mutant: result.static_mutant,
-                        ..base
-                    }
-                }
-                (MutantDisposition::Planned | MutantDisposition::Pending, _) => base,
+            let mut result = mutant_result(mutant, outcome);
+            if result.status == MutantStatus::NoCoverage {
+                result.test_reach = test_reach(mutant);
             }
+            result
         })
         .collect()
+}
+
+fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> MutantResult {
+    let base = MutantResult {
+        location: location(mutant),
+        status: MutantStatus::Pending,
+        prune_reason: prune_reason(mutant),
+        killed_by: None,
+        covering_tests: Vec::new(),
+        static_mutant: false,
+        duration_ms: None,
+        test_reach: None,
+    };
+    let scheduled = outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
+    match (mutant.disposition, scheduled) {
+        (MutantDisposition::Pruned(_), _) => MutantResult {
+            status: MutantStatus::Pruned,
+            ..base
+        },
+        (MutantDisposition::Planned | MutantDisposition::NoCoverage, Some(result)) => {
+            MutantResult {
+                status: result.status,
+                killed_by: result.killed_by.clone(),
+                covering_tests: result.covering_tests.clone(),
+                static_mutant: result.static_mutant,
+                duration_ms: result.duration_ms,
+                ..base
+            }
+        }
+        (MutantDisposition::NoCoverage, None) => MutantResult {
+            status: MutantStatus::NoCoverage,
+            ..base
+        },
+        (MutantDisposition::Pending, Some(result)) if result.status == MutantStatus::NoCoverage => {
+            MutantResult {
+                status: MutantStatus::NoCoverage,
+                static_mutant: result.static_mutant,
+                ..base
+            }
+        }
+        (MutantDisposition::Planned | MutantDisposition::Pending, _) => base,
+    }
 }
 
 /// The totals of `results`.
@@ -360,6 +388,12 @@ mod tests {
             rank,
             disposition,
             function,
+            test_reach: Some(fallow_engine::mutation::MutantTestReach {
+                reach: ExportTestReach::MockedOnly,
+                export_name: Some("add".to_owned()),
+                tests: vec!["test/a.test.ts".to_owned()],
+                mocked_targets: vec!["src/a.ts".to_owned()],
+            }),
         }
     }
 
@@ -443,6 +477,61 @@ mod tests {
         );
         let summary = summary(&results);
         assert_eq!(summary.coverage, Some(2.0 / 3.0));
+    }
+
+    #[test]
+    fn only_a_no_coverage_mutant_carries_its_test_reach() {
+        let plan = plan(
+            vec![
+                planned("m1", Some(1), MutantDisposition::Planned, None),
+                planned("m2", Some(2), MutantDisposition::Pending, None),
+                planned("m3", None, MutantDisposition::NoCoverage, None),
+                planned("m4", Some(3), MutantDisposition::Pending, None),
+            ],
+            2,
+        );
+        let mut outcome = outcome(&[
+            ("m1", MutantStatus::Killed),
+            ("m2", MutantStatus::NoCoverage),
+        ]);
+        if let Some(result) = outcome.results.get_mut("m2") {
+            result.covering_tests.clear();
+        }
+        let reach = |results: &[MutantResult]| -> Vec<(MutantStatus, Option<TestReachClass>)> {
+            results
+                .iter()
+                .map(|result| {
+                    (
+                        result.status,
+                        result.test_reach.as_ref().map(|reach| reach.reach),
+                    )
+                })
+                .collect()
+        };
+        let results = mutant_results(&plan, Some(&outcome));
+        let mocked = Some(TestReachClass::MockedOnly);
+        assert_eq!(
+            reach(&results),
+            vec![
+                (MutantStatus::Killed, None),
+                (MutantStatus::NoCoverage, mocked),
+                (MutantStatus::NoCoverage, mocked),
+                (MutantStatus::Pending, None),
+            ]
+        );
+        let entry = results[2].test_reach.as_ref().expect("a test reach");
+        assert_eq!(entry.export_name.as_deref(), Some("add"));
+        assert_eq!(entry.mocked_targets, vec!["src/a.ts"]);
+        let value = serde_json::to_value(&results[2]).expect("serializes");
+        assert_eq!(value["test_reach"]["reach"], "mocked-only");
+        assert!(serde_json::to_value(&results[0]).expect("serializes")["test_reach"].is_null());
+
+        let entries = plan_mutants(&plan);
+        let plan_reach: Vec<Option<TestReachClass>> = entries
+            .iter()
+            .map(|entry| entry.test_reach.as_ref().map(|reach| reach.reach))
+            .collect();
+        assert_eq!(plan_reach, vec![None, None, mocked, None]);
     }
 
     #[test]

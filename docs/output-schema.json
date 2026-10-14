@@ -33176,6 +33176,17 @@
             "null"
           ],
           "description": "The duration of the deciding run."
+        },
+        "test_reach": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantTestReach"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How tests reach the code of the mutant in the module graph. Only a\n`no_coverage` mutant has this field."
         }
       },
       "required": [
@@ -33631,6 +33642,17 @@
             "null"
           ],
           "description": "The static rule of a `pruned` mutant, kebab-case."
+        },
+        "test_reach": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantTestReach"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How tests reach the code of the mutant in the module graph. Only a\n`no_coverage` mutant has this field."
         }
       },
       "required": [
@@ -33759,6 +33781,40 @@
         "mutated_lines"
       ],
       "description": "The code of one mutant, from the current file."
+    },
+    "MutantTestReach": {
+      "type": "object",
+      "properties": {
+        "reach": {
+          "description": "The reach class. The same open set as the test reach of `audit`.",
+          "$ref": "#/definitions/TestReachClass"
+        },
+        "export_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The export whose declaration holds the mutant. Absent for a mutant\noutside each value export declaration."
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "For `mocked-only`: the test files whose references a mock removed,\nsorted."
+        },
+        "mocked_targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "For `mocked-only`: the mocked modules on the reference paths, sorted.\nA mocked module can be a barrel in front of the file of the mutant."
+        }
+      },
+      "required": [
+        "reach"
+      ],
+      "description": "How tests reach the code of one mutant in the module graph. The class\ngives a static reason why no test covers the mutant.\n\nA mutant in the top-level statement that declares a value export gets the\nclass of that export. A mutant outside each such statement gets the class\nof its file: `none-file` when no test loads the file, `mocked-only` when no\ntest loads the file and a mock explains an export of the file, and `none`\nwhen a test loads the file."
     }
   }
 }

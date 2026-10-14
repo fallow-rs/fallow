@@ -4,12 +4,12 @@ use std::time::Duration;
 use fallow_api::MutationRunScope;
 use fallow_config::{MutationConfig, MutationOperatorName, OutputFormat};
 use fallow_output::{
-    MutantLocation, MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
-    MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
+    MutantLocation, MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure,
+    MutationCompletion, MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
     MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationPlanOutput,
     MutationPlanSchemaVersion, MutationReport, MutationSchemaVersion, MutationScopeKind,
     MutationScopeOutput, MutationStatusCounts, MutationSummary, MutationTimings,
-    MutationWorktreeCheck,
+    MutationWorktreeCheck, TestReachClass,
 };
 use fallow_types::envelope::{ElapsedMs, ToolVersion};
 
@@ -237,6 +237,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         },
         static_mutant: false,
         duration_ms: Some(3),
+        test_reach: None,
     }
 }
 
@@ -709,12 +710,98 @@ fn inspect_marks_each_line_of_a_multi_line_mutant() {
     );
 }
 
+fn reached(mut mutant: MutantResult, reach: TestReachClass) -> MutantResult {
+    mutant.test_reach = Some(MutantTestReach {
+        reach,
+        export_name: None,
+        tests: Vec::new(),
+        mocked_targets: Vec::new(),
+    });
+    mutant
+}
+
+#[test]
+fn each_no_coverage_file_line_counts_the_test_reach_classes() {
+    let no_coverage = |id: &str, file: &str| mutant(id, file, 5, MutantStatus::NoCoverage);
+    let mutants = vec![
+        reached(no_coverage("n1", "src/a.ts"), TestReachClass::NoneFile),
+        reached(no_coverage("n2", "src/a.ts"), TestReachClass::MockedOnly),
+        reached(no_coverage("n3", "src/a.ts"), TestReachClass::MockedOnly),
+        reached(no_coverage("n4", "src/b.ts"), TestReachClass::None),
+        no_coverage("n5", "src/c.ts"),
+    ];
+    let text = run_text(&report(mutants, Vec::new()), &OPTIONS);
+    let section: Vec<&str> = text
+        .split("No coverage (5)")
+        .nth(1)
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+        .take(3)
+        .collect();
+    assert_eq!(
+        section,
+        vec![
+            "  src/a.ts  3 mutants  test reach: 2 mocked-only, 1 none-file",
+            "  src/b.ts  1 mutant  test reach: 1 none",
+            "  src/c.ts  1 mutant",
+        ],
+        "{text}"
+    );
+}
+
+#[test]
+fn human_plan_counts_the_no_coverage_mutants_by_test_reach() {
+    let entry = |id: &str, reach: Option<TestReachClass>| MutationPlanMutant {
+        location: mutant(id, "src/a.ts", 1, MutantStatus::Pending).location,
+        disposition: MutationPlanDisposition::NoCoverage,
+        prune_reason: None,
+        test_reach: reach.map(|reach| MutantTestReach {
+            reach,
+            export_name: None,
+            tests: Vec::new(),
+            mocked_targets: Vec::new(),
+        }),
+    };
+    let plan = MutationPlanOutput {
+        schema_version: MutationPlanSchemaVersion::V1,
+        version: ToolVersion("0.0.0".to_owned()),
+        elapsed_ms: ElapsedMs(0),
+        scope: MutationScopeOutput {
+            kind: MutationScopeKind::All,
+            base_ref: None,
+        },
+        counts: MutationPlanCountsOutput {
+            total: 3,
+            no_coverage: 3,
+            ..MutationPlanCountsOutput::default()
+        },
+        mutants: vec![
+            entry("m1", Some(TestReachClass::NoneFile)),
+            entry("m2", Some(TestReachClass::MockedOnly)),
+            entry("m3", Some(TestReachClass::MockedOnly)),
+        ],
+        files: Vec::new(),
+        test_files: Vec::new(),
+        no_test_files: false,
+        framework_config_checked: true,
+        skipped_files: Vec::new(),
+        unmatched_paths: Vec::new(),
+    };
+    let text = plain(&render_plan(&plan));
+    assert!(
+        text.contains("No coverage by test reach: 2 mocked-only, 1 none-file\n"),
+        "{text}"
+    );
+}
+
 #[test]
 fn human_plan_lists_planned_mutants_and_prune_reasons() {
     let planned = |id: &str, rank: u32, disposition, reason: Option<&str>| MutationPlanMutant {
         location: mutant(id, "src/a.ts", rank, MutantStatus::Pending).location,
         disposition,
         prune_reason: reason.map(str::to_owned),
+        test_reach: None,
     };
     let plan = MutationPlanOutput {
         schema_version: MutationPlanSchemaVersion::V1,
@@ -1148,6 +1235,7 @@ fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
                     .location,
                 disposition: MutationPlanDisposition::Planned,
                 prune_reason: None,
+                test_reach: None,
             })
             .collect(),
         files: Vec::new(),
