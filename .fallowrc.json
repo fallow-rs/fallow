@@ -18,10 +18,6 @@
   ],
   "ignoreDependencies": [
     "@fallow-cli/fallow-node-*",
-    "dpdm",
-    "jscpd",
-    "knip",
-    "madge",
     "vitest4",
     "zod"
   ],
