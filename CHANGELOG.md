@@ -489,6 +489,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loader import with no local shadowing. The extraction and graph caches rebuild
   so cached results use the corrected import facts.
 
+- **An electron-vite renderer without an `input` keeps its files.**
+  electron-vite builds `src/renderer/index.html` when the `renderer` section
+  of `electron.vite.config.*` declares no `build.rollupOptions.input`. Fallow
+  did not use this default entry, so it reported every renderer file as
+  unused. Now the default HTML entry and the files that it loads are
+  reachable.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

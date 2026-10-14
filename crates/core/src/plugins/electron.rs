@@ -6,6 +6,7 @@
 //! `src/preload` is an entry. With an electron-vite config, the plugin reads the
 //! entries that electron-vite builds: the declared `build.rollupOptions.input`
 //! or `build.lib.entry`, else the electron-vite default `src/<section>/index`.
+//! A renderer section without an input gets the default `src/renderer/index.html`.
 
 use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind};
 
@@ -50,6 +51,10 @@ const VITE_SECTIONS: &[&str] = &["main", "preload", "renderer"];
 /// default entry when the section declares none.
 const NODE_SECTIONS: &[&str] = &["main", "preload"];
 
+/// The renderer input that electron-vite builds, relative to the config root,
+/// when the renderer section declares none.
+const RENDERER_DEFAULT_ENTRY: &str = "src/renderer/index.html";
+
 /// Property paths inside a section that declare the section entries.
 const SECTION_ENTRY_PATHS: &[&[&str]] = &[
     &["build", "rollupOptions", "input"],
@@ -83,6 +88,16 @@ fn classify_node_sections(
                 .map(|&section| (section, classify_section_object(config, section)))
                 .collect(),
         )
+    })
+}
+
+fn classify_renderer_section(
+    source: &str,
+    config_path: &std::path::Path,
+) -> Option<SectionEntries> {
+    config_parser::extract_from_source(source, config_path, |program| {
+        config_parser::find_config_object(program)
+            .map(|config| classify_section_object(config, "renderer"))
     })
 }
 
@@ -241,6 +256,14 @@ define_plugin! {
             );
             push_config_entries(&mut result, inputs, config_path, root);
         }
+        if classify_renderer_section(source, config_path) == Some(SectionEntries::Default) {
+            push_config_entries(
+                &mut result,
+                vec![RENDERER_DEFAULT_ENTRY.to_string()],
+                config_path,
+                root,
+            );
+        }
 
         result.referenced_dependencies.extend(super::react_compiler::extract_dependencies(
             source,
@@ -360,20 +383,77 @@ mod tests {
     }
 
     #[test]
-    fn resolve_config_empty_or_malformed_config_yields_no_entries() {
+    fn resolve_config_empty_config_yields_no_entries() {
         assert!(
             ElectronPlugin
                 .resolve_config(&config_path(), "", Path::new("/project"))
                 .entry_patterns
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn resolve_config_renderer_without_input_uses_electron_vite_default_entry() {
         let source = r"export default { renderer: { build: {} } };";
-        assert!(
-            ElectronPlugin
-                .resolve_config(&config_path(), source, Path::new("/project"))
-                .entry_patterns
-                .is_empty()
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert_eq!(
+            entry_strings(&result),
+            vec![RENDERER_DEFAULT_ENTRY.to_string()]
         );
+    }
+
+    #[test]
+    fn resolve_config_renderer_default_entry_sits_beside_node_defaults() {
+        let source = r#"
+            import { resolve } from "node:path";
+            import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+            import react from "@vitejs/plugin-react";
+
+            export default defineConfig({
+                main: { plugins: [externalizeDepsPlugin()] },
+                preload: { plugins: [externalizeDepsPlugin()] },
+                renderer: {
+                    resolve: { alias: { "@": resolve(__dirname, "src/renderer/src") } },
+                    plugins: [react()],
+                },
+            });
+        "#;
+        let result = ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+        assert!(result.replace_entry_patterns);
+        assert_eq!(
+            entry_strings(&result),
+            vec![
+                MAIN_DEFAULT.to_string(),
+                PRELOAD_DEFAULT.to_string(),
+                RENDERER_DEFAULT_ENTRY.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_renderer_default_entry_keeps_monorepo_prefix() {
+        let source = "export default { renderer: {} };";
+        let result = ElectronPlugin.resolve_config(
+            Path::new("/project/apps/desktop/electron.vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(
+            entry_strings(&result),
+            vec![format!("apps/desktop/{RENDERER_DEFAULT_ENTRY}")]
+        );
+    }
+
+    #[test]
+    fn resolve_config_unreadable_renderer_adds_no_default_entry() {
+        for source in [
+            "import shared from './shared';\nexport default { renderer: shared };",
+            "import shared from './shared';\nexport default { renderer: { ...shared } };",
+        ] {
+            let result =
+                ElectronPlugin.resolve_config(&config_path(), source, Path::new("/project"));
+            assert!(result.entry_patterns.is_empty(), "source: {source}");
+        }
     }
 
     #[test]

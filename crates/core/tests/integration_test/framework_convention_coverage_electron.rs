@@ -62,6 +62,27 @@ fn electron_vite_empty_sections_use_default_entries_only() {
     );
 }
 
+#[test]
+fn electron_vite_renderer_without_input_uses_default_html_entry() {
+    let root = fixture_path("electron-vite-renderer-default-entry");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = collect_unused_files(&root, &results);
+    for reachable in ["src/renderer/main.ts", "src/renderer/view.ts"] {
+        assert!(
+            !unused_files.iter().any(|path| path == reachable),
+            "{reachable} should be reachable via src/renderer/index.html, unused files: {unused_files:?}"
+        );
+    }
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path == "src/renderer/orphan.ts"),
+        "orphan renderer file must remain reportable, unused files: {unused_files:?}"
+    );
+}
+
 fn assert_declared_main_entry_replaces_default(fixture: &str) {
     let root = fixture_path(fixture);
     let config = create_config(root.clone());
