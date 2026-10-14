@@ -1292,3 +1292,20 @@ test("parseGitHead and parseGitAncestor read the git results", () => {
     error: "fatal: not a commit",
   });
 });
+
+test("--head waits until the pull request reports the pushed commit", fakeGhOptions, () => {
+  const oldHead = "b".repeat(40);
+  const newHead = "c".repeat(40);
+  const fixture = {
+    selected: [],
+    rollups: [
+      { headRefOid: oldHead, statusCheckRollup: [checkRun("CI", "COMPLETED", "FAILURE")] },
+      { headRefOid: newHead, statusCheckRollup: [checkRun("CI", "COMPLETED", "SUCCESS")] },
+    ],
+  };
+  const stale = runWithFakeGh(fixture);
+  assert.equal(stale.status, 1, "without --head, the rollup of the old head decides");
+  const result = runWithFakeGh(fixture, ["--head", newHead]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(rollupReads(result.calls).length, 2);
+});

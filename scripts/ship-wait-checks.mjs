@@ -78,6 +78,9 @@ Options:
   --min-checks <count>    The count of checks that must exist (default: 1).
                           Use the check count of a recent complete run.
   --required              Wait for the required checks only (--pr only).
+  --head <sha>            Wait until the pull request head is this full
+                          40-character SHA (--pr only). Right after a push,
+                          GitHub can still report the checks of the old head.
   --follow-main           When the only failures are cancelled runs, wait
                           for the newest commit of ${FOLLOW_REF} instead,
                           if it contains the given commit (--commit only).
@@ -704,11 +707,44 @@ const ghRunsReader =
     return parseGhRuns(spawnSync("gh", args, { encoding: "utf8" }));
   };
 
+/** The `headRefOid` of `gh pr view` JSON, or null when it is unreadable. */
+const reportedHead = (stdout) => {
+  try {
+    return JSON.parse(stdout)?.headRefOid ?? null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * True when a successful `gh pr view` result names another head than `head`.
+ * A failed or unreadable result is not stale: the rollup parser reports it.
+ */
+const isStaleHead = ({ status, stdout }, head) => {
+  const reported = status === 0 ? reportedHead(stdout) : null;
+  return typeof reported === "string" && reported !== head;
+};
+
+/** The pending check that keeps the wait going until GitHub shows the push. */
+const HEAD_UPDATE_PENDING = {
+  ok: true,
+  checks: [{ name: "pull request head update", bucket: "pending" }],
+};
+
+/** Read the rollup of the pull request head, or a pending check for a stale head. */
+const readHeadRollup = (args, { head, readRun, names }) => {
+  const view = spawnSync("gh", args, { encoding: "utf8" });
+  if (head !== null && isStaleHead(view, head)) {
+    return HEAD_UPDATE_PENDING;
+  }
+  return parseGhPrRollup(view, { readRun, names });
+};
+
 /** Read current-head states; `gh pr checks --required` selects names only. */
-const ghChecksReader = ({ pr, repo, required }) => {
+const ghChecksReader = ({ pr, repo, required, head = null }) => {
   const readRun = ghRunMetadataReader();
   return () => {
-    const args = ["pr", "view", pr, "--json", "statusCheckRollup"];
+    const args = ["pr", "view", pr, "--json", "statusCheckRollup,headRefOid"];
     if (repo !== null) {
       args.push("--repo", repo);
     }
@@ -733,10 +769,7 @@ const ghChecksReader = ({ pr, repo, required }) => {
       }
     }
     const names = selected === null ? null : new Set(selected.checks.map(({ name }) => name));
-    const current = parseGhPrRollup(spawnSync("gh", args, { encoding: "utf8" }), {
-      readRun,
-      names,
-    });
+    const current = readHeadRollup(args, { head, readRun, names });
     if (!current.ok || selected === null) {
       return current;
     }
@@ -758,12 +791,26 @@ const positiveInteger = (name, value) => {
   return Number(value);
 };
 
+/** Check `--head`: a full SHA, and only together with `--pr`. */
+const validateHead = ({ head, pr }) => {
+  if (head === undefined) {
+    return;
+  }
+  if (pr === undefined) {
+    throw new Error("--head works only with --pr.");
+  }
+  if (!FULL_SHA_PATTERN.test(head)) {
+    throw new Error(`--head must be a full 40-character SHA, not "${head}".`);
+  }
+};
+
 const parseOptions = (argv) => {
   const { values } = parseArgs({
     args: argv,
     options: {
       pr: { type: "string" },
       commit: { type: "string" },
+      head: { type: "string" },
       repo: { type: "string" },
       "min-checks": { type: "string", default: "1" },
       required: { type: "boolean", default: false },
@@ -799,6 +846,7 @@ const parseOptions = (argv) => {
       throw new Error("--required works only with --pr.");
     }
   }
+  validateHead(values);
   const pr = values.pr === undefined ? null : String(positiveInteger("--pr", values.pr));
   return {
     help: false,
@@ -806,6 +854,8 @@ const parseOptions = (argv) => {
     commit: values.commit ?? null,
     label: pr === null ? commitLabel(values.commit) : `PR ${pr}`,
     repo: values.repo ?? null,
+    // Absent stays undefined, and `ghChecksReader` defaults it to null.
+    head: values.head,
     required: values.required,
     followMain: values["follow-main"],
     minChecks: positiveInteger("--min-checks", values["min-checks"]),

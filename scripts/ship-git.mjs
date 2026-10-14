@@ -399,6 +399,8 @@ const pushIfAsked = (cwd, log, { push, remote, branch, base, oldTip, newTip, top
     env: { ...pushSshEnv(process.env, configured), ...pushCargoEnv(process.env, top) },
   });
   log(`Pushed ${branch} with a lease on ${oldTip.slice(0, 12)}.`);
+  // Right after a push, GitHub can still report the checks of the old head.
+  log(`Wait for the checks of this push with ship-wait-checks.mjs --head ${newTip}.`);
 };
 
 /**

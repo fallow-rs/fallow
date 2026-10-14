@@ -625,6 +625,7 @@ test("--push updates the branch with a lease on the old tip", (t) => {
   );
   repo.git("fetch", "--quiet", "origin");
   assert.equal(repo.git("rev-parse", "origin/feat"), newTipOf(result));
+  assert.match(result.output, new RegExp(`--head ${newTipOf(result)}\\.`, "u"));
 });
 
 test("--push fails when the remote branch moved after the fetch", (t) => {
