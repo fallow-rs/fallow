@@ -208,6 +208,26 @@ tests detect the mutant.
 - A `killed` result after a retry reports the duration of the retry. Each
   other status keeps the duration of the first run.
 
+### Measure the flaky rate
+
+`scripts/mutation-flaky-rate.mjs` compares the saved reports of repeated runs
+with the same scope:
+
+```bash
+fallow mutation --all --root <project>
+cp <project>/.fallow/mutation/last-report.json run-1.json
+# Repeat for run-2.json and run-3.json, then:
+node scripts/mutation-flaky-rate.mjs run-1.json run-2.json run-3.json
+```
+
+- `compared` counts the mutants that each run executed.
+- `unstable` counts the compared mutants with a different status between runs
+  or a `flaky` status in one run.
+- `score_flips` counts the unstable mutants that one run detected and another
+  run did not. `timeout_flips` counts the score flips with a `timeout` in one
+  run.
+- Each count has a rate over `compared`.
+
 ## Test reach of no-coverage mutants
 
 Each `no_coverage` mutant has a `test_reach` object in the run report and in
@@ -355,7 +375,7 @@ The key hashes these parts:
 - the mutant id, and the content of the mutated source file;
 - the covering test ids;
 - the content of the covering test files, and of the files that they reach
-  through static imports in the module graph (`MutationPlan::test_reach`).
+  through static imports in the module graph (`MutationPlan::test_file_reach`).
   The run computes one digest for each test file and its reach, and each
   mutant key combines the digests of its covering test files;
 - the content of the runner setup files (Vitest `setupFiles`) and of the
