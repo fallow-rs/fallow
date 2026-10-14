@@ -77,6 +77,39 @@ const RUN_FILES = {
   "files/src/unused.ts": INSTRUMENTED_UNUSED,
 };
 
+/** The whole component file with only the script block instrumented. */
+const INSTRUMENTED_BADGE = `<template>
+  <span>{{ label(count) }}</span>
+</template>
+
+<script>
+// @ts-nocheck
+${PRELUDE}
+export const label = (count) => ((__fallow_m_a("m10") ? (count >= 1) : (__fallow_m_c("m10"), (count > 1))) ? "many" : "one");
+</script>
+
+<style>
+.badge {
+  color: red;
+}
+</style>
+`;
+
+const PATH_MAP = {
+  "src/faults.ts": "files/src/faults.ts",
+  "src/math.ts": "files/src/math.ts",
+  "src/unused.ts": "files/src/unused.ts",
+};
+
+/** The run files and the path map, with the component file when asked. */
+const fixtureFiles = (components) =>
+  components
+    ? {
+        runFiles: { ...RUN_FILES, "files/src/Badge.vue": INSTRUMENTED_BADGE },
+        pathMap: { ...PATH_MAP, "src/Badge.vue": "files/src/Badge.vue" },
+      }
+    : { runFiles: RUN_FILES, pathMap: PATH_MAP };
+
 const write = (root, relativePath, text) => {
   const path = join(root, relativePath);
   mkdirSync(dirname(path), { recursive: true });
@@ -90,9 +123,10 @@ const write = (root, relativePath, text) => {
  * macOS, which also covers the real-path comparison of the overlay.
  *
  * `packageName` selects the installed Vitest major. The project sees it as
- * `node_modules/vitest`.
+ * `node_modules/vitest`. `components` adds the instrumented component file
+ * `src/Badge.vue` to the run directory and the path map.
  */
-export const createFixtureProject = ({ packageName = "vitest" } = {}) => {
+export const createFixtureProject = ({ packageName = "vitest", components = false } = {}) => {
   const workspace = mkdtempSync(join(tmpdir(), "fallow-mutation-vitest-"));
   const root = join(workspace, "project");
   const runDir = join(workspace, "run");
@@ -106,18 +140,15 @@ export const createFixtureProject = ({ packageName = "vitest" } = {}) => {
     join(root, "node_modules", "vitest"),
     "dir",
   );
-  for (const [path, text] of Object.entries(RUN_FILES)) write(runDir, path, text);
+  const { runFiles, pathMap } = fixtureFiles(components);
+  for (const [path, text] of Object.entries(runFiles)) write(runDir, path, text);
   return {
     root,
     runDir,
-    pathMap: {
-      "src/faults.ts": "files/src/faults.ts",
-      "src/math.ts": "files/src/math.ts",
-      "src/unused.ts": "files/src/unused.ts",
-    },
+    pathMap,
     /** Gives each mutant id in the run directory the suffix, for example `m1` to `m1b`. */
     renameMutants: (suffix) => {
-      for (const path of Object.keys(RUN_FILES).map((file) => join(runDir, file))) {
+      for (const path of Object.keys(runFiles).map((file) => join(runDir, file))) {
         writeFileSync(path, readFileSync(path, "utf8").replace(/"(m\d+)"/gu, `"$1${suffix}"`));
       }
     },

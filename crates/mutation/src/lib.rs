@@ -14,13 +14,16 @@
 //! that is a comparison or a logical expression, because the relational and
 //! logical operator mutants of that test cover it.
 
+mod blocks;
 mod collect;
 mod emit;
 mod id;
 mod operator;
+mod regex;
 
 use serde::Serialize;
 
+pub use blocks::{ScriptBlock, ScriptRole, instrument_blocks};
 pub use operator::Operator;
 
 /// The language of a source text.
@@ -256,11 +259,42 @@ pub fn instrument(
     source_type: SourceKind,
     options: &MutationOptions,
 ) -> Result<Instrumented, MutationError> {
+    let mut seen_ids = std::collections::BTreeSet::new();
+    let text = TextInput {
+        source,
+        path,
+        kind: source_type,
+        role: None,
+        prelude: true,
+    };
+    instrument_text(&text, options, &mut seen_ids)
+}
+
+/// One source text for [`instrument_text`]: a whole file or one script block.
+pub(crate) struct TextInput<'s> {
+    pub(crate) source: &'s str,
+    pub(crate) path: &'s str,
+    pub(crate) kind: SourceKind,
+    /// The role of a script block, or `None` for a whole file.
+    pub(crate) role: Option<ScriptRole>,
+    /// True when the text gets the prelude.
+    pub(crate) prelude: bool,
+}
+
+/// Instruments one text. The spans, lines and columns of the result are
+/// relative to the text. `seen_ids` holds the ids of earlier texts of the
+/// same file, so that each id stays unique in the file.
+pub(crate) fn instrument_text(
+    input: &TextInput<'_>,
+    options: &MutationOptions,
+    seen_ids: &mut std::collections::BTreeSet<MutantId>,
+) -> Result<Instrumented, MutationError> {
+    let source = input.source;
     if u32::try_from(source.len()).is_err() {
         return Err(MutationError::TooLarge);
     }
     let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, source, source_type.source_type()).parse();
+    let parsed = oxc_parser::Parser::new(&allocator, source, input.kind.source_type()).parse();
     if parsed.fatal_error || parsed.diagnostics.has_errors() {
         let messages = parsed.diagnostics.iter().map(ToString::to_string).collect();
         return Err(MutationError::Parse { messages });
@@ -269,20 +303,26 @@ pub fn instrument(
         return Err(MutationError::ReservedName { name });
     }
     let collected = collect::collect(&parsed.program, source);
-    let insertions = header_insertions(&parsed.program, source);
+    let protected = input
+        .role
+        .map(|role| blocks::protected_spans(&parsed.program, role))
+        .unwrap_or_default();
+    let insertions = header_insertions(&parsed.program, source, input.prelude);
     let line_starts = line_starts(source);
 
     let mut mutants = Vec::new();
     let mut emit_sites = Vec::new();
-    let mut seen_ids = std::collections::BTreeSet::new();
     for site in collected.sites {
+        if protected.excludes(site.span) {
+            continue;
+        }
         let kept = select_candidates(source, &site, &collected.statement_starts, options);
         if kept.is_empty() {
             continue;
         }
         let mut emit_mutants = Vec::with_capacity(kept.len());
         for candidate in kept {
-            let id = unique_id(path, source, &site, &candidate, &mut seen_ids);
+            let id = unique_id(input.path, source, &site, &candidate, seen_ids);
             let (line, column) = line_column(&line_starts, candidate.region.0);
             emit_mutants.push(emit::EmitMutant {
                 id: id.0.clone(),
@@ -363,7 +403,13 @@ const TS_NOCHECK: &str = "// @ts-nocheck";
 /// A directive can share a line with the last leading comment. The line
 /// comment then ends with a newline, or the directive and the prelude become
 /// comment text.
-fn header_insertions(program: &oxc_ast::ast::Program<'_>, source: &str) -> Vec<emit::Insertion> {
+///
+/// A script block without the prelude gets only the comment.
+fn header_insertions(
+    program: &oxc_ast::ast::Program<'_>,
+    source: &str,
+    prelude: bool,
+) -> Vec<emit::Insertion> {
     let offset = leading_end(program, source);
     let line_break_follows = source
         .get(offset as usize..)
@@ -375,6 +421,12 @@ fn header_insertions(program: &oxc_ast::ast::Program<'_>, source: &str) -> Vec<e
     } else {
         format!("\n{TS_NOCHECK}\n")
     };
+    if !prelude {
+        return vec![emit::Insertion {
+            offset,
+            text: nocheck,
+        }];
+    }
     let Some(last) = program.directives.last() else {
         let text = if offset == 0 {
             format!("{nocheck}{PRELUDE}\n")

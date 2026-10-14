@@ -40,6 +40,87 @@ read-only next steps. It never writes a test and never proposes a code change.
   creates the file before Fallow starts, so the dirty-worktree check refuses
   the run. Use `-o` or the saved report instead.
 
+## Source files
+
+- JavaScript and TypeScript files (`.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`,
+  `.tsx`, `.mts`, `.cts`) are one program each.
+- In a Vue or Svelte component and in an Astro component, only the script
+  blocks get mutants: the Vue `<script>` and `<script setup>` blocks, the
+  Svelte instance and module scripts, and the Astro frontmatter. A block with
+  a `src` attribute has no inline code. The extract crate finds the blocks
+  (`fallow_extract::sfc::extract_sfc_scripts`,
+  `fallow_extract::astro::extract_astro_frontmatter`), so the plan uses the
+  same blocks as the analysis.
+- The instrumented copy of a component is the whole file with each script
+  block replaced. The template and the styles stay the same, so the framework
+  plugin of the project compiles the copy. The companion serves a component
+  copy in the Vite `load` hook, so a framework plugin with its own `pre`
+  `transform` hook also compiles the copy. A request with a query (a style or
+  a template block) is not served: the framework plugin makes it from the
+  component that it compiled.
+- Spans, lines, columns and diff ranges use the coordinates of the whole
+  file. A mutant id depends on the text of its function, not on the offset of
+  the block, so an edit of the template keeps the ids.
+- The prelude goes into each block with module scope (the Vue `<script>`, the
+  Svelte module script). When a component has no such block, each block gets
+  its own prelude.
+- The framework compiler moves some code out of the block scope, where the
+  prelude is not visible or where a switch is not valid. These positions give
+  no mutant:
+  - the arguments of `defineProps`, `defineEmits`, `defineModel`,
+    `defineOptions`, `defineSlots` and `withDefaults` in a Vue
+    `<script setup>` block, and the destructure defaults of a declaration
+    such as `const { size = 1 } = defineProps()`;
+  - an expression that holds a Svelte rune call (`$state`, `$derived`,
+    `$effect`, `$props`, `$bindable`, `$inspect`, `$host`). The rune
+    arguments still get mutants;
+  - an exported declaration in the Astro frontmatter.
+- Svelte module files (`.svelte.js`, `.svelte.ts`) can use runes. They are one
+  program each with the Svelte rune rule.
+- The script blocks of a component parse as one program for the side-effect
+  and framework-config rules. A sink in a component template does not run when
+  the module loads, so it does not prune the top-level mutants.
+
+## Operators
+
+| Operator | Change |
+|---|---|
+| `arithmetic-operator` | `+` and `-` swap, `*` and `/` swap, `%` becomes `*`, `+=` and `-=` swap |
+| `relational-operator` | the non-redundant relational subset |
+| `logical-operator` | `&&` and `\|\|` swap, `??` becomes `&&` |
+| `negate-condition` | a plain condition becomes `true` and `false` |
+| `unary-operator` | `!x` and `-x` become `x` |
+| `update-operator` | `++` and `--` swap |
+| `removed-call` | a call statement becomes a no-op |
+| `return-value` | `return expr` becomes `return undefined` |
+| `boolean-literal` | `true` and `false` swap |
+| `string-literal` | a string becomes empty, an empty string becomes `"fallow"` |
+| `optional-chaining` | `a?.b` becomes `a.b` |
+| `regex-literal` | one pattern token changes |
+
+The `regex-literal` operator gives one mutant for each of these tokens of a
+regular expression literal:
+
+- a `^` at the start of the pattern is removed;
+- a `$` at the end of the pattern is removed;
+- a character class is negated (`[a-z]` to `[^a-z]`, and the reverse). A
+  pattern with the `v` flag gives no negation;
+- a class escape gets the opposite case (`\d` to `\D`, and the same for `\w`
+  and `\s`).
+
+The flags stay the same, and an empty pattern becomes `(?:)`. The corpus for
+this operator is the JavaScript and TypeScript source files of six public
+projects (date-fns, zod, vue core, SvelteKit, reka-ui, runed), without tests.
+Each of its 7971 regex mutants compiled with `new RegExp`. Most literals give
+one mutant. Locale data with many patterns gives many: date-fns has 6723 regex
+mutants, 6555 of them in its locale files.
+
+No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
+to each operand of an arithmetic or relational expression. The same corpus has
+114119 mutants, and the operator adds 6473 mutants (5.7 %), 24 % of them on
+numeric literals. Each one is on an expression that already has an arithmetic
+or relational mutant, so it adds little test-strength signal for its run time.
+
 ## Safety boundary
 
 - Only `fallow mutation` without `--plan` runs code. Project config cannot
@@ -461,6 +542,7 @@ reads files only. It runs no test.
 | Part | Path |
 |---|---|
 | Mutant sites and instrumentation | `crates/mutation` |
+| Component script blocks | `crates/mutation/src/blocks.rs`, `crates/engine/src/mutation/layout.rs` |
 | Selection, test map, prune and rank | `crates/engine/src/mutation` |
 | Runner protocol, companion, scheduler, report, verdict join, survivor type check | `crates/api/src/mutation` |
 | Type check request and response | `crates/api/src/type_aware/mutant_typecheck.rs` |

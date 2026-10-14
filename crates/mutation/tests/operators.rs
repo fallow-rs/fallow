@@ -502,6 +502,46 @@ fn optional_chaining_skips_a_parenthesized_callee() {
 }
 
 #[test]
+fn regex_literal_changes_one_pattern_token() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x = /^a+$/;", &[("/^a+$/", "/a+$/"), ("/^a+$/", "/^a+/")]),
+        (
+            "x = /[a-z]\\d/gi;",
+            &[
+                ("/[a-z]\\d/gi", "/[^a-z]\\d/gi"),
+                ("/[a-z]\\d/gi", "/[a-z]\\D/gi"),
+            ],
+        ),
+        (
+            "x = /[^\\s]/;",
+            &[("/[^\\s]/", "/[\\s]/"), ("/[^\\s]/", "/[^\\S]/")],
+        ),
+        ("x = /\\W/u;", &[("/\\W/u", "/\\w/u")]),
+        ("x = /^/;", &[("/^/", "/(?:)/")]),
+        ("x = /a\\$/;", &[]),
+        ("x = /[$]/;", &[("/[$]/", "/[^$]/")]),
+        ("x = /a[b]c/;", &[("/a[b]c/", "/a[^b]c/")]),
+        ("x = /[\\d--x]/v;", &[("/[\\d--x]/v", "/[\\D--x]/v")]),
+        ("x = /abc/;", &[]),
+        ("console.log(/^a$/);", &[]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RegexLiteral),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn regex_literal_at_a_statement_start_stays_valid() {
+    let result = run("a();\n/^b/.test(c);", JS);
+    assert_eq!(pairs(&result, Operator::RegexLiteral).len(), 1);
+}
+
+#[test]
 fn operator_filter_keeps_only_allowed_operators() {
     let options = fallow_mutation::MutationOptions {
         operators: vec![Operator::BooleanLiteral],
@@ -529,6 +569,7 @@ fn operator_names_are_kebab_case() {
             "boolean-literal",
             "string-literal",
             "optional-chaining",
+            "regex-literal",
         ],
     );
     assert_eq!(

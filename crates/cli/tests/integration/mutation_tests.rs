@@ -59,6 +59,69 @@ fn plan_json_lists_unreached_mutants_and_runs_no_code() {
 }
 
 #[test]
+fn plan_mutates_the_script_blocks_of_vue_svelte_and_astro_components() {
+    let project = untested_project();
+    let root = project.path();
+    fs::write(
+        root.join("src/math.ts"),
+        "import Counter from './Counter.vue';\nimport Toggle from './Toggle.svelte';\nimport Page from './Page.astro';\nimport { total } from './total.svelte.ts';\nexport const parts = [Counter, Toggle, Page, total];\n",
+    )
+    .expect("math.ts");
+    fs::write(
+        root.join("src/Counter.vue"),
+        "<template>\n  <p>{{ count > 1 ? 'many' : 'one' }}</p>\n</template>\n<script setup lang=\"ts\">\nconst props = defineProps({ start: { type: Number, default: 1 + 1 } })\nconst count = props.start * 2\n</script>\n",
+    )
+    .expect("Counter.vue");
+    fs::write(
+        root.join("src/Toggle.svelte"),
+        "<script>\n  let on = $state(false);\n  function flip() {\n    on = !on;\n  }\n</script>\n<button onclick={flip}>{on ? 'on' : 'off'}</button>\n",
+    )
+    .expect("Toggle.svelte");
+    fs::write(
+        root.join("src/Page.astro"),
+        "---\nexport const prerender = true;\nconst title = Astro.props.title ?? 'Home';\n---\n<h1>{title}</h1>\n",
+    )
+    .expect("Page.astro");
+    fs::write(
+        root.join("src/total.svelte.ts"),
+        "export const total = $state.raw(1 + 1) || 0;\n",
+    )
+    .expect("total.svelte.ts");
+    commit_all(root, "components");
+
+    let (output, value) = json_mutation(root, &["--plan", "--all"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let mut mutants: Vec<String> = value["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .filter(|mutant| mutant["file"] != "src/math.ts")
+        .map(|mutant| {
+            format!(
+                "{}:{}:{} {}",
+                mutant["file"].as_str().unwrap_or_default(),
+                mutant["line"],
+                mutant["column"],
+                mutant["operator"].as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    mutants.sort();
+    assert_eq!(
+        mutants,
+        vec![
+            "src/Counter.vue:6:27 arithmetic-operator",
+            "src/Page.astro:3:33 logical-operator",
+            "src/Page.astro:3:36 string-literal",
+            "src/Toggle.svelte:2:19 boolean-literal",
+            "src/Toggle.svelte:4:10 unary-operator",
+            "src/total.svelte.ts:1:35 arithmetic-operator",
+        ],
+        "{value}"
+    );
+}
+
+#[test]
 fn plan_human_output_names_scope_counts_and_no_tests_in_one_line() {
     let project = untested_project();
     let output = mutation(project.path(), &["--plan", "--all", "--quiet"]);

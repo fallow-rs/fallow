@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use fallow_config::EffectKind;
-use fallow_mutation::{Instrumented, MutationError, MutationOptions, Operator, SourceKind};
+use fallow_mutation::{Instrumented, MutationError, MutationOptions, Operator};
 use fallow_security::ProvenanceBindings;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{FunctionComplexity, ModuleInfo, SinkSite, byte_offset_to_line_col};
@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sha2::{Digest, Sha256};
 
+use super::layout::Layout;
 use super::{
     FunctionFacts, MutantDisposition, MutantTestReach, MutationPlan, MutationPlanCounts,
     MutationPlanInputs, MutationPlanRequest, MutationScope, PlannedFile, PlannedMutant,
@@ -59,7 +60,7 @@ struct Candidate<'a> {
     file_id: FileId,
     path: &'a Path,
     rel: String,
-    kind: SourceKind,
+    layout: Layout,
     /// `None` when the analysis kept no module facts for the file.
     module: Option<&'a ModuleInfo>,
     added_lines: Option<Vec<u64>>,
@@ -167,7 +168,8 @@ pub(super) fn build(
 }
 
 /// The source files in scope, sorted by root-relative path. Test code, test
-/// support, declaration files and non-JavaScript files are never selected.
+/// support, declaration files and files that are not JavaScript, TypeScript,
+/// Vue, Svelte or Astro are never selected.
 /// Test code is a test entry point of the graph (a file that the runner
 /// config makes a test) or a file that the test path rule matches.
 /// The second value holds the `Paths` scope entries that select no file.
@@ -189,7 +191,7 @@ fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<String>) 
         .iter()
         .filter_map(|node| {
             let rel = relative_key_path(&node.path, root);
-            let kind = SourceKind::from_path(&rel)?;
+            let layout = Layout::from_path(&rel)?;
             if is_declaration_file_path(&node.path)
                 || context.graph.test_entry_points.contains(&node.file_id)
                 || crate::test_paths::is_test_path_str(root, &rel)
@@ -222,7 +224,7 @@ fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<String>) 
                 file_id: node.file_id,
                 path: &node.path,
                 rel,
-                kind,
+                layout,
                 module: modules.get(&node.file_id).copied(),
                 added_lines,
             })
@@ -280,13 +282,15 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         .added_lines
         .as_deref()
         .map(|lines| added_line_ranges(source, lines));
-    let instrumented =
-        match fallow_mutation::instrument(source, &candidate.rel, candidate.kind, &options) {
-            Ok(instrumented) => instrumented,
-            Err(MutationError::Parse { .. }) => return skipped(SkipReason::Parse),
-            Err(MutationError::ReservedName { .. }) => return skipped(SkipReason::ReservedName),
-            Err(MutationError::TooLarge) => return skipped(SkipReason::TooLarge),
-        };
+    let instrumented = match candidate
+        .layout
+        .instrument(source, &candidate.rel, &options)
+    {
+        Ok(instrumented) => instrumented,
+        Err(MutationError::Parse { .. }) => return skipped(SkipReason::Parse),
+        Err(MutationError::ReservedName { .. }) => return skipped(SkipReason::ReservedName),
+        Err(MutationError::TooLarge) => return skipped(SkipReason::TooLarge),
+    };
     let covered = context.graph.is_test_reachable(candidate.file_id);
     let facts = FileFacts::new(context, candidate, module, source);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
@@ -390,8 +394,16 @@ impl<'a> FileFacts<'a> {
             .inputs
             .framework_config_exports
             .and_then(|exports| exports.exports_for(&candidate.rel))
-            .map(|names| framework_regions(module, names, source, candidate.kind))
+            .map(|names| framework_regions(module, names, source, candidate.layout))
             .unwrap_or_default();
+        // A sink in a component template does not run when the module
+        // loads, so only the sinks in the script blocks count.
+        let script_spans = candidate.layout.script_spans(source);
+        let in_script = |start: u32| {
+            script_spans
+                .as_ref()
+                .is_none_or(|spans| spans.iter().any(|&(from, to)| from <= start && start < to))
+        };
         let sink_starts = if context.request.allow_side_effects {
             Vec::new()
         } else {
@@ -400,10 +412,11 @@ impl<'a> FileFacts<'a> {
                 .iter()
                 .filter(|site| is_side_effect_sink(module, site))
                 .map(|site| site.span_start)
+                .filter(|&start| in_script(start))
                 .collect()
         };
         let top_level_sink =
-            !sink_starts.is_empty() && has_top_level_site(&sink_starts, source, candidate.kind);
+            !sink_starts.is_empty() && has_top_level_site(&sink_starts, source, candidate.layout);
         Self {
             file_prune,
             framework_regions,
@@ -663,7 +676,7 @@ fn is_side_effect_sink(module: &ModuleInfo, site: &SinkSite) -> bool {
 /// Whether one of the offsets lies outside every function and arrow
 /// function of the source. The function kinds match the enclosing functions
 /// that `fallow-mutation` reports.
-fn has_top_level_site(starts: &[u32], source: &str, kind: SourceKind) -> bool {
+fn has_top_level_site(starts: &[u32], source: &str, layout: Layout) -> bool {
     use oxc_ast::ast::{ArrowFunctionExpression, Function};
     use oxc_ast_visit::Visit;
     use oxc_syntax::scope::ScopeFlags;
@@ -681,8 +694,9 @@ fn has_top_level_site(starts: &[u32], source: &str, kind: SourceKind) -> bool {
         }
     }
 
+    let (text, kind) = layout.parse_view(source);
     let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, source, kind.source_type()).parse();
+    let parsed = oxc_parser::Parser::new(&allocator, &text, kind.source_type()).parse();
     let mut spans = Spans::default();
     spans.visit_program(&parsed.program);
     starts.iter().any(|&start| {
@@ -699,7 +713,7 @@ fn framework_regions(
     module: &ModuleInfo,
     names: &BTreeSet<String>,
     source: &str,
-    kind: SourceKind,
+    layout: Layout,
 ) -> Vec<(u32, u32)> {
     use oxc_span::GetSpan;
 
@@ -716,8 +730,9 @@ fn framework_regions(
     if starts.is_empty() {
         return Vec::new();
     }
+    let (text, kind) = layout.parse_view(source);
     let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_parser::Parser::new(&allocator, source, kind.source_type()).parse();
+    let parsed = oxc_parser::Parser::new(&allocator, &text, kind.source_type()).parse();
     parsed
         .program
         .body
@@ -823,17 +838,17 @@ mod tests {
     /// is the only added line.
     fn diff_membership(source: &str) -> Vec<(u32, bool, bool)> {
         let path = Path::new("/project/src/limit.ts");
-        let kind = SourceKind::from_path("src/limit.ts").expect("a TypeScript path");
-        let instrumented =
-            fallow_mutation::instrument(source, "src/limit.ts", kind, &MutationOptions::default())
-                .expect("the source parses");
+        let layout = Layout::from_path("src/limit.ts").expect("a TypeScript path");
+        let instrumented = layout
+            .instrument(source, "src/limit.ts", &MutationOptions::default())
+            .expect("the source parses");
         let line_offsets = fallow_types::extract::compute_line_offsets(source);
         let added_lines = vec![1];
         let candidate = Candidate {
             file_id: FileId(0),
             path,
             rel: "src/limit.ts".to_owned(),
-            kind,
+            layout,
             module: None,
             added_lines: Some(added_lines.clone()),
         };

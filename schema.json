@@ -1219,6 +1219,11 @@
           "description": "`a?.b` to `a.b`.",
           "type": "string",
           "const": "optional-chaining"
+        },
+        {
+          "description": "One token of a regular expression literal changed: an anchor\nremoved, a character class negated, or a class escape with the\nopposite case.",
+          "type": "string",
+          "const": "regex-literal"
         }
       ]
     },

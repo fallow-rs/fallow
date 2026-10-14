@@ -19,7 +19,7 @@ use oxc_ast::ast::{
     ExportDefaultDeclaration, ExportFromDeclaration, ExportNamedDeclaration, Expression,
     ExpressionStatement, ForStatement, ForStatementLeft, Function, IfStatement, ImportDeclaration,
     ImportExpression, JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition,
-    MethodDefinitionKind, ObjectProperty, Program, PropertyDefinition, PropertyKey,
+    MethodDefinitionKind, ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral,
     ReturnStatement, SimpleAssignmentTarget, StringLiteral, TSEnumDeclaration, TSExportAssignment,
     TSExternalModuleDeclaration, TSGlobalDeclaration, TSImportEqualsDeclaration,
     TSInterfaceDeclaration, TSNamespaceDeclaration, TSNamespaceExportDeclaration, TSType,
@@ -873,6 +873,13 @@ impl<'a> Visit<'a> for Collector<'_> {
             format!("{quote}{quote}")
         };
         self.add(it.span, Operator::StringLiteral, pair(it.span), replacement);
+    }
+
+    fn visit_reg_exp_literal(&mut self, it: &RegExpLiteral<'a>) {
+        let raw = self.text(it.span.start, it.span.end).to_owned();
+        for replacement in crate::regex::mutations(&raw) {
+            self.add(it.span, Operator::RegexLiteral, pair(it.span), replacement);
+        }
     }
 
     fn visit_tagged_template_expression(&mut self, it: &TaggedTemplateExpression<'a>) {

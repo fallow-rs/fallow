@@ -17,6 +17,7 @@
 //!   replaces the module with `vi.mock` does not reach it.
 //! - `pruned`: a static rule removes the mutant (see [`PruneReason`](crate::mutation::PruneReason)).
 
+mod layout;
 mod plan;
 mod reach;
 #[cfg(test)]
@@ -31,6 +32,7 @@ pub use fallow_mutation::{
     FunctionRef, Mutant, MutantId, MutationError, Operator, RESERVED_PREFIX, SourceKind,
 };
 pub use fallow_output::DiffIndex;
+pub use layout::instrument_source;
 
 use crate::EngineError;
 use crate::module_graph::{ExportTestReach, RetainedModuleGraph};

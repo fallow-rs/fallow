@@ -144,8 +144,28 @@ const buildOverlay = (root, runDir, pathMap) => {
 
 const readSourceMap = (path) => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null);
 
+/** Vue, Svelte and Astro component files. */
+const COMPONENT_FILE = /\.(?:vue|svelte|astro)$/u;
+
+const isComponent = (source) => COMPONENT_FILE.test(source);
+
+/** A request for a file on disk: no virtual module and no query. */
+const isPlainRequest = (id) => !id.startsWith("\0") && !id.includes("?");
+
+/** The overlay entry of a plain request for a component file, or undefined. */
+const componentEntry = (overlay, id) => {
+  if (!isPlainRequest(id)) return undefined;
+  const entry = overlay.get(realPath(id));
+  return entry !== undefined && isComponent(entry.source) ? entry : undefined;
+};
+
 /**
- * Serves the instrumented copy of each mapped file. The `config` hook also
+ * Serves the instrumented copy of each mapped file. A script file gets its
+ * copy in the `transform` hook. A component file gets its copy in the `load`
+ * hook, so the framework plugin compiles the instrumented component also when
+ * its own `transform` hook runs first. A component request with a query (a
+ * style or a template block) is not served: the framework plugin makes it
+ * from the component that it compiled. The `config` hook also
  * adds this plugin to each inline project definition. Vitest 4 gives the
  * plugins of `createVitest` to the root project only. Vitest 5 does not give
  * them to an inline project with a `browser` block, also when browser mode
@@ -164,10 +184,16 @@ const overlayPlugin = (overlay, loaded) => {
           : project,
       );
     },
+    load(id) {
+      const entry = componentEntry(overlay, id);
+      if (entry === undefined) return null;
+      loaded.add(entry.source);
+      return readFileSync(entry.target, "utf8");
+    },
     transform(_code, id) {
       if (id.startsWith("\0")) return null;
       const entry = overlay.get(realPath(id.split("?", 1)[0]));
-      if (entry === undefined) return null;
+      if (entry === undefined || isComponent(entry.source)) return null;
       loaded.add(entry.source);
       return {
         code: readFileSync(entry.target, "utf8"),

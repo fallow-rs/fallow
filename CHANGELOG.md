@@ -71,6 +71,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     score, as `mutation` on the finding. A function whose file changed since
     the run is `stale` and gets no score. The score never changes CRAP or
     the health score. A plan or an invalid file exits with 2.
+  - Vue, Svelte and Astro components get mutants in their script blocks: the
+    Vue `<script>` and `<script setup>` blocks, the Svelte instance and module
+    scripts, and the Astro frontmatter. Svelte module files (`.svelte.js`,
+    `.svelte.ts`) get mutants too. The text outside the script blocks stays
+    the same, so the framework plugin of the project compiles the mutated
+    component.
+  - Code that the framework compiler moves out of its block gives no mutant:
+    the arguments and destructure defaults of `defineProps` and the other
+    Vue compiler macros, an expression that holds a Svelte rune call, and an exported declaration in
+    the Astro frontmatter. The arguments of a rune still get mutants.
+  - The `regex-literal` operator changes one token of a regular expression
+    literal. It removes a `^` or `$` anchor, negates a character class, or
+    gives `\d`, `\w` or `\s` the opposite case.
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /

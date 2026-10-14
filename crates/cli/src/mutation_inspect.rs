@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::Path;
 
-use fallow_mutation::{MutationOptions, SourceKind, instrument};
+use fallow_mutation::MutationOptions;
 use fallow_output::{
     MutantLocation, MutantStatus, MutationInspectCode, MutationInspectOutput,
     MutationInspectSchemaVersion, MutationInspectStatus, MutationStaleReason,
@@ -150,7 +150,6 @@ pub fn reproduce(
     mutant_id: &str,
     span: (u32, u32),
 ) -> Option<Reproduced> {
-    let kind = SourceKind::from_path(file)?;
     let passes = [
         MutationOptions::default(),
         MutationOptions {
@@ -159,7 +158,8 @@ pub fn reproduce(
         },
     ];
     passes.iter().find_map(|options| {
-        let instrumented = instrument(source, file, kind, options).ok()?;
+        let instrumented =
+            fallow_engine::mutation::instrument_source(source, file, options)?.ok()?;
         instrumented
             .mutants
             .into_iter()
@@ -297,6 +297,7 @@ pub fn inspect(
 #[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
 mod tests {
     use super::*;
+    use fallow_mutation::{SourceKind, instrument};
 
     const SOURCE: &str = "export function add(a: number, b: number) {\n  return a + b;\n}\n";
 
@@ -412,6 +413,26 @@ mod tests {
             packet.stale_reason,
             Some(MutationStaleReason::MutantNotReproduced)
         );
+    }
+
+    #[test]
+    fn a_mutant_in_a_vue_script_block_is_reproduced() {
+        let source = "<template><p>{{ total }}</p></template>\n<script setup lang=\"ts\">\nconst total = 1 + 2\n</script>\n";
+        let mutant = fallow_engine::mutation::instrument_source(
+            source,
+            "src/Total.vue",
+            &MutationOptions::default(),
+        )
+        .unwrap()
+        .unwrap()
+        .mutants
+        .into_iter()
+        .find(|mutant| mutant.original == "+")
+        .unwrap();
+        let reproduced =
+            reproduce(source, "src/Total.vue", mutant.id.as_str(), mutant.span).unwrap();
+        assert_eq!(reproduced.replacement, "-");
+        assert_eq!(mutant.line, 3);
     }
 
     #[test]

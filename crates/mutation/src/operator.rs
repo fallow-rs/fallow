@@ -31,11 +31,15 @@ pub enum Operator {
     StringLiteral,
     /// `a?.b` becomes `a.b`, `a?.()` becomes `a()`.
     OptionalChaining,
+    /// One token of a regular expression literal changes: an anchor is
+    /// removed, a character class is negated, or a class escape gets the
+    /// opposite case.
+    RegexLiteral,
 }
 
 impl Operator {
     /// Every operator, in a stable order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::ArithmeticOperator,
         Self::RelationalOperator,
         Self::LogicalOperator,
@@ -47,6 +51,7 @@ impl Operator {
         Self::BooleanLiteral,
         Self::StringLiteral,
         Self::OptionalChaining,
+        Self::RegexLiteral,
     ];
 
     /// The stable kebab-case name of the operator.
@@ -63,6 +68,7 @@ impl Operator {
             Self::BooleanLiteral => "boolean-literal",
             Self::StringLiteral => "string-literal",
             Self::OptionalChaining => "optional-chaining",
+            Self::RegexLiteral => "regex-literal",
         }
     }
 

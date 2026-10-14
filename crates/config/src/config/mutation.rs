@@ -38,6 +38,10 @@ pub enum MutationOperatorName {
     StringLiteral,
     /// `a?.b` to `a.b`.
     OptionalChaining,
+    /// One token of a regular expression literal changed: an anchor
+    /// removed, a character class negated, or a class escape with the
+    /// opposite case.
+    RegexLiteral,
 }
 
 impl MutationOperatorName {
@@ -56,6 +60,7 @@ impl MutationOperatorName {
             Self::BooleanLiteral => "boolean-literal",
             Self::StringLiteral => "string-literal",
             Self::OptionalChaining => "optional-chaining",
+            Self::RegexLiteral => "regex-literal",
         }
     }
 }
