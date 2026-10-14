@@ -588,7 +588,7 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         baseline_failures: &baseline,
         worktree_changed: !changed_paths.is_empty(),
         worktree_unchecked: check_error.is_some(),
-        unretried_survivors: outcome.is_some_and(|outcome| !outcome.unretried_survivors.is_empty()),
+        unretried: outcome.is_some_and(|outcome| !outcome.unretried.is_empty()),
         unloaded_paths: outcome.map_or(&[], |outcome| outcome.unloaded_paths.as_slice()),
     });
     let errors = run_issues(outcome, &changed_paths, check_error);

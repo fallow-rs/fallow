@@ -32806,7 +32806,7 @@
         {
           "type": "string",
           "const": "timeout",
-          "description": "The run passed its timeout. The mutant counts as detected."
+          "description": "The run went past its timeout, also in a second run in a new\ncompanion. The mutant counts as detected."
         },
         {
           "type": "string",
@@ -32826,7 +32826,7 @@
         {
           "type": "string",
           "const": "flaky",
-          "description": "The second run gave a different result than the first run."
+          "description": "One of two runs detected the mutant and the other run did not."
         },
         {
           "type": "string",
@@ -32955,7 +32955,7 @@
         {
           "type": "string",
           "const": "time-budget",
-          "description": "The time budget ended before each mutant ran."
+          "description": "The time budget ended before each mutant ran or got its retry."
         },
         {
           "type": "string",
@@ -33419,7 +33419,7 @@
         },
         "retry_ms": {
           "type": "integer",
-          "description": "The second runs of survived mutants."
+          "description": "The second runs of survived and timed-out mutants."
         }
       },
       "required": [

@@ -102,6 +102,51 @@ mutant. Their results decide no mutant status.
   `errors[]` entry names the mutant.
 - A baseline failure makes the completion `partial` (`baseline-failure`).
 
+## Retries
+
+A mutant gets a second run in a new companion when its first result can be
+noise. The retries run after the mutant runs, inside the time budget.
+
+| First result | Second result | Final status |
+|---|---|---|
+| any | `runtime_error` | `runtime_error` |
+| `survived` | `survived` | `survived` |
+| `survived` | `killed` or `timeout` | `flaky` |
+| `timeout` | `timeout` | `timeout` |
+| `timeout` | `killed` | `killed`, with the test of the second run |
+| `timeout` | `survived` | `flaky` |
+
+- A runtime error gets one more attempt at once, in a new companion. Only two
+  runtime errors give `runtime_error`.
+- `killed` gets no retry. A failed assertion is a fact about the mutant.
+- `timeout` gets a retry, because host load can make a slow test go past
+  its timeout. On a loaded host, a mutant that survives in a few seconds can
+  time out in one run of three. Without the retry, that run counts it as
+  detected and the score goes up.
+- When the time budget ends before a retry, the mutant keeps its first
+  status, and the completion is `partial` (`time-budget`).
+- `timings.retry_ms` is the wall time of the retries.
+
+### Measure the flaky rate
+
+`scripts/mutation-flaky-rate.mjs` compares the saved reports of repeated runs
+with the same scope:
+
+```bash
+fallow mutation --all --root <project>
+cp <project>/.fallow/mutation/last-report.json run-1.json
+# Repeat for run-2.json and run-3.json, then:
+node scripts/mutation-flaky-rate.mjs run-1.json run-2.json run-3.json
+```
+
+- `compared` counts the mutants that each run executed.
+- `unstable` counts the compared mutants with a different status between runs
+  or a `flaky` status in one run.
+- `score_flips` counts the unstable mutants that one run detected and another
+  run did not. `timeout_flips` counts the score flips with a `timeout` in one
+  run.
+- Each count has a rate over `compared`.
+
 ## Runner notes
 
 `runner.notes` lists facts of the runner setup that limit the result. The key

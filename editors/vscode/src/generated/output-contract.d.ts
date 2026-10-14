@@ -19962,7 +19962,7 @@ dry_run_ms: number
  */
 mutants_ms: number
 /**
- * The second runs of survived mutants.
+ * The second runs of survived and timed-out mutants.
  */
 retry_ms: number
 }

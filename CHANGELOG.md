@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A covering test that fails in the dry run of a restarted companion is a
     baseline failure. The mutant runs with its other covering tests and is a
     runtime error only when no covering test is left.
+  - A mutant that times out runs a second time in a new companion, as a
+    survivor does. A timeout and then a pass give `flaky`, so a slow test on a
+    loaded host does not count as a detection. A kill in the second run gives
+    `killed`. (#3415)
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
 
