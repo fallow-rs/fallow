@@ -89,9 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `typescript-content-mapper` runs the `exec` script of
     `package.json#typescript.contentMapper` as an entry point.
 
-- **`fallow migrate` knows the latest knip plugins and config keys.** A knip
-  section for `expo-router`, `varlock`, `turbo` or one of the new plugins
-  above now gets the "auto-detected" message, not the "unknown key" warning.
+- **`fallow migrate` recognizes more plugin sections and config keys.** A
+  plugin section for `expo-router`, `varlock`, `turbo` or one of the new
+  plugins above now gets the "auto-detected" message, not the "unknown key"
+  warning.
   The root keys `cycles`, `ignoreGlobalBinaries`, `preprocessor`,
   `preprocessorOptions` and `asyncCompilers` now get a specific message with
   the closest fallow alternative.
