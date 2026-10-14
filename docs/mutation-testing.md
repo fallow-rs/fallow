@@ -127,11 +127,12 @@ mutant. Their results decide no mutant status.
   affected mutants in `mutant_ids`. The mutant runs with its other covering
   tests. Only a mutant with no covering test left is `runtime_error`, and its
   `errors[]` entry names the mutant.
-- The dry run of a restarted companion has a longer timeout than the first
-  dry run, because it shares the host with the other workers. The timeout is
-  the first dry-run time times 2 times the worker count, and at least the
-  runner timeout (120 seconds). On a slow or loaded host, a short fixed
-  timeout made each mutant of a restarted companion a `runtime_error`.
+- The dry run of a restarted companion shares the host with the other
+  workers. Its timeout is the first dry-run time times 2 times the worker
+  count, and at least the runner timeout (120 seconds by default). On a slow
+  or loaded host, a fixed timeout made each mutant of a restarted companion a
+  `runtime_error`. The time budget does not stop a dry run in progress, so a
+  companion that hangs in its dry run can extend the run past the budget.
 - A baseline failure makes the completion `partial` (`baseline-failure`).
 
 ## Runner notes
