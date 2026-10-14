@@ -230,6 +230,7 @@ fn config(concurrency: usize) -> ScheduleConfig {
         concurrency,
         runner_timeout: Duration::from_secs(5),
         deadline: None,
+        cache: None,
     }
 }
 
@@ -1217,4 +1218,106 @@ fn a_restarted_companion_setup_timeout_names_the_setup_timeout_flag() {
         "{}",
         issue.message
     );
+}
+
+/// The query of one key: the mutant, the tests, the test files and the
+/// runner version.
+type KeyQuery = (String, Vec<String>, Vec<String>, String);
+
+/// A cache that holds a killed result for `m1` and records each query.
+#[derive(Debug, Default)]
+struct FakeCache {
+    queries: Mutex<Vec<KeyQuery>>,
+}
+
+impl ResultLookup for FakeCache {
+    fn key(
+        &self,
+        ready: &Ready,
+        mutant: &ScheduledMutant,
+        tests: &[String],
+        test_files: &[String],
+    ) -> String {
+        self.queries.lock().expect("queries").push((
+            mutant.id.clone(),
+            tests.to_vec(),
+            test_files.to_vec(),
+            ready.runner_version.clone(),
+        ));
+        format!("key-{}", mutant.id)
+    }
+
+    fn get(&self, mutant_id: &str, key: &str) -> Option<CachedResult> {
+        (mutant_id == "m1" && key == "key-m1").then(|| CachedResult {
+            status: MutantStatus::Killed,
+            killed_by: Some(tid("t1")),
+            duration_ms: Some(3),
+        })
+    }
+}
+
+#[test]
+fn a_cache_hit_skips_the_mutant_run_and_a_miss_reports_its_key() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    let cache = Arc::new(FakeCache::default());
+    let mut config = config(1);
+    config.cache = Some(Arc::clone(&cache) as Arc<dyn ResultLookup>);
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config).expect("run");
+
+    let ran: Vec<String> = spawner
+        .runs()
+        .into_iter()
+        .map(|(_, run)| run.mutant_id)
+        .collect();
+    assert_eq!(ran, vec!["m2".to_owned()], "the cached mutant does not run");
+    let m1 = &outcome.results["m1"];
+    assert!(m1.cached);
+    assert_eq!(m1.status, MutantStatus::Killed);
+    assert_eq!(m1.killed_by, Some(tid("t1")));
+    assert_eq!(m1.duration_ms, Some(3));
+    assert_eq!(m1.covering_tests, vec![tid("t1")]);
+    assert!(!outcome.results["m2"].cached);
+    assert!(
+        !outcome.results["m3"].cached,
+        "no_coverage never asks the cache"
+    );
+    assert_eq!(
+        outcome.cache_keys,
+        FxHashMap::from_iter([("m2".to_owned(), "key-m2".to_owned())]),
+        "only an executed mutant reports its key"
+    );
+    let queries = cache.queries.lock().expect("queries").clone();
+    assert_eq!(
+        queries,
+        vec![
+            (
+                "m1".to_owned(),
+                vec![tid("t1")],
+                vec!["test/a.test.ts".to_owned()],
+                "5.0.4".to_owned()
+            ),
+            (
+                "m2".to_owned(),
+                vec![tid("t1"), tid("t2")],
+                vec!["test/a.test.ts".to_owned()],
+                "5.0.4".to_owned()
+            ),
+        ],
+        "the key covers the covering tests and their files"
+    );
+}
+
+#[test]
+fn without_a_cache_each_covered_mutant_runs_and_no_key_is_reported() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config(1)).expect("run");
+    assert_eq!(spawner.runs().len(), 2);
+    assert!(outcome.cache_keys.is_empty());
+    assert!(outcome.results.values().all(|result| !result.cached));
 }

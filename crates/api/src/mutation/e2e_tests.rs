@@ -251,11 +251,8 @@ mod end_to_end {
         Some(dunce::canonicalize(package).expect("package path"))
     }
 
-    #[test]
-    fn the_embedded_companion_runs_vitest_against_the_fixture_end_to_end() {
-        let Some(package) = companion_fixture() else {
-            return;
-        };
+    /// A committed copy of the Vitest fixture of the companion package.
+    fn vitest_project(package: &Path) -> (tempfile::TempDir, PathBuf) {
         let fixture = package.join("test/fixtures/vitest-basic");
         let project = tempfile::tempdir().expect("dir");
         let root = dunce::canonicalize(project.path()).expect("root");
@@ -278,6 +275,84 @@ mod end_to_end {
         )
         .expect("symlink");
         commit_all(&root);
+        (project, root)
+    }
+
+    #[test]
+    fn a_second_run_reuses_the_results_until_a_key_file_changes() {
+        let Some(package) = companion_fixture() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package);
+        let mut cached = options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        );
+        cached.analysis.no_cache = false;
+
+        let first = run_mutation(&cached).expect("the first run completes");
+        let cache = first.cache.as_ref().expect("the cache is on");
+        assert_eq!(cache.hits, 0);
+        assert!(cache.stored > 0, "{cache:#?}");
+        assert_eq!(cache.not_keyed, vec!["dynamic-imports", "file-reads"]);
+        assert!(first.mutants.iter().all(|mutant| !mutant.cached));
+
+        let second = run_mutation(&cached).expect("the second run completes");
+        assert_eq!(
+            second.cache.as_ref().expect("the cache is on").hits,
+            cache.stored,
+            "each stored result is used"
+        );
+        assert_eq!(second.cache.as_ref().expect("cache").stored, 0);
+        let statuses = |report: &fallow_output::MutationReport| {
+            report
+                .mutants
+                .iter()
+                .map(|mutant| (mutant.location.mutant_id.clone(), mutant.status))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(statuses(&first), statuses(&second));
+        assert_eq!(first.summary.score, second.summary.score);
+        assert!(
+            second
+                .mutants
+                .iter()
+                .filter(|mutant| matches!(
+                    mutant.status,
+                    MutantStatus::Killed | MutantStatus::Survived
+                ))
+                .all(|mutant| mutant.cached)
+        );
+
+        fs::write(
+            root.join("test/user-setup.ts"),
+            format!(
+                "{}// changed\n",
+                fs::read_to_string(root.join("test/user-setup.ts")).expect("read")
+            ),
+        )
+        .expect("write");
+        commit_all(&root);
+        let third = run_mutation(&cached).expect("the third run completes");
+        assert_eq!(
+            third.cache.as_ref().expect("cache").hits,
+            0,
+            "a change to the runner setup file runs each mutant again"
+        );
+
+        let mut uncached = cached;
+        uncached.analysis.no_cache = true;
+        let fourth = run_mutation(&uncached).expect("the run without a cache completes");
+        assert!(fourth.cache.is_none(), "--no-cache turns the cache off");
+        assert!(fourth.mutants.iter().all(|mutant| !mutant.cached));
+    }
+
+    #[test]
+    fn the_embedded_companion_runs_vitest_against_the_fixture_end_to_end() {
+        let Some(package) = companion_fixture() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package);
         let before = fs::read_to_string(root.join("src/math.ts")).expect("read");
 
         let report = run_mutation(&options(

@@ -18,6 +18,7 @@
 //! - `pruned`: a static rule removes the mutant (see [`PruneReason`](crate::mutation::PruneReason)).
 
 mod plan;
+mod reach;
 #[cfg(test)]
 mod tests;
 
@@ -123,6 +124,10 @@ pub struct MutationPlanInputs<'a> {
     /// facts. The plan then prunes no `framework-config` mutants and sets
     /// [`MutationPlan::framework_config_checked`] to false.
     pub framework_config_exports: Option<&'a FrameworkConfigExports>,
+    /// The setup files of the test runner config, absolute or relative to
+    /// the root, with or without an extension. They fill
+    /// [`MutationPlan::support_files`].
+    pub setup_files: &'a [PathBuf],
 }
 
 /// Why a static rule removes a mutant.
@@ -297,6 +302,22 @@ pub struct MutationPlan {
     pub mutants: Vec<PlannedMutant>,
     /// The union of the static test files of `files`, sorted.
     pub test_files: Vec<String>,
+    /// The files that the test files reach through static imports, sorted.
+    /// [`MutationPlan::test_file_reach`] indexes into this list.
+    #[serde(skip)]
+    pub reach_files: Vec<String>,
+    /// The files that each test file of `test_files` reaches through static
+    /// imports, as sorted indices into `reach_files`. The list leaves out the
+    /// test file itself and ignores `vi.mock`, so it is a superset of the
+    /// files that the test loads. The result cache of a run keys on the
+    /// content of these files.
+    #[serde(skip)]
+    pub test_file_reach: BTreeMap<String, Vec<u32>>,
+    /// The setup files of the test runner and the files that they reach
+    /// through static imports, sorted. Each test loads them, so the result
+    /// cache keys on their content for each mutant.
+    #[serde(skip)]
+    pub support_files: Vec<String>,
     /// The number of mutants for each disposition.
     pub counts: MutationPlanCounts,
     /// True when the project has no test files. Each mutant is then
@@ -314,6 +335,19 @@ pub struct MutationPlan {
     /// does not exist, or because it names only test code, declaration files
     /// or files outside the module graph.
     pub unmatched_paths: Vec<String>,
+}
+
+impl MutationPlan {
+    /// The files that `test_file` reaches through static imports, sorted.
+    /// Empty for a file that is not a test file of the plan.
+    pub fn test_file_reach_paths<'a>(&'a self, test_file: &str) -> impl Iterator<Item = &'a str> {
+        self.test_file_reach
+            .get(test_file)
+            .into_iter()
+            .flatten()
+            .filter_map(|&index| self.reach_files.get(index as usize))
+            .map(String::as_str)
+    }
 }
 
 /// An error from [`plan_mutations_for_session`].
@@ -383,7 +417,10 @@ pub fn plan_mutations_for_session(
         .modules
         .as_deref()
         .ok_or(MutationPlanError::MissingArtifact("parsed modules"))?;
-    let framework_config_exports = framework_config_exports(session, graph)?;
+    let inventory = crate::list_inventory::collect_listing_inventory(session, false)
+        .map_err(|error| MutationPlanError::Plugins(error.message().to_owned()))?;
+    let framework_config_exports = framework_config_exports(session, graph, &inventory);
+    let setup_files = inventory.plugins.backend().setup_files();
     Ok(plan_mutations(
         &MutationPlanInputs {
             root: session.root(),
@@ -391,6 +428,7 @@ pub fn plan_mutations_for_session(
             modules,
             results: &artifacts.results,
             framework_config_exports: Some(&framework_config_exports),
+            setup_files: &setup_files,
         },
         request,
     ))
@@ -400,9 +438,8 @@ pub fn plan_mutations_for_session(
 fn framework_config_exports(
     session: &AnalysisSession,
     graph: &RetainedModuleGraph,
-) -> Result<FrameworkConfigExports, MutationPlanError> {
-    let inventory = crate::list_inventory::collect_listing_inventory(session, false)
-        .map_err(|error| MutationPlanError::Plugins(error.message().to_owned()))?;
+    inventory: &crate::list_inventory::ListingInventory,
+) -> FrameworkConfigExports {
     let names = inventory.plugins.backend().used_export_names();
     let mut exports = FrameworkConfigExports::default();
     for node in &graph.as_graph().modules {
@@ -411,5 +448,5 @@ fn framework_config_exports(
             exports.insert(rel.clone(), name);
         }
     }
-    Ok(exports)
+    exports
 }

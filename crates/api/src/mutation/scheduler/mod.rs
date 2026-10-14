@@ -6,8 +6,8 @@
 //! transport.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fallow_output::MutantStatus;
@@ -69,6 +69,32 @@ pub struct ScheduleConfig {
     pub runner_timeout: Duration,
     /// The end of the time budget.
     pub deadline: Option<Instant>,
+    /// The result cache. `None` runs each covered mutant.
+    pub cache: Option<Arc<dyn ResultLookup>>,
+}
+
+/// A result of an earlier run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedResult {
+    pub status: MutantStatus,
+    pub killed_by: Option<String>,
+    pub duration_ms: Option<u64>,
+}
+
+/// Looks up the result of a mutant from an earlier run.
+pub trait ResultLookup: std::fmt::Debug + Send + Sync {
+    /// The cache key of `mutant` with these covering tests and their test
+    /// files, for the runner that `ready` describes.
+    fn key(
+        &self,
+        ready: &Ready,
+        mutant: &ScheduledMutant,
+        tests: &[String],
+        test_files: &[String],
+    ) -> String;
+
+    /// The stored result of `mutant_id` under `key`.
+    fn get(&self, mutant_id: &str, key: &str) -> Option<CachedResult>;
 }
 
 /// The result of one mutant.
@@ -81,6 +107,9 @@ pub struct MutantOutcome {
     pub duration_ms: Option<u64>,
     /// True when the status comes from a first run and a retry.
     pub retried: bool,
+    /// True when the result comes from the result cache. The mutant did not
+    /// run.
+    pub cached: bool,
 }
 
 impl MutantOutcome {
@@ -92,6 +121,7 @@ impl MutantOutcome {
             static_mutant: false,
             duration_ms: None,
             retried: false,
+            cached: false,
         }
     }
 }
@@ -144,6 +174,25 @@ pub struct ScheduleOutcome {
     pub unretried: Vec<String>,
     pub timings: ScheduleTimings,
     pub workers: usize,
+    /// The cache key of each mutant that ran. Empty without a cache.
+    pub cache_keys: FxHashMap<String, String>,
+}
+
+impl ScheduleOutcome {
+    /// An outcome with no result.
+    fn empty() -> Self {
+        Self {
+            ready: None,
+            results: FxHashMap::default(),
+            baseline_failures: Vec::new(),
+            unloaded_paths: Vec::new(),
+            issues: Vec::new(),
+            unretried: Vec::new(),
+            timings: ScheduleTimings::default(),
+            workers: 0,
+            cache_keys: FxHashMap::default(),
+        }
+    }
 }
 
 /// Why the run stopped.
@@ -196,6 +245,8 @@ struct Job {
     /// the watchdog waits for it (section 8).
     setup_ms: u64,
     static_mutant: bool,
+    /// The result cache key. `None` without a cache.
+    cache_key: Option<String>,
 }
 
 impl Job {
@@ -715,13 +766,27 @@ fn whole_files(facts: &DryRunFacts, tests: &BTreeSet<String>) -> BTreeSet<String
         .collect()
 }
 
+/// The facts of the first companion that the jobs read.
+struct JobContext<'a> {
+    dry_files: &'a [String],
+    ready: &'a Ready,
+    cache: Option<&'a dyn ResultLookup>,
+}
+
+/// Builds the job of each covered mutant. A mutant with a cached result gets
+/// that result and no job.
 fn build_jobs(
     plan: &SchedulePlan,
     facts: &DryRunFacts,
-    dry_files: &[String],
-    caps: Capabilities,
+    context: &JobContext<'_>,
     outcome: &mut ScheduleOutcome,
 ) -> Vec<Job> {
+    let JobContext {
+        dry_files,
+        ready,
+        cache,
+    } = *context;
+    let caps = ready.capabilities;
     let mut regular = Vec::new();
     let mut statics = Vec::new();
     let planned = plan.mutants.iter().map(|mutant| (mutant, false));
@@ -768,12 +833,43 @@ fn build_jobs(
         });
         let total: f64 = tests.iter().map(|(duration, _)| duration).sum();
         let setup_ms = scaled_ms(facts.setup_of(&tests));
+        let tests: Vec<String> = tests.into_iter().map(|(_, test)| test).collect();
+        let cache_key = cache.map(|cache| {
+            let mut test_files: Vec<String> = tests
+                .iter()
+                .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
+                .collect();
+            test_files.sort_unstable();
+            test_files.dedup();
+            cache.key(ready, mutant, &tests, &test_files)
+        });
+        if let (Some(cache), Some(key)) = (cache, &cache_key)
+            && let Some(hit) = cache.get(&mutant.id, key)
+        {
+            let mut covering_tests = tests;
+            covering_tests.sort_unstable();
+            outcome.results.insert(
+                mutant.id.clone(),
+                MutantOutcome {
+                    status: hit.status,
+                    killed_by: hit.killed_by,
+                    covering_tests,
+                    static_mutant,
+                    duration_ms: hit.duration_ms,
+                    // The cache stores a survivor only after its retry.
+                    retried: hit.status == MutantStatus::Survived,
+                    cached: true,
+                },
+            );
+            continue;
+        }
         let job = Job {
             id: mutant.id.clone(),
-            tests: tests.into_iter().map(|(_, test)| test).collect(),
+            tests,
             timeout_ms: timeout_ms(total),
             setup_ms,
             static_mutant,
+            cache_key,
         };
         if static_mutant {
             statics.push(job);
@@ -905,6 +1001,9 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
     // depend on durations, so it lists the covering tests by id.
     let mut covering_tests = job.tests;
     covering_tests.sort_unstable();
+    if let Some(key) = job.cache_key {
+        outcome.cache_keys.insert(job.id.clone(), key);
+    }
     outcome.results.insert(
         job.id,
         MutantOutcome {
@@ -914,6 +1013,7 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
             static_mutant: job.static_mutant,
             duration_ms: attempt.duration_ms,
             retried: false,
+            cached: false,
         },
     );
 }
@@ -1169,16 +1269,7 @@ pub fn run_schedule(
     plan: &SchedulePlan,
     config: &ScheduleConfig,
 ) -> Result<ScheduleOutcome, ScheduleError> {
-    let mut outcome = ScheduleOutcome {
-        ready: None,
-        results: FxHashMap::default(),
-        baseline_failures: Vec::new(),
-        unloaded_paths: Vec::new(),
-        issues: Vec::new(),
-        unretried: Vec::new(),
-        timings: ScheduleTimings::default(),
-        workers: 0,
-    };
+    let mut outcome = ScheduleOutcome::empty();
     let no_coverage_for_all = |outcome: &mut ScheduleOutcome| {
         for mutant in plan.mutants.iter().chain(&plan.pending) {
             outcome
@@ -1204,7 +1295,7 @@ pub fn run_schedule(
         config,
         caps: ready.capabilities,
     };
-    outcome.ready = Some(ready);
+    outcome.ready = Some(ready.clone());
     outcome.timings.setup = started.elapsed();
     if dry_files.is_empty() {
         link.shutdown();
@@ -1233,7 +1324,12 @@ pub fn run_schedule(
     };
     outcome.unloaded_paths = dry.unloaded_paths;
     outcome.baseline_failures.clone_from(&facts.baseline);
-    let jobs = build_jobs(plan, &facts, &dry_files, runner.caps, &mut outcome);
+    let context = JobContext {
+        dry_files: &dry_files,
+        ready: &ready,
+        cache: config.cache.as_deref(),
+    };
+    let jobs = build_jobs(plan, &facts, &context, &mut outcome);
     mark_unreached_pending(plan, &facts, &dry_files, &mut outcome);
     let known: FxHashSet<String> = facts.passing.keys().cloned().collect();
 

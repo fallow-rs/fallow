@@ -51,6 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     export and its name. For `mocked-only`, the object lists the tests and
     the mocked modules. The human no-coverage lines count the mutants of
     each file by class, and the plan prints one line with these counts.
+  - A run reuses the killed and survived results of an earlier run from the
+    Fallow cache. The key covers the mutant, its covering tests, the content
+    of the covering test files and the files that they import, the runner
+    setup files, the lockfile and the runner config. A change to one of them
+    runs the mutant again. Dynamic imports that the module graph does not
+    resolve, and files that a test reads, are not in the key. Each cache entry
+    and the `cache` object of the report record this limit. A reused result
+    has `cached: true`. `--no-cache` runs each mutant.
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
 

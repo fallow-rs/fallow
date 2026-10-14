@@ -332,6 +332,10 @@ pub struct MutantResult {
     /// retry, because the time budget ended first.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retried: bool,
+    /// True when the status comes from the result cache of an earlier run.
+    /// The mutant did not run in this run. `--no-cache` runs each mutant.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cached: bool,
 }
 
 /// How tests reach the code of one mutant in the module graph. The class
@@ -359,6 +363,21 @@ pub struct MutantTestReach {
     /// A mocked module can be a barrel in front of the file of the mutant.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mocked_targets: Vec<String>,
+}
+
+/// The result cache facts of a run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationCacheOutput {
+    /// The mutants whose status came from the cache. They did not run.
+    pub hits: usize,
+    /// The results that this run added to the cache.
+    pub stored: usize,
+    /// The test inputs that the cache key does not cover: modules that a
+    /// test loads through a dynamic import that the module graph does not
+    /// resolve (`dynamic-imports`), and files that a test reads
+    /// (`file-reads`). A change to them does not invalidate a cached result.
+    pub not_keyed: Vec<String>,
 }
 
 /// The results of the mutants of one function.
@@ -548,6 +567,10 @@ pub struct MutationReport {
     /// test file reaches a mutant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<MutationRunnerOutput>,
+    /// The result cache. Absent with `--no-cache`, and when no companion
+    /// started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<MutationCacheOutput>,
     /// The totals.
     pub summary: MutationSummary,
     /// Each mutant, ranked mutants first.
@@ -925,6 +948,7 @@ mod tests {
             duration_ms: None,
             test_reach: None,
             retried: false,
+            cached: false,
         }
     }
 
@@ -1059,6 +1083,7 @@ mod tests {
             duration_ms: None,
             test_reach: None,
             retried: false,
+            cached: false,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

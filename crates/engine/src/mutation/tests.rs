@@ -39,6 +39,7 @@ fn plans(
         modules: artifacts.modules.as_deref().expect("modules"),
         results: &artifacts.results,
         framework_config_exports: exports,
+        setup_files: &[],
     };
     requests
         .iter()
@@ -625,6 +626,7 @@ fn a_graph_file_without_module_facts_is_skipped_with_a_reason() {
         modules: &modules,
         results: &artifacts.results,
         framework_config_exports: None,
+        setup_files: &[],
     };
     let plan = plan_mutations(&inputs, &MutationPlanRequest::new(MutationScope::All));
     assert!(plan.skipped_files.contains(&SkippedFile {
@@ -874,4 +876,62 @@ fn a_project_without_tests_labels_each_mutant_none_file() {
                 .as_ref()
                 .is_some_and(|reach| reach.reach == ExportTestReach::NoneFile)
     }));
+}
+
+#[test]
+fn each_test_file_lists_the_files_that_it_reaches_through_imports() {
+    let plan = plan_all(&fixture("mutation-plan"));
+    let math: Vec<&str> = plan.test_file_reach_paths("src/math.test.ts").collect();
+    for file in [
+        "src/fixtures/data.ts",
+        "src/math.ts",
+        "src/page.ts",
+        "src/schema.generated.ts",
+        "src/writer.ts",
+    ] {
+        assert!(math.contains(&file), "{file}: {math:?}");
+    }
+    assert!(
+        !math.contains(&"src/math.test.ts"),
+        "the test file is not part of its own reach"
+    );
+    assert!(math.is_sorted(), "{math:?}");
+    let wrapper: Vec<&str> = plan.test_file_reach_paths("src/wrapper.test.ts").collect();
+    assert!(
+        wrapper.contains(&"src/dependency.ts"),
+        "a file that `vi.mock` replaces stays in the reach, so a change to it still changes the cache key: {wrapper:?}"
+    );
+    assert_eq!(
+        plan.test_file_reach.keys().cloned().collect::<Vec<_>>(),
+        plan.test_files,
+        "each plan test file has a reach entry"
+    );
+    assert!(plan.support_files.is_empty(), "no runner setup file");
+}
+
+#[test]
+fn a_runner_setup_file_and_its_imports_are_support_files() {
+    let root = fixture("mutation-plan");
+    let session = session(&root);
+    let artifacts = session
+        .analyze_dead_code_with_artifacts(true, true)
+        .expect("analysis succeeds");
+    let setup_files = [
+        PathBuf::from("src/wrapper"),
+        root.join("src/missing-setup.ts"),
+    ];
+    let inputs = MutationPlanInputs {
+        root: session.root(),
+        graph: artifacts.graph.as_ref().expect("graph"),
+        modules: artifacts.modules.as_deref().expect("modules"),
+        results: &artifacts.results,
+        framework_config_exports: None,
+        setup_files: &setup_files,
+    };
+    let plan = plan_mutations(&inputs, &MutationPlanRequest::new(MutationScope::All));
+    assert_eq!(
+        plan.support_files,
+        vec!["src/dependency.ts".to_owned(), "src/wrapper.ts".to_owned()],
+        "a setup path without an extension resolves to the graph file, its imports follow, and a missing setup file adds nothing"
+    );
 }

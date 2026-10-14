@@ -599,6 +599,14 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
             "Type check: the project enables the Vitest type-check pass, and this run did not run it. Type-level kills are not counted.\n",
         );
     }
+    if let Some(cache) = report.cache.as_ref().filter(|cache| cache.hits > 0) {
+        let _ = writeln!(
+            out,
+            "Cache: {} {} from an earlier run. Pass --no-cache to run each mutant.",
+            cache.hits,
+            plural(cache.hits, "result came", "results came")
+        );
+    }
 }
 
 /// Renders the human report of a run.

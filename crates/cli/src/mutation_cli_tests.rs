@@ -249,6 +249,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         duration_ms: Some(3),
         test_reach: None,
         retried: false,
+        cached: false,
     }
 }
 
@@ -267,6 +268,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
             base_ref: Some("origin/main".to_owned()),
         },
         runner: None,
+        cache: None,
         summary: MutationSummary::from_results(&mutants),
         functions: Vec::<MutationFunctionResult>::new(),
         mutants,
@@ -680,6 +682,36 @@ fn a_typecheck_note_says_that_type_level_kills_are_not_counted() {
     assert!(
         text.contains(
             "Type check: the project enables the Vitest type-check pass, and this run did not run it. Type-level kills are not counted.\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn cached_results_get_one_line_with_the_opt_out() {
+    let mut cached = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::Killed),
+            mutant("m2", "src/a.ts", 2, MutantStatus::Killed),
+        ],
+        Vec::new(),
+    );
+    cached.cache = Some(fallow_output::MutationCacheOutput {
+        hits: 0,
+        stored: 2,
+        not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+    });
+    let text = run_text(&cached, &OPTIONS);
+    assert!(!text.contains("Cache:"), "no line without a hit: {text}");
+    cached.cache = Some(fallow_output::MutationCacheOutput {
+        hits: 2,
+        stored: 0,
+        not_keyed: vec!["dynamic-imports".to_owned(), "file-reads".to_owned()],
+    });
+    let text = run_text(&cached, &OPTIONS);
+    assert!(
+        text.contains(
+            "Cache: 2 results came from an earlier run. Pass --no-cache to run each mutant.\n"
         ),
         "{text}"
     );

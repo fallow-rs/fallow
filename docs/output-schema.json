@@ -32392,6 +32392,17 @@
           ],
           "description": "The runner. Absent when no companion started, for example when no\ntest file reaches a mutant."
         },
+        "cache": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationCacheOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The result cache. Absent with `--no-cache`, and when no companion\nstarted."
+        },
         "summary": {
           "description": "The totals.",
           "$ref": "#/definitions/MutationSummary"
@@ -33191,6 +33202,10 @@
         "retried": {
           "type": "boolean",
           "description": "True when the status comes from a first run and a retry in a new\ncompanion. A `survived` or `timeout` mutant without this field got no\nretry, because the time budget ended first."
+        },
+        "cached": {
+          "type": "boolean",
+          "description": "True when the status comes from the result cache of an earlier run.\nThe mutant did not run in this run. `--no-cache` runs each mutant."
         }
       },
       "required": [
@@ -33819,6 +33834,32 @@
         "reach"
       ],
       "description": "How tests reach the code of one mutant in the module graph. The class\ngives a static reason why no test covers the mutant.\n\nA mutant in the top-level statement that declares a value export gets the\nclass of that export. A mutant outside each such statement gets the class\nof its file: `none-file` when no test loads the file, `mocked-only` when no\ntest loads the file and a mock explains an export of the file, and `none`\nwhen a test loads the file."
+    },
+    "MutationCacheOutput": {
+      "type": "object",
+      "properties": {
+        "hits": {
+          "type": "integer",
+          "description": "The mutants whose status came from the cache. They did not run."
+        },
+        "stored": {
+          "type": "integer",
+          "description": "The results that this run added to the cache."
+        },
+        "not_keyed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The test inputs that the cache key does not cover: modules that a\ntest loads through a dynamic import that the module graph does not\nresolve (`dynamic-imports`), and files that a test reads\n(`file-reads`). A change to them does not invalidate a cached result."
+        }
+      },
+      "required": [
+        "hits",
+        "stored",
+        "not_keyed"
+      ],
+      "description": "The result cache facts of a run."
     }
   }
 }

@@ -11,6 +11,7 @@ pub(crate) mod last_report;
 pub(crate) mod manifest;
 pub(crate) mod protocol;
 pub(crate) mod report;
+pub(crate) mod result_cache;
 pub(crate) mod run_dir;
 pub(crate) mod scheduler;
 pub(crate) mod transport;

@@ -25,7 +25,8 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`),
   `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
-  `--min-score`, `--operators` and `--verdicts`.
+  `--min-score`, `--operators` and `--verdicts`. The global `--no-cache` flag
+  also turns off the result cache (see "Result cache").
 - Only `--format human` and `--format json` are valid. Version 1 has no SARIF,
   CodeClimate, LSP, gate, GitHub Action or GitLab surface.
 - Each run saves its full JSON report to
@@ -194,6 +195,57 @@ is absent when the runner states no fact.
 `runner` is absent when no companion started, for example in a project with
 no test files.
 
+## Result cache
+
+A run stores the result of each `killed` mutant and each `survived` mutant
+that a retry confirmed. The file is `<cache dir>/mutation/results.json`. A
+later run uses a stored result when the key is equal, and does not run that
+mutant. The dry run always runs, because it gives the covering tests.
+
+The key hashes these parts:
+
+- the key format and the Fallow version;
+- the runner version and the runtime version;
+- the mutant id, and the content of the mutated source file;
+- the covering test ids;
+- the content of the covering test files, and of the files that they reach
+  through static imports in the module graph (`MutationPlan::test_reach`).
+  The run computes one digest for each test file and its reach, and each
+  mutant key combines the digests of its covering test files;
+- the content of the runner setup files (Vitest `setupFiles`) and of the
+  files that they reach (`MutationPlan::support_files`);
+- the lockfiles of the first directory from the root upward that has one;
+- the runner config files at the root: `vitest.config.*`, `vite.config.*`,
+  `vitest.workspace.*`, `package.json` and `tsconfig.json`. An absent file is
+  also a key fact, so a new config file changes the key.
+
+The reach ignores `vi.mock`, so a replaced module is still in the key. This
+gives more misses, never a stale hit.
+
+Known limit: dynamic imports that the module graph does not resolve, and files
+that a test reads, are not in the key. A change to them does not invalidate a
+stored result. Each cache entry records this limit in `not_keyed`, and the
+report repeats it in `cache.not_keyed`.
+
+- A `timeout`, `flaky`, `runtime_error` or `pending` result is never stored.
+  A timeout depends on the load of the machine. A survivor that the time
+  budget left without a retry is not stored.
+- A reused result has `cached: true` in `mutants[]`. It counts in the score
+  and the coverage the same as a result of this run.
+- `cache` in the report gives `hits`, `stored` and `not_keyed`. It is absent
+  with `--no-cache` and when no companion started.
+- The human output prints one `Cache:` line when a result came from the cache.
+- The global `--no-cache` flag turns the result cache off. The run then reads
+  and writes no entry.
+- The file keeps one entry for each mutant id, and at most 20000 entries. It
+  drops the entries that no recent run stored or used. A file that does not
+  parse, or that has another format version, gives an empty cache.
+- A failed write of the file adds a `cache-write-failed` error and keeps the
+  run result.
+- The scheduler talks to the cache through the `ResultLookup` trait in
+  `crates/api/src/mutation/scheduler`. The key and the file live in
+  `crates/api/src/mutation/result_cache`.
+
 ## Verdicts for equivalent mutants
 
 A verdict document replaces an inline suppression comment:
@@ -264,6 +316,8 @@ reaches inspects as `no-digest`.
 - The coverage line: the coverage and the no-coverage count.
 - One line when `runner.notes` has `typecheck-not-run`: type-level kills are
   not counted.
+- One `Cache:` line when a result came from the result cache. It names
+  `--no-cache`.
 - The 10 best-ranked survivors grouped by file, files and mutants in rank
   order, and one `and N more survivors` line. Each survivor has the location,
   the operator, the original and mutated code, and one line with the count of

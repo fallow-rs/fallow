@@ -5,6 +5,7 @@
 //! project against each planned mutant through the embedded companion.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fallow_engine::mutation::{
@@ -13,9 +14,9 @@ use fallow_engine::mutation::{
 };
 use fallow_engine::session::AnalysisSession;
 use fallow_output::{
-    MutationPlanOutput, MutationPlanSchemaVersion, MutationReport, MutationRunnerOutput,
-    MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind, MutationScopeOutput,
-    MutationTimings, MutationWorktreeCheck,
+    MutationCacheOutput, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
+    MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind,
+    MutationScopeOutput, MutationTimings, MutationWorktreeCheck,
 };
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
@@ -31,9 +32,11 @@ use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
     plan_counts, plan_files, plan_mutants, skipped_files, summary, tool_version,
 };
+use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::scheduler::{
-    ScheduleConfig, ScheduleError, ScheduleOutcome, SchedulePlan, ScheduledMutant, run_schedule,
+    ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome, SchedulePlan,
+    ScheduledMutant, run_schedule,
 };
 use crate::mutation::transport::ProcessSpawner;
 use crate::mutation::worktree::{WorktreeSnapshot, snapshot};
@@ -435,9 +438,46 @@ fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
 struct Execution {
     outcome: Option<ScheduleOutcome>,
     runner: Option<MutationRunnerOutput>,
+    cache: Option<MutationCacheOutput>,
     setup_ms: u64,
 }
 
+/// The result cache of a run. `None` with `--no-cache`.
+fn open_result_cache(
+    no_cache: bool,
+    mutation_cache: &Path,
+    root: &Path,
+    plan: &MutationPlan,
+) -> Option<Arc<ResultCache>> {
+    (!no_cache).then(|| {
+        Arc::new(ResultCache::open(
+            mutation_cache,
+            root,
+            KeyFiles::from_plan(plan),
+        ))
+    })
+}
+
+/// Stores the new results of `outcome` in `cache` and writes the cache file.
+/// A failed write adds a `cache-write-failed` issue and keeps the run result.
+fn store_results(cache: &ResultCache, outcome: &mut ScheduleOutcome) -> MutationCacheOutput {
+    let counts = cache.record(outcome);
+    if let Err(message) = cache.save() {
+        outcome.issues.push(ScheduleIssue {
+            code: "cache-write-failed",
+            message: format!("the mutation result cache was not saved: {message}"),
+            mutant_id: None,
+            stderr_tail: None,
+        });
+    }
+    MutationCacheOutput {
+        hits: counts.hits,
+        stored: counts.stored,
+        not_keyed: NOT_KEYED.iter().map(|&item| item.to_owned()).collect(),
+    }
+}
+
+/// The public error of a schedule that stopped the run.
 fn execute(
     options: &MutationRunOptions,
     planned: &Planned,
@@ -453,6 +493,7 @@ fn execute(
         return Ok(Execution {
             outcome: None,
             runner: None,
+            cache: None,
             setup_ms: 0,
         });
     }
@@ -486,6 +527,7 @@ fn execute(
         .collect();
     let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
     let root = planned.resolved.root().to_path_buf();
+    let result_cache = open_result_cache(planned.resolved.no_cache, &mutation_cache, &root, plan);
     let config = ScheduleConfig {
         init: InitRequest {
             root: root.to_string_lossy().into_owned(),
@@ -499,6 +541,9 @@ fn execute(
         concurrency: options.concurrency.unwrap_or_else(default_concurrency),
         runner_timeout: options.runner_timeout.unwrap_or(DEFAULT_RUNNER_TIMEOUT),
         deadline,
+        cache: result_cache
+            .clone()
+            .map(|cache| cache as Arc<dyn ResultLookup>),
     };
     let spawner = ProcessSpawner {
         runtime: runtime.path.clone(),
@@ -508,7 +553,7 @@ fn execute(
         session_token_env: manifest.session_token_env.clone(),
     };
     let setup_ms = millis(setup_started.elapsed());
-    let outcome = run_schedule(&spawner, &schedule, &config)
+    let mut outcome = run_schedule(&spawner, &schedule, &config)
         .map_err(|error| schedule_error(&error, config.runner_timeout))?;
     let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
         name: RUNNER.to_owned(),
@@ -526,9 +571,14 @@ fn execute(
             .cloned()
             .collect(),
     });
+    let cache = match (&result_cache, outcome.ready.is_some()) {
+        (Some(result_cache), true) => Some(store_results(result_cache, &mut outcome)),
+        _ => None,
+    };
     Ok(Execution {
         outcome: Some(outcome),
         runner,
+        cache,
         setup_ms,
     })
 }
@@ -634,6 +684,7 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         completion,
         scope: scope_output(options, planned.base_ref.clone()),
         runner: execution.runner,
+        cache: execution.cache,
         summary: summary(&results),
         functions: function_results(plan, &results),
         mutants: results,
@@ -733,6 +784,26 @@ mod tests {
                 Some(operator)
             );
         }
+    }
+
+    #[test]
+    fn no_cache_opens_no_result_cache() {
+        let dir = tempfile::tempdir().expect("dir");
+        let plan = MutationPlan {
+            files: Vec::new(),
+            mutants: Vec::new(),
+            test_files: Vec::new(),
+            reach_files: Vec::new(),
+            test_file_reach: std::collections::BTreeMap::new(),
+            support_files: Vec::new(),
+            counts: fallow_engine::mutation::MutationPlanCounts::default(),
+            no_test_files: false,
+            framework_config_checked: false,
+            skipped_files: Vec::new(),
+            unmatched_paths: Vec::new(),
+        };
+        assert!(open_result_cache(true, dir.path(), dir.path(), &plan).is_none());
+        assert!(open_result_cache(false, dir.path(), dir.path(), &plan).is_some());
     }
 
     #[test]

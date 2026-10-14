@@ -237,6 +237,7 @@ mod tests {
             duration_ms: None,
             test_reach: None,
             retried: false,
+            cached: false,
         }
     }
 
@@ -259,6 +260,7 @@ mod tests {
                 base_ref: None,
             },
             runner: None,
+            cache: None,
             summary: MutationSummary::from_results(&mutants),
             functions: vec![MutationFunctionResult {
                 file: "src/a.ts".to_owned(),

@@ -19570,6 +19570,11 @@ scope: MutationScopeOutput
  * test file reaches a mutant.
  */
 runner?: (MutationRunnerOutput | null)
+/**
+ * The result cache. Absent with `--no-cache`, and when no companion
+ * started.
+ */
+cache?: (MutationCacheOutput | null)
 summary: MutationSummary
 /**
  * Each mutant, ranked mutants first.
@@ -19678,6 +19683,26 @@ name: string
  * The version that the runtime reports.
  */
 version: string
+}
+/**
+ * The result cache facts of a run.
+ */
+export interface MutationCacheOutput {
+/**
+ * The mutants whose status came from the cache. They did not run.
+ */
+hits: number
+/**
+ * The results that this run added to the cache.
+ */
+stored: number
+/**
+ * The test inputs that the cache key does not cover: modules that a
+ * test loads through a dynamic import that the module graph does not
+ * resolve (`dynamic-imports`), and files that a test reads
+ * (`file-reads`). A change to them does not invalidate a cached result.
+ */
+not_keyed: string[]
 }
 /**
  * The totals of a run.
@@ -19830,6 +19855,11 @@ test_reach?: (MutantTestReach | null)
  * retry, because the time budget ended first.
  */
 retried?: boolean
+/**
+ * True when the status comes from the result cache of an earlier run.
+ * The mutant did not run in this run. `--no-cache` runs each mutant.
+ */
+cached?: boolean
 }
 /**
  * How tests reach the code of one mutant in the module graph. The class

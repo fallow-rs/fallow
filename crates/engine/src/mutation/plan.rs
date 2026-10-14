@@ -149,11 +149,16 @@ pub(super) fn build(
         .flat_map(|file| file.static_test_files.iter().cloned())
         .collect();
 
+    let test_files: Vec<String> = test_files.into_iter().collect();
+    let reach = super::reach::test_reach(graph, inputs.root, &test_files);
     MutationPlan {
         files,
         counts: count(&mutants),
         mutants,
-        test_files: test_files.into_iter().collect(),
+        reach_files: reach.files,
+        test_file_reach: reach.reach,
+        support_files: super::reach::support_files(graph, inputs.root, inputs.setup_files),
+        test_files,
         no_test_files: graph.test_entry_points.is_empty(),
         framework_config_checked: inputs.framework_config_exports.is_some(),
         skipped_files,

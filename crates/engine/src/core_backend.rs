@@ -438,6 +438,16 @@ impl BackendAggregatedPluginResult {
         &self.inner.active_plugins
     }
 
+    /// The setup files that the plugins found in tool configs, such as
+    /// Vitest `setupFiles`, absolute or relative to the root.
+    pub fn setup_files(&self) -> Vec<PathBuf> {
+        self.inner
+            .setup_files
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect()
+    }
+
     /// The plugin used-export rules, compiled for path lookups.
     pub fn used_export_names(&self) -> BackendUsedExportNames {
         BackendUsedExportNames {

@@ -155,6 +155,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         duration_ms: None,
         test_reach: None,
         retried: false,
+        cached: false,
     };
     let scheduled = outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
     match (mutant.disposition, scheduled) {
@@ -170,6 +171,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
                 static_mutant: result.static_mutant,
                 duration_ms: result.duration_ms,
                 retried: result.retried,
+                cached: result.cached,
                 ..base
             }
         }
@@ -415,6 +417,9 @@ mod tests {
             },
             mutants,
             test_files: vec!["test/a.test.ts".to_owned()],
+            reach_files: Vec::new(),
+            test_file_reach: BTreeMap::new(),
+            support_files: Vec::new(),
             no_test_files: false,
             framework_config_checked: false,
             skipped_files: Vec::new(),
@@ -441,6 +446,7 @@ mod tests {
                                 *status,
                                 MutantStatus::Survived | MutantStatus::Timeout
                             ),
+                            cached: false,
                         },
                     )
                 })
@@ -451,6 +457,7 @@ mod tests {
             unretried: Vec::new(),
             timings: ScheduleTimings::default(),
             workers: 1,
+            cache_keys: FxHashMap::default(),
         }
     }
 
@@ -824,6 +831,25 @@ mod tests {
         assert_eq!(results[0].status, MutantStatus::Killed);
         assert_eq!(results[0].killed_by.as_deref(), Some("test/a.test.ts::t1"));
         assert_eq!(results[1].status, MutantStatus::NoCoverage);
+    }
+
+    #[test]
+    fn a_cached_result_is_marked_in_the_report_and_counts_like_a_run() {
+        let plan = plan(
+            vec![
+                planned("m1", Some(1), MutantDisposition::Planned, None),
+                planned("m2", Some(2), MutantDisposition::Planned, None),
+            ],
+            0,
+        );
+        let mut outcome = outcome(&[("m1", MutantStatus::Killed), ("m2", MutantStatus::Survived)]);
+        if let Some(result) = outcome.results.get_mut("m1") {
+            result.cached = true;
+        }
+        let results = mutant_results(&plan, Some(&outcome));
+        assert!(results[0].cached);
+        assert!(!results[1].cached);
+        assert_eq!(summary(&results).score, Some(0.5));
     }
 
     #[test]
