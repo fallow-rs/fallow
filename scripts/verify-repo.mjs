@@ -30,6 +30,23 @@ const FAST_COMMANDS = [
     args: ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
   },
   {
+    // The workspace run leaves out the feature-gated CLI targets, such as
+    // the schema-emit binary and its tests. CI lints them in a separate step.
+    label: "Rust linting (feature-gated CLI targets)",
+    command: "cargo",
+    args: [
+      "clippy",
+      "-p",
+      "fallow-cli",
+      "--features",
+      "test-sidecar-key,schema-emit",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings",
+    ],
+  },
+  {
     label: "JavaScript linting",
     command: "npm",
     args: ["run", "lint:js"],

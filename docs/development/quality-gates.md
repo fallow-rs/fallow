@@ -193,6 +193,7 @@ The underlying repository checks include:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p fallow-cli --features test-sidecar-key,schema-emit --all-targets -- -D warnings
 cargo test --workspace --lib --bins --tests --examples
 cargo check --workspace --benches
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
