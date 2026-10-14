@@ -55,8 +55,8 @@ clap = { version = "4", features = ["derive"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-deser-value = "0.9"
-deser-yaml = "0.9"
+deser-value = "0.10"
+deser-yaml = "0.10"
 semver = "1"
 jsonc-parser = { version = "0.34", features = ["cst", "serde", "serde_json"] }
 toml = "1.1"

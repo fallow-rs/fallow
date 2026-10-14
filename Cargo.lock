@@ -912,9 +912,9 @@ dependencies = [
 
 [[package]]
 name = "deser-core"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12bd36a68e8d14a98ad4107016d65f3af3e851185f3176f05d873aaec9328472"
+checksum = "008b84ada3372d9c3ec224c4d415edc627bfc79d008798c66fb36ef062e610e4"
 dependencies = [
  "bigdecimal",
  "indexmap",
@@ -925,9 +925,9 @@ dependencies = [
 
 [[package]]
 name = "deser-value"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d92341b8f09ca41e6a5e9f5eed1f7f2c8025cd11922ce9b1cdb2bbe90e5faf7"
+checksum = "bbfacb84c4f33b80f23f310625adfdd380097aebe404ead958476a52e95b7ee8"
 dependencies = [
  "deser-core",
  "indexmap",
@@ -935,11 +935,13 @@ dependencies = [
 
 [[package]]
 name = "deser-yaml"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728645c3d2f7eb1bc58353d7f9c05ef5392f1ccc49ac604aae8e25fdb085a5f3"
+checksum = "20efcd913390e66c7758b1ca0c3768cdc253fc4a42be960031786af324dfaa97"
 dependencies = [
  "deser-core",
+ "itoa",
+ "simdutf8",
  "zmij",
 ]
 
