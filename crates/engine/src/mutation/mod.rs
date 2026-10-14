@@ -15,7 +15,7 @@
 //! - `pending`: a planned mutant after the `max_mutants` limit.
 //! - `no-coverage`: no test file reaches the file in the graph. A test that
 //!   replaces the module with `vi.mock` does not reach it.
-//! - `pruned`: a static rule removes the mutant (see [`PruneReason`]).
+//! - `pruned`: a static rule removes the mutant (see [`PruneReason`](crate::mutation::PruneReason)).
 
 mod plan;
 #[cfg(test)]
