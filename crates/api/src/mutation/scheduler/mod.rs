@@ -79,6 +79,8 @@ pub struct MutantOutcome {
     pub covering_tests: Vec<String>,
     pub static_mutant: bool,
     pub duration_ms: Option<u64>,
+    /// True when the status comes from a first run and a retry.
+    pub retried: bool,
 }
 
 impl MutantOutcome {
@@ -89,6 +91,7 @@ impl MutantOutcome {
             covering_tests: Vec::new(),
             static_mutant: false,
             duration_ms: None,
+            retried: false,
         }
     }
 }
@@ -152,6 +155,8 @@ pub enum ScheduleError {
     Setup {
         message: String,
         stderr_tail: Option<String>,
+        /// The watchdog fired before the companion answered.
+        timed_out: bool,
     },
     /// The runner version is outside the manifest range.
     RunnerVersion(String),
@@ -902,6 +907,7 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
             covering_tests,
             static_mutant: job.static_mutant,
             duration_ms: attempt.duration_ms,
+            retried: false,
         },
     );
 }
@@ -934,6 +940,7 @@ fn setup_error(stage: &str, fault: &LinkFault) -> ScheduleError {
     ScheduleError::Setup {
         message: format!("the mutation companion {stage} failed: {fault}"),
         stderr_tail: fault.stderr_tail().map(str::to_owned),
+        timed_out: matches!(fault, LinkFault::Timeout),
     }
 }
 
@@ -1117,6 +1124,7 @@ fn retry_suspects(
         } else {
             first.and_then(|first| first.duration_ms)
         };
+        let id = job.id.clone();
         record(
             outcome,
             facts,
@@ -1127,6 +1135,9 @@ fn retry_suspects(
                 ..attempt
             },
         );
+        if let Some(result) = outcome.results.get_mut(&id) {
+            result.retried = true;
+        }
     }
     Ok(())
 }

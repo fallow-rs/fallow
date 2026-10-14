@@ -358,6 +358,42 @@ fn guard_worktree(allow_dirty: bool, start: Option<&WorktreeSnapshot>) -> Progra
     .with_help("commit or stash the changes, or pass --allow-dirty"))
 }
 
+/// Maps a schedule error to its public error. A setup watchdog fault names
+/// `--setup-timeout`, because a slow or busy host is the usual cause.
+fn schedule_error(error: &ScheduleError, setup_timeout: Duration) -> ProgrammaticError {
+    let (code, stderr_tail) = match error {
+        ScheduleError::Integrity(_) => ("FALLOW_MUTATION_COMPANION_INTEGRITY", None),
+        ScheduleError::RunnerVersion(_) => ("FALLOW_MUTATION_RUNNER_UNSUPPORTED", None),
+        ScheduleError::Setup { stderr_tail, .. } => {
+            ("FALLOW_MUTATION_RUNNER_FAILED", stderr_tail.clone())
+        }
+        ScheduleError::UnknownHit(_) => ("FALLOW_MUTATION_PLAN_MISMATCH", None),
+        ScheduleError::Baseline(_) => ("FALLOW_MUTATION_BASELINE_FAILED", None),
+    };
+    let mut help = Vec::new();
+    if matches!(
+        error,
+        ScheduleError::Setup {
+            timed_out: true,
+            ..
+        }
+    ) {
+        help.push(format!(
+            "the runner setup took longer than {}s; on a slow or busy host, pass --setup-timeout with a longer duration, for example 5m",
+            setup_timeout.as_secs()
+        ));
+    }
+    if let Some(tail) = stderr_tail.filter(|tail| !tail.trim().is_empty()) {
+        help.push(format!("companion stderr:\n{}", tail.trim_end()));
+    }
+    let public = mutation_error(code, error.to_string());
+    if help.is_empty() {
+        public
+    } else {
+        public.with_help(help.join("\n"))
+    }
+}
+
 fn default_concurrency() -> usize {
     std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
@@ -472,22 +508,8 @@ fn execute(
         session_token_env: manifest.session_token_env.clone(),
     };
     let setup_ms = millis(setup_started.elapsed());
-    let outcome = run_schedule(&spawner, &schedule, &config).map_err(|error| {
-        let (code, stderr_tail) = match &error {
-            ScheduleError::Integrity(_) => ("FALLOW_MUTATION_COMPANION_INTEGRITY", None),
-            ScheduleError::RunnerVersion(_) => ("FALLOW_MUTATION_RUNNER_UNSUPPORTED", None),
-            ScheduleError::Setup { stderr_tail, .. } => {
-                ("FALLOW_MUTATION_RUNNER_FAILED", stderr_tail.clone())
-            }
-            ScheduleError::UnknownHit(_) => ("FALLOW_MUTATION_PLAN_MISMATCH", None),
-            ScheduleError::Baseline(_) => ("FALLOW_MUTATION_BASELINE_FAILED", None),
-        };
-        let error = mutation_error(code, error.to_string());
-        match stderr_tail.filter(|tail| !tail.trim().is_empty()) {
-            Some(tail) => error.with_help(format!("companion stderr:\n{}", tail.trim_end())),
-            None => error,
-        }
-    })?;
+    let outcome = run_schedule(&spawner, &schedule, &config)
+        .map_err(|error| schedule_error(&error, config.runner_timeout))?;
     let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
         name: RUNNER.to_owned(),
         version: ready.runner_version.clone(),
@@ -641,6 +663,32 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_setup_watchdog_error_names_the_setup_timeout_flag() {
+        let error = schedule_error(
+            &ScheduleError::Setup {
+                message: "the mutation companion dry_run failed".to_owned(),
+                stderr_tail: Some("vitest started\n".to_owned()),
+                timed_out: true,
+            },
+            Duration::from_secs(120),
+        );
+        let help = error.help.as_deref().unwrap_or_default();
+        assert!(help.contains("longer than 120s"), "{help}");
+        assert!(help.contains("--setup-timeout"), "{help}");
+        assert!(help.contains("companion stderr:\nvitest started"), "{help}");
+
+        let other = schedule_error(
+            &ScheduleError::Setup {
+                message: "the mutation companion init failed".to_owned(),
+                stderr_tail: None,
+                timed_out: false,
+            },
+            Duration::from_secs(120),
+        );
+        assert_eq!(other.help, None);
+    }
 
     #[test]
     fn a_failed_end_check_keeps_the_execute_error_and_reports_the_check_error() {

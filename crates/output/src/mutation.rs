@@ -42,10 +42,12 @@ pub enum MutationPlanSchemaVersion {
 pub enum MutantStatus {
     /// A covering test failed.
     Killed,
-    /// The run passed its timeout, also in a second run in a new companion.
-    /// The mutant counts as detected.
+    /// The run passed its timeout. A retry in a new companion with twice the
+    /// time also timed out, when the time budget allowed the retry. The
+    /// mutant counts as detected.
     Timeout,
-    /// Each covering test passed, also in a second run in a new companion.
+    /// Each covering test passed, also in a retry in a new companion when
+    /// the time budget allowed the retry.
     Survived,
     /// No test reaches the mutant.
     NoCoverage,
@@ -317,13 +319,19 @@ pub struct MutantResult {
     /// True when the mutant runs while a module loads, outside each test.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub static_mutant: bool,
-    /// The duration of the deciding run.
+    /// The duration of one run in milliseconds. A `killed` mutant after a
+    /// retry reports the retry. Each other status reports the first run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     /// How tests reach the code of the mutant in the module graph. Only a
     /// `no_coverage` mutant has this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_reach: Option<MutantTestReach>,
+    /// True when the status comes from a first run and a retry in a new
+    /// companion. A `survived` or `timeout` mutant without this field got no
+    /// retry, because the time budget ended first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retried: bool,
 }
 
 /// How tests reach the code of one mutant in the module graph. The class
@@ -916,6 +924,7 @@ mod tests {
             static_mutant: false,
             duration_ms: None,
             test_reach: None,
+            retried: false,
         }
     }
 
@@ -1049,6 +1058,7 @@ mod tests {
             static_mutant: false,
             duration_ms: None,
             test_reach: None,
+            retried: false,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

@@ -236,6 +236,7 @@ mod tests {
             static_mutant: false,
             duration_ms: None,
             test_reach: None,
+            retried: false,
         }
     }
 

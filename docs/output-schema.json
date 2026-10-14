@@ -32806,12 +32806,12 @@
         {
           "type": "string",
           "const": "timeout",
-          "description": "The run passed its timeout, also in a second run in a new companion.\nThe mutant counts as detected."
+          "description": "The run passed its timeout. A retry in a new companion with twice the\ntime also timed out, when the time budget allowed the retry. The\nmutant counts as detected."
         },
         {
           "type": "string",
           "const": "survived",
-          "description": "Each covering test passed, also in a second run in a new companion."
+          "description": "Each covering test passed, also in a retry in a new companion when\nthe time budget allowed the retry."
         },
         {
           "type": "string",
@@ -33175,7 +33175,7 @@
             "integer",
             "null"
           ],
-          "description": "The duration of the deciding run."
+          "description": "The duration of one run in milliseconds. A `killed` mutant after a\nretry reports the retry. Each other status reports the first run."
         },
         "test_reach": {
           "anyOf": [
@@ -33187,6 +33187,10 @@
             }
           ],
           "description": "How tests reach the code of the mutant in the module graph. Only a\n`no_coverage` mutant has this field."
+        },
+        "retried": {
+          "type": "boolean",
+          "description": "True when the status comes from a first run and a retry in a new\ncompanion. A `survived` or `timeout` mutant without this field got no\nretry, because the time budget ended first."
         }
       },
       "required": [

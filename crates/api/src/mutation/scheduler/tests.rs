@@ -513,6 +513,8 @@ fn a_watchdog_timeout_is_timeout_and_the_next_mutant_gets_a_new_companion() {
     let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config(1)).expect("run");
     assert_eq!(status(&outcome, "m1"), MutantStatus::Timeout);
     assert_eq!(status(&outcome, "m2"), MutantStatus::Killed);
+    assert!(outcome.results["m1"].retried, "a confirmed timeout");
+    assert!(!outcome.results["m2"].retried, "a kill gets no retry");
     let runs = spawner.runs();
     assert_eq!(runs.len(), 3, "a timeout gets one retry");
     assert_eq!((runs[0].0, runs[1].0), (0, 1));
@@ -537,6 +539,7 @@ fn a_timeout_reruns_in_a_new_companion_and_a_survived_retry_is_flaky() {
     ));
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
     assert_eq!(status(&outcome, "m1"), MutantStatus::Flaky);
+    assert!(outcome.results["m1"].retried);
     let runs = spawner.runs();
     assert_eq!(runs.len(), 2);
     assert_eq!(runs[1].0, 1, "the retry uses a new companion");
@@ -955,6 +958,7 @@ fn an_ended_time_budget_skips_the_timeout_retry_and_keeps_timeout() {
     config.deadline = Some(Instant::now() + Duration::from_millis(150));
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
     assert_eq!(status(&outcome, "m1"), MutantStatus::Timeout);
+    assert!(!outcome.results["m1"].retried, "an unconfirmed timeout");
     assert_eq!(outcome.unretried, vec!["m1".to_owned()]);
     assert_eq!(spawner.spawns.load(Ordering::SeqCst), 1);
 }
@@ -1172,4 +1176,24 @@ fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
             mutant_ids: vec!["m2".to_owned(), "m3".to_owned()],
         }]
     );
+}
+
+#[test]
+fn a_setup_watchdog_fault_is_marked_as_a_timeout() {
+    let timed_out = setup_error("dry_run", &LinkFault::Timeout);
+    assert!(matches!(
+        timed_out,
+        ScheduleError::Setup {
+            timed_out: true,
+            ..
+        }
+    ));
+    let protocol = setup_error("dry_run", &LinkFault::Protocol("bad line".to_owned()));
+    assert!(matches!(
+        protocol,
+        ScheduleError::Setup {
+            timed_out: false,
+            ..
+        }
+    ));
 }

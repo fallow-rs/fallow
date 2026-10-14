@@ -120,6 +120,7 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         all: true,
         allow_side_effects: true,
         time_budget: Some("2m".to_owned()),
+        setup_timeout: Some("5m".to_owned()),
         ..MutationArgs::default()
     };
     let flagged = input(root, args, config);
@@ -132,13 +133,14 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
     assert_eq!(from_flags.scope, MutationRunScope::All);
     assert!(from_flags.allow_side_effects);
     assert_eq!(from_flags.time_budget, Some(Duration::from_secs(120)));
+    assert_eq!(from_flags.runner_timeout, Some(Duration::from_secs(300)));
     assert_eq!(min_score(&flagged).unwrap(), Some(90.0));
 }
 
 #[test]
 fn invalid_flags_and_scope_conflicts_exit_2() {
     let root = Path::new("/project");
-    let cases: [(MutationArgs, Option<&str>, &str); 6] = [
+    let cases: [(MutationArgs, Option<&str>, &str); 7] = [
         (
             MutationArgs {
                 operators: vec!["bogus".to_owned()],
@@ -154,6 +156,14 @@ fn invalid_flags_and_scope_conflicts_exit_2() {
             },
             None,
             "not a duration",
+        ),
+        (
+            MutationArgs {
+                setup_timeout: Some("later".to_owned()),
+                ..MutationArgs::default()
+            },
+            None,
+            "--setup-timeout `later` is not a duration",
         ),
         (
             MutationArgs {
@@ -238,6 +248,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         static_mutant: false,
         duration_ms: Some(3),
         test_reach: None,
+        retried: false,
     }
 }
 

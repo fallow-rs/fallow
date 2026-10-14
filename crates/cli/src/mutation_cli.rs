@@ -92,6 +92,10 @@ pub struct MutationArgs {
     /// mutants leave the score.
     #[arg(long, value_name = "PATH")]
     pub verdicts: Option<PathBuf>,
+    /// Wait this long for each runner process to start and finish its dry run, for
+    /// example `5m` on a slow or busy host (default: `2m`).
+    #[arg(long, value_name = "DURATION")]
+    pub setup_timeout: Option<String>,
     /// Mutate only these files or directories instead of the changed code.
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -229,6 +233,15 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         })?),
         None => None,
     };
+    let runner_timeout = match input.args.setup_timeout.as_deref() {
+        Some(text) => Some(parse_duration(text).ok_or_else(|| {
+            input_error(
+                format!("--setup-timeout `{text}` is not a duration such as 90s, 10m or 1h"),
+                "mutation.setupTimeout",
+            )
+        })?),
+        None => None,
+    };
     if input.args.concurrency == Some(0) {
         return Err(input_error(
             "--concurrency must be at least 1",
@@ -259,7 +272,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         runtime: input.args.runtime.clone(),
         concurrency: input.args.concurrency.or(input.config.concurrency),
         time_budget,
-        runner_timeout: None,
+        runner_timeout,
         output_paths: input
             .output_file
             .map(absolute_output_path)

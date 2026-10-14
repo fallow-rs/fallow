@@ -154,6 +154,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         static_mutant: false,
         duration_ms: None,
         test_reach: None,
+        retried: false,
     };
     let scheduled = outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
     match (mutant.disposition, scheduled) {
@@ -168,6 +169,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
                 covering_tests: result.covering_tests.clone(),
                 static_mutant: result.static_mutant,
                 duration_ms: result.duration_ms,
+                retried: result.retried,
                 ..base
             }
         }
@@ -435,6 +437,10 @@ mod tests {
                             covering_tests: vec!["test/a.test.ts::t1".to_owned()],
                             static_mutant: false,
                             duration_ms: Some(4),
+                            retried: matches!(
+                                *status,
+                                MutantStatus::Survived | MutantStatus::Timeout
+                            ),
                         },
                     )
                 })
@@ -584,6 +590,14 @@ mod tests {
         assert_eq!(results[0].killed_by.as_deref(), Some("test/a.test.ts::t1"));
         assert_eq!(results[0].location.column, 10, "the column is 1-based");
         assert_eq!(results[5].prune_reason.as_deref(), Some("side-effect-sink"));
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.retried)
+                .collect::<Vec<_>>(),
+            vec![false, true, false, false, false, false],
+            "only the retried survivor carries the flag"
+        );
 
         let summary = summary(&results);
         assert_eq!(summary.counts.total, 6);

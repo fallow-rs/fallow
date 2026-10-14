@@ -19815,7 +19815,8 @@ covering_tests?: string[]
  */
 static_mutant?: boolean
 /**
- * The duration of the deciding run.
+ * The duration of one run in milliseconds. A `killed` mutant after a
+ * retry reports the retry. Each other status reports the first run.
  */
 duration_ms?: (number | null)
 /**
@@ -19823,6 +19824,12 @@ duration_ms?: (number | null)
  * `no_coverage` mutant has this field.
  */
 test_reach?: (MutantTestReach | null)
+/**
+ * True when the status comes from a first run and a retry in a new
+ * companion. A `survived` or `timeout` mutant without this field got no
+ * retry, because the time budget ended first.
+ */
+retried?: boolean
 }
 /**
  * How tests reach the code of one mutant in the module graph. The class
