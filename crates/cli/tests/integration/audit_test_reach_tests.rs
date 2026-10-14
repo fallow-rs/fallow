@@ -503,17 +503,19 @@ fn brief_orders_default_sfc_and_multi_declarator_exports() {
         listed,
         [
             ("src/Gauge.vue", "scale"),
-            ("src/pair.ts", "default"),
             ("src/pair.ts", "a"),
             ("src/pair.ts", "b"),
+            ("src/pair.ts", "default"),
         ]
         .map(|(file, name)| (file.to_string(), name.to_string())),
-        "modified before new, then file, line and name: {reach}"
+        "file, line and name: {reach}"
     );
     assert_eq!(row(&reach, "src/Gauge.vue", "scale")["line"], 6);
-    // Every line of the one-line declaration is an added line, so both
-    // declarators count as new. They share the line, so the name decides.
-    assert_eq!(row(&reach, "src/pair.ts", "a")["change"], "new");
+    // The diff replaces the one-line declaration, but both names existed at
+    // the base, so both declarators are modified. They share the line, so
+    // the name decides.
+    assert_eq!(row(&reach, "src/pair.ts", "a")["change"], "modified");
+    assert_eq!(row(&reach, "src/pair.ts", "b")["change"], "modified");
     assert_eq!(row(&reach, "src/pair.ts", "default")["change"], "modified");
 }
 
@@ -799,4 +801,128 @@ fn coverage_gap_note_names_a_mocked_only_export() {
         note("noneFileExport"),
         "This export is runtime-reachable but no test-reachable module references it"
     );
+}
+
+/// A file that no test loads, so each changed export of it is a row.
+const CHANGE_BASE_UI: &str = "export const oneLine = (): string => 'a';\nexport const rewritten = (): string =>\n  'a';\nexport const moved = (): number => 1;\nexport const oldName = (): number => 2;\nexport function keep(): number {\n  const value = 0;\n  return value;\n}\n";
+
+const CHANGE_HEAD_UI: &str = "export const oneLine = (): string => 'b';\nexport const rewritten = (): number =>\n  42;\nexport const newName = (): number => 2;\nexport function keep(): number {\n  const value = 0;\n  return value;\n}\nexport const moved = (): number => 1;\nexport const brandNew = (): number => 3;\n";
+
+fn change_label_base() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("package.json", VITEST_PACKAGE),
+        (
+            "src/main.ts",
+            "import { oneLine, rewritten, moved, oldName, keep } from './ui';\nimport { tested } from './tested';\nimport { stays } from './old-place';\nconsole.log(oneLine(), rewritten(), moved(), oldName(), keep(), tested(), stays());\n",
+        ),
+        ("src/ui.ts", CHANGE_BASE_UI),
+        (
+            "src/tested.ts",
+            "export function tested(): number {\n  return 1;\n}\n",
+        ),
+        (
+            "src/tested.test.ts",
+            "import { expect, it } from 'vitest';\nimport { tested } from './tested';\nit('tested', () => { expect(tested()).toBe(1); });\n",
+        ),
+        (
+            "src/old-place.ts",
+            "const first = 1;\nconst second = 2;\nconst third = 3;\nexport const stays = (): number => first + second + third;\nexport const fourth = 4;\nexport const fifth = 5;\n",
+        ),
+    ]
+}
+
+#[test]
+fn brief_labels_an_export_new_only_when_its_name_did_not_exist_at_the_base() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_files(root, &change_label_base());
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "base");
+    fs::remove_file(root.join("src/old-place.ts")).expect("remove renamed file");
+    write_files(
+        root,
+        &[
+            (
+                "src/main.ts",
+                "import { oneLine, rewritten, moved, newName, keep, brandNew } from './ui';\nimport { tested } from './tested';\nimport { stays } from './new-place';\nimport { fresh } from './fresh';\nconsole.log(oneLine(), rewritten(), moved(), newName(), keep(), brandNew(), tested(), stays(), fresh());\n",
+            ),
+            ("src/ui.ts", CHANGE_HEAD_UI),
+            (
+                "src/new-place.ts",
+                "const first = 1;\nconst second = 2;\nconst third = 3;\nexport const stays = (): number => first + second + third + 1;\nexport const fourth = 4;\nexport const fifth = 5;\n",
+            ),
+            ("src/fresh.ts", "export const fresh = (): number => 7;\n"),
+        ],
+    );
+    commit_all(root, "head");
+
+    let reach = test_reach(root);
+    let change = |file: &str, name: &str| row(&reach, file, name)["change"].clone();
+
+    assert_eq!(change("src/ui.ts", "oneLine"), "modified", "one-line edit");
+    assert_eq!(change("src/ui.ts", "rewritten"), "modified", "full rewrite");
+    assert_eq!(
+        change("src/ui.ts", "moved"),
+        "modified",
+        "moved declaration"
+    );
+    assert_eq!(change("src/ui.ts", "newName"), "new", "renamed export");
+    assert_eq!(change("src/ui.ts", "brandNew"), "new", "new export");
+    assert_eq!(change("src/fresh.ts", "fresh"), "new", "new file");
+    assert_eq!(
+        change("src/new-place.ts", "stays"),
+        "modified",
+        "one-line edit in a renamed file"
+    );
+}
+
+#[test]
+fn brief_json_states_the_e2e_runner_only_when_one_is_present() {
+    let base = |package: &'static str| {
+        vec![
+            ("package.json", package),
+            (
+                "src/main.ts",
+                "import { ui } from './ui';\nimport { tested } from './tested';\nconsole.log(ui(), tested());\n",
+            ),
+            ("src/ui.ts", "export const ui = (): string => 'a';\n"),
+            (
+                "src/tested.ts",
+                "export function tested(): number {\n  return 1;\n}\n",
+            ),
+            (
+                "src/tested.test.ts",
+                "import { expect, it } from 'vitest';\nimport { tested } from './tested';\nit('tested', () => { expect(tested()).toBe(1); });\n",
+            ),
+            (
+                "e2e/app.spec.ts",
+                "import { test } from '@playwright/test';\ntest('app', async () => {});\n",
+            ),
+        ]
+    };
+    let head = [("src/ui.ts", "export const ui = (): string => 'b';\n")];
+
+    let with_runner = tempfile::tempdir().expect("temporary project");
+    two_commit_project(
+        with_runner.path(),
+        &base(
+            r#"{"name":"reach","private":true,"type":"module","main":"src/main.ts","devDependencies":{"vitest":"^3.0.0","@playwright/test":"^1.48.0","typescript":"^5.6.0"}}"#,
+        ),
+        &head,
+    );
+    let reach = test_reach(with_runner.path());
+    assert_eq!(reach["e2e_runner"], true, "{reach}");
+    let human = brief_output(with_runner.path(), "human");
+    assert!(
+        human.stderr.contains("e2e tests do not import files"),
+        "{}",
+        human.stderr
+    );
+
+    let without_runner = tempfile::tempdir().expect("temporary project");
+    let mut plain = base(VITEST_PACKAGE);
+    plain.retain(|(path, _)| !path.starts_with("e2e/"));
+    two_commit_project(without_runner.path(), &plain, &head);
+    let reach = test_reach(without_runner.path());
+    assert!(reach.get("e2e_runner").is_none(), "{reach}");
 }

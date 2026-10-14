@@ -822,6 +822,16 @@ fn run_audit_head_analyses(
         check.search_gaps =
             compute_brief_search_gaps(opts.root, check, changed_files, changed_exports.as_deref());
         check.test_reach = compute_brief_test_reach(opts.root, check, changed_exports.as_deref());
+        check.test_reach_base_exports = changed_since.and_then(|base_ref| {
+            compute_brief_test_reach_base_exports(
+                opts.root,
+                base_ref,
+                check.test_reach.as_ref()?,
+                brief_diff_evidence
+                    .as_ref()
+                    .and_then(|evidence| evidence.diff_index.as_ref())?,
+            )
+        });
         check.internal_consumers =
             compute_brief_internal_consumers(opts.root, check, changed_files);
         check.test_adjacency = compute_brief_test_adjacency(opts.root, check, changed_files);
@@ -1073,6 +1083,36 @@ fn compute_brief_test_reach(
         changed_exports?,
         &|path| fallow_engine::test_paths::is_test_code_path_str(root, path),
     )
+}
+
+/// Read the export names of the test reach files at the base side of the
+/// diff. The brief labels an export `new` only when its name is not among
+/// them. A renamed file is read at its path before the rename. `None` when
+/// the project has no tests, because the brief then lists no rows.
+fn compute_brief_test_reach_base_exports(
+    root: &std::path::Path,
+    base_ref: &str,
+    reach: &fallow_engine::module_graph::TestReachPaths,
+    diff_index: &fallow_output::DiffIndex,
+) -> Option<FxHashMap<String, FxHashSet<String>>> {
+    if !reach.has_tests {
+        return None;
+    }
+    let mut files: Vec<(String, String)> = Vec::new();
+    for export in &reach.exports {
+        // The rows keep the file order of the graph, so the rows of one file
+        // are adjacent.
+        if files.last().is_some_and(|(head, _)| *head == export.file) {
+            continue;
+        }
+        let base = diff_index
+            .old_path_for_root_relative(&export.file)
+            .map_or_else(|| export.file.clone(), std::borrow::Cow::into_owned);
+        files.push((export.file.clone(), base));
+    }
+    Some(fallow_api::audit_run::export_names_at_base(
+        root, base_ref, &files,
+    ))
 }
 
 /// Precompute the per-anchor honest consumer count for the decision surface:

@@ -636,6 +636,12 @@ pub struct CheckResult {
     /// the retained graph on the brief path BEFORE the graph is dropped;
     /// `None` otherwise. Internal (not serialized).
     pub test_reach: Option<fallow_engine::module_graph::TestReachPaths>,
+    /// The export names of each test reach file at the base side of the
+    /// diff, keyed by head path. A file that did not exist at the base maps
+    /// to an empty set. A file that git could not read is absent. Computed
+    /// on the brief path; `None` otherwise. Internal (not serialized).
+    pub test_reach_base_exports:
+        Option<rustc_hash::FxHashMap<String, rustc_hash::FxHashSet<String>>>,
     /// Which configs name which files, dependencies and configuration
     /// exports. The brief reads the framework configuration exports from it.
     pub trace_provenance: fallow_engine::trace::TraceProvenance,
@@ -1234,6 +1240,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         export_lines: None,
         search_gaps: None,
         test_reach: None,
+        test_reach_base_exports: None,
         trace_provenance,
         internal_consumers: None,
         test_adjacency: None,

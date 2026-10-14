@@ -469,7 +469,14 @@ after every gate set the exit code.
   (`crates/core/src/plugins/mod.rs`), a plugin `used_exports` rule that names
   it for the file (recorded in the trace provenance), and a literal
   initializer. The coverage-gap note of an untested export uses the same
-  mocked-only check.
+  mocked-only check. The `change` label of a row compares the export name
+  with the export names of the file at the merge base of the diff
+  (`export_names_at_base` in `crates/api/src/audit_run/base_files.rs`, one
+  `git cat-file --batch` reader). A renamed file is read at its old path.
+  When git cannot read the base file, the label falls back to the diff
+  lines, and that fallback labels a one-line edit `new`. `e2e_runner` in the
+  JSON and the human `none-file` reason come from the same
+  `has_e2e_runner` fact.
 - Audit dependency scope: a dependency-level finding (unused, type-only,
   test-only or misplaced dependency, unused catalog entry) is in audit scope
   only when the changeset touches the manifest or catalog file that declares

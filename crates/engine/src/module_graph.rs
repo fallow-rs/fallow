@@ -447,6 +447,19 @@ pub struct ExportSearchGapPaths {
     pub consumers: Vec<ConsumerSearchGapPaths>,
 }
 
+/// The names of the exports that `source` declares, parsed as the file at
+/// `path`. The names use the format of [`ChangedExport::export_name`].
+#[must_use]
+pub fn export_names_in_source(path: &Path, source: &str) -> FxHashSet<String> {
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let module = fallow_extract::parse_source_to_module(FileId(0), path, source, 0, false);
+    module
+        .exports
+        .iter()
+        .map(|export| export.name.to_string())
+        .collect()
+}
+
 /// One export of a changed file, with the line facts that the review brief
 /// joins on the diff.
 ///

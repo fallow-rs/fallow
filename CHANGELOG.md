@@ -210,6 +210,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The review brief labels an edited export `modified`.** The `test_reach`
+  section labelled an export `new` when every line of its declaration was an
+  added line. A one-line edit replaces the line, so an edited one-line export
+  read as `new`. Now an export is `new` only when the file did not export the
+  name at the base of the diff: a new export, a renamed export, or an export
+  of a new file. An edited, rewritten or moved declaration is `modified`.
+  The JSON `test_reach` object also adds `e2e_runner: true` when the project
+  uses Playwright or Cypress. The human brief already said that these tests
+  do not import files.
+
 - **The MCP `trace_export` tool runs the CLI when type-aware analysis is
   on.** With `typeAware.enabled` in config or `FALLOW_TYPE_AWARE` set,
   `fallow dead-code --trace` adds `semantic` evidence to the trace, and with
