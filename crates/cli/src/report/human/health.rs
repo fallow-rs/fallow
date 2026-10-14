@@ -1846,6 +1846,9 @@ fn render_findings(lines: &mut Vec<String>, report: &fallow_output::HealthReport
     if let Some(note) = crap_coverage_note(report) {
         lines.push(format!("  {}", note.dimmed()));
     }
+    if let Some(note) = mutation_report_note(report) {
+        lines.push(format!("  {}", note.dimmed()));
+    }
     if let Some(warning) = coverage_join_warning(report) {
         lines.push(format!("  {}", warning.yellow()));
     }
@@ -1959,6 +1962,9 @@ fn push_finding_metric_rows(
         lines.push(line);
     }
     if let Some(line) = finding_crap_line(finding, root) {
+        lines.push(line);
+    }
+    if let Some(line) = finding_mutation_line(finding) {
         lines.push(line);
     }
     if let Some(line) = finding_override_thresholds_line(finding, thresholds) {
@@ -2177,6 +2183,68 @@ fn finding_crap_line(finding: &fallow_output::ComplexityViolation, root: &Path) 
         breach_marker(breached),
         coverage_suffix.dimmed(),
     ))
+}
+
+/// The mutation score from `--mutation-report`, under the CRAP line. A stale
+/// file prints no score, so a changed function never shows an old value.
+fn finding_mutation_line(finding: &fallow_output::ComplexityViolation) -> Option<String> {
+    let mutation = finding.mutation.as_ref()?;
+    let text = match (mutation.state, mutation.score, mutation.counts) {
+        (fallow_output::HealthMutationState::Stale, _, _) => {
+            let reason = match mutation.stale_reason {
+                Some(fallow_output::HealthMutationStaleReason::FileMissing) => "file missing",
+                Some(fallow_output::HealthMutationStaleReason::NoDigest) => "no digest",
+                Some(fallow_output::HealthMutationStaleReason::SourceChanged) | None => {
+                    "file changed since the run"
+                }
+            };
+            format!("mutation score: stale ({reason})")
+        }
+        (_, Some(score), Some(counts)) => format!(
+            "{:.0}% mutation score ({} killed, {} survived{})",
+            score * 100.0,
+            counts.killed + counts.timeout,
+            counts.survived,
+            if counts.no_coverage > 0 {
+                format!(", {} no coverage", counts.no_coverage)
+            } else {
+                String::new()
+            },
+        ),
+        (_, None, Some(counts)) if counts.no_coverage > 0 => {
+            format!("mutation score: none ({} no coverage)", counts.no_coverage)
+        }
+        _ => "mutation score: none (no mutant ran)".to_string(),
+    };
+    Some(format!("         {}", text.dimmed()))
+}
+
+/// One line for the join of `--mutation-report`: matched findings and stale
+/// files. The mutation score never changes CRAP or the health score.
+fn mutation_report_note(report: &fallow_output::HealthReport) -> Option<String> {
+    let summary = report.mutation.as_ref()?;
+    let mut note = format!(
+        "Mutation report: {} of {} findings matched",
+        summary.findings_fresh + summary.findings_stale,
+        report.findings.len(),
+    );
+    if !summary.stale_files.is_empty() {
+        let _ = write!(
+            note,
+            "; {} {} no score",
+            summary.stale_files.len(),
+            if summary.stale_files.len() == 1 {
+                "stale file has"
+            } else {
+                "stale files have"
+            },
+        );
+    }
+    if summary.completion == Some(fallow_output::MutationCompletionStatus::Partial) {
+        note.push_str("; the run was partial");
+    }
+    note.push_str(". The score does not change CRAP or the health score.");
+    Some(note)
 }
 
 fn render_threshold_overrides(
@@ -3163,6 +3231,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: None,
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: None,
                     coverage_source: None,
@@ -3215,6 +3284,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::Moderate,
                     crap: None,
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: None,
                     coverage_source: None,
@@ -3264,6 +3334,7 @@ mod tests {
             effective_severity: None,
             severity: fallow_output::FindingSeverity::High,
             crap: Some(90.0),
+            mutation: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,
@@ -3718,6 +3789,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: None,
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: None,
                     coverage_source: None,
@@ -3764,6 +3836,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: Some(650.0),
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: Some(fallow_output::CoverageTier::None),
                     coverage_source: Some(fallow_output::CoverageSource::Estimated),
@@ -3812,6 +3885,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: Some(45.0),
+                    mutation: None,
                     coverage_pct: Some(40.0),
                     coverage_tier: Some(fallow_output::CoverageTier::Partial),
                     coverage_source: Some(fallow_output::CoverageSource::Istanbul),
@@ -3890,6 +3964,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: Some(45.0),
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: Some(fallow_output::CoverageTier::None),
                     coverage_source: Some(fallow_output::CoverageSource::Estimated),
@@ -3944,6 +4019,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: None,
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: None,
                     coverage_source: None,
@@ -3971,6 +4047,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: None,
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: None,
                     coverage_source: None,
@@ -5859,6 +5936,7 @@ mod tests {
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
                 crap: None,
+                mutation: None,
                 coverage_pct: None,
                 coverage_tier: None,
                 coverage_source: None,
@@ -5980,6 +6058,7 @@ mod tests {
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
                 crap: None,
+                mutation: None,
                 coverage_pct: None,
                 coverage_tier: None,
                 coverage_source: None,
@@ -6020,6 +6099,7 @@ mod tests {
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::High,
                 crap: None,
+                mutation: None,
                 coverage_pct: None,
                 coverage_tier: None,
                 coverage_source: None,
@@ -6060,6 +6140,7 @@ mod tests {
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
                 crap: None,
+                mutation: None,
                 coverage_pct: None,
                 coverage_tier: None,
                 coverage_source: None,
@@ -6087,6 +6168,7 @@ mod tests {
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
                 crap: None,
+                mutation: None,
                 coverage_pct: None,
                 coverage_tier: None,
                 coverage_source: None,
@@ -6127,6 +6209,7 @@ mod tests {
                 effective_severity: None,
                 severity: fallow_output::FindingSeverity::Moderate,
                 crap: None,
+                mutation: None,
                 coverage_pct: None,
                 coverage_tier: None,
                 coverage_source: None,
@@ -6228,6 +6311,7 @@ mod tests {
             effective_severity: None,
             severity: fallow_output::FindingSeverity::High,
             crap: None,
+            mutation: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,
@@ -6282,6 +6366,7 @@ mod tests {
                     effective_severity: None,
                     severity: fallow_output::FindingSeverity::High,
                     crap: Some(45.0),
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: Some(fallow_output::CoverageTier::Partial),
                     coverage_source: Some(
@@ -6340,6 +6425,7 @@ mod tests {
             effective_severity: None,
             severity: fallow_output::FindingSeverity::High,
             crap: None,
+            mutation: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,

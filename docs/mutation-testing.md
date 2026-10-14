@@ -13,6 +13,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `fallow mutation --plan` | no | `mutation-plan` |
 | `fallow mutation` | yes | `mutation` |
 | `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
+| `fallow health --mutation-report <file>` | no | `health` |
 
 - The default scope is the changed code against the detected base ref, the same
   way as `fallow audit`. `--changed-since <ref>` (alias `--base`) sets the
@@ -342,6 +343,40 @@ The run report lists a digest for each mutated file. The plan lists digests
 only for the files that it instruments, so a plan mutant in a file that no test
 reaches inspects as `no-digest`.
 
+## Health join
+
+`fallow health --mutation-report <file>` reads a saved run report and adds
+the mutation score of each complexity finding next to its CRAP score. It
+reads files only. It runs no test.
+
+- The file is the saved report (`<cache dir>/mutation/last-report.json`) or
+  the `-o` file of a run. A plan has no results, so health refuses it with
+  exit code 2 and `FALLOW_MUTATION_REPORT_INVALID`. A missing or invalid file
+  gets the same exit code and code.
+- A finding matches one entry of `functions[]` when the path, the first line
+  and the name are equal. Two entries with the same key make the match
+  ambiguous, and the finding gets no evidence.
+- The finding gets `mutation.state`. `fresh` means the file has the SHA-256
+  digest of the report. Then `mutation.counts` has the counts of the function
+  and `mutation.score` has its score. The score is absent when no mutant of
+  the function ran to a tested result.
+- `stale` means the file changed (`source-changed`), is missing
+  (`file-missing`) or has no digest in the report (`no-digest`). A stale
+  finding has `stale_reason` and no score and no counts, so a changed
+  function never shows an old value.
+- The top-level `mutation` object has the completion status of the run, the
+  number of function results, the number of fresh, stale and unmatched
+  findings, and the stale files. `sections` then has `mutation`.
+- The join runs after the health report is complete. The mutation score
+  never changes `crap`, the health score, the vital signs or a gate.
+- Only complexity findings get a score. A function under each threshold has
+  no finding, so its score stays in the mutation report. The findings of
+  each `--group-by` group get the same evidence.
+- The human output prints one line under the CRAP line of each matched
+  finding, and one note line with the matched and stale counts. The other
+  output formats (SARIF, CodeClimate, markdown, compact) do not show it.
+- The score uses the final statuses after the retries (see Retries).
+
 ## Human output
 
 - The output uses the section headers and colors of the other commands.
@@ -433,6 +468,7 @@ reaches inspects as `no-digest`.
 | Envelopes | `crates/output/src/mutation.rs` |
 | Config section | `crates/config/src/config/mutation.rs` |
 | CLI adapter, human output, inspect | `crates/cli/src/mutation_cli.rs`, `mutation_human.rs`, `mutation_inspect.rs` |
+| Health join | `crates/cli/src/health/mutation_report.rs`, `crates/output/src/health_mutation.rs` |
 | MCP plan and inspect tools | `crates/mcp/src/tools/mutation.rs` |
 | Node companion | `tools/mutation-runner` |
 

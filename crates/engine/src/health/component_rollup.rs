@@ -271,6 +271,7 @@ fn make_component_rollup_violation(
             DEFAULT_CYCLOMATIC_CRITICAL,
         ),
         crap: None,
+        mutation: None,
         coverage_pct: None,
         coverage_tier: None,
         coverage_source: None,

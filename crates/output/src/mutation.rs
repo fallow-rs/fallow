@@ -70,7 +70,7 @@ pub enum MutantStatus {
 }
 
 /// The number of mutants for each status, and the mutation score.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationStatusCounts {
     /// Each mutant.
@@ -94,7 +94,9 @@ pub struct MutationStatusCounts {
     pub pending: usize,
     /// Mutants that a verdict marks as equivalent.
     pub equivalent: usize,
-    /// Survived mutants that do not type-check.
+    /// Survived mutants that do not type-check. A report from a version
+    /// before `--typecheck` has no such field, so it reads as 0.
+    #[serde(default)]
     pub compile_error: usize,
 }
 
@@ -156,7 +158,7 @@ impl MutationStatusCounts {
 }
 
 /// Whether the result is conclusive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MutationCompletionStatus {
@@ -859,7 +861,7 @@ pub enum MutationInspectStatus {
 }
 
 /// Why an inspect packet is stale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum MutationStaleReason {

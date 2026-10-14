@@ -46,6 +46,9 @@ pub enum HealthSection {
     Trend,
     /// `runtime_coverage`.
     RuntimeCoverage,
+    /// `mutation`: the join of a saved mutation report with the findings
+    /// (`--mutation-report`).
+    Mutation,
     /// `css_analytics`, `styling_health` and `styling_findings`.
     Css,
 }
@@ -127,6 +130,11 @@ pub struct HealthReport {
     /// `--runtime-coverage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
+    /// The join of a saved mutation report with the complexity findings
+    /// (only populated with `--mutation-report`). It never changes the CRAP
+    /// scores or the health score.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutation: Option<crate::HealthMutationSummary>,
     /// Combined coverage, runtime, complexity, and change-scope verdicts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_intelligence: Option<CoverageIntelligenceReport>,

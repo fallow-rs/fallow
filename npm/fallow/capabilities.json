@@ -2057,6 +2057,12 @@
           "description": "File or directory containing runtime coverage input. Accepts a V8 coverage directory, a single V8 JSON file, or a single Istanbul coverage map JSON file (commonly coverage-final.json). A single local capture is free. Continuous or multi-capture monitoring needs a license (see `fallow license`)"
         },
         {
+          "name": "--mutation-report",
+          "type": "string",
+          "required": false,
+          "description": "Saved `fallow mutation --format json` report (for example `.fallow/mutation/last-report.json` or the `-o` file of a run). Adds the mutation score of each complexity finding next to its CRAP score. The score never changes CRAP or the health score. A function whose file changed since the run gets no score. Reads the file only; it runs no test"
+        },
+        {
           "name": "--min-invocations-hot",
           "type": "string",
           "required": false,

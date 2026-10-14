@@ -66,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     error to its file gets the status `compile_error` and leaves the score.
     The check reads only the mutated file and never writes a project file.
     Without a companion, the run exits with 2 before the tests start.
+  - `fallow health --mutation-report <file>` reads a saved run report and
+    adds the mutation score of each complexity finding next to its CRAP
+    score, as `mutation` on the finding. A function whose file changed since
+    the run is `stale` and gets no score. The score never changes CRAP or
+    the health score. A plan or an invalid file exits with 2.
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /

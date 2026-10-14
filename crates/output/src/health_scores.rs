@@ -448,6 +448,12 @@ pub struct ComplexityViolation {
     /// CRAP score (change risk anti-pattern), when coverage data exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crap: Option<f64>,
+    /// Mutation evidence of the function from a saved `fallow mutation`
+    /// report (`fallow health --mutation-report`). A separate value: it never
+    /// changes `crap` or the health score. Absent without the flag, and when
+    /// no function result of the report matches the finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutation: Option<crate::HealthFindingMutation>,
     /// Test coverage percentage (0-100) backing the CRAP score.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_pct: Option<f64>,

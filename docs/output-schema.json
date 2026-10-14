@@ -1730,6 +1730,17 @@
           ],
           "description": "Runtime coverage findings from the paid sidecar (only populated with\n`--runtime-coverage`)."
         },
+        "mutation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthMutationSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The join of a saved mutation report with the complexity findings\n(only populated with `--mutation-report`). It never changes the CRAP\nscores or the health score."
+        },
         "coverage_intelligence": {
           "anyOf": [
             {
@@ -2981,6 +2992,17 @@
           ],
           "description": "Runtime coverage findings from the paid sidecar (only populated with\n`--runtime-coverage`)."
         },
+        "mutation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthMutationSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The join of a saved mutation report with the complexity findings\n(only populated with `--mutation-report`). It never changes the CRAP\nscores or the health score."
+        },
         "coverage_intelligence": {
           "anyOf": [
             {
@@ -3559,6 +3581,17 @@
             "null"
           ],
           "description": "CRAP score (change risk anti-pattern), when coverage data exists."
+        },
+        "mutation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthFindingMutation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Mutation evidence of the function from a saved `fallow mutation`\nreport (`fallow health --mutation-report`). A separate value: it never\nchanges `crap` or the health score. Absent without the flag, and when\nno function result of the report matches the finding."
         },
         "coverage_pct": {
           "type": [
@@ -12176,6 +12209,17 @@
             "null"
           ],
           "description": "CRAP score (change risk anti-pattern), when coverage data exists."
+        },
+        "mutation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthFindingMutation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Mutation evidence of the function from a saved `fallow mutation`\nreport (`fallow health --mutation-report`). A separate value: it never\nchanges `crap` or the health score. Absent without the flag, and when\nno function result of the report matches the finding."
         },
         "coverage_pct": {
           "type": [
@@ -30108,6 +30152,11 @@
         },
         {
           "type": "string",
+          "const": "mutation",
+          "description": "`mutation`: the join of a saved mutation report with the findings\n(`--mutation-report`)."
+        },
+        {
+          "type": "string",
           "const": "css",
           "description": "`css_analytics`, `styling_health` and `styling_findings`."
         }
@@ -32918,7 +32967,7 @@
         },
         "compile_error": {
           "type": "integer",
-          "description": "Survived mutants that do not type-check."
+          "description": "Survived mutants that do not type-check. A report from a version\nbefore `--typecheck` has no such field, so it reads as 0."
         }
       },
       "required": [
@@ -32931,8 +32980,7 @@
         "flaky",
         "pruned",
         "pending",
-        "equivalent",
-        "compile_error"
+        "equivalent"
       ],
       "description": "The number of mutants for each status, and the mutation score."
     },
@@ -33976,6 +34024,147 @@
         }
       ],
       "description": "Why the type check did not check a survivor."
+    },
+    "HealthFindingMutation": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "description": "Whether the evidence describes the current file.",
+          "$ref": "#/definitions/HealthMutationState"
+        },
+        "stale_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HealthMutationStaleReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the evidence is stale. Absent when the state is `fresh`."
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The mutation score of the function, a fraction from 0 to 1:\n`(killed + timeout) / (killed + timeout + survived)`. Absent when the\nstate is `stale`, and when no mutant of the function ran to a tested\nresult."
+        },
+        "counts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationStatusCounts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The number of mutants of the function for each status. Absent when\nthe state is `stale`."
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "description": "The mutation evidence of one complexity finding."
+    },
+    "HealthMutationState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "fresh",
+          "description": "The file has the SHA-256 digest of the report."
+        },
+        {
+          "type": "string",
+          "const": "stale",
+          "description": "The file changed, is missing, or has no digest in the report. The\nevidence has no score and no counts."
+        }
+      ],
+      "description": "Whether the mutation evidence still describes the current source file."
+    },
+    "HealthMutationStaleReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "file-missing",
+          "description": "The file does not exist or cannot be read."
+        },
+        {
+          "type": "string",
+          "const": "no-digest",
+          "description": "The report has no digest for the file."
+        },
+        {
+          "type": "string",
+          "const": "source-changed",
+          "description": "The SHA-256 digest of the file differs from the report."
+        }
+      ],
+      "description": "Why mutation evidence is stale."
+    },
+    "HealthMutationSummary": {
+      "type": "object",
+      "properties": {
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationCompletionStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The completion status of the run that wrote the report. Only\n`complete` makes an empty survivor list conclusive. Absent when the\nreport has no completion."
+        },
+        "functions": {
+          "type": "integer",
+          "description": "The number of function results in the report."
+        },
+        "findings_fresh": {
+          "type": "integer",
+          "description": "The number of complexity findings with fresh mutation evidence."
+        },
+        "findings_stale": {
+          "type": "integer",
+          "description": "The number of complexity findings with stale mutation evidence."
+        },
+        "findings_unmatched": {
+          "type": "integer",
+          "description": "The number of complexity findings that no function result of the\nreport matches. A finding matches when the path, the first line and\nthe name are equal."
+        },
+        "stale_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HealthMutationStaleFile"
+          },
+          "description": "The report files that do not match the current source, sorted by\npath. Their functions have no score."
+        }
+      },
+      "required": [
+        "functions",
+        "findings_fresh",
+        "findings_stale",
+        "findings_unmatched"
+      ],
+      "description": "The join of a saved mutation report with the complexity findings."
+    },
+    "HealthMutationStaleFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The root-relative path, with forward slashes."
+        },
+        "reason": {
+          "description": "Why the file is stale.",
+          "$ref": "#/definitions/HealthMutationStaleReason"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "description": "One file of the mutation report that does not match the current source."
     }
   }
 }

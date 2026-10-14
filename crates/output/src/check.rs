@@ -1394,6 +1394,7 @@ mod tests {
                     severity: FindingSeverity::High,
                     effective_severity: None,
                     crap: None,
+                    mutation: None,
                     coverage_pct: None,
                     coverage_tier: None,
                     coverage_source: None,

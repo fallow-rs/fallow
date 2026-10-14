@@ -280,6 +280,7 @@ fn build_health_report_struct(
         },
         change_coupling: parts.change_coupling,
         runtime_coverage: parts.runtime_coverage,
+        mutation: None,
         coverage_intelligence: None,
         large_functions: if opts.score_only_output {
             Vec::new()

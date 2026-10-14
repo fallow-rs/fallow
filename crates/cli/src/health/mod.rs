@@ -9,6 +9,7 @@
 //! telemetry recording, exit-code gating, and human / machine rendering.
 
 pub mod coverage;
+pub mod mutation_report;
 pub mod optimization_target;
 
 /// Health scoring helpers, re-exported from the engine for CLI consumers that
@@ -396,7 +397,14 @@ pub fn run_health(
     opts: &HealthOptions<'_>,
     json_style: crate::json_style::JsonStyle,
     type_aware: &TypeAwareHealthOptions<'_>,
+    mutation_report: Option<&std::path::Path>,
 ) -> ExitCode {
+    let mutation_evidence = match mutation_report.map(mutation_report::read_mutation_evidence) {
+        Some(Err(error)) => {
+            return crate::error::emit_programmatic_error(&error, opts.output, json_style);
+        }
+        evidence => evidence.and_then(Result::ok),
+    };
     let (config, config_ms) = match load_health_config(opts) {
         Ok(config) => config,
         Err(code) => return code,
@@ -461,6 +469,9 @@ pub fn run_health(
             meta
         })
         .or(degraded_meta);
+    if let Some(evidence) = mutation_evidence.as_ref() {
+        mutation_report::attach_to_result(&mut result, evidence);
+    }
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output, json_style);
     }
@@ -1015,6 +1026,7 @@ mod tests {
             effective_severity: None,
             severity: FindingSeverity::Moderate,
             crap: exceeded.includes_crap().then_some(30.0),
+            mutation: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,

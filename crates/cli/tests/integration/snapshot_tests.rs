@@ -2962,6 +2962,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
     };
     HealthReport {
         sections: None,
+        mutation: None,
         findings: vec![fallow_output::HealthFinding::with_actions(
             ComplexityViolation {
                 path: root.join("src/complex.ts"),
@@ -2980,6 +2981,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
                 effective_severity: None,
                 severity: FindingSeverity::High,
                 crap: None,
+                mutation: None,
                 coverage_pct: None,
                 coverage_tier: None,
                 coverage_source: None,
@@ -3273,6 +3275,7 @@ fn codeclimate_health_with_coverage_intelligence_snapshot() {
 fn empty_health_report() -> HealthReport {
     HealthReport {
         sections: None,
+        mutation: None,
         findings: vec![],
         summary: HealthSummary {
             files_analyzed: 50,

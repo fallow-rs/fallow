@@ -1816,6 +1816,12 @@
     },
     {
       "section": "flags:health",
+      "row": "--mutation-report",
+      "column": "Description",
+      "seed": "Saved `fallow mutation --format json` report (for example `.fallow/mutation/last-report.json` or the `-o` file of a run). Adds the mutation score of each complexity finding next to its CRAP score. The score never changes CRAP or the health score. A function whose file changed since the run gets no score. Reads the file only; it runs no test"
+    },
+    {
+      "section": "flags:health",
       "row": "--ownership",
       "column": "Description",
       "seed": "Attach ownership signals to hotspot entries: bus factor, contributor count, declared CODEOWNERS owner, and ownership drift. Implies `--hotspots`. Requires a git repository"

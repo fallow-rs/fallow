@@ -840,6 +840,14 @@ export type ExceededThreshold = ("cyclomatic" | "cognitive" | "both" | "crap" | 
  */
 export type FindingSeverity = ("moderate" | "high" | "critical")
 /**
+ * Whether the mutation evidence still describes the current source file.
+ */
+export type HealthMutationState = ("fresh" | "stale")
+/**
+ * Why mutation evidence is stale.
+ */
+export type HealthMutationStaleReason = ("file-missing" | "no-digest" | "source-changed")
+/**
  * Coverage tier classification for CRAP findings.
  */
 export type CoverageTier = ("none" | "partial" | "high")
@@ -892,7 +900,7 @@ export type CoverageSourceConsistency = ("uniform" | "mixed")
  * set is OPEN: a later release can add a section, so a consumer must accept
  * a token that it does not know.
  */
-export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "change-coupling" | "targets" | "trend" | "runtime-coverage" | "css")
+export type HealthSection = ("complexity" | "vital-signs" | "score" | "file-scores" | "coverage-gaps" | "hotspots" | "change-coupling" | "targets" | "trend" | "runtime-coverage" | "mutation" | "css")
 /**
  * Lifecycle state for a configured threshold override.
  */
@@ -1003,6 +1011,10 @@ export type RuntimeCoverageRiskBand = ("low" | "medium" | "high")
  * License or trial watermark applied to runtime coverage output.
  */
 export type RuntimeCoverageWatermark = ("trial-expired" | "license-expired-grace" | "unknown")
+/**
+ * Whether the result is conclusive.
+ */
+export type MutationCompletionStatus = ("complete" | "partial")
 /**
  * Coverage-intelligence JSON contract version. Scoped to the
  * `coverage_intelligence` block and independent of the top-level fallow
@@ -1670,10 +1682,6 @@ export type SimilarCodeCacheClearSchemaVersion = "1"
  * Version singleton for a mutation report.
  */
 export type MutationSchemaVersion = "1"
-/**
- * Whether the result is conclusive.
- */
-export type MutationCompletionStatus = ("complete" | "partial")
 /**
  * Why a run is partial.
  */
@@ -7837,6 +7845,12 @@ change_coupling?: (ChangeCouplingReport | null)
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
 /**
+ * The join of a saved mutation report with the complexity findings
+ * (only populated with `--mutation-report`). It never changes the CRAP
+ * scores or the health score.
+ */
+mutation?: (HealthMutationSummary | null)
+/**
  * Combined coverage, runtime, complexity, and change-scope verdicts.
  */
 coverage_intelligence?: (CoverageIntelligenceReport | null)
@@ -7972,6 +7986,13 @@ effective_severity?: (EffectiveSeverity | null)
  */
 crap?: (number | null)
 /**
+ * Mutation evidence of the function from a saved `fallow mutation`
+ * report (`fallow health --mutation-report`). A separate value: it never
+ * changes `crap` or the health score. Absent without the flag, and when
+ * no function result of the report matches the finding.
+ */
+mutation?: (HealthFindingMutation | null)
+/**
  * Test coverage percentage (0-100) backing the CRAP score.
  */
 coverage_pct?: (number | null)
@@ -8067,6 +8088,79 @@ custom: number
  * so absence does NOT mean "no coupling").
  */
 max_effect_dep_arity?: (number | null)
+}
+/**
+ * The mutation evidence of one complexity finding.
+ */
+export interface HealthFindingMutation {
+state: HealthMutationState
+/**
+ * Why the evidence is stale. Absent when the state is `fresh`.
+ */
+stale_reason?: (HealthMutationStaleReason | null)
+/**
+ * The mutation score of the function, a fraction from 0 to 1:
+ * `(killed + timeout) / (killed + timeout + survived)`. Absent when the
+ * state is `stale`, and when no mutant of the function ran to a tested
+ * result.
+ */
+score?: (number | null)
+/**
+ * The number of mutants of the function for each status. Absent when
+ * the state is `stale`.
+ */
+counts?: (MutationStatusCounts | null)
+}
+/**
+ * The number of mutants for each status, and the mutation score.
+ */
+export interface MutationStatusCounts {
+/**
+ * Each mutant.
+ */
+total: number
+/**
+ * Killed mutants.
+ */
+killed: number
+/**
+ * Mutants that passed their timeout.
+ */
+timeout: number
+/**
+ * Mutants that each covering test let pass.
+ */
+survived: number
+/**
+ * Mutants that no test reaches.
+ */
+no_coverage: number
+/**
+ * Mutants with a runner fault.
+ */
+runtime_error: number
+/**
+ * Mutants where the second run in a new companion changed whether the
+ * tests detect the mutant.
+ */
+flaky: number
+/**
+ * Mutants that a static rule removed.
+ */
+pruned: number
+/**
+ * Mutants that did not run.
+ */
+pending: number
+/**
+ * Mutants that a verdict marks as equivalent.
+ */
+equivalent: number
+/**
+ * Survived mutants that do not type-check. A report from a version
+ * before `--typecheck` has no such field, so it reads as 0.
+ */
+compile_error?: number
 }
 /**
  * Component-level aggregate attached to a template complexity finding,
@@ -9920,6 +10014,50 @@ stale: boolean
  * The documented staleness cutoff (days), echoed so the rule travels in-band.
  */
 stale_after_days: number
+}
+/**
+ * The join of a saved mutation report with the complexity findings.
+ */
+export interface HealthMutationSummary {
+/**
+ * The completion status of the run that wrote the report. Only
+ * `complete` makes an empty survivor list conclusive. Absent when the
+ * report has no completion.
+ */
+completion?: (MutationCompletionStatus | null)
+/**
+ * The number of function results in the report.
+ */
+functions: number
+/**
+ * The number of complexity findings with fresh mutation evidence.
+ */
+findings_fresh: number
+/**
+ * The number of complexity findings with stale mutation evidence.
+ */
+findings_stale: number
+/**
+ * The number of complexity findings that no function result of the
+ * report matches. A finding matches when the path, the first line and
+ * the name are equal.
+ */
+findings_unmatched: number
+/**
+ * The report files that do not match the current source, sorted by
+ * path. Their functions have no score.
+ */
+stale_files?: HealthMutationStaleFile[]
+}
+/**
+ * One file of the mutation report that does not match the current source.
+ */
+export interface HealthMutationStaleFile {
+/**
+ * The root-relative path, with forward slashes.
+ */
+path: string
+reason: HealthMutationStaleReason
 }
 /**
  * Combined coverage, runtime, complexity, and change-scope verdicts.
@@ -13728,6 +13866,12 @@ change_coupling?: (ChangeCouplingReport | null)
  * `--runtime-coverage`).
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
+/**
+ * The join of a saved mutation report with the complexity findings
+ * (only populated with `--mutation-report`). It never changes the CRAP
+ * scores or the health score.
+ */
+mutation?: (HealthMutationSummary | null)
 /**
  * Combined coverage, runtime, complexity, and change-scope verdicts.
  */
@@ -19735,56 +19879,6 @@ score?: (number | null)
  * mutants never count. `null` when no mutant is covered or unreached.
  */
 coverage?: (number | null)
-}
-/**
- * The number of mutants for each status, and the mutation score.
- */
-export interface MutationStatusCounts {
-/**
- * Each mutant.
- */
-total: number
-/**
- * Killed mutants.
- */
-killed: number
-/**
- * Mutants that passed their timeout.
- */
-timeout: number
-/**
- * Mutants that each covering test let pass.
- */
-survived: number
-/**
- * Mutants that no test reaches.
- */
-no_coverage: number
-/**
- * Mutants with a runner fault.
- */
-runtime_error: number
-/**
- * Mutants where the second run in a new companion changed whether the
- * tests detect the mutant.
- */
-flaky: number
-/**
- * Mutants that a static rule removed.
- */
-pruned: number
-/**
- * Mutants that did not run.
- */
-pending: number
-/**
- * Mutants that a verdict marks as equivalent.
- */
-equivalent: number
-/**
- * Survived mutants that do not type-check.
- */
-compile_error: number
 }
 /**
  * One mutant of a run.

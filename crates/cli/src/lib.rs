@@ -1787,6 +1787,15 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         runtime_coverage: Option<PathBuf>,
 
+        /// Saved `fallow mutation --format json` report (for example
+        /// `.fallow/mutation/last-report.json` or the `-o` file of a run).
+        /// Adds the mutation score of each complexity finding next to its
+        /// CRAP score. The score never changes CRAP or the health score. A
+        /// function whose file changed since the run gets no score. Reads
+        /// the file only; it runs no test.
+        #[arg(long, value_name = "FILE")]
+        mutation_report: Option<PathBuf>,
+
         /// Threshold for hot-path classification
         #[arg(long, default_value_t = 100)]
         min_invocations_hot: u64,
@@ -5657,6 +5666,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         coverage,
         coverage_root,
         runtime_coverage,
+        mutation_report,
         min_invocations_hot,
         min_observation_volume,
         low_traffic_threshold,
@@ -5705,6 +5715,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         coverage: coverage.as_deref(),
         coverage_root: coverage_root.as_deref(),
         runtime_coverage: runtime_coverage.as_deref(),
+        mutation_report: mutation_report.as_deref(),
         min_invocations_hot,
         min_observation_volume,
         low_traffic_threshold,
@@ -7425,6 +7436,7 @@ struct HealthDispatchArgs<'a> {
     coverage: Option<&'a std::path::Path>,
     coverage_root: Option<&'a std::path::Path>,
     runtime_coverage: Option<&'a std::path::Path>,
+    mutation_report: Option<&'a std::path::Path>,
     min_invocations_hot: u64,
     min_observation_volume: Option<u32>,
     low_traffic_threshold: Option<f64>,
@@ -7758,6 +7770,7 @@ fn run_health_dispatch(
             projects: &cli.type_aware_project,
             require: cli.type_aware_require.map(Into::into),
         },
+        args.mutation_report,
     )
 }
 

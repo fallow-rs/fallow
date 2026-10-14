@@ -65,7 +65,8 @@ struct SavedFile {
     static_test_files: Vec<String>,
 }
 
-fn input_error(message: impl Into<String>) -> fallow_api::ProgrammaticError {
+/// An invalid-report error: exit code 2, `FALLOW_MUTATION_REPORT_INVALID`.
+pub fn report_input_error(message: impl Into<String>) -> fallow_api::ProgrammaticError {
     fallow_api::ProgrammaticError::new(message, 2)
         .with_code("FALLOW_MUTATION_REPORT_INVALID")
         .with_context("mutation.report")
@@ -78,21 +79,35 @@ fn input_error(message: impl Into<String>) -> fallow_api::ProgrammaticError {
 /// Returns an error when the file cannot be read, is too large, is not a
 /// mutation report or plan, or does not parse.
 pub fn read_saved_report(path: &Path) -> Result<SavedReport, fallow_api::ProgrammaticError> {
-    let file = std::fs::File::open(path)
-        .map_err(|error| input_error(format!("failed to read {}: {error}", path.display())))?;
+    parse_saved_report(&read_report_bytes(path)?)
+}
+
+/// Reads the bytes of a saved report, bounded to 64 MiB.
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be read or is too large.
+pub fn read_report_bytes(path: &Path) -> Result<Vec<u8>, fallow_api::ProgrammaticError> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        report_input_error(format!("failed to read {}: {error}", path.display()))
+    })?;
     let mut bytes = Vec::new();
     file.take(MAX_REPORT_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| input_error(format!("failed to read {}: {error}", path.display())))?;
+        .map_err(|error| {
+            report_input_error(format!("failed to read {}: {error}", path.display()))
+        })?;
     if bytes.len() as u64 > MAX_REPORT_BYTES {
-        return Err(input_error("the mutation report is larger than 64 MiB"));
+        return Err(report_input_error(
+            "the mutation report is larger than 64 MiB",
+        ));
     }
-    parse_saved_report(&bytes)
+    Ok(bytes)
 }
 
 fn parse_saved_report(bytes: &[u8]) -> Result<SavedReport, fallow_api::ProgrammaticError> {
     let report: SavedReport = serde_json::from_slice(bytes).map_err(|error| {
-        input_error(format!(
+        report_input_error(format!(
             "the file is not a `fallow mutation --format json` report: {error}"
         ))
     })?;
@@ -100,7 +115,7 @@ fn parse_saved_report(bytes: &[u8]) -> Result<SavedReport, fallow_api::Programma
         && kind != "mutation"
         && kind != "mutation-plan"
     {
-        return Err(input_error(format!(
+        return Err(report_input_error(format!(
             "the file is a `{kind}` document, not a mutation report or plan"
         )));
     }
@@ -224,7 +239,7 @@ pub fn inspect(
             .components()
             .any(|component| matches!(component, std::path::Component::ParentDir))
     {
-        return Err(input_error(format!(
+        return Err(report_input_error(format!(
             "the report path `{}` is not inside the project root",
             mutant.file
         )));

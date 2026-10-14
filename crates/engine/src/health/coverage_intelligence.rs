@@ -877,6 +877,7 @@ mod tests {
             severity: FindingSeverity::High,
             effective_severity: None,
             crap,
+            mutation: None,
             coverage_pct,
             coverage_tier: coverage_pct.map(|pct| {
                 if pct >= 70.0 {

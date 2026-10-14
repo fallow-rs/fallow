@@ -722,6 +722,7 @@ mod tests {
             severity: crate::FindingSeverity::High,
             effective_severity: None,
             crap: Some(90.0),
+            mutation: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,

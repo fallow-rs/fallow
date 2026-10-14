@@ -248,6 +248,7 @@ mod tests {
             effective_severity: None,
             severity: FindingSeverity::High,
             crap: None,
+            mutation: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,

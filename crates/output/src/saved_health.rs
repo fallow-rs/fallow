@@ -253,6 +253,7 @@ impl From<SavedHealthFinding> for HealthFinding {
                 severity: saved.severity,
                 effective_severity: saved.effective_severity,
                 crap: saved.crap,
+                mutation: None,
                 coverage_pct: saved.coverage_pct,
                 coverage_tier: None,
                 coverage_source: None,

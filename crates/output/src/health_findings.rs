@@ -1162,6 +1162,7 @@ mod crap_action_tests {
             severity: crate::FindingSeverity::Moderate,
             effective_severity: None,
             crap: None,
+            mutation: None,
             coverage_pct: None,
             coverage_tier: None,
             coverage_source: None,
