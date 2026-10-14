@@ -36,7 +36,7 @@ use fallow_types::duplicates::CloneGroup;
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
-pub use base_files::{BaseFileReader, BaseRead, can_reuse_current_as_base};
+pub use base_files::{BaseFileReader, BaseRead, can_reuse_current_as_base, export_names_at_base};
 pub use base_ref::{
     AuditBaseError, AuditBaseOrigin, parse_audit_base_override, resolve_audit_base,
 };

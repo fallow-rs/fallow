@@ -11,7 +11,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     api_runtime::{
         env_changed_since, env_diff_file, non_empty_path, non_empty_string,
-        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result,
+        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result, typed_type_aware,
         workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
@@ -358,6 +358,7 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
             ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
+            type_aware: typed_type_aware(params.type_aware),
             ..AnalysisOptions::default()
         },
         max_cyclomatic: params.max_cyclomatic,
@@ -794,6 +795,19 @@ mod tests {
             Ok(None)
         );
         assert_cli_fallback_ran(run_health(MISSING_FALLBACK_BINARY, params()).await);
+
+        // `type_aware: false` keeps the run syntactic on both routes.
+        let off = || HealthParams {
+            type_aware: Some(false),
+            ..params()
+        };
+        assert!(
+            run_health_api_value_with_env(&off(), Some(CoverageInputs::default()))
+                .expect("typed health")
+                .is_some(),
+            "`type_aware: false` stays on the typed route"
+        );
+        assert!(build_health_args(&off()).contains(&"--no-type-aware".to_string()));
 
         let section = HealthParams {
             complexity: Some(true),

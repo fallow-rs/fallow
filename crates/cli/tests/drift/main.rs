@@ -886,6 +886,7 @@ fn type_aware_config_agrees_across_surfaces() {
         if !config.contains("enabled") {
             continue;
         }
+        assert_trace_export_agrees(config, root);
         for (analysis, tool) in [
             (Analysis::DeadCode, "analyze"),
             (Analysis::Health, "check_health"),
@@ -925,6 +926,61 @@ fn type_aware_config_agrees_across_surfaces() {
             .map(drop),
         );
     }
+}
+
+/// With type-aware analysis on, `fallow dead-code --trace` adds semantic
+/// evidence, or fails when no companion is installed. The MCP `trace_export`
+/// tool must give the same answer: the typed trace refuses, and the tool runs
+/// the CLI.
+fn assert_trace_export_agrees(config: &str, root: &std::path::Path) {
+    let dead_code = cli_analysis_envelope(Analysis::DeadCode, root, &Scope::default(), None);
+    let target = &dead_code["unused_exports"][0];
+    let (file, export) = (
+        target["path"].as_str().expect("an unused export to trace"),
+        target["export_name"].as_str().expect("an export name"),
+    );
+    let output = run_cli(
+        root,
+        &[
+            "dead-code".to_string(),
+            "--trace".to_string(),
+            format!("{file}:{export}"),
+        ],
+    );
+    let cli = crate::common::parse_json(&output);
+    let mcp = with_server(|server| {
+        server.call_tool_allowing_error(
+            "trace_export",
+            &serde_json::json!({
+                "root": root.display().to_string(),
+                "file": file,
+                "export_name": export,
+                "no_cache": true,
+            }),
+        )
+    });
+    assert_eq!(
+        mcp["error"], cli["error"],
+        "trace_export, {config}: CLI {cli}, MCP {mcp}"
+    );
+    if cli["error"] == true {
+        assert_eq!(mcp["message"], cli["message"], "trace_export, {config}");
+    } else {
+        assert_eq!(
+            mcp.get("semantic").is_some(),
+            cli.get("semantic").is_some(),
+            "trace_export, {config}: CLI {cli}, MCP {mcp}"
+        );
+    }
+    assert_api_refuses(
+        config,
+        fallow_api::run_trace_export(&fallow_api::TraceExportOptions {
+            analysis: api_analysis(root),
+            file: file.to_string(),
+            export_name: export.to_string(),
+        })
+        .map(drop),
+    );
 }
 
 fn api_analysis(root: &std::path::Path) -> fallow_api::AnalysisOptions {

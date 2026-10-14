@@ -360,17 +360,20 @@ async fn e2e_trace_export_returns_json() {
 #[tokio::test]
 async fn api_backed_trace_export_tool_returns_json() {
     let root = fixture_path("basic-project");
-    let result = run_trace_export_tool(crate::params::TraceExportParams {
-        file: "src/utils.ts".to_string(),
-        export_name: "usedFunction".to_string(),
-        root: Some(root.to_string_lossy().to_string()),
-        config: None,
-        allow_remote_extends: None,
-        production: None,
-        workspace: None,
-        no_cache: None,
-        threads: None,
-    })
+    let result = run_trace_export_tool(
+        "unused-binary-on-api-path",
+        crate::params::TraceExportParams {
+            file: "src/utils.ts".to_string(),
+            export_name: "usedFunction".to_string(),
+            root: Some(root.to_string_lossy().to_string()),
+            config: None,
+            allow_remote_extends: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        },
+    )
     .await
     .unwrap();
 

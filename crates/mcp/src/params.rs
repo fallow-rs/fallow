@@ -155,6 +155,7 @@ pub struct AnalyzeParams {
     pub threads: Option<usize>,
 
     /// Refine project-wide public API findings with TypeScript symbol identity.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.
@@ -744,6 +745,7 @@ pub struct InspectTargetParams {
     pub threads: Option<usize>,
 
     /// Include project-wide TypeScript semantic evidence for symbol targets.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.
@@ -1409,6 +1411,7 @@ pub struct HealthParams {
     pub threads: Option<usize>,
 
     /// Enable the TypeScript semantic backend.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.
@@ -1771,6 +1774,7 @@ pub struct AuditParams {
     pub threads: Option<usize>,
 
     /// Refine both audit sides with TypeScript symbol identity before attribution.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.

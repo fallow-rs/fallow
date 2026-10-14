@@ -175,7 +175,7 @@ impl BaseSource {
 /// The merge base of `base_ref` and `HEAD`, or `base_ref` when git cannot
 /// resolve one. The changed-file list uses the merge base too, so a base
 /// branch that moved on does not read as a change of this branch.
-fn merge_base(root: &Path, base_ref: &str) -> String {
+pub(crate) fn merge_base(root: &Path, base_ref: &str) -> String {
     let mut command = Command::new("git");
     command
         .args(["merge-base", "--end-of-options", base_ref, "HEAD"])

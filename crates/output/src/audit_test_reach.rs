@@ -62,14 +62,17 @@ pub enum TestReachClass {
     Framework,
 }
 
-/// Whether the diff adds the whole declaration or changes an existing one.
+/// Whether the export existed before the change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ExportChange {
-    /// The diff changes some lines of an existing declaration.
+    /// The file exported this name at the base of the diff, and the diff
+    /// changes its declaration. An edited, rewritten or moved declaration is
+    /// `modified`.
     Modified,
-    /// Every line of the declaration is an added line.
+    /// The file did not export this name at the base: a new export, a
+    /// renamed export, or an export of a new file.
     New,
 }
 
@@ -165,4 +168,10 @@ pub struct TestReachFacts {
     pub exports: Vec<ExportTestReachFact>,
     /// Number of attention rows left out by the cap.
     pub exports_omitted: usize,
+    /// True when the project uses an end-to-end test runner (Playwright or
+    /// Cypress). End-to-end tests drive the running app and do not import
+    /// source files, so the reach classes do not count them. Absent when no
+    /// such runner is present.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub e2e_runner: bool,
 }

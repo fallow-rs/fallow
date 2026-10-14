@@ -654,6 +654,8 @@ mod rstest_plugin;
 mod serverless_framework_plugin;
 #[path = "integration_test/textlint_plugin.rs"]
 mod textlint_plugin;
+#[path = "integration_test/type_only_namespace.rs"]
+mod type_only_namespace;
 #[path = "integration_test/typescript_content_mapper_plugin.rs"]
 mod typescript_content_mapper_plugin;
 #[path = "integration_test/vite_root_entries.rs"]

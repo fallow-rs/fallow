@@ -34,7 +34,8 @@ pub(super) enum TypeAwareCommand {
 }
 
 /// Fail with [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when the environment or the
-/// config turns on type-aware analysis that `type_aware` leaves off.
+/// config turns on type-aware analysis and `type_aware` leaves the choice
+/// open.
 ///
 /// # Errors
 ///
@@ -56,6 +57,29 @@ pub(super) fn reject_config_type_aware(
     )
 }
 
+/// `fallow dead-code --trace` adds semantic evidence and its completeness
+/// exit when type-aware analysis is on. The typed trace has neither, so it
+/// refuses a type-aware run from every layer, the `type_aware` option
+/// included. `Some(false)` keeps the trace syntactic, as `--no-type-aware`
+/// does.
+///
+/// # Errors
+///
+/// Returns the config load errors, and [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when
+/// the option or a layer turns type-aware analysis on.
+pub(super) fn reject_type_aware_trace(
+    type_aware: &TypeAwareOptions,
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<()> {
+    if type_aware.requested() {
+        return Err(type_aware_refusal(
+            "analysis.typeAware",
+            "the programmatic trace has no semantic evidence; run the `fallow` CLI",
+        ));
+    }
+    reject_config_type_aware(type_aware, resolved, TypeAwareCommand::Analysis)
+}
+
 /// Where the project config of a run lives.
 #[derive(Clone, Copy)]
 pub(super) struct ConfigLocation<'a> {
@@ -71,7 +95,9 @@ pub(super) fn reject_config_type_aware_at(
     location: ConfigLocation<'_>,
     command: TypeAwareCommand,
 ) -> ProgrammaticResult<()> {
-    if type_aware.enabled {
+    // An explicit choice wins over the environment and the config, as the
+    // `--type-aware` and `--no-type-aware` flags do.
+    if type_aware.enabled.is_some() {
         return Ok(());
     }
     let source = match env_layer(std::env::var(TYPE_AWARE_ENV)) {
@@ -91,14 +117,19 @@ pub(super) fn reject_config_type_aware_at(
     let Some(source) = source else {
         return Ok(());
     };
-    Err(ProgrammaticError::new(
-        format!(
-            "`{source}` turns on type-aware analysis, which the programmatic API runs only when the `type_aware` option requests it; set that option or run the `fallow` CLI"
-        ),
+    Err(type_aware_refusal(
+        source,
+        "the programmatic API runs it only when the `type_aware` option requests it; set that option or run the `fallow` CLI",
+    ))
+}
+
+fn type_aware_refusal(source: &str, reason: &str) -> ProgrammaticError {
+    ProgrammaticError::new(
+        format!("`{source}` turns on type-aware analysis, but {reason}"),
         2,
     )
     .with_code(TYPE_AWARE_CONFIG_UNSUPPORTED)
-    .with_context(source))
+    .with_context(source)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -151,6 +182,28 @@ mod tests {
             env_layer(Err(std::env::VarError::NotPresent)),
             EnvLayer::Unset
         );
+    }
+
+    /// An explicit choice returns before the environment or the config is
+    /// read, as `--type-aware` and `--no-type-aware` win over both. The root
+    /// does not exist, so a config read would fail.
+    #[test]
+    fn explicit_choice_wins_before_the_environment_and_the_config() {
+        for enabled in [Some(true), Some(false)] {
+            let options = TypeAwareOptions {
+                enabled,
+                ..TypeAwareOptions::default()
+            };
+            let location = ConfigLocation {
+                root: Path::new("/fallow-no-such-root"),
+                config_path: Some(Path::new("/fallow-no-such-root/.fallowrc.json")),
+                allow_remote_extends: false,
+            };
+            assert!(
+                reject_config_type_aware_at(&options, location, TypeAwareCommand::Audit).is_ok(),
+                "{enabled:?}"
+            );
+        }
     }
 
     #[test]

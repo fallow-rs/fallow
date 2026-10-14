@@ -170,6 +170,16 @@ pub(super) fn json_success(value: &serde_json::Value) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
+/// The type-aware choice of a typed call. The typed route runs only when the
+/// parameter does not request type-aware analysis, so it passes `false` on as
+/// an explicit opt-out, and `None` leaves the choice to the config.
+pub(super) fn typed_type_aware(param: Option<bool>) -> fallow_api::TypeAwareOptions {
+    fallow_api::TypeAwareOptions {
+        enabled: param,
+        ..fallow_api::TypeAwareOptions::default()
+    }
+}
+
 /// The typed route refused a run that only the CLI reproduces: the
 /// environment or the project config turns on type-aware analysis, or the
 /// config sets an `audit` baseline key. The tool then runs the CLI.

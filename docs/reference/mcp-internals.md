@@ -329,12 +329,18 @@ Contract rules:
   when no section and no `css` is selected (the CLI adds type coupling only
   then). `api_runtime::typed_error_needs_cli` reads the code, and `analyze`,
   `check_changed`, `check_health`, `audit` and the Code Mode `combined` and
-  `checkChanged` routes run the CLI instead. The `type_aware: false`
-  parameter does not turn off type-aware analysis that the config turns on:
-  the typed route refuses, and the CLI fallback passes no `--no-type-aware`.
-  The drift case
-  `type_aware_config_agrees_across_surfaces` holds the MCP envelope to the
-  `_meta.type_aware` of the CLI.
+  `checkChanged` routes run the CLI instead. `TypeAwareOptions.enabled` is
+  an `Option<bool>`, like the `--type-aware` and `--no-type-aware` flags: a
+  set value wins over the environment and the config, so `Some(false)` runs
+  syntactic without a refusal. The `type_aware: false` parameter passes
+  `Some(false)` to the typed route and `--no-type-aware` to the CLI fallback.
+  `run_trace_export` refuses every type-aware request, the `Some(true)`
+  option included: `fallow dead-code --trace` then adds semantic evidence
+  and its completeness exit, which the typed trace cannot. The
+  `trace_export` tool and the Code Mode `traceExport` route run the CLI on
+  that code. The drift case `type_aware_config_agrees_across_surfaces` holds
+  the MCP envelope to the `_meta.type_aware` of the CLI, and the
+  `trace_export` answer to the CLI trace.
 - `trace_symbol` and `symbol_impact` expose exact TypeScript evidence for
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.

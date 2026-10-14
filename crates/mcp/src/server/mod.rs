@@ -228,13 +228,13 @@ impl FallowMcp {
         run_recommend(&self.binary, params.0).await
     }
 
-    /// Trace why an export is considered used or unused. Returns file reachability, entry-point status, direct references, re-export chains, and a concise reason string. If export_name is a class / enum / store MEMBER rather than a top-level export, returns a member trace instead (carrying member_name, member_kind, owner_export, owner_is_used) that reports the owning class's reachability and usage plus a pointer to the matching --unused-<kind>-members command, so a class-member finding can be debugged too. Use this when an agent needs evidence before deleting or rewriting a supposedly unused export or class member. References carry `search_visibility`; see fallow://tools/trace_export.
+    /// Trace why an export is considered used or unused. Returns file reachability, entry-point status, direct references, re-export chains, and a concise reason string. If export_name is a class / enum / store MEMBER rather than a top-level export, returns a member trace instead (carrying member_name, member_kind, owner_export, owner_is_used) that reports the owning class's reachability and usage plus a pointer to the matching --unused-<kind>-members command, so a class-member finding can be debugged too. Use this when an agent needs evidence before deleting or rewriting a supposedly unused export or class member. References carry `search_visibility`; see fallow://tools/trace_export. When the config or FALLOW_TYPE_AWARE turns type-aware analysis on, the trace also carries a `semantic` block with checker-backed evidence, as `fallow dead-code --trace` does.
     #[tool(annotations(read_only_hint = true, open_world_hint = true))]
     async fn trace_export(
         &self,
         params: Parameters<TraceExportParams>,
     ) -> Result<CallToolResult, McpError> {
-        run_trace_export_tool(params.0).await
+        run_trace_export_tool(&self.binary, params.0).await
     }
 
     /// Trace an exact TypeScript symbol with checker-backed references, namespace identity, aliases, and re-export hops. Root trace fields preserve syntactic context; treat `semantic.references`, `semantic.status`, and `semantic.identity` as the authoritative exact evidence. The proof covers only the lane named by `semantic.target.namespace`, so a root trace that lists a reference the proof does not is wider evidence rather than stale. This is project-wide evidence for Fallow decisions, not a compiler-diagnostic or lint-rule surface.

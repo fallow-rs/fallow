@@ -22,14 +22,19 @@ use super::{
     VALID_DUPES_MODES,
     api_runtime::{
         env_changed_since, env_diff_file, json_success, non_empty_path, programmatic_error_body,
-        run_api_blocking, workspace_patterns_from_param,
+        run_api_blocking, typed_api_value, typed_tool_result, workspace_patterns_from_param,
     },
     duplication_mode_from_param, min_occurrences_from_param, push_global, push_remote_extends,
-    push_scope, require_non_empty, validation_error_body,
+    push_scope, require_non_empty, run_tool, validation_error_body,
 };
 
-/// Run `trace_export` through the typed API.
-pub async fn run_trace_export_tool(params: TraceExportParams) -> Result<CallToolResult, McpError> {
+/// Run `trace_export` through the typed API. When type-aware analysis is on,
+/// `fallow dead-code --trace` adds semantic evidence that the typed trace
+/// cannot, so the tool runs the CLI.
+pub async fn run_trace_export_tool(
+    binary: &str,
+    params: TraceExportParams,
+) -> Result<CallToolResult, McpError> {
     let options = match trace_export_options_from_params(&params) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
@@ -37,12 +42,14 @@ pub async fn run_trace_export_tool(params: TraceExportParams) -> Result<CallTool
     let result = run_api_blocking("trace_export", move || {
         run_trace_export(&options).and_then(serialize_trace_export_programmatic_json)
     })
-    .await?
-    .map_or_else(
-        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
-    );
-    Ok(result)
+    .await?;
+    if let Some(result) = typed_tool_result(result) {
+        return Ok(result);
+    }
+    match build_trace_export_args(&params) {
+        Ok(args) => run_tool(binary, "trace_export", &args).await,
+        Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+    }
 }
 
 /// Run `trace_file` through the typed API.
@@ -131,15 +138,15 @@ pub async fn run_trace_clone_tool(params: TraceCloneParams) -> Result<CallToolRe
     Ok(result)
 }
 
+/// The Code Mode form of [`run_trace_export_tool`]: `Ok(None)` asks the
+/// caller to run the CLI.
 pub fn run_trace_export_api_value(
     params: &TraceExportParams,
     cancellation: Option<Arc<AtomicBool>>,
-) -> Result<serde_json::Value, String> {
+) -> Result<Option<serde_json::Value>, String> {
     let mut options = trace_export_options_from_params(params)?;
     options.analysis.cancellation = cancellation;
-    run_trace_export(&options)
-        .and_then(serialize_trace_export_programmatic_json)
-        .map_err(|err| programmatic_error_body(&err))
+    typed_api_value(run_trace_export(&options).and_then(serialize_trace_export_programmatic_json))
 }
 
 pub fn run_trace_file_api_value(
@@ -798,5 +805,44 @@ mod tests {
                 expected
             );
         }
+    }
+
+    /// `typeAware.enabled` in config makes `fallow dead-code --trace` add
+    /// semantic evidence. The typed trace has none, so the tool and the Code
+    /// Mode route run the CLI.
+    #[tokio::test]
+    async fn trace_export_runs_the_cli_when_the_config_turns_type_aware_on() {
+        use super::super::api_runtime::{
+            MISSING_FALLBACK_BINARY, assert_cli_fallback_ran, write_type_aware_config,
+        };
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","main":"index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(project.path().join("index.ts"), "export const a = 1;\n")
+            .expect("write source");
+        let params = || TraceExportParams {
+            file: "index.ts".to_string(),
+            export_name: "a".to_string(),
+            root: Some(project.path().display().to_string()),
+            config: None,
+            allow_remote_extends: None,
+            production: None,
+            workspace: None,
+            no_cache: Some(true),
+            threads: None,
+        };
+        assert!(
+            run_trace_export_api_value(&params(), None)
+                .expect("typed trace")
+                .is_some(),
+            "a syntactic config stays on the typed route"
+        );
+
+        write_type_aware_config(project.path(), r#"{"typeAware":{"enabled":true}}"#);
+        assert_eq!(run_trace_export_api_value(&params(), None), Ok(None));
+        assert_cli_fallback_ran(run_trace_export_tool(MISSING_FALLBACK_BINARY, params()).await);
     }
 }

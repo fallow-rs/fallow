@@ -249,6 +249,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The review brief labels an edited export `modified`.** The `test_reach`
+  section labelled an export `new` when every line of its declaration was an
+  added line. A one-line edit replaces the line, so an edited one-line export
+  read as `new`. Now an export is `new` only when the file did not export the
+  name at the base of the diff: a new export, a renamed export, or an export
+  of a new file. An edited, rewritten or moved declaration is `modified`.
+  The JSON `test_reach` object also adds `e2e_runner: true` when the project
+  uses Playwright or Cypress. The human brief already said that these tests
+  do not import files.
+- **A namespace that holds only types is now a type export.** TypeScript
+  emits no JavaScript for a namespace whose body has only interfaces, type
+  aliases, `declare` declarations, `import type` aliases and nested
+  namespaces of the same kind. Before, Fallow treated such a namespace as a
+  value export when it had no `declare` or `export type`. Examples are
+  `export namespace JSX { export interface Element {} }` and the same shape
+  with `module` or a dotted name such as `A.B.C`. Now:
+  - An unused one reports as `unused-type`, not as `unused-export`. The SARIF
+    rule id, the CodeClimate check name and fingerprint, the LSP diagnostic
+    and the MCP and audit output change with it.
+  - It is no longer an untested export in `health --coverage-gaps`, and it
+    leaves the `test_reach` section of the review brief.
+  - An existing `fallow-ignore-next-line unused-export` comment on such a
+    namespace no longer matches. The finding then reports as `unused-type`
+    and the comment as a stale suppression. Change the comment to
+    `unused-type`.
+  - Baselines that list such a namespace as an unused export can change.
+
+  A body with any other statement, exported or not, stays a value. A
+  `const enum` and a non-type `import X = A.B` alias also keep the namespace
+  a value. A namespace that merges with a function, class, enum or variable
+  of the same name stays a value too, so a value import of the merged name
+  keeps crediting it. The extraction and graph caches are versioned again, so
+  a warm cache does not keep the old classification.
+
+- **The MCP `trace_export` tool runs the CLI when type-aware analysis is
+  on.** With `typeAware.enabled` in config or `FALLOW_TYPE_AWARE` set,
+  `fallow dead-code --trace` adds `semantic` evidence to the trace, and with
+  `typeAware.require: complete` it exits non-zero when that evidence is
+  incomplete. The typed route of `trace_export` and the Code Mode
+  `traceExport` route ignored these settings and returned the syntactic
+  trace only. They now run the CLI in this case. `fallow_api::run_trace_export`
+  returns the error code `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` when type-aware
+  analysis is on, also for `type_aware.enabled: Some(true)`. Set
+  `Some(false)` to get the syntactic trace. When `typeAware.require:
+  complete` comes from the config, an incomplete semantic trace or symbol
+  impact is now an MCP error, as the CLI exit 1 says. Before, only the
+  `type_aware_require` parameter made it an error.
+
 - **Search gaps no longer count files that only forward an export.** A file
   that imports an export and only exports it again needs no edit when the
   export changes. Examples are `import { a } from './x'; export { a }` and
@@ -289,6 +337,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now runs the CLI, which applies the baseline. `fallow_api::run_audit`
   returns the error code `FALLOW_AUDIT_BASELINE_UNSUPPORTED` for these keys.
   It does not ignore them.
+
+- **`type_aware: false` keeps a run syntactic on every programmatic surface.**
+  The MCP `analyze`, `check_health`, `audit` and `inspect_target` tools
+  ignored `type_aware: false`: when the config turned type-aware analysis
+  on, the run was type-aware. The tools now pass `--no-type-aware` to the CLI
+  and keep the typed route syntactic, as `--no-type-aware` does. In
+  `fallow_api`, `TypeAwareOptions.enabled` is now an `Option<bool>`.
+  `Some(false)` runs syntactic without the
+  `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` error, also when
+  `FALLOW_TYPE_AWARE` or the config turns type-aware analysis on. In the
+  Node bindings, `typeAware: { enabled: false }` does the same. Before, it
+  was the same as an unset option. An explicit choice now also reaches
+  detection, as the CLI flags do: a syntactic run credits the framework
+  class members that the type-aware config holds back for verification, and
+  a type-aware run turns the opt-in `private-type-leaks` rule on unless the
+  config sets it. Before, `fallow_api` and the Node bindings reported no
+  private-type leaks for a type-aware run where `fallow dead-code
+  --type-aware` reported them.
 
 - **The MCP tools run type-aware analysis when the config turns it on.**
   `fallow` runs type-aware analysis when `typeAware.enabled` is `true`, and
