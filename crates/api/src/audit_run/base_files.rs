@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use fallow_engine::changed_files::clear_ambient_git_env;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Whether the head run can stand in for the base snapshot.
 ///
@@ -72,6 +72,51 @@ pub fn can_reuse_current_as_base(
         }
     }
     true
+}
+
+/// The export names of changed files at the merge base of `base_ref` and
+/// `HEAD`, the base side of the audit diff.
+///
+/// `files` pairs the head path of each file with its base path (the path
+/// before a rename), both relative to `root`. The result maps each head path
+/// that git could read to the export names of its base version. A file that
+/// did not exist at the base maps to an empty set. A file that git cannot
+/// read is left out, and a read error stops the remaining reads, so a broken
+/// pipe never reads as a file without exports.
+#[must_use]
+pub fn export_names_at_base(
+    root: &Path,
+    base_ref: &str,
+    files: &[(String, String)],
+) -> FxHashMap<String, FxHashSet<String>> {
+    let mut names = FxHashMap::default();
+    if files.is_empty() {
+        return names;
+    }
+    let Ok(git_root) = fallow_engine::changed_files::resolve_git_toplevel(root) else {
+        return names;
+    };
+    let git_root = dunce::canonicalize(&git_root).unwrap_or(git_root);
+    let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let Some(mut reader) = BaseFileReader::spawn(&root) else {
+        return names;
+    };
+    let commit = crate::diff_risk::merge_base(&root, base_ref);
+    for (head, base) in files {
+        let base_path = root.join(base);
+        let Ok(relative) = base_path.strip_prefix(&git_root) else {
+            continue;
+        };
+        let exports = match reader.read(&commit, relative) {
+            BaseRead::Content(source) => {
+                fallow_engine::module_graph::export_names_in_source(&base_path, &source)
+            }
+            BaseRead::Missing => FxHashSet::default(),
+            BaseRead::Error => break,
+        };
+        names.insert(head.clone(), exports);
+    }
+    names
 }
 
 /// A long-lived `git cat-file --batch` child process that reads the base

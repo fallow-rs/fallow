@@ -243,8 +243,8 @@ fn build_test_reach_facts(
 ) -> Option<fallow_output::TestReachFacts> {
     use fallow_engine::module_graph::{ExportTestReach, TestMaskingState};
     use fallow_output::{
-        ExportChange, ExportTestReachFact, TEST_REACH_EXPORT_CAP, TEST_REACH_FILE_CAP,
-        TestReachClass, TestReachCounts, TestReachFacts, TestReachMasking, TestReachStatus,
+        ExportTestReachFact, TEST_REACH_EXPORT_CAP, TEST_REACH_FILE_CAP, TestReachClass,
+        TestReachCounts, TestReachFacts, TestReachMasking, TestReachStatus,
     };
 
     let diff_index = diff_index?;
@@ -281,11 +281,12 @@ fn build_test_reach_facts(
         if !reach.has_tests || matches!(class, TestReachClass::Direct | TestReachClass::Framework) {
             continue;
         }
-        let change = if (start..=end).all(|line| diff_index.line_is_added(&key, u64::from(line))) {
-            ExportChange::New
-        } else {
-            ExportChange::Modified
-        };
+        let change = export_change(
+            check.test_reach_base_exports.as_ref(),
+            diff_index,
+            &key,
+            export,
+        );
         let mocked = class == TestReachClass::MockedOnly;
         let tests = (mocked && !export.tests.is_empty()).then_some(&export.tests);
         rows.push(ExportTestReachFact {
@@ -339,7 +340,41 @@ fn build_test_reach_facts(
         counts,
         exports: rows,
         exports_omitted,
+        e2e_runner: reach.has_e2e_runner,
     })
+}
+
+/// Label a changed export `new` or `modified`.
+///
+/// An export is `new` only when it did not exist before the change: the file
+/// did not export the name at the base of the diff. So a one-line edit, a
+/// full rewrite and a moved declaration are `modified`, while a new export, a
+/// renamed export and an export of a new file are `new`. A renamed file is
+/// compared with its path before the rename.
+///
+/// When git could not read the base version of the file, the label falls
+/// back to the diff lines: `new` when every line of the declaration is an
+/// added line. This fallback cannot tell a one-line edit from a new export.
+fn export_change(
+    base_exports: Option<&FxHashMap<String, FxHashSet<String>>>,
+    diff_index: &fallow_output::DiffIndex,
+    key: &str,
+    export: &fallow_engine::module_graph::ExportTestReachPaths,
+) -> fallow_output::ExportChange {
+    use fallow_output::ExportChange;
+    if let Some(names) = base_exports.and_then(|base| base.get(&export.file)) {
+        return if names.contains(&export.export_name) {
+            ExportChange::Modified
+        } else {
+            ExportChange::New
+        };
+    }
+    let (start, end) = export.declaration_lines;
+    if (start..=end).all(|line| diff_index.line_is_added(key, u64::from(line))) {
+        ExportChange::New
+    } else {
+        ExportChange::Modified
+    }
 }
 
 /// Build the Stage 2 partition facts from the audit result's retained
@@ -763,12 +798,7 @@ fn print_brief_human(
         print_branching_human(brief.branching.as_ref());
         print_partition_human(&brief.partition);
         print_impact_closure_human(&brief.impact_closure);
-        let has_e2e_runner = result
-            .check
-            .as_ref()
-            .and_then(|check| check.test_reach.as_ref())
-            .is_some_and(|reach| reach.has_e2e_runner);
-        for line in test_reach_lines(brief.test_reach.as_ref(), has_e2e_runner) {
+        for line in test_reach_lines(brief.test_reach.as_ref()) {
             eprintln!("{line}");
         }
         print_focus_human(&brief.focus, show_deprioritized);
@@ -1294,10 +1324,7 @@ fn test_reach_reason(
 /// Split out from the printer so the wording and the width are testable:
 /// every line holds within 80 columns. The section shows at most
 /// [`MAX_HUMAN_TEST_REACH_EXPORTS`] rows and points to the JSON for the rest.
-fn test_reach_lines(
-    facts: Option<&fallow_output::TestReachFacts>,
-    has_e2e_runner: bool,
-) -> Vec<String> {
+fn test_reach_lines(facts: Option<&fallow_output::TestReachFacts>) -> Vec<String> {
     use fallow_output::{TestReachMasking, TestReachStatus};
 
     let Some(facts) = facts else {
@@ -1356,7 +1383,7 @@ fn test_reach_lines(
         };
         // The reason column aligns when the padded row fits. A long name in
         // another row must not push this reason to its own line.
-        match test_reach_reason(row, has_e2e_runner) {
+        match test_reach_reason(row, facts.e2e_runner) {
             Some(reason) if fits(&main, &reason) => lines.push(format!("{main}  {reason}")),
             Some(reason) if fits(&trimmed, &reason) => {
                 lines.push(format!("{trimmed}  {reason}"));
@@ -2386,6 +2413,62 @@ mod tests {
         assert_eq!(triage.review_effort, ReviewEffort::Review);
     }
 
+    fn reach_export(
+        name: &str,
+        lines: (u32, u32),
+    ) -> fallow_engine::module_graph::ExportTestReachPaths {
+        fallow_engine::module_graph::ExportTestReachPaths {
+            file: "src/a.ts".to_owned(),
+            export_name: name.to_owned(),
+            line: lines.0,
+            declaration_lines: lines,
+            literal_value: false,
+            reach: fallow_engine::module_graph::ExportTestReach::None,
+            tests: Vec::new(),
+            mocked_targets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn export_change_falls_back_to_added_lines_without_base_exports() {
+        use fallow_output::ExportChange;
+        // Line 2 is the only added line: a one-line edit of a three-line
+        // declaration, and a one-line declaration that is all added.
+        let index = fallow_output::DiffIndex::from_unified_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n line one\n-old\n+new\n line three\n",
+        );
+        let edited = reach_export("edited", (1, 3));
+        let one_line = reach_export("oneLine", (2, 2));
+        let other_file: rustc_hash::FxHashMap<String, FxHashSet<String>> =
+            std::iter::once(("src/b.ts".to_owned(), FxHashSet::default())).collect();
+
+        for base in [None, Some(&other_file)] {
+            assert_eq!(
+                super::export_change(base, &index, "src/a.ts", &edited),
+                ExportChange::Modified
+            );
+            // The fallback cannot tell a one-line edit from a new export.
+            assert_eq!(
+                super::export_change(base, &index, "src/a.ts", &one_line),
+                ExportChange::New
+            );
+        }
+
+        let with_base: rustc_hash::FxHashMap<String, FxHashSet<String>> = std::iter::once((
+            "src/a.ts".to_owned(),
+            std::iter::once("oneLine".to_owned()).collect(),
+        ))
+        .collect();
+        assert_eq!(
+            super::export_change(Some(&with_base), &index, "src/a.ts", &one_line),
+            ExportChange::Modified
+        );
+        assert_eq!(
+            super::export_change(Some(&with_base), &index, "src/a.ts", &edited),
+            ExportChange::New
+        );
+    }
+
     #[test]
     fn no_diff_brief_keeps_optional_triage_fields_absent() {
         let result = audit_result(AuditVerdict::Warn, OutputFormat::Json);
@@ -2620,6 +2703,7 @@ mod tests {
             counts,
             exports,
             exports_omitted: 0,
+            e2e_runner: false,
         }
     }
 
@@ -2627,7 +2711,7 @@ mod tests {
     fn test_reach_lines_fit_eighty_columns_and_cap_the_rows() {
         use fallow_output::TestReachClass;
 
-        assert!(test_reach_lines(None, false).is_empty());
+        assert!(test_reach_lines(None).is_empty());
         let long_dir = "packages/very-long-workspace-name/src/features/deeply/nested";
         let counts = fallow_output::TestReachCounts {
             direct: 1200,
@@ -2637,7 +2721,7 @@ mod tests {
             none_file: 1000,
             framework: 9000,
         };
-        let facts = reach_facts(
+        let mut facts = reach_facts(
             counts,
             vec![
                 reach_row(
@@ -2650,7 +2734,8 @@ mod tests {
                 reach_row("src/t.ts", "transitive", TestReachClass::Transitive),
             ],
         );
-        let lines = test_reach_lines(Some(&facts), true);
+        facts.e2e_runner = true;
+        let lines = test_reach_lines(Some(&facts));
 
         assert!(lines[0].starts_with("  test reach: 28000 changed exports: 1200 direct,"));
         assert!(
@@ -2694,7 +2779,7 @@ mod tests {
         );
 
         assert_eq!(
-            test_reach_lines(Some(&facts), false),
+            test_reach_lines(Some(&facts)),
             [
                 "  test reach: 2 changed exports: 1 mocked only, 1 no test",
                 "    mocked only  src/queue.ts:120     enqueue      tests mock src/queue.ts +1",
@@ -2714,7 +2799,7 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(
-            test_reach_lines(Some(&direct_only), false),
+            test_reach_lines(Some(&direct_only)),
             ["  test reach: 3 changed exports: 2 direct, 1 framework"]
         );
 
@@ -2731,7 +2816,7 @@ mod tests {
         );
         capped.masking = fallow_output::TestReachMasking::Capped;
         assert_eq!(
-            test_reach_lines(Some(&capped), false),
+            test_reach_lines(Some(&capped)),
             [
                 "  test reach: 1 changed export: 1 transitive",
                 "    mock detection is off: too many distinct mock sets",
@@ -2748,7 +2833,7 @@ mod tests {
         );
         no_tests.status = fallow_output::TestReachStatus::NoTests;
         assert_eq!(
-            test_reach_lines(Some(&no_tests), false),
+            test_reach_lines(Some(&no_tests)),
             ["  test reach: no test files in this project; 7 changed exports have no test"]
         );
     }

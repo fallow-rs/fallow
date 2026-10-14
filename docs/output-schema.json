@@ -32152,6 +32152,10 @@
         "exports_omitted": {
           "type": "integer",
           "description": "Number of attention rows left out by the cap."
+        },
+        "e2e_runner": {
+          "type": "boolean",
+          "description": "True when the project uses an end-to-end test runner (Playwright or\nCypress). End-to-end tests drive the running app and do not import\nsource files, so the reach classes do not count them. Absent when no\nsuch runner is present."
         }
       },
       "required": [
@@ -32344,15 +32348,15 @@
         {
           "type": "string",
           "const": "modified",
-          "description": "The diff changes some lines of an existing declaration."
+          "description": "The file exported this name at the base of the diff, and the diff\nchanges its declaration. An edited, rewritten or moved declaration is\n`modified`."
         },
         {
           "type": "string",
           "const": "new",
-          "description": "Every line of the declaration is an added line."
+          "description": "The file did not export this name at the base: a new export, a\nrenamed export, or an export of a new file."
         }
       ],
-      "description": "Whether the diff adds the whole declaration or changes an existing one."
+      "description": "Whether the export existed before the change."
     },
     "MutationReport": {
       "type": "object",

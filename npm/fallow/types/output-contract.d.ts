@@ -1530,7 +1530,7 @@ export type TestReachMasking = ("active" | "no-mocks" | "capped")
  */
 export type TestReachClass = ("mocked-only" | "none" | "none-file" | "transitive" | "direct" | "framework")
 /**
- * Whether the diff adds the whole declaration or changes an existing one.
+ * Whether the export existed before the change.
  */
 export type ExportChange = ("modified" | "new")
 /**
@@ -18185,6 +18185,13 @@ exports: ExportTestReachFact[]
  * Number of attention rows left out by the cap.
  */
 exports_omitted: number
+/**
+ * True when the project uses an end-to-end test runner (Playwright or
+ * Cypress). End-to-end tests drive the running app and do not import
+ * source files, so the reach classes do not count them. Absent when no
+ * such runner is present.
+ */
+e2e_runner?: boolean
 }
 /**
  * Number of changed exports per reach class. The keys are exactly the
