@@ -803,6 +803,22 @@ fn dynamic_import_without_await_captures_local_name() {
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./service");
     assert_eq!(info.dynamic_imports[0].local_name, Some("mod".to_string()));
+    assert!(!info.whole_object_uses.contains(&"mod".to_string()));
+}
+
+#[test]
+fn member_read_on_unawaited_import_binding_is_whole_use() {
+    for source in [
+        "const mod = import('./service'); mod.then(use);",
+        "let mod; mod = import('./service'); mod.catch(report);",
+    ] {
+        let info = parse_source(source);
+        assert_eq!(info.dynamic_imports[0].local_name, Some("mod".to_string()));
+        assert!(
+            info.whole_object_uses.contains(&"mod".to_string()),
+            "{source}"
+        );
+    }
 }
 
 #[test]
@@ -1971,5 +1987,97 @@ const unrelated = (await server.loadModule('/src/unused.ts')) as Module;
             ("/src/c.ts", vec![], Some("nonnull")),
             ("/src/d.ts", vec![], Some("angle")),
         ]
+    );
+}
+
+fn unbound_import_escapes(source: &str) -> Vec<(String, bool)> {
+    parse_source(source)
+        .dynamic_imports
+        .iter()
+        .filter(|imp| imp.local_name.is_none() && imp.destructured_names.is_empty())
+        .map(|imp| (imp.source.clone(), imp.value_escapes))
+        .collect()
+}
+
+#[test]
+fn discarded_dynamic_import_statements_do_not_escape() {
+    for source in [
+        "import('./x');",
+        "await import('./x');",
+        "void import('./x');",
+        "(import('./x'));",
+        "import('./x').catch(() => {});",
+        "await import('./x').finally(done);",
+        "const [, a] = await Promise.all([import('./x'), import('./a')]);",
+        "const [a] = await Promise.all([import('./a'), import('./x')]);",
+        "import('./x').then(() => boot());",
+        "import('./x').then(() => {}).catch(report);",
+        "const ready = import('./x').then(() => true);",
+        "await Promise.all([import('./x')]);",
+        "enabled && import('./x');",
+        "enabled ? import('./x') : null;",
+        "import('./x'), boot();",
+    ] {
+        assert_eq!(
+            unbound_import_escapes(source),
+            vec![("./x".to_string(), false)],
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn dynamic_import_values_that_leave_the_expression_escape() {
+    for source in [
+        "register(import('./x'));",
+        "globalThis.list = [import('./x')];",
+        "globalThis.map = { x: import('./x') };",
+        "import('./x').then(use);",
+        "import('./x').then(function () { use(arguments[0]); });",
+        "import('./x').then(null, report).then(use);",
+        "const all = Promise.all([import('./x')]);",
+        "console.log(await import('./x'));",
+        "function f(n) { return n ? import('./x') : null; }",
+        "const f = () => { for (const n of list) { return use(import('./x')); } };",
+    ] {
+        assert_eq!(
+            unbound_import_escapes(source),
+            vec![("./x".to_string(), true)],
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn local_loader_binds_nested_returned_imports() {
+    let info = parse_source(
+        "const load = async (name) => {
+           switch (name) {
+             case 'a': return import('./a');
+             default: { if (name) { return await import('./b'); } throw new Error(name); }
+           }
+         };
+         export const run = async () => { const m = await load('a'); m.create(); };",
+    );
+    let mut bound: Vec<(&str, Option<&str>, bool)> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| {
+            (
+                imp.source.as_str(),
+                imp.local_name.as_deref(),
+                imp.value_escapes,
+            )
+        })
+        .collect();
+    bound.sort_unstable();
+    assert_eq!(
+        bound,
+        vec![("./a", Some("m"), false), ("./b", Some("m"), false)]
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "m" && access.member == "create")
     );
 }

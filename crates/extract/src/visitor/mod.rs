@@ -60,16 +60,22 @@ pub(crate) fn infer_props_field_array_element_type(
     array_element_type_from_type(field_type)
 }
 
-/// A local function that only returns a dynamic `import()`, with the count of
+/// A local function that returns dynamic `import()` results, with the count of
 /// its references and of the references whose shape credits a precise set of
 /// exports. A reference in any other shape credits the whole target module.
 #[derive(Debug, Clone)]
 pub(crate) struct LocalImportLoader {
-    import_span: Span,
-    sources: Vec<String>,
+    imports: Vec<LoaderImport>,
     references: usize,
     credited_references: usize,
     is_exported: bool,
+}
+
+/// One `import()` that a local loader returns, with its static specifiers.
+#[derive(Debug, Clone)]
+pub(crate) struct LoaderImport {
+    span: Span,
+    sources: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -616,6 +622,12 @@ pub(crate) struct ModuleInfoExtractor {
     has_angular_component_template_url: bool,
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
+    /// `import()` spans whose value an expression statement discards.
+    discarded_import_spans: FxHashSet<Span>,
+    /// Bindings of an `import()` without `await`. Such a binding holds a
+    /// promise, so a member read on it, such as `p.then(cb)`, hands the
+    /// namespace to code that the walk does not follow.
+    promise_import_bindings: FxHashSet<String>,
     /// Top-level local loader functions keyed by binding name: a `const`
     /// arrow or function expression, or a function declaration, whose body
     /// returns an `import()`. Registered before the body walk because a
@@ -4189,6 +4201,12 @@ pub(crate) fn extract_import_expression<'a, 'b>(
     }
 }
 
+/// Whether `expr` is an `import()` without `await`, whose value is the
+/// promise of the namespace and not the namespace itself.
+pub(crate) fn is_unawaited_import(expr: &Expression<'_>) -> bool {
+    matches!(expr.without_parentheses(), Expression::ImportExpression(_))
+}
+
 /// Vite dev-server method that loads a module by specifier for SSR.
 const SSR_LOAD_MODULE_METHOD: &str = "ssrLoadModule";
 
@@ -4270,6 +4288,76 @@ fn extract_import_from_return_body<'a, 'b>(
         }
     }
     None
+}
+
+/// Collect each `import()` that a local loader returns. The search includes
+/// nested blocks, such as `switch` cases and `if` branches, but not nested
+/// functions, because their `return` statements belong to them.
+fn collect_loader_imports<'a, 'b>(expr: &'b Expression<'a>) -> Vec<&'b ImportExpression<'a>> {
+    let mut imports = Vec::new();
+    match expr {
+        Expression::ArrowFunctionExpression(arrow) => match &arrow.body {
+            ArrowFunctionBody::FunctionBody(body) => {
+                collect_returned_imports(&body.statements, &mut imports);
+            }
+            body => imports.extend(body.as_expression().and_then(extract_import_expression)),
+        },
+        Expression::FunctionExpression(func) => {
+            if let Some(body) = &func.body {
+                collect_returned_imports(&body.statements, &mut imports);
+            }
+        }
+        _ => {}
+    }
+    imports
+}
+
+fn collect_returned_imports<'a, 'b>(
+    stmts: &'b [Statement<'a>],
+    imports: &mut Vec<&'b ImportExpression<'a>>,
+) {
+    for stmt in stmts {
+        collect_returned_imports_from(stmt, imports);
+    }
+}
+
+fn collect_returned_imports_from<'a, 'b>(
+    stmt: &'b Statement<'a>,
+    imports: &mut Vec<&'b ImportExpression<'a>>,
+) {
+    match stmt {
+        Statement::ReturnStatement(ret) => {
+            imports.extend(ret.argument.as_ref().and_then(extract_import_expression));
+        }
+        Statement::BlockStatement(block) => collect_returned_imports(&block.body, imports),
+        Statement::IfStatement(stmt) => {
+            collect_returned_imports_from(&stmt.consequent, imports);
+            if let Some(alternate) = &stmt.alternate {
+                collect_returned_imports_from(alternate, imports);
+            }
+        }
+        Statement::SwitchStatement(stmt) => {
+            for case in &stmt.cases {
+                collect_returned_imports(&case.consequent, imports);
+            }
+        }
+        Statement::TryStatement(stmt) => {
+            collect_returned_imports(&stmt.block.body, imports);
+            if let Some(handler) = &stmt.handler {
+                collect_returned_imports(&handler.body.body, imports);
+            }
+            if let Some(finalizer) = &stmt.finalizer {
+                collect_returned_imports(&finalizer.body, imports);
+            }
+        }
+        Statement::LabeledStatement(stmt) => collect_returned_imports_from(&stmt.body, imports),
+        Statement::ForStatement(stmt) => collect_returned_imports_from(&stmt.body, imports),
+        Statement::ForInStatement(stmt) => collect_returned_imports_from(&stmt.body, imports),
+        Statement::ForOfStatement(stmt) => collect_returned_imports_from(&stmt.body, imports),
+        Statement::WhileStatement(stmt) => collect_returned_imports_from(&stmt.body, imports),
+        Statement::DoWhileStatement(stmt) => collect_returned_imports_from(&stmt.body, imports),
+        _ => {}
+    }
 }
 
 #[must_use]

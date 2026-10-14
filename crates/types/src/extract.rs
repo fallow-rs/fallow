@@ -4061,6 +4061,12 @@ pub struct DynamicImportInfo {
     pub local_name: Option<String>,
     /// True when this dynamic import was synthesised by fallow rather than appearing in user source.
     pub is_speculative: bool,
+    /// True when the value of an `import()` without a binding escapes, for
+    /// example as a return value, a call argument, or an array element.
+    /// The consumer can then read any export, so the edge credits the whole
+    /// module namespace. False for a discarded `import()` statement, which
+    /// only loads the module.
+    pub value_escapes: bool,
 }
 
 /// A `require()` call.
@@ -4521,6 +4527,7 @@ mod tests {
                 destructured_names: vec!["value".to_string()],
                 local_name: None,
                 is_speculative: false,
+                value_escapes: false,
             }],
             dynamic_import_patterns: vec![DynamicImportPattern {
                 prefix: "./pages/".to_string(),

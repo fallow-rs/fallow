@@ -212,6 +212,7 @@ fn apply_alchemy_mains(module: &mut ModuleInfo, mains: crate::alchemy::AlchemyMa
                 destructured_names: Vec::new(),
                 local_name: Some(local_name),
                 is_speculative: true,
+                value_escapes: false,
             });
     }
     module.whole_object_uses = whole_object_uses.into();

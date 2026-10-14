@@ -56,6 +56,7 @@ impl ModuleInfoExtractor {
                 destructured_names: Vec::new(),
                 local_name: None,
                 is_speculative: false,
+                value_escapes: false,
             });
             self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }
@@ -87,6 +88,7 @@ impl ModuleInfoExtractor {
                 destructured_names,
                 local_name: None,
                 is_speculative: false,
+                value_escapes: false,
             });
             self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }
@@ -329,6 +331,7 @@ impl ModuleInfoExtractor {
                 destructured_names: Vec::new(),
                 local_name: None,
                 is_speculative: false,
+                value_escapes: false,
             });
             self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }

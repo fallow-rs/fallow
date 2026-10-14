@@ -314,6 +314,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the same name stays a value too, so a value import of the merged name
   keeps crediting it. The extraction and graph caches are versioned again, so
   a warm cache does not keep the old classification.
+- **A dynamic `import()` whose value escapes no longer reports the target
+  exports as unused.** An `import()` without a binding credited no export,
+  also when its value left the expression. Examples are
+  `return import('./x')` in a nested block, `register(import('./x'))`,
+  `[import('./x')]` and `p.then(cb)` after `const p = import('./x')`. Such
+  an `import()` now credits every export of the target module. Only an
+  `import()` whose value is discarded still loads the module without a
+  credit. Examples are `import('./x');`, `await import('./x');`,
+  `import('./x').catch(onError);` and `import('./x').then(() => start())`. A local loader function now also recognizes a
+  `return import('./x')` inside `switch`, `if`, `try` and loop blocks. Thus
+  `const m = await load(name); m.createAdapter()` credits `createAdapter`
+  only. The extraction and graph cache versions are bumped, so the first run
+  after the update re-parses every file.
 
 - **The MCP `trace_export` tool runs the CLI when type-aware analysis is
   on.** With `typeAware.enabled` in config or `FALLOW_TYPE_AWARE` set,

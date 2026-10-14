@@ -7768,12 +7768,13 @@ fn dynamic_import_in_object_property_function_callback_credits_default() {
 }
 
 #[test]
-fn dynamic_import_in_unknown_object_property_callback_stays_side_effect_only() {
+fn dynamic_import_in_unknown_object_property_callback_credits_whole_module() {
     let info = parse("const loaders = { arbitrary: () => import('./maybe-side-effect') };");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./maybe-side-effect");
     assert!(info.dynamic_imports[0].destructured_names.is_empty());
     assert!(info.dynamic_imports[0].local_name.is_none());
+    assert!(info.dynamic_imports[0].value_escapes);
 }
 
 #[test]

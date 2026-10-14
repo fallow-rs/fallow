@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::visitor::{
-    LocalImportLoader, extract_import_from_callable, extract_import_from_return_body,
+    LoaderImport, LocalImportLoader, collect_loader_imports, collect_returned_imports,
 };
 
 impl<'a> ModuleInfoExtractor {
@@ -113,7 +113,84 @@ impl<'a> ModuleInfoExtractor {
                 destructured_names: destructured_names.to_vec(),
                 local_name: local_name.map(str::to_string),
                 is_speculative: false,
+                value_escapes: false,
             });
+        }
+    }
+
+    /// Push the edges of an `import()` without a binding. Only a discarded
+    /// value is a plain load. Any other position hands the namespace to code
+    /// that the walk does not follow, so the edge credits the whole module.
+    pub(super) fn push_unbound_dynamic_import_branches(&mut self, sources: &[String], span: Span) {
+        let value_escapes = !self.discarded_import_spans.contains(&span);
+        for source in sources {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source: source.clone(),
+                span,
+                destructured_names: Vec::new(),
+                local_name: None,
+                is_speculative: false,
+                value_escapes,
+            });
+        }
+    }
+
+    /// Mark each `import()` whose value an expression statement discards:
+    /// `import('./x')`, `await import('./x')`, `void import('./x')`, a
+    /// `.catch()`, `.finally()` or parameterless `.then()` handler on it,
+    /// `await Promise.all([import('./x')])`, and the operands of `&&`, `||`,
+    /// `??`, `?:` and `,`. These forms only load the module and read no export.
+    pub(super) fn record_discarded_dynamic_import(&mut self, expression: &Expression<'_>) {
+        match expression.without_parentheses() {
+            Expression::ImportExpression(import_expr) => {
+                self.discarded_import_spans.insert(import_expr.span);
+            }
+            Expression::AwaitExpression(await_expr) => {
+                self.record_discarded_dynamic_import(&await_expr.argument);
+            }
+            Expression::UnaryExpression(unary) if unary.operator == UnaryOperator::Void => {
+                self.record_discarded_dynamic_import(&unary.argument);
+            }
+            Expression::SequenceExpression(sequence) => {
+                for expr in &sequence.expressions {
+                    self.record_discarded_dynamic_import(expr);
+                }
+            }
+            Expression::LogicalExpression(logical) => {
+                self.record_discarded_dynamic_import(&logical.left);
+                self.record_discarded_dynamic_import(&logical.right);
+            }
+            Expression::ConditionalExpression(conditional) => {
+                self.record_discarded_dynamic_import(&conditional.consequent);
+                self.record_discarded_dynamic_import(&conditional.alternate);
+            }
+            Expression::CallExpression(call) => {
+                if let Some(elements) = extract_promise_all_elements(expression) {
+                    for element in elements {
+                        if let Some(expr) = element.as_expression() {
+                            self.record_discarded_dynamic_import(expr);
+                        }
+                    }
+                } else if let Expression::StaticMemberExpression(member) = &call.callee
+                    && matches!(member.property.name.as_str(), "catch" | "finally")
+                {
+                    self.record_discarded_dynamic_import(&member.object);
+                } else if let Some(object) = parameterless_then_object(call) {
+                    self.record_discarded_dynamic_import(object);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Mark the `import()` of `import('./x').then(() => ...)` as discarded in
+    /// any position. The callback has no parameter, so it reads no export, and
+    /// the chain resolves to the callback result, not to the namespace.
+    pub(super) fn record_parameterless_then_import(&mut self, call: &CallExpression<'_>) {
+        if let Some(Expression::ImportExpression(import_expr)) =
+            parameterless_then_object(call).map(Expression::without_parentheses)
+        {
+            self.discarded_import_spans.insert(import_expr.span);
         }
     }
 
@@ -213,17 +290,19 @@ impl<'a> ModuleInfoExtractor {
                 continue;
             };
             loader.credited_references += 1;
-            let import_span = loader.import_span;
-            let sources = loader.sources.clone();
-            self.push_dynamic_import_branches(
-                &sources,
-                import_span,
-                &["default".to_string()],
-                None,
-            );
-            if self.is_next_dynamic_ssr_false_call(expr) {
-                self.client_only_dynamic_import_spans
-                    .push(import_span.start);
+            let imports = loader.imports.clone();
+            let is_client_only = self.is_next_dynamic_ssr_false_call(expr);
+            for import in imports {
+                self.push_dynamic_import_branches(
+                    &import.sources,
+                    import.span,
+                    &["default".to_string()],
+                    None,
+                );
+                if is_client_only {
+                    self.client_only_dynamic_import_spans
+                        .push(import.span.start);
+                }
             }
         }
     }
@@ -258,9 +337,9 @@ impl<'a> ModuleInfoExtractor {
             return false;
         };
         loader.credited_references += 1;
-        let import_span = loader.import_span;
-        let sources = loader.sources.clone();
-        self.handle_dynamic_import_declaration(&declarator.id, import_span, &sources);
+        for import in loader.imports.clone() {
+            self.handle_dynamic_import_declaration(&declarator.id, import.span, &import.sources);
+        }
         true
     }
 
@@ -317,9 +396,9 @@ impl<'a> ModuleInfoExtractor {
         for declarator in &decl.declarations {
             if let BindingPattern::BindingIdentifier(id) = &declarator.id
                 && let Some(init) = &declarator.init
-                && let Some(import_expr) = extract_import_from_callable(init.without_parentheses())
             {
-                self.register_local_import_loader(id.name.as_str(), import_expr, is_exported);
+                let imports = collect_loader_imports(init.without_parentheses());
+                self.register_local_import_loader(id.name.as_str(), &imports, is_exported);
             }
         }
     }
@@ -327,32 +406,44 @@ impl<'a> ModuleInfoExtractor {
     fn register_function_loader(&mut self, func: &Function<'_>, is_exported: bool) {
         if let Some(id) = &func.id
             && let Some(body) = &func.body
-            && let Some(import_expr) = extract_import_from_return_body(&body.statements)
         {
-            self.register_local_import_loader(id.name.as_str(), import_expr, is_exported);
+            let mut imports = Vec::new();
+            collect_returned_imports(&body.statements, &mut imports);
+            self.register_local_import_loader(id.name.as_str(), &imports, is_exported);
         }
     }
 
+    /// Register `name` as a loader when it returns at least one `import()` and
+    /// every returned `import()` has a static specifier. A computed specifier
+    /// keeps the old path, so the loader abstains as a whole.
     fn register_local_import_loader(
         &mut self,
         name: &str,
-        import_expr: &ImportExpression<'_>,
+        import_exprs: &[&ImportExpression<'_>],
         is_exported: bool,
     ) {
-        if self.local_import_loaders.contains_key(name) {
+        if import_exprs.is_empty() || self.local_import_loaders.contains_key(name) {
             return;
         }
-        let mut sources = Vec::new();
-        collect_static_import_specifiers(&import_expr.source, &mut sources);
-        if sources.is_empty() {
-            return;
+        let mut imports = Vec::with_capacity(import_exprs.len());
+        for import_expr in import_exprs {
+            let mut sources = Vec::new();
+            collect_static_import_specifiers(&import_expr.source, &mut sources);
+            if sources.is_empty() {
+                return;
+            }
+            imports.push(LoaderImport {
+                span: import_expr.span,
+                sources,
+            });
         }
-        self.handled_import_spans.insert(import_expr.span);
+        for import in &imports {
+            self.handled_import_spans.insert(import.span);
+        }
         self.local_import_loaders.insert(
             name.to_string(),
             LocalImportLoader {
-                import_span: import_expr.span,
-                sources,
+                imports,
                 references: 0,
                 credited_references: 0,
                 is_exported,
@@ -371,22 +462,45 @@ impl<'a> ModuleInfoExtractor {
             std::mem::take(&mut self.local_import_loaders)
                 .into_iter()
                 .collect();
-        loaders.sort_unstable_by_key(|(_, loader)| loader.import_span.start);
+        loaders.sort_unstable_by_key(|(_, loader)| loader.imports[0].span.start);
         for (name, loader) in loaders {
             if loader.references == 0 && !loader.is_exported {
-                self.push_dynamic_import_branches(&loader.sources, loader.import_span, &[], None);
+                for import in &loader.imports {
+                    self.push_dynamic_import_branches(&import.sources, import.span, &[], None);
+                }
                 continue;
             }
             if loader.is_exported
                 || loader.credited_references == 0
                 || loader.references > loader.credited_references
             {
-                self.push_dynamic_import_branches(
-                    &loader.sources,
-                    loader.import_span,
-                    &[],
-                    Some(&name),
-                );
+                for import in &loader.imports {
+                    self.push_dynamic_import_branches(
+                        &import.sources,
+                        import.span,
+                        &[],
+                        Some(&name),
+                    );
+                }
+                self.push_whole_object_use(name);
+            }
+        }
+    }
+
+    /// Give each `import()` promise binding with a member read the
+    /// whole-module credit. A promise binding without any use credits
+    /// nothing, and a binding handed on or awaited is already a whole use.
+    pub(super) fn finish_promise_import_bindings(&mut self) {
+        let mut names: Vec<String> = std::mem::take(&mut self.promise_import_bindings)
+            .into_iter()
+            .collect();
+        names.sort_unstable();
+        for name in names {
+            if self
+                .member_accesses
+                .iter()
+                .any(|access| access.object == name)
+            {
                 self.push_whole_object_use(name);
             }
         }
@@ -472,4 +586,20 @@ fn is_eager_glob_options(argument: &Argument<'_>) -> bool {
                     && matches!(&property.value, Expression::BooleanLiteral(value) if value.value)
         )
     })
+}
+
+/// The receiver of `receiver.then(() => ...)` when the first callback is an
+/// arrow function without parameters. An arrow has no own `arguments`, so it
+/// cannot read the resolved value.
+fn parameterless_then_object<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    if member.property.name != "then" {
+        return None;
+    }
+    let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.first() else {
+        return None;
+    };
+    (arrow.params.items.is_empty() && arrow.params.rest.is_none()).then_some(&member.object)
 }

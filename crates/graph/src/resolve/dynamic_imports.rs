@@ -83,6 +83,17 @@ pub(super) fn resolve_single_dynamic_import(
         )];
     }
 
+    // An escaping namespace without a binding is a whole-module edge: a
+    // `Namespace` import with an empty local name credits every export.
+    if imp.value_escapes {
+        return vec![dynamic_import_with(
+            imp,
+            ImportedName::Namespace,
+            String::new(),
+            target,
+        )];
+    }
+
     vec![dynamic_import_with(
         imp,
         ImportedName::SideEffect,

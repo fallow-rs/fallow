@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-import-escaping-namespace",
+  "type": "module",
+  "main": "src/index.mjs"
+}

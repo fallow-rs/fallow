@@ -332,6 +332,7 @@ impl ModuleInfoExtractor {
             destructured_names: Vec::new(),
             local_name: None,
             is_speculative: false,
+            value_escapes: false,
         });
 
         if has_factory {
@@ -357,6 +358,7 @@ impl ModuleInfoExtractor {
                 destructured_names: Vec::new(),
                 local_name: Some(String::new()),
                 is_speculative: true,
+                value_escapes: false,
             });
         }
     }

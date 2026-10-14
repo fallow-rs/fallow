@@ -559,3 +559,46 @@ fn dynamic_import_assigned_to_outer_binding_credits_member_reads() {
          and keep the unread export reported"
     );
 }
+
+#[test]
+fn escaping_dynamic_import_namespace_credits_whole_module() {
+    let root = fixture_path("dynamic-import-escaping-namespace");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
+            )
+        })
+        .collect();
+    unused.sort();
+
+    let expected: Vec<(String, String)> = [
+        ("adapter.mjs", "unusedAdapterHelper"),
+        ("awaited-side-effect.mjs", "awaitedSideEffectValue"),
+        ("caught-side-effect.mjs", "caughtSideEffectValue"),
+        ("side-effect.mjs", "sideEffectValue"),
+        ("then-side-effect.mjs", "thenSideEffectValue"),
+        ("unread-promise.mjs", "unreadPromiseValue"),
+    ]
+    .iter()
+    .map(|(file, name)| ((*file).to_string(), (*name).to_string()))
+    .collect();
+
+    assert_eq!(
+        unused, expected,
+        "a loader with a nested `return import()` credits the accessed names, an \
+         `import()` whose value escapes credits the whole module, and only a \
+         discarded `import()` or an unread promise binding credits nothing"
+    );
+}

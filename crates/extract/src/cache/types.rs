@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 354;
+pub(super) const CACHE_VERSION: u32 = 355;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -516,6 +516,8 @@ pub struct CachedDynamicImport {
     /// True when this dynamic import was synthesised by fallow (see
     /// `DynamicImportInfo::is_speculative`).
     pub(crate) is_speculative: bool,
+    /// See `DynamicImportInfo::value_escapes`.
+    pub(crate) value_escapes: bool,
 }
 
 /// Cached `require()` call data.

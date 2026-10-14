@@ -565,6 +565,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             destructured_names: Vec::new(),
             local_name: None,
             is_speculative: false,
+            value_escapes: false,
         }],
         require_calls: vec![RequireCallInfo {
             source: "fs".to_string(),
@@ -1341,6 +1342,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
             destructured_names: vec![],
             local_name: Some("mod".to_string()),
             is_speculative: false,
+            value_escapes: false,
         }],
         ..ModuleInfo::empty(FileId(0))
     };

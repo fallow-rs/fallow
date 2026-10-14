@@ -1478,6 +1478,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
             destructured_names: vec![],
             local_name: None,
             is_speculative: false,
+            value_escapes: false,
         }],
         require_calls: vec![RequireCallInfo {
             source: "fs".to_string(),

@@ -135,6 +135,7 @@ fn cached_dynamic_imports_to_module(
             destructured_names: dynamic_import.destructured_names.clone(),
             local_name: dynamic_import.local_name.clone(),
             is_speculative: dynamic_import.is_speculative,
+            value_escapes: dynamic_import.value_escapes,
         })
         .collect()
 }
@@ -348,6 +349,7 @@ fn module_dynamic_imports_to_cached(
             destructured_names: dynamic_import.destructured_names.clone(),
             local_name: dynamic_import.local_name.clone(),
             is_speculative: dynamic_import.is_speculative,
+            value_escapes: dynamic_import.value_escapes,
         })
         .collect()
 }

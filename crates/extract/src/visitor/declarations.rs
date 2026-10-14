@@ -623,16 +623,28 @@ impl ModuleInfoExtractor {
             if let Some(binding) = pattern.elements.get(index) {
                 if let Some(binding) = binding {
                     self.handle_dynamic_import_declaration(binding, import_expr.span, &sources);
+                } else {
+                    self.discarded_import_spans.insert(import_expr.span);
                 }
                 continue;
             }
-            if let Some(rest) = &pattern.rest
-                && let BindingPattern::BindingIdentifier(id) = &rest.argument
-            {
-                let local = id.name.to_string();
-                self.push_whole_object_use(local.clone());
-                self.push_dynamic_import_branches(&sources, import_expr.span, &[], Some(&local));
-                self.handled_import_spans.insert(import_expr.span);
+            match &pattern.rest {
+                Some(rest) => {
+                    if let BindingPattern::BindingIdentifier(id) = &rest.argument {
+                        let local = id.name.to_string();
+                        self.push_whole_object_use(local.clone());
+                        self.push_dynamic_import_branches(
+                            &sources,
+                            import_expr.span,
+                            &[],
+                            Some(&local),
+                        );
+                        self.handled_import_spans.insert(import_expr.span);
+                    }
+                }
+                None => {
+                    self.discarded_import_spans.insert(import_expr.span);
+                }
             }
         }
     }
@@ -657,6 +669,9 @@ impl ModuleInfoExtractor {
             return;
         }
         let name = target.name.as_str();
+        if super::is_unawaited_import(right) {
+            self.promise_import_bindings.insert(name.to_string());
+        }
         self.record_assigned_namespace_binding_name(name.to_string());
         self.push_dynamic_import_branches(&sources, import_expr.span, &[], Some(name));
         self.handled_import_spans.insert(import_expr.span);

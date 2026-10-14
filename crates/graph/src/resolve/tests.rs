@@ -137,6 +137,7 @@ fn make_dynamic(
         destructured_names: destructured.into_iter().map(String::from).collect(),
         local_name: local_name.map(String::from),
         is_speculative: false,
+        value_escapes: false,
     }
 }
 
@@ -558,6 +559,25 @@ fn dynamic_import_side_effect() {
 }
 
 #[test]
+fn escaping_unbound_dynamic_import_is_whole_module_namespace() {
+    with_empty_ctx(|ctx| {
+        let imp = DynamicImportInfo {
+            value_escapes: true,
+            ..make_dynamic("./adapter", vec![], None)
+        };
+        let file = Path::new("/project/src/app.ts");
+        let result = resolve_single_dynamic_import(ctx, file, &imp);
+
+        assert_eq!(result.len(), 1);
+        assert!(matches!(
+            result[0].info.imported_name,
+            ImportedName::Namespace
+        ));
+        assert_eq!(result[0].info.local_name, "");
+    });
+}
+
+#[test]
 fn dynamic_import_destructured_takes_priority_over_local_name() {
     with_empty_ctx(|ctx| {
         let imp = DynamicImportInfo {
@@ -566,6 +586,7 @@ fn dynamic_import_destructured_takes_priority_over_local_name() {
             destructured_names: vec!["a".into()],
             local_name: Some("mod".into()),
             is_speculative: false,
+            value_escapes: false,
         };
         let file = Path::new("/project/src/app.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1468,6 +1489,7 @@ fn dynamic_import_empty_destructured_and_no_local_is_side_effect() {
             destructured_names: vec![],
             local_name: None,
             is_speculative: false,
+            value_escapes: false,
         };
         let file = Path::new("/project/src/app.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1490,6 +1512,7 @@ fn speculative_dynamic_import_drops_when_unresolvable() {
             destructured_names: vec![],
             local_name: Some(String::new()),
             is_speculative: true,
+            value_escapes: false,
         };
         let file = Path::new("/project/src/app.test.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1513,6 +1536,7 @@ fn speculative_dynamic_import_drops_when_package_space() {
             destructured_names: vec![],
             local_name: Some(String::new()),
             is_speculative: true,
+            value_escapes: false,
         };
         let file = Path::new("/project/src/app.test.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1532,6 +1556,7 @@ fn non_speculative_dynamic_import_keeps_package_entry() {
             destructured_names: vec![],
             local_name: None,
             is_speculative: false,
+            value_escapes: false,
         };
         let file = Path::new("/project/src/app.test.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1549,6 +1574,7 @@ fn non_speculative_dynamic_import_keeps_unresolvable_entry() {
             destructured_names: vec![],
             local_name: None,
             is_speculative: false,
+            value_escapes: false,
         };
         let file = Path::new("/project/src/app.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);
@@ -1566,6 +1592,7 @@ fn dynamic_import_preserves_source_span() {
             destructured_names: vec!["x".into()],
             local_name: None,
             is_speculative: false,
+            value_escapes: false,
         };
         let file = Path::new("/project/src/app.ts");
         let result = resolve_single_dynamic_import(ctx, file, &imp);

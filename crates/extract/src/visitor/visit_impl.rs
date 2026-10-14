@@ -42,8 +42,8 @@ use super::helpers::{
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
     SideEffectRegistrationTarget, collect_static_import_specifiers, extract_import_expression,
-    extract_promise_all_elements, ssr_load_module_call, ssr_load_module_source,
-    try_extract_arrow_wrapped_import, try_extract_import_then_callback,
+    extract_promise_all_elements, is_unawaited_import, ssr_load_module_call,
+    ssr_load_module_source, try_extract_arrow_wrapped_import, try_extract_import_then_callback,
     try_extract_property_callback_import, try_extract_require,
 };
 
@@ -3217,6 +3217,11 @@ impl<'a> ModuleInfoExtractor {
             return;
         }
         self.handle_dynamic_import_declaration(&declarator.id, import_expr.span, &sources);
+        if is_unawaited_import(init)
+            && let BindingPattern::BindingIdentifier(id) = &declarator.id
+        {
+            self.promise_import_bindings.insert(id.name.to_string());
+        }
     }
 
     /// Record a CommonJS named export (`module.exports.X = ...` /
@@ -3784,6 +3789,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_program_local_import_loaders(program);
         walk::walk_program(self, program);
         self.finish_local_import_loaders();
+        self.finish_promise_import_bindings();
         self.record_jsx_import_source_pragma(program);
     }
 
@@ -4545,10 +4551,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 _ => {}
             }
         } else {
-            self.push_dynamic_import_branches(&sources, expr.span, &[], None);
+            self.push_unbound_dynamic_import_branches(&sources, expr.span);
         }
 
         walk::walk_import_expression(self, expr);
+    }
+
+    fn visit_expression_statement(&mut self, statement: &ExpressionStatement<'a>) {
+        self.record_discarded_dynamic_import(&statement.expression);
+        walk::walk_expression_statement(self, statement);
     }
 
     fn visit_return_statement(&mut self, statement: &ReturnStatement<'a>) {
@@ -4677,6 +4688,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_import_meta_glob_patterns(expr);
         self.record_require_context_pattern(expr);
         self.record_import_callback_dynamic_imports(expr);
+        self.record_parameterless_then_import(expr);
         self.record_arrow_wrapped_dynamic_import(expr);
         self.record_ssr_load_module(expr);
 
@@ -4840,6 +4852,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 destructured_names: Vec::new(),
                 local_name: None,
                 is_speculative,
+                value_escapes: false,
             });
             self.mark_import_load_kind(expr.span, ImportLoadKind::OutOfThread);
         }

@@ -235,6 +235,9 @@ error by suppressing a downstream detector.
   object a consumer observes in Phase 2 (an ambient-module star, a
   dynamic-import pattern match through `import()`, `import.meta.glob`, or
   `require.context`, a bare side-effect `require('./barrel')` with no binding,
+  an `import()` without a binding whose value escapes (a return value, a call
+  argument, or an array element; only a discarded `import()` statement stays
+  a side-effect edge), a member read on an un-awaited `import()` binding,
   and a namespace import the graph cannot narrow: a whole-object use, a
   binding handed on without member access, or a binding exported under its own
   name from any module, entry point included) plus every `export * as ns`
