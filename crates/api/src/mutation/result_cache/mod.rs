@@ -58,7 +58,7 @@ const LOCKFILES: [&str; 6] = [
 
 /// The runner config files at the root. A file that is absent also is a
 /// key fact, so a new config file changes the key.
-const RUNNER_CONFIGS: [&str; 21] = [
+const RUNNER_CONFIGS: [&str; 22] = [
     "vitest.config.ts",
     "vitest.config.mts",
     "vitest.config.cts",
@@ -78,6 +78,7 @@ const RUNNER_CONFIGS: [&str; 21] = [
     "vitest.workspace.mjs",
     "vitest.workspace.cjs",
     "vitest.workspace.json",
+    "bunfig.toml",
     "package.json",
     "tsconfig.json",
 ];

@@ -362,8 +362,8 @@ The key hashes these parts:
   files that they reach (`MutationPlan::support_files`);
 - the lockfiles of the first directory from the root upward that has one;
 - the runner config files at the root: `vitest.config.*`, `vite.config.*`,
-  `vitest.workspace.*`, `package.json` and `tsconfig.json`. An absent file is
-  also a key fact, so a new config file changes the key.
+  `vitest.workspace.*`, `bunfig.toml`, `package.json` and `tsconfig.json`. An
+  absent file is also a key fact, so a new config file changes the key.
 
 The reach ignores `vi.mock`, so a replaced module is still in the key. This
 gives more misses, never a stale hit.

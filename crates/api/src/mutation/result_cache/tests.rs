@@ -100,6 +100,7 @@ fn a_file_change_in_each_key_part_changes_the_key() {
         ("the package manifest", "package.json"),
         ("a new runner config file", "vite.config.mts"),
         ("a new lockfile", "pnpm-lock.yaml"),
+        ("a new bun test config file", "bunfig.toml"),
     ] {
         let dir = tempfile::tempdir().unwrap();
         project(dir.path());
