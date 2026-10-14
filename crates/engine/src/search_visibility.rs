@@ -12,7 +12,7 @@ use std::path::Path;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ExportName, ImportedName};
 use fallow_types::trace::{SearchGapReason, SearchVisibility};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graph::{ExportNamespace, ModuleGraph, ReferenceKind, SymbolReference};
 
@@ -39,6 +39,7 @@ struct Source {
 pub(crate) struct SourceCache<'g> {
     graph: &'g ModuleGraph,
     sources: FxHashMap<FileId, Option<Source>>,
+    forwarded: FxHashMap<FileId, FxHashSet<String>>,
 }
 
 impl<'g> SourceCache<'g> {
@@ -46,7 +47,28 @@ impl<'g> SourceCache<'g> {
         Self {
             graph,
             sources: FxHashMap::default(),
+            forwarded: FxHashMap::default(),
         }
+    }
+
+    /// Whether `file_id` only exports its import binding `local` again and
+    /// has no other use of it. The file is parsed once.
+    fn only_forwards(&mut self, file_id: FileId, local: &str) -> bool {
+        if !self.forwarded.contains_key(&file_id) {
+            let path = self
+                .graph
+                .modules
+                .get(file_id.0 as usize)
+                .map(|module| module.path.clone());
+            let names = match (path, self.get(file_id)) {
+                (Some(path), Some(source)) => forwarded_import_bindings(&path, &source.text),
+                _ => FxHashSet::default(),
+            };
+            self.forwarded.insert(file_id, names);
+        }
+        self.forwarded
+            .get(&file_id)
+            .is_some_and(|names| names.contains(local))
     }
 
     fn get(&mut self, file_id: FileId) -> Option<&Source> {
@@ -124,7 +146,20 @@ impl SearchTarget {
             .0
         });
         let binding = self.binding(graph, reference);
-        let (visibility, reason, search_as) = if matches!(binding, Some(Binding::ReExport)) {
+        let forwards = match &binding {
+            Some(Binding::ReExport) => true,
+            Some(Binding::Named { imported, local }) => {
+                let name = if local.is_empty() { imported } else { local };
+                sources.only_forwards(reference.from_file, name)
+            }
+            Some(Binding::Default { local }) => {
+                !local.is_empty() && sources.only_forwards(reference.from_file, local)
+            }
+            // The graph does not credit the importers of a forwarded
+            // namespace binding, so the forwarding file stays a consumer.
+            Some(Binding::Namespace { .. }) | None => false,
+        };
+        let (visibility, reason, search_as) = if forwards {
             (
                 SearchVisibility::Found,
                 Some(SearchGapReason::PassThrough),
@@ -308,6 +343,111 @@ enum Binding<'g> {
     ReExport,
 }
 
+/// The import bindings of a source file that the file only exports again
+/// with a top-level `export { .. }` (`import { a } from './x'; export { a }`)
+/// and does not use in any other place.
+///
+/// `export default b` and `export = b` are normal uses: the module graph does
+/// not credit the importers of such a file to the origin export, so the file
+/// is the only signal and must stay a consumer.
+///
+/// Only plain script files are read. A Vue, Svelte, Astro or MDX file can use
+/// a binding in its template, so it has no such bindings. A file that does not
+/// parse has none.
+#[must_use]
+fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
+    use oxc_ast::ast::{ImportDeclarationSpecifier, Statement};
+    use oxc_ast_visit::Visit;
+
+    let Ok(source_type) = oxc_span::SourceType::from_path(path) else {
+        return FxHashSet::default();
+    };
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+    if parsed.fatal_error {
+        return FxHashSet::default();
+    }
+    let imports: FxHashSet<&str> = parsed
+        .program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::ImportDeclaration(import) => import.specifiers.as_ref(),
+            _ => None,
+        })
+        .flatten()
+        .map(|specifier| match specifier {
+            ImportDeclarationSpecifier::ImportSpecifier(named) => named.local.name.as_str(),
+            ImportDeclarationSpecifier::ImportDefaultSpecifier(default) => {
+                default.local.name.as_str()
+            }
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(namespace) => {
+                namespace.local.name.as_str()
+            }
+        })
+        .collect();
+    if imports.is_empty() {
+        return FxHashSet::default();
+    }
+    let top_level_exports = parsed
+        .program
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::ExportNamedDeclaration(export) => Some(export.span.start),
+            _ => None,
+        })
+        .collect();
+    let mut uses = BindingUses {
+        imports,
+        top_level_exports,
+        exported: FxHashSet::default(),
+        used: FxHashSet::default(),
+    };
+    uses.visit_program(&parsed.program);
+    uses.exported
+        .difference(&uses.used)
+        .map(|name| (*name).to_string())
+        .collect()
+}
+
+/// The uses of the import bindings of one file, split in export positions
+/// and all other positions.
+struct BindingUses<'s> {
+    imports: FxHashSet<&'s str>,
+    /// The start offsets of the top-level `export { .. }` statements. An
+    /// `export { .. }` in a TS namespace or an ambient module is a normal use.
+    top_level_exports: FxHashSet<u32>,
+    exported: FxHashSet<&'s str>,
+    used: FxHashSet<&'s str>,
+}
+
+impl BindingUses<'_> {
+    fn record(&mut self, name: &str, exported: bool) {
+        let Some(&name) = self.imports.get(name) else {
+            return;
+        };
+        if exported {
+            self.exported.insert(name);
+        } else {
+            self.used.insert(name);
+        }
+    }
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for BindingUses<'_> {
+    fn visit_identifier_reference(&mut self, it: &oxc_ast::ast::IdentifierReference<'a>) {
+        self.record(it.name.as_str(), false);
+    }
+
+    fn visit_export_named_declaration(&mut self, it: &oxc_ast::ast::ExportNamedDeclaration<'a>) {
+        let exported = self.top_level_exports.contains(&it.span.start);
+        for specifier in &it.specifiers {
+            self.record(specifier.local.name().as_str(), exported);
+        }
+    }
+}
+
 /// The search term of the default export of `file_id`: the name of the
 /// declaration, when it has one.
 fn default_export_term(
@@ -406,6 +546,20 @@ pub fn default_declaration_name(source: &str, start: usize) -> Option<&str> {
     (after.is_empty() || after.starts_with(';') || after.starts_with('\n')).then_some(name)
 }
 
+/// The top-level statement that declares one export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportDeclaration {
+    /// 1-based first and last line of the statement.
+    pub lines: (u32, u32),
+    /// True when the export is a variable whose initializer is a literal, or
+    /// an object or array of literals.
+    pub literal_value: bool,
+    /// True when the export comes from a re-export statement
+    /// (`export { x } from`, `export * as ns from`). Such a statement declares
+    /// nothing.
+    pub is_re_export: bool,
+}
+
 /// The 1-based line range of the top-level statement that declares each
 /// export of a source file, keyed by the byte offset of the export span.
 ///
@@ -420,6 +574,22 @@ pub fn declaration_line_ranges(
     source: &str,
     export_starts: &[u32],
 ) -> FxHashMap<u32, (u32, u32)> {
+    export_declarations(path, source, export_starts)
+        .into_iter()
+        .map(|(start, declaration)| (start, declaration.lines))
+        .collect()
+}
+
+/// The declaring statement of each export of a source file, keyed by the
+/// byte offset of the export span. One parse gives the line range and the
+/// literal-initializer flag. See [`declaration_line_ranges`] for the mapping
+/// rules.
+#[must_use]
+pub fn export_declarations(
+    path: &Path,
+    source: &str,
+    export_starts: &[u32],
+) -> FxHashMap<u32, ExportDeclaration> {
     let statements = match fallow_extract::embedded_script_sections(path, source) {
         Some(sections) => sections
             .iter()
@@ -435,7 +605,7 @@ pub fn declaration_line_ranges(
     };
     let offsets = fallow_types::extract::compute_line_offsets(source);
     let line = |offset: u32| fallow_types::extract::byte_offset_to_line_col(&offsets, offset).0;
-    let mut ranges = FxHashMap::default();
+    let mut declarations = FxHashMap::default();
     for &start in export_starts {
         let Some(containing) = statements
             .iter()
@@ -443,11 +613,11 @@ pub fn declaration_line_ranges(
         else {
             continue;
         };
+        let local = source
+            .get(start as usize..)
+            .map(identifier_prefix)
+            .unwrap_or_default();
         let statement = if containing.is_specifier_list {
-            let local = source
-                .get(start as usize..)
-                .map(identifier_prefix)
-                .unwrap_or_default();
             statements
                 .iter()
                 .find(|statement| statement.declared.iter().any(|name| name == local))
@@ -455,19 +625,27 @@ pub fn declaration_line_ranges(
         } else {
             containing
         };
-        ranges.insert(
+        declarations.insert(
             start,
-            (line(statement.start), line(statement.end.saturating_sub(1))),
+            ExportDeclaration {
+                lines: (line(statement.start), line(statement.end.saturating_sub(1))),
+                literal_value: !local.is_empty()
+                    && statement.literal_names.iter().any(|name| name == local),
+                is_re_export: containing.is_re_export,
+            },
         );
     }
-    ranges
+    declarations
 }
 
 struct TopLevelStatement {
     start: u32,
     end: u32,
     declared: Vec<String>,
+    /// Declared variables whose initializer is a literal value.
+    literal_names: Vec<String>,
     is_specifier_list: bool,
+    is_re_export: bool,
 }
 
 impl TopLevelStatement {
@@ -503,22 +681,86 @@ fn top_level_statement(statement: &oxc_ast::ast::Statement<'_>) -> TopLevelState
     use oxc_span::GetSpan;
 
     let span = statement.span();
-    let (declared, is_specifier_list) = match statement {
-        Statement::ExportDeclaration(export) => (declared_names(&export.declaration), false),
-        Statement::ExportNamedDeclaration(_) => (Vec::new(), true),
-        _ => (
-            statement
-                .as_declaration()
-                .map(declared_names)
-                .unwrap_or_default(),
-            false,
-        ),
+    let declaration = match statement {
+        Statement::ExportDeclaration(export) => Some(&export.declaration),
+        _ => statement.as_declaration(),
     };
     TopLevelStatement {
         start: span.start,
         end: span.end,
-        declared,
-        is_specifier_list,
+        declared: declaration.map(declared_names).unwrap_or_default(),
+        literal_names: declaration.map(literal_names).unwrap_or_default(),
+        is_specifier_list: matches!(statement, Statement::ExportNamedDeclaration(_)),
+        is_re_export: matches!(
+            statement,
+            Statement::ExportFromDeclaration(_) | Statement::ExportAllDeclaration(_)
+        ),
+    }
+}
+
+/// The variables of a declaration whose initializer is a literal value.
+fn literal_names(declaration: &oxc_ast::ast::Declaration<'_>) -> Vec<String> {
+    let oxc_ast::ast::Declaration::VariableDeclaration(variable) = declaration else {
+        return Vec::new();
+    };
+    variable
+        .declarations
+        .iter()
+        .filter(|declarator| {
+            declarator
+                .init
+                .as_ref()
+                .is_some_and(|init| is_literal_value(init, 0))
+        })
+        .filter_map(|declarator| declarator.id.get_binding_identifier())
+        .map(|identifier| identifier.name.to_string())
+        .collect()
+}
+
+/// How deep a literal object or array may nest before the check gives up.
+const LITERAL_DEPTH_LIMIT: usize = 16;
+
+/// Whether an expression is a literal, or an object or array of literals.
+/// A function call, an identifier or a computed key makes it a non-literal.
+fn is_literal_value(expression: &oxc_ast::ast::Expression<'_>, depth: usize) -> bool {
+    use oxc_ast::ast::{ArrayExpressionElement, Expression, ObjectPropertyKind, UnaryOperator};
+
+    if depth > LITERAL_DEPTH_LIMIT {
+        return false;
+    }
+    match expression {
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_) => true,
+        Expression::TemplateLiteral(template) => template.expressions.is_empty(),
+        Expression::UnaryExpression(unary) => {
+            matches!(
+                unary.operator,
+                UnaryOperator::UnaryNegation | UnaryOperator::UnaryPlus
+            ) && matches!(unary.argument, Expression::NumericLiteral(_))
+        }
+        Expression::ParenthesizedExpression(inner) => is_literal_value(&inner.expression, depth),
+        Expression::TSAsExpression(inner) => is_literal_value(&inner.expression, depth),
+        Expression::TSSatisfiesExpression(inner) => is_literal_value(&inner.expression, depth),
+        Expression::ArrayExpression(array) => array.elements.iter().all(|element| match element {
+            ArrayExpressionElement::SpreadElement(_) | ArrayExpressionElement::Elision(_) => false,
+            element => element
+                .as_expression()
+                .is_some_and(|value| is_literal_value(value, depth + 1)),
+        }),
+        Expression::ObjectExpression(object) => {
+            object.properties.iter().all(|property| match property {
+                ObjectPropertyKind::ObjectProperty(property) => {
+                    !property.computed
+                        && !property.method
+                        && is_literal_value(&property.value, depth + 1)
+                }
+                ObjectPropertyKind::SpreadProperty(_) => false,
+            })
+        }
+        _ => false,
     }
 }
 
@@ -567,6 +809,102 @@ mod tests {
         assert!(contains_whole_word("a foobar foo", "foo"));
     }
 
+    fn forwarded(path: &str, source: &str) -> Vec<String> {
+        let mut names: Vec<String> = forwarded_import_bindings(Path::new(path), source)
+            .into_iter()
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn forwarded_bindings_are_only_exported_again() {
+        assert_eq!(
+            forwarded("a.ts", "import { a } from './x';\nexport { a };\n"),
+            ["a"]
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a as c } from './x';\nexport { c as d };\n"
+            ),
+            ["c"]
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import type { T } from './x';\nexport type { T };\n"
+            ),
+            ["T"]
+        );
+    }
+
+    #[test]
+    fn forwarded_bindings_exclude_local_uses_and_unused_imports() {
+        let empty: [&str; 0] = [];
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\nexport { a };\nexport const b = a * 2;\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.tsx",
+                "import A from './x';\nexport { A };\nconst v = <A />;\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded("a.ts", "import { a } from './x';\nexport default a + 1;\n"),
+            empty
+        );
+        assert_eq!(forwarded("a.ts", "import { a } from './x';\n"), empty);
+        // The module graph does not credit the importers of `export default b`
+        // or `export = c` to the origin export, so such a file stays a
+        // consumer.
+        assert_eq!(
+            forwarded("a.ts", "import b from './x';\nexport default b;\n"),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import b = require('./x');\nimport c from './y';\nexport = c;\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\nexport namespace N {\n  export { a };\n}\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\ndeclare module 'm' {\n  export { a };\n}\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import { a } from './x';\nexport { a } from './y';\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded(
+                "A.vue",
+                "<script>\nimport a from './x';\nexport { a };\n</script>\n"
+            ),
+            empty
+        );
+    }
+
     #[test]
     fn default_declaration_name_reads_named_declarations() {
         let name = |source: &'static str| default_declaration_name(source, 0);
@@ -603,6 +941,77 @@ mod tests {
         assert_eq!(ranges.get(&a), Some(&(1, 1)));
         assert_eq!(ranges.get(&b), Some(&(3, 5)));
         assert_eq!(ranges.get(&c), Some(&(7, 7)));
+    }
+
+    fn literal_of(source: &str, needle: &str) -> bool {
+        let start = source.find(needle).unwrap() as u32;
+        export_declarations(Path::new("page.tsx"), source, &[start])
+            .get(&start)
+            .is_some_and(|declaration| declaration.literal_value)
+    }
+
+    #[test]
+    fn export_declarations_flag_literal_initializers() {
+        assert!(literal_of(
+            "export const dynamic = 'force-dynamic';\n",
+            "dynamic"
+        ));
+        assert!(literal_of("export const revalidate = 60;\n", "revalidate"));
+        assert!(literal_of(
+            "export const maxDuration = -1;\n",
+            "maxDuration"
+        ));
+        assert!(literal_of(
+            "export const metadata: Metadata = { title: 'A', robots: { index: false }, keywords: ['a'] };\n",
+            "metadata"
+        ));
+        assert!(literal_of(
+            "export const config = { runtime: `edge` } as const;\n",
+            "config"
+        ));
+        assert!(literal_of("const a = 1;\nexport { a };\n", "a }"));
+    }
+
+    #[test]
+    fn export_declarations_reject_computed_values() {
+        assert!(!literal_of(
+            "export const metadata = { title: buildTitle('A') };\n",
+            "metadata"
+        ));
+        assert!(!literal_of("export const metadata = base;\n", "metadata"));
+        assert!(!literal_of(
+            "export const Route = createFileRoute('/')({ loader });\n",
+            "Route"
+        ));
+        assert!(!literal_of("export function GET() {}\n", "GET"));
+        assert!(!literal_of("export const x = { ...base };\n", "x"));
+        assert!(!literal_of("export const x = `a${b}`;\n", "x"));
+    }
+
+    #[test]
+    fn export_declarations_flag_re_export_statements() {
+        let source =
+            "export { a } from './a';\nexport * as ns from './ns';\nconst b = 1;\nexport { b };\n";
+        let a = source.find("a }").unwrap() as u32;
+        let ns = source.find("ns ").unwrap() as u32;
+        let b = source.rfind("b }").unwrap() as u32;
+        let declarations = export_declarations(Path::new("x.ts"), source, &[a, ns, b]);
+        assert!(declarations[&a].is_re_export);
+        assert!(declarations[&ns].is_re_export);
+        assert!(!declarations[&b].is_re_export);
+        assert_eq!(declarations[&b].lines, (3, 3));
+    }
+
+    #[test]
+    fn export_declarations_flag_each_declarator() {
+        let source = "export const a = 1, b = make();\n";
+        let a = source.find("a =").unwrap() as u32;
+        let b = source.find("b =").unwrap() as u32;
+        let declarations = export_declarations(Path::new("x.ts"), source, &[a, b]);
+        assert!(declarations[&a].literal_value);
+        assert!(!declarations[&b].literal_value);
+        assert_eq!(declarations[&a].lines, (1, 1));
+        assert_eq!(declarations[&b].lines, (1, 1));
     }
 
     fn range_of(path: &str, source: &str, needle: &str) -> Option<(u32, u32)> {

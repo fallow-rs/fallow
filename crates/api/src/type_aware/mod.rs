@@ -40,7 +40,7 @@ pub fn refine_programmatic_dead_code(
     session: &AnalysisSession,
     results: &mut AnalysisResults,
 ) -> Result<Option<TypeAwareMeta>, ProgrammaticError> {
-    if !options.enabled {
+    if !options.requested() {
         return Ok(None);
     }
 
@@ -117,7 +117,7 @@ pub fn refine_programmatic_dead_code_in_session(
     session: &AnalysisSession,
     results: &mut AnalysisResults,
 ) -> Result<Option<TypeAwareMeta>, ProgrammaticError> {
-    if !options.enabled {
+    if !options.requested() {
         return Ok(None);
     }
     let DeadCodeCapabilityScope {

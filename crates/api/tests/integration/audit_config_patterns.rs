@@ -73,7 +73,7 @@ fn programmatic_audit_reports_unmatched_config_patterns_like_the_cli() {
             ..AnalysisOptions::default()
         },
         base: Some("HEAD~1".to_owned()),
-        gate: AuditGate::NewOnly,
+        gate: Some(AuditGate::NewOnly),
         ..AuditOptions::default()
     })
     .and_then(serialize_audit_programmatic_json)

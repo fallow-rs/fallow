@@ -1,0 +1,9 @@
+{
+  "name": "type-only-test-reach",
+  "private": true,
+  "type": "module",
+  "main": "src/entry.ts",
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

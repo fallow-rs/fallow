@@ -323,6 +323,40 @@ Contract rules:
   validation, so a call that is invalid in two ways (a rejected coverage input
   and, say, `threads: 0`) reports the coverage error, which is also the order
   the CLI reports them in.
+- The `audit` typed route reads the `audit` config section with the CLI's
+  precedence: a `gate` or `css_deep` parameter wins, then `audit.gate`,
+  `audit.css` and `audit.cssDeep`, then the defaults. `css: false` turns
+  styling off, as `--no-css` does, but `css: true` cannot override
+  `audit.css: false`, because the CLI has no flag for that. `fallow_api::run_audit` resolves the
+  section after it loads the config, so an unset `AuditOptions` field means
+  "use the config". The baseline keys of the section are CLI-only: on a
+  non-empty changeset the API returns `FALLOW_AUDIT_BASELINE_UNSUPPORTED` and
+  the tool runs the CLI. The
+  drift case `i5_audit_config_section_agrees_across_surfaces` holds both
+  routes to the CLI result.
+- The typed routes run type-aware analysis only when the caller sets
+  `AnalysisOptions.type_aware`. The CLI also turns it on from
+  `FALLOW_TYPE_AWARE`, `audit.typeAware` (audit only) and
+  `typeAware.enabled`, with that precedence. `fallow_api` therefore refuses a
+  run that these layers make type-aware with
+  `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED`: `run_dead_code`,
+  `run_circular_dependencies`, `run_boundary_violations`, `run_audit`,
+  `run_combined` when its dead-code or health section runs, and `run_health`
+  when no section and no `css` is selected (the CLI adds type coupling only
+  then). `api_runtime::typed_error_needs_cli` reads the code, and `analyze`,
+  `check_changed`, `check_health`, `audit` and the Code Mode `combined` and
+  `checkChanged` routes run the CLI instead. `TypeAwareOptions.enabled` is
+  an `Option<bool>`, like the `--type-aware` and `--no-type-aware` flags: a
+  set value wins over the environment and the config, so `Some(false)` runs
+  syntactic without a refusal. The `type_aware: false` parameter passes
+  `Some(false)` to the typed route and `--no-type-aware` to the CLI fallback.
+  `run_trace_export` refuses every type-aware request, the `Some(true)`
+  option included: `fallow dead-code --trace` then adds semantic evidence
+  and its completeness exit, which the typed trace cannot. The
+  `trace_export` tool and the Code Mode `traceExport` route run the CLI on
+  that code. The drift case `type_aware_config_agrees_across_surfaces` holds
+  the MCP envelope to the `_meta.type_aware` of the CLI, and the
+  `trace_export` answer to the CLI trace.
 - `trace_symbol` and `symbol_impact` expose exact TypeScript evidence for
   Fallow-owned project questions. They do not expose compiler diagnostics or
   typed lint findings.

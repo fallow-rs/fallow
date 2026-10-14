@@ -34,6 +34,9 @@ pub(super) enum TestReachabilityPlan<'roots> {
     NoRoots,
     Legacy {
         roots: &'roots FxHashSet<FileId>,
+        /// True when replacement masks exist but their profile count passed
+        /// [`PROFILE_COUNT_SAFETY_CAP`], so masking is off.
+        capped: bool,
     },
     Profiled {
         profiles: Vec<TestReachabilityProfile>,
@@ -69,6 +72,7 @@ impl<'roots> TestReachabilityPlan<'roots> {
         if targets_by_root.is_empty() {
             return Self::Legacy {
                 roots: test_entry_points,
+                capped: false,
             };
         }
 
@@ -88,6 +92,7 @@ impl<'roots> TestReachabilityPlan<'roots> {
             );
             return Self::Legacy {
                 roots: test_entry_points,
+                capped: true,
             };
         }
 
@@ -119,7 +124,10 @@ impl<'roots> TestReachabilityPlan<'roots> {
 
 enum TestReachability {
     NoRoots,
-    Legacy(FixedBitSet),
+    Legacy {
+        reachable: FixedBitSet,
+        capped: bool,
+    },
     Profiled {
         reachable: FixedBitSet,
         index: TestReachabilityIndex,
@@ -132,7 +140,13 @@ impl TestReachability {
     fn into_parts(self) -> (Option<FixedBitSet>, TestReachabilityIndex) {
         match self {
             Self::NoRoots => (None, TestReachabilityIndex::default()),
-            Self::Legacy(reachable) => (Some(reachable), TestReachabilityIndex::default()),
+            Self::Legacy { reachable, capped } => (
+                Some(reachable),
+                TestReachabilityIndex {
+                    masking_capped: capped,
+                    ..TestReachabilityIndex::default()
+                },
+            ),
             Self::Profiled {
                 reachable, index, ..
             } => (Some(reachable), index),
@@ -145,7 +159,7 @@ impl TestReachability {
             Self::Profiled {
                 dirty_word_pops, ..
             } => *dirty_word_pops,
-            Self::NoRoots | Self::Legacy(_) => 0,
+            Self::NoRoots | Self::Legacy { .. } => 0,
         }
     }
 }
@@ -366,9 +380,10 @@ impl ModuleGraph {
     ) -> TestReachability {
         match plan {
             TestReachabilityPlan::NoRoots => TestReachability::NoRoots,
-            TestReachabilityPlan::Legacy { roots } => {
-                TestReachability::Legacy(self.collect_reachable(roots, total_capacity))
-            }
+            TestReachabilityPlan::Legacy { roots, capped } => TestReachability::Legacy {
+                reachable: self.collect_reachable(roots, total_capacity),
+                capped,
+            },
             TestReachabilityPlan::Profiled { profiles } => {
                 let (reachable, index, dirty_word_pops) =
                     self.collect_profiled_reachable(&profiles, total_capacity);
@@ -489,7 +504,7 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{TestReachabilityPlan, TestReachabilityProfile};
-    use crate::graph::ModuleGraph;
+    use crate::graph::{ExportNamespace, ExportTestReach, ModuleGraph, TestMaskingState};
     use crate::resolve::{
         ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport,
         ResolvedReplacedModuleTarget,
@@ -533,13 +548,39 @@ mod tests {
         build_reachability_graph_with_replacements(file_count, &edges, runtime_eps, test_eps, &[])
     }
 
+    fn build_reachability_graph_with_replacements(
+        file_count: usize,
+        edges_spec: &[(u32, u32, bool)],
+        runtime_eps: &[u32],
+        test_eps: &[u32],
+        replacements: &[ResolvedReplacedModuleTarget],
+    ) -> ModuleGraph {
+        let edges: Vec<_> = edges_spec
+            .iter()
+            .map(|&(source, target, is_commonjs)| ReachabilityEdge {
+                source,
+                target,
+                is_commonjs,
+                is_type_only: false,
+            })
+            .collect();
+        build_reachability_graph_with_edges(file_count, &edges, runtime_eps, test_eps, replacements)
+    }
+
+    struct ReachabilityEdge {
+        source: u32,
+        target: u32,
+        is_commonjs: bool,
+        is_type_only: bool,
+    }
+
     #[expect(
         clippy::cast_possible_truncation,
         reason = "test file counts are trivially small"
     )]
-    fn build_reachability_graph_with_replacements(
+    fn build_reachability_graph_with_edges(
         file_count: usize,
-        edges_spec: &[(u32, u32, bool)],
+        edges_spec: &[ReachabilityEdge],
         runtime_eps: &[u32],
         test_eps: &[u32],
         replacements: &[ResolvedReplacedModuleTarget],
@@ -556,22 +597,22 @@ mod tests {
             .map(|i| {
                 let imports: Vec<ResolvedImport> = edges_spec
                     .iter()
-                    .filter(|(source, _, _)| *source == i as u32)
-                    .map(|(_, target, is_commonjs)| ResolvedImport {
+                    .filter(|edge| edge.source == i as u32)
+                    .map(|edge| ResolvedImport {
                         info: ImportInfo {
-                            source: format!("./file{target}"),
+                            source: format!("./file{}", edge.target),
                             imported_name: ImportedName::Named("x".to_string()),
                             local_name: "x".to_string(),
-                            is_type_only: false,
+                            is_type_only: edge.is_type_only,
                             is_type_only_star: false,
                             from_style: false,
                             span: oxc_span::Span::new(0, 10),
                             source_span: oxc_span::Span::default(),
                         },
-                        target: if *is_commonjs {
-                            ResolveResult::CommonJsInternalModule(FileId(*target))
+                        target: if edge.is_commonjs {
+                            ResolveResult::CommonJsInternalModule(FileId(edge.target))
                         } else {
-                            ResolveResult::InternalModule(FileId(*target))
+                            ResolveResult::InternalModule(FileId(edge.target))
                         },
                     })
                     .collect();
@@ -1053,6 +1094,65 @@ mod tests {
         assert!(graph.modules[3].is_test_reachable());
     }
 
+    /// File 0 is a test root. It imports `x` from file 1, with `import type`
+    /// when `type_only` is set. With `masked`, file 0 also mocks the
+    /// unrelated file 2, so the graph uses the profiled traversal instead of
+    /// the plain BFS.
+    fn build_type_only_test_import_graph(type_only: bool, masked: bool) -> ModuleGraph {
+        let edges = [ReachabilityEdge {
+            source: 0,
+            target: 1,
+            is_commonjs: false,
+            is_type_only: type_only,
+        }];
+        let replacements = if masked {
+            vec![ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(2),
+            }]
+        } else {
+            Vec::new()
+        };
+        build_reachability_graph_with_edges(3, &edges, &[], &[0], &replacements)
+    }
+
+    #[test]
+    fn type_only_test_import_gives_no_export_coverage() {
+        for masked in [false, true] {
+            let graph = build_type_only_test_import_graph(true, masked);
+            assert_eq!(graph.test_reachability_index.profile_count > 0, masked);
+            let export = &graph.modules[1].exports[0];
+            assert_eq!(export.references.len(), 1, "masked: {masked}");
+            assert_eq!(
+                export.references[0].namespace,
+                ExportNamespace::Type,
+                "masked: {masked}"
+            );
+
+            assert!(
+                !graph.is_test_reference_covered(export, 0),
+                "masked: {masked}"
+            );
+            assert!(
+                !graph.is_any_test_reference_covered(export),
+                "masked: {masked}"
+            );
+        }
+    }
+
+    #[test]
+    fn value_test_import_gives_export_coverage() {
+        for masked in [false, true] {
+            let graph = build_type_only_test_import_graph(false, masked);
+            let export = &graph.modules[1].exports[0];
+
+            assert!(
+                graph.is_test_reference_covered(export, 0),
+                "masked: {masked}"
+            );
+        }
+    }
+
     #[test]
     fn esm_replacement_masks_target_only_from_test_reachability() {
         let graph = build_reachability_graph_with_replacements(
@@ -1498,6 +1598,7 @@ mod tests {
         // Masking still applies under the cap: the mocked target is only
         // imported by the root that replaces it, so it stays unreachable.
         assert!(!graph.modules[count as usize].is_test_reachable());
+        assert_eq!(graph.test_masking_state(), TestMaskingState::Active);
     }
 
     #[test]
@@ -1519,7 +1620,10 @@ mod tests {
         let root_set: FxHashSet<_> = test_roots.iter().copied().map(FileId).collect();
 
         let plan = TestReachabilityPlan::new(&root_set, &replacements, total);
-        assert!(matches!(&plan, TestReachabilityPlan::Legacy { .. }));
+        assert!(matches!(
+            &plan,
+            TestReachabilityPlan::Legacy { capped: true, .. }
+        ));
         assert!(!plan.requires_reference_provenance());
 
         // Fail-open: no profiles survive, and mocked targets stay
@@ -1529,6 +1633,14 @@ mod tests {
             assert!(graph.modules[root as usize].is_test_reachable());
             assert!(graph.modules[(count + root) as usize].is_test_reachable());
         }
+
+        // The capped state is visible, and a mocked export keeps its reach
+        // class instead of `MockedOnly`.
+        assert_eq!(graph.test_masking_state(), TestMaskingState::Capped);
+        let mocked = &graph.modules[count as usize];
+        let reach =
+            graph.export_test_reach(mocked.file_id, &mocked.exports[0], &|file| file.0 < count);
+        assert_eq!(reach.reach, ExportTestReach::Direct);
     }
 
     #[test]
@@ -2002,5 +2114,206 @@ mod tests {
         }
         assert_eq!(map[&FileId(1)], vec![FileId(0)]);
         assert!(map[&FileId(2)].is_empty());
+    }
+
+    /// Classify the first export of `file` with the given test files.
+    fn reach_of(
+        graph: &ModuleGraph,
+        file: u32,
+        tests: &[u32],
+    ) -> crate::graph::ExportTestReachResult {
+        let module = &graph.modules[file as usize];
+        graph.export_test_reach(module.file_id, &module.exports[0], &|id| {
+            tests.contains(&id.0)
+        })
+    }
+
+    #[test]
+    fn test_reach_without_mocks_reports_no_mocks() {
+        let graph = build_reachability_graph(2, &[(0, 1)], &[], &[0]);
+
+        assert_eq!(graph.test_masking_state(), TestMaskingState::NoMocks);
+        let reach = reach_of(&graph, 1, &[0]);
+        assert_eq!(reach.reach, ExportTestReach::Direct);
+        assert_eq!(reach.tests, vec![FileId(0)]);
+    }
+
+    #[test]
+    fn test_reach_through_a_non_test_module_is_transitive() {
+        let graph = build_reachability_graph(3, &[(0, 1), (1, 2)], &[], &[0]);
+
+        assert_eq!(reach_of(&graph, 2, &[0]).reach, ExportTestReach::Transitive);
+    }
+
+    #[test]
+    fn test_reach_without_a_reference_separates_file_reach() {
+        let files: Vec<_> = (0..3)
+            .map(|id| DiscoveredFile {
+                id: FileId(id),
+                path: PathBuf::from(format!("/project/file{id}.ts")),
+                size_bytes: 100,
+            })
+            .collect();
+        let export = || {
+            vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("value".to_string()),
+                local_name: Some("value".to_string()),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::new(0, 20),
+                members: Vec::new(),
+                is_side_effect_used: false,
+                super_class: None,
+                deprecated: false,
+                deprecated_reason: None,
+            }]
+            .into()
+        };
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![intermediate_import(
+                    "./file1",
+                    FileId(1),
+                    ImportedName::SideEffect,
+                    false,
+                )],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                exports: export(),
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: export(),
+                ..ResolvedModule::default()
+            },
+        ];
+        let test_entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let graph = ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &[],
+            &test_entry_points,
+            &[],
+            &test_entry_points,
+            &files,
+        );
+
+        assert_eq!(reach_of(&graph, 1, &[0]).reach, ExportTestReach::None);
+        assert_eq!(reach_of(&graph, 2, &[0]).reach, ExportTestReach::NoneFile);
+    }
+
+    #[test]
+    fn test_reach_reports_an_esm_mask_on_a_direct_import() {
+        let graph = build_reachability_graph_with_replacements(
+            2,
+            &[(0, 1, false)],
+            &[],
+            &[0],
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(1),
+            }],
+        );
+
+        assert_eq!(graph.test_masking_state(), TestMaskingState::Active);
+        // The masked module is not test-reachable, so without the mask check
+        // the export would read as `NoneFile`.
+        assert!(!graph.modules[1].is_test_reachable());
+        let reach = reach_of(&graph, 1, &[0]);
+        assert_eq!(reach.reach, ExportTestReach::MockedOnly);
+        assert_eq!(reach.tests, vec![FileId(0)]);
+        assert_eq!(reach.mocked_targets, vec![FileId(1)]);
+    }
+
+    #[test]
+    fn test_reach_reports_a_mask_behind_a_barrel() {
+        let graph = build_masked_re_export_graph(false, false);
+        let reach = reach_of(&graph, 2, &[0]);
+
+        assert_eq!(reach.reach, ExportTestReach::MockedOnly);
+        assert_eq!(reach.mocked_targets, vec![FileId(2)]);
+    }
+
+    #[test]
+    fn test_reach_names_a_mocked_intermediate_barrel() {
+        let graph = build_intermediate_replacement_graph(false, false, false);
+        let reach = reach_of(&graph, 2, &[0]);
+
+        // An alternate route keeps the target test-reachable, but the only
+        // reference passes through the mocked barrel.
+        assert!(graph.modules[2].is_test_reachable());
+        assert_eq!(reach.reach, ExportTestReach::MockedOnly);
+        assert_eq!(reach.mocked_targets, vec![FileId(1)]);
+    }
+
+    #[test]
+    fn test_reach_keeps_a_commonjs_require_unmasked() {
+        let graph = build_reachability_graph_with_replacements(
+            2,
+            &[(0, 1, true)],
+            &[],
+            &[0],
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(1),
+            }],
+        );
+
+        assert_eq!(reach_of(&graph, 1, &[0]).reach, ExportTestReach::Direct);
+    }
+
+    #[test]
+    fn test_reach_through_a_required_barrel_checks_only_esm_hops() {
+        let barrel_mocked = build_intermediate_replacement_graph(true, false, false);
+        assert_eq!(
+            reach_of(&barrel_mocked, 2, &[0]).reach,
+            ExportTestReach::Direct
+        );
+
+        let target_mocked = build_intermediate_replacement_graph(true, false, true);
+        let reach = reach_of(&target_mocked, 2, &[0]);
+        assert_eq!(reach.reach, ExportTestReach::MockedOnly);
+        assert_eq!(reach.mocked_targets, vec![FileId(2)]);
+    }
+
+    #[test]
+    fn test_reach_with_an_unmasked_second_root_is_direct() {
+        let graph = build_reachability_graph_with_replacements(
+            3,
+            &[(0, 2, false), (1, 2, false)],
+            &[],
+            &[0, 1],
+            &[ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(2),
+            }],
+        );
+        let reach = reach_of(&graph, 2, &[0, 1]);
+
+        assert_eq!(reach.reach, ExportTestReach::Direct);
+        assert_eq!(reach.tests, vec![FileId(1)]);
+    }
+
+    #[test]
+    fn test_reach_survives_graph_cache_serialization() {
+        let graph = build_masked_re_export_graph(false, false);
+        let encoded = postcard::to_allocvec(&graph).expect("encode graph");
+        let decoded: ModuleGraph = postcard::from_bytes(&encoded).expect("decode graph");
+
+        assert_eq!(decoded.test_masking_state(), TestMaskingState::Active);
+        assert_eq!(
+            reach_of(&decoded, 2, &[0]).reach,
+            ExportTestReach::MockedOnly
+        );
     }
 }

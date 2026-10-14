@@ -421,6 +421,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         key_params: &[
             "gate",
             "base",
+            "skip",
             "css_deep",
             "max_crap",
             "coverage",

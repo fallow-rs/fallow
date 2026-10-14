@@ -27,13 +27,17 @@ struct TraceArtifacts {
 /// # Errors
 ///
 /// Returns a structured programmatic error for invalid options, config load
-/// failures, graph construction failures, or missing trace targets.
+/// failures, graph construction failures, or missing trace targets. When the
+/// `type_aware` option, `FALLOW_TYPE_AWARE` or `typeAware.enabled` turns on
+/// type-aware analysis, it returns [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`]:
+/// the CLI trace then adds semantic evidence that this trace cannot.
 pub fn run_trace_export(
     options: &TraceExportOptions,
 ) -> ProgrammaticResult<TraceExportProgrammaticOutput> {
     validate_non_empty("file", &options.file)?;
     validate_non_empty("export_name", &options.export_name)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    super::type_aware_config::reject_type_aware_trace(&options.analysis.type_aware, &resolved)?;
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;

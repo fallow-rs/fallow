@@ -319,6 +319,21 @@ fn sort_clone_groups(groups: &mut [CloneGroup]) {
     groups.sort_by_cached_key(clone_group_rank_key);
 }
 
+/// Sort clone groups into the order of [`DuplicationReport::sort`]: instances
+/// by file path and line, groups by spread-aware priority.
+///
+/// A clone family builds its suggestions from its groups, so it sorts them
+/// with this function first. Then the suggestions follow the group order on
+/// every surface.
+pub fn sort_clone_groups_in_report_order(groups: &mut [CloneGroup]) {
+    for group in groups.iter_mut() {
+        group
+            .instances
+            .sort_by(|a, b| a.file.cmp(&b.file).then(a.start_line.cmp(&b.start_line)));
+    }
+    sort_clone_groups(groups);
+}
+
 /// The kind of refactoring suggested for a clone family.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -418,20 +433,9 @@ impl DuplicationReport {
     /// Clone groups use spread-aware priority order, instances use file path and
     /// line order, and clone families use their file set.
     pub fn sort(&mut self) {
-        for group in &mut self.clone_groups {
-            group
-                .instances
-                .sort_by(|a, b| a.file.cmp(&b.file).then(a.start_line.cmp(&b.start_line)));
-        }
-        sort_clone_groups(&mut self.clone_groups);
-
+        sort_clone_groups_in_report_order(&mut self.clone_groups);
         for family in &mut self.clone_families {
-            for group in &mut family.groups {
-                group
-                    .instances
-                    .sort_by(|a, b| a.file.cmp(&b.file).then(a.start_line.cmp(&b.start_line)));
-            }
-            sort_clone_groups(&mut family.groups);
+            sort_clone_groups_in_report_order(&mut family.groups);
         }
         self.clone_families.sort_by(|a, b| a.files.cmp(&b.files));
     }

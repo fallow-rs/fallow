@@ -205,7 +205,8 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     /// passed.
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-    /// Dead-code findings scoped to the audit changeset.
+    /// Dead-code findings scoped to the audit changeset. Absent when no file
+    /// changed, or when `summary.dead_code_skipped` says the pass was skipped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code: Option<DeadCode>,
     /// Duplication findings scoped to the audit changeset.

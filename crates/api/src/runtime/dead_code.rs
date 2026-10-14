@@ -44,7 +44,9 @@ pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
 ///
 /// Returns a structured programmatic error for unsupported options, invalid
 /// options, config load failures, analysis failures, or git changed-file
-/// failures.
+/// failures. When the environment or `typeAware.enabled` turns on type-aware
+/// analysis that the options leave off, it returns
+/// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
 pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     run_dead_code_with_baseline(options, None)
 }
@@ -66,7 +68,22 @@ pub fn run_dead_code_with_baseline(
     baseline: Option<&Path>,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    reject_config_type_aware(options, &resolved)?;
     run_dead_code_in_context(options, baseline, &resolved)
+}
+
+/// `fallow dead-code` turns type-aware analysis on from the environment and
+/// `typeAware.enabled`. The typed route runs it only on request, see
+/// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
+fn reject_config_type_aware(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<()> {
+    super::type_aware_config::reject_config_type_aware(
+        &options.analysis.type_aware,
+        resolved,
+        super::type_aware_config::TypeAwareCommand::Analysis,
+    )
 }
 
 /// Run dead-code analysis in a context that the caller resolved. Audit uses
@@ -240,6 +257,7 @@ pub fn run_circular_dependencies(
 ) -> ProgrammaticResult<CircularDependenciesProgrammaticOutput> {
     reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    reject_config_type_aware(options, &resolved)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_circular_dependencies).map(Into::into)
     })
@@ -292,6 +310,7 @@ pub fn run_boundary_violations(
 ) -> ProgrammaticResult<BoundaryViolationsProgrammaticOutput> {
     reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    reject_config_type_aware(options, &resolved)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_boundary_violations).map(Into::into)
     })
@@ -646,7 +665,7 @@ fn refine_with_unfiltered_unused_files(
     let outcome =
         crate::type_aware::refine_programmatic_dead_code(options, filters, session, results);
     results.unused_files = reported_unused_files;
-    if options.enabled {
+    if options.requested() {
         // Reconciliation can add findings, so rule severities are resolved
         // again over the refined set. The pass removes findings and writes
         // each gate severity again, so repeating it is idempotent. Mirrors
@@ -856,7 +875,31 @@ fn configure_project_for_dead_code(
         project_config.config.show_cascade = true;
     }
     activate_explicit_dead_code_opt_ins(&options.filters, &mut project_config.config.rules);
+    apply_explicit_type_aware_choice(options, &mut project_config.config);
     project_config
+}
+
+/// Write an explicit `type_aware` choice into the resolved config, as the
+/// `--type-aware` and `--no-type-aware` flags do. Detection reads
+/// `typeAware.enabled` itself: it holds framework class-member rules back for
+/// semantic verification, and a syntactic run must credit them instead.
+/// A type-aware run turns the opt-in `private-type-leaks` rule on, as the CLI
+/// does, unless a filter is active or the config sets the rule.
+fn apply_explicit_type_aware_choice(
+    options: &DeadCodeOptions,
+    config: &mut fallow_config::ResolvedConfig,
+) {
+    let Some(enabled) = options.analysis.type_aware.enabled else {
+        return;
+    };
+    config.type_aware.enabled = enabled;
+    if enabled
+        && !options.filters.any_active()
+        && config.rules.private_type_leaks == fallow_config::Severity::Off
+        && !config.rules.private_type_leaks_configured
+    {
+        config.rules.private_type_leaks = fallow_config::Severity::Warn;
+    }
 }
 
 fn activate_explicit_dead_code_opt_ins(

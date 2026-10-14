@@ -13,10 +13,10 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     ISSUE_TYPE_FLAGS,
-    api_runtime::{env_changed_since, env_diff_file, run_api_blocking},
     api_runtime::{
-        json_success, non_empty_path, programmatic_error_body, workspace_patterns_from_param,
+        env_changed_since, env_diff_file, run_api_blocking, typed_tool_result, typed_type_aware,
     },
+    api_runtime::{non_empty_path, workspace_patterns_from_param},
     fallback_policy::{
         baseline_requested, grouped_requested, regression_requested, type_aware_requested,
     },
@@ -27,34 +27,31 @@ use super::{
 /// Run `analyze` through the typed API when parameters map cleanly to the
 /// programmatic contract, falling back to the CLI for CLI-only surfaces.
 pub async fn run_analyze(binary: &str, params: AnalyzeParams) -> Result<CallToolResult, McpError> {
-    if requires_cli_fallback(&params) {
-        return match build_analyze_args(&params) {
-            Ok(args) => run_tool(binary, "analyze", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+    if !requires_cli_fallback(&params) {
+        let family = analyze_family(&params);
+        let options = match dead_code_options_from_params(&params) {
+            Ok(options) => options,
+            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
+        let result = run_api_blocking("analyze", move || match family {
+            AnalyzeFamily::Boundary => run_boundary_violations(&options)
+                .and_then(serialize_boundary_violations_programmatic_json),
+            AnalyzeFamily::Circular => run_circular_dependencies(&options)
+                .and_then(serialize_circular_dependencies_programmatic_json),
+            AnalyzeFamily::DeadCode => {
+                run_dead_code(&options).and_then(serialize_dead_code_programmatic_json)
+            }
+        })
+        .await?;
+        if let Some(result) = typed_tool_result(result) {
+            return Ok(result);
+        }
     }
 
-    let family = analyze_family(&params);
-    let options = match dead_code_options_from_params(&params) {
-        Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
-    };
-
-    let result = run_api_blocking("analyze", move || match family {
-        AnalyzeFamily::Boundary => run_boundary_violations(&options)
-            .and_then(serialize_boundary_violations_programmatic_json),
-        AnalyzeFamily::Circular => run_circular_dependencies(&options)
-            .and_then(serialize_circular_dependencies_programmatic_json),
-        AnalyzeFamily::DeadCode => {
-            run_dead_code(&options).and_then(serialize_dead_code_programmatic_json)
-        }
-    })
-    .await?
-    .map_or_else(
-        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
-    );
-    Ok(result)
+    match build_analyze_args(&params) {
+        Ok(args) => run_tool(binary, "analyze", &args).await,
+        Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+    }
 }
 
 /// Build CLI arguments for the `analyze` tool.
@@ -188,6 +185,7 @@ fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptio
             ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
+            type_aware: typed_type_aware(params.type_aware),
             ..AnalysisOptions::default()
         },
         filters: filters_from_params(params)?,
@@ -667,5 +665,50 @@ mod tests {
         assert_eq!(json["kind"], "dead-code");
         assert!(json["circular_dependencies"].is_array());
         assert_eq!(json["unused_exports"].as_array().map(Vec::len), Some(0));
+    }
+
+    /// `typeAware.enabled` in config makes `fallow dead-code` type-aware. The
+    /// typed route cannot run that, so the tool runs the CLI for every family.
+    #[tokio::test]
+    async fn config_type_aware_falls_back_to_the_cli() {
+        use super::super::api_runtime::{
+            MISSING_FALLBACK_BINARY, assert_cli_fallback_ran, write_type_aware_config,
+        };
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::create_dir(project.path().join("src")).expect("create src");
+        std::fs::write(project.path().join("src/index.ts"), "export const a = 1;\n")
+            .expect("write source");
+        write_type_aware_config(project.path(), r#"{"typeAware":{"enabled":true}}"#);
+
+        for issue_types in [None, Some(vec!["circular-deps".to_string()])] {
+            let params = AnalyzeParams {
+                root: Some(project.path().display().to_string()),
+                issue_types,
+                no_cache: Some(true),
+                ..AnalyzeParams::default()
+            };
+            assert!(!requires_cli_fallback(&params));
+            assert_cli_fallback_ran(run_analyze(MISSING_FALLBACK_BINARY, params).await);
+        }
+
+        // `type_aware: false` keeps the run syntactic on both routes.
+        let off = || AnalyzeParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            type_aware: Some(false),
+            ..AnalyzeParams::default()
+        };
+        let result = run_analyze(MISSING_FALLBACK_BINARY, off())
+            .await
+            .expect("the typed route answers");
+        assert_eq!(result.is_error, Some(false));
+        let args = build_analyze_args(&off()).expect("analyze args");
+        assert!(args.contains(&"--no-type-aware".to_string()), "{args:?}");
+        assert!(!args.contains(&"--type-aware".to_string()), "{args:?}");
     }
 }

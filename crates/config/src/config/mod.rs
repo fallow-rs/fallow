@@ -726,6 +726,18 @@ pub struct AuditConfig {
     #[serde(default, skip_serializing_if = "AuditGate::is_default")]
     pub gate: AuditGate,
 
+    /// Toggles the dead-code sub-analysis in `fallow audit` (unused files, exports, types, members and dependencies, plus boundary violations and circular dependencies, which come from the same pass). Defaults to on when unset; set `false` to leave it out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dead-code` turns it off for one run and `--only` replaces this selection. The review brief (`--brief`, `fallow review`) keeps every sub-analysis because it reads the module graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_code: Option<bool>,
+
+    /// Toggles the health sub-analysis in `fallow audit` (complexity and CRAP findings, plus styling findings, which come from the same pass). Defaults to on when unset; set `false` to leave it out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip health` turns it off for one run and `--only` replaces this selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<bool>,
+
+    /// Toggles the duplication sub-analysis in `fallow audit`. Defaults to on when unset; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dupes: Option<bool>,
+
     /// Toggles styling analytics (CSS and CSS-in-JS) in the `fallow audit` health sub-pass; these findings are descriptive and verdict-neutral by default (they change the exit code only when a css-* rule is set to error). Defaults to on when unset; set `false` to skip styling analysis. The `--no-css` CLI flag forces it off regardless.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub css: Option<bool>,
@@ -760,6 +772,9 @@ impl AuditConfig {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.gate.is_default()
+            && self.dead_code.is_none()
+            && self.health.is_none()
+            && self.dupes.is_none()
             && self.css.is_none()
             && self.css_deep.is_none()
             && self.dead_code_baseline.is_none()

@@ -41,6 +41,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
 
+- **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
+  `--only` and `--skip` with the values and rules of bare `fallow --only` /
+  `--skip`: `dead-code`, `architecture`, `dupes` and `health`. The new config
+  keys `audit.deadCode`, `audit.health` and `audit.dupes` set the default
+  selection. `--skip` removes from it, and `--only` replaces it. A skipped
+  sub-analysis is skipped on the head and on the base snapshot, so it leaves
+  the verdict, `summary` and `attribution`. A warn-only gate for complexity and
+  duplication is now `fallow audit --skip dead-code` with the complexity rules
+  at `warn`.
+  - The JSON report omits the block of a skipped sub-analysis and sets
+    `summary.dead_code_skipped`, `complexity_skipped` or
+    `duplication_skipped`. The human output and the GitHub step summary show
+    the row as skipped.
+  - `architecture` narrows the dead-code findings to, or away from, cycles,
+    boundary violations and policy violations. Styling findings come from the
+    health sub-analysis.
+  - A baseline flag for a skipped sub-analysis exits 2. A configured baseline
+    for it is ignored. `--max-crap`, `--coverage`, `--coverage-root` and
+    `--runtime-coverage` print a note when the health sub-analysis is skipped.
+  - A selection that leaves no sub-analysis exits 2. The bare
+    `fallow --skip dead-code,dupes,health` now exits 2 too, instead of
+    printing an empty report.
+  - A partial selection does not write the Impact record, as for the bare run.
+  - The review brief (`--brief`, `fallow review`) keeps every sub-analysis.
+  - The GitHub Action `only` / `skip` inputs and the GitLab `FALLOW_ONLY` /
+    `FALLOW_SKIP` variables now apply to `audit` too. The MCP `audit` tool
+    takes `only` and `skip`, and the programmatic `run_audit` reads the three
+    config keys.
+  - The GitHub step summary of `audit` now has the `Styling` row in both of
+    its renderers.
+
+  Thanks @cr101 for the request. (#3381)
+
+- **The review brief reports test reach for changed exports.** `fallow audit
+  --brief` and `fallow review` add a `test_reach` section. For each value
+  export that the diff changes, it states how tests reach it:
+  - `direct`: a test file references the export.
+  - `transitive`: tests reach it only through other modules.
+  - `mocked-only`: only tests that mock a module on the import path reference
+    it, so the real code does not run in a test.
+  - `none` or `none-file`: no test references it, or no test loads the file.
+  - `framework`: a framework configuration export with a literal value, such
+    as the Next.js `dynamic` option.
+
+  The JSON lists at most 25 exports that need attention, with the mocking
+  tests and the mocked module of a `mocked-only` export. The human brief shows
+  the counts and the first three rows. A project without test files gets one
+  `no-tests` line. The section is advisory and never changes the exit code.
+
 - **Effect dead-code findings.** Projects that declare `effect` get three new
   rules, each at `warn` by default:
   - `unused-effect-layer` reports a layer that only unused layers compose.
@@ -192,6 +241,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bucket.
 
 ### Fixed
+
+- **The MCP `trace_export` tool runs the CLI when type-aware analysis is
+  on.** With `typeAware.enabled` in config or `FALLOW_TYPE_AWARE` set,
+  `fallow dead-code --trace` adds `semantic` evidence to the trace, and with
+  `typeAware.require: complete` it exits non-zero when that evidence is
+  incomplete. The typed route of `trace_export` and the Code Mode
+  `traceExport` route ignored these settings and returned the syntactic
+  trace only. They now run the CLI in this case. `fallow_api::run_trace_export`
+  returns the error code `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` when type-aware
+  analysis is on, also for `type_aware.enabled: Some(true)`. Set
+  `Some(false)` to get the syntactic trace. When `typeAware.require:
+  complete` comes from the config, an incomplete semantic trace or symbol
+  impact is now an MCP error, as the CLI exit 1 says. Before, only the
+  `type_aware_require` parameter made it an error.
+
+- **Search gaps no longer count files that only forward an export.** A file
+  that imports an export and only exports it again needs no edit when the
+  export changes. Examples are `import { a } from './x'; export { a }` and
+  `import { a as c } from './x'; export { c }`. Such a file is now `found`
+  with `reason` `pass-through` in `--trace` references, in `--impact-closure`
+  coordination gaps and in the audit brief `impact_closure.search_gap`, the
+  same as a pure barrel. A file that also uses the binding stays a normal
+  consumer. A file that forwards the binding with `export default b` or
+  `export = b` also stays a consumer, because its importers are not listed
+  under the original export. A namespace import with member access (`ns.a`) stays `found`,
+  and a whole-object use (`Object.keys(ns)`, a spread, `ns` as a value) stays
+  `missed`.
+
+- **Coverage gaps and the CRAP estimate count only value references from
+  tests.** Before, a test reference that uses a value export only as a type
+  counted as test reach. This covers an `import type`, and also a plain
+  `import` that the test uses only in type positions (for example
+  `typeof fn`). Now `fallow health --coverage-gaps` reports such an export
+  under `untested_exports`. The static CRAP estimate for that function uses
+  40% coverage (test-reachable file), not 85% (directly tested export). The
+  static test signal of runtime coverage changes the same way. File-level
+  reach does not change. A test with only type references to a module still
+  makes that file test-reachable.
+
+- **The coverage-gap note names mocked exports.** `fallow health
+  --coverage-gaps` now says "only tests that mock this module reference it"
+  when the only test references to an untested export go through a closed
+  factory mock. Before, the note said that no test-reachable module references
+  the export.
+
+- **The MCP `audit` tool and `fallow_api::run_audit` read the `audit` config
+  section.** The typed route ignored `audit.gate`, `audit.css` and
+  `audit.cssDeep`. A project with `"gate": "all"` got the `new-only` verdict
+  from the MCP tool, and the CLI gave `all`. The typed route now uses these
+  keys when the tool parameter is not set, the same as `fallow audit`. The
+  typed route cannot apply `audit.deadCodeBaseline`, `audit.healthBaseline`
+  or `audit.dupesBaseline`. When the config sets one of them, the MCP tool
+  now runs the CLI, which applies the baseline. `fallow_api::run_audit`
+  returns the error code `FALLOW_AUDIT_BASELINE_UNSUPPORTED` for these keys.
+  It does not ignore them.
+
+- **`type_aware: false` keeps a run syntactic on every programmatic surface.**
+  The MCP `analyze`, `check_health`, `audit` and `inspect_target` tools
+  ignored `type_aware: false`: when the config turned type-aware analysis
+  on, the run was type-aware. The tools now pass `--no-type-aware` to the CLI
+  and keep the typed route syntactic, as `--no-type-aware` does. In
+  `fallow_api`, `TypeAwareOptions.enabled` is now an `Option<bool>`.
+  `Some(false)` runs syntactic without the
+  `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` error, also when
+  `FALLOW_TYPE_AWARE` or the config turns type-aware analysis on. In the
+  Node bindings, `typeAware: { enabled: false }` does the same. Before, it
+  was the same as an unset option. An explicit choice now also reaches
+  detection, as the CLI flags do: a syntactic run credits the framework
+  class members that the type-aware config holds back for verification, and
+  a type-aware run turns the opt-in `private-type-leaks` rule on unless the
+  config sets it. Before, `fallow_api` and the Node bindings reported no
+  private-type leaks for a type-aware run where `fallow dead-code
+  --type-aware` reported them.
+
+- **The MCP tools run type-aware analysis when the config turns it on.**
+  `fallow` runs type-aware analysis when `typeAware.enabled` is `true`, and
+  `fallow audit` also when `audit.typeAware` is `true`. The typed route of the
+  MCP `analyze`, `check_changed`, `check_health` and `audit` tools and of the
+  Code Mode `combined` route ignored these keys and the `FALLOW_TYPE_AWARE`
+  variable. It returned syntactic results where the CLI returned type-aware
+  results. These routes now run the CLI when one of these settings turns on
+  type-aware analysis. `fallow_api::run_dead_code`,
+  `run_circular_dependencies`, `run_boundary_violations`, `run_audit`,
+  `run_combined` and `run_health` now return the error code
+  `FALLOW_TYPE_AWARE_CONFIG_UNSUPPORTED` in this case. They do not return
+  syntactic results. The Node bindings return the same error. To run
+  type-aware analysis through the API, set `typeAware.enabled` in the call
+  options. To keep a call syntactic, set `FALLOW_TYPE_AWARE=0`.
+- **Clone families have one order on every surface.** `fallow audit`,
+  `fallow dupes --changed-since` and `fallow dupes --baseline` now order
+  `clone_families[]` by file set. `fallow dupes`, the MCP tools and
+  `fallow_api` already used this order. Before, these three commands ordered
+  the families by duplicated lines. The `suggestions[]` of a family now follow
+  the order of its `groups[]` on every surface. Two `mirrored_directories[]`
+  entries with the same `total_lines` are now ordered by directory pair. The
+  family set and the values do not change.
 
 - **The review brief and the audit report the same weakened guardrails.**
   The `weakening` section of `fallow audit --brief` and `fallow review` now

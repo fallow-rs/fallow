@@ -440,6 +440,21 @@ impl McpServer {
         let response = self.request("tools/call", &json!({"name": tool, "arguments": arguments}));
         mcp_result_envelope(&response["result"])
     }
+
+    /// Call one tool and return the JSON of its text content, also when the
+    /// tool reports an error.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the result has no JSON text content.
+    pub fn call_tool_allowing_error(&mut self, tool: &str, arguments: &Value) -> Value {
+        let response = self.request("tools/call", &json!({"name": tool, "arguments": arguments}));
+        let text = response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("MCP result has no text content: {response}"));
+        serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("MCP result text is not JSON ({err}): {text}"))
+    }
 }
 
 impl Drop for McpServer {
@@ -783,7 +798,9 @@ pub fn mcp_audit(server: &mut McpServer, root: &Path) -> Value {
     )
 }
 
-/// Run `fallow_api::run_audit` in this process against the base commit.
+/// Run `fallow_api::run_audit` in this process against the base commit. The
+/// gate stays unset, as in [`cli_audit`] and [`mcp_audit`], so `audit.gate`
+/// in config decides it.
 ///
 /// # Panics
 ///
@@ -797,7 +814,6 @@ pub fn api_audit(root: &Path) -> Value {
             ..fallow_api::AnalysisOptions::default()
         },
         base: Some(AUDIT_BASE_REF.to_string()),
-        gate: fallow_api::AuditGate::NewOnly,
         min_invocations_hot: 100,
         ..fallow_api::AuditOptions::default()
     };

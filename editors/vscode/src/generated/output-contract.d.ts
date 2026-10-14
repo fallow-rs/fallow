@@ -1515,6 +1515,25 @@ export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppressio
  */
 export type CognitiveAttribution = ("nesting-reset" | "fewer-branch-points" | "mixed")
 /**
+ * Whether the project has tests to measure against.
+ */
+export type TestReachStatus = ("measured" | "no-tests")
+/**
+ * Why mock detection is or is not active.
+ */
+export type TestReachMasking = ("active" | "no-mocks" | "capped")
+/**
+ * How tests reach one changed export.
+ *
+ * Treat this as an open set: a later version can add a class. A consumer
+ * must read an unknown value as "needs attention".
+ */
+export type TestReachClass = ("mocked-only" | "none" | "none-file" | "transitive" | "direct" | "framework")
+/**
+ * Whether the diff adds the whole declaration or changes an existing one.
+ */
+export type ExportChange = ("modified" | "new")
+/**
  * Independently-versioned wire-version newtype. Serializes as the integer
  * [`DECISION_SURFACE_SCHEMA_VERSION`].
  */
@@ -1754,7 +1773,8 @@ gate_outcomes?: (GateOutcomes | null)
  */
 _meta?: (Meta | null)
 /**
- * Dead-code findings scoped to the audit changeset.
+ * Dead-code findings scoped to the audit changeset. Absent when no file
+ * changed, or when `summary.dead_code_skipped` says the pass was skipped.
  */
 dead_code?: (CheckOutput | null)
 /**
@@ -1789,6 +1809,24 @@ dead_code_issues: number
  * Whether any reported dead-code issue has error severity.
  */
 dead_code_has_errors: boolean
+/**
+ * True when `--only`, `--skip` or `audit.deadCode = false` skipped the
+ * dead-code sub-analysis. The dead-code counts are then 0 and do not mean
+ * a clean result. Omitted when the sub-analysis ran.
+ */
+dead_code_skipped?: boolean
+/**
+ * True when `--only`, `--skip` or `audit.health = false` skipped the
+ * health sub-analysis. The complexity and styling counts are then 0 and
+ * do not mean a clean result. Omitted when the sub-analysis ran.
+ */
+complexity_skipped?: boolean
+/**
+ * True when `--only`, `--skip` or `audit.dupes = false` skipped the
+ * duplication sub-analysis. The clone-group counts are then 0 and do not
+ * mean a clean result. Omitted when the sub-analysis ran.
+ */
+duplication_skipped?: boolean
 /**
  * Total complexity findings reported for the changed files.
  */
@@ -12027,7 +12065,7 @@ search_visibility?: (SearchVisibility | null)
 /**
  * Why a text search does not find the uses in this consumer. With
  * `search_visibility` `found`, only `pass-through` occurs: the consumer
- * is a barrel that forwards the export and does not use it.
+ * forwards the export and does not use it.
  */
 reason?: (SearchGapReason | null)
 /**
@@ -17255,6 +17293,12 @@ complexity?: (HealthReport | null)
  * comparison ran.
  */
 branching?: (BranchingReport | null)
+/**
+ * How tests reach the value exports that the diff changes. Advisory,
+ * never gates. Absent when the diff changes no value export or no diff
+ * is known.
+ */
+test_reach?: (TestReachFacts | null)
 }
 /**
  * The ranked, capped decision surface plus the set of signal_ids the
@@ -18116,6 +18160,104 @@ branch_points_delta: number
 functions_delta: number
 }
 /**
+ * How tests reach the value exports that the diff changes.
+ *
+ * A changed export is a value export whose declaring statement overlaps an
+ * added line. The section is advisory: it never changes the verdict or the
+ * exit code.
+ */
+export interface TestReachFacts {
+status: TestReachStatus
+masking: TestReachMasking
+/**
+ * Number of changed value exports.
+ */
+total: number
+counts: TestReachCounts
+/**
+ * The exports that need attention (`mocked-only`, `none`, `none-file`,
+ * `transitive`), at most [`TEST_REACH_EXPORT_CAP`]. The order is reach
+ * class, then `modified` before `new`, then file, line and name. Empty
+ * for `no-tests`.
+ */
+exports: ExportTestReachFact[]
+/**
+ * Number of attention rows left out by the cap.
+ */
+exports_omitted: number
+}
+/**
+ * Number of changed exports per reach class. The keys are exactly the
+ * [`TestReachClass`] values.
+ */
+export interface TestReachCounts {
+/**
+ * Exports that a test file references.
+ */
+direct: number
+/**
+ * Exports that tests reach only through other modules.
+ */
+transitive: number
+/**
+ * Exports that only mocking tests reference.
+ */
+"mocked-only": number
+/**
+ * Exports in a test-reached file without a test-reachable reference.
+ */
+none: number
+/**
+ * Exports in a file that no test loads.
+ */
+"none-file": number
+/**
+ * Framework configuration exports.
+ */
+framework: number
+}
+/**
+ * One changed export that needs attention.
+ */
+export interface ExportTestReachFact {
+/**
+ * Root-relative path of the file that declares the export.
+ */
+file: string
+/**
+ * The export name, `default` for a default export.
+ */
+export_name: string
+/**
+ * 1-based line of the export.
+ */
+line: number
+reach: TestReachClass
+change: ExportChange
+/**
+ * Test files that name the export, sorted, at most
+ * [`TEST_REACH_FILE_CAP`]. On a `mocked-only` row these are the mocking
+ * tests. Absent when no test file names the export.
+ */
+tests?: (string[] | null)
+/**
+ * Number of test files that name the export, before the cap. Present with
+ * `tests`.
+ */
+tests_total?: (number | null)
+/**
+ * True when one of the test files that name the export changed in this
+ * diff. Present with `tests`.
+ */
+test_changed?: (boolean | null)
+/**
+ * The mocked modules on the import paths, sorted, at most
+ * [`TEST_REACH_FILE_CAP`]. A mocked module can be a barrel in front of
+ * the declaring file. Present only on `mocked-only` rows.
+ */
+mocked_targets?: (string[] | null)
+}
+/**
  * The separable `decision-surface` envelope: the single call that puts taste-
  * decisions in front of a human, callable WITHOUT the full pipeline (the
  * `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
@@ -18314,6 +18456,12 @@ decisions: DecisionSurface
  * never had a base snapshot.
  */
 branching?: (BranchingReport | null)
+/**
+ * How tests reach the value exports that the diff changes. Advisory,
+ * never gates. Absent when the diff changes no value export or no diff
+ * is known.
+ */
+test_reach?: (TestReachFacts | null)
 }
 /**
  * The review direction artifact: the order to review in, the coherent units,

@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use fallow_types::duplicates::sort_clone_groups_in_report_order;
 use rustc_hash::FxHashMap;
 
 use super::types::{
@@ -16,7 +17,11 @@ use super::types::{
 /// The line threshold above which we suggest extracting a module rather than a function.
 const MODULE_EXTRACTION_THRESHOLD: usize = 50;
 
-/// Group clone groups into families by file set, sorted by total duplicated lines.
+/// Group clone groups into families by file set, in the report order.
+///
+/// The families come out ordered by file set, as `DuplicationReport::sort`
+/// orders them. So a caller that rebuilds the families and does not sort
+/// the report again still emits the report order.
 #[must_use]
 pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<CloneFamily> {
     if clone_groups.is_empty() {
@@ -33,7 +38,8 @@ pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<Clon
 
     let mut families: Vec<CloneFamily> = family_map
         .into_iter()
-        .map(|(file_set, groups)| {
+        .map(|(file_set, mut groups)| {
+            sort_clone_groups_in_report_order(&mut groups);
             let total_duplicated_lines: usize = groups.iter().map(|g| g.line_count).sum();
             let total_duplicated_tokens: usize = groups.iter().map(|g| g.token_count).sum();
             let suggestions =
@@ -49,12 +55,7 @@ pub fn group_into_families(clone_groups: &[CloneGroup], root: &Path) -> Vec<Clon
         })
         .collect();
 
-    families.sort_by(|a, b| {
-        b.total_duplicated_lines
-            .cmp(&a.total_duplicated_lines)
-            .then(b.groups.len().cmp(&a.groups.len()))
-            .then_with(|| a.files.cmp(&b.files))
-    });
+    families.sort_by(|a, b| a.files.cmp(&b.files));
 
     families
 }
@@ -228,7 +229,13 @@ pub fn detect_mirrored_directories(
         });
     }
 
-    mirrors.sort_by_key(|b| std::cmp::Reverse(b.total_lines));
+    // The pairs come from a hash map, so ties need a key of their own.
+    mirrors.sort_by(|a, b| {
+        b.total_lines
+            .cmp(&a.total_lines)
+            .then_with(|| a.dir_a.cmp(&b.dir_a))
+            .then_with(|| a.dir_b.cmp(&b.dir_b))
+    });
 
     mirrors
 }
@@ -257,6 +264,41 @@ mod tests {
     #[test]
     fn empty_groups_produce_no_families() {
         assert!(group_into_families(&[], &root()).is_empty());
+    }
+
+    /// The suggestions follow the group order, and neither depends on the
+    /// input order. The programmatic route builds families before the report
+    /// sort, and the changed-file scope builds them after it.
+    #[test]
+    fn suggestions_follow_the_group_order_for_every_input_order() {
+        let small = CloneGroup {
+            instances: vec![instance("src/a.ts", 1, 5), instance("src/b.ts", 1, 5)],
+            token_count: 15,
+            line_count: 5,
+            similarity: None,
+        };
+        let large = CloneGroup {
+            instances: vec![instance("src/b.ts", 20, 31), instance("src/a.ts", 20, 31)],
+            token_count: 40,
+            line_count: 12,
+            similarity: None,
+        };
+        let shape = |groups: &[CloneGroup]| {
+            let family = group_into_families(groups, &root()).remove(0);
+            let lines: Vec<usize> = family.groups.iter().map(|g| g.line_count).collect();
+            let suggestions: Vec<String> = family
+                .suggestions
+                .iter()
+                .map(|s| s.description.clone())
+                .collect();
+            (lines, suggestions)
+        };
+
+        let forward = shape(&[small.clone(), large.clone()]);
+        let reverse = shape(&[large, small]);
+
+        assert_eq!(forward, reverse);
+        assert!(forward.1[0].contains(&format!("({} lines)", forward.0[0])));
     }
 
     #[test]
@@ -319,8 +361,10 @@ mod tests {
         assert_eq!(families.len(), 2);
     }
 
+    /// The larger family has the later file set, so an order by duplicated
+    /// lines puts it first.
     #[test]
-    fn families_sorted_by_total_lines_descending() {
+    fn families_are_ordered_by_file_set() {
         let groups = vec![
             CloneGroup {
                 instances: vec![instance("src/a.ts", 1, 5), instance("src/b.ts", 1, 5)],
@@ -338,30 +382,38 @@ mod tests {
 
         let families = group_into_families(&groups, &root());
         assert_eq!(families.len(), 2);
-        assert_eq!(families[0].total_duplicated_lines, 20);
-        assert_eq!(families[1].total_duplicated_lines, 5);
-    }
-
-    #[test]
-    fn equally_weighted_families_are_sorted_by_file_set() {
-        let groups = vec![
-            CloneGroup {
-                instances: vec![instance("src/c.ts", 1, 10), instance("src/d.ts", 1, 10)],
-                token_count: 30,
-                line_count: 10,
-                similarity: None,
-            },
-            CloneGroup {
-                instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
-                token_count: 30,
-                line_count: 10,
-                similarity: None,
-            },
-        ];
-
-        let families = group_into_families(&groups, &root());
         assert_eq!(families[0].files[0], PathBuf::from("src/a.ts"));
         assert_eq!(families[1].files[0], PathBuf::from("src/c.ts"));
+    }
+
+    /// Two mirrors with the same line count are ordered by directory pair,
+    /// whatever the order of the families.
+    #[test]
+    fn mirrors_with_equal_lines_are_ordered_by_directory_pair() {
+        let family = |dir_a: &str, dir_b: &str, file: &str| CloneFamily {
+            files: vec![
+                PathBuf::from(format!("{dir_a}/{file}")),
+                PathBuf::from(format!("{dir_b}/{file}")),
+            ],
+            groups: Vec::new(),
+            total_duplicated_lines: 10,
+            total_duplicated_tokens: 50,
+            suggestions: Vec::new(),
+        };
+        let mut families: Vec<CloneFamily> = ["x.ts", "y.ts", "z.ts"]
+            .into_iter()
+            .flat_map(|file| [family("q/a", "q/b", file), family("p/a", "p/b", file)])
+            .collect();
+        let dirs = |mirrors: Vec<MirroredDirectory>| -> Vec<String> {
+            mirrors.into_iter().map(|m| m.dir_a).collect()
+        };
+
+        let forward = dirs(detect_mirrored_directories(&families, &root()));
+        families.reverse();
+        let reverse = dirs(detect_mirrored_directories(&families, &root()));
+
+        assert_eq!(forward, ["p/a/", "q/a/"]);
+        assert_eq!(reverse, ["p/a/", "q/a/"]);
     }
 
     #[test]

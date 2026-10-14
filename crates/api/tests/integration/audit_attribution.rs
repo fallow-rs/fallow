@@ -31,7 +31,7 @@ fn audit_with_gate(root: &Path, gate: AuditGate) -> Value {
             ..AnalysisOptions::default()
         },
         base: Some("HEAD~1".to_string()),
-        gate,
+        gate: Some(gate),
         ..AuditOptions::default()
     };
     run_audit(&options)
@@ -249,7 +249,7 @@ fn the_typed_output_keeps_the_base_snapshot() {
             ..AnalysisOptions::default()
         },
         base: Some("HEAD~1".to_string()),
-        gate: AuditGate::NewOnly,
+        gate: Some(AuditGate::NewOnly),
         ..AuditOptions::default()
     };
     let output = run_audit(&options).expect("run the programmatic audit");

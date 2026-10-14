@@ -79,7 +79,7 @@ fn changed_files_scope_after_type_aware_pass_keeps_real_finding() {
             &mut semantic,
             None,
             &TypeAwareOptions {
-                enabled: true,
+                enabled: Some(true),
                 projects: Vec::new(),
                 require: TypeAwareRequire::Complete,
             },

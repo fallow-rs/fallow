@@ -2609,8 +2609,7 @@ pub fn filter_new_clone_groups(
         });
     }
 
-    crate::duplicates::refresh_clone_families(&mut report, root);
-    report.stats = recompute_stats(&report);
+    crate::duplicates::refresh_scoped_report(&mut report, root);
 
     report
 }
@@ -4453,6 +4452,40 @@ mod tests {
         assert!(
             filtered.clone_groups.is_empty(),
             "an unrelated line shift must not resurface a baselined clone"
+        );
+    }
+
+    /// A baseline filter keeps the family order of every other path: the file
+    /// set. The larger family has the later file set, so an order by
+    /// duplicated lines puts it first.
+    #[test]
+    fn filter_new_clone_groups_orders_families_by_file_set() {
+        let root = Path::new("/project");
+        let baseline = DuplicationBaselineData::from_report(&make_duplication_report(vec![]), root);
+        let mut large = make_clone_group_with_fragment(
+            "const large = 1;",
+            vec![("/project/src/y.ts", 1, 46), ("/project/src/z.ts", 1, 46)],
+        );
+        large.line_count = 46;
+        let small = make_clone_group_with_fragment(
+            "const small = 1;",
+            vec![("/project/src/a.ts", 1, 7), ("/project/src/b.ts", 1, 7)],
+        );
+
+        let filtered =
+            filter_new_clone_groups(make_duplication_report(vec![large, small]), &baseline, root);
+
+        let order: Vec<&Path> = filtered
+            .clone_families
+            .iter()
+            .map(|family| family.files[0].as_path())
+            .collect();
+        assert_eq!(
+            order,
+            [
+                Path::new("/project/src/a.ts"),
+                Path::new("/project/src/y.ts")
+            ]
         );
     }
 

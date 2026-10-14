@@ -155,6 +155,7 @@ pub struct AnalyzeParams {
     pub threads: Option<usize>,
 
     /// Refine project-wide public API findings with TypeScript symbol identity.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.
@@ -809,6 +810,7 @@ pub struct InspectTargetParams {
     pub threads: Option<usize>,
 
     /// Include project-wide TypeScript semantic evidence for symbol targets.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.
@@ -1474,6 +1476,7 @@ pub struct HealthParams {
     pub threads: Option<usize>,
 
     /// Enable the TypeScript semantic backend.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.
@@ -1802,13 +1805,28 @@ pub struct AuditParams {
     /// Run only the duplication sub-analysis in production mode.
     pub production_dupes: Option<bool>,
 
-    /// Enable or disable styling analytics in audit. Defaults to enabled.
+    /// Run only these audit sub-analyses, with the values of bare `fallow
+    /// --only`: `dead-code`, `architecture`, `dupes`, `health`. Replaces the
+    /// `audit.deadCode`, `audit.health` and `audit.dupes` config selection.
+    /// Cannot be combined with `skip`.
+    pub only: Option<Vec<String>>,
+
+    /// Skip these audit sub-analyses, with the values of `only`. A skipped
+    /// sub-analysis leaves the verdict; the response omits its block and sets
+    /// `summary.dead_code_skipped`, `complexity_skipped` or
+    /// `duplication_skipped`. A baseline for a skipped sub-analysis is an
+    /// error.
+    pub skip: Option<Vec<String>>,
+
+    /// Set `false` to skip styling analytics in audit. Unset or `true` uses
+    /// `audit.css` from the config, which defaults to enabled.
     pub css: Option<bool>,
 
     /// Enable or disable deep CSS analysis for audit: project-wide styling
     /// reachability and near-duplicate theme-token candidates, narrowed back to
-    /// changed anchors. Defaults to enabled; set `false` to pass
-    /// `--no-css-deep` on the CLI fallback path.
+    /// changed anchors. Unset uses `audit.cssDeep` from the config, which
+    /// defaults to enabled; `true` or `false` overrides the config. No effect
+    /// when styling analytics are off.
     pub css_deep: Option<bool>,
 
     /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
@@ -1821,6 +1839,7 @@ pub struct AuditParams {
     pub threads: Option<usize>,
 
     /// Refine both audit sides with TypeScript symbol identity before attribution.
+    /// `false` keeps the run syntactic, also when the config turns type-aware analysis on. `type_aware_projects` or `type_aware_require` turns it on and wins over `false`.
     pub type_aware: Option<bool>,
 
     /// Explicit tsconfig paths for type-aware analysis.
@@ -1837,8 +1856,9 @@ pub struct AuditParams {
     /// dupes, health) that audit runs.
     pub group_by: Option<String>,
 
-    /// Which findings affect the audit verdict. Values: "new-only" (default)
-    /// or "all". Passed through to the CLI's `--gate` flag.
+    /// Which findings affect the audit verdict. Values: "new-only" or "all".
+    /// Unset uses `audit.gate` from the config, which defaults to "new-only".
+    /// Passed through to the CLI's `--gate` flag.
     pub gate: Option<String>,
 
     /// Path to a dead-code baseline file (produced by `fallow dead-code

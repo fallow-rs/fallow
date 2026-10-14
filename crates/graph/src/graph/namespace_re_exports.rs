@@ -700,6 +700,230 @@ mod tests {
         assert!(!graph.is_test_reference_covered(export, 0));
     }
 
+    /// The diamond with a star re-export cycle between `outer` and `left`.
+    fn namespace_cycle_graph() -> ModuleGraph {
+        let files: Vec<_> = (0..7)
+            .map(|id| discovered_file(id, &format!("/project/file-{id}.ts"), 50))
+            .collect();
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![
+                    named_import_from("./outer", "Ns", FileId(1)),
+                    side_effect_import("./alternate", FileId(6), oxc_span::Span::new(20, 30)),
+                ],
+                member_accesses: vec![MemberAccess {
+                    object: "Ns".to_string(),
+                    member: "used".to_string(),
+                }]
+                .into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![
+                    star_re_export("./left", FileId(2)),
+                    star_re_export("./right", FileId(3)),
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                re_exports: vec![
+                    star_re_export("./namespace", FileId(4)),
+                    star_re_export("./outer", FileId(1)),
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(3),
+                path: files[3].path.clone(),
+                re_exports: vec![star_re_export("./namespace", FileId(4))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(4),
+                path: files[4].path.clone(),
+                re_exports: vec![ns_re_export("./source", "Ns", FileId(5))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(5),
+                path: files[5].path.clone(),
+                exports: vec![named_export("used")].into(),
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(6),
+                path: files[6].path.clone(),
+                resolved_imports: vec![side_effect_import(
+                    "./source",
+                    FileId(5),
+                    oxc_span::Span::new(0, 10),
+                )],
+                ..Default::default()
+            },
+        ];
+        let test_entries = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let replacements = [2, 3].map(|target| ResolvedReplacedModuleTarget {
+            source_file: FileId(0),
+            target_file: FileId(target),
+        });
+
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &replacements,
+            &test_entries,
+            &[],
+            &test_entries,
+            &files,
+        )
+    }
+
+    fn reach_of(graph: &ModuleGraph, file: u32) -> crate::graph::ExportTestReachResult {
+        let module = &graph.modules[file as usize];
+        graph.export_test_reach(module.file_id, &module.exports[0], &|id| id == FileId(0))
+    }
+
+    #[test]
+    fn test_reach_names_both_masked_namespace_routes() {
+        let graph = namespace_diamond_graph(true);
+        let reach = reach_of(&graph, 5);
+
+        assert!(!graph.reference_routes.graphs.is_empty());
+        assert_eq!(reach.reach, crate::graph::ExportTestReach::MockedOnly);
+        assert_eq!(reach.tests, vec![FileId(0)]);
+        assert_eq!(reach.mocked_targets, vec![FileId(2), FileId(3)]);
+    }
+
+    #[test]
+    fn test_reach_with_one_open_namespace_route_is_direct() {
+        let graph = namespace_diamond_graph(false);
+
+        assert_eq!(
+            reach_of(&graph, 5).reach,
+            crate::graph::ExportTestReach::Direct
+        );
+    }
+
+    #[test]
+    fn test_reach_through_a_namespace_route_cycle_terminates() {
+        let graph = namespace_cycle_graph();
+        let export = &graph.modules[5].exports[0];
+        let reach = reach_of(&graph, 5);
+
+        assert!(!graph.reference_routes.graphs.is_empty());
+        assert!(!graph.is_any_test_reference_covered(export));
+        assert_eq!(reach.reach, crate::graph::ExportTestReach::MockedOnly);
+        assert_eq!(reach.mocked_targets, vec![FileId(2), FileId(3)]);
+    }
+
+    /// An entry barrel exposes `Ns`, so its own route starts without a load
+    /// mechanism. The test reaches the barrel through `require()`, which
+    /// ignores the mock, and the test mocks both the barrel and the source.
+    fn namespace_entry_route_graph() -> ModuleGraph {
+        let files = vec![
+            discovered_file(0, "/project/consumer.test.ts", 100),
+            discovered_file(1, "/project/barrel.ts", 50),
+            discovered_file(2, "/project/source.ts", 50),
+        ];
+        let modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                resolved_imports: vec![named_import_with_mechanism(
+                    "./barrel",
+                    "unrelated",
+                    FileId(1),
+                    true,
+                )],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                re_exports: vec![ns_re_export("./source", "Ns", FileId(2))],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                exports: vec![named_export("used")].into(),
+                ..Default::default()
+            },
+        ];
+        let test_entries = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::TestFile,
+        }];
+        let entry_points = vec![
+            test_entries[0].clone(),
+            EntryPoint {
+                path: files[1].path.clone(),
+                source: EntryPointSource::PackageJsonMain,
+            },
+        ];
+        let replacements = [1, 2].map(|target| ResolvedReplacedModuleTarget {
+            source_file: FileId(0),
+            target_file: FileId(target),
+        });
+
+        ModuleGraph::build_with_reachability_roots_and_replacements(
+            &modules,
+            &replacements,
+            &entry_points,
+            &[],
+            &test_entries,
+            &files,
+        )
+    }
+
+    #[test]
+    fn test_reach_does_not_mask_the_start_of_an_entry_route() {
+        let graph = namespace_entry_route_graph();
+        let export = &graph.modules[2].exports[0];
+        let barrel_reference = export
+            .references
+            .iter()
+            .position(|reference| reference.from_file == FileId(1))
+            .expect("the entry barrel credits the namespace member");
+        let path = export
+            .reference_path(barrel_reference)
+            .expect("the barrel credit records its route");
+        assert!(matches!(
+            graph.reference_paths[path.index()],
+            crate::graph::types::ReferencePathNode::Route {
+                start_mechanism: None,
+                ..
+            }
+        ));
+
+        let reach = reach_of(&graph, 2);
+
+        assert_eq!(reach.reach, crate::graph::ExportTestReach::MockedOnly);
+        assert_eq!(reach.mocked_targets, vec![FileId(2)]);
+    }
+
+    #[test]
+    fn test_reach_with_a_commonjs_namespace_consumer_is_direct() {
+        let graph = namespace_coverage_graph(true);
+
+        assert_eq!(
+            reach_of(&graph, 2).reach,
+            crate::graph::ExportTestReach::Direct
+        );
+        let esm = namespace_coverage_graph(false);
+        let reach = reach_of(&esm, 2);
+        assert_eq!(reach.reach, crate::graph::ExportTestReach::MockedOnly);
+        assert_eq!(reach.mocked_targets, vec![FileId(1)]);
+    }
+
     #[test]
     fn issue_324_simple_namespace_re_export_credits_target_members() {
         let files = vec![

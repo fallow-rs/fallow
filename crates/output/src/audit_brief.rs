@@ -482,6 +482,11 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     /// never had a base snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branching: Option<crate::BranchingReport>,
+    /// How tests reach the value exports that the diff changes. Advisory,
+    /// never gates. Absent when the diff changes no value export or no diff
+    /// is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_reach: Option<crate::TestReachFacts>,
 }
 
 /// The standard audit brief payload shape used by the CLI, schema emitter,
@@ -610,6 +615,11 @@ pub struct ReviewBriefWireOutput<
     /// comparison ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branching: Option<crate::BranchingReport>,
+    /// How tests reach the value exports that the diff changes. Advisory,
+    /// never gates. Absent when the diff changes no value export or no diff
+    /// is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_reach: Option<crate::TestReachFacts>,
 }
 
 /// CLI-built audit subreports that are embedded in the audit brief envelope.
@@ -688,6 +698,7 @@ where
         duplication: subtract.duplication,
         complexity: subtract.complexity,
         branching: brief.branching,
+        test_reach: brief.test_reach,
     })
 }
 
@@ -761,6 +772,7 @@ mod tests {
     fn brief_wire_value(branching: Option<crate::BranchingReport>) -> Value {
         let brief = ReviewBriefOutput {
             branching,
+            test_reach: None,
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "1.2.3".to_string(),
             command: "audit-brief".to_string(),

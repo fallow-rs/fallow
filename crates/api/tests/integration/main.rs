@@ -9,9 +9,12 @@ mod common;
 
 mod absent_component_props;
 
+mod audit_analysis_selection;
 mod audit_attribution;
 mod audit_config_patterns;
+mod audit_config_section;
 mod capability_parity;
+mod config_type_aware;
 mod dead_code_baseline;
 mod editor_type_aware_scope_order;
 mod health_rerun_diagnostics;

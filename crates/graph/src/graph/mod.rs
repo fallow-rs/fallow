@@ -21,6 +21,7 @@ mod public_exports;
 mod re_exports;
 mod reachability;
 mod shortest_import_path;
+mod test_reach;
 pub mod types;
 
 use std::path::Path;
@@ -56,6 +57,7 @@ pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, Revie
 pub use public_exports::PublicExportOrigin;
 pub use re_exports::GraphReExportCycle;
 pub use shortest_import_path::ImportPathHop;
+pub use test_reach::{ExportTestReach, ExportTestReachResult, TestMaskingState};
 pub use types::{
     ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, ReferencePathId, SymbolReference,
 };
@@ -362,6 +364,10 @@ struct TestReachabilityIndex {
     /// The test roots of each profile, by profile index. The per-root query
     /// reads it to find the replacement mask of one root.
     profile_roots: Vec<Vec<FileId>>,
+    /// True when test roots declare replacement masks, but the distinct mask
+    /// count passed the profile safety cap. Reachability then ignores the
+    /// masks, so a mocked module counts as reached.
+    masking_capped: bool,
 }
 
 /// Sparse profile-mask row for one replaced target.
@@ -381,6 +387,7 @@ impl TestReachabilityIndex {
             reachable_profiles: vec![0; storage_len],
             masked_profiles: Vec::new(),
             profile_roots: Vec::new(),
+            masking_capped: false,
         }
     }
 
@@ -900,11 +907,18 @@ impl ModuleGraph {
     /// every target hop. ESM hops also require that profile not to replace the
     /// hop target; CommonJS hops remain active because Vitest replacement mocks
     /// do not intercept `require()`.
+    ///
+    /// Only a value reference can give coverage. A type reference never runs
+    /// the export, so it never gives coverage. This includes `import type` and
+    /// a plain import that the test uses only in type positions.
     #[must_use]
     pub fn is_test_reference_covered(&self, export: &ExportSymbol, reference_index: usize) -> bool {
         let Some(reference) = export.references.get(reference_index) else {
             return false;
         };
+        if reference.namespace != ExportNamespace::Value {
+            return false;
+        }
         if self.test_reachability_index.profile_count == 0 {
             return self.is_test_reachable(reference.from_file);
         }

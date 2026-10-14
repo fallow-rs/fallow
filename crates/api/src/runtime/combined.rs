@@ -52,7 +52,10 @@ struct DeadCodeSessionRun<'a> {
 /// # Errors
 ///
 /// Returns a structured programmatic error for invalid options, config load
-/// failures, or analysis failures.
+/// failures, or analysis failures. When the dead-code or health section runs
+/// and the environment or `typeAware.enabled` turns on type-aware analysis
+/// that the options leave off, it returns
+/// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
 pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedProgrammaticOutput> {
     if !(options.dead_code || options.duplication || options.health) {
         return Err(ProgrammaticError::new(
@@ -65,6 +68,16 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
 
     let start = Instant::now();
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    // Bare `fallow` makes dead code type-aware and adds type coupling to
+    // health from config. The shared-session paths below do not pass through
+    // the checks of `run_dead_code` and `run_health`, so the check runs here.
+    if options.dead_code || options.health {
+        super::type_aware_config::reject_config_type_aware(
+            &options.analysis.type_aware,
+            &resolved,
+            super::type_aware_config::TypeAwareCommand::Analysis,
+        )?;
+    }
     resolved.install(|| {
         resolved.ensure_not_cancelled("combined analysis")?;
         let production_modes = resolve_effective_production_modes(&resolved, None, None, None)?;

@@ -841,6 +841,183 @@ fn i5_audit_agrees_across_surfaces() {
     });
 }
 
+/// I2 and I5 under a config that turns on type-aware analysis. The generator
+/// writes no config file, so without this case no surface reads
+/// `typeAware.enabled` or `audit.typeAware`.
+///
+/// The harness has no type-aware companion, so the CLI degrades: it records
+/// `_meta.type_aware` with `executed: false` and keeps the syntactic findings.
+/// `fallow_api` refuses the config with a stable code, and each MCP tool falls
+/// back to the CLI. The MCP envelope then carries the `_meta.type_aware` of
+/// the CLI. A typed run would carry none.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn type_aware_config_agrees_across_surfaces() {
+    for config in [
+        r#"{ "typeAware": { "enabled": true } }"#,
+        r#"{ "audit": { "typeAware": true } }"#,
+    ] {
+        let mut files = audit_control_model(true).materialize(true);
+        for side in [&mut files.base, &mut files.head] {
+            side.insert(".fallowrc.json".to_string(), config.to_string());
+        }
+        let project = Project::from_files(files);
+        let root = &project.root;
+
+        let cli = cli_audit(root);
+        let mcp = with_server(|server| mcp_audit(server, root));
+        assert_type_aware_meta_agrees(&format!("audit, {config}"), &cli, &mcp);
+        project
+            .explain(invariants::i5_audit_surfaces_agree(&[
+                ("CLI".to_string(), audit_keys(&cli)),
+                ("MCP".to_string(), audit_keys(&mcp)),
+            ]))
+            .unwrap_or_else(|err| panic!("{err}"));
+        assert_api_refuses(
+            config,
+            fallow_api::run_audit(&fallow_api::AuditOptions {
+                analysis: api_analysis(root),
+                base: Some(surfaces::AUDIT_BASE_REF.to_string()),
+                ..fallow_api::AuditOptions::default()
+            })
+            .map(drop),
+        );
+
+        if !config.contains("enabled") {
+            continue;
+        }
+        assert_trace_export_agrees(config, root);
+        for (analysis, tool) in [
+            (Analysis::DeadCode, "analyze"),
+            (Analysis::Health, "check_health"),
+        ] {
+            let cli = cli_analysis_envelope(analysis, root, &Scope::default(), None);
+            let mcp = with_server(|server| {
+                server.call_tool(
+                    tool,
+                    &serde_json::json!({"root": root.display().to_string(), "no_cache": true}),
+                )
+            });
+            assert_type_aware_meta_agrees(&format!("{tool}, {config}"), &cli, &mcp);
+            project
+                .explain(invariants::surfaces_agree(
+                    &format!("{tool} finding sets differ under {config}"),
+                    &[
+                        ("CLI".to_string(), analysis.keys(&cli)),
+                        ("MCP".to_string(), analysis.keys(&mcp)),
+                    ],
+                ))
+                .unwrap_or_else(|err| panic!("{err}"));
+        }
+        assert_api_refuses(
+            config,
+            fallow_api::run_dead_code(&fallow_api::DeadCodeOptions {
+                analysis: api_analysis(root),
+                ..fallow_api::DeadCodeOptions::default()
+            })
+            .map(drop),
+        );
+        assert_api_refuses(
+            config,
+            fallow_api::run_health(&fallow_api::ComplexityOptions {
+                analysis: api_analysis(root),
+                ..fallow_api::ComplexityOptions::default()
+            })
+            .map(drop),
+        );
+    }
+}
+
+/// With type-aware analysis on, `fallow dead-code --trace` adds semantic
+/// evidence, or fails when no companion is installed. The MCP `trace_export`
+/// tool must give the same answer: the typed trace refuses, and the tool runs
+/// the CLI.
+fn assert_trace_export_agrees(config: &str, root: &std::path::Path) {
+    let dead_code = cli_analysis_envelope(Analysis::DeadCode, root, &Scope::default(), None);
+    let target = &dead_code["unused_exports"][0];
+    let (file, export) = (
+        target["path"].as_str().expect("an unused export to trace"),
+        target["export_name"].as_str().expect("an export name"),
+    );
+    let output = run_cli(
+        root,
+        &[
+            "dead-code".to_string(),
+            "--trace".to_string(),
+            format!("{file}:{export}"),
+        ],
+    );
+    let cli = crate::common::parse_json(&output);
+    let mcp = with_server(|server| {
+        server.call_tool_allowing_error(
+            "trace_export",
+            &serde_json::json!({
+                "root": root.display().to_string(),
+                "file": file,
+                "export_name": export,
+                "no_cache": true,
+            }),
+        )
+    });
+    assert_eq!(
+        mcp["error"], cli["error"],
+        "trace_export, {config}: CLI {cli}, MCP {mcp}"
+    );
+    if cli["error"] == true {
+        assert_eq!(mcp["message"], cli["message"], "trace_export, {config}");
+    } else {
+        assert_eq!(
+            mcp.get("semantic").is_some(),
+            cli.get("semantic").is_some(),
+            "trace_export, {config}: CLI {cli}, MCP {mcp}"
+        );
+    }
+    assert_api_refuses(
+        config,
+        fallow_api::run_trace_export(&fallow_api::TraceExportOptions {
+            analysis: api_analysis(root),
+            file: file.to_string(),
+            export_name: export.to_string(),
+        })
+        .map(drop),
+    );
+}
+
+fn api_analysis(root: &std::path::Path) -> fallow_api::AnalysisOptions {
+    fallow_api::AnalysisOptions {
+        root: Some(root.to_path_buf()),
+        no_cache: true,
+        ..fallow_api::AnalysisOptions::default()
+    }
+}
+
+#[track_caller]
+fn assert_api_refuses(config: &str, result: Result<(), fallow_api::ProgrammaticError>) {
+    let err = result.expect_err("fallow_api must refuse config type-aware analysis");
+    assert_eq!(
+        err.code.as_deref(),
+        Some(fallow_api::TYPE_AWARE_CONFIG_UNSUPPORTED),
+        "{config}: {err:?}"
+    );
+}
+
+/// The CLI records `_meta.type_aware` for a type-aware run, and the MCP
+/// envelope must record the same state. The warnings hold absolute paths, so
+/// the check compares the run state only.
+#[track_caller]
+fn assert_type_aware_meta_agrees(context: &str, cli: &Value, mcp: &Value) {
+    let state = |envelope: &Value| {
+        envelope
+            .pointer("/_meta/type_aware")
+            .map(|meta| (meta["executed"].clone(), meta["warning_count"].clone()))
+    };
+    assert!(
+        state(cli).is_some(),
+        "{context}: the CLI did not run type-aware analysis: {cli}"
+    );
+    assert_eq!(state(mcp), state(cli), "{context}: MCP envelope: {mcp}");
+}
+
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i9_work_counters_do_not_depend_on_threads_or_the_alias() {
@@ -1106,6 +1283,138 @@ fn audit_controls_see_renames_and_manifests() {
         );
     }
     unchanged
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
+}
+
+/// I5 for the audit sub-analysis keys: with `audit.deadCode` and
+/// `audit.dupes` false, the CLI, the MCP typed route and `fallow_api` skip the
+/// same sub-analyses, mark them in the summary, and report the same keys.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i5_audit_sub_analysis_keys_agree_across_surfaces() {
+    let mut files = audit_control_model(true).materialize(true);
+    let config = r#"{ "audit": { "deadCode": false, "dupes": false } }"#;
+    files
+        .base
+        .insert(".fallowrc.json".to_string(), config.to_string());
+    files
+        .head
+        .insert(".fallowrc.json".to_string(), config.to_string());
+    let project = Project::from_files(files);
+    let envelopes = vec![
+        ("CLI".to_string(), cli_audit(&project.root)),
+        (
+            "MCP Typed".to_string(),
+            with_typed_server(|server| mcp_audit(server, &project.root)),
+        ),
+        ("fallow_api".to_string(), api_audit(&project.root)),
+    ];
+    for (surface, envelope) in &envelopes {
+        for (block, marker) in [
+            ("dead_code", "dead_code_skipped"),
+            ("duplication", "duplication_skipped"),
+        ] {
+            assert!(
+                envelope.get(block).is_none() && envelope["summary"][marker] == true,
+                "{surface} audit ignored the `audit` sub-analysis keys: {envelope}"
+            );
+        }
+        assert!(
+            envelope["summary"].get("complexity_skipped").is_none(),
+            "{surface} audit skipped health: {envelope}"
+        );
+    }
+    let results: Vec<(String, AuditKeys)> = envelopes
+        .iter()
+        .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
+        .collect();
+    project
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
+}
+
+/// I5 under an `audit` config section. The generator writes no config file,
+/// so without this case no surface reads `audit.gate`, `audit.css`,
+/// `audit.cssDeep` or an `audit` baseline key.
+///
+/// - Gate and styling keys: every surface takes its typed or CLI path and
+///   reports the gate of the config.
+/// - Baseline key: `fallow_api` refuses it with a stable code, and the MCP
+///   tool falls back to the CLI, so MCP and CLI give the same result.
+#[test]
+#[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
+fn i5_audit_config_section_agrees_across_surfaces() {
+    let with_config = |config: &str| {
+        let mut files = audit_control_model(true).materialize(true);
+        files
+            .base
+            .insert(".fallowrc.json".to_string(), config.to_string());
+        files
+            .head
+            .insert(".fallowrc.json".to_string(), config.to_string());
+        Project::from_files(files)
+    };
+
+    let project = with_config(r#"{ "audit": { "gate": "all", "css": false, "cssDeep": false } }"#);
+    let envelopes = vec![
+        ("CLI".to_string(), cli_audit(&project.root)),
+        (
+            "MCP Typed".to_string(),
+            with_typed_server(|server| mcp_audit(server, &project.root)),
+        ),
+        ("fallow_api".to_string(), api_audit(&project.root)),
+    ];
+    for (surface, envelope) in &envelopes {
+        assert_eq!(
+            envelope["attribution"]["gate"], "all",
+            "{surface} audit ignored `audit.gate`: {envelope}"
+        );
+    }
+    let results: Vec<(String, AuditKeys)> = envelopes
+        .iter()
+        .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
+        .collect();
+    project
+        .explain(invariants::i5_audit_surfaces_agree(&results))
+        .unwrap_or_else(|err| panic!("{err}"));
+
+    let unbaselined = with_config("{}");
+    let baseline = unbaselined.scratch.join("dead-code-baseline.json");
+    cli_save_baseline(Analysis::DeadCode, &unbaselined.root, &baseline);
+    let project = with_config(&format!(
+        r#"{{ "audit": {{ "deadCodeBaseline": {} }} }}"#,
+        Value::String(baseline.display().to_string())
+    ));
+    let err = fallow_api::run_audit(&fallow_api::AuditOptions {
+        analysis: fallow_api::AnalysisOptions {
+            root: Some(project.root.clone()),
+            no_cache: true,
+            ..fallow_api::AnalysisOptions::default()
+        },
+        base: Some(surfaces::AUDIT_BASE_REF.to_string()),
+        ..fallow_api::AuditOptions::default()
+    })
+    .expect_err("fallow_api must refuse an `audit` baseline key");
+    assert_eq!(
+        err.code.as_deref(),
+        Some(fallow_api::AUDIT_CONFIG_BASELINE_UNSUPPORTED),
+        "{err:?}"
+    );
+    let cli = audit_keys(&cli_audit(&project.root));
+    assert_ne!(
+        cli,
+        audit_keys(&cli_audit(&unbaselined.root)),
+        "the `audit.deadCodeBaseline` baseline changed no CLI audit finding"
+    );
+    let results = vec![
+        ("CLI".to_string(), cli),
+        (
+            "MCP".to_string(),
+            audit_keys(&with_server(|server| mcp_audit(server, &project.root))),
+        ),
+    ];
+    project
         .explain(invariants::i5_audit_surfaces_agree(&results))
         .unwrap_or_else(|err| panic!("{err}"));
 }

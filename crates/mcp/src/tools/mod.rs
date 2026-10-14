@@ -127,9 +127,15 @@ fn push_type_aware(
     projects: Option<&[String]>,
     require: Option<crate::params::TypeAwareRequireParam>,
 ) {
-    if enabled == Some(true) || projects.is_some_and(|items| !items.is_empty()) || require.is_some()
-    {
+    let requested = enabled == Some(true)
+        || projects.is_some_and(|items| !items.is_empty())
+        || require.is_some();
+    if requested {
         args.push("--type-aware".to_string());
+    } else if enabled == Some(false) {
+        // `false` keeps the run syntactic also when the config turns
+        // type-aware analysis on, as on the typed route.
+        args.push("--no-type-aware".to_string());
     }
     if let Some(projects) = projects {
         for project in projects.iter().filter(|project| !project.is_empty()) {
@@ -764,6 +770,19 @@ fn non_success_result(
 fn type_aware_complete_required(args: &[String]) -> bool {
     args.windows(2)
         .any(|pair| pair == ["--type-aware-require", "complete"])
+        || is_semantic_dead_code_trace(args)
+}
+
+/// `dead-code --trace` and `dead-code --symbol-impact` exit 1 only when
+/// type-aware evidence was required complete and is not
+/// (`semantic_completeness_exit` in the CLI); every other failure exits 2.
+/// The requirement can come from the config, which the arguments do not
+/// show, so exit 1 of these runs is the requirement.
+fn is_semantic_dead_code_trace(args: &[String]) -> bool {
+    args.first().is_some_and(|command| command == "dead-code")
+        && args
+            .iter()
+            .any(|arg| arg == "--trace" || arg == "--symbol-impact")
 }
 
 fn type_aware_output_requires_complete(stdout: &str) -> bool {
@@ -973,6 +992,27 @@ mod completeness_tests {
         let result = non_success_result(1, &output, "", false);
 
         assert_eq!(result.is_error, Some(true));
+    }
+
+    /// `typeAware.require: complete` in config reaches neither the arguments
+    /// nor the trace output, so exit 1 of a `dead-code --trace` run alone
+    /// marks the requirement.
+    #[test]
+    fn incomplete_trace_exit_one_is_an_error_when_the_config_requires_complete() {
+        let args: Vec<String> = ["dead-code", "--format", "json", "--trace", "src/a.ts:a"]
+            .map(String::from)
+            .to_vec();
+        let output = serde_json::json!({
+            "semantic": { "identity": { "completeness": "partial" }, "status": "partial" }
+        })
+        .to_string();
+
+        let result = non_success_result(1, &output, "", type_aware_complete_required(&args));
+
+        assert_eq!(result.is_error, Some(true));
+        assert!(!type_aware_complete_required(
+            &["dead-code", "--trace-file", "src/a.ts"].map(String::from)
+        ));
     }
 
     #[test]

@@ -646,6 +646,12 @@
     },
     {
       "section": "flags:audit",
+      "row": "--only",
+      "column": "Description",
+      "seed": "Run only these sub-analyses (comma-separated: dead-code, architecture, dupes, health), with the same values as bare `fallow --only`. Replaces the `audit.deadCode`, `audit.health` and `audit.dupes` selection. The review brief (`--brief`, `fallow review`) keeps every sub-analysis"
+    },
+    {
+      "section": "flags:audit",
       "row": "--production-dead-code",
       "column": "Description",
       "seed": "Run dead-code analysis in production mode for this audit"
@@ -679,6 +685,12 @@
       "row": "--show-deprioritized",
       "column": "Description",
       "seed": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the `--walkthrough` path"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--skip",
+      "column": "Description",
+      "seed": "Skip these sub-analyses (comma-separated: dead-code, architecture, dupes, health), with the same values as bare `fallow --skip`, on top of the `audit.*` selection"
     },
     {
       "section": "flags:audit",

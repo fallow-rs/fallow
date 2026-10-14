@@ -2245,6 +2245,30 @@
           "description": "Absolute prefix to strip from coverage data paths before CRAP matching. Use when coverage was generated under a different checkout root in CI or Docker. Also configurable via FALLOW_COVERAGE_ROOT or health.coverageRoot"
         },
         {
+          "name": "--only",
+          "type": "string",
+          "required": false,
+          "description": "Run only these sub-analyses (comma-separated: dead-code, architecture, dupes, health), with the same values as bare `fallow --only`. Replaces the `audit.deadCode`, `audit.health` and `audit.dupes` selection. The review brief (`--brief`, `fallow review`) keeps every sub-analysis",
+          "possible_values": [
+            "dead-code",
+            "dupes",
+            "health",
+            "architecture"
+          ]
+        },
+        {
+          "name": "--skip",
+          "type": "string",
+          "required": false,
+          "description": "Skip these sub-analyses (comma-separated: dead-code, architecture, dupes, health), with the same values as bare `fallow --skip`, on top of the `audit.*` selection",
+          "possible_values": [
+            "dead-code",
+            "dupes",
+            "health",
+            "architecture"
+          ]
+        },
+        {
           "name": "--no-css",
           "type": "bool",
           "required": false,
@@ -7832,6 +7856,7 @@
         "key_params": [
           "gate",
           "base",
+          "skip",
           "css_deep",
           "max_crap",
           "coverage",

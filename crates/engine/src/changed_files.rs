@@ -1093,8 +1093,7 @@ pub(crate) fn filter_duplication_by_path_scope(
             .iter()
             .any(|instance| scope.contains(&instance.file))
     });
-    duplicates::refresh_clone_families(report, root);
-    report.stats = duplicates::recompute_stats(report);
+    duplicates::refresh_scoped_report(report, root);
 }
 
 #[cfg(test)]
@@ -1562,6 +1561,55 @@ mod tests {
         assert_eq!(report.clone_groups.len(), 1);
         assert_eq!(report.stats.clone_groups, 1);
         assert_eq!(report.stats.clone_instances, 2);
+    }
+
+    /// A changed-file scope keeps the family order of every other path: the
+    /// file set. The larger family has the later file set, so an order by
+    /// duplicated lines puts it first.
+    #[test]
+    fn changed_file_scope_orders_families_by_file_set() {
+        let group = |files: [&str; 2], line_count: usize| CloneGroup {
+            instances: files
+                .iter()
+                .map(|file| CloneInstance {
+                    is_symlink: false,
+                    file: PathBuf::from(file),
+                    start_line: 1,
+                    end_line: line_count,
+                    start_col: 0,
+                    end_col: 10,
+                    fragment: String::new(),
+                })
+                .collect(),
+            token_count: line_count * 10,
+            line_count,
+            similarity: None,
+        };
+        let mut report = DuplicationReport {
+            clone_groups: vec![
+                group(["/repo/y.ts", "/repo/z.ts"], 46),
+                group(["/repo/a.ts", "/repo/b.ts"], 7),
+            ],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        };
+        let changed: FxHashSet<PathBuf> = ["/repo/a.ts", "/repo/y.ts"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+
+        filter_duplication_by_changed_files(&mut report, &changed, Path::new("/repo"));
+
+        let order: Vec<&PathBuf> = report
+            .clone_families
+            .iter()
+            .map(|family| &family.files[0])
+            .collect();
+        assert_eq!(
+            order,
+            [&PathBuf::from("/repo/a.ts"), &PathBuf::from("/repo/y.ts")]
+        );
     }
 
     /// The combined probe gives the same two paths as the two single probes,

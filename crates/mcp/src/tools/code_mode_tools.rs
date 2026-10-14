@@ -20,7 +20,8 @@ use super::super::{
     VALID_DUPES_MODES,
     api_runtime::{
         env_changed_since, env_diff_file, non_empty_path, non_empty_string,
-        programmatic_error_body, resolve_typed_coverage_inputs, workspace_patterns_from_param,
+        programmatic_error_body, resolve_typed_coverage_inputs, typed_api_value,
+        workspace_patterns_from_param,
     },
     build_analyze_args, build_architecture_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -285,7 +286,7 @@ fn api_route(tool: CodeModeTool) -> Option<ApiRoute> {
         }),
         CodeModeTool::TraceExport => Some(|params, cancellation| {
             let params: TraceExportParams = parse_params(params)?;
-            run_trace_export_api_value(&params, cancellation).map(Some)
+            run_trace_export_api_value(&params, cancellation)
         }),
         CodeModeTool::TraceFile => Some(|params, cancellation| {
             let params: TraceFileParams = parse_params(params)?;
@@ -565,11 +566,7 @@ fn run_combined_api_value(
 ) -> Result<Option<serde_json::Value>, String> {
     let mut options = combined_options_from_params(params)?;
     options.analysis.cancellation = cancellation;
-    let value = run_combined(&options)
-        .and_then(serialize_combined_programmatic_json)
-        .map_err(|err| programmatic_error_body(&err))?;
-
-    Ok(Some(value))
+    typed_api_value(run_combined(&options).and_then(serialize_combined_programmatic_json))
 }
 
 fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptions, String> {
@@ -958,6 +955,31 @@ mod tests {
             options.health_options.coverage_root.as_deref(),
             Some(std::path::Path::new("/ci/workspace"))
         );
+    }
+
+    /// Bare `fallow` runs type-aware analysis when the config turns it on.
+    /// The in-process route declines the call, so Code Mode runs the
+    /// subprocess.
+    #[test]
+    fn combined_declines_config_type_aware_analysis() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","main":"index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(project.path().join("index.ts"), "export const a = 1;\n")
+            .expect("write source");
+        crate::tools::api_runtime::write_type_aware_config(
+            project.path(),
+            r#"{"typeAware":{"enabled":true}}"#,
+        );
+        let params = CombinedParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            ..CombinedParams::default()
+        };
+        assert_eq!(run_combined_api_value(&params, None), Ok(None));
     }
 
     #[test]

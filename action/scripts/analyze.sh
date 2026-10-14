@@ -325,6 +325,8 @@ build_command_args() {
       [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
       [ -n "${INPUT_GATE:-}" ] && ARGS+=(--gate "$INPUT_GATE")
       [ "${INPUT_INCLUDE_ENTRY_EXPORTS:-}" = "true" ] && ARGS+=(--include-entry-exports)
+      [ -n "${INPUT_ONLY:-}" ] && ARGS+=(--only "$INPUT_ONLY")
+      [ -n "${INPUT_SKIP:-}" ] && ARGS+=(--skip "$INPUT_SKIP")
       ;;
     security)
       [ -n "${INPUT_SECURITY_GATE:-}" ] && ARGS+=(--gate "$INPUT_SECURITY_GATE")

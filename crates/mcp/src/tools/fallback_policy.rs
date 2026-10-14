@@ -85,6 +85,9 @@ mod tests {
             "dupes.rs",
             "health.rs",
         ];
+        // The typed route runs first and falls back only when `fallow_api`
+        // refuses with a code that `api_runtime::typed_error_needs_cli` names.
+        let refusal_cli_backed = ["trace.rs"];
 
         for entry in std::fs::read_dir(&tools_dir).expect("read tools dir") {
             let entry = entry.expect("read tools entry");
@@ -101,12 +104,21 @@ mod tests {
             let invokes_cli = invokes_cli_dispatch(&source);
             let is_unconditional = unconditional_cli_backed.contains(&file_name);
             let is_conditional = conditional_cli_backed.contains(&file_name);
+            let is_refusal = refusal_cli_backed.contains(&file_name);
 
             if invokes_cli {
                 assert!(
-                    is_unconditional || is_conditional,
+                    is_unconditional || is_conditional || is_refusal,
                     "{file_name} must be API-backed or added to the explicit CLI fallback policy"
                 );
+            }
+
+            if is_refusal {
+                assert!(
+                    source.contains("typed_tool_result"),
+                    "{file_name} must fall back only on a typed refusal"
+                );
+                continue;
             }
 
             if is_conditional {

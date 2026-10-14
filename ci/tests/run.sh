@@ -485,6 +485,21 @@ run_generated_gitlab_fixture() {
   )
 }
 
+# --- Audit forwards FALLOW_ONLY and FALLOW_SKIP (issue #3381) ---
+
+SELECTION_WORK="$RUNNER_TMP/audit-selection"
+mkdir -p "$SELECTION_WORK"
+run_generated_gitlab_fixture "$SELECTION_WORK" \
+  FALLOW_COMMAND=audit \
+  FALLOW_SKIP=dead-code,dupes >/dev/null
+SELECTION_ARGS=""
+while IFS= read -r -d '' arg; do
+  SELECTION_ARGS+="${arg} "
+done < "$SELECTION_WORK/fallow-analysis-args.bin"
+assert_contains "$SELECTION_ARGS" "audit " "audit selection: the command is audit"
+assert_contains "$SELECTION_ARGS" "--skip dead-code,dupes" "audit selection: FALLOW_SKIP reaches audit"
+rm -rf "$SELECTION_WORK"
+
 # --- Baseline staleness gate (issue #2673) ---
 
 STALE_WORK="$RUNNER_TMP/stale-baseline"
