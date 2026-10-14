@@ -251,6 +251,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The JSON `test_reach` object also adds `e2e_runner: true` when the project
   uses Playwright or Cypress. The human brief already said that these tests
   do not import files.
+- **A namespace that holds only types is now a type export.** TypeScript
+  emits no JavaScript for a namespace whose body has only interfaces, type
+  aliases, `declare` declarations, `import type` aliases and nested
+  namespaces of the same kind. Before, Fallow treated such a namespace as a
+  value export when it had no `declare` or `export type`. Examples are
+  `export namespace JSX { export interface Element {} }` and the same shape
+  with `module` or a dotted name such as `A.B.C`. Now:
+  - An unused one reports as `unused-type`, not as `unused-export`. The SARIF
+    rule id, the CodeClimate check name and fingerprint, the LSP diagnostic
+    and the MCP and audit output change with it.
+  - It is no longer an untested export in `health --coverage-gaps`, and it
+    leaves the `test_reach` section of the review brief.
+  - An existing `fallow-ignore-next-line unused-export` comment on such a
+    namespace no longer matches. The finding then reports as `unused-type`
+    and the comment as a stale suppression. Change the comment to
+    `unused-type`.
+  - Baselines that list such a namespace as an unused export can change.
+
+  A body with any other statement, exported or not, stays a value. A
+  `const enum` and a non-type `import X = A.B` alias also keep the namespace
+  a value. A namespace that merges with a function, class, enum or variable
+  of the same name stays a value too, so a value import of the merged name
+  keeps crediting it. The extraction and graph caches are versioned again, so
+  a warm cache does not keep the old classification.
 
 - **The MCP `trace_export` tool runs the CLI when type-aware analysis is
   on.** With `typeAware.enabled` in config or `FALLOW_TYPE_AWARE` set,

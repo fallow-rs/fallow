@@ -70,6 +70,18 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   local namespace cannot merge with an exported one. The body is still walked
   so imports referenced inside it keep their credit. `export namespace Foo`
   keeps recording one export with the inner declarations as members.
+- An `export namespace Foo` (or `module Foo`, or dotted `A.B.C`) export is
+  type-only when TypeScript emits no JavaScript for it.
+  `namespace_is_instantiated` in `crates/extract/src/visitor/declarations.rs`
+  applies the TypeScript rule: interfaces, type aliases, `declare`
+  declarations, `import type` aliases, empty bodies and nested non-instantiated
+  namespaces emit nothing. Any other statement, exported or not, makes it a
+  value. A `const enum` and a non-type import alias count as values, which
+  keeps the rule conservative. When such a namespace merges with a value
+  export of the same name in the file, its entry stays a value, because a
+  value import of the merged name must credit it. `is_type_only` is cached in
+  the extraction cache and in the persisted graph, so a change to this rule
+  bumps both `CACHE_VERSION` and `GRAPH_CACHE_VERSION`.
 - A template pipeline that records member accesses for an import binding must
   make narrowing safe structurally, not shape by shape. Namespace-import
   narrowing (and CSS module, enum, and class member crediting) trusts the

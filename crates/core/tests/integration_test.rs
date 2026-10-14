@@ -638,6 +638,8 @@ mod namespace_spy_call_member;
 mod node_modules_bin_path;
 #[path = "integration_test/pkg_utils_plugin.rs"]
 mod pkg_utils_plugin;
+#[path = "integration_test/type_only_namespace.rs"]
+mod type_only_namespace;
 #[path = "integration_test/vite_root_entries.rs"]
 mod vite_root_entries;
 #[path = "integration_test/vitest_script_config_arg.rs"]

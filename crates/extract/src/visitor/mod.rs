@@ -783,6 +783,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// Transient visitor state; never persisted.
     local_namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
+    /// Spans of exported namespaces that are type-only only because their
+    /// body emits no JavaScript (see `namespace_is_instantiated`). When such a
+    /// namespace merges with a value export of the same name, the merged
+    /// symbol is one runtime binding, so the namespace entry stays a value.
+    /// Transient visitor state; never persisted.
+    structural_type_only_namespace_spans: Vec<oxc_span::Span>,
     class_heritage: Vec<ClassHeritageInfo>,
     /// `(token_export_name, interface_name)` for `new InjectionToken<I>(...)`
     /// declarations imported from `@angular/core`. See issue #920.
@@ -3637,6 +3643,7 @@ impl ModuleInfoExtractor {
             self.collect_exported_factory_return_object_shapes();
         let type_member_types = self.collect_type_member_types();
         Self::deduplicate_local_type_declarations(&mut self.local_type_declarations);
+        self.keep_value_merged_namespaces_as_values();
         ModuleInfo {
             file_id,
             exports: self.exports.into(),

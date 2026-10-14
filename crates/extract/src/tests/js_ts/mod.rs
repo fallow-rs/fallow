@@ -20,4 +20,5 @@ mod reflective_object_uses;
 mod require_resolve;
 mod security_sources;
 mod signature_references;
+mod type_only_namespace;
 mod unused_bindings;

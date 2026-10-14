@@ -5,8 +5,8 @@
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrayPattern, BindingPattern, CallExpression, Declaration,
-    Expression, IdentifierReference, TSEnumMemberName, TSImportEqualsDeclaration,
-    TSModuleReference, VariableDeclarator,
+    Expression, IdentifierReference, Statement, TSEnumMemberName, TSImportEqualsDeclaration,
+    TSModuleReference, TSNamespaceDeclaration, TSNamespaceDeclarationBody, VariableDeclarator,
 };
 
 use crate::{
@@ -98,10 +98,16 @@ impl ModuleInfoExtractor {
                 self.extract_enum_declaration_export(enumd, is_type_only);
             }
             Declaration::TSNamespaceDeclaration(namespace) => {
+                let structurally_type_only =
+                    !is_type_only && !namespace.declare && !namespace_is_instantiated(namespace);
+                if structurally_type_only {
+                    self.structural_type_only_namespace_spans
+                        .push(namespace.id.span);
+                }
                 self.extract_module_declaration_export(
                     namespace.id.name.to_string(),
                     namespace.id.span,
-                    namespace.declare || is_type_only,
+                    is_type_only || namespace.declare || structurally_type_only,
                 );
             }
             Declaration::TSExternalModuleDeclaration(module) => {
@@ -235,6 +241,35 @@ impl ModuleInfoExtractor {
             deprecated: false,
             deprecated_reason: None,
         });
+    }
+
+    /// A namespace that holds only types still merges with a function, class,
+    /// enum, or variable of the same name into one runtime binding. Keep the
+    /// namespace entry a value in that case, so a value import of the merged
+    /// name credits it and it does not surface as a separate unused type.
+    pub(super) fn keep_value_merged_namespaces_as_values(&mut self) {
+        if self.structural_type_only_namespace_spans.is_empty() {
+            return;
+        }
+        let spans = std::mem::take(&mut self.structural_type_only_namespace_spans);
+        let merged_value_names: Vec<ExportName> = self
+            .exports
+            .iter()
+            .filter(|export| spans.contains(&export.span))
+            .filter(|namespace| {
+                self.exports.iter().any(|other| {
+                    !other.is_type_only
+                        && other.name == namespace.name
+                        && !spans.contains(&other.span)
+                })
+            })
+            .map(|namespace| namespace.name.clone())
+            .collect();
+        for export in &mut self.exports {
+            if spans.contains(&export.span) && merged_value_names.contains(&export.name) {
+                export.is_type_only = false;
+            }
+        }
     }
 
     fn extract_module_declaration_export(
@@ -627,5 +662,57 @@ impl ModuleInfoExtractor {
         self.handled_import_spans.insert(import_expr.span);
         self.structured_namespace_reference_spans
             .insert(target.span);
+    }
+}
+
+/// Whether a TypeScript namespace emits JavaScript, following the TypeScript
+/// rule for instantiated namespaces. A namespace that holds only interfaces,
+/// type aliases, ambient (`declare`) declarations, type-only imports and
+/// exports, and nested namespaces of the same kind emits nothing, so its name
+/// exists only in type space. Any other statement, exported or not, makes the
+/// namespace a runtime object. A `const enum` and a non-type import alias count
+/// as values here, which keeps the classification conservative.
+pub(super) fn namespace_is_instantiated(namespace: &TSNamespaceDeclaration<'_>) -> bool {
+    if namespace.declare {
+        return false;
+    }
+    match &namespace.body {
+        TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
+            namespace_is_instantiated(inner)
+        }
+        TSNamespaceDeclarationBody::TSModuleBlock(block) => {
+            !block.directives.is_empty() || block.body.iter().any(statement_is_instantiated)
+        }
+    }
+}
+
+fn statement_is_instantiated(statement: &Statement<'_>) -> bool {
+    match statement {
+        Statement::EmptyStatement(_) => false,
+        Statement::ExportDeclaration(export) => {
+            !export.export_kind().is_type() && declaration_is_instantiated(&export.declaration)
+        }
+        Statement::ExportNamedDeclaration(export) => !export.export_kind.is_type(),
+        Statement::ImportDeclaration(import) => !import.import_kind.is_type(),
+        _ => statement
+            .as_declaration()
+            .is_none_or(declaration_is_instantiated),
+    }
+}
+
+fn declaration_is_instantiated(declaration: &Declaration<'_>) -> bool {
+    match declaration {
+        Declaration::TSTypeAliasDeclaration(_)
+        | Declaration::TSInterfaceDeclaration(_)
+        | Declaration::TSGlobalDeclaration(_) => false,
+        Declaration::VariableDeclaration(var) => !var.declare,
+        Declaration::FunctionDeclaration(func) => !func.declare && func.body.is_some(),
+        Declaration::ClassDeclaration(class) => !class.declare,
+        Declaration::TSEnumDeclaration(enumd) => !enumd.declare,
+        Declaration::TSNamespaceDeclaration(namespace) => namespace_is_instantiated(namespace),
+        Declaration::TSExternalModuleDeclaration(module) => !module.declare,
+        Declaration::TSImportEqualsDeclaration(import_equals) => {
+            !import_equals.import_kind.is_type()
+        }
     }
 }

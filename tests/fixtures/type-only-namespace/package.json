@@ -1,0 +1,5 @@
+{
+  "name": "type-only-namespace",
+  "private": true,
+  "main": "src/index.ts"
+}
