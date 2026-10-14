@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A covering test that fails in the dry run of a restarted companion is a
     baseline failure. The mutant runs with its other covering tests and is a
     runtime error only when no covering test is left.
+  - The dry-run timeout of a restarted companion grows with the first
+    dry-run time and the worker count. It is at least the runner timeout. A
+    loaded host no longer turns the mutants of a restarted companion into
+    runtime errors.
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
 

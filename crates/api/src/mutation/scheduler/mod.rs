@@ -26,6 +26,9 @@ const WATCHDOG_GRACE_MS: u64 = 2000;
 const TIMEOUT_BASE_MS: u64 = 5000;
 /// The factor on the covering-test duration (section 8, the Stryker default).
 const TIMEOUT_FACTOR: f64 = 1.5;
+/// The factor on the first dry-run time, for each worker, in the dry-run
+/// timeout of a respawned companion.
+const RESPAWN_DRY_RUN_FACTOR: u32 = 2;
 
 /// One planned mutant, in rank order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +68,8 @@ pub struct ScheduleConfig {
     pub runner: RunnerRange,
     /// The number of companions that run mutants.
     pub concurrency: usize,
-    /// The timeout of `init` and `dry_run`.
+    /// The timeout of `init` and the first `dry_run`. It is also the minimum
+    /// dry-run timeout of a respawned companion.
     pub runner_timeout: Duration,
     /// The end of the time budget.
     pub deadline: Option<Instant>,
@@ -341,6 +345,7 @@ struct Worker<'a> {
     spawner: &'a dyn CompanionSpawner,
     config: &'a ScheduleConfig,
     dry_files: &'a [String],
+    dry_run_timeout: Duration,
     link: Option<Box<dyn CompanionLink>>,
     known_tests: FxHashSet<String>,
 }
@@ -355,11 +360,13 @@ impl<'a> Worker<'a> {
         spawner: &'a dyn CompanionSpawner,
         config: &'a ScheduleConfig,
         dry_files: &'a [String],
+        dry_run_timeout: Duration,
     ) -> Self {
         Self {
             spawner,
             config,
             dry_files,
+            dry_run_timeout,
             link: None,
             known_tests: FxHashSet::default(),
         }
@@ -408,7 +415,7 @@ impl<'a> Worker<'a> {
             let request = Request::DryRun {
                 test_files: self.dry_files.to_vec(),
             };
-            match link.request(&request, self.config.runner_timeout) {
+            match link.request(&request, self.dry_run_timeout) {
                 Ok(Response::DryRun(result)) => {
                     self.known_tests = result
                         .tests
@@ -525,6 +532,20 @@ impl<'a> Worker<'a> {
         let second = self.attempt(job, caps)?;
         Ok(second)
     }
+}
+
+/// The timeout of the dry run of a respawned companion: the first dry-run
+/// time times [`RESPAWN_DRY_RUN_FACTOR`] times the worker count, and at least
+/// `runner_timeout`. The first dry run has the host to itself, but a
+/// respawned companion shares it with each other worker.
+fn respawn_dry_run_timeout(
+    runner_timeout: Duration,
+    first_dry_run: Duration,
+    workers: usize,
+) -> Duration {
+    let workers = u32::try_from(workers).unwrap_or(u32::MAX);
+    let scaled = first_dry_run.saturating_mul(RESPAWN_DRY_RUN_FACTOR.saturating_mul(workers));
+    runner_timeout.max(scaled)
 }
 
 fn version_error(range: &RunnerRange, version: &str) -> ScheduleError {
@@ -785,11 +806,17 @@ struct Phase<'a> {
     spawner: &'a dyn CompanionSpawner,
     config: &'a ScheduleConfig,
     dry_files: &'a [String],
+    dry_run_timeout: Duration,
 }
 
 impl Phase<'_> {
     fn work(&self, primary: Option<Box<dyn CompanionLink>>, known: FxHashSet<String>) {
-        let mut worker = Worker::new(self.spawner, self.config, self.dry_files);
+        let mut worker = Worker::new(
+            self.spawner,
+            self.config,
+            self.dry_files,
+            self.dry_run_timeout,
+        );
         if let Some(link) = primary {
             worker.link = Some(link);
             worker.known_tests = known;
@@ -836,6 +863,8 @@ struct PhaseRunner<'a> {
     spawner: &'a dyn CompanionSpawner,
     config: &'a ScheduleConfig,
     caps: Capabilities,
+    /// The wall time of the first dry run.
+    first_dry_run: Duration,
 }
 
 /// A companion that already did its dry run, and the tests that passed in it.
@@ -861,6 +890,11 @@ fn run_phase(
         spawner: runner.spawner,
         config: runner.config,
         dry_files,
+        dry_run_timeout: respawn_dry_run_timeout(
+            runner.config.runner_timeout,
+            runner.first_dry_run,
+            workers,
+        ),
     };
     let mut primary = primary;
     std::thread::scope(|scope| {
@@ -1131,6 +1165,25 @@ fn retry_suspects(
     Ok(())
 }
 
+/// Sends the dry run on the first companion. A failure shuts it down.
+fn first_dry_run(
+    link: &mut Box<dyn CompanionLink>,
+    dry_files: &[String],
+    timeout: Duration,
+) -> Result<DryRunResult, ScheduleError> {
+    let request = Request::DryRun {
+        test_files: dry_files.to_vec(),
+    };
+    let Response::DryRun(dry) = setup_request(link, &request, timeout)? else {
+        link.shutdown();
+        return Err(setup_error(
+            "dry_run",
+            &LinkFault::Protocol("no dry_run_result".to_owned()),
+        ));
+    };
+    Ok(dry)
+}
+
 /// Runs the plan: dry run, mutant runs, and retries of survivors and
 /// timeouts.
 ///
@@ -1172,10 +1225,11 @@ pub fn run_schedule(
         undiscovered,
     } = start_primary(spawner, plan, config)?;
     outcome.issues.extend(undiscovered_issue(&undiscovered));
-    let runner = PhaseRunner {
+    let mut runner = PhaseRunner {
         spawner,
         config,
         caps: ready.capabilities,
+        first_dry_run: Duration::ZERO,
     };
     outcome.ready = Some(ready);
     outcome.timings.setup = started.elapsed();
@@ -1186,17 +1240,9 @@ pub fn run_schedule(
     }
 
     let dry_started = Instant::now();
-    let request = Request::DryRun {
-        test_files: dry_files.clone(),
-    };
-    let Response::DryRun(dry) = setup_request(&mut link, &request, config.runner_timeout)? else {
-        link.shutdown();
-        return Err(setup_error(
-            "dry_run",
-            &LinkFault::Protocol("no dry_run_result".to_owned()),
-        ));
-    };
+    let dry = first_dry_run(&mut link, &dry_files, config.runner_timeout)?;
     outcome.timings.dry_run = dry_started.elapsed();
+    runner.first_dry_run = outcome.timings.dry_run;
     let facts = match read_dry_run(plan, runner.caps, &dry) {
         Ok(facts) => facts,
         Err(error) => {

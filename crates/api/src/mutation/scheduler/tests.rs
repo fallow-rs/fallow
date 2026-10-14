@@ -11,12 +11,19 @@ struct FakeLink {
     script: Arc<Script>,
     log: Arc<Mutex<Vec<(usize, Request)>>>,
     waits: Arc<Mutex<Vec<Duration>>>,
+    respawn_dry_run: Option<Duration>,
 }
 
 impl CompanionLink for FakeLink {
     fn request(&mut self, request: &Request, timeout: Duration) -> Result<Response, LinkFault> {
         if let Ok(mut log) = self.log.lock() {
             log.push((self.index, request.clone()));
+        }
+        if let (Request::DryRun { .. }, Some(needed)) = (request, self.respawn_dry_run)
+            && self.index > 0
+            && timeout < needed
+        {
+            return Err(LinkFault::Timeout);
         }
         if let (Request::Run(_), Ok(mut waits)) = (request, self.waits.lock()) {
             waits.push(timeout);
@@ -34,6 +41,9 @@ struct FakeSpawner {
     /// The watchdog wait of each `run` request.
     waits: Arc<Mutex<Vec<Duration>>>,
     integrity: Option<String>,
+    /// The time that the dry run of a respawned companion needs. A shorter
+    /// timeout gives a watchdog timeout.
+    respawn_dry_run: Option<Duration>,
 }
 
 impl FakeSpawner {
@@ -46,6 +56,7 @@ impl FakeSpawner {
             log: Arc::new(Mutex::new(Vec::new())),
             waits: Arc::new(Mutex::new(Vec::new())),
             integrity: None,
+            respawn_dry_run: None,
         }
     }
 
@@ -83,6 +94,7 @@ impl CompanionSpawner for FakeSpawner {
             script: Arc::clone(&self.script),
             log: Arc::clone(&self.log),
             waits: Arc::clone(&self.waits),
+            respawn_dry_run: self.respawn_dry_run,
         }))
     }
 }
@@ -477,6 +489,57 @@ fn a_companion_exit_is_retried_once_in_a_new_companion() {
     assert_eq!(
         spawner.runs().iter().map(|run| run.0).collect::<Vec<_>>(),
         vec![0, 1]
+    );
+}
+
+#[test]
+fn the_dry_run_of_a_respawned_companion_waits_in_proportion_to_the_first_dry_run() {
+    // On a loaded host the dry run of a respawned companion takes longer than
+    // `runner_timeout`, although the first dry run took less.
+    let first_dry_run = Duration::from_millis(200);
+    let mut spawner = FakeSpawner::new(script(
+        move |index| {
+            if index == 0 {
+                std::thread::sleep(first_dry_run);
+            }
+            standard_dry()
+        },
+        |index, run| {
+            if index == 0 {
+                Err(LinkFault::Exited {
+                    stderr_tail: "segfault".to_owned(),
+                })
+            } else {
+                Ok(run_result(run, RunStatus::Killed, Some(&tid("t1"))))
+            }
+        },
+    ));
+    spawner.respawn_dry_run = Some(Duration::from_millis(300));
+    let config = ScheduleConfig {
+        runner_timeout: Duration::from_millis(50),
+        ..config(1)
+    };
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(spawner.requests_of(1), ["init", "dry_run", "run"]);
+}
+
+#[test]
+fn the_respawn_dry_run_timeout_is_at_least_the_runner_timeout() {
+    let floor = Duration::from_secs(120);
+    assert_eq!(
+        respawn_dry_run_timeout(floor, Duration::from_secs(10), 2),
+        floor,
+        "a fast first dry run keeps the runner timeout"
+    );
+    assert_eq!(
+        respawn_dry_run_timeout(floor, Duration::from_secs(26), 5),
+        Duration::from_secs(26 * 2 * 5),
+        "each worker shares the host, so the wait grows with the worker count"
+    );
+    assert_eq!(
+        respawn_dry_run_timeout(floor, Duration::MAX, usize::MAX),
+        Duration::MAX
     );
 }
 
