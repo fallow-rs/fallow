@@ -778,3 +778,100 @@ fn a_provenance_row_prunes_only_the_calls_of_its_import_source() {
         ])
     );
 }
+
+/// `(file, line, reach, export, mocked targets)` of a mutant.
+type ReachRow = (String, u32, String, Option<String>, Vec<String>);
+
+/// The test reach of each mutant that no rule prunes.
+fn reach_rows(plan: &MutationPlan) -> BTreeSet<ReachRow> {
+    plan.mutants
+        .iter()
+        .filter(|entry| !matches!(entry.disposition, MutantDisposition::Pruned(_)))
+        .map(|entry| {
+            let reach = entry
+                .test_reach
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has a test reach", entry.mutant.id.as_str()));
+            (
+                entry.file.clone(),
+                entry.mutant.line,
+                format!("{:?}", reach.reach),
+                reach.export_name.clone(),
+                reach.mocked_targets.clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn each_mutant_gets_the_test_reach_of_its_export_or_its_file() {
+    let plan = plan_all(&fixture("mutation-test-reach"));
+    let mocked = vec!["src/service.ts".to_owned()];
+    let row = |file: &str,
+               line: u32,
+               reach: ExportTestReach,
+               export: Option<&str>,
+               targets: &[String]| {
+        (
+            file.to_owned(),
+            line,
+            format!("{reach:?}"),
+            export.map(str::to_owned),
+            targets.to_vec(),
+        )
+    };
+    let expected: BTreeSet<ReachRow> = [
+        row(
+            "src/consumer.ts",
+            4,
+            ExportTestReach::Direct,
+            Some("total"),
+            &[],
+        ),
+        row(
+            "src/index.ts",
+            5,
+            ExportTestReach::NoneFile,
+            Some("main"),
+            &[],
+        ),
+        row("src/math.ts", 1, ExportTestReach::None, None, &[]),
+        row("src/math.ts", 4, ExportTestReach::Direct, Some("add"), &[]),
+        row(
+            "src/service.ts",
+            2,
+            ExportTestReach::MockedOnly,
+            None,
+            &mocked,
+        ),
+        row(
+            "src/service.ts",
+            6,
+            ExportTestReach::MockedOnly,
+            Some("price"),
+            &mocked,
+        ),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(reach_rows(&plan), expected);
+    assert!(
+        plan.mutants
+            .iter()
+            .filter(|entry| entry.file == "src/service.ts")
+            .all(|entry| entry.disposition == NO_COVERAGE)
+    );
+}
+
+#[test]
+fn a_project_without_tests_labels_each_mutant_none_file() {
+    let plan = plan_all(&fixture("mutation-plan-no-tests"));
+    assert!(!plan.mutants.is_empty());
+    assert!(plan.mutants.iter().all(|entry| {
+        matches!(entry.disposition, MutantDisposition::Pruned(_))
+            || entry
+                .test_reach
+                .as_ref()
+                .is_some_and(|reach| reach.reach == ExportTestReach::NoneFile)
+    }));
+}

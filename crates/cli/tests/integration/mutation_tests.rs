@@ -599,6 +599,21 @@ mod end_to_end {
             .map(|mutant| mutant["mutant_id"].as_str().expect("id").to_owned())
             .collect();
         assert!(!triple.is_empty(), "{full}");
+        for report in [&full, &capped] {
+            let reach: Vec<&serde_json::Value> = report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .filter(|mutant| mutant["function"] == "triple")
+                .map(|mutant| &mutant["test_reach"])
+                .collect();
+            assert!(
+                reach
+                    .iter()
+                    .all(|reach| reach["reach"] == "none" && reach["export_name"] == "triple"),
+                "a test loads the file, but no test references triple: {report}"
+            );
+        }
         let full_ids = no_coverage_ids(&full);
         assert!(
             triple.iter().all(|id| full_ids.contains(id)),

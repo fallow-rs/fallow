@@ -515,20 +515,42 @@ pub fn changed_exports_for_changed_paths(
         let Ok(source) = std::fs::read_to_string(&module.path) else {
             continue;
         };
-        let offsets = fallow_types::extract::compute_line_offsets(&source);
-        let starts: Vec<u32> = module
-            .exports
-            .iter()
-            .map(|export| export.span.start)
-            .collect();
-        let declarations =
-            crate::search_visibility::export_declarations(&module.path, &source, &starts);
-        let file = relative_key_path(&module.path, root);
-        for (export_index, export) in module.exports.iter().enumerate() {
+        changed_exports.extend(module_exports(graph, root, file_id, &source));
+    }
+    Some(changed_exports)
+}
+
+/// List the exports of one module with their declaration lines. `source` is
+/// the current text of the module. The exports keep graph order.
+pub(crate) fn module_exports(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_id: FileId,
+    source: &str,
+) -> Vec<ChangedExport> {
+    let Some(module) = graph.modules.get(file_id.0 as usize) else {
+        return Vec::new();
+    };
+    if module.exports.is_empty() {
+        return Vec::new();
+    }
+    let offsets = fallow_types::extract::compute_line_offsets(source);
+    let starts: Vec<u32> = module
+        .exports
+        .iter()
+        .map(|export| export.span.start)
+        .collect();
+    let declarations = crate::search_visibility::export_declarations(&module.path, source, &starts);
+    let file = relative_key_path(&module.path, root);
+    module
+        .exports
+        .iter()
+        .enumerate()
+        .map(|(export_index, export)| {
             let line =
                 fallow_types::extract::byte_offset_to_line_col(&offsets, export.span.start).0;
             let declaration = declarations.get(&export.span.start);
-            changed_exports.push(ChangedExport {
+            ChangedExport {
                 file_id,
                 export_index,
                 file: file.clone(),
@@ -538,10 +560,9 @@ pub fn changed_exports_for_changed_paths(
                 is_type_only: export.is_type_only,
                 literal_value: declaration.is_some_and(|found| found.literal_value),
                 is_re_export: declaration.is_some_and(|found| found.is_re_export),
-            });
-        }
-    }
-    Some(changed_exports)
+            }
+        })
+        .collect()
 }
 
 /// Compute the literal-search gaps of the changed exports.
@@ -639,7 +660,8 @@ pub fn search_gaps_for_changed_paths(
 const E2E_RUNNER_PACKAGES: &[&str] = &["@playwright/test", "playwright", "cypress"];
 
 /// How tests reach one export.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ExportTestReach {
     /// A test file references the export, and a test root covers it.
     Direct,
@@ -749,56 +771,10 @@ pub fn test_reach_for_changed_paths(
         })
     };
     let has_tests = !graph.test_entry_points.is_empty();
-    let mut exports = Vec::new();
-    for changed in changed_exports {
-        if changed.is_type_only || changed.is_re_export {
-            continue;
-        }
-        let Some(module) = graph.modules.get(changed.file_id.0 as usize) else {
-            continue;
-        };
-        let Some(export) = module.exports.get(changed.export_index) else {
-            continue;
-        };
-        if !is_reach_subject(&module.path) || is_test_file(changed.file_id) {
-            continue;
-        }
-        let result = if has_tests {
-            let test_flags: FxHashMap<FileId, bool> = export
-                .references
-                .iter()
-                .map(|reference| (reference.from_file, is_test_file(reference.from_file)))
-                .collect();
-            graph.export_test_reach(changed.file_id, export, &|file_id| {
-                test_flags.get(&file_id).copied().unwrap_or(false)
-            })
-        } else {
-            GraphExportTestReachResult {
-                reach: GraphExportTestReach::NoneFile,
-                tests: Vec::new(),
-                mocked_targets: Vec::new(),
-            }
-        };
-        let paths_of = |files: &[FileId]| -> Vec<String> {
-            let mut paths: Vec<String> = files
-                .iter()
-                .filter_map(|file_id| graph.modules.get(file_id.0 as usize))
-                .map(|node| relative_key_path(&node.path, root))
-                .collect();
-            paths.sort_unstable();
-            paths
-        };
-        exports.push(ExportTestReachPaths {
-            file: changed.file.clone(),
-            export_name: changed.export_name.clone(),
-            line: changed.line,
-            declaration_lines: changed.declaration_lines,
-            literal_value: changed.literal_value,
-            reach: result.reach.into(),
-            tests: paths_of(&result.tests),
-            mocked_targets: paths_of(&result.mocked_targets),
-        });
-    }
+    let exports: Vec<ExportTestReachPaths> = changed_exports
+        .iter()
+        .filter_map(|changed| classify_export_test_reach(graph, root, changed, &mut is_test_file))
+        .collect();
     if exports.is_empty() {
         return None;
     }
@@ -810,6 +786,61 @@ pub fn test_reach_for_changed_paths(
         masking: graph.test_masking_state().into(),
         has_e2e_runner,
         exports,
+    })
+}
+
+/// Classify how tests reach one export. `None` for a type-only export, a
+/// re-export, an export of a test file, of a declaration file or of a
+/// stylesheet. `is_test_file` decides which referencing files are tests. In a
+/// project with no test entry points, the class is `NoneFile`.
+pub(crate) fn classify_export_test_reach(
+    graph: &ModuleGraph,
+    root: &Path,
+    changed: &ChangedExport,
+    is_test_file: &mut dyn FnMut(FileId) -> bool,
+) -> Option<ExportTestReachPaths> {
+    if changed.is_type_only || changed.is_re_export {
+        return None;
+    }
+    let module = graph.modules.get(changed.file_id.0 as usize)?;
+    let export = module.exports.get(changed.export_index)?;
+    if !is_reach_subject(&module.path) || is_test_file(changed.file_id) {
+        return None;
+    }
+    let result = if graph.test_entry_points.is_empty() {
+        GraphExportTestReachResult {
+            reach: GraphExportTestReach::NoneFile,
+            tests: Vec::new(),
+            mocked_targets: Vec::new(),
+        }
+    } else {
+        let test_flags: FxHashMap<FileId, bool> = export
+            .references
+            .iter()
+            .map(|reference| (reference.from_file, is_test_file(reference.from_file)))
+            .collect();
+        graph.export_test_reach(changed.file_id, export, &|file_id| {
+            test_flags.get(&file_id).copied().unwrap_or(false)
+        })
+    };
+    let paths_of = |files: &[FileId]| -> Vec<String> {
+        let mut paths: Vec<String> = files
+            .iter()
+            .filter_map(|file_id| graph.modules.get(file_id.0 as usize))
+            .map(|node| relative_key_path(&node.path, root))
+            .collect();
+        paths.sort_unstable();
+        paths
+    };
+    Some(ExportTestReachPaths {
+        file: changed.file.clone(),
+        export_name: changed.export_name.clone(),
+        line: changed.line,
+        declaration_lines: changed.declaration_lines,
+        literal_value: changed.literal_value,
+        reach: result.reach.into(),
+        tests: paths_of(&result.tests),
+        mocked_targets: paths_of(&result.mocked_targets),
     })
 }
 

@@ -13,7 +13,7 @@ use colored::Colorize as _;
 use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
     MutationInspectStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
-    MutationScopeKind, MutationScopeOutput, MutationStaleReason,
+    MutationScopeKind, MutationScopeOutput, MutationStaleReason, TestReachClass,
 };
 use rustc_hash::FxHashMap;
 
@@ -372,21 +372,36 @@ fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&Cod
     }
 }
 
-/// The no-coverage section: one line per file with its count, the files
-/// with the most mutants first, capped. The full list is in the JSON report.
+/// The no-coverage section: one line per file with its count and the counts
+/// by test reach class, the files with the most mutants first, capped. The
+/// full list is in the JSON report.
 fn render_no_coverage(out: &mut String, report: &MutationReport) {
-    let mut files: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut files: BTreeMap<&str, Vec<&MutantResult>> = BTreeMap::new();
     for mutant in report
         .mutants
         .iter()
         .filter(|mutant| mutant.status == MutantStatus::NoCoverage)
     {
-        *files.entry(mutant.location.file.as_str()).or_default() += 1;
+        files
+            .entry(mutant.location.file.as_str())
+            .or_default()
+            .push(mutant);
     }
     if files.is_empty() {
         return;
     }
-    let mut files: Vec<(&str, usize)> = files.into_iter().collect();
+    let mut files: Vec<(&str, usize, String)> = files
+        .into_iter()
+        .map(|(file, mutants)| {
+            let reach = reach_counts(
+                mutants
+                    .iter()
+                    .filter_map(|mutant| mutant.test_reach.as_ref())
+                    .map(|reach| reach.reach),
+            );
+            (file, mutants.len(), reach)
+        })
+        .collect();
     files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     let _ = writeln!(
         out,
@@ -397,10 +412,15 @@ fn render_no_coverage(out: &mut String, report: &MutationReport) {
             Level::Warn
         )
     );
-    for (file, count) in files.iter().take(MAX_NO_COVERAGE_FILES) {
+    for (file, count, reach) in files.iter().take(MAX_NO_COVERAGE_FILES) {
+        let reach = if reach.is_empty() {
+            String::new()
+        } else {
+            format!("  {}", format!("test reach: {reach}").dimmed())
+        };
         let _ = writeln!(
             out,
-            "  {}  {count} {}",
+            "  {}  {count} {}{reach}",
             format_path(file),
             plural(*count, "mutant", "mutants")
         );
@@ -408,6 +428,31 @@ fn render_no_coverage(out: &mut String, report: &MutationReport) {
     let hidden = files.len().saturating_sub(MAX_NO_COVERAGE_FILES);
     if hidden > 0 {
         let _ = writeln!(out, "{}", more_line(hidden, "file", "files"));
+    }
+}
+
+/// The test reach classes with their counts, in the order of
+/// [`TestReachClass`]: `2 mocked-only, 1 none-file`.
+fn reach_counts(classes: impl Iterator<Item = TestReachClass>) -> String {
+    let mut counts: BTreeMap<TestReachClass, usize> = BTreeMap::new();
+    for class in classes {
+        *counts.entry(class).or_default() += 1;
+    }
+    counts
+        .iter()
+        .map(|(class, count)| format!("{count} {}", reach_label(*class)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+const fn reach_label(class: TestReachClass) -> &'static str {
+    match class {
+        TestReachClass::MockedOnly => "mocked-only",
+        TestReachClass::None => "none",
+        TestReachClass::NoneFile => "none-file",
+        TestReachClass::Transitive => "transitive",
+        TestReachClass::Direct => "direct",
+        TestReachClass::Framework => "framework",
     }
 }
 
@@ -627,6 +672,16 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
     );
     if !pruned_by_reason.is_empty() {
         let _ = writeln!(out, "Pruned: {pruned_by_reason}");
+    }
+    let no_coverage_reach = reach_counts(
+        plan.mutants
+            .iter()
+            .filter(|mutant| mutant.disposition == MutationPlanDisposition::NoCoverage)
+            .filter_map(|mutant| mutant.test_reach.as_ref())
+            .map(|reach| reach.reach),
+    );
+    if !plan.no_test_files && !no_coverage_reach.is_empty() {
+        let _ = writeln!(out, "No coverage by test reach: {no_coverage_reach}");
     }
     let planned: Vec<_> = plan
         .mutants

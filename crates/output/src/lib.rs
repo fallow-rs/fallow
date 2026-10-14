@@ -307,8 +307,8 @@ pub use list_envelopes::{
 };
 pub use mutation::{
     MUTATION_INSPECT_SCHEMA_VERSION, MUTATION_PLAN_SCHEMA_VERSION, MUTATION_SCHEMA_VERSION,
-    MutantLocation, MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
-    MutationCompletionStatus, MutationFunctionResult, MutationIncompleteReason,
+    MutantLocation, MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure,
+    MutationCompletion, MutationCompletionStatus, MutationFunctionResult, MutationIncompleteReason,
     MutationInspectCode, MutationInspectOutput, MutationInspectSchemaVersion,
     MutationInspectStatus, MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile,
     MutationPlanMutant, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,

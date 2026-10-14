@@ -32,7 +32,7 @@ pub use fallow_mutation::{
 pub use fallow_output::DiffIndex;
 
 use crate::EngineError;
-use crate::module_graph::RetainedModuleGraph;
+use crate::module_graph::{ExportTestReach, RetainedModuleGraph};
 use crate::session::AnalysisSession;
 use crate::source::ModuleInfo;
 use fallow_types::results::AnalysisResults;
@@ -189,6 +189,30 @@ pub struct PlannedMutant {
     pub disposition: MutantDisposition,
     /// The function that contains the mutant.
     pub function: Option<FunctionFacts>,
+    /// How tests reach the code of the mutant in the module graph. `None`
+    /// for a pruned mutant.
+    pub test_reach: Option<MutantTestReach>,
+}
+
+/// How tests reach the code of one mutant, from the module graph.
+///
+/// A mutant in the top-level statement that declares a value export gets the
+/// class of that export. A mutant outside each such statement gets the class
+/// of its file: `none-file` when no test loads the file, `mocked-only` when no
+/// test loads the file and a mock explains an export of the file, and `none`
+/// when a test loads the file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MutantTestReach {
+    /// The reach class.
+    pub reach: ExportTestReach,
+    /// The export whose declaration holds the mutant. `None` for a mutant
+    /// outside each value export declaration.
+    pub export_name: Option<String>,
+    /// For `mocked-only`: the test files whose references a mock removed,
+    /// sorted.
+    pub tests: Vec<String>,
+    /// For `mocked-only`: the mocked modules on the reference paths, sorted.
+    pub mocked_targets: Vec<String>,
 }
 
 /// One file that the runner loads in its instrumented form.

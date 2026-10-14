@@ -33,7 +33,11 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "return-value",
       "function": "add",
       "function_line": 1,
-      "disposition": "no_coverage"
+      "disposition": "no_coverage",
+      "test_reach": {
+        "reach": "none-file",
+        "export_name": "add"
+      }
     },
     {
       "mutant_id": "3fc446a8dd3213b8",
@@ -47,7 +51,11 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "arithmetic-operator",
       "function": "add",
       "function_line": 1,
-      "disposition": "no_coverage"
+      "disposition": "no_coverage",
+      "test_reach": {
+        "reach": "none-file",
+        "export_name": "add"
+      }
     },
     {
       "mutant_id": "2738a05b79088e86",
@@ -61,7 +69,11 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "return-value",
       "function": "isPositive",
       "function_line": 5,
-      "disposition": "no_coverage"
+      "disposition": "no_coverage",
+      "test_reach": {
+        "reach": "none-file",
+        "export_name": "isPositive"
+      }
     },
     {
       "mutant_id": "5421493beb3910ac",
@@ -75,7 +87,11 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "relational-operator",
       "function": "isPositive",
       "function_line": 5,
-      "disposition": "no_coverage"
+      "disposition": "no_coverage",
+      "test_reach": {
+        "reach": "none-file",
+        "export_name": "isPositive"
+      }
     },
     {
       "mutant_id": "6dc3c6f031114a55",
@@ -89,7 +105,11 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "relational-operator",
       "function": "isPositive",
       "function_line": 5,
-      "disposition": "no_coverage"
+      "disposition": "no_coverage",
+      "test_reach": {
+        "reach": "none-file",
+        "export_name": "isPositive"
+      }
     },
     {
       "mutant_id": "a95119edeb1e9ac4",
@@ -103,7 +123,11 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
       "operator": "relational-operator",
       "function": "isPositive",
       "function_line": 5,
-      "disposition": "no_coverage"
+      "disposition": "no_coverage",
+      "test_reach": {
+        "reach": "none-file",
+        "export_name": "isPositive"
+      }
     }
   ],
   "files": [],
