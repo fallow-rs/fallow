@@ -1,0 +1,8 @@
+{
+  "name": "fallow-mutation-runner-bun-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  }
+}

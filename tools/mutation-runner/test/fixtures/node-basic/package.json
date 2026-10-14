@@ -1,0 +1,8 @@
+{
+  "name": "fallow-mutation-runner-node-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

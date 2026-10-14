@@ -1,105 +1,37 @@
 // Generated from tools/mutation-runner/src/adapters/vitest.mjs. Do not edit.
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { RUNNERS } from "../generated-protocol.mjs";
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
+import {
+  TEST_ID_SEPARATOR,
+  attributeHits,
+  buildOverlay,
+  byCodeUnit,
+  dryRunResult,
+  errorMessage,
+  hasRun,
+  isSupportedVersion,
+  parseVersion,
+  realPath,
+  runResult,
+  toPosix,
+  uniqueNames,
+  validateDryRun,
+  validateInit,
+  validateRun,
+} from "./common.mjs";
 
 const RUNNER_NAME = "vitest";
 const ACTIVE_MUTANT_KEY = "fallowActiveMutant";
-const TEST_ID_SEPARATOR = "::";
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
 const TIMEOUT_MESSAGE = /\b(?:Test|Hook) timed out in \d+ms/u;
 const OVERLAY_PLUGIN = "fallow-mutation-overlay";
 
-const toPosix = (path) => path.split(sep).join("/");
-
-/** Compares two strings by UTF-16 code unit, independent of the host locale. */
-const byCodeUnit = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
-
 /** Keys a test module by its project, because two projects can include one file. */
 const moduleKey = (project, moduleId) => `${project.name}\0${moduleId}`;
-
-const realPath = (path) => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-};
-
-const isInside = (parent, child) => {
-  const rel = relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-};
-
-const isAbsolutePath = (value) => typeof value === "string" && isAbsolute(value);
-
-const isStringList = (value) =>
-  Array.isArray(value) && value.every((entry) => typeof entry === "string");
-
-const isNonEmptyStringList = (value) => isStringList(value) && value.length > 0;
-
-const isStringMap = (value) =>
-  isPlainObject(value) && Object.values(value).every((entry) => typeof entry === "string");
-
-const isOptional = (value, check) => value === undefined || check(value);
-
-const isOptionalPath = (value) =>
-  value === undefined || value === null || typeof value === "string";
-
-const isPositiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
-
-const parseVersion = (version) => {
-  const match = /^(\d+)\.(\d+)\.(\d+)/u.exec(version);
-  return match ? match.slice(1, 4).map(Number) : null;
-};
-
-const compareVersions = (left, right) => {
-  for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] - right[index];
-  }
-  return 0;
-};
-
-const isSupportedVersion = (version) => {
-  const runner = RUNNERS.find((entry) => entry.name === RUNNER_NAME);
-  const parsed = parseVersion(version);
-  return (
-    parsed !== null &&
-    compareVersions(parsed, parseVersion(runner.min_version)) >= 0 &&
-    compareVersions(parsed, parseVersion(runner.max_version_exclusive)) < 0
-  );
-};
-
-const validateInit = (init) => {
-  expectRequest(isAbsolutePath(init.root), "root must be absolute");
-  expectRequest(isAbsolutePath(init.run_dir), "run_dir must be absolute");
-  expectRequest(isOptionalPath(init.config_path), "config_path must be a string or null");
-  expectRequest(isPlainObject(init.path_map), "path_map must be an object");
-  const options = init.options ?? {};
-  expectRequest(
-    isOptional(options.test_files, isStringList),
-    "options.test_files must be a list of paths",
-  );
-  expectRequest(isOptional(options.env, isStringMap), "options.env must map names to strings");
-};
-
-const validateDryRun = (request) => {
-  expectRequest(isOptional(request.test_files, isStringList), "test_files must be a list of paths");
-};
-
-const validateRun = (request) => {
-  expectRequest(
-    typeof request.mutant_id === "string" && request.mutant_id.length > 0,
-    "mutant_id must be a string",
-  );
-  expectRequest(isNonEmptyStringList(request.test_ids), "test_ids must be a non-empty list");
-  expectRequest(isPositiveInteger(request.timeout_ms), "timeout_ms must be a positive integer");
-  expectRequest(typeof request.bail === "boolean", "bail must be a boolean");
-};
 
 const resolvePackage = (projectRequire, root) => {
   try {
@@ -113,7 +45,7 @@ const resolvePackage = (projectRequire, root) => {
 const loadProjectVitest = async (root) => {
   const projectRequire = createRequire(join(root, "package.json"));
   const { version } = JSON.parse(readFileSync(resolvePackage(projectRequire, root), "utf8"));
-  if (!isSupportedVersion(version)) {
+  if (!isSupportedVersion(RUNNER_NAME, version)) {
     throw new CompanionError("runner-version", `vitest ${version} is not supported`);
   }
   try {
@@ -122,25 +54,6 @@ const loadProjectVitest = async (root) => {
   } catch (error) {
     throw new CompanionError("runner-load-failed", `cannot import vitest/node: ${error.message}`);
   }
-};
-
-/**
- * Maps the real path of each project source file to its instrumented copy in
- * the run directory. The comparison uses real paths, so a symlink cannot
- * select a file outside the map.
- */
-const buildOverlay = (root, runDir, pathMap) => {
-  const realRunDir = realPath(runDir);
-  const overlay = new Map();
-  for (const [source, target] of Object.entries(pathMap)) {
-    expectRequest(typeof target === "string", `path_map value for ${source} must be a string`);
-    const sourcePath = resolve(root, source);
-    const targetPath = realPath(resolve(runDir, target));
-    expectRequest(isInside(root, sourcePath), `path_map key ${source} is outside root`);
-    expectRequest(isInside(realRunDir, targetPath), `path_map value ${target} is outside run_dir`);
-    overlay.set(realPath(sourcePath), { source, target: targetPath });
-  }
-  return overlay;
 };
 
 const readSourceMap = (path) => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null);
@@ -225,13 +138,8 @@ const STATUS_BY_STATE = {
 /** Gives the status of a test, or null for a test that did not finish. */
 const testStatus = (testCase) => STATUS_BY_STATE[testCase.result().state]?.(testCase) ?? null;
 
-/** True for a test that ran to a result. A skipped or cancelled test did not run. */
-const hasRun = (status) => status === "pass" || status === "fail";
-
 const isConcurrent = (testCase) =>
   testCase.options.concurrent === true || testCase.project.config.sequence?.concurrent === true;
-
-const errorMessage = (error) => String(error?.message ?? error);
 
 const failureKind = (testCase) => {
   const errors = testCase.result().errors ?? [];
@@ -477,16 +385,6 @@ const modulesOfRun = (testModules, specifications) => {
     .toSorted((left, right) => position(left) - position(right));
 };
 
-/** Names each test of a module. A repeated full name gets a ` (n)` suffix. */
-const uniqueTestNames = (testCases) => {
-  const seen = new Map();
-  return testCases.map((testCase) => {
-    const count = (seen.get(testCase.fullName) ?? 0) + 1;
-    seen.set(testCase.fullName, count);
-    return count === 1 ? testCase.fullName : `${testCase.fullName} (${count})`;
-  });
-};
-
 const metaList = (meta, key) => (Array.isArray(meta[key]) ? meta[key] : []);
 
 const testLine = (testCase) => testCase.location?.line ?? null;
@@ -514,23 +412,15 @@ const moduleSetupMs = (testModule, entries) => {
   return Math.max(0, total - tests);
 };
 
-/** Rounds each value of a map up to a whole millisecond, with the keys sorted. */
-const roundedByKey = (values) =>
-  Object.fromEntries(
-    Object.keys(values)
-      .toSorted(byCodeUnit)
-      .map((key) => [key, Math.ceil(values[key])]),
-  );
-
 /** Reads each test of one dry-run module with its hits and its report entry. */
 const readDryRunTests = (testModule, file, prefix) => {
   const testCases = [...testModule.children.allTests()];
-  const names = uniqueTestNames(testCases);
+  const names = uniqueNames(testCases.map((testCase) => testCase.fullName));
   return testCases.map((testCase, index) => {
     const meta = testCase.meta();
     return {
       taskId: testCase.id,
-      concurrent: isConcurrent(testCase),
+      shared: isConcurrent(testCase),
       hits: metaList(meta, "fallowHits"),
       staticHits: metaList(meta, "fallowStaticHits"),
       report: {
@@ -543,22 +433,6 @@ const readDryRunTests = (testModule, file, prefix) => {
       },
     };
   });
-};
-
-/**
- * Gives the hits of each test that ran, as `[test_id, hits]` pairs.
- * Concurrent tests overlap, so a hit cannot name its test. Each test that ran
- * in such a file gets the union of the file hits. The scheduler then runs a
- * mutant against every test of the file that can kill it.
- */
-const attributeHits = (entries) => {
-  const ran = entries.filter((entry) => hasRun(entry.report.status));
-  const shared = entries.some((entry) => entry.concurrent)
-    ? [...new Set(ran.flatMap((entry) => entry.hits))].toSorted()
-    : null;
-  return ran
-    .map((entry) => [entry.report.test_id, shared ?? [...entry.hits].toSorted()])
-    .filter(([, hits]) => hits.length > 0);
 };
 
 /** Gives the report entry of one test of a run, or no entry when it did not run. */
@@ -577,31 +451,15 @@ const collectRunTests = (testModules, testIdByTask) =>
     ),
   );
 
-const failureStatus = (failure) => (failure.failure_kind === "timeout" ? "timeout" : "killed");
-
-/**
- * Gives the status of a run. An error outside a test fails the Vitest run, so
- * the mutant is detected. Zero executed tests, or fewer than requested with
- * no failure, is a fault of the run and never evidence that the mutant
- * survived.
- */
-const runStatus = (tests, errors, requestedCount) => {
-  const firstFailure = tests.find((test) => test.status === "fail");
-  if (firstFailure !== undefined) return failureStatus(firstFailure);
-  if (errors.length > 0) return "killed";
-  return tests.length === requestedCount ? "survived" : "runtime_error";
-};
-
 /**
  * Creates the Vitest adapter for an `init` request. It starts one Vitest
  * instance with no file parallelism and one worker, and keeps the project
  * `isolate` setting.
  *
  * The companion reads this export from the `import()` namespace that
- * `loadAdapter` returns. Fallow 3.32 does not follow that return, so the
- * next line keeps the export out of the unused-export findings.
+ * `loadAdapter` returns. The `ignoreExports` entry of the Fallow config
+ * keeps it out of the unused-export and duplicate-export findings.
  */
-// fallow-ignore-next-line unused-export
 export const createAdapter = async (init) => {
   validateInit(init);
   const root = resolve(init.root);
@@ -677,17 +535,13 @@ export const createAdapter = async (init) => {
       const file = fileByModule.get(moduleKey(testModule.project, testModule.moduleId));
       recordDryRunModule(testModule, file, summary);
     }
-    return {
-      duration_ms: Math.round(performance.now() - started),
-      tests: summary.tests,
-      hits: summary.hits,
-      static_hits: [...summary.staticHits].toSorted(),
-      file_setup_ms: roundedByKey(summary.setup),
-      unhandled_errors: runErrors(result, root),
-      unloaded_paths: Object.keys(init.path_map)
-        .filter((path) => !loaded.has(path))
-        .toSorted(),
-    };
+    return dryRunResult({
+      started,
+      summary,
+      errors: runErrors(result, root),
+      pathMap: init.path_map,
+      loaded,
+    });
   };
 
   /** Groups the requested tests into one specification for each test module. */
@@ -719,23 +573,13 @@ export const createAdapter = async (init) => {
       bail: request.bail,
       timeoutMs: request.timeout_ms,
     });
-    const tests = collectRunTests(result.testModules, testIdByTask);
-    const errors = runErrors(result, root);
-    const status = runStatus(tests, errors, requested.length);
-    return {
-      mutant_id: request.mutant_id,
-      status,
-      // With no failing test, a kill comes from an error outside a test, so
-      // no test is the killer.
-      killed_by:
-        status === "killed"
-          ? (tests.find((test) => test.status === "fail")?.test_id ?? null)
-          : null,
-      duration_ms: Math.round(performance.now() - started),
-      tests_executed: tests.length,
-      tests,
-      unhandled_errors: errors,
-    };
+    return runResult({
+      mutantId: request.mutant_id,
+      tests: collectRunTests(result.testModules, testIdByTask),
+      errors: runErrors(result, root),
+      requestedCount: requested.length,
+      durationMs: performance.now() - started,
+    });
   };
 
   return {

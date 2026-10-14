@@ -271,6 +271,63 @@ mutant. Their results decide no mutant status.
   companion that hangs in its dry run can extend the run past the budget.
 - A baseline failure makes the completion `partial` (`baseline-failure`).
 
+## Runners
+
+The companion has three runner adapters. The `mutation.runner` config key
+selects one. The default `auto` reads the project in this order:
+
+1. `vitest` in the root `package.json` dependencies selects Vitest.
+2. Otherwise the test module that the most static test files import:
+   `vitest`, `bun:test` or `node:test`. A tie goes to Vitest, then
+   `bun test`.
+3. Otherwise a `bunfig.toml`, `bun.lock` or `bun.lockb` at the root selects
+   `bun test`.
+4. Otherwise a `node --test` command in a `package.json` script selects
+   `node:test`.
+5. Otherwise Vitest.
+
+| Runner | Config value | Versions | Runtime of the companion |
+|---|---|---|---|
+| Vitest | `vitest` | 4 and 5 | `node`, then `bun` |
+| `node:test` | `node-test` | Node.js 22.18 to 26 | `node` |
+| `bun test` | `bun-test` | Bun 1.3 and later 1.x releases | `bun` |
+
+`--runtime` must name a runtime that the runner accepts. A Bun runtime for
+`node-test`, or a Node runtime for `bun-test`, exits with code 2 and
+`FALLOW_MUTATION_RUNTIME_NOT_FOUND`.
+
+### `node:test` and `bun test`
+
+- Each dry run and each mutant run starts one test process for each test
+  file. The `node:test` adapter uses `run()` of `node:test` with process
+  isolation. The `bun test` adapter starts `bun test` with a JUnit report.
+- A preload file serves the instrumented files. `node:test` uses a
+  synchronous module hook (`module.registerHooks`), so `import` and
+  `require` both get the instrumented file. Node strips the types of a
+  TypeScript file. `bun test` uses a `Bun.plugin` load hook.
+- The test files are the files that the default patterns of the runner
+  match, without `node_modules` and `.git`. A static test file that the
+  patterns do not match is not run, and the report says so.
+- A test id is `<file>::<suite> > <test>`, as for Vitest.
+- `node:test` reports the hits of a test in a test diagnostic. Bun hooks get
+  no test context, so the `bun test` adapter joins the hits to the JUnit
+  results by order. When the order is not safe, each test that ran in the
+  file gets the hits of the file: tests that overlap (`concurrency` in
+  `node:test`, `test.concurrent` in Bun), a count that differs, or
+  `randomize = true` in `bunfig.toml`. The scheduler then runs a mutant
+  against each test of the file that can kill it.
+- A run selects the requested tests with a name pattern. Each whitespace
+  run in the pattern matches any whitespace, because a Node test process
+  matches a name without its trailing whitespace.
+- With `bail`, a run stops the test process at the first failure. Node 22
+  applies the run timeout to the whole test file process. A requested test
+  with no result after that timeout counts as a timeout.
+- Bun 1.3 gives each failed test the JUnit type `AssertionError`, so the
+  `failure_kind` of a run on Bun 1.3 is `assertion`, also for a runtime
+  error. The status does not change.
+- The in-process mode of `node:test` (`isolation: "none"`) is not
+  supported.
+
 ## Runner notes
 
 `runner.notes` lists facts of the runner setup that limit the result. The key
@@ -533,7 +590,8 @@ reads files only. It runs no test.
 }
 ```
 
-- `runner` is `auto` or `vitest`. Version 1 runs Vitest 4 and 5.
+- `runner` is `auto`, `vitest`, `node-test` or `bun-test`. See
+  [Runners](#runners).
 - `operators`, `minScore` and `concurrency` apply to each run. A CLI flag wins.
 - `typecheck: true` turns on the survivor type check for each run.
   `--typecheck` turns it on for one run. No flag turns it off.
@@ -558,7 +616,8 @@ reads files only. It runs no test.
 | CLI adapter, human output, inspect | `crates/cli/src/mutation_cli.rs`, `mutation_human.rs`, `mutation_inspect.rs` |
 | Health join | `crates/cli/src/health/mutation_report.rs`, `crates/output/src/health_mutation.rs` |
 | MCP plan and inspect tools | `crates/mcp/src/tools/mutation.rs` |
-| Node companion | `tools/mutation-runner` |
+| Node companion and runner adapters | `tools/mutation-runner` |
+| Runner selection | `crates/api/src/mutation/runner_select.rs` |
 
 ## Tests
 
@@ -572,3 +631,8 @@ reads files only. It runs no test.
   `tools/type-aware-sidecar`.
 - `node --test test/mutant-typecheck.test.mjs` in `tools/type-aware-sidecar`
   tests the companion side of the type check.
+- The `node:test` end-to-end test needs a supported `node` on `PATH`, and
+  the `bun test` end-to-end test needs a supported `bun`. Without it, the
+  test prints a skip message and passes.
+- `npm test` in `tools/mutation-runner` runs the companion suites. The
+  `bun test` suite is skipped when `bun` is not on `PATH`.

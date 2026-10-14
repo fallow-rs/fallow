@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow mutation` measures how well the tests detect code changes.** The
   command makes small changes (mutants) in the changed code and runs the
-  Vitest tests of the project against each one. A mutant that no test fails
+  tests of the project against each one. A mutant that no test fails
   on survives. The report gives the mutation score over the tested mutants,
   the survivors by file with their covering tests, and the share of mutants
   that a test reaches.
@@ -88,6 +88,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The `regex-literal` operator changes one token of a regular expression
     literal. It removes a `^` or `$` anchor, negates a character class, or
     gives `\d`, `\w` or `\s` the opposite case.
+  - The runner is Vitest 4 or 5, `node:test` of Node.js 22.18 or later, or
+    `bun test` of Bun 1.3 or later. `mutation.runner` selects one
+    (`vitest`, `node-test` or `bun-test`). The default `auto` detects it
+    from the `vitest` dependency, the test module that the test files
+    import, a Bun file at the root, or a `node --test` script. `node:test`
+    and `bun test` run each test file in its own process. (#3407)
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /

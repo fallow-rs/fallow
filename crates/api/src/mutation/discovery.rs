@@ -51,9 +51,13 @@ fn executable_names(base: &str) -> Vec<String> {
     }
 }
 
-/// Finds `node`, then `bun`, in the directories of `search_path`.
-pub fn find_on_path(search_path: &OsStr) -> Option<(RuntimeKind, PathBuf)> {
-    for kind in [RuntimeKind::Node, RuntimeKind::Bun] {
+/// Finds the first of `kinds`, in that order, in the directories of
+/// `search_path`.
+pub fn find_kinds_on_path(
+    search_path: &OsStr,
+    kinds: &[RuntimeKind],
+) -> Option<(RuntimeKind, PathBuf)> {
+    for &kind in kinds {
         for directory in std::env::split_paths(search_path) {
             if directory.as_os_str().is_empty() || !directory.is_absolute() {
                 continue;
@@ -89,33 +93,59 @@ fn version_of(path: &Path) -> Result<String, String> {
     Ok(version)
 }
 
-/// Resolves the runtime: `explicit` when given, otherwise `node` or `bun`
-/// from `PATH`.
+/// Resolves the runtime: `explicit` when given, otherwise the first of
+/// `kinds` from `PATH`. An explicit runtime of a kind outside `kinds` is an
+/// error, because the runner cannot start on it.
 ///
 /// # Errors
 ///
-/// Returns an error when no runtime is found or the runtime does not report
-/// a version.
-pub fn discover_runtime(explicit: Option<&Path>) -> Result<JsRuntime, String> {
+/// Returns an error when no runtime is found, the explicit runtime has the
+/// wrong kind, or the runtime does not report a version.
+pub fn discover_runtime(
+    explicit: Option<&Path>,
+    kinds: &[RuntimeKind],
+) -> Result<JsRuntime, String> {
     let cwd = std::env::current_dir()
         .map_err(|error| format!("cannot read the working directory: {error}"))?;
-    discover_runtime_in(explicit, &cwd)
+    discover_runtime_in(explicit, kinds, &cwd)
+}
+
+/// The names of `kinds`, as `` `node` or `bun` ``.
+fn kind_names(kinds: &[RuntimeKind]) -> String {
+    kinds
+        .iter()
+        .map(|kind| format!("`{}`", kind.name()))
+        .collect::<Vec<_>>()
+        .join(" or ")
 }
 
 /// [`discover_runtime`] with a relative explicit path resolved against
 /// `cwd`. The companion starts in the project root, so the stored path must
 /// not depend on the working directory.
-fn discover_runtime_in(explicit: Option<&Path>, cwd: &Path) -> Result<JsRuntime, String> {
+fn discover_runtime_in(
+    explicit: Option<&Path>,
+    kinds: &[RuntimeKind],
+    cwd: &Path,
+) -> Result<JsRuntime, String> {
     let (kind, path) = if let Some(path) = explicit {
         let path = cwd.join(path);
         if !path.is_file() {
             return Err(format!("the runtime {} is not a file", path.display()));
         }
-        (RuntimeKind::from_executable(&path), path)
+        let kind = RuntimeKind::from_executable(&path);
+        if !kinds.contains(&kind) {
+            return Err(format!(
+                "the runtime {} is `{}`, and the test runner needs {}",
+                path.display(),
+                kind.name(),
+                kind_names(kinds)
+            ));
+        }
+        (kind, path)
     } else {
         let search_path = std::env::var_os("PATH").unwrap_or_default();
-        find_on_path(&search_path)
-            .ok_or_else(|| "no `node` or `bun` executable on PATH".to_owned())?
+        find_kinds_on_path(&search_path, kinds)
+            .ok_or_else(|| format!("no {} executable on PATH", kind_names(kinds)))?
     };
     let version = version_of(&path)?;
     Ok(JsRuntime {
@@ -131,6 +161,8 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    const BOTH: &[RuntimeKind] = &[RuntimeKind::Node, RuntimeKind::Bun];
+
     fn fake_runtime(dir: &Path, name: &str, version: &str) -> PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, format!("#!/bin/sh\necho '{version}'\n")).expect("write");
@@ -145,11 +177,17 @@ mod tests {
         let bun = fake_runtime(first.path(), "bun", "1.4.2");
         let node = fake_runtime(second.path(), "node", "v24.20.0");
         let search = std::env::join_paths([first.path(), second.path()]).expect("join");
-        assert_eq!(find_on_path(&search), Some((RuntimeKind::Node, node)));
+        assert_eq!(
+            find_kinds_on_path(&search, BOTH),
+            Some((RuntimeKind::Node, node))
+        );
         let only_bun = std::env::join_paths([first.path()]).expect("join");
-        assert_eq!(find_on_path(&only_bun), Some((RuntimeKind::Bun, bun)));
+        assert_eq!(
+            find_kinds_on_path(&only_bun, BOTH),
+            Some((RuntimeKind::Bun, bun))
+        );
         let relative = std::env::join_paths(["relative/dir"]).expect("join");
-        assert_eq!(find_on_path(&relative), None);
+        assert_eq!(find_kinds_on_path(&relative, BOTH), None);
     }
 
     #[test]
@@ -158,7 +196,7 @@ mod tests {
         std::fs::create_dir(cwd.path().join("bin")).expect("mkdir");
         let node = fake_runtime(&cwd.path().join("bin"), "node", "v24.20.0");
         let runtime =
-            discover_runtime_in(Some(Path::new("bin/node")), cwd.path()).expect("runtime");
+            discover_runtime_in(Some(Path::new("bin/node")), BOTH, cwd.path()).expect("runtime");
         assert!(runtime.path.is_absolute(), "{}", runtime.path.display());
         assert_eq!(runtime.path, node);
         assert_eq!(runtime.version, "v24.20.0");
@@ -173,19 +211,48 @@ mod tests {
     fn an_explicit_runtime_reports_its_kind_and_version() {
         let dir = tempfile::tempdir().expect("dir");
         let bun = fake_runtime(dir.path(), "bun-canary", "1.4.2");
-        let runtime = discover_runtime(Some(&bun)).expect("runtime");
+        let runtime = discover_runtime(Some(&bun), BOTH).expect("runtime");
         assert_eq!(runtime.kind, RuntimeKind::Bun);
         assert_eq!(runtime.version, "1.4.2");
         let node = fake_runtime(dir.path(), "node24", "v24.20.0");
         assert_eq!(
-            discover_runtime(Some(&node)).expect("runtime").kind,
+            discover_runtime(Some(&node), BOTH).expect("runtime").kind,
             RuntimeKind::Node
         );
         let missing = dir.path().join("nope");
         assert!(
-            discover_runtime(Some(&missing))
+            discover_runtime(Some(&missing), BOTH)
                 .unwrap_err()
                 .contains("not a file")
+        );
+    }
+
+    #[test]
+    fn a_runner_that_needs_one_runtime_finds_only_that_runtime() {
+        let first = tempfile::tempdir().expect("dir");
+        let second = tempfile::tempdir().expect("dir");
+        let node = fake_runtime(first.path(), "node", "v24.20.0");
+        let bun = fake_runtime(second.path(), "bun", "1.4.2");
+        let search = std::env::join_paths([first.path(), second.path()]).expect("join");
+        assert_eq!(
+            find_kinds_on_path(&search, &[RuntimeKind::Bun]),
+            Some((RuntimeKind::Bun, bun.clone()))
+        );
+        assert_eq!(
+            find_kinds_on_path(&search, &[RuntimeKind::Node]),
+            Some((RuntimeKind::Node, node.clone()))
+        );
+        let only_node = std::env::join_paths([first.path()]).expect("join");
+        assert_eq!(find_kinds_on_path(&only_node, &[RuntimeKind::Bun]), None);
+
+        let error = discover_runtime_in(Some(&node), &[RuntimeKind::Bun], first.path())
+            .expect_err("bun test cannot start on node");
+        assert!(error.contains("needs `bun`"), "{error}");
+        assert_eq!(
+            discover_runtime_in(Some(&bun), &[RuntimeKind::Bun], first.path())
+                .expect("runtime")
+                .kind,
+            RuntimeKind::Bun
         );
     }
 }

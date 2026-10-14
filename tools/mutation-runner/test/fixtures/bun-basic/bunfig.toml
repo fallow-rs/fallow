@@ -1,0 +1,3 @@
+[test]
+# The fixture runs its tests in file order.
+randomize = false

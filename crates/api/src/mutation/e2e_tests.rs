@@ -238,8 +238,10 @@ mod end_to_end {
             Path::new(&std::env::var_os("CARGO_MANIFEST_DIR")?).join("../../tools/mutation-runner");
         let vitest = package.join("node_modules/vitest/package.json");
         let node = std::env::var_os("PATH").and_then(|path| {
-            crate::mutation::discovery::find_on_path(&path)
-                .filter(|(kind, _)| *kind == crate::mutation::discovery::RuntimeKind::Node)
+            crate::mutation::discovery::find_kinds_on_path(
+                &path,
+                &[crate::mutation::discovery::RuntimeKind::Node],
+            )
         });
         if !vitest.is_file() || node.is_none() {
             eprintln!(
@@ -421,5 +423,147 @@ mod end_to_end {
                     && !function.survived.is_empty())
         );
         assert!(report.timings.dry_run_ms > 0);
+    }
+
+    /// The companion package, when a runtime of `kind` is on `PATH` and
+    /// reports a version that the manifest range of `runner` contains.
+    #[expect(
+        clippy::print_stderr,
+        reason = "a skipped end-to-end test says why it did not run"
+    )]
+    fn child_runner_package(
+        runner: &str,
+        kind: crate::mutation::discovery::RuntimeKind,
+    ) -> Option<PathBuf> {
+        let package =
+            Path::new(&std::env::var_os("CARGO_MANIFEST_DIR")?).join("../../tools/mutation-runner");
+        let runtime = crate::mutation::discovery::discover_runtime(None, &[kind]).ok();
+        let range = crate::mutation::manifest::manifest()
+            .ok()
+            .and_then(|manifest| manifest.runner(runner));
+        let supported = runtime
+            .as_ref()
+            .zip(range)
+            .is_some_and(|(runtime, range)| range.contains(&runtime.version));
+        if !supported {
+            eprintln!(
+                "skipped: the end-to-end {runner} test needs a supported `{}` on PATH",
+                kind.name()
+            );
+            return None;
+        }
+        Some(dunce::canonicalize(package).expect("package path"))
+    }
+
+    /// Copies `files` of a companion fixture to a new committed repository.
+    fn fixture_repository(fixture: &Path, files: &[&str]) -> (tempfile::TempDir, PathBuf) {
+        let project = tempfile::tempdir().expect("dir");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        for file in files {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+            fs::copy(fixture.join(file), &target).expect("copy");
+        }
+        commit_all(&root);
+        (project, root)
+    }
+
+    /// Checks the statuses of the math fixture: the tests kill each mutant
+    /// of `add` and the `LIMIT` mutant, and a test with no assertion lets a
+    /// mutant of `isPositive` survive.
+    fn assert_math_statuses(report: &fallow_output::MutationReport) {
+        assert_eq!(
+            report.completion.status,
+            MutationCompletionStatus::Complete,
+            "{report:#?}"
+        );
+        assert!(report.errors.is_empty(), "{:#?}", report.errors);
+        assert!(report.worktree.changed_paths.is_empty());
+        let in_function = |name: &str| {
+            report
+                .mutants
+                .iter()
+                .filter(|mutant| mutant.location.function.as_deref() == Some(name))
+                .collect::<Vec<_>>()
+        };
+        let add = in_function("add");
+        assert!(!add.is_empty());
+        for mutant in &add {
+            assert_eq!(mutant.status, MutantStatus::Killed, "{mutant:#?}");
+            assert!(
+                mutant
+                    .killed_by
+                    .as_deref()
+                    .is_some_and(|test| test.starts_with("test/math.test.ts::add > ")),
+                "{mutant:#?}"
+            );
+        }
+        let positive = in_function("isPositive");
+        assert!(
+            positive
+                .iter()
+                .any(|mutant| mutant.status == MutantStatus::Survived
+                    && mutant.covering_tests
+                        == vec!["test/math.test.ts::positive without an assertion".to_owned()]),
+            "a test with no assertion lets a mutant of isPositive survive: {positive:#?}"
+        );
+        let limit = report
+            .mutants
+            .iter()
+            .find(|mutant| mutant.location.function.is_none() && mutant.static_mutant)
+            .expect("the LIMIT mutant runs while the module loads");
+        assert_eq!(limit.status, MutantStatus::Killed, "{limit:#?}");
+        assert_eq!(limit.killed_by.as_deref(), Some("test/math.test.ts::limit"));
+    }
+
+    #[test]
+    fn the_embedded_companion_runs_node_test_against_the_fixture_end_to_end() {
+        use crate::mutation::discovery::RuntimeKind;
+        let Some(package) = child_runner_package("node-test", RuntimeKind::Node) else {
+            return;
+        };
+        let (_project, root) = fixture_repository(
+            &package.join("test/fixtures/node-basic"),
+            &["package.json", "src/math.ts", "test/math.test.ts"],
+        );
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        ))
+        .expect("the run completes");
+
+        let runner = report.runner.as_ref().expect("a runner ran");
+        assert_eq!(runner.name, "node-test");
+        assert_eq!(runner.runtime.name, "node");
+        assert_math_statuses(&report);
+    }
+
+    #[test]
+    fn the_embedded_companion_runs_bun_test_against_the_fixture_end_to_end() {
+        use crate::mutation::discovery::RuntimeKind;
+        let Some(package) = child_runner_package("bun-test", RuntimeKind::Bun) else {
+            return;
+        };
+        let (_project, root) = fixture_repository(
+            &package.join("test/fixtures/bun-basic"),
+            &[
+                "package.json",
+                "bunfig.toml",
+                "src/math.ts",
+                "test/math.test.ts",
+            ],
+        );
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        ))
+        .expect("the run completes");
+
+        let runner = report.runner.as_ref().expect("a runner ran");
+        assert_eq!(runner.name, "bun-test");
+        assert_eq!(runner.runtime.name, "bun");
+        assert_math_statuses(&report);
     }
 }

@@ -42,6 +42,10 @@ const loadAdapter = async (runner) => {
   switch (runner) {
     case "vitest":
       return import("./adapters/vitest.mjs");
+    case "node-test":
+      return import("./adapters/node-test.mjs");
+    case "bun-test":
+      return import("./adapters/bun-test.mjs");
     default:
       throw new CompanionError("bad-request", `no adapter for runner ${JSON.stringify(runner)}`);
   }

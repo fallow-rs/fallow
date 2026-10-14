@@ -34,6 +34,7 @@ use crate::mutation::report::{
 };
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
+use crate::mutation::runner_select::{Runner, select_runner};
 use crate::mutation::scheduler::{
     ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome, SchedulePlan,
     ScheduledMutant, run_schedule,
@@ -45,8 +46,6 @@ use crate::mutation::{MutationRunOptions, MutationRunScope};
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
-/// The runner of version 1.
-const RUNNER: &str = "vitest";
 /// The default timeout of `init` and the dry run (`protocol.md` section 8).
 const DEFAULT_RUNNER_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -204,6 +203,8 @@ fn config_operators(
 struct Planned {
     resolved: ProgrammaticAnalysisContext,
     cache_dir: PathBuf,
+    /// The `mutation.runner` config value.
+    runner: fallow_config::MutationRunner,
     plan: MutationPlan,
     base_ref: Option<String>,
 }
@@ -216,6 +217,7 @@ fn plan_for(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     let session = load_session(&resolved)?;
     let cache_dir = session.config().cache_dir.clone();
+    let runner = session.config().mutation.runner;
     before_plan(resolved.root(), &cache_dir)?;
     let (scope, base_ref) = engine_scope(options, &resolved)?;
     let operators = match &options.operators {
@@ -234,6 +236,7 @@ fn plan_for(
     Ok(Planned {
         resolved,
         cache_dir,
+        runner,
         plan,
         base_ref,
     })
@@ -405,6 +408,12 @@ fn default_concurrency() -> usize {
         .max(1)
 }
 
+fn runtime_error(runner: Runner, message: String) -> ProgrammaticError {
+    mutation_error("FALLOW_MUTATION_RUNTIME_NOT_FOUND", message)
+        .with_help(runner.runtime_help())
+        .with_context("mutation.runtime")
+}
+
 fn scheduled(plan: &MutationPlan, disposition: MutantDisposition) -> Vec<ScheduledMutant> {
     plan.mutants
         .iter()
@@ -501,17 +510,16 @@ fn execute(
     let setup_started = Instant::now();
     let manifest = manifest()
         .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?;
-    let range = manifest.runner(RUNNER).ok_or_else(|| {
+    let runner = select_runner(planned.runner, planned.resolved.root(), &plan.test_files);
+    let name = runner.name();
+    let range = manifest.runner(name).ok_or_else(|| {
         mutation_error(
             "FALLOW_MUTATION_PROTOCOL_INVALID",
-            format!("the protocol manifest has no `{RUNNER}` runner"),
+            format!("the protocol manifest has no `{name}` runner"),
         )
     })?;
-    let runtime = discover_runtime(options.runtime.as_deref()).map_err(|message| {
-        mutation_error("FALLOW_MUTATION_RUNTIME_NOT_FOUND", message)
-            .with_help("install Node.js, or pass the runtime path")
-            .with_context("mutation.runtime")
-    })?;
+    let runtime = discover_runtime(options.runtime.as_deref(), runner.runtimes())
+        .map_err(|message| runtime_error(runner, message))?;
     let cache_error =
         |message: String| mutation_error("FALLOW_MUTATION_CACHE_WRITE_FAILED", message);
     ignore_cache_dir(&planned.cache_dir).map_err(|error| cache_error(error.to_string()))?;
@@ -532,7 +540,7 @@ fn execute(
     let config = ScheduleConfig {
         init: InitRequest {
             root: root.to_string_lossy().into_owned(),
-            runner: RUNNER.to_owned(),
+            runner: name.to_owned(),
             config_path: None,
             run_dir: run_dir.dir.to_string_lossy().into_owned(),
             path_map: run_dir.path_map.clone(),
@@ -557,7 +565,7 @@ fn execute(
     let mut outcome = run_schedule(&spawner, &schedule, &config)
         .map_err(|error| schedule_error(&error, config.runner_timeout))?;
     let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
-        name: RUNNER.to_owned(),
+        name: name.to_owned(),
         version: ready.runner_version.clone(),
         protocol_version: manifest.wire_protocol_version,
         runtime: MutationRuntimeOutput {

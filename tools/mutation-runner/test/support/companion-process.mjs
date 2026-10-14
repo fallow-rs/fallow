@@ -12,13 +12,17 @@ const COMPANION = fileURLToPath(new URL("../../src/companion.mjs", import.meta.u
  * reads its stdout as the API does: a line that starts with the token is a
  * protocol line, and each other line is stray output. Both lists are kept, so
  * a test can prove that runner output never reaches the protocol channel.
- * `token: null` starts the companion with no token.
+ * `token: null` starts the companion with no token. `runtime` is the
+ * executable that runs the companion, Node by default.
  */
-export const startCompanion = ({ token = randomBytes(16).toString("hex") } = {}) => {
+export const startCompanion = ({
+  token = randomBytes(16).toString("hex"),
+  runtime = process.execPath,
+} = {}) => {
   const env = { ...process.env };
   delete env[SESSION_TOKEN_ENV];
   if (token !== null) env[SESSION_TOKEN_ENV] = token;
-  const child = spawn(process.execPath, [COMPANION], { stdio: ["pipe", "pipe", "pipe"], env });
+  const child = spawn(runtime, [COMPANION], { stdio: ["pipe", "pipe", "pipe"], env });
   const prefix = `${token} `;
   const lines = [];
   const strayLines = [];
