@@ -1197,3 +1197,24 @@ fn a_setup_watchdog_fault_is_marked_as_a_timeout() {
         }
     ));
 }
+
+#[test]
+fn a_restarted_companion_setup_timeout_names_the_setup_timeout_flag() {
+    let normal = script(|_| standard_dry(), |_, _| Err(LinkFault::Timeout));
+    let spawner = FakeSpawner::new(move |index, request| match request {
+        Request::Init(_) if index > 0 => Err(LinkFault::Timeout),
+        _ => normal(index, request),
+    });
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::RuntimeError);
+    let issue = outcome
+        .issues
+        .iter()
+        .find(|issue| issue.mutant_id.as_deref() == Some("m1"))
+        .expect("the m1 issue");
+    assert!(
+        issue.message.contains("--setup-timeout"),
+        "{}",
+        issue.message
+    );
+}

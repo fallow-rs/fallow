@@ -384,13 +384,19 @@ impl<'a> Worker<'a> {
                     EnsureError::Fatal(ScheduleError::Integrity(message))
                 }
                 SpawnFailure::Fault(fault) => EnsureError::Fault(
-                    format!("the companion did not start: {fault}"),
+                    format!(
+                        "the companion did not start: {fault}{}",
+                        setup_timeout_hint(&fault)
+                    ),
                     fault.stderr_tail().map(str::to_owned),
                 ),
             })?;
             let fault = |stage: &str, fault: &LinkFault| {
                 EnsureError::Fault(
-                    format!("the companion {stage} failed: {fault}"),
+                    format!(
+                        "the companion {stage} failed: {fault}{}",
+                        setup_timeout_hint(fault)
+                    ),
                     fault.stderr_tail().map(str::to_owned),
                 )
             };
@@ -934,6 +940,16 @@ fn note_restarted_baseline_failure(
         message: Some(RESTARTED_DRY_RUN_FAILURE.to_owned()),
         mutant_ids: vec![mutant_id.to_owned()],
     });
+}
+
+/// The hint for a setup watchdog fault of a restarted companion. The run
+/// continues, so the hint goes into the mutant error.
+fn setup_timeout_hint(fault: &LinkFault) -> &'static str {
+    if matches!(fault, LinkFault::Timeout) {
+        "; on a slow or busy host, pass --setup-timeout with a longer duration"
+    } else {
+        ""
+    }
 }
 
 fn setup_error(stage: &str, fault: &LinkFault) -> ScheduleError {

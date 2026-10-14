@@ -157,11 +157,16 @@ that reference the export, so it cannot give that list.
 
 ## Setup timeout
 
-`--setup-timeout` limits the start and the dry run of each runner process.
-The default is 2 minutes. A slow or busy host can need more, because the dry
-run executes each test file. When the limit ends, the run stops with exit code
-2 and `FALLOW_MUTATION_RUNNER_FAILED`, and the help names the flag. The
-config has no key for this limit.
+`--setup-timeout` limits the start, the dry run and each reload of a runner
+process. The default is 2 minutes, and units from `ms` to `h` are valid. A
+slow or busy host can need more, because the dry run executes each test file.
+
+- For the first runner process, the run stops with exit code 2 and
+  `FALLOW_MUTATION_RUNNER_FAILED`, and the help names the flag.
+- For a restarted runner process, the mutant is `runtime_error`, and its error
+  names the flag. The run continues.
+- A reload that passes the limit restarts the runner process.
+- The config has no key for this limit.
 
 ## Baseline failures
 

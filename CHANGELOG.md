@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a timeout waits twice as long. A changed detection result is `flaky`
     and leaves the score.
     `retried: true` on a mutant marks a status from both runs.
-  - `--setup-timeout` sets how long each runner process can take to start
-    and finish its dry run (default `2m`).
+  - `--setup-timeout` sets how long each runner process can take to start,
+    finish its dry run or reload (default `2m`).
   - A run refuses a dirty git worktree unless `--allow-dirty` is set. Mutants
     near file system, process, network or database calls are pruned unless
     `--allow-side-effects` is set. Fallow does not write to project files, and

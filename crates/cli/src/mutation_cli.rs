@@ -92,8 +92,8 @@ pub struct MutationArgs {
     /// mutants leave the score.
     #[arg(long, value_name = "PATH")]
     pub verdicts: Option<PathBuf>,
-    /// Wait this long for each runner process to start and finish its dry run, for
-    /// example `5m` on a slow or busy host (default: `2m`).
+    /// Wait this long for each runner process to start, finish its dry run or
+    /// reload, for example `5m` on a slow or busy host (default: `2m`).
     #[arg(long, value_name = "DURATION")]
     pub setup_timeout: Option<String>,
     /// Mutate only these files or directories instead of the changed code.
