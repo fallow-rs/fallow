@@ -214,8 +214,8 @@ pub struct CompletionFacts<'a> {
     pub worktree_changed: bool,
     /// The end-of-run worktree check failed.
     pub worktree_unchecked: bool,
-    /// The time budget ended before each survivor got its retry.
-    pub unretried_survivors: bool,
+    /// The time budget ended before each survivor and timeout got its retry.
+    pub unretried: bool,
     /// The `path_map` keys that the runner did not load in the dry run.
     pub unloaded_paths: &'a [String],
 }
@@ -243,7 +243,7 @@ pub fn completion(facts: &CompletionFacts<'_>) -> MutationCompletion {
             mutant.disposition == MutantDisposition::Planned
                 && result.status == MutantStatus::Pending
         });
-    if budget_pending || facts.unretried_survivors {
+    if budget_pending || facts.unretried {
         reasons.push(MutationIncompleteReason::TimeBudget);
     }
     if !facts.plan.skipped_files.is_empty() {
@@ -408,7 +408,7 @@ mod tests {
             baseline_failures: Vec::new(),
             unloaded_paths: Vec::new(),
             issues: Vec::new(),
-            unretried_survivors: Vec::new(),
+            unretried: Vec::new(),
             timings: ScheduleTimings::default(),
             workers: 1,
         }
@@ -515,7 +515,7 @@ mod tests {
             baseline_failures: &[],
             worktree_changed: false,
             worktree_unchecked: false,
-            unretried_survivors: false,
+            unretried: false,
             unloaded_paths: &[],
         });
         assert_eq!(
@@ -598,7 +598,7 @@ mod tests {
                 baseline_failures: &[],
                 worktree_changed: false,
                 worktree_unchecked: false,
-                unretried_survivors: false,
+                unretried: false,
                 unloaded_paths: &[],
             })
             .reasons,
@@ -630,7 +630,7 @@ mod tests {
             baseline_failures: &[failure],
             worktree_changed: true,
             worktree_unchecked: false,
-            unretried_survivors: false,
+            unretried: false,
             unloaded_paths: &[],
         });
         assert_eq!(
@@ -659,7 +659,7 @@ mod tests {
             baseline_failures: &[],
             worktree_changed: false,
             worktree_unchecked: true,
-            unretried_survivors: true,
+            unretried: true,
             unloaded_paths: &[],
         });
         assert_eq!(
@@ -691,7 +691,7 @@ mod tests {
                 baseline_failures: &[],
                 worktree_changed: false,
                 worktree_unchecked: false,
-                unretried_survivors: false,
+                unretried: false,
                 unloaded_paths: unloaded,
             })
             .reasons

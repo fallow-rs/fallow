@@ -316,8 +316,9 @@ fn the_watchdog_adds_the_setup_time_of_each_covering_file() {
         vec![
             Duration::from_millis(5003 + 12_000 + 2000),
             Duration::from_millis(5153 + 12_000 + 2000),
+            Duration::from_millis(5003 + 12_000 + 2000),
         ],
-        "timeout_ms + ceil(1.5 * 8000) + 2000"
+        "timeout_ms + ceil(1.5 * 8000) + 2000, and the same wait for the m1 retry"
     );
     let timed_out = &outcome.results["m1"];
     assert_eq!(timed_out.status, MutantStatus::Timeout);
@@ -513,9 +514,50 @@ fn a_watchdog_timeout_is_timeout_and_the_next_mutant_gets_a_new_companion() {
     assert_eq!(status(&outcome, "m1"), MutantStatus::Timeout);
     assert_eq!(status(&outcome, "m2"), MutantStatus::Killed);
     let runs = spawner.runs();
-    assert_eq!(runs.len(), 2, "a timeout gets no retry");
+    assert_eq!(runs.len(), 3, "a timeout gets one retry");
     assert_eq!((runs[0].0, runs[1].0), (0, 1));
     assert_eq!(spawner.requests_of(1)[..3], ["init", "dry_run", "run"]);
+    assert_eq!(
+        runs[2].1.mutant_id, "m1",
+        "the retry runs the timed-out mutant"
+    );
+}
+
+#[test]
+fn a_timeout_reruns_in_a_new_companion_and_a_survived_retry_is_flaky() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| {
+            if index == 0 {
+                Ok(run_result(run, RunStatus::Timeout, None))
+            } else {
+                Ok(run_result(run, RunStatus::Survived, None))
+            }
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Flaky);
+    let runs = spawner.runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[1].0, 1, "the retry uses a new companion");
+}
+
+#[test]
+fn a_timeout_with_a_killed_retry_is_killed() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| {
+            if index == 0 {
+                Ok(run_result(run, RunStatus::Timeout, None))
+            } else {
+                Ok(run_result(run, RunStatus::Killed, Some(&tid("t1"))))
+            }
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    let result = &outcome.results["m1"];
+    assert_eq!(result.status, MutantStatus::Killed);
+    assert_eq!(result.killed_by.as_deref(), Some(tid("t1").as_str()));
 }
 
 #[test]
@@ -882,12 +924,29 @@ fn an_ended_time_budget_skips_the_survivor_retry_and_keeps_survived() {
     config.deadline = Some(Instant::now() + Duration::from_millis(150));
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
     assert_eq!(status(&outcome, "m1"), MutantStatus::Survived);
-    assert_eq!(outcome.unretried_survivors, vec!["m1".to_owned()]);
+    assert_eq!(outcome.unretried, vec!["m1".to_owned()]);
     assert_eq!(
         spawner.spawns.load(Ordering::SeqCst),
         1,
         "no retry companion starts after the budget ends"
     );
+}
+
+#[test]
+fn an_ended_time_budget_skips_the_timeout_retry_and_keeps_timeout() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| {
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(run_result(run, RunStatus::Timeout, None))
+        },
+    ));
+    let mut config = config(1);
+    config.deadline = Some(Instant::now() + Duration::from_millis(150));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Timeout);
+    assert_eq!(outcome.unretried, vec!["m1".to_owned()]);
+    assert_eq!(spawner.spawns.load(Ordering::SeqCst), 1);
 }
 
 #[test]

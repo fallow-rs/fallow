@@ -41,7 +41,8 @@ pub enum MutationPlanSchemaVersion {
 pub enum MutantStatus {
     /// A covering test failed.
     Killed,
-    /// The run passed its timeout. The mutant counts as detected.
+    /// The run passed its timeout, also in a second run in a new companion.
+    /// The mutant counts as detected.
     Timeout,
     /// Each covering test passed, also in a second run in a new companion.
     Survived,
@@ -49,7 +50,8 @@ pub enum MutantStatus {
     NoCoverage,
     /// The runner failed for a reason outside the tests.
     RuntimeError,
-    /// The second run gave a different result than the first run.
+    /// The second run in a new companion changed whether the tests detect
+    /// the mutant.
     Flaky,
     /// A static rule removed the mutant.
     Pruned,
@@ -483,7 +485,7 @@ pub struct MutationTimings {
     pub dry_run_ms: u64,
     /// The mutant runs.
     pub mutants_ms: u64,
-    /// The second runs of survived mutants.
+    /// The second runs of survived and timed-out mutants.
     pub retry_ms: u64,
 }
 

@@ -32806,7 +32806,7 @@
         {
           "type": "string",
           "const": "timeout",
-          "description": "The run passed its timeout. The mutant counts as detected."
+          "description": "The run passed its timeout, also in a second run in a new companion.\nThe mutant counts as detected."
         },
         {
           "type": "string",
@@ -32826,7 +32826,7 @@
         {
           "type": "string",
           "const": "flaky",
-          "description": "The second run gave a different result than the first run."
+          "description": "The second run in a new companion changed whether the tests detect\nthe mutant."
         },
         {
           "type": "string",
@@ -33419,7 +33419,7 @@
         },
         "retry_ms": {
           "type": "integer",
-          "description": "The second runs of survived mutants."
+          "description": "The second runs of survived and timed-out mutants."
         }
       },
       "required": [

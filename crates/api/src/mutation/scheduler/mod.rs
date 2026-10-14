@@ -136,9 +136,9 @@ pub struct ScheduleOutcome {
     pub baseline_failures: Vec<BaselineFailure>,
     pub unloaded_paths: Vec<String>,
     pub issues: Vec<ScheduleIssue>,
-    /// The survivors that kept `survived` without a retry because the time
-    /// budget ended, sorted.
-    pub unretried_survivors: Vec<String>,
+    /// The survivors and timeouts that kept their first status without a
+    /// retry because the time budget ended, sorted.
+    pub unretried: Vec<String>,
     pub timings: ScheduleTimings,
     pub workers: usize,
 }
@@ -1061,50 +1061,57 @@ fn mark_unreached_pending(
     }
 }
 
-/// Runs each survivor again in a new companion (section 10). A different
-/// second result is `flaky`. The retry stays inside the time budget: a
-/// survivor that gets no retry before the deadline keeps `survived` and is
-/// listed in [`ScheduleOutcome::unretried_survivors`].
-fn retry_survivors(
+/// True for a first status that gets one retry in a new companion. A
+/// timeout is suspect because host load alone can make a test time out.
+const fn needs_retry(status: MutantStatus) -> bool {
+    matches!(status, MutantStatus::Survived | MutantStatus::Timeout)
+}
+
+/// Gives the final status from the first and the retry status. A retry that
+/// changes whether the tests detect the mutant gives `flaky`. A timeout with
+/// a killed retry stays detected and is `killed`.
+const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatus {
+    match (first, retry) {
+        (_, MutantStatus::RuntimeError) => MutantStatus::RuntimeError,
+        (MutantStatus::Survived, MutantStatus::Survived) => MutantStatus::Survived,
+        (MutantStatus::Timeout, MutantStatus::Timeout) => MutantStatus::Timeout,
+        (MutantStatus::Timeout, MutantStatus::Killed) => MutantStatus::Killed,
+        _ => MutantStatus::Flaky,
+    }
+}
+
+/// Runs each survivor and each timeout again in a new companion (section
+/// 10), see [`retried_status`]. The retry stays inside the time budget: a
+/// mutant that gets no retry before the deadline keeps its first status and
+/// is listed in [`ScheduleOutcome::unretried`].
+fn retry_suspects(
     runner: PhaseRunner<'_>,
     facts: &DryRunFacts,
-    survivors: Vec<Job>,
+    suspects: Vec<Job>,
     outcome: &mut ScheduleOutcome,
 ) -> Result<(), ScheduleError> {
-    let mut retry_files: Vec<String> = survivors
+    let mut retry_files: Vec<String> = suspects
         .iter()
         .flat_map(|job| &job.tests)
         .filter_map(|test| facts.passing.get(test).map(|(file, _)| file.clone()))
         .collect();
     retry_files.sort();
     retry_files.dedup();
-    let (retries, _) = run_phase(
-        runner,
-        &retry_files,
-        survivors,
-        runner.config.deadline,
-        None,
-    )?;
+    let (retries, _) = run_phase(runner, &retry_files, suspects, runner.config.deadline, None)?;
     for (job, attempt) in retries {
         if attempt.status == MutantStatus::Pending {
-            outcome.unretried_survivors.push(job.id);
+            outcome.unretried.push(job.id);
             continue;
         }
-        let status = match attempt.status {
-            MutantStatus::Survived => MutantStatus::Survived,
-            MutantStatus::RuntimeError => MutantStatus::RuntimeError,
-            _ => MutantStatus::Flaky,
-        };
-        let first_duration = outcome
-            .results
-            .get(&job.id)
-            .and_then(|first| first.duration_ms);
+        let first = outcome.results.get(&job.id);
+        let first_status = first.map_or(MutantStatus::Survived, |first| first.status);
+        let first_duration = first.and_then(|first| first.duration_ms);
         record(
             outcome,
             facts,
             job,
             Attempt {
-                status,
+                status: retried_status(first_status, attempt.status),
                 duration_ms: first_duration,
                 ..attempt
             },
@@ -1113,7 +1120,8 @@ fn retry_survivors(
     Ok(())
 }
 
-/// Runs the plan: dry run, mutant runs, and survivor retries.
+/// Runs the plan: dry run, mutant runs, and retries of survivors and
+/// timeouts.
 ///
 /// # Errors
 ///
@@ -1129,7 +1137,7 @@ pub fn run_schedule(
         baseline_failures: Vec::new(),
         unloaded_paths: Vec::new(),
         issues: Vec::new(),
-        unretried_survivors: Vec::new(),
+        unretried: Vec::new(),
         timings: ScheduleTimings::default(),
         workers: 0,
     };
@@ -1201,16 +1209,16 @@ pub fn run_schedule(
     )?;
     outcome.workers = workers;
     outcome.timings.mutants = mutants_started.elapsed();
-    let mut survivors = Vec::new();
+    let mut suspects = Vec::new();
     for (job, attempt) in attempts {
-        if attempt.status == MutantStatus::Survived {
-            survivors.push(job.clone());
+        if needs_retry(attempt.status) {
+            suspects.push(job.clone());
         }
         record(&mut outcome, &facts, job, attempt);
     }
-    if !survivors.is_empty() {
+    if !suspects.is_empty() {
         let retry_started = Instant::now();
-        retry_survivors(runner, &facts, survivors, &mut outcome)?;
+        retry_suspects(runner, &facts, suspects, &mut outcome)?;
         outcome.timings.retry = retry_started.elapsed();
     }
     outcome
@@ -1221,7 +1229,7 @@ pub fn run_schedule(
         failure.mutant_ids.dedup();
     }
     outcome.baseline_failures.sort();
-    outcome.unretried_survivors.sort();
+    outcome.unretried.sort();
     Ok(outcome)
 }
 

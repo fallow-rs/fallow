@@ -89,6 +89,28 @@ each mutant is `no_coverage`.
 - Only `completion.status: "complete"` makes an empty survivor list
   conclusive.
 
+## Retries
+
+A `survived` or `timeout` result gets one retry in a new companion. Host
+load can make a test time out, so a single timeout is not proof that the
+tests detect the mutant.
+
+| First result | Retry result | Final status |
+|---|---|---|
+| `survived` | `survived` | `survived` |
+| `timeout` | `timeout` | `timeout` |
+| `timeout` | `killed` | `killed` |
+| any | `runtime_error` | `runtime_error` |
+| any | other result | `flaky` |
+
+- A `killed` result gets no retry. A kill by an assertion failure under load
+  did not appear in the measurements, and a retry of each kill doubles the
+  run time.
+- The retries stay inside the time budget. A mutant that gets no retry
+  before the deadline keeps its first status, and the completion is
+  `partial` (`time-budget`).
+- A retry of a real infinite loop costs one more timeout window.
+
 ## Baseline failures
 
 `baseline_failures` lists the tests and test files that fail with no active

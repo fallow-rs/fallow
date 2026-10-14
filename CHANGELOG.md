@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `stale` status.
   - The default scope is the changed code against the base ref, as for
     `audit`. `--all` and file paths widen or narrow it.
+  - A survived or timed-out mutant runs once more in a new companion, so
+    host load alone does not make a mutant count as detected. A changed
+    detection result is `flaky` and leaves the score.
   - A run refuses a dirty git worktree unless `--allow-dirty` is set. Mutants
     near file system, process, network or database calls are pruned unless
     `--allow-side-effects` is set. Fallow does not write to project files, and
