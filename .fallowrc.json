@@ -10,7 +10,20 @@
     "fuzz/corpus/**",
     "crates/cli/viz-assets/**",
     "crates/api/src/mutation/companion/**",
-    "tools/mutation-runner/test/fixtures/**"
+    "tools/mutation-runner/test/fixtures/**",
+    "assets/demo-project/**",
+    "tests/benchmark-corpus/**",
+    "tests/coverage-producer-corpus/**",
+    "tests/semantic-clone-corpus/**"
+  ],
+  "ignoreDependencies": [
+    "@fallow-cli/fallow-node-*",
+    "dpdm",
+    "jscpd",
+    "knip",
+    "madge",
+    "vitest4",
+    "zod"
   ],
   "ignoreExports": [
     {
@@ -24,6 +37,7 @@
   ],
   "health": {
     "ignore": [
+      "crates/napi/index.js",
       "npm/fallow/scripts/**",
       "scripts/check-contract-surfaces.mjs",
       "scripts/public-smoke-conformance.mjs",
