@@ -4072,6 +4072,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .push(self.scoped_direct_object_binding_targets.len() - 1);
         self.push_function_declaration_scope(&func.params);
         self.bind_map_callback_value(func.span.start);
+        self.bind_then_callback_namespace(func.span.start);
         self.deferred_function_var_binding_roots.push(var_roots);
         self.function_depth += 1;
         let component_pushed = self.react_enter_function(func);
@@ -4123,6 +4124,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .push(self.scoped_direct_object_binding_targets.len() - 1);
         self.push_function_declaration_scope(&expr.params);
         self.bind_map_callback_value(expr.span.start);
+        self.bind_then_callback_namespace(expr.span.start);
         self.deferred_function_var_binding_roots.push(var_roots);
         self.function_depth += 1;
         let component_pushed = self.react_enter_arrow(expr);

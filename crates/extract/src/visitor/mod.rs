@@ -716,6 +716,10 @@ pub(crate) struct ModuleInfoExtractor {
     scoped_map_binding_value_types: Vec<FxHashMap<String, String>>,
     /// Map callbacks awaiting their function scope, keyed by callback start.
     map_callback_value_bindings: FxHashMap<u32, (String, Span, String, Option<BindingClassProof>)>,
+    /// `import('./x').then(m => ...)` namespace params awaiting their
+    /// callback scope, keyed by callback start. The param shadows a binding
+    /// that is recorded in the outer scope, so that binding gets no credit.
+    then_callback_namespace_bindings: FxHashMap<u32, String>,
     /// Top-level local function name -> declared return element class
     /// (`Promise<T>` / `T`, non-builtin). Populated by a `visit_program` pre-pass
     /// so `Promise.all(arr.map(cb))` can type its result from a map callback whose
@@ -4381,6 +4385,7 @@ struct ImportThenCallback {
     import_span: oxc_span::Span,
     destructured_names: Vec<String>,
     local_name: Option<String>,
+    callback_start: u32,
 }
 
 fn try_extract_import_then_callback(expr: &CallExpression<'_>) -> Option<ImportThenCallback> {
@@ -4407,7 +4412,7 @@ fn try_extract_import_then_callback(expr: &CallExpression<'_>) -> Option<ImportT
         }
         Argument::FunctionExpression(func) => {
             let param = func.params.items.first()?;
-            then_callback_from_pattern(&param.pattern, sources, import_span)
+            then_callback_from_pattern(&param.pattern, sources, import_span, func.span.start)
         }
         _ => None,
     }
@@ -4431,6 +4436,7 @@ fn arrow_then_callback(
                 import_span,
                 destructured_names: names,
                 local_name: None,
+                callback_start: arrow.span.start,
             });
         }
         return Some(ImportThenCallback {
@@ -4438,9 +4444,10 @@ fn arrow_then_callback(
             import_span,
             destructured_names: Vec::new(),
             local_name: Some(param_name),
+            callback_start: arrow.span.start,
         });
     }
-    then_callback_from_pattern(&param.pattern, sources, import_span)
+    then_callback_from_pattern(&param.pattern, sources, import_span, arrow.span.start)
 }
 
 /// Build an `ImportThenCallback` from a callback param pattern: object pattern
@@ -4449,6 +4456,7 @@ fn then_callback_from_pattern(
     pattern: &BindingPattern<'_>,
     sources: Vec<String>,
     import_span: Span,
+    callback_start: u32,
 ) -> Option<ImportThenCallback> {
     match pattern {
         BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
@@ -4456,12 +4464,14 @@ fn then_callback_from_pattern(
             import_span,
             destructured_names: extract_destructured_names(obj_pat),
             local_name: None,
+            callback_start,
         }),
         BindingPattern::BindingIdentifier(id) => Some(ImportThenCallback {
             sources,
             import_span,
             destructured_names: Vec::new(),
             local_name: Some(id.name.to_string()),
+            callback_start,
         }),
         _ => None,
     }

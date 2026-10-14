@@ -1235,6 +1235,69 @@ fn then_callback_function_expression() {
 }
 
 #[test]
+fn then_callback_param_member_access_is_recorded() {
+    for source in [
+        "void import('./lib').then((m) => m.foo({ k: 1 }));",
+        "import('./lib').then((m) => m.foo());",
+        "import('./lib').then((m) => { m.foo(); });",
+        "import('./lib').then(function (m) { m.foo(); });",
+        "if (flag) { void import('./lib').then((m) => m.foo()); }",
+    ] {
+        let info = parse_source(source);
+        assert_eq!(
+            info.dynamic_imports[0].local_name,
+            Some("m".to_string()),
+            "{source}"
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "m" && access.member == "foo"),
+            "{source}: {:?}",
+            info.member_accesses
+        );
+        assert!(
+            !info.whole_object_uses.contains(&"m".to_string()),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn then_callback_param_escape_is_whole_use() {
+    for source in [
+        "import('./lib').then((m) => use(m));",
+        "import('./lib').then((m) => { store = m; });",
+        "import('./lib').then(function (m) { use({ ...m }); });",
+    ] {
+        let info = parse_source(source);
+        assert_eq!(
+            info.dynamic_imports[0].local_name,
+            Some("m".to_string()),
+            "{source}"
+        );
+        assert!(
+            info.whole_object_uses.contains(&"m".to_string()),
+            "{source}: {:?}",
+            info.whole_object_uses
+        );
+    }
+}
+
+#[test]
+fn then_callback_param_shadowed_in_inner_scope_is_not_credited() {
+    let info = parse_source("import('./lib').then((m) => { const f = (m) => m.foo; f(other); });");
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "m" && access.member == "foo"),
+        "{:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn then_callback_destructured_with_rest_is_namespace() {
     let info = parse_source("import('./lib').then(({ foo, ...rest }) => { });");
     assert_eq!(info.dynamic_imports.len(), 1);

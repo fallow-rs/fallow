@@ -110,4 +110,35 @@ fn then_callback_credits_accessed_exports() {
             .any(|(name, file)| *name == "UnusedComponent" && file == "dashboard.component.ts"),
         "UnusedComponent should be unused (only DashboardComponent is accessed), unused exports: {unused_export_names:?}"
     );
+
+    assert!(
+        !unused_export_names
+            .iter()
+            .any(|(name, file)| *name == "startInspector" && file == "inspector.ts"),
+        "startInspector should be credited via .then((m) => m.startInspector()), unused exports: {unused_export_names:?}"
+    );
+
+    assert!(
+        unused_export_names
+            .iter()
+            .any(|(name, file)| *name == "unusedInspectorExport" && file == "inspector.ts"),
+        "unusedInspectorExport should be unused (the callback reads only startInspector), unused exports: {unused_export_names:?}"
+    );
+
+    assert!(
+        !unused_export_names
+            .iter()
+            .any(|(_, file)| file == "escaped.ts"),
+        "escaped.ts exports should be credited when the callback param escapes, unused exports: {unused_export_names:?}"
+    );
+
+    let unused_type_names: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|t| t.export.export_name.as_str())
+        .collect();
+    assert!(
+        !unused_type_names.contains(&"InspectorOptions"),
+        "InspectorOptions is used by startInspector, unused types: {unused_type_names:?}"
+    );
 }

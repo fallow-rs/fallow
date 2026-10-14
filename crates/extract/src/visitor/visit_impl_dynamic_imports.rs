@@ -236,7 +236,8 @@ impl<'a> ModuleInfoExtractor {
     pub(super) fn record_import_callback_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
         if let Some(then_cb) = try_extract_import_then_callback(expr) {
             if let Some(local) = &then_cb.local_name {
-                self.record_namespace_binding_name(local.clone());
+                self.then_callback_namespace_bindings
+                    .insert(then_cb.callback_start, local.clone());
             }
             self.handled_import_spans.insert(then_cb.import_span);
             self.push_dynamic_import_branches(
@@ -245,6 +246,14 @@ impl<'a> ModuleInfoExtractor {
                 &then_cb.destructured_names,
                 then_cb.local_name.as_deref(),
             );
+        }
+    }
+
+    /// Bind the namespace param of an `import('./x').then(m => ...)` callback
+    /// in the callback scope, which the caller pushed before this call.
+    pub(super) fn bind_then_callback_namespace(&mut self, start: u32) {
+        if let Some(local) = self.then_callback_namespace_bindings.remove(&start) {
+            self.record_namespace_binding_name(local);
         }
     }
 
