@@ -78,7 +78,8 @@ pub struct MutationStatusCounts {
     pub no_coverage: usize,
     /// Mutants with a runner fault.
     pub runtime_error: usize,
-    /// Mutants with a different result in the second run.
+    /// Mutants where the second run in a new companion changed whether the
+    /// tests detect the mutant.
     pub flaky: usize,
     /// Mutants that a static rule removed.
     pub pruned: usize,

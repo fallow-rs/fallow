@@ -198,6 +198,15 @@ impl Job {
     fn watchdog_ms(&self) -> u64 {
         self.timeout_ms + self.setup_ms + WATCHDOG_GRACE_MS
     }
+
+    /// The job for the retry of a timeout, with twice the test and setup
+    /// time. Host load that slowed the first run often lasts into the retry,
+    /// and a real infinite loop still times out.
+    fn with_doubled_timeout(mut self) -> Self {
+        self.timeout_ms = self.timeout_ms.saturating_mul(2);
+        self.setup_ms = self.setup_ms.saturating_mul(2);
+        self
+    }
 }
 
 /// The decision of one attempt.
@@ -1061,12 +1070,6 @@ fn mark_unreached_pending(
     }
 }
 
-/// True for a first status that gets one retry in a new companion. A
-/// timeout is suspect because host load alone can make a test time out.
-const fn needs_retry(status: MutantStatus) -> bool {
-    matches!(status, MutantStatus::Survived | MutantStatus::Timeout)
-}
-
 /// Gives the final status from the first and the retry status. A retry that
 /// changes whether the tests detect the mutant gives `flaky`. A timeout with
 /// a killed retry stays detected and is `killed`.
@@ -1081,7 +1084,8 @@ const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatu
 }
 
 /// Runs each survivor and each timeout again in a new companion (section
-/// 10), see [`retried_status`]. The retry stays inside the time budget: a
+/// 10), see [`retried_status`]. Host load alone can make a test time out,
+/// so a single timeout is not proof of detection. The retry stays inside the time budget: a
 /// mutant that gets no retry before the deadline keeps its first status and
 /// is listed in [`ScheduleOutcome::unretried`].
 fn retry_suspects(
@@ -1105,14 +1109,21 @@ fn retry_suspects(
         }
         let first = outcome.results.get(&job.id);
         let first_status = first.map_or(MutantStatus::Survived, |first| first.status);
-        let first_duration = first.and_then(|first| first.duration_ms);
+        let status = retried_status(first_status, attempt.status);
+        // A kill reports the run that killed the mutant. Each other status
+        // keeps the first run, so a retry never shortens a timeout.
+        let duration_ms = if status == MutantStatus::Killed {
+            attempt.duration_ms
+        } else {
+            first.and_then(|first| first.duration_ms)
+        };
         record(
             outcome,
             facts,
             job,
             Attempt {
-                status: retried_status(first_status, attempt.status),
-                duration_ms: first_duration,
+                status,
+                duration_ms,
                 ..attempt
             },
         );
@@ -1211,8 +1222,10 @@ pub fn run_schedule(
     outcome.timings.mutants = mutants_started.elapsed();
     let mut suspects = Vec::new();
     for (job, attempt) in attempts {
-        if needs_retry(attempt.status) {
-            suspects.push(job.clone());
+        match attempt.status {
+            MutantStatus::Survived => suspects.push(job.clone()),
+            MutantStatus::Timeout => suspects.push(job.clone().with_doubled_timeout()),
+            _ => {}
         }
         record(&mut outcome, &facts, job, attempt);
     }

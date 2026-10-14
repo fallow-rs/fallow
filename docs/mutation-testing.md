@@ -103,13 +103,18 @@ tests detect the mutant.
 | any | `runtime_error` | `runtime_error` |
 | any | other result | `flaky` |
 
-- A `killed` result gets no retry. A kill by an assertion failure under load
-  did not appear in the measurements, and a retry of each kill doubles the
-  run time.
+- The retry of a `timeout` waits twice as long. Host load often lasts into
+  the retry, and a real infinite loop still times out.
+- A `killed` result gets no retry. In repeated runs under host load, no
+  kill became a survivor, and a retry of each kill doubles the run time.
 - The retries stay inside the time budget. A mutant that gets no retry
   before the deadline keeps its first status, and the completion is
   `partial` (`time-budget`).
-- A retry of a real infinite loop costs one more timeout window.
+- A retry of a real infinite loop costs two more timeout windows.
+- A `runtime_error` retry takes the mutant out of the score, also after a
+  first `timeout`. The completion is then `partial` (`runtime-error`).
+- A `killed` result after a retry reports the duration of the retry. Each
+  other status keeps the duration of the first run.
 
 ## Baseline failures
 

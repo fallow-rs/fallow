@@ -646,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unretried_survivor_and_an_unchecked_worktree_make_a_run_partial() {
+    fn an_unretried_mutant_and_an_unchecked_worktree_make_a_run_partial() {
         let plan = plan(
             vec![planned("m1", Some(1), MutantDisposition::Planned, None)],
             0,

@@ -19731,7 +19731,8 @@ no_coverage: number
  */
 runtime_error: number
 /**
- * Mutants with a different result in the second run.
+ * Mutants where the second run in a new companion changed whether the
+ * tests detect the mutant.
  */
 flaky: number
 /**

@@ -32875,7 +32875,7 @@
         },
         "flaky": {
           "type": "integer",
-          "description": "Mutants with a different result in the second run."
+          "description": "Mutants where the second run in a new companion changed whether the\ntests detect the mutant."
         },
         "pruned": {
           "type": "integer",

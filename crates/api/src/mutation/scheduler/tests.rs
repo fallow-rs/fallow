@@ -316,9 +316,9 @@ fn the_watchdog_adds_the_setup_time_of_each_covering_file() {
         vec![
             Duration::from_millis(5003 + 12_000 + 2000),
             Duration::from_millis(5153 + 12_000 + 2000),
-            Duration::from_millis(5003 + 12_000 + 2000),
+            Duration::from_millis(2 * (5003 + 12_000) + 2000),
         ],
-        "timeout_ms + ceil(1.5 * 8000) + 2000, and the same wait for the m1 retry"
+        "timeout_ms + ceil(1.5 * 8000) + 2000, and twice the wait without the grace for the m1 retry"
     );
     let timed_out = &outcome.results["m1"];
     assert_eq!(timed_out.status, MutantStatus::Timeout);
@@ -540,15 +540,20 @@ fn a_timeout_reruns_in_a_new_companion_and_a_survived_retry_is_flaky() {
     let runs = spawner.runs();
     assert_eq!(runs.len(), 2);
     assert_eq!(runs[1].0, 1, "the retry uses a new companion");
+    assert_eq!(
+        runs[1].1.timeout_ms,
+        2 * runs[0].1.timeout_ms,
+        "host load that slowed the first run can last, so the retry waits twice as long"
+    );
 }
 
 #[test]
-fn a_timeout_with_a_killed_retry_is_killed() {
+fn a_timeout_with_a_killed_retry_is_killed_with_the_retry_duration() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
         |index, run| {
             if index == 0 {
-                Ok(run_result(run, RunStatus::Timeout, None))
+                Err(LinkFault::Timeout)
             } else {
                 Ok(run_result(run, RunStatus::Killed, Some(&tid("t1"))))
             }
@@ -558,6 +563,11 @@ fn a_timeout_with_a_killed_retry_is_killed() {
     let result = &outcome.results["m1"];
     assert_eq!(result.status, MutantStatus::Killed);
     assert_eq!(result.killed_by.as_deref(), Some(tid("t1").as_str()));
+    assert_eq!(
+        result.duration_ms,
+        Some(12),
+        "the kill reports the duration of the run that killed it, not the watchdog wait"
+    );
 }
 
 #[test]
