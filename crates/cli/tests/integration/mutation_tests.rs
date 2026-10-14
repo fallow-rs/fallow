@@ -669,7 +669,10 @@ mod end_to_end {
         reason = "a skipped end-to-end test says why it did not run"
     )]
     fn type_aware_companion_installed() -> bool {
-        let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/type-aware-sidecar");
+        let Some(manifest_dir) = std::env::var_os("CARGO_MANIFEST_DIR") else {
+            return false;
+        };
+        let package = Path::new(&manifest_dir).join("../../tools/type-aware-sidecar");
         let installed = package
             .join("node_modules/typescript/package.json")
             .is_file();
