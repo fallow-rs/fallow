@@ -180,6 +180,23 @@ test("package marketplace metadata does not name other analysis tools", () => {
   assert.ok(COMPARED_TOOLS.test("knip"), "mutation control: the tool pattern must match");
 });
 
+/** The entries under `## [Unreleased]`, which become the next release notes. */
+const unreleasedChangelog = (changelog) =>
+  changelog.match(/^## \[Unreleased\]\n([\s\S]*?)(?=^## \[)/mu)?.[1] ?? "";
+
+test("unreleased changelog entries do not name other analysis tools", () => {
+  const offenders = unreleasedChangelog(readFileSync("CHANGELOG.md", "utf8"))
+    .split("\n")
+    .filter((line) => COMPARED_TOOLS.test(line));
+
+  assert.deepEqual(offenders, [], "describe what fallow does, without naming another tool");
+  assert.equal(
+    unreleasedChangelog("## [Unreleased]\n\n- Matches knip.\n\n## [1.0.0]\n\n- Old knip note.\n"),
+    "\n- Matches knip.\n\n",
+    "mutation control: only the Unreleased section is checked",
+  );
+});
+
 test("root Node API overview follows the published declarations", () => {
   const declarations = readFileSync("crates/napi/types/index.d.ts", "utf8");
   const readme = readFileSync("README.md", "utf8");
