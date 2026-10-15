@@ -3103,7 +3103,7 @@ pub enum EffortFilter {
 
 impl EffortFilter {
     /// Convert to the corresponding `EffortEstimate` for comparison.
-    pub const fn to_estimate(self) -> fallow_output::EffortEstimate {
+    pub(crate) const fn to_estimate(self) -> fallow_output::EffortEstimate {
         match self {
             Self::Low => fallow_output::EffortEstimate::Low,
             Self::Medium => fallow_output::EffortEstimate::Medium,
@@ -3122,7 +3122,7 @@ pub enum HealthSeverityCli {
 
 impl HealthSeverityCli {
     /// Convert to the typed health output severity.
-    pub const fn to_health_severity(self) -> fallow_output::FindingSeverity {
+    pub(crate) const fn to_health_severity(self) -> fallow_output::FindingSeverity {
         match self {
             Self::Moderate => fallow_output::FindingSeverity::Moderate,
             Self::High => fallow_output::FindingSeverity::High,
@@ -3151,7 +3151,7 @@ pub enum EmailModeArg {
 
 impl EmailModeArg {
     /// Convert to the equivalent config-level mode.
-    pub const fn to_config(self) -> fallow_config::EmailMode {
+    pub(crate) const fn to_config(self) -> fallow_config::EmailMode {
         match self {
             Self::Raw => fallow_config::EmailMode::Raw,
             Self::Handle => fallow_config::EmailMode::Handle,
