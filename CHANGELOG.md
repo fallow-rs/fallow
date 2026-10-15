@@ -358,6 +358,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     value becomes one URL path segment, so `..` addressed a different route.
     `fallow coverage analyze --cloud`, the cloud read commands and the cloud
     MCP tools refuse it, with the rule that already applies to commit SHAs.
+- **Two Fallow processes can save the cache at the same time.** The
+  extraction cache and the graph cache wrote through one fixed temp file
+  (`cache.bin.tmp`, `graph-cache.bin.tmp`). An editor server and a CLI run, or
+  a pre-commit hook beside an editor, that shared `.fallow/` wrote into the
+  same file. A save could then fail, or the cache could hold bytes from two
+  runs and be rebuilt from cold on the next run. Each save now writes its own
+  temp file and renames it into place.
+- **Cache eviction keeps the files that every run reads.** At the size cap
+  (`cache.maxSizeMb`), the extraction cache evicted the entries that it had
+  parsed longest ago. A file that never changes was parsed once and was then
+  the first entry to go, so the next run parsed it again. Eviction now removes
+  first the entries that recent runs did not discover, for example test
+  files after `--production` runs.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

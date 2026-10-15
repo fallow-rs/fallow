@@ -13,6 +13,9 @@
     )
 )]
 
+/// Atomic cache-file replacement, shared by the extraction cache and the graph
+/// cache so concurrent fallow processes never interleave a write.
+pub mod atomic_file;
 /// Typed audit cache-key inputs.
 pub mod audit_cache;
 /// Why a persisted cache was refused, shared by the extraction cache, the
