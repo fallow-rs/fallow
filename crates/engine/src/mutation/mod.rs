@@ -122,6 +122,7 @@ impl MutationPlanRequest {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FrameworkConfigExports {
     files: BTreeMap<String, BTreeSet<String>>,
+    config_files: BTreeSet<String>,
 }
 
 impl FrameworkConfigExports {
@@ -131,6 +132,22 @@ impl FrameworkConfigExports {
             .entry(file.into())
             .or_default()
             .insert(export.into());
+    }
+
+    /// Records that the root-relative `file` is a tool config file. The tool
+    /// reads its default export, and a top-level `module.exports = ...`
+    /// statement counts as that default export.
+    pub fn insert_config_file(&mut self, file: impl Into<String>) {
+        let file = file.into();
+        self.insert(file.clone(), DEFAULT_EXPORT);
+        self.config_files.insert(file);
+    }
+
+    /// True when [`Self::insert_config_file`] recorded the root-relative
+    /// `file`.
+    #[must_use]
+    pub fn is_config_file(&self, file: &str) -> bool {
+        self.config_files.contains(file)
     }
 
     /// The framework config export names of one root-relative file.
@@ -500,7 +517,8 @@ pub fn plan_mutations_for_session_with(
 
 /// The plugin used-export names of each module of the graph. A tool reads
 /// the default export of its config file, so the default export of each file
-/// that an active plugin config glob matches is framework config too.
+/// that a tool config glob of an active plugin matches is framework config
+/// too.
 fn framework_config_exports(
     session: &AnalysisSession,
     graph: &RetainedModuleGraph,
@@ -508,7 +526,19 @@ fn framework_config_exports(
 ) -> FrameworkConfigExports {
     let backend = inventory.plugins.backend();
     let names = backend.used_export_names();
-    let config_files = config_file_globs(&backend.config_patterns());
+    let active = backend.active_plugins();
+    let external = session
+        .config()
+        .external_plugins
+        .iter()
+        .filter(|plugin| active.contains(&plugin.name))
+        .flat_map(|plugin| plugin.config_patterns.iter().cloned());
+    let patterns: Vec<String> = backend
+        .config_patterns()
+        .into_iter()
+        .chain(external)
+        .collect();
+    let config_files = config_file_globs(&patterns);
     let mut exports = FrameworkConfigExports::default();
     for node in &graph.as_graph().modules {
         let rel = crate::module_graph::relative_key_path(&node.path, session.root());
@@ -516,7 +546,7 @@ fn framework_config_exports(
             exports.insert(rel.clone(), name);
         }
         if config_files.is_match(&rel) {
-            exports.insert(rel, DEFAULT_EXPORT);
+            exports.insert_config_file(rel);
         }
     }
     exports
@@ -525,12 +555,40 @@ fn framework_config_exports(
 /// The export name of `export default` and of `module.exports = ...`.
 const DEFAULT_EXPORT: &str = "default";
 
-/// The plugin config globs, each also tried under `**/`, because a glob is
+/// The word in a file name that marks a tool config file, as in
+/// `vite.config.ts`, `stryker.conf.js` or `tsconfig.json`.
+const CONFIG_NAME_MARKERS: [&str; 2] = ["config", ".conf."];
+
+/// True when the file name part of a plugin config glob names a tool config
+/// file: it holds `config` or `.conf.`, or an `rc` suffix as in
+/// `.eslintrc.js`. Some plugins also list application files as config, for
+/// example `codegen*.ts`, `src/module.ts` or `app/routes.ts`. Tests can load
+/// those files, so their default export stays in the plan.
+fn is_tool_config_glob(pattern: &str) -> bool {
+    let name = pattern
+        .rsplit('/')
+        .next()
+        .unwrap_or(pattern)
+        .to_ascii_lowercase();
+    if CONFIG_NAME_MARKERS
+        .iter()
+        .any(|marker| name.contains(marker))
+    {
+        return true;
+    }
+    let stem = name.split(['.', '{']).find(|part| !part.is_empty());
+    stem.is_some_and(|stem| stem.ends_with("rc"))
+}
+
+/// The tool config globs, each also tried under `**/`, because a glob is
 /// relative to the directory that the plugin searches, for example a
-/// workspace root.
+/// workspace package.
 fn config_file_globs(patterns: &[String]) -> globset::GlobSet {
     let mut builder = globset::GlobSetBuilder::new();
-    for pattern in patterns {
+    for pattern in patterns
+        .iter()
+        .filter(|pattern| is_tool_config_glob(pattern))
+    {
         let anywhere = if pattern.starts_with("**/") {
             pattern.clone()
         } else {

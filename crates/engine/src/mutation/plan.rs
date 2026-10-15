@@ -411,8 +411,17 @@ impl<'a> FileFacts<'a> {
         let framework_regions = context
             .inputs
             .framework_config_exports
-            .and_then(|exports| exports.exports_for(&candidate.rel))
-            .map(|names| framework_regions(module, names, source, candidate.layout))
+            .and_then(|exports| {
+                let names = exports.exports_for(&candidate.rel)?;
+                let config_file = exports.is_config_file(&candidate.rel);
+                Some(framework_regions(
+                    module,
+                    names,
+                    config_file,
+                    source,
+                    candidate.layout,
+                ))
+            })
             .unwrap_or_default();
         // A sink in a component template does not run when the module
         // loads, so only the sinks in the script blocks count.
@@ -741,10 +750,12 @@ fn has_top_level_site(starts: &[u32], source: &str, layout: Layout) -> bool {
 }
 
 /// The top-level statements that declare one of the framework config
-/// exports of the module.
+/// exports of the module. In a tool config file, a top-level
+/// `module.exports = ...` statement is one of them too.
 fn framework_regions(
     module: &ModuleInfo,
     names: &BTreeSet<String>,
+    config_file: bool,
     source: &str,
     layout: Layout,
 ) -> Vec<(u32, u32)> {
@@ -760,8 +771,7 @@ fn framework_regions(
         })
         .map(|export| export.span.start)
         .collect();
-    let commonjs_default =
-        module.has_cjs_exports && names.iter().any(|name| name == "*" || name == "default");
+    let commonjs_default = config_file && module.has_cjs_exports;
     if starts.is_empty() && !commonjs_default {
         return Vec::new();
     }

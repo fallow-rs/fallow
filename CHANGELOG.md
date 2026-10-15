@@ -105,7 +105,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     such as `vite.config.ts` or `.eslintrc.js`, with the reason
     `framework-config`. No test loads these files, so their mutants were
     `no_coverage` and lowered the coverage. A `module.exports = ...` config
-    counts as the default export. A mutant inside a function of the config,
+    counts as the default export. Only a file whose name marks a config
+    file counts, so `codegen-helpers.ts` or `app/routes.ts` keeps its
+    mutants. A mutant inside a function of the config,
     for example an inline Vite plugin, stays in the plan. (#3483)
   - The `regex-literal` operator changes one token of a regular expression
     literal. It removes a `^` or `$` anchor, negates a character class, or

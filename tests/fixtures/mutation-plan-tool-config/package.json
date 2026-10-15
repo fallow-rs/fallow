@@ -2,7 +2,12 @@
   "name": "mutation-plan-tool-config",
   "private": true,
   "type": "module",
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "my-tool": "^1.0.0"
+  },
   "devDependencies": {
+    "@graphql-codegen/cli": "^5.0.0",
     "eslint": "^8.57.0",
     "vitest": "^3.2.4"
   }

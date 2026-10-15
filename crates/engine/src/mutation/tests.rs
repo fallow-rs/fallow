@@ -230,6 +230,16 @@ fn the_session_entry_point_prunes_plugin_known_config_exports() {
     );
 }
 
+fn pruned_count(plan: &MutationPlan, file: &str) -> usize {
+    plan.mutants
+        .iter()
+        .filter(|entry| {
+            entry.file == file
+                && entry.disposition == MutantDisposition::Pruned(PruneReason::FrameworkConfig)
+        })
+        .count()
+}
+
 #[test]
 fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
     let root = fixture("mutation-plan-tool-config");
@@ -241,15 +251,26 @@ fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
     let config = MutantDisposition::Pruned(PruneReason::FrameworkConfig);
 
     let vite = function_dispositions(&plan, "vite.config.ts");
-    assert_eq!(vite.get("<top-level>"), Some(&config), "{vite:?}");
     assert_eq!(
-        vite.values()
-            .filter(|&&disposition| disposition == NO_COVERAGE)
-            .count(),
-        1,
-        "only the inline plugin function keeps a mutant: {vite:?}"
+        vite,
+        BTreeMap::from([
+            ("<top-level>".to_owned(), config),
+            ("transform".to_owned(), NO_COVERAGE),
+        ]),
+        "only the inline plugin function keeps its mutants"
     );
-    assert_eq!(vite.len(), 2, "{vite:?}");
+    assert_eq!(pruned_count(&plan, "vite.config.ts"), VITE_CONFIG_PRUNED);
+
+    let nested = function_dispositions(&plan, "packages/app/vite.config.ts");
+    assert_eq!(
+        nested,
+        BTreeMap::from([("<top-level>".to_owned(), config)]),
+        "a config file of a workspace package is pruned"
+    );
+    assert_eq!(
+        pruned_count(&plan, "packages/app/vite.config.ts"),
+        NESTED_CONFIG_PRUNED
+    );
 
     let eslint = function_dispositions(&plan, ".eslintrc.cjs");
     assert_eq!(
@@ -258,9 +279,69 @@ fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
         "a CommonJS config counts as the default export"
     );
 
+    let external = function_dispositions(&plan, "my-tool.config.ts");
     assert_eq!(
-        dispositions(&plan).get("src/math.ts"),
-        Some(&set(&[PLANNED]))
+        external,
+        BTreeMap::from([("<top-level>".to_owned(), config)]),
+        "the config glob of an external plugin counts"
+    );
+
+    for source in ["src/math.ts", "src/codegen-helpers.ts", "src/legacy.cjs"] {
+        assert_eq!(
+            dispositions(&plan).get(source),
+            Some(&set(&[PLANNED])),
+            "{source} is not a tool config file, so its default export stays planned"
+        );
+    }
+}
+
+/// The string mutants of the plugin name and the include glob in the root
+/// `vite.config.ts`. The mutants of the inline plugin function stay.
+const VITE_CONFIG_PRUNED: usize = 2;
+/// The string mutant of `"a"` in `defineConfig({ test: { include: ["a"] } })`.
+const NESTED_CONFIG_PRUNED: usize = 1;
+
+#[test]
+fn only_a_glob_that_names_a_config_file_is_a_tool_config_glob() {
+    for config in [
+        "vite.config.{ts,js}",
+        "**/vitest.config.ts",
+        ".eslintrc.{js,cjs}",
+        "adonisrc.ts",
+        "config/taprc",
+        "stryker.conf.js",
+        "tsconfig.json",
+    ] {
+        assert!(super::is_tool_config_glob(config), "{config}");
+    }
+    for source in [
+        "codegen*.{ts,js,cjs,mjs}",
+        "src/module.{ts,js}",
+        "app/routes.{ts,js,mts,mjs}",
+        "gatsby-node.{ts,js,mjs}",
+        "serverless.{js,ts}",
+    ] {
+        assert!(!super::is_tool_config_glob(source), "{source}");
+    }
+}
+
+#[test]
+fn a_wildcard_plugin_export_does_not_prune_a_commonjs_module() {
+    let root = fixture("mutation-plan-tool-config");
+    let mut exports = FrameworkConfigExports::default();
+    exports.insert("src/legacy.cjs", "*");
+    let plan = plans(
+        &root,
+        Some(&exports),
+        &[MutationPlanRequest::new(MutationScope::All)],
+    )
+    .remove(0);
+    assert_eq!(pruned_count(&plan, "src/legacy.cjs"), 0);
+    assert!(
+        plan.mutants
+            .iter()
+            .any(|entry| entry.file == "src/legacy.cjs"),
+        "the fixture has mutants in the CommonJS module"
     );
 }
 

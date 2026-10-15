@@ -1,0 +1,8 @@
+{
+  "name": "app",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
