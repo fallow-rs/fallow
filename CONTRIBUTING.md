@@ -13,7 +13,7 @@ cd fallow
 mise install                           # Optional: install pinned tools, including hk
 hk install --mise                      # Enable hooks (without mise: hk install)
 npm install                            # Install repo tooling such as commitlint
-pnpm --dir editors/vscode install     # Tooling that verify:fast needs
+pnpm --dir editors/vscode install      # Tooling that verify:fast needs
 cargo build --workspace
 npm run verify:fast                   # Canonical local feedback loop
 ```
