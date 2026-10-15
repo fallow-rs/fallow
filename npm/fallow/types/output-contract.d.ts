@@ -1697,7 +1697,7 @@ export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | 
 /**
  * Why the type check did not check a survivor.
  */
-export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing")
+export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing" | "unsupported-file")
 /**
  * Version singleton for a mutation plan.
  */

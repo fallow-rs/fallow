@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     error to its file gets the status `compile_error` and leaves the score.
     The check reads only the mutated file and never writes a project file.
     Without a companion, the run exits with 2 before the tests start.
+    The checker cannot read a Vue, Svelte or Astro component, so a survivor
+    in a component stays `survived` with the skip reason
+    `unsupported-file`. (#3471)
   - `fallow health --mutation-report <file>` reads a saved run report and
     adds the mutation score of each complexity finding next to its CRAP
     score, as `mutation` on the finding. A function whose file changed since

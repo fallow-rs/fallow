@@ -32,7 +32,7 @@ pub use fallow_mutation::{
     FunctionRef, Mutant, MutantId, MutationError, Operator, RESERVED_PREFIX, SourceKind,
 };
 pub use fallow_output::DiffIndex;
-pub use layout::instrument_source;
+pub use layout::{instrument_source, is_component_file};
 
 use crate::EngineError;
 use crate::module_graph::{ExportTestReach, RetainedModuleGraph};

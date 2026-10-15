@@ -34021,6 +34021,11 @@
           "type": "string",
           "const": "file-missing",
           "description": "The file does not exist."
+        },
+        {
+          "type": "string",
+          "const": "unsupported-file",
+          "description": "The checker cannot read the file type: a Vue, Svelte or Astro\ncomponent file."
         }
       ],
       "description": "Why the type check did not check a survivor."

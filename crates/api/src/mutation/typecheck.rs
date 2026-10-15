@@ -9,23 +9,48 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use fallow_engine::mutation::MutationPlan;
+use fallow_engine::mutation::{MutationPlan, is_component_file};
 use fallow_output::{
     MutantResult, MutantStatus, MutationRunIssue, MutationTypecheckOutput, MutationTypecheckSkip,
+    MutationTypecheckSkipReason,
 };
 use rustc_hash::FxHashMap;
 
 use crate::type_aware::{TypecheckFile, TypecheckMutant, TypecheckOutcome};
 
-/// The request files: the survivors of `results`, grouped by file in plan
-/// order. `results` is in plan order.
-pub fn survivor_files(plan: &MutationPlan, results: &[MutantResult]) -> Vec<TypecheckFile> {
+/// The survivors of one run, split by what the checker can read.
+pub struct SurvivorRequest {
+    /// The request files: the survivors in files that the checker can read,
+    /// grouped by file in plan order.
+    pub files: Vec<TypecheckFile>,
+    /// The outcomes of the survivors in component files. The checker cannot
+    /// read a Vue, Svelte or Astro file, so these survivors are not sent.
+    pub unsupported: Vec<(String, TypecheckOutcome)>,
+}
+
+impl SurvivorRequest {
+    /// The number of survivors, sent or not.
+    pub fn survivors(&self) -> usize {
+        self.files
+            .iter()
+            .map(|file| file.mutants.len())
+            .sum::<usize>()
+            + self.unsupported.len()
+    }
+}
+
+/// Splits the survivors of `results` into the request files and the
+/// component survivors. `results` is in plan order.
+pub fn survivor_request(plan: &MutationPlan, results: &[MutantResult]) -> SurvivorRequest {
     let digests: FxHashMap<&str, &str> = plan
         .files
         .iter()
         .map(|file| (file.path.as_str(), file.source_sha256.as_str()))
         .collect();
-    let mut files: Vec<TypecheckFile> = Vec::new();
+    let mut request = SurvivorRequest {
+        files: Vec::new(),
+        unsupported: Vec::new(),
+    };
     let mut index_of: FxHashMap<&str, usize> = FxHashMap::default();
     for (planned, result) in plan.mutants.iter().zip(results) {
         if result.status != MutantStatus::Survived {
@@ -34,6 +59,13 @@ pub fn survivor_files(plan: &MutationPlan, results: &[MutantResult]) -> Vec<Type
         let Some(digest) = digests.get(planned.file.as_str()) else {
             continue;
         };
+        if is_component_file(&planned.file) {
+            request.unsupported.push((
+                planned.mutant.id.as_str().to_owned(),
+                TypecheckOutcome::Unchecked(MutationTypecheckSkipReason::UnsupportedFile),
+            ));
+            continue;
+        }
         let mutant = TypecheckMutant {
             id: planned.mutant.id.as_str().to_owned(),
             start: planned.mutant.span.0,
@@ -41,17 +73,17 @@ pub fn survivor_files(plan: &MutationPlan, results: &[MutantResult]) -> Vec<Type
             replacement: planned.mutant.replacement.clone(),
         };
         if let Some(&index) = index_of.get(planned.file.as_str()) {
-            files[index].mutants.push(mutant);
+            request.files[index].mutants.push(mutant);
             continue;
         }
-        index_of.insert(planned.file.as_str(), files.len());
-        files.push(TypecheckFile {
+        index_of.insert(planned.file.as_str(), request.files.len());
+        request.files.push(TypecheckFile {
             path: planned.file.clone(),
             source_sha256: (*digest).to_owned(),
             mutants: vec![mutant],
         });
     }
-    files
+    request
 }
 
 /// Applies the checker outcomes to `results` and returns the summary. Only a
@@ -147,10 +179,13 @@ pub fn typecheck_survivors(
             elapsed: Duration::ZERO,
         };
     }
-    let files = survivor_files(plan, results);
-    let survivors = files.iter().map(|file| file.mutants.len()).sum();
-    let (output, issue) = match crate::type_aware::typecheck_mutants(root, &files) {
-        Ok(outcomes) => (apply_outcomes(results, outcomes), None),
+    let request = survivor_request(plan, results);
+    let survivors = request.survivors();
+    let (output, issue) = match crate::type_aware::typecheck_mutants(root, &request.files) {
+        Ok(mut outcomes) => {
+            outcomes.extend(request.unsupported);
+            (apply_outcomes(results, outcomes), None)
+        }
         Err(error) => {
             let (output, issue) = failed_output(survivors, &error.to_string());
             (output, Some(issue))
@@ -165,9 +200,59 @@ pub fn typecheck_survivors(
 
 #[cfg(test)]
 mod tests {
-    use fallow_output::{MutantLocation, MutationSummary, MutationTypecheckSkipReason};
+    use std::collections::BTreeMap;
+
+    use fallow_engine::mutation::{
+        Mutant, MutantDisposition, MutantId, MutationPlanCounts, Operator, PlannedFile,
+        PlannedMutant,
+    };
+    use fallow_output::{MutantLocation, MutationSummary};
 
     use super::*;
+
+    fn plan_with(paths: &[&str]) -> MutationPlan {
+        MutationPlan {
+            files: paths
+                .iter()
+                .map(|path| PlannedFile {
+                    path: (*path).to_owned(),
+                    source_sha256: "ab".repeat(32),
+                    instrumented_code: String::new(),
+                    static_test_files: Vec::new(),
+                })
+                .collect(),
+            mutants: paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| PlannedMutant {
+                    mutant: Mutant {
+                        id: MutantId(format!("m{index}")),
+                        operator: Operator::StringLiteral,
+                        span: (0, 1),
+                        line: 1,
+                        column: 0,
+                        original: "\"a\"".to_owned(),
+                        replacement: "\"\"".to_owned(),
+                        enclosing_function: None,
+                    },
+                    file: (*path).to_owned(),
+                    rank: None,
+                    disposition: MutantDisposition::Planned,
+                    function: None,
+                    test_reach: None,
+                })
+                .collect(),
+            test_files: Vec::new(),
+            reach_files: Vec::new(),
+            test_file_reach: BTreeMap::new(),
+            support_files: Vec::new(),
+            counts: MutationPlanCounts::default(),
+            no_test_files: false,
+            framework_config_checked: false,
+            skipped_files: Vec::new(),
+            unmatched_paths: Vec::new(),
+        }
+    }
 
     fn result(id: &str, status: MutantStatus) -> MutantResult {
         MutantResult {
@@ -253,6 +338,48 @@ mod tests {
         );
         assert_eq!(results[0].status, MutantStatus::Killed);
         assert!(results[0].type_error_codes.is_empty());
+    }
+
+    #[test]
+    fn a_component_survivor_is_not_sent_and_gets_its_own_reason() {
+        let plan = plan_with(&[
+            "src/a.ts",
+            "src/Button.vue",
+            "src/Card.svelte",
+            "src/Page.astro",
+        ]);
+        let results: Vec<MutantResult> = plan
+            .mutants
+            .iter()
+            .map(|planned| {
+                let mut survivor = result(planned.mutant.id.as_str(), MutantStatus::Survived);
+                survivor.location.file.clone_from(&planned.file);
+                survivor
+            })
+            .collect();
+        let request = survivor_request(&plan, &results);
+        let sent: Vec<&str> = request
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        assert_eq!(sent, vec!["src/a.ts"]);
+        let mut results = results;
+        let mut outcomes = request.unsupported;
+        outcomes.push((
+            plan.mutants[0].mutant.id.as_str().to_owned(),
+            TypecheckOutcome::Compiles,
+        ));
+        let output = apply_outcomes(&mut results, outcomes);
+        assert_eq!(output.survivors, 4);
+        assert_eq!(output.checked, 1);
+        assert_eq!(
+            output.skipped,
+            vec![MutationTypecheckSkip {
+                reason: MutationTypecheckSkipReason::UnsupportedFile,
+                count: 3,
+            }]
+        );
     }
 
     #[test]
