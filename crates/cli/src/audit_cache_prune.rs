@@ -59,6 +59,14 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
     );
     report
         .entries
+        .extend(crate::audit::sweep_base_snapshot_cache(
+            &project_cache_dir(opts),
+            resolved.max_age,
+            mode,
+            std::time::SystemTime::now(),
+        ));
+    report
+        .entries
         .sort_by(|left, right| left.path.cmp(&right.path));
     log_sweep_entries(&report, mode, resolved.max_age);
 
@@ -72,6 +80,33 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
         print_prune_human(opts, &scan_root, &resolved, &report.entries, &counts);
     }
     ExitCode::SUCCESS
+}
+
+/// The project cache directory that holds the base-snapshot files, resolved
+/// like the analysis commands do: `FALLOW_CACHE_DIR`, then `cache.dir`, then
+/// `<root>/.fallow`. A relative path resolves from the root. A config that
+/// does not load gives the default, so prune never fails on a bad config.
+fn project_cache_dir(opts: &AuditCachePruneOptions<'_>) -> PathBuf {
+    let configured = fallow_config::cache_dir_env_override().or_else(|| {
+        let load_options = fallow_config::ConfigLoadOptions {
+            allow_remote_extends: opts.allow_remote_extends,
+        };
+        let config = match opts.config_path {
+            Some(path) => fallow_config::FallowConfig::load_with_options(path, load_options).ok(),
+            None => {
+                fallow_config::FallowConfig::find_and_load_with_options(opts.root, load_options)
+                    .ok()
+                    .flatten()
+                    .map(|(config, _)| config)
+            }
+        };
+        config.and_then(|config| config.cache.dir)
+    });
+    match configured {
+        Some(dir) if dir.is_absolute() => dir,
+        Some(dir) => opts.root.join(dir),
+        None => opts.root.join(".fallow"),
+    }
 }
 
 /// Aggregate decision counts. `removed + kept + skipped + failed == found ==
@@ -313,6 +348,10 @@ fn entry_row(entry: &SweepEntry, dry_run: bool) -> String {
         }
         "orphaned-sidecars" => segments.push("orphaned sidecars".to_string()),
         "legacy-registered" => segments.push("legacy git registration".to_string()),
+        "over-capacity" => {
+            push_age(&mut segments, entry);
+            segments.push("beyond the newest-snapshots cap".to_string());
+        }
         "legacy-deregistered" => {
             segments.push("legacy git registration; cache stays warm on disk".to_string());
         }
@@ -425,6 +464,13 @@ mod tests {
         assert_eq!(
             entry_row(&seeded, false),
             "  kept         fallow-audit-base-cache-aa-root-bb  2 KiB  first seen, ages from now",
+        );
+        let mut capped = entry(SweepDisposition::ReclaimedOverCapacity, Some(2048));
+        capped.pass = SweepPass::Snapshot;
+        capped.path = PathBuf::from("/repo/.fallow/cache/audit-base-v13/00000000000000ff.bin");
+        assert_eq!(
+            entry_row(&capped, true),
+            "  would remove 00000000000000ff.bin  2 KiB  aged 42d  beyond the newest-snapshots cap",
         );
         let deregistered = entry(SweepDisposition::KeptLegacyDeregistered, Some(2048));
         assert_eq!(

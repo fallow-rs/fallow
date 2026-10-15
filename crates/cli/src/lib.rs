@@ -2467,8 +2467,10 @@ enum AuditCacheCli {
     /// Runs the same reclaim policy every `fallow audit` run already applies
     /// silently: orphaned-sidecar cleanup, age-based reclaim under the
     /// resolved threshold, and cross-repo reclaim of abandoned entries whose
-    /// recorded owner root no longer exists. Entries owned by other live
-    /// projects are never touched. Use `--dry-run` to preview every decision
+    /// recorded owner root no longer exists. It also bounds the base-snapshot
+    /// files in the project cache directory (`pass: "snapshot"`): files older
+    /// than the threshold go, and only the newest 32 stay. Entries owned by
+    /// other live projects are never touched. Use `--dry-run` to preview every decision
     /// the policy would take without touching the filesystem. `--root` is
     /// optional and defaults to the current directory. Reported sizes come
     /// from a full recursive walk of each cache entry, which can take a few
