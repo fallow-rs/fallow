@@ -5405,6 +5405,11 @@ mod tests {
                 "`{script}` keeps the files as entry files: {:?}",
                 result.entry_files
             );
+            assert!(
+                !result.entry_files.iter().any(|file| file.starts_with('!')),
+                "`{script}` keeps no exclusion glob as an entry file: {:?}",
+                result.entry_files
+            );
         }
     }
 

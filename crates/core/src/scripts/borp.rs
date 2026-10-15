@@ -119,11 +119,12 @@ pub(super) fn test_files(args: &[&str]) -> Vec<String> {
     BorpArgs::parse(args).test_files()
 }
 
-/// Return `file_args` without the flag values that name no file, plus the
-/// test files and globs that `borp` runs with `args`.
+/// Return `file_args` without the flag values that name no file and without
+/// the `!` exclusion globs, plus the test files and globs that `borp` runs
+/// with `args`. An exclusion glob names no entry file.
 pub(super) fn with_test_files(args: &[&str], mut file_args: Vec<String>) -> Vec<String> {
     let parsed = BorpArgs::parse(args);
-    file_args.retain(|file| !parsed.is_unused_value(file));
+    file_args.retain(|file| !file.starts_with('!') && !parsed.is_unused_value(file));
     for file in parsed.test_files() {
         if !file_args.contains(&file) {
             file_args.push(file);

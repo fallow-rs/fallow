@@ -348,7 +348,10 @@ test files of a `borp` command in the order of `borp` 1.0:
 3. Otherwise the default glob `**/*.test.{js,mjs,cjs,ts,mts,cts}`.
 
 These files are test entry points, so the plan finds the static test files
-of the project. The parser does not read a `.borp.yaml` file.
+of the project. The parser does not apply a `!` exclusion glob: a file that
+the exclusion removes stays a test entry point when another glob matches it.
+The parser does not read a `.borp.yaml` file. A project that sets its test
+files in `.borp.yaml` and runs a bare `borp` command gets the default glob.
 
 `--runtime` must name a runtime that the runner accepts. A Bun runtime for
 `node-test`, or a Node runtime for `bun-test`, exits with code 2 and

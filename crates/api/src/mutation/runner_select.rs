@@ -132,13 +132,59 @@ fn has_node_test_script(manifest: &serde_json::Value) -> bool {
 /// The name of the `borp` binary, a test runner that runs `node:test`.
 const BORP_BINARY: &str = "borp";
 
-/// True when a `package.json` script runs `borp`, also through a package
-/// manager (`npx borp`) or a binary path (`./node_modules/.bin/borp`).
+/// The commands that run the binary that follows them, such as `npx borp`
+/// or `cross-env CI=1 borp`.
+const COMMAND_WRAPPERS: &[&str] = &["npx", "bunx", "pnpx", "cross-env", "dotenv"];
+
+/// The package managers that run a binary, also through a subcommand such
+/// as `pnpm exec borp` or `yarn dlx borp`.
+const PACKAGE_MANAGERS: &[&str] = &["npm", "pnpm", "yarn", "bun"];
+
+/// The package manager subcommands that run the binary that follows them.
+const RUN_SUBCOMMANDS: &[&str] = &["exec", "dlx", "x"];
+
+/// True when a `package.json` script runs `borp` as a command, also through
+/// a package manager (`npx borp`) or a binary path
+/// (`./node_modules/.bin/borp`). An argument such as `echo borp` or
+/// `npm i -g borp` does not run `borp`.
 fn has_borp_script(manifest: &serde_json::Value) -> bool {
     script_texts(manifest).any(|script| {
         script
-            .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')'))
-            .any(|word| word.rsplit('/').next() == Some(BORP_BINARY))
+            .split([';', '&', '|', '(', ')', '\n'])
+            .filter_map(segment_command)
+            .any(|command| command.rsplit('/').next() == Some(BORP_BINARY))
+    })
+}
+
+/// The command that a shell segment runs, after the environment variable
+/// assignments, the command wrappers and the package manager subcommands.
+fn segment_command(segment: &str) -> Option<&str> {
+    let mut words = segment.split_whitespace().peekable();
+    loop {
+        let word = words.next()?;
+        if word.starts_with('-') || is_env_assignment(word) {
+            continue;
+        }
+        if COMMAND_WRAPPERS.contains(&word) {
+            continue;
+        }
+        if PACKAGE_MANAGERS.contains(&word) {
+            if words
+                .peek()
+                .is_some_and(|next| RUN_SUBCOMMANDS.contains(next))
+            {
+                words.next();
+            }
+            continue;
+        }
+        return Some(word);
+    }
+}
+
+/// True for a shell assignment such as `NODE_ENV=test`.
+fn is_env_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     })
 }
 
@@ -313,6 +359,10 @@ mod tests {
             "npm run lint && borp --coverage",
             "npx borp",
             "./node_modules/.bin/borp test/a.test.js",
+            "pnpm exec borp -C",
+            "yarn borp",
+            "NODE_ENV=test npx -y borp",
+            "cross-env CI=1 borp --coverage",
         ] {
             let manifest = format!(r#"{{"scripts":{{"test":{}}}}}"#, serde_json::json!(script));
             let runner = detect(
@@ -332,6 +382,11 @@ mod tests {
             &[],
         );
         assert_eq!(other, Runner::Vitest);
+        for script in ["echo borp", "npm i -g borp", "npm install borp && vitest"] {
+            let manifest = format!(r#"{{"scripts":{{"test":{}}}}}"#, serde_json::json!(script));
+            let runner = detect(&[("package.json", manifest.as_str())], &[]);
+            assert_eq!(runner, Runner::Vitest, "`{script}`");
+        }
     }
 
     #[test]
