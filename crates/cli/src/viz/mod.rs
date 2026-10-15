@@ -31,8 +31,8 @@ use fallow_types::semantic::SemanticAnalysisIdentity;
 
 mod payload;
 
+use crate::dispatch::resolve_coverage_inputs;
 use crate::error::emit_error;
-use crate::resolve_coverage_inputs;
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
 // ── Embedded viz assets ─────────────────────────────────────────

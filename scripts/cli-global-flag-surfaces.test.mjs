@@ -1,6 +1,6 @@
 /**
  * Guards the generated agent-facing contract surfaces against a new global clap
- * flag that lands in `crates/cli/src/lib.rs` without a contract regeneration
+ * flag that lands in `crates/cli/src/cli_args.rs` without a contract regeneration
  * (issue #2010). `fallow schema` reflects the clap command, so the committed
  * capability manifest and the generated CLI reference both go stale silently.
  */
@@ -12,20 +12,20 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CLI_SOURCE = join(REPO_ROOT, "crates/cli/src/lib.rs");
+const CLI_SOURCE = join(REPO_ROOT, "crates/cli/src/cli_args.rs");
 const CAPABILITIES = join(REPO_ROOT, "npm/fallow/capabilities.json");
 const CLI_REFERENCE = join(REPO_ROOT, "npm/fallow/skills/fallow/references/cli-reference.md");
 
 /** `--help` and `--version` are clap builtins that `build_cli_schema` drops. */
 const SCHEMA_EXCLUDED_FLAGS = new Set(["--help", "--version"]);
 
-const ARG_FIELD = /#\[arg\(([\s\S]*?)\)\]\s*(?:#\[[\s\S]*?\]\s*)*([a-z0-9_]+)\s*:/g;
+const ARG_FIELD = /#\[arg\(([\s\S]*?)\)\]\s*(?:#\[[\s\S]*?\]\s*)*(?:pub\s+)?([a-z0-9_]+)\s*:/g;
 
 /** Long flag names declared on the root `Cli` struct, in declaration order. */
 const declaredGlobalFlags = () => {
   const source = readFileSync(CLI_SOURCE, "utf8");
-  const start = source.indexOf("\nstruct Cli {");
-  assert.notEqual(start, -1, "crates/cli/src/lib.rs should declare `struct Cli`");
+  const start = source.indexOf("\npub struct Cli {");
+  assert.notEqual(start, -1, "crates/cli/src/cli_args.rs should declare `struct Cli`");
   const body = source.slice(start, source.indexOf("\n}\n", start));
   const names = [];
   for (const [, attributes, field] of body.matchAll(ARG_FIELD)) {
