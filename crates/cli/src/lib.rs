@@ -3790,6 +3790,26 @@ pub fn benchmark_audit_review_brief_many_changed_files_json(
     }
 }
 
+/// Finding counts of the audit analyses benchmark. This is not a supported API.
+#[doc(hidden)]
+pub use audit::AuditAnalysesBenchmarkResult;
+
+/// Benchmark the HEAD and base analyses of one audit over two prepared trees,
+/// without git. This is not a supported API.
+///
+/// # Errors
+///
+/// Returns the exit code of the failed analysis.
+#[doc(hidden)]
+pub fn benchmark_audit_analyses(
+    head_root: &Path,
+    base_root: &Path,
+    changed_files: &[PathBuf],
+    threads: usize,
+) -> Result<AuditAnalysesBenchmarkResult, ExitCode> {
+    audit::benchmark_audit_analyses(head_root, base_root, changed_files, threads)
+}
+
 #[doc(hidden)]
 pub use inspect::InspectBenchmarkCorpus;
 

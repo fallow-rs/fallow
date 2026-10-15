@@ -20,8 +20,9 @@ use fallow_api::{
 };
 use fallow_cli::{
     AuditReviewBenchmarkCorpus, InspectBenchmarkCorpus, SecurityBlindSpotsBenchmarkResult,
-    WatchFilterBenchmarkGlobalGitignore, benchmark_audit_review_brief_many_changed_files_json,
-    benchmark_dead_code_json, benchmark_fix_dry_run, benchmark_inspect_file_evidence_bundle_json,
+    WatchFilterBenchmarkGlobalGitignore, benchmark_audit_analyses,
+    benchmark_audit_review_brief_many_changed_files_json, benchmark_dead_code_json,
+    benchmark_fix_dry_run, benchmark_inspect_file_evidence_bundle_json,
     benchmark_list_boundaries_json, benchmark_list_json, benchmark_recommend_json,
     benchmark_rule_pack_test_json, benchmark_runtime_coverage_analyze_json,
     benchmark_security_blind_spots_json, benchmark_security_json,
@@ -56,6 +57,8 @@ const AUDIT_REVIEW_INTRODUCED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT / 2
 const AUDIT_REVIEW_INHERITED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT / 2;
 const AUDIT_REVIEW_PUBLIC_API_ADDED_COUNT: usize = AUDIT_REVIEW_CHANGED_FILE_COUNT;
 const AUDIT_REVIEW_DECISION_COUNT: usize = 4;
+const AUDIT_ANALYSES_MODULE_COUNT: usize = 128;
+const AUDIT_ANALYSES_CHANGED_FILE_COUNT: usize = 16;
 const BUN_LOCK_PACKAGE_COUNT: usize = 4_096;
 const BUN_OVERRIDE_COUNT: usize = 512;
 const BUN_UNUSED_OVERRIDE_COUNT: usize = 1;
@@ -101,6 +104,13 @@ struct InspectCommandInput {
     _temp_dir: TempDir,
     root: PathBuf,
     corpus: InspectBenchmarkCorpus,
+}
+
+struct AuditAnalysesCommandInput {
+    _temp_dir: TempDir,
+    head_root: PathBuf,
+    base_root: PathBuf,
+    changed_files: Vec<PathBuf>,
 }
 
 struct AuditReviewCommandInput {
@@ -316,6 +326,72 @@ fn create_audit_review_project() -> AuditReviewCommandInput {
     AuditReviewCommandInput {
         _temp_dir: temp_dir,
         root,
+        changed_files,
+    }
+}
+
+/// One module of the audit analyses fixture. The scoring functions differ only
+/// in their names, so the duplication analysis finds clone groups, and their
+/// branches give the health analysis complexity to score.
+fn audit_analyses_module(index: usize, changed: bool) -> String {
+    let mut source = format!(
+        "export const used{index} = {index};\n\
+         export const unused{index} = {index};\n\
+         export function score{index}(input: number[]): number {{\n\
+         \x20 let total = 0;\n\
+         \x20 for (const value of input) {{\n\
+         \x20   if (value > 10) {{\n\
+         \x20     total += value;\n\
+         \x20   }} else if (value < 0) {{\n\
+         \x20     total -= value;\n\
+         \x20   }} else {{\n\
+         \x20     total += 1;\n\
+         \x20   }}\n\
+         \x20 }}\n\
+         \x20 return total;\n\
+         }}\n"
+    );
+    if changed {
+        writeln!(&mut source, "export const added{index} = {index};").unwrap();
+    }
+    source
+}
+
+fn write_audit_analyses_tree(root: &Path, changed_count: usize) {
+    write_file(
+        root,
+        "package.json",
+        r#"{"name":"bench-audit-analyses","type":"module","main":"src/index.ts"}"#,
+    );
+    let mut index_source = String::new();
+    for index in 0..AUDIT_ANALYSES_MODULE_COUNT {
+        write_file(
+            root,
+            &format!("src/modules/module{index}.ts"),
+            audit_analyses_module(index, index < changed_count),
+        );
+        writeln!(
+            &mut index_source,
+            "import {{ used{index}, score{index} }} from \"./modules/module{index}\";\nconsole.log(score{index}([used{index}]));"
+        )
+        .unwrap();
+    }
+    write_file(root, "src/index.ts", index_source);
+}
+
+fn create_audit_analyses_project() -> AuditAnalysesCommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let head_root = temp_dir.path().join("head");
+    let base_root = temp_dir.path().join("base");
+    write_audit_analyses_tree(&head_root, AUDIT_ANALYSES_CHANGED_FILE_COUNT);
+    write_audit_analyses_tree(&base_root, 0);
+    let changed_files = (0..AUDIT_ANALYSES_CHANGED_FILE_COUNT)
+        .map(|index| head_root.join(format!("src/modules/module{index}.ts")))
+        .collect();
+    AuditAnalysesCommandInput {
+        _temp_dir: temp_dir,
+        head_root,
+        base_root,
         changed_files,
     }
 }
@@ -1338,6 +1414,33 @@ fn stable_audit_review_brief_many_changed_files_json(c: &mut Criterion) {
     );
 }
 
+fn stable_audit_base_and_head_analyses(c: &mut Criterion) {
+    let input = create_audit_analyses_project();
+    let run = || {
+        benchmark_audit_analyses(
+            &input.head_root,
+            &input.base_root,
+            &input.changed_files,
+            bench_threads(),
+        )
+        .expect("audit analyses benchmark runs")
+    };
+    let warmup = run();
+    // Each changed file adds one unused export, and its old unused export
+    // also exists at the base.
+    assert_eq!(warmup.introduced_count, AUDIT_ANALYSES_CHANGED_FILE_COUNT);
+    assert_eq!(warmup.inherited_count, AUDIT_ANALYSES_CHANGED_FILE_COUNT);
+    assert!(warmup.clone_group_count > 0);
+
+    c.bench_function("stable_audit_base_and_head_analyses", |bencher| {
+        bencher.iter(|| {
+            let result = run();
+            assert_eq!(result, warmup);
+            result
+        });
+    });
+}
+
 fn stable_audit_impact_closure_many_files(c: &mut Criterion) {
     let input = create_impact_closure_project();
     let session = AnalysisSession::load(&input.root, None).expect("impact session loads");
@@ -1900,6 +2003,7 @@ criterion_group!(
     stable_feature_flags_workspace_analysis,
     stable_audit_review_brief_many_changed_files_json,
     stable_audit_impact_closure_many_files,
+    stable_audit_base_and_head_analyses,
     stable_fix_dry_run_many_exports,
     stable_inspect_file_evidence_bundle_json,
     stable_dead_code_many_exports_json,

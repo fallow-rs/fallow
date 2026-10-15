@@ -169,7 +169,8 @@ Fast PR shards:
   and its bench file).
 - `fallow-benchmarks/programmatic_stable`: deterministic programmatic API,
   session reuse, warm parse-cache, health-cache, dead-code analysis and compact
-  JSON rendering, fix dry-run planning, opt-in security and rule-pack policy
+  JSON rendering, the HEAD and base audit analyses over two prepared trees
+  (no git), fix dry-run planning, opt-in security and rule-pack policy
   analysis, list inventory rendering, and Viz HTML payload paths.
 - `fallow-benchmarks/representative_sources`: focused source-shape extraction
   probes.
