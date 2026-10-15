@@ -740,38 +740,50 @@ fn run_check_analysis(
     )
     .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
 
-    if opts.retain_modules_for_health {
-        return session
+    let result = if opts.retain_modules_for_health {
+        session
             .analyze_dead_code_with_artifacts(true, true)
             .map(|output| check_data_from_artifacts(output, &session))
-            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
-    }
-
-    if opts.include_dupes {
-        return session
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+    } else if opts.include_dupes {
+        session
             .analyze_dead_code_retaining_files(false, opts.trace_opts.any_active())
             .map(|mut output| {
                 output.modules = None;
                 check_data_from_artifacts(output, &session)
             })
-            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
-    }
-
-    if opts.trace_opts.any_active() || config.type_aware.enabled {
-        return session
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+    } else if opts.trace_opts.any_active() || config.type_aware.enabled {
+        session
             .analyze_dead_code_with_artifacts(false, true)
             .map(|mut output| {
                 output.modules = None;
                 output.files = None;
                 check_data_from_artifacts(output, &session)
             })
-            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
-    }
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+    } else {
+        session
+            .analyze_dead_code_with_artifacts(false, false)
+            .map(|output| check_data_from_plain_artifacts(output, &session))
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+    };
+    drop_in_background(session);
+    result
+}
 
-    session
-        .analyze_dead_code_with_artifacts(false, false)
-        .map(|output| check_data_from_plain_artifacts(output, &session))
-        .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
+/// Free a large value on a helper thread.
+///
+/// The session holds every parsed module. Freeing them took about five
+/// percent of a CLI run, on the thread that renders the report next. A short
+/// CLI run exits before the helper finishes, and the exit frees the memory.
+/// When no thread can start, the value drops here.
+fn drop_in_background<T: Send + 'static>(value: T) {
+    // On a spawn error the closure, and the value in it, drops here.
+    let spawned = std::thread::Builder::new()
+        .name("fallow-drop".to_owned())
+        .spawn(move || drop(value));
+    drop(spawned);
 }
 
 fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
