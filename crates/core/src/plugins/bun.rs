@@ -3,7 +3,8 @@
 //! Detects Bun runtime projects and marks config files as always used.
 //! Models Bun's default `bun test` file discovery and parses `bunfig.toml`
 //! to seed `[test] preload` and top-level `preload` entries so they are not
-//! reported unused.
+//! reported unused. The preload files are also setup files: bun runs them
+//! before the tests, so the mutation result cache keys on their content.
 
 use std::path::Path;
 
@@ -39,6 +40,7 @@ define_plugin! {
         };
 
         for path in extract_preload_entries(&value, config_path, root) {
+            result.setup_files.push(root.join(&path));
             result.push_entry_pattern(path);
         }
         if let Some(test_root) = extract_test_root(&value, config_path, root) {
@@ -148,6 +150,29 @@ preload = ["./src/test-preload.ts"]
         assert!(
             entries.contains(&"src/test-preload.ts"),
             "test preload must be an entry pattern, got: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn preload_files_are_setup_files() {
+        let result = BunPlugin.resolve_config(
+            Path::new("/repo/bunfig.toml"),
+            r#"
+preload = ["./src/global-preload.ts"]
+
+[test]
+preload = ["./src/test-preload.ts"]
+"#,
+            Path::new("/repo"),
+        );
+
+        assert_eq!(
+            result.setup_files,
+            vec![
+                Path::new("/repo").join("src/global-preload.ts"),
+                Path::new("/repo").join("src/test-preload.ts"),
+            ],
+            "bun runs each preload file before the tests, the same role as a Vitest setup file"
         );
     }
 

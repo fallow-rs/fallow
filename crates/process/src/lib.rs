@@ -28,3 +28,10 @@ pub use spawn_retry::spawn_tokio_retrying_busy_executable;
 pub fn drain_and_kill() {
     registry::drain_and_kill();
 }
+
+/// Like [`drain_and_kill`], but skip the cleanup when another thread holds
+/// the registry lock. Use it from a panic hook, where a blocking lock can
+/// deadlock.
+pub fn try_drain_and_kill() {
+    registry::try_drain_and_kill();
+}

@@ -584,6 +584,9 @@ pub enum MutationTypecheckSkipReason {
     SourceChanged,
     /// The file does not exist.
     FileMissing,
+    /// The checker cannot read the file type: a Vue, Svelte or Astro
+    /// component file.
+    UnsupportedFile,
 }
 
 /// The number of survivors with one skip reason.

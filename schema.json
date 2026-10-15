@@ -1104,7 +1104,7 @@
       "type": "object",
       "properties": {
         "runner": {
-          "description": "The test runner. `auto` detects it; version 1 supports Vitest only.",
+          "description": "The test runner: `auto`, `vitest`, `node-test` or `bun-test`. `auto`\ndetects it from the project.",
           "$ref": "#/$defs/MutationRunner",
           "default": "auto"
         },
@@ -1151,7 +1151,7 @@
       "description": "The test runner of `fallow mutation`.",
       "oneOf": [
         {
-          "description": "Detect the runner from the project. Version 1 supports Vitest only.",
+          "description": "Detect the runner from the project: the `vitest` dependency, the\ntest module that the test files import, a Bun file at the root, or a\n`node --test` script.",
           "type": "string",
           "const": "auto"
         },
@@ -1159,6 +1159,16 @@
           "description": "Vitest 4 or 5 from the project `node_modules`.",
           "type": "string",
           "const": "vitest"
+        },
+        {
+          "description": "`node:test` of Node.js 22.18 or later. Each test file runs in its own\nNode process.",
+          "type": "string",
+          "const": "node-test"
+        },
+        {
+          "description": "`bun test` of Bun 1.3 or later. Each test file runs in its own Bun\nprocess.",
+          "type": "string",
+          "const": "bun-test"
         }
       ]
     },
@@ -3441,7 +3451,7 @@
           ]
         },
         "cacheMaxAgeDays": {
-          "description": "Garbage-collection threshold, in whole days, for the persistent reusable base-snapshot worktree caches `fallow audit` creates: entries older than this window are swept on each audit run. Set to control cache accumulation; `0` disables the sweep and unset defaults to 30 days. Each sweep also reclaims abandoned entries minted under other repo identities (deleted or moved repos, other git worktrees) once they age past this repo's threshold; entries whose recorded owner root still exists are skipped and stay governed by that repo's own setting. The `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` environment variable overrides this field.",
+          "description": "Garbage-collection threshold, in whole days, for the persistent reusable base-snapshot worktree caches `fallow audit` creates: entries older than this window are swept on each audit run. Set to control cache accumulation; `0` disables the sweep and unset defaults to 30 days. Each sweep also reclaims abandoned entries minted under other repo identities (deleted or moved repos, other git worktrees) once they age past this repo's threshold; entries whose recorded owner root still exists are skipped and stay governed by that repo's own setting. The same window applies to the base-snapshot files in the project cache directory, counted from their last use; independent of this window, audit keeps only the newest 32 of those files. The `FALLOW_AUDIT_CACHE_MAX_AGE_DAYS` environment variable overrides this field.",
           "type": [
             "integer",
             "null"

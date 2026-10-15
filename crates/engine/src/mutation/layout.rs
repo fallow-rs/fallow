@@ -174,6 +174,14 @@ fn block(script: &SfcScript, role: ScriptRole) -> Option<ScriptBlock> {
     })
 }
 
+/// True when `path` is a Vue, Svelte or Astro component file, whose code is
+/// in script blocks. A Svelte module file (`.svelte.ts`) is not a component
+/// file.
+#[must_use]
+pub fn is_component_file(path: &str) -> bool {
+    matches!(Layout::from_path(path), Some(Layout::Component(_)))
+}
+
 /// Instruments a source file of any layout that `fallow mutation` supports:
 /// JavaScript, TypeScript, and the script blocks of Vue, Svelte and Astro
 /// components. Returns `None` for another file type.

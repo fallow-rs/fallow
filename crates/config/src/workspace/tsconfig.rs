@@ -342,6 +342,69 @@ pub(super) fn malformed_extends_parents(
     malformed
 }
 
+/// The tsconfig files that `config_path` pulls in, transitively, through
+/// `extends` (one string or an array) and `references[].path`.
+///
+/// The result excludes `config_path` and is in walk order. A target that does
+/// not resolve to a file, or a file that does not parse, ends the walk on that
+/// branch. The walk stops after 16 levels, the same limit as the `extends`
+/// walk of [`TsconfigOutputMap`].
+#[must_use]
+pub fn tsconfig_linked_files(config_path: &Path) -> Vec<PathBuf> {
+    let mut visited = FxHashSet::default();
+    visited.insert(config_path.to_path_buf());
+    let mut linked = Vec::new();
+    let mut frontier = vec![(config_path.to_path_buf(), 0)];
+    while let Some((path, depth)) = frontier.pop() {
+        if depth >= MAX_EXTENDS_DEPTH {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = crate::jsonc::parse_to_value::<serde_json::Value>(
+            content.trim_start_matches('\u{FEFF}'),
+        ) else {
+            continue;
+        };
+        let targets = extends_parents(&path, &value)
+            .into_iter()
+            .chain(reference_targets(&path, &value));
+        for target in targets {
+            if visited.insert(target.clone()) {
+                linked.push(target.clone());
+                frontier.push((target, depth + 1));
+            }
+        }
+    }
+    linked
+}
+
+/// The config files that `references[].path` names. A reference path is a
+/// config file or a directory that holds a `tsconfig.json`.
+fn reference_targets(config_path: &Path, value: &serde_json::Value) -> Vec<PathBuf> {
+    let (Some(config_dir), Some(references)) = (
+        config_path.parent(),
+        value
+            .get("references")
+            .and_then(serde_json::Value::as_array),
+    ) else {
+        return Vec::new();
+    };
+    references
+        .iter()
+        .filter_map(|reference| reference.get("path")?.as_str())
+        .filter_map(|target| {
+            let target = normalize_path(&config_dir.join(target))?;
+            if target.is_file() {
+                return Some(target);
+            }
+            let directory_config = target.join("tsconfig.json");
+            directory_config.is_file().then_some(directory_config)
+        })
+        .collect()
+}
+
 /// The resolved parent configs of one tsconfig: `extends` is one string or,
 /// since TypeScript 5.0, an array of strings.
 fn extends_parents(config_path: &Path, value: &serde_json::Value) -> Vec<PathBuf> {
@@ -608,6 +671,39 @@ mod tests {
             map(root, "./distribution/index.js", &["ts", "tsx", "js"]),
             TsconfigOutputResolution::Resolved(root.join("source/index.ts"))
         );
+    }
+
+    #[test]
+    fn linked_files_follow_extends_and_references_transitively() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        write(
+            &root.join("tsconfig.json"),
+            r#"{
+              // comments are allowed
+              "extends": ["./configs/base.json"],
+              "references": [{ "path": "./packages/app" }, { "path": "./missing" }]
+            }"#,
+        );
+        write(
+            &root.join("configs/base.json"),
+            r#"{"extends":"./shared.json"}"#,
+        );
+        write(&root.join("configs/shared.json"), "{}");
+        write(
+            &root.join("packages/app/tsconfig.json"),
+            r#"{"extends":"../../tsconfig.json"}"#,
+        );
+
+        let mut linked = tsconfig_linked_files(&root.join("tsconfig.json"));
+        linked.sort();
+        let mut expected = vec![
+            root.join("configs/base.json"),
+            root.join("configs/shared.json"),
+            root.join("packages/app/tsconfig.json"),
+        ];
+        expected.sort();
+        assert_eq!(linked, expected);
     }
 
     #[test]

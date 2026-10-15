@@ -10,7 +10,7 @@
 //! a dedicated process tree so signal cleanup also terminates descendants.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 use std::time::{Duration, Instant};
 
 use rustc_hash::FxHashMap;
@@ -79,23 +79,45 @@ pub fn is_registered(id: u64) -> bool {
 /// during the same shutdown skip the body to avoid re-entering the
 /// lock under signal storm.
 pub fn drain_and_kill() {
-    if DRAINING
-        .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
+    if !begin_drain() {
         return;
     }
+    let targets: Vec<KillTarget> = registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .drain()
+        .map(|(_id, target)| target)
+        .collect();
+    kill_and_wait(&targets);
+}
 
-    let targets: Vec<KillTarget> = {
-        registry()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .drain()
-            .map(|(_id, target)| target)
-            .collect()
+/// Like [`drain_and_kill`], but returns at once when another thread holds
+/// the registry lock. A panic hook calls this: a blocking lock would
+/// deadlock when the panicking thread itself holds the lock.
+pub fn try_drain_and_kill() {
+    let targets: Vec<KillTarget> = match registry().try_lock() {
+        Ok(mut guard) => drain_targets(&mut guard),
+        Err(TryLockError::Poisoned(error)) => drain_targets(&mut error.into_inner()),
+        Err(TryLockError::WouldBlock) => return,
     };
+    kill_and_wait(&targets);
+}
 
-    for target in &targets {
+fn drain_targets(registry: &mut FxHashMap<u64, KillTarget>) -> Vec<KillTarget> {
+    if !begin_drain() {
+        return Vec::new();
+    }
+    registry.drain().map(|(_id, target)| target).collect()
+}
+
+fn begin_drain() -> bool {
+    DRAINING
+        .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+fn kill_and_wait(targets: &[KillTarget]) {
+    for target in targets {
         kill_target(target);
     }
 
@@ -232,6 +254,22 @@ mod tests {
         assert!(!is_registered(id));
         deregister(id);
         assert!(!is_registered(id));
+    }
+
+    /// A panic on a thread that holds the registry lock must not deadlock
+    /// the panic hook. The hook then skips the cleanup.
+    #[test]
+    fn try_drain_returns_while_the_lock_is_held() {
+        let id = register(42);
+        let guard = registry().lock().unwrap_or_else(|error| error.into_inner());
+        try_drain_and_kill();
+        let still_registered = guard.contains_key(&id);
+        drop(guard);
+        deregister(id);
+        assert!(
+            still_registered,
+            "a held lock must leave the registry as is"
+        );
     }
 
     #[cfg(unix)]

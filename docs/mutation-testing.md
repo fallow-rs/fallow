@@ -128,12 +128,34 @@ or relational mutant, so it adds little test-strength signal for its run time.
 - The run refuses a dirty git worktree unless `--allow-dirty` is set. After the
   run, it compares the worktree with the start state and reports each changed
   path.
-- Mutants in functions that reach a file system, process, network or database
-  sink are pruned (`side-effect-sink`). `--allow-side-effects` keeps them. This
-  override is a flag only: the config rejects `allowSideEffects`, so a project
-  config cannot widen what a run executes.
+- The check covers tracked and untracked paths. For ignored files, it covers
+  the files that `git status --ignored=matching` lists at the start, up to
+  10000 files in path order: a write to one of them or a delete is a change.
+  Git lists an ignored directory such as `node_modules/` or `coverage/` as one
+  entry, so the check does not see the files below it. A new ignored file is
+  not a change, because test runs make such files (coverage, logs).
+- The check leaves out `<cache>/mutation` and the output files of the run. For
+  ignored files it also leaves out the whole cache directory, because the
+  analysis writes its own cache files there. The run refuses a cache directory
+  that is the project root or a directory above it, or that holds a planned
+  source or test file (`FALLOW_MUTATION_UNSAFE_CACHE_DIR`, exit code `2`). Such
+  a cache directory would hide the writes of the tests from the check.
+- Mutants in a function whose own body calls a file system, process, network
+  or database sink are pruned (`side-effect-sink`). A mutant in top-level code
+  is pruned when the module calls a sink at the top level. The pruning does
+  not follow calls: a mutant in a function that calls a helper, which then
+  calls a sink, still runs. `--allow-side-effects` keeps the pruned mutants.
+  This override is a flag only: the config rejects `allowSideEffects`, so a
+  project config cannot widen what a run executes.
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
+- The companions run in their own process group on Unix and in a Job Object on
+  Windows. Fallow ends that group when a run ends, and when it receives
+  SIGINT, SIGTERM, SIGHUP or SIGQUIT. When Fallow starts with SIGHUP ignored,
+  as under `nohup`, it keeps SIGHUP ignored. The release binary aborts on a
+  panic, and a panic hook ends the group first. A companion whose stdin closes
+  without a `shutdown` request kills its own process group and exits, so it
+  does not outlive a Fallow process that ended in another way.
 
 ## Exit codes
 
@@ -141,7 +163,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run with no executed mutant has no score and exits `0`, also when
@@ -208,6 +230,29 @@ tests detect the mutant.
 - A `killed` result after a retry reports the duration of the retry. Each
   other status keeps the duration of the first run.
 
+### Measure the flaky rate
+
+`scripts/mutation-flaky-rate.mjs` compares the saved reports of repeated runs
+with the same scope:
+
+```bash
+fallow mutation --all --no-cache --root <project>
+cp <project>/.fallow/mutation/last-report.json run-1.json
+# Repeat for run-2.json and run-3.json, then:
+node scripts/mutation-flaky-rate.mjs run-1.json run-2.json run-3.json
+```
+
+- `--no-cache` makes each run execute each mutant. A result from the result
+  cache did not run: the script leaves it out of `compared`, and `cached`
+  gives its count for each report.
+- `compared` counts the mutants that each run executed.
+- `unstable` counts the compared mutants with a different status between runs
+  or a `flaky` status in one run.
+- `score_flips` counts the unstable mutants that one run detected and another
+  run did not. `timeout_flips` counts the score flips with a `timeout` in one
+  run.
+- Each count has a rate over `compared`.
+
 ## Test reach of no-coverage mutants
 
 Each `no_coverage` mutant has a `test_reach` object in the run report and in
@@ -247,6 +292,9 @@ slow or busy host can need more, because the dry run executes each test file.
 
 - For the first runner process, the run stops with exit code 2 and
   `FALLOW_MUTATION_RUNNER_FAILED`, and the help names the flag.
+- The dry run of a restarted runner process gets the larger of
+  `--setup-timeout` and a limit that scales with the first dry run (see
+  Baseline failures).
 - For a restarted runner process, the mutant is `runtime_error`, and its error
   names the flag. The run continues.
 - A reload that passes the limit restarts the runner process.
@@ -265,11 +313,92 @@ mutant. Their results decide no mutant status.
   `errors[]` entry names the mutant.
 - The dry run of a restarted companion shares the host with the other
   workers. Its timeout is the first dry-run time times 2 times the worker
-  count, and at least the runner timeout (120 seconds by default). On a slow
+  count, and at least `--setup-timeout` (2 minutes by default). On a slow
   or loaded host, a fixed timeout made each mutant of a restarted companion a
   `runtime_error`. The time budget does not stop a dry run in progress, so a
   companion that hangs in its dry run can extend the run past the budget.
 - A baseline failure makes the completion `partial` (`baseline-failure`).
+
+## Runners
+
+The companion has three runner adapters. The `mutation.runner` config key
+selects one. The default `auto` reads the project in this order:
+
+1. `vitest` in the root `package.json` dependencies selects Vitest.
+2. Otherwise the test module that the most static test files import:
+   `vitest`, `bun:test` or `node:test`. A tie goes to Vitest, then
+   `bun test`.
+3. Otherwise a `bunfig.toml`, `bun.lock` or `bun.lockb` at the root selects
+   `bun test`.
+4. Otherwise a `node --test` command in a `package.json` script selects
+   `node:test`.
+5. Otherwise Vitest.
+
+| Runner | Config value | Versions | Runtime of the companion |
+|---|---|---|---|
+| Vitest | `vitest` | 4 and 5 | `node`, then `bun` |
+| `node:test` | `node-test` | Node.js 22.18 to 26 | `node` |
+| `bun test` | `bun-test` | Bun 1.3 and later 1.x releases | `bun` |
+
+`--runtime` must name a runtime that the runner accepts. A Bun runtime for
+`node-test`, or a Node runtime for `bun-test`, exits with code 2 and
+`FALLOW_MUTATION_RUNTIME_NOT_FOUND`.
+
+### `node:test` and `bun test`
+
+- Each dry run and each mutant run starts one test process for each test
+  file. The `node:test` adapter uses `run()` of `node:test` with process
+  isolation. The `bun test` adapter starts `bun test` with a JUnit report.
+- A preload file serves the instrumented files. `node:test` uses a
+  synchronous module hook (`module.registerHooks`), so `import` and
+  `require` both get the instrumented file. Node strips the types of a
+  TypeScript file. `bun test` uses a `Bun.plugin` load hook.
+- The test files are the files that the default patterns of the runner
+  match, without `node_modules` and `.git`. A static test file that the
+  patterns do not match is not run, and the report says so.
+- A test id is `<file>::<suite> > <test>`, as for Vitest.
+- `node:test` reports the hits of a test in a test diagnostic. Bun hooks get
+  no test context, so the `bun test` adapter joins the hits to the JUnit
+  results by order. When the order is not safe, each test that ran in the
+  file gets the hits of the file: tests that overlap (`concurrency` in
+  `node:test`, `test.concurrent` in Bun), a count that differs, or
+  `randomize = true` in `bunfig.toml`. The scheduler then runs a mutant
+  against each test of the file that can kill it.
+- A run selects the requested tests with a name pattern. Each whitespace
+  run in the pattern matches any whitespace, because a Node test process
+  matches a name without its trailing whitespace.
+- With `bail`, a run stops the test process at the first failure. Node 22
+  applies the run timeout to the whole test file process. A requested test
+  with no result after that timeout counts as a timeout.
+- Bun 1.3 gives each failed test the JUnit type `AssertionError`, so the
+  `failure_kind` of a run on Bun 1.3 is `assertion`, also for a runtime
+  error. The status does not change.
+- The in-process mode of `node:test` (`isolation: "none"`) is not
+  supported.
+- Neither runtime can load a Vue, Svelte or Astro component file. The
+  `node:test` hook calls the default loader first, and that loader refuses
+  the file type. The Bun hook serves the copy with a TypeScript loader, and
+  a project plugin that serves the file first serves the original. So the
+  plan leaves each component file out, with the skip reason
+  `runner-cannot-load` in `skipped_files`. Its mutants are not in the plan
+  and not in the coverage.
+- The runner decision reads the static test files of the plan. When the
+  first plan has a component mutant and the runner cannot load components,
+  the plan is built again from the same analysis without the component
+  files (`plan_mutations_for_session_with`). The run keeps the runner of
+  the first decision. `--plan` uses the same rule, so the plan and the run
+  agree.
+
+### Type tests
+
+A type test (`*.test-d.ts`, `*.spec-d.ts`, or a TypeScript file below a
+`test-d` directory) is not a test file of the plan. A compiler checks it (`tsd`,
+`expect-type`, the Vitest type check), and no runner executes it. Before this
+rule, a `tsd` file was the only static test file of some projects. The dry run
+then ran it as a runtime test, it failed as a baseline failure, and runner
+detection read its imports. A project whose only test entry points are type
+tests has `no_test_files: true`. A file that only type tests reach has no
+coverage, and its mutants get the test reach `none-file`.
 
 ## Runner notes
 
@@ -294,31 +423,44 @@ mutant. The dry run always runs, because it gives the covering tests.
 The key hashes these parts:
 
 - the key format and the Fallow version;
-- the runner version and the runtime version;
+- the runner name, the runner version and the runtime version;
 - the mutant id, and the content of the mutated source file;
 - the covering test ids;
 - the content of the covering test files, and of the files that they reach
-  through static imports in the module graph (`MutationPlan::test_reach`).
+  through static imports in the module graph (`MutationPlan::test_file_reach`).
   The run computes one digest for each test file and its reach, and each
   mutant key combines the digests of its covering test files;
-- the content of the runner setup files (Vitest `setupFiles`) and of the
-  files that they reach (`MutationPlan::support_files`);
+- the content of the runner setup files (Vitest `setupFiles`, the `preload`
+  files of `bunfig.toml`), of the runner config modules at the root
+  (`vitest.config.*`, `vite.config.*` and `vitest.workspace.*`), and of the
+  files that they reach through static imports (`MutationPlan::support_files`).
+  A change to a config fragment that the runner config imports changes the
+  key;
 - the lockfiles of the first directory from the root upward that has one;
 - the runner config files at the root: `vitest.config.*`, `vite.config.*`,
-  `vitest.workspace.*`, `package.json` and `tsconfig.json`. An absent file is
-  also a key fact, so a new config file changes the key.
+  `vitest.workspace.*`, `bunfig.toml`, `package.json` and `tsconfig.json`. An
+  absent file is also a key fact, so a new config file changes the key;
+- the configs of the `extends` chain of the root `tsconfig.json`, at most 32
+  files. A relative `extends` resolves to the path, or to the path with
+  `.json`. A package `extends` resolves in each `node_modules` directory from
+  the config upward, to the path, the path with `.json`, or `tsconfig.json`
+  in the path. The `exports` map of a package is not read. An `extends` that
+  does not resolve adds only its text to the key.
 
 The reach ignores `vi.mock`, so a replaced module is still in the key. This
 gives more misses, never a stale hit.
 
 Known limit: dynamic imports that the module graph does not resolve, and files
-that a test reads, are not in the key. A change to them does not invalidate a
-stored result. Each cache entry records this limit in `not_keyed`, and the
+that a test or a runner config reads, are not in the key. Runner configs and
+tsconfig files below the root, for example in a workspace package, are not in
+the key. A change to them does not invalidate a stored result. Each cache entry records this limit in `not_keyed`, and the
 report repeats it in `cache.not_keyed`.
 
 - A `timeout`, `flaky`, `runtime_error` or `pending` result is never stored.
   A timeout depends on the load of the machine. A survivor that the time
-  budget left without a retry is not stored.
+  budget left without a retry is not stored. A survivor of a run without a
+  dropped covering test (see Baseline failures) is not stored, because the
+  key covers that test.
 - A reused result has `cached: true` in `mutants[]`. It counts in the score
   and the coverage the same as a result of this run.
 - `cache` in the report gives `hits`, `stored` and `not_keyed`. It is absent
@@ -334,6 +476,25 @@ report repeats it in `cache.not_keyed`.
 - The scheduler talks to the cache through the `ResultLookup` trait in
   `crates/api/src/mutation/scheduler`. The key and the file live in
   `crates/api/src/mutation/result_cache`.
+
+## Run directory
+
+The run writes the instrumented files, `paths.json` and the runtime hooks to
+`<cache dir>/mutation/runs/<content hash>/`. The hash covers each planned
+path and its instrumented text, so two runs of the same plan share one
+directory.
+
+- The write goes to a `.staging-*` directory below `runs/`, which the run
+  renames into place. A crash or a concurrent run never leaves a partial
+  directory, and a run that reads the directory never sees a partial file.
+- A directory whose files have the expected content is used again without a
+  write. A directory with other content is replaced in one rename.
+- Each run records its use in a `.last-used` marker file. At the start of a
+  run, Fallow removes the run directories that are not among the 5 most
+  recently used ones and that no run used in the last hour. The hour keeps
+  the directory of a concurrent run. The run never removes its own
+  directory. A `.staging-*` directory older than one hour, which a crash can
+  leave, is also removed.
 
 ## Type check of survivors
 
@@ -357,7 +518,11 @@ are not checked, so the cost grows with the number of survivors only.
 - A survivor that the checker cannot check stays `survived`. The reasons are
   `no-project` (no `tsconfig.json` includes the file), `not-type-checked`
   (`// @ts-nocheck`, or a JavaScript file without `checkJs`),
-  `source-changed` and `file-missing`. `typecheck.skipped` counts them.
+  `source-changed`, `file-missing` and `unsupported-file` (a Vue, Svelte or
+  Astro component). `typecheck.skipped` counts them.
+- The run does not send a component survivor to the companion. The
+  TypeScript checker cannot read a component file, so the run gives it the
+  reason `unsupported-file` directly.
 - The run looks for the companion before the tests start. When no trusted
   companion exists, the run exits with code 2 and
   `FALLOW_MUTATION_TYPECHECK_UNAVAILABLE`. Discovery is the same as for
@@ -366,6 +531,8 @@ are not checked, so the cost grows with the number of survivors only.
 - When the companion fails after the tests, the survivors keep the status
   `survived`. The report has `typecheck.completed: false`, an error with the
   code `typecheck-failed`, and the completion reason `typecheck-failed`.
+  `typecheck.skipped` still counts the component survivors, because they
+  never go to the companion.
 - `typecheck` is absent from the report when the option is off. A run
   without the option never sets `compile_error`.
 - `--plan --typecheck` exits with code 2, because a plan has no survivors.
@@ -510,6 +677,9 @@ reads files only. It runs no test.
   mutants and one `and N more files` line. The JSON report has the full list.
 - The plan prints one `No coverage by test reach` line with the same counts
   when a mutant is `no_coverage` and the project has test files.
+- One `Skipped files:` line with the count of each skip reason, in the run
+  and in the plan. The JSON report lists each path. A `runner-cannot-load` skip adds
+  one line that names `mutation.runner` and Vitest as the next step.
 - The pruned counts by reason, and one line for "no tests" or "no mutation
   data", never one line for each function. A project with no test files gets
   the one "no tests" line with the mutant count, and no no-coverage section.
@@ -533,7 +703,8 @@ reads files only. It runs no test.
 }
 ```
 
-- `runner` is `auto` or `vitest`. Version 1 runs Vitest 4 and 5.
+- `runner` is `auto`, `vitest`, `node-test` or `bun-test`. See
+  [Runners](#runners).
 - `operators`, `minScore` and `concurrency` apply to each run. A CLI flag wins.
 - `typecheck: true` turns on the survivor type check for each run.
   `--typecheck` turns it on for one run. No flag turns it off.
@@ -558,7 +729,8 @@ reads files only. It runs no test.
 | CLI adapter, human output, inspect | `crates/cli/src/mutation_cli.rs`, `mutation_human.rs`, `mutation_inspect.rs` |
 | Health join | `crates/cli/src/health/mutation_report.rs`, `crates/output/src/health_mutation.rs` |
 | MCP plan and inspect tools | `crates/mcp/src/tools/mutation.rs` |
-| Node companion | `tools/mutation-runner` |
+| Node companion and runner adapters | `tools/mutation-runner` |
+| Runner selection | `crates/api/src/mutation/runner_select.rs` |
 
 ## Tests
 
@@ -572,3 +744,8 @@ reads files only. It runs no test.
   `tools/type-aware-sidecar`.
 - `node --test test/mutant-typecheck.test.mjs` in `tools/type-aware-sidecar`
   tests the companion side of the type check.
+- The `node:test` end-to-end test needs a supported `node` on `PATH`, and
+  the `bun test` end-to-end test needs a supported `bun`. Without it, the
+  test prints a skip message and passes.
+- `npm test` in `tools/mutation-runner` runs the companion suites. The
+  `bun test` suite is skipped when `bun` is not on `PATH`.

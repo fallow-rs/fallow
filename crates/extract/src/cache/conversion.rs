@@ -18,7 +18,7 @@ use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
 
 /// Seconds-since-Unix-epoch from the wall clock, saturating to 0 if the
 /// system clock is set before the epoch. Used as the LRU bookkeeping
-/// timestamp on `CachedModule.last_access_secs`. Wall-clock (not monotonic)
+/// timestamp on `CachedModule.last_seen_secs`. Wall-clock (not monotonic)
 /// is the right source here because the value persists across process
 /// invocations.
 #[must_use]
@@ -629,7 +629,7 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
         mtime_ns: 0,
         ctime_ns: 0,
         file_size: 0,
-        last_access_secs: current_unix_seconds(),
+        last_seen_secs: current_unix_seconds(),
         exports: module_exports_to_cached(&module.exports),
         imports: module_imports_to_cached(&module.imports),
         re_exports: module_re_exports_to_cached(&module.re_exports),

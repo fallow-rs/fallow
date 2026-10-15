@@ -5,11 +5,19 @@ use serde::{Deserialize, Deserializer, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MutationRunner {
-    /// Detect the runner from the project. Version 1 supports Vitest only.
+    /// Detect the runner from the project: the `vitest` dependency, the
+    /// test module that the test files import, a Bun file at the root, or a
+    /// `node --test` script.
     #[default]
     Auto,
     /// Vitest 4 or 5 from the project `node_modules`.
     Vitest,
+    /// `node:test` of Node.js 22.18 or later. Each test file runs in its own
+    /// Node process.
+    NodeTest,
+    /// `bun test` of Bun 1.3 or later. Each test file runs in its own Bun
+    /// process.
+    BunTest,
 }
 
 /// A mutation operator name, kebab-case.
@@ -101,7 +109,8 @@ where
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MutationConfig {
-    /// The test runner. `auto` detects it; version 1 supports Vitest only.
+    /// The test runner: `auto`, `vitest`, `node-test` or `bun-test`. `auto`
+    /// detects it from the project.
     #[serde(default)]
     pub runner: MutationRunner,
 
@@ -172,6 +181,15 @@ mod tests {
         assert_eq!(config.min_score, Some(80.0));
         assert_eq!(config.concurrency, Some(4));
         assert_eq!(config.typecheck, Some(true));
+    }
+
+    #[test]
+    fn the_runner_names_node_test_and_bun_test() {
+        let node = parse(r#"{"runner":"node-test"}"#).expect("node-test");
+        assert_eq!(node.runner, MutationRunner::NodeTest);
+        let bun = parse(r#"{"runner":"bun-test"}"#).expect("bun-test");
+        assert_eq!(bun.runner, MutationRunner::BunTest);
+        assert!(parse(r#"{"runner":"jest"}"#).is_err());
     }
 
     #[test]

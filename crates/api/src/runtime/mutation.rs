@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use fallow_engine::mutation::{
     DiffIndex, MutantDisposition, MutationPlan, MutationPlanRequest, MutationScope,
-    plan_mutations_for_session,
+    plan_mutations_for_session_with,
 };
 use fallow_engine::session::AnalysisSession;
 use fallow_output::{
@@ -34,19 +34,18 @@ use crate::mutation::report::{
 };
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
+use crate::mutation::runner_select::{Runner, select_runner};
 use crate::mutation::scheduler::{
     ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome, SchedulePlan,
     ScheduledMutant, run_schedule,
 };
 use crate::mutation::transport::ProcessSpawner;
 use crate::mutation::typecheck::typecheck_survivors;
-use crate::mutation::worktree::{WorktreeSnapshot, snapshot};
+use crate::mutation::worktree::{Exclusions, WorktreeSnapshot, canonical_path, snapshot};
 use crate::mutation::{MutationRunOptions, MutationRunScope};
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
-/// The runner of version 1.
-const RUNNER: &str = "vitest";
 /// The default timeout of `init` and the dry run (`protocol.md` section 8).
 const DEFAULT_RUNNER_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -204,6 +203,8 @@ fn config_operators(
 struct Planned {
     resolved: ProgrammaticAnalysisContext,
     cache_dir: PathBuf,
+    /// The test runner, selected from the config value and the first plan.
+    runner: Runner,
     plan: MutationPlan,
     base_ref: Option<String>,
 }
@@ -216,6 +217,7 @@ fn plan_for(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     let session = load_session(&resolved)?;
     let cache_dir = session.config().cache_dir.clone();
+    let configured = session.config().mutation.runner;
     before_plan(resolved.root(), &cache_dir)?;
     let (scope, base_ref) = engine_scope(options, &resolved)?;
     let operators = match &options.operators {
@@ -227,13 +229,26 @@ fn plan_for(
         operators,
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
+        skip_component_files: false,
     };
+    // The runner decision reads the test files of the first plan. A second
+    // plan without the component files keeps that decision.
+    let mut selected = None;
     let plan = resolved
-        .install(|| plan_mutations_for_session(&session, &request))
+        .install(|| {
+            plan_mutations_for_session_with(&session, &request, |plan| {
+                let runner = select_runner(configured, resolved.root(), &plan.test_files);
+                selected = Some(runner);
+                !runner.loads_component_files()
+            })
+        })
         .map_err(|error| mutation_error("FALLOW_MUTATION_PLAN_FAILED", error.to_string()))?;
+    let runner =
+        selected.unwrap_or_else(|| select_runner(configured, resolved.root(), &plan.test_files));
     Ok(Planned {
         resolved,
         cache_dir,
+        runner,
         plan,
         base_ref,
     })
@@ -265,18 +280,71 @@ pub fn plan_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutatio
     })
 }
 
+fn unsafe_cache_dir(message: String) -> ProgrammaticError {
+    mutation_error("FALLOW_MUTATION_UNSAFE_CACHE_DIR", message)
+        .with_help(
+            "set cache.dir or FALLOW_CACHE_DIR to a directory that holds no project file, such as .fallow",
+        )
+        .with_context("cache.dir")
+}
+
+/// Refuses a cache directory that is the root or a directory above it. The
+/// worktree check leaves the mutation cache out, and the analysis writes a
+/// `.gitignore` that ignores the whole cache directory, so such a cache
+/// directory hides each stray write from the check.
+fn guard_cache_dir(root: &Path, cache_dir: &Path) -> ProgrammaticResult<()> {
+    if !canonical_path(root).starts_with(canonical_path(cache_dir)) {
+        return Ok(());
+    }
+    Err(unsafe_cache_dir(format!(
+        "the cache directory `{}` is the project root or a directory above it, so the worktree check cannot see stray writes",
+        cache_dir.display()
+    )))
+}
+
+/// Refuses a cache directory that holds a planned source or test file.
+fn guard_cache_holds_no_planned_file(
+    root: &Path,
+    cache_dir: &Path,
+    plan: &MutationPlan,
+) -> ProgrammaticResult<()> {
+    let root = canonical_path(root);
+    let cache = canonical_path(cache_dir);
+    let inside = plan
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .chain(plan.test_files.iter().map(String::as_str))
+        .find(|path| root.join(path).starts_with(&cache));
+    let Some(path) = inside else {
+        return Ok(());
+    };
+    Err(unsafe_cache_dir(format!(
+        "the cache directory `{}` holds the project file `{path}`, so the worktree check cannot see stray writes",
+        cache_dir.display()
+    )))
+}
+
 fn take_worktree_snapshot(
     root: &Path,
     cache_dir: &Path,
     output_paths: &[PathBuf],
+    start: Option<&WorktreeSnapshot>,
 ) -> ProgrammaticResult<Option<WorktreeSnapshot>> {
-    let mut excluded = Vec::with_capacity(output_paths.len() + 1);
-    excluded.push(cache_dir.to_path_buf());
     // The caller writes a relative output path against the process
     // directory, which can be below the root.
     let cwd = std::env::current_dir().unwrap_or_else(|_| root.to_path_buf());
-    excluded.extend(output_paths.iter().map(|path| cwd.join(path)));
-    snapshot(root, &excluded)
+    let outputs = output_paths.iter().map(|path| cwd.join(path));
+    // Only the mutation cache is left out of the status check. The analysis
+    // caches next to it are git-ignored, and an ignored file changes only
+    // in the ignored-file check, so the whole cache is left out there.
+    let exclusions = Exclusions {
+        paths: std::iter::once(cache_dir.join("mutation"))
+            .chain(outputs)
+            .collect(),
+        ignored: vec![cache_dir.to_path_buf()],
+    };
+    snapshot(root, &exclusions, start)
         .map_err(|message| mutation_error("FALLOW_MUTATION_WORKTREE_CHECK_FAILED", message))
 }
 
@@ -292,7 +360,7 @@ struct WorktreeEnd {
 /// the report, never a reason to drop the run result or its error.
 fn settle_worktree(
     start: Option<&WorktreeSnapshot>,
-    take_end: impl FnOnce() -> ProgrammaticResult<Option<WorktreeSnapshot>>,
+    take_end: impl FnOnce(&WorktreeSnapshot) -> ProgrammaticResult<Option<WorktreeSnapshot>>,
 ) -> WorktreeEnd {
     let Some(start) = start else {
         return WorktreeEnd {
@@ -300,7 +368,7 @@ fn settle_worktree(
             check_error: None,
         };
     };
-    match take_end() {
+    match take_end(start) {
         Ok(end) => WorktreeEnd {
             changed_paths: end.map(|end| start.changed_paths(&end)).unwrap_or_default(),
             check_error: None,
@@ -405,6 +473,12 @@ fn default_concurrency() -> usize {
         .max(1)
 }
 
+fn runtime_error(runner: Runner, message: String) -> ProgrammaticError {
+    mutation_error("FALLOW_MUTATION_RUNTIME_NOT_FOUND", message)
+        .with_help(runner.runtime_help())
+        .with_context("mutation.runtime")
+}
+
 fn scheduled(plan: &MutationPlan, disposition: MutantDisposition) -> Vec<ScheduledMutant> {
     plan.mutants
         .iter()
@@ -448,12 +522,14 @@ fn open_result_cache(
     no_cache: bool,
     mutation_cache: &Path,
     root: &Path,
+    runner: &str,
     plan: &MutationPlan,
 ) -> Option<Arc<ResultCache>> {
     (!no_cache).then(|| {
         Arc::new(ResultCache::open(
             mutation_cache,
             root,
+            runner,
             KeyFiles::from_plan(plan),
         ))
     })
@@ -501,17 +577,16 @@ fn execute(
     let setup_started = Instant::now();
     let manifest = manifest()
         .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?;
-    let range = manifest.runner(RUNNER).ok_or_else(|| {
+    let runner = planned.runner;
+    let name = runner.name();
+    let range = manifest.runner(name).ok_or_else(|| {
         mutation_error(
             "FALLOW_MUTATION_PROTOCOL_INVALID",
-            format!("the protocol manifest has no `{RUNNER}` runner"),
+            format!("the protocol manifest has no `{name}` runner"),
         )
     })?;
-    let runtime = discover_runtime(options.runtime.as_deref()).map_err(|message| {
-        mutation_error("FALLOW_MUTATION_RUNTIME_NOT_FOUND", message)
-            .with_help("install Node.js, or pass the runtime path")
-            .with_context("mutation.runtime")
-    })?;
+    let runtime = discover_runtime(options.runtime.as_deref(), runner.runtimes())
+        .map_err(|message| runtime_error(runner, message))?;
     let cache_error =
         |message: String| mutation_error("FALLOW_MUTATION_CACHE_WRITE_FAILED", message);
     ignore_cache_dir(&planned.cache_dir).map_err(|error| cache_error(error.to_string()))?;
@@ -527,12 +602,13 @@ fn execute(
         })
         .collect();
     let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
-    let root = planned.resolved.root().to_path_buf();
-    let result_cache = open_result_cache(planned.resolved.no_cache, &mutation_cache, &root, plan);
+    let resolved = &planned.resolved;
+    let root = resolved.root().to_path_buf();
+    let result_cache = open_result_cache(resolved.no_cache, &mutation_cache, &root, name, plan);
     let config = ScheduleConfig {
         init: InitRequest {
             root: root.to_string_lossy().into_owned(),
-            runner: RUNNER.to_owned(),
+            runner: name.to_owned(),
             config_path: None,
             run_dir: run_dir.dir.to_string_lossy().into_owned(),
             path_map: run_dir.path_map.clone(),
@@ -557,7 +633,7 @@ fn execute(
     let mut outcome = run_schedule(&spawner, &schedule, &config)
         .map_err(|error| schedule_error(&error, config.runner_timeout))?;
     let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
-        name: RUNNER.to_owned(),
+        name: name.to_owned(),
         version: ready.runner_version.clone(),
         protocol_version: manifest.wire_protocol_version,
         runtime: MutationRuntimeOutput {
@@ -647,17 +723,20 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
     let deadline = options.time_budget.map(|budget| started + budget);
     let mut start_snapshot = None;
     let planned = plan_for(options, |root, cache_dir| {
-        start_snapshot = take_worktree_snapshot(root, cache_dir, &options.output_paths)?;
+        guard_cache_dir(root, cache_dir)?;
+        start_snapshot = take_worktree_snapshot(root, cache_dir, &options.output_paths, None)?;
         guard_worktree(options.allow_dirty, start_snapshot.as_ref())
     })?;
+    guard_cache_holds_no_planned_file(planned.resolved.root(), &planned.cache_dir, &planned.plan)?;
     guard_typecheck_companion(options.typecheck, planned.resolved.root())?;
     let plan_ms = millis(started.elapsed());
     let execution = execute(options, &planned, deadline);
-    let worktree_end = settle_worktree(start_snapshot.as_ref(), || {
+    let worktree_end = settle_worktree(start_snapshot.as_ref(), |start| {
         take_worktree_snapshot(
             planned.resolved.root(),
             &planned.cache_dir,
             &options.output_paths,
+            Some(start),
         )
     });
     let execution = execution.map_err(|error| with_worktree_facts(error, &worktree_end))?;
@@ -771,7 +850,7 @@ mod tests {
     #[test]
     fn a_failed_end_check_keeps_the_execute_error_and_reports_the_check_error() {
         let start = WorktreeSnapshot::default();
-        let end = settle_worktree(Some(&start), || {
+        let end = settle_worktree(Some(&start), |_| {
             Err(mutation_error(
                 "FALLOW_MUTATION_WORKTREE_CHECK_FAILED",
                 "git status failed",
@@ -829,13 +908,77 @@ mod tests {
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
         };
-        assert!(open_result_cache(true, dir.path(), dir.path(), &plan).is_none());
-        assert!(open_result_cache(false, dir.path(), dir.path(), &plan).is_some());
+        assert!(open_result_cache(true, dir.path(), dir.path(), "vitest", &plan).is_none());
+        assert!(open_result_cache(false, dir.path(), dir.path(), "vitest", &plan).is_some());
+    }
+
+    fn empty_plan() -> MutationPlan {
+        MutationPlan {
+            files: Vec::new(),
+            mutants: Vec::new(),
+            test_files: Vec::new(),
+            reach_files: Vec::new(),
+            test_file_reach: std::collections::BTreeMap::new(),
+            support_files: Vec::new(),
+            counts: fallow_engine::mutation::MutationPlanCounts::default(),
+            no_test_files: false,
+            framework_config_checked: false,
+            skipped_files: Vec::new(),
+            unmatched_paths: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_cache_dir_at_or_above_the_root_is_refused() {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join("src")).expect("dir");
+        for cache in [root.clone(), root.join("."), dir.path().to_path_buf()] {
+            let error = guard_cache_dir(&root, &cache).expect_err("refused");
+            assert_eq!(
+                error.code.as_deref(),
+                Some("FALLOW_MUTATION_UNSAFE_CACHE_DIR")
+            );
+            assert_eq!(error.exit_code, 2);
+            assert_eq!(error.context.as_deref(), Some("cache.dir"));
+        }
+        assert!(guard_cache_dir(&root, &root.join(".fallow")).is_ok());
+        assert!(guard_cache_dir(&root, &root.join("src")).is_ok());
+    }
+
+    #[test]
+    fn a_cache_dir_that_holds_a_planned_file_is_refused() {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = dir.path();
+        let mut plan = empty_plan();
+        plan.files.push(fallow_engine::mutation::PlannedFile {
+            path: "src/a.ts".to_owned(),
+            source_sha256: String::new(),
+            instrumented_code: String::new(),
+            static_test_files: Vec::new(),
+        });
+        plan.test_files.push("test/a.test.ts".to_owned());
+
+        let error = guard_cache_holds_no_planned_file(root, &root.join("src"), &plan)
+            .expect_err("the cache holds a planned source file");
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_UNSAFE_CACHE_DIR")
+        );
+        assert!(error.message.contains("src/a.ts"), "{}", error.message);
+        let error = guard_cache_holds_no_planned_file(root, &root.join("test"), &plan)
+            .expect_err("the cache holds a planned test file");
+        assert!(
+            error.message.contains("test/a.test.ts"),
+            "{}",
+            error.message
+        );
+        assert!(guard_cache_holds_no_planned_file(root, &root.join(".fallow"), &plan).is_ok());
     }
 
     #[test]
     fn no_start_snapshot_needs_no_end_check() {
-        let end = settle_worktree(None, || panic!("no end check without a start snapshot"));
+        let end = settle_worktree(None, |_| panic!("no end check without a start snapshot"));
         assert!(end.changed_paths.is_empty());
         assert!(end.check_error.is_none());
     }

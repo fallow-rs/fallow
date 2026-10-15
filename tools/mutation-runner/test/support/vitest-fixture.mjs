@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const FIXTURE = join(PACKAGE_ROOT, "test/fixtures/vitest-basic");
+const FIXTURES = join(PACKAGE_ROOT, "test/fixtures");
 const MUTATION_LIB = fileURLToPath(
   new URL("../../../../crates/mutation/src/lib.rs", import.meta.url),
 );
@@ -123,23 +123,31 @@ const write = (root, relativePath, text) => {
  * macOS, which also covers the real-path comparison of the overlay.
  *
  * `packageName` selects the installed Vitest major. The project sees it as
- * `node_modules/vitest`. `components` adds the instrumented component file
- * `src/Badge.vue` to the run directory and the path map.
+ * `node_modules/vitest`. `fixture` selects the fixture directory; a fixture
+ * other than `vitest-basic` gets no `node_modules`. `components` adds the
+ * instrumented component file `src/Badge.vue` to the run directory and the
+ * path map.
  */
-export const createFixtureProject = ({ packageName = "vitest", components = false } = {}) => {
-  const workspace = mkdtempSync(join(tmpdir(), "fallow-mutation-vitest-"));
+export const createFixtureProject = ({
+  packageName = "vitest",
+  fixture = "vitest-basic",
+  components = false,
+} = {}) => {
+  const workspace = mkdtempSync(join(tmpdir(), `fallow-mutation-${fixture}-`));
   const root = join(workspace, "project");
   const runDir = join(workspace, "run");
-  cpSync(FIXTURE, root, {
+  cpSync(join(FIXTURES, fixture), root, {
     recursive: true,
     filter: (source) => !source.split(/[\\/]/u).includes("node_modules"),
   });
-  mkdirSync(join(root, "node_modules"));
-  symlinkSync(
-    join(PACKAGE_ROOT, "node_modules", packageName),
-    join(root, "node_modules", "vitest"),
-    "dir",
-  );
+  if (fixture === "vitest-basic") {
+    mkdirSync(join(root, "node_modules"));
+    symlinkSync(
+      join(PACKAGE_ROOT, "node_modules", packageName),
+      join(root, "node_modules", "vitest"),
+      "dir",
+    );
+  }
   const { runFiles, pathMap } = fixtureFiles(components);
   for (const [path, text] of Object.entries(runFiles)) write(runDir, path, text);
   return {

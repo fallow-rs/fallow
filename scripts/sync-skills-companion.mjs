@@ -69,6 +69,17 @@ export const COMPANION_CHECKS = [
   ["node", "--test", "scripts/*.test.mjs"],
 ];
 
+/**
+ * The modules that the companion checks import. A missing module fails a
+ * check only after the sync staged its changes, so the sync tests them first.
+ */
+const CHECK_PREREQUISITES = [
+  {
+    command: ["python3", "-c", "import yaml"],
+    fix: "install PyYAML (python3 -m pip install pyyaml)",
+  },
+];
+
 const USAGE = `Usage:
   node scripts/sync-skills-companion.mjs [--pin <sha>] [--message <text>] [--dry-run]
 
@@ -277,6 +288,23 @@ const subjectsBetween = (git, repoRoot, from, to) => {
   }
 };
 
+const checkPrerequisites = (env, skipChecks) => {
+  if (skipChecks) {
+    return;
+  }
+  for (const {
+    command: [command, ...args],
+    fix,
+  } of CHECK_PREREQUISITES) {
+    const result = spawnSync(command, args, { env, stdio: "ignore" });
+    if (result.status !== 0) {
+      throw new Refusal(
+        `the companion checks need \`${[command, ...args].join(" ")}\` to pass. Fix: ${fix}.`,
+      );
+    }
+  }
+};
+
 const runChecks = (companion, source, oldVersion, env, log) => {
   for (const [command, ...args] of COMPANION_CHECKS) {
     const resolved = args.map((arg) => (arg === OLD_VERSION_ARG ? oldVersion : arg));
@@ -300,6 +328,7 @@ const runChecks = (companion, source, oldVersion, env, log) => {
 const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
   const companion = companionSkillsRoot({ env, repoRoot });
   checkCompanion(git, companion);
+  checkPrerequisites(env, skipChecks);
   const pin = resolvePin(git, repoRoot, options.pin);
   const source = checkoutPin(git, repoRoot, pin);
   try {
@@ -360,8 +389,14 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
     }
     git(companion, "commit", "-S", "--quiet", "-m", message);
     log(`${PREFIX}: committed ${git(companion, "rev-parse", "--short", "HEAD")} in ${companion}.`);
-    log("Push it with:");
-    log(`  git -C ${companion} push origin ${MAIN}`);
+    // The companion main branch is protected, so the commit lands through a pull request.
+    const branch = `docs/sync-fallow-${pin.slice(0, 9)}`;
+    log("Publish it through a pull request:");
+    log(`  git -C ${companion} push origin HEAD:refs/heads/${branch}`);
+    log(`  gh pr create --repo fallow-rs/fallow-skills --base ${MAIN} --head ${branch} --fill`);
+    log(
+      `After the merge: git -C ${companion} fetch origin && git -C ${companion} reset --hard ${ORIGIN_MAIN}`,
+    );
     log('Then run the failed "Public skills contract" job on fallow main again.');
     return 0;
   } finally {

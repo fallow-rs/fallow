@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, SystemTime};
 
 use fallow_types::audit_cache::{
     AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
@@ -11,7 +12,10 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use super::keys::{ComplexityBaseline, ComplexityMetrics};
 use super::{AuditKeySnapshot, AuditOptions};
-use crate::base_worktree::{git_rev_parse, git_toplevel};
+use crate::base_worktree::{
+    SECONDS_PER_DAY, SweepDecision, SweepDisposition, SweepEntry, SweepMode, SweepPass,
+    git_rev_parse, git_toplevel,
+};
 use crate::error::emit_error;
 
 /// Version 11: complexity keys hold path and function name only, and each
@@ -24,9 +28,18 @@ use crate::error::emit_error;
 /// payload, and version 7 rebased Istanbul coverage paths onto the base
 /// worktree (#2347), so snapshots computed by the coverage-blind base pass must
 /// not be reused. Version 12 added the clone-group instance locations that
-/// the `diverged-clone-sibling` rule reads.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 12;
+/// the `diverged-clone-sibling` rule reads. Version 13 added `--brief` to the
+/// key: only a brief base pass computes the public-export set, so a version-12
+/// snapshot from a run without `--brief` holds an empty set that a brief run
+/// would read as "every head export is new".
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 13;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
+/// Most snapshot files that one cache version directory keeps. Each key folds
+/// in the base SHA and the changed files, so every new commit or edit adds a
+/// file; the cap bounds the directory at this many files of at most
+/// [`MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE`] each.
+pub(super) const MAX_AUDIT_BASE_SNAPSHOT_FILES: usize = 32;
+const SNAPSHOT_FILE_SUFFIX: &str = ".bin";
 
 pub(super) struct AuditBaseSnapshotCacheKey {
     pub(super) hash: u64,
@@ -247,7 +260,8 @@ pub(super) fn audit_base_snapshot_cache_file(
     cache_dir: &Path,
     key: &AuditBaseSnapshotCacheKey,
 ) -> PathBuf {
-    audit_base_snapshot_cache_dir(cache_dir).join(format!("{:016x}.bin", key.hash))
+    audit_base_snapshot_cache_dir(cache_dir)
+        .join(format!("{:016x}{SNAPSHOT_FILE_SUFFIX}", key.hash))
 }
 
 pub(super) fn ensure_audit_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Error> {
@@ -291,7 +305,7 @@ pub(super) fn load_cached_base_snapshot(
     key: &AuditBaseSnapshotCacheKey,
 ) -> Option<AuditKeySnapshot> {
     let path = audit_base_snapshot_cache_file(opts.cache_dir, key);
-    let data = std::fs::read(path).ok()?;
+    let data = std::fs::read(&path).ok()?;
     if data.len() > MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE {
         return None;
     }
@@ -303,7 +317,126 @@ pub(super) fn load_cached_base_snapshot(
     {
         return None;
     }
-    snapshot_from_cached(cached)
+    let snapshot = snapshot_from_cached(cached)?;
+    touch_snapshot_file(&path);
+    Some(snapshot)
+}
+
+/// Mark a snapshot file as used now, so the age-based sweep measures the age
+/// from the last reuse and not from the first write. Best effort.
+fn touch_snapshot_file(path: &Path) {
+    if let Ok(file) = std::fs::File::options().write(true).open(path) {
+        let _ = file.set_modified(SystemTime::now());
+    }
+}
+
+/// One snapshot file of the current cache version directory, with the
+/// metadata the sweep sorts and reports on.
+struct SnapshotFile {
+    path: PathBuf,
+    modified: SystemTime,
+    len: u64,
+}
+
+/// Whether `name` has the exact shape that [`audit_base_snapshot_cache_file`]
+/// writes: 16 lowercase hex digits and the snapshot suffix.
+///
+/// The sweep deletes files, so it matches only names that it wrote itself.
+fn is_snapshot_file_name(name: &str) -> bool {
+    name.strip_suffix(SNAPSHOT_FILE_SUFFIX).is_some_and(|stem| {
+        stem.len() == 16
+            && stem
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
+fn list_snapshot_files(dir: &Path) -> Vec<SnapshotFile> {
+    // A symlinked version directory can point outside the cache. The sweep
+    // deletes files, so it does not follow the link.
+    if std::fs::symlink_metadata(dir).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<SnapshotFile> = entries
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(is_snapshot_file_name)
+        })
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            Some(SnapshotFile {
+                path: entry.path(),
+                modified: metadata.modified().ok()?,
+                len: metadata.len(),
+            })
+        })
+        .collect();
+    // Newest first. The path breaks ties so the order is stable.
+    files.sort_by(|a, b| b.modified.cmp(&a.modified).then(a.path.cmp(&b.path)));
+    files
+}
+
+fn snapshot_disposition(rank: usize, age: Duration, max_age: Option<Duration>) -> SweepDisposition {
+    if max_age.is_some_and(|max_age| age >= max_age) {
+        return SweepDisposition::ReclaimedAged;
+    }
+    if rank >= MAX_AUDIT_BASE_SNAPSHOT_FILES {
+        return SweepDisposition::ReclaimedOverCapacity;
+    }
+    if max_age.is_none() {
+        SweepDisposition::KeptAgeGcDisabled
+    } else {
+        SweepDisposition::KeptFresh
+    }
+}
+
+/// Bound the base-snapshot files of the current cache version.
+///
+/// A file is removed when it is older than `max_age` (the
+/// `audit.cacheMaxAgeDays` threshold, measured from the last write or reuse)
+/// or when it is not among the newest [`MAX_AUDIT_BASE_SNAPSHOT_FILES`]
+/// files. `fallow audit` runs this in [`SweepMode::Apply`] after each save,
+/// and `fallow audit-cache prune` runs it in both modes and reports the
+/// entries.
+pub fn sweep_base_snapshot_cache(
+    cache_dir: &Path,
+    max_age: Option<Duration>,
+    mode: SweepMode,
+    now: SystemTime,
+) -> Vec<SweepEntry> {
+    let dir = audit_base_snapshot_cache_dir(cache_dir);
+    list_snapshot_files(&dir)
+        .into_iter()
+        .enumerate()
+        .map(|(rank, file)| {
+            let age = now.duration_since(file.modified).unwrap_or_default();
+            let mut disposition = snapshot_disposition(rank, age, max_age);
+            if mode == SweepMode::Apply
+                && disposition.decision() == SweepDecision::Removed
+                && let Err(error) = std::fs::remove_file(&file.path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                disposition = SweepDisposition::RemoveFailed;
+            }
+            SweepEntry {
+                path: file.path,
+                pass: SweepPass::Snapshot,
+                disposition,
+                age_days: Some(age.as_secs() / SECONDS_PER_DAY),
+                owner_root: None,
+                size_bytes: Some(file.len),
+            }
+        })
+        .collect()
 }
 
 pub(super) fn save_cached_base_snapshot(
@@ -331,7 +464,18 @@ pub(super) fn save_cached_base_snapshot(
     if tmp.write_all(&data).is_err() {
         return;
     }
-    let _ = tmp.persist(audit_base_snapshot_cache_file(opts.cache_dir, key));
+    if tmp
+        .persist(audit_base_snapshot_cache_file(opts.cache_dir, key))
+        .is_err()
+    {
+        return;
+    }
+    let max_age = crate::base_worktree::resolve_cache_max_age_with_options(
+        opts.root,
+        opts.config_path.as_ref(),
+        opts.allow_remote_extends,
+    );
+    sweep_base_snapshot_cache(opts.cache_dir, max_age, SweepMode::Apply, SystemTime::now());
 }
 
 fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> Vec<String> {
@@ -491,6 +635,9 @@ pub(super) fn audit_base_snapshot_cache_key(
         opts.include_entry_exports,
     )
     .show_cascade(opts.show_cascade)
+    // Only a brief base pass computes the public-export set of the snapshot,
+    // so a non-brief snapshot must never serve a brief run.
+    .brief(opts.brief)
     .health(
         opts.max_crap,
         coverage_file,

@@ -9,12 +9,14 @@
 //! - the mutant id and the content of the mutated source file;
 //! - the covering test ids;
 //! - the content of the covering test files, of the files that they reach
-//!   through static imports, and of the runner setup files and their reach;
+//!   through static imports, and of the runner setup files, the runner
+//!   config modules at the root, and their reach;
 //! - the lockfile;
-//! - the runner config files.
+//! - the runner config files at the root, and the configs that the root
+//!   `tsconfig.json` extends.
 //!
 //! Dynamic imports that the module graph does not resolve, and files that a
-//! test reads, are not in the key. Each entry records this limit in
+//! test or a config reads, are not in the key. Each entry records this limit in
 //! `not_keyed`. `--no-cache` turns the cache off.
 //!
 //! The cache is one file, `<cache dir>/mutation/results.json`. It keeps one
@@ -26,7 +28,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use fallow_engine::mutation::MutationPlan;
+use fallow_engine::mutation::{MutationPlan, RUNNER_CONFIG_MODULES};
 use fallow_output::MutantStatus;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -39,7 +41,7 @@ use super::scheduler::{CachedResult, ResultLookup, ScheduleOutcome, ScheduledMut
 pub const RESULT_CACHE_FILE: &str = "results.json";
 /// The version of the key and of the file format. A change to the key
 /// parts or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 3;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 /// The inputs of a test that the key does not hash.
@@ -56,31 +58,23 @@ const LOCKFILES: [&str; 6] = [
     "bun.lockb",
 ];
 
-/// The runner config files at the root. A file that is absent also is a
-/// key fact, so a new config file changes the key.
-const RUNNER_CONFIGS: [&str; 21] = [
-    "vitest.config.ts",
-    "vitest.config.mts",
-    "vitest.config.cts",
-    "vitest.config.js",
-    "vitest.config.mjs",
-    "vitest.config.cjs",
-    "vite.config.ts",
-    "vite.config.mts",
-    "vite.config.cts",
-    "vite.config.js",
-    "vite.config.mjs",
-    "vite.config.cjs",
-    "vitest.workspace.ts",
-    "vitest.workspace.mts",
-    "vitest.workspace.cts",
-    "vitest.workspace.js",
-    "vitest.workspace.mjs",
-    "vitest.workspace.cjs",
+/// The runner config files at the root that are not modules. With
+/// [`RUNNER_CONFIG_MODULES`], a file that is absent also is a key fact, so a
+/// new config file changes the key. The files that a config module reaches
+/// through static imports are in [`KeyFiles::support_files`].
+const RUNNER_CONFIG_DATA: [&str; 4] = [
     "vitest.workspace.json",
+    "bunfig.toml",
     "package.json",
-    "tsconfig.json",
+    TSCONFIG,
 ];
+
+/// The root tsconfig. The key also hashes each config of its `extends`
+/// chain.
+const TSCONFIG: &str = "tsconfig.json";
+
+/// The most files of a tsconfig `extends` chain that the key reads.
+const MAX_TSCONFIG_EXTENDS: usize = 32;
 
 /// The hash value of a file that does not exist or cannot be read.
 const ABSENT: &str = "-";
@@ -126,14 +120,93 @@ fn lockfile_digest(root: &Path) -> String {
     hex(&hasher.finalize())
 }
 
-/// The runner config digest of the files at `root`.
+/// The runner config digest of the files at `root`, and of the configs that
+/// the root `tsconfig.json` extends.
 fn runner_config_digest(root: &Path) -> String {
     let mut hasher = Sha256::new();
-    for name in RUNNER_CONFIGS {
+    for name in RUNNER_CONFIG_MODULES.iter().chain(&RUNNER_CONFIG_DATA) {
         feed(&mut hasher, name);
         feed(&mut hasher, &file_hash(&root.join(name)));
     }
+    feed_tsconfig_extends(&mut hasher, &root.join(TSCONFIG));
     hex(&hasher.finalize())
+}
+
+/// Adds each config of the `extends` chain of `tsconfig` to `hasher`: the
+/// `extends` text and the content of the file that it resolves to. The
+/// chain stops at [`MAX_TSCONFIG_EXTENDS`] files, so a cycle ends.
+fn feed_tsconfig_extends(hasher: &mut Sha256, tsconfig: &Path) {
+    let mut configs = vec![tsconfig.to_path_buf()];
+    let mut next = 0;
+    while next < configs.len() {
+        let config = configs[next].clone();
+        next += 1;
+        let Some(dir) = config.parent() else {
+            continue;
+        };
+        for spec in extends_of(&config) {
+            let resolved = resolve_extends(dir, &spec);
+            feed(hasher, &spec);
+            feed(
+                hasher,
+                &resolved
+                    .as_deref()
+                    .map_or_else(|| ABSENT.to_owned(), file_hash),
+            );
+            if let Some(resolved) = resolved
+                && configs.len() < MAX_TSCONFIG_EXTENDS
+                && !configs.contains(&resolved)
+            {
+                configs.push(resolved);
+            }
+        }
+    }
+}
+
+/// The `extends` entries of a tsconfig file: one text or an array of texts.
+/// A file that does not read or parse has none.
+fn extends_of(config: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(config) else {
+        return Vec::new();
+    };
+    let Ok(value) = fallow_config::jsonc::parse_to_value::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    match value.get("extends") {
+        Some(serde_json::Value::String(spec)) => vec![spec.clone()],
+        Some(serde_json::Value::Array(specs)) => specs
+            .iter()
+            .filter_map(|spec| spec.as_str().map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The file of one `extends` entry, as TypeScript resolves it. A relative or
+/// absolute path is the path, else the path with `.json`. A package path is
+/// looked up in each `node_modules` directory from `dir` upward, as the path,
+/// the path with `.json`, or `tsconfig.json` in the path. The `exports` map
+/// of a package is not read.
+fn resolve_extends(dir: &Path, spec: &str) -> Option<PathBuf> {
+    let with_json = |path: PathBuf| -> Option<PathBuf> {
+        if path.is_file() {
+            return Some(path);
+        }
+        let mut name = path.into_os_string();
+        name.push(".json");
+        let path = PathBuf::from(name);
+        path.is_file().then_some(path)
+    };
+    if spec.starts_with("./") || spec.starts_with("../") || Path::new(spec).is_absolute() {
+        return with_json(dir.join(spec));
+    }
+    dir.ancestors().find_map(|ancestor| {
+        let package = ancestor.join("node_modules").join(spec);
+        with_json(package.clone()).or_else(|| {
+            let nested = package.join(TSCONFIG);
+            nested.is_file().then_some(nested)
+        })
+    })
 }
 
 /// One stored result.
@@ -214,11 +287,11 @@ pub struct CacheCounts {
 }
 
 impl ResultCache {
-    /// Opens the cache of `mutation_cache` for a project at `root`. A missing
-    /// file, a file of another format, or a file that does not parse gives
-    /// an empty cache.
+    /// Opens the cache of `mutation_cache` for a project at `root` and the
+    /// `runner` of the run. A missing file, a file of another format, or a
+    /// file that does not parse gives an empty cache.
     #[must_use]
-    pub fn open(mutation_cache: &Path, root: &Path, files: KeyFiles) -> Self {
+    pub fn open(mutation_cache: &Path, root: &Path, runner: &str, files: KeyFiles) -> Self {
         let file = mutation_cache.join(RESULT_CACHE_FILE);
         let state = std::fs::read(&file)
             .ok()
@@ -232,6 +305,7 @@ impl ResultCache {
         let mut hasher = Sha256::new();
         feed(&mut hasher, &FORMAT_VERSION.to_string());
         feed(&mut hasher, env!("CARGO_PKG_VERSION"));
+        feed(&mut hasher, runner);
         feed(&mut hasher, &lockfile_digest(root));
         feed(&mut hasher, &runner_config_digest(root));
         hasher.update((files.support_files.len() as u64).to_le_bytes());

@@ -253,11 +253,12 @@ mod base_ref;
 mod cache;
 
 use base_ref::resolve_base_ref;
+pub use cache::sweep_base_snapshot_cache;
 #[cfg(test)]
 use cache::{
-    AUDIT_BASE_SNAPSHOT_CACHE_VERSION, CachedAuditKeySnapshot, audit_base_snapshot_cache_dir,
-    audit_base_snapshot_cache_file, cached_from_snapshot, config_file_fingerprint,
-    ensure_audit_base_snapshot_cache_dir, snapshot_from_cached,
+    AUDIT_BASE_SNAPSHOT_CACHE_VERSION, CachedAuditKeySnapshot, MAX_AUDIT_BASE_SNAPSHOT_FILES,
+    audit_base_snapshot_cache_dir, audit_base_snapshot_cache_file, cached_from_snapshot,
+    config_file_fingerprint, ensure_audit_base_snapshot_cache_dir, snapshot_from_cached,
 };
 use cache::{
     AuditBaseSnapshotCacheKey, audit_base_snapshot_cache_key, audit_workspace_patterns,

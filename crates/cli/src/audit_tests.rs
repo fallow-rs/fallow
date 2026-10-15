@@ -2490,6 +2490,219 @@ fn audit_base_snapshot_cache_dir_sweeps_lower_versions() {
     assert!(cache_dir.exists());
 }
 
+/// Write `count` snapshot files whose modification times step back one hour
+/// each from `newest`, so file 0 is the newest.
+fn write_snapshot_files(
+    cache_root: &std::path::Path,
+    count: usize,
+    newest: std::time::SystemTime,
+) -> Vec<PathBuf> {
+    let dir = audit_base_snapshot_cache_dir(cache_root);
+    ensure_audit_base_snapshot_cache_dir(&dir).expect("cache dir should be created");
+    (0..count)
+        .map(|index| {
+            let path = dir.join(format!("{index:016x}.bin"));
+            fs::write(&path, b"payload").expect("snapshot should write");
+            let hours = u64::try_from(index).expect("index fits u64");
+            let modified = newest - Duration::from_hours(hours);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .and_then(|file| file.set_modified(modified))
+                .expect("mtime should be set");
+            path
+        })
+        .collect()
+}
+
+#[test]
+fn base_snapshot_sweep_keeps_only_the_newest_files() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let cache_root = tmp.path().join(".fallow");
+    let now = std::time::SystemTime::now();
+    let files = write_snapshot_files(&cache_root, MAX_AUDIT_BASE_SNAPSHOT_FILES + 2, now);
+
+    let entries = sweep_base_snapshot_cache(
+        &cache_root,
+        Some(Duration::from_hours(30 * 24)),
+        SweepMode::Apply,
+        now,
+    );
+
+    let removed: Vec<&PathBuf> = entries
+        .iter()
+        .filter(|entry| entry.disposition.decision() == SweepDecision::Removed)
+        .map(|entry| &entry.path)
+        .collect();
+    assert_eq!(
+        removed,
+        files[MAX_AUDIT_BASE_SNAPSHOT_FILES..]
+            .iter()
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        entries
+            .iter()
+            .filter(|entry| entry.disposition.decision() == SweepDecision::Removed)
+            .all(|entry| entry.disposition.reason() == "over-capacity"
+                && entry.pass == SweepPass::Snapshot)
+    );
+    assert!(
+        files[..MAX_AUDIT_BASE_SNAPSHOT_FILES]
+            .iter()
+            .all(|path| path.exists())
+    );
+    assert!(
+        files[MAX_AUDIT_BASE_SNAPSHOT_FILES..]
+            .iter()
+            .all(|path| !path.exists())
+    );
+}
+
+#[test]
+fn base_snapshot_sweep_removes_only_files_it_wrote() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let cache_root = tmp.path().join(".fallow");
+    let now = std::time::SystemTime::now();
+    let old = now - Duration::from_hours(40 * 24);
+    let files = write_snapshot_files(&cache_root, 1, old);
+    let dir = audit_base_snapshot_cache_dir(&cache_root);
+    let foreign = dir.join("notes.bin");
+    fs::write(&foreign, b"user data").expect("foreign file should write");
+
+    let entries = sweep_base_snapshot_cache(
+        &cache_root,
+        Some(Duration::from_hours(30 * 24)),
+        SweepMode::Apply,
+        now,
+    );
+
+    assert_eq!(entries.len(), 1);
+    assert!(!files[0].exists(), "the aged snapshot must be removed");
+    assert!(foreign.exists(), "a file the cache did not write must stay");
+}
+
+#[cfg(unix)]
+#[test]
+fn base_snapshot_sweep_does_not_follow_a_symlinked_version_dir() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&outside).expect("outside dir should be created");
+    let victim = outside.join(format!("{:016x}.bin", 7));
+    fs::write(&victim, b"payload").expect("victim should write");
+    let now = std::time::SystemTime::now();
+    fs::File::options()
+        .write(true)
+        .open(&victim)
+        .and_then(|file| file.set_modified(now - Duration::from_hours(40 * 24)))
+        .expect("mtime should be set");
+    let cache_root = tmp.path().join(".fallow");
+    let dir = audit_base_snapshot_cache_dir(&cache_root);
+    fs::create_dir_all(dir.parent().expect("version dir has a parent"))
+        .expect("cache dir should be created");
+    std::os::unix::fs::symlink(&outside, &dir).expect("symlink should be created");
+
+    let entries = sweep_base_snapshot_cache(
+        &cache_root,
+        Some(Duration::from_hours(30 * 24)),
+        SweepMode::Apply,
+        now,
+    );
+
+    assert!(entries.is_empty());
+    assert!(
+        victim.exists(),
+        "the sweep must not delete through a symlink"
+    );
+}
+
+#[test]
+fn base_snapshot_sweep_reclaims_aged_files_and_dry_run_keeps_them() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let cache_root = tmp.path().join(".fallow");
+    let now = std::time::SystemTime::now();
+    let files = write_snapshot_files(&cache_root, 1, now - Duration::from_hours(40 * 24));
+    let max_age = Some(Duration::from_hours(30 * 24));
+
+    let preview = sweep_base_snapshot_cache(&cache_root, max_age, SweepMode::DryRun, now);
+    assert_eq!(preview.len(), 1);
+    assert_eq!(preview[0].disposition.reason(), "aged-out");
+    assert_eq!(preview[0].age_days, Some(40));
+    assert!(files[0].exists(), "a dry run must not remove the file");
+
+    let applied = sweep_base_snapshot_cache(&cache_root, max_age, SweepMode::Apply, now);
+    assert_eq!(applied[0].disposition.reason(), "aged-out");
+    assert!(!files[0].exists(), "an aged snapshot must be removed");
+
+    let disabled = write_snapshot_files(&cache_root, 1, now - Duration::from_hours(40 * 24));
+    let kept = sweep_base_snapshot_cache(&cache_root, None, SweepMode::Apply, now);
+    assert_eq!(kept[0].disposition.reason(), "age-gc-disabled");
+    assert!(
+        disabled[0].exists(),
+        "max age 0 disables the age-based reclaim"
+    );
+}
+
+/// Each key folds in the base SHA and the changed files, so without a bound
+/// every commit adds one payload of up to 16 MiB to the cache directory.
+#[test]
+fn base_snapshot_save_bounds_the_cache_directory() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let config_path = None;
+    let cache_root = tmp.path().join(".fallow");
+    let opts = audit_review_benchmark_options(tmp.path(), &config_path, &cache_root, 1);
+    let now = std::time::SystemTime::now();
+    write_snapshot_files(&cache_root, MAX_AUDIT_BASE_SNAPSHOT_FILES, now);
+    let key = AuditBaseSnapshotCacheKey {
+        hash: 0xfeed_beef,
+        base_sha: "abc123".to_string(),
+    };
+
+    save_cached_base_snapshot(&opts, &key, &AuditKeySnapshot::default());
+
+    let dir = audit_base_snapshot_cache_dir(&cache_root);
+    let snapshots = fs::read_dir(&dir)
+        .expect("cache dir should read")
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "bin"))
+        .count();
+    assert_eq!(snapshots, MAX_AUDIT_BASE_SNAPSHOT_FILES);
+    assert!(
+        audit_base_snapshot_cache_file(&cache_root, &key).exists(),
+        "the snapshot just saved is the newest and must stay"
+    );
+}
+
+#[test]
+fn base_snapshot_cache_hit_refreshes_the_file_age() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let config_path = None;
+    let cache_root = tmp.path().join(".fallow");
+    let opts = audit_review_benchmark_options(tmp.path(), &config_path, &cache_root, 1);
+    let key = AuditBaseSnapshotCacheKey {
+        hash: 0xfeed_beef,
+        base_sha: "abc123".to_string(),
+    };
+    save_cached_base_snapshot(&opts, &key, &AuditKeySnapshot::default());
+    let path = audit_base_snapshot_cache_file(&cache_root, &key);
+    let old = std::time::SystemTime::now() - Duration::from_hours(20 * 24);
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .and_then(|file| file.set_modified(old))
+        .expect("mtime should be set");
+
+    assert!(load_cached_base_snapshot(&opts, &key).is_some());
+
+    let modified = fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .expect("mtime should read");
+    assert!(
+        modified > old,
+        "a cache hit must restart the age of the file"
+    );
+}
+
 #[test]
 fn audit_base_snapshot_cache_roundtrips_from_disk() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");

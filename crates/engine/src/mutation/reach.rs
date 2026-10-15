@@ -1,5 +1,6 @@
-//! The files that a test file or a runner setup file reaches through static
-//! imports. The result cache of a mutation run keys on their content.
+//! The files that a test file, a runner setup file or a runner config module
+//! reaches through static imports. The result cache of a mutation run keys
+//! on their content.
 //!
 //! The traversal follows each graph edge and ignores `vi.mock`. The result is
 //! a superset of the files that a test loads, so a change to a replaced
@@ -12,6 +13,7 @@ use std::path::{Path, PathBuf};
 use fallow_types::discover::FileId;
 use rustc_hash::FxHashMap;
 
+use super::RUNNER_CONFIG_MODULES;
 use crate::graph::ModuleGraph;
 use crate::module_graph::relative_key_path;
 
@@ -122,14 +124,28 @@ fn setup_module(graph: &ModuleGraph, resolved: &Path) -> Option<FileId> {
         .map(|node| node.file_id)
 }
 
-/// The setup files and their reach, sorted. A setup path that matches no
-/// graph file adds nothing.
+/// The graph files of the runner config modules at `root`.
+fn config_modules(graph: &ModuleGraph, root: &Path) -> Vec<FileId> {
+    let configs: Vec<PathBuf> = RUNNER_CONFIG_MODULES
+        .iter()
+        .map(|name| root.join(name))
+        .collect();
+    graph
+        .modules
+        .iter()
+        .filter(|node| configs.contains(&node.path))
+        .map(|node| node.file_id)
+        .collect()
+}
+
+/// The setup files, the runner config modules at the root, and their
+/// reach, sorted. A setup path that matches no graph file adds nothing.
 pub(super) fn support_files(
     graph: &ModuleGraph,
     root: &Path,
     setup_files: &[PathBuf],
 ) -> Vec<String> {
-    let starts: Vec<FileId> = setup_files
+    let mut starts: Vec<FileId> = setup_files
         .iter()
         .map(|path| {
             if path.is_absolute() {
@@ -140,6 +156,7 @@ pub(super) fn support_files(
         })
         .filter_map(|resolved| setup_module(graph, &resolved))
         .collect();
+    starts.extend(config_modules(graph, root));
     if starts.is_empty() {
         return Vec::new();
     }

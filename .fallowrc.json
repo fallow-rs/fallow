@@ -12,6 +12,12 @@
     "crates/api/src/mutation/companion/**",
     "tools/mutation-runner/test/fixtures/**"
   ],
+  "ignoreExports": [
+    {
+      "file": "tools/mutation-runner/src/adapters/{bun-test,node-test,vitest}.mjs",
+      "exports": ["createAdapter"]
+    }
+  ],
   "ignoreUnresolvedImports": [
     "./generated/lsp-initialization-options.js",
     "../src/generated/lsp-initialization-options.js"

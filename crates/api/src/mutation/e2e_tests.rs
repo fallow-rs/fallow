@@ -110,6 +110,127 @@ fn a_project_without_tests_reports_no_coverage_without_a_companion() {
     assert_eq!(report.summary.coverage, Some(0.0));
 }
 
+/// A `node:test` project with a Vue component. The test does not import the
+/// component, because Node cannot load it.
+fn component_project(runner: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("dir");
+    let write = |path: &str, text: &str| {
+        let target = dir.path().join(path);
+        fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        fs::write(target, text).expect("write");
+    };
+    write(
+        "package.json",
+        r#"{"name":"p","type":"module","scripts":{"test":"node --test"}}"#,
+    );
+    write(
+        ".fallowrc.json",
+        &format!(r#"{{"mutation":{{"runner":"{runner}"}}}}"#),
+    );
+    write(
+        "src/math.ts",
+        "export function add(a: number, b: number) { return a + b; }\n",
+    );
+    write(
+        "src/Badge.vue",
+        "<template><span>{{ label(1) }}</span></template>\n<script>\nexport function label(n) {\n  return n === 1 ? \"one\" : \"many\";\n}\n</script>\n",
+    );
+    write(
+        "test/math.test.ts",
+        "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { add } from \"../src/math.ts\";\n\ntest(\"add\", () => {\n  assert.equal(add(1, 2), 3);\n});\n",
+    );
+    dir
+}
+
+#[test]
+fn a_runner_that_cannot_load_components_leaves_them_out_of_the_plan() {
+    for runner in ["node-test", "bun-test", "auto"] {
+        let project = component_project(runner);
+        let plan = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
+        assert!(
+            plan.mutants
+                .iter()
+                .all(|mutant| mutant.location.file != "src/Badge.vue"),
+            "{runner}: {:#?}",
+            plan.mutants
+        );
+        assert!(
+            plan.mutants
+                .iter()
+                .any(|mutant| mutant.location.file == "src/math.ts"),
+            "{runner}"
+        );
+        assert_eq!(plan.skipped_files.len(), 1, "{runner}");
+        assert_eq!(plan.skipped_files[0].path, "src/Badge.vue");
+        assert_eq!(plan.skipped_files[0].reason, "runner-cannot-load");
+    }
+
+    let project = component_project("node-test");
+    let only_component = plan_mutation(&options(
+        project.path(),
+        MutationRunScope::Paths(vec![std::path::PathBuf::from("src/Badge.vue")]),
+    ))
+    .expect("plan");
+    assert!(only_component.mutants.is_empty());
+    assert!(only_component.unmatched_paths.is_empty());
+    assert_eq!(only_component.skipped_files.len(), 1);
+    assert_eq!(only_component.skipped_files[0].reason, "runner-cannot-load");
+
+    let project = component_project("vitest");
+    let plan = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
+    assert!(
+        plan.mutants
+            .iter()
+            .any(|mutant| mutant.location.file == "src/Badge.vue"),
+        "Vitest loads a component through the framework plugin"
+    );
+    assert!(plan.skipped_files.is_empty());
+}
+
+/// A type test (`tsd`, Vitest `*.test-d.ts`) is checked by a compiler, not
+/// run by a test runner. It must not count as a test file of the plan.
+#[test]
+fn a_type_test_is_not_a_test_file_of_the_plan() {
+    let dir = tempfile::tempdir().expect("dir");
+    let write = |path: &str, text: &str| {
+        let target = dir.path().join(path);
+        fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        fs::write(target, text).expect("write");
+    };
+    write(
+        "package.json",
+        r#"{"name":"p","main":"index.ts","devDependencies":{"tsd":"0.31.0"}}"#,
+    );
+    write(
+        "index.ts",
+        "export const add = (a: number, b: number) => a + b;\n",
+    );
+    write(
+        "test/types/index.test-d.ts",
+        "import { expectType } from \"tsd\";\nimport { add } from \"../../index\";\nexpectType<number>(add(1, 2));\n",
+    );
+    let plan = plan_mutation(&options(dir.path(), MutationRunScope::All)).expect("plan");
+    assert!(plan.test_files.is_empty(), "{:?}", plan.test_files);
+    assert!(plan.no_test_files);
+    assert_eq!(plan.counts.planned, 0, "no runner test covers a mutant");
+    assert_eq!(plan.counts.no_coverage, plan.counts.total);
+    assert!(
+        plan.mutants.iter().all(|mutant| mutant
+            .test_reach
+            .as_ref()
+            .is_some_and(|reach| reach.reach == fallow_output::TestReachClass::NoneFile)),
+        "a type test is not a test that loads the file: {:#?}",
+        plan.mutants
+    );
+    assert!(
+        plan.files
+            .iter()
+            .all(|file| file.static_test_files.is_empty()),
+        "{:?}",
+        plan.files
+    );
+}
+
 #[test]
 fn the_plan_uses_the_config_operators_unless_the_caller_names_operators() {
     let project = small_project();
@@ -198,6 +319,41 @@ fn the_last_report_is_saved_in_the_ignored_cache() {
 }
 
 #[test]
+fn a_cache_dir_that_hides_project_files_is_refused() {
+    for (dir, shown) in [(".", "the project root"), ("src", "src/a.ts")] {
+        let project = small_project();
+        fs::write(
+            project.path().join(".fallowrc.json"),
+            format!(r#"{{"cache":{{"dir":"{dir}"}}}}"#),
+        )
+        .expect("config");
+        // A `node --test` file makes `src/a.ts` a planned file. The refusal
+        // comes before the run looks for a runtime.
+        fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"p","type":"module","main":"src/a.ts","scripts":{"test":"node --test"}}"#,
+        )
+        .expect("write");
+        fs::create_dir_all(project.path().join("test")).expect("dir");
+        fs::write(
+            project.path().join("test/a.test.ts"),
+            "import { test } from \"node:test\";\nimport { add } from \"../src/a.ts\";\n\ntest(\"add\", () => {\n  if (add(1, 2) !== 3) throw new Error(\"add\");\n});\n",
+        )
+        .expect("write");
+        commit_all(project.path());
+        let error = run_mutation(&options(project.path(), MutationRunScope::All)).unwrap_err();
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_UNSAFE_CACHE_DIR"),
+            "{dir}: {}",
+            error.message
+        );
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains(shown), "{dir}: {}", error.message);
+    }
+}
+
+#[test]
 fn invalid_limits_are_refused() {
     let project = small_project();
     let mut zero = options(project.path(), MutationRunScope::All);
@@ -238,8 +394,10 @@ mod end_to_end {
             Path::new(&std::env::var_os("CARGO_MANIFEST_DIR")?).join("../../tools/mutation-runner");
         let vitest = package.join("node_modules/vitest/package.json");
         let node = std::env::var_os("PATH").and_then(|path| {
-            crate::mutation::discovery::find_on_path(&path)
-                .filter(|(kind, _)| *kind == crate::mutation::discovery::RuntimeKind::Node)
+            crate::mutation::discovery::find_kinds_on_path(
+                &path,
+                &[crate::mutation::discovery::RuntimeKind::Node],
+            )
         });
         if !vitest.is_file() || node.is_none() {
             eprintln!(
@@ -421,5 +579,237 @@ mod end_to_end {
                     && !function.survived.is_empty())
         );
         assert!(report.timings.dry_run_ms > 0);
+    }
+
+    /// The companion package, when a runtime of `kind` is on `PATH` and
+    /// reports a version that the manifest range of `runner` contains.
+    #[expect(
+        clippy::print_stderr,
+        reason = "a skipped end-to-end test says why it did not run"
+    )]
+    fn child_runner_package(
+        runner: &str,
+        kind: crate::mutation::discovery::RuntimeKind,
+    ) -> Option<PathBuf> {
+        let package =
+            Path::new(&std::env::var_os("CARGO_MANIFEST_DIR")?).join("../../tools/mutation-runner");
+        let runtime = crate::mutation::discovery::discover_runtime(None, &[kind]).ok();
+        let range = crate::mutation::manifest::manifest()
+            .ok()
+            .and_then(|manifest| manifest.runner(runner));
+        let supported = runtime
+            .as_ref()
+            .zip(range)
+            .is_some_and(|(runtime, range)| range.contains(&runtime.version));
+        if !supported {
+            eprintln!(
+                "skipped: the end-to-end {runner} test needs a supported `{}` on PATH",
+                kind.name()
+            );
+            return None;
+        }
+        Some(dunce::canonicalize(package).expect("package path"))
+    }
+
+    /// Copies `files` of a companion fixture to a new committed repository.
+    fn fixture_repository(fixture: &Path, files: &[&str]) -> (tempfile::TempDir, PathBuf) {
+        let project = tempfile::tempdir().expect("dir");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        for file in files {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+            fs::copy(fixture.join(file), &target).expect("copy");
+        }
+        commit_all(&root);
+        (project, root)
+    }
+
+    /// Checks the statuses of the math fixture: the tests kill each mutant
+    /// of `add` and the `LIMIT` mutant, and a test with no assertion lets a
+    /// mutant of `isPositive` survive.
+    fn assert_math_statuses(report: &fallow_output::MutationReport) {
+        assert_eq!(
+            report.completion.status,
+            MutationCompletionStatus::Complete,
+            "{report:#?}"
+        );
+        assert!(report.errors.is_empty(), "{:#?}", report.errors);
+        assert!(report.worktree.changed_paths.is_empty());
+        let in_function = |name: &str| {
+            report
+                .mutants
+                .iter()
+                .filter(|mutant| mutant.location.function.as_deref() == Some(name))
+                .collect::<Vec<_>>()
+        };
+        let add = in_function("add");
+        assert!(!add.is_empty());
+        for mutant in &add {
+            assert_eq!(mutant.status, MutantStatus::Killed, "{mutant:#?}");
+            assert!(
+                mutant
+                    .killed_by
+                    .as_deref()
+                    .is_some_and(|test| test.starts_with("test/math.test.ts::add > ")),
+                "{mutant:#?}"
+            );
+        }
+        let positive = in_function("isPositive");
+        assert!(
+            positive
+                .iter()
+                .any(|mutant| mutant.status == MutantStatus::Survived
+                    && mutant.covering_tests
+                        == vec!["test/math.test.ts::positive without an assertion".to_owned()]),
+            "a test with no assertion lets a mutant of isPositive survive: {positive:#?}"
+        );
+        let limit = report
+            .mutants
+            .iter()
+            .find(|mutant| mutant.location.function.is_none() && mutant.static_mutant)
+            .expect("the LIMIT mutant runs while the module loads");
+        assert_eq!(limit.status, MutantStatus::Killed, "{limit:#?}");
+        assert_eq!(limit.killed_by.as_deref(), Some("test/math.test.ts::limit"));
+    }
+
+    #[test]
+    fn the_embedded_companion_runs_node_test_against_the_fixture_end_to_end() {
+        use crate::mutation::discovery::RuntimeKind;
+        let Some(package) = child_runner_package("node-test", RuntimeKind::Node) else {
+            return;
+        };
+        let (_project, root) = fixture_repository(
+            &package.join("test/fixtures/node-basic"),
+            &["package.json", "src/math.ts", "test/math.test.ts"],
+        );
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        ))
+        .expect("the run completes");
+
+        let runner = report.runner.as_ref().expect("a runner ran");
+        assert_eq!(runner.name, "node-test");
+        assert_eq!(runner.runtime.name, "node");
+        assert_math_statuses(&report);
+    }
+
+    /// The acceptance case of #3470: a `node:test` run gives no
+    /// `no_coverage` mutant for a Vue file, and the report names the skip.
+    #[test]
+    fn a_node_test_run_leaves_a_component_out_and_says_why() {
+        use crate::mutation::discovery::RuntimeKind;
+        if child_runner_package("node-test", RuntimeKind::Node).is_none() {
+            return;
+        }
+        let project = super::component_project("auto");
+        commit_all(project.path());
+
+        let report = run_mutation(&options(project.path(), MutationRunScope::All))
+            .expect("the run completes");
+
+        assert_eq!(
+            report.runner.as_ref().expect("a runner ran").name,
+            "node-test"
+        );
+        assert!(
+            report
+                .mutants
+                .iter()
+                .all(|mutant| mutant.location.file != "src/Badge.vue"),
+            "{:#?}",
+            report.mutants
+        );
+        assert_eq!(
+            report.summary.counts.no_coverage, 0,
+            "{:#?}",
+            report.mutants
+        );
+        assert_eq!(report.skipped_files.len(), 1);
+        assert_eq!(report.skipped_files[0].reason, "runner-cannot-load");
+        // The component survivors are unknown, so an empty survivor list of
+        // this run is not conclusive.
+        assert_eq!(report.completion.status, MutationCompletionStatus::Partial);
+        assert!(
+            report
+                .completion
+                .reasons
+                .contains(&fallow_output::MutationIncompleteReason::SkippedFiles)
+        );
+    }
+
+    #[test]
+    fn a_test_that_writes_to_the_root_is_reported_as_a_worktree_change() {
+        use crate::mutation::discovery::RuntimeKind;
+        let Some(package) = child_runner_package("node-test", RuntimeKind::Node) else {
+            return;
+        };
+        let (_project, root) = fixture_repository(
+            &package.join("test/fixtures/node-basic"),
+            &["package.json", "src/math.ts", "test/math.test.ts"],
+        );
+        fs::write(
+            root.join("test/touch.test.ts"),
+            "import assert from \"node:assert/strict\";\n\
+             import { writeFileSync } from \"node:fs\";\n\
+             import { test } from \"node:test\";\n\n\
+             import { add } from \"../src/math.ts\";\n\n\
+             test(\"touch\", () => {\n  writeFileSync(\"touched.txt\", \"x\");\n  assert.equal(add(1, 2), 3);\n});\n",
+        )
+        .expect("write");
+        commit_all(&root);
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        ))
+        .expect("the run completes");
+
+        assert!(report.worktree.checked);
+        assert_eq!(report.worktree.changed_paths, vec!["touched.txt"]);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|issue| issue.code == "worktree-changed"),
+            "{:#?}",
+            report.errors
+        );
+        assert_eq!(report.completion.status, MutationCompletionStatus::Partial);
+        assert!(
+            report
+                .completion
+                .reasons
+                .contains(&fallow_output::MutationIncompleteReason::WorktreeChanged)
+        );
+    }
+
+    #[test]
+    fn the_embedded_companion_runs_bun_test_against_the_fixture_end_to_end() {
+        use crate::mutation::discovery::RuntimeKind;
+        let Some(package) = child_runner_package("bun-test", RuntimeKind::Bun) else {
+            return;
+        };
+        let (_project, root) = fixture_repository(
+            &package.join("test/fixtures/bun-basic"),
+            &[
+                "package.json",
+                "bunfig.toml",
+                "src/math.ts",
+                "test/math.test.ts",
+            ],
+        );
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        ))
+        .expect("the run completes");
+
+        let runner = report.runner.as_ref().expect("a runner ran");
+        assert_eq!(runner.name, "bun-test");
+        assert_eq!(runner.runtime.name, "bun");
+        assert_math_statuses(&report);
     }
 }

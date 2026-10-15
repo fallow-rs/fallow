@@ -832,6 +832,82 @@ mod end_to_end {
         assert_eq!(checked["completion"]["status"], "complete", "{checked}");
     }
 
+    /// A component compiler in the shape of the Vue plugin: its `transform`
+    /// hook keeps the script block of a `.vue` file.
+    const COMPONENT_CONFIG: &str = r#"const componentPlugin = () => ({
+  name: "fixture-component",
+  enforce: "pre",
+  transform(code, id) {
+    if (!id.endsWith(".vue")) return null;
+    return /<script>([\s\S]*?)<\/script>/u.exec(code)?.[1] ?? "";
+  },
+});
+
+export default {
+  plugins: [componentPlugin()],
+  test: { include: ["test/**/*.test.ts"] },
+};
+"#;
+
+    /// The TypeScript checker cannot read a Vue file, so a survivor in a
+    /// component gets the skip reason `unsupported-file`, not `no-project`.
+    #[test]
+    fn a_typecheck_run_gives_a_component_survivor_its_own_skip_reason() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        if !type_aware_companion_installed() {
+            return;
+        }
+        let (_project, root) = vitest_project(&package, "");
+        fs::write(root.join("vitest.config.mjs"), COMPONENT_CONFIG).expect("config");
+        fs::write(
+            root.join("src/Badge.vue"),
+            "<template><span>{{ label(1) }}</span></template>\n<script>\nexport function label(n) {\n  return n === 1 ? \"one\" : \"many\";\n}\n</script>\n",
+        )
+        .expect("component");
+        fs::write(
+            root.join("test/badge.test.ts"),
+            "import { test } from \"vitest\";\nimport { label } from \"../src/Badge.vue\";\n\ntest(\"label runs\", () => {\n  label(1);\n});\n",
+        )
+        .expect("test");
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"noEmit":true},"include":["src"]}"#,
+        )
+        .expect("tsconfig");
+        commit_all(&root, "component");
+
+        let mut command = std::process::Command::new(crate::common::fallow_bin());
+        command
+            .env("RUST_LOG", "")
+            .env("NO_COLOR", "1")
+            .args(["mutation", "--root"])
+            .arg(&root)
+            .args(["src/Badge.vue", "--concurrency", "1"])
+            .args(["--typecheck", "--format", "json", "--quiet"]);
+        crate::common::configure_type_aware_sidecar(&mut command);
+        let output = command.output().expect("fallow runs");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+        let survived = report["summary"]["counts"]["survived"]
+            .as_u64()
+            .expect("survived");
+        assert!(survived > 0, "the test checks no value: {report}");
+        assert_eq!(report["typecheck"]["completed"], true, "{report}");
+        assert_eq!(report["typecheck"]["checked"], 0, "{report}");
+        assert_eq!(
+            report["typecheck"]["skipped"],
+            serde_json::json!([{ "reason": "unsupported-file", "count": survived }]),
+            "{report}"
+        );
+    }
+
     #[test]
     fn a_vitest_run_kills_add_mutants_and_reports_a_survivor_of_is_positive() {
         let Some(package) = companion_package() else {

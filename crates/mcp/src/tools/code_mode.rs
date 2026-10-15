@@ -2299,25 +2299,25 @@ mod tests {
 
     #[test]
     fn exit_code_zero_with_stdout_returns_stdout() {
-        let result = normalize_output(0, b"{ \"ok\": true }", b"");
+        let result = normalize_output(0, b"{ \"ok\": true }", b"", false);
         assert_eq!(result.unwrap(), "{ \"ok\": true }");
     }
 
     #[test]
     fn exit_code_one_with_stdout_returns_stdout() {
-        let result = normalize_output(1, b"{ \"findings\": [] }", b"");
+        let result = normalize_output(1, b"{ \"findings\": [] }", b"", false);
         assert_eq!(result.unwrap(), "{ \"findings\": [] }");
     }
 
     #[test]
     fn exit_code_zero_with_empty_stdout_returns_empty_object() {
-        let result = normalize_output(0, b"", b"");
+        let result = normalize_output(0, b"", b"", false);
         assert_eq!(result.unwrap(), "{}");
     }
 
     #[test]
     fn exit_code_one_with_empty_stdout_returns_empty_object() {
-        let result = normalize_output(1, b"", b"");
+        let result = normalize_output(1, b"", b"", false);
         assert_eq!(result.unwrap(), "{}");
     }
 
@@ -2327,7 +2327,7 @@ mod tests {
     fn a_gated_run_carries_its_verdict_into_the_snippet_body() {
         let body = br#"{"gate_outcomes":{"health-min-score":{"status":"fail","enforced":true}}}"#;
 
-        let result = normalize_output(1, body, b"").expect("exit 1 stays a success body");
+        let result = normalize_output(1, body, b"", false).expect("exit 1 stays a success body");
         let value: serde_json::Value = serde_json::from_str(&result).expect("body parses");
 
         assert!(
@@ -2348,7 +2348,7 @@ mod tests {
     fn a_gated_error_body_carries_its_verdict_too() {
         let body = br#"{"gate_outcomes":{"security":{"status":"fail","enforced":true}}}"#;
 
-        let result = normalize_output(8, body, b"").expect_err("exit 8 is an error body");
+        let result = normalize_output(8, body, b"", false).expect_err("exit 8 is an error body");
         let value: serde_json::Value = serde_json::from_str(&result).expect("body parses");
 
         assert!(
@@ -2362,13 +2362,13 @@ mod tests {
     #[test]
     fn nonzero_exit_with_valid_json_stdout_returns_err_with_stdout() {
         let json_stdout = b"{ \"error\": true, \"message\": \"config error\" }";
-        let err = normalize_output(2, json_stdout, b"").unwrap_err();
+        let err = normalize_output(2, json_stdout, b"", false).unwrap_err();
         assert_eq!(err, String::from_utf8_lossy(json_stdout));
     }
 
     #[test]
     fn nonzero_exit_with_empty_stdout_returns_err_with_exit_code() {
-        let err = normalize_output(2, b"", b"").unwrap_err();
+        let err = normalize_output(2, b"", b"", false).unwrap_err();
         let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
         assert_eq!(parsed["error"], true);
         assert_eq!(parsed["exit_code"], 2);
@@ -2383,7 +2383,7 @@ mod tests {
 
     #[test]
     fn nonzero_exit_with_stderr_uses_stderr_as_message() {
-        let err = normalize_output(3, b"", b"  some stderr text  ").unwrap_err();
+        let err = normalize_output(3, b"", b"  some stderr text  ", false).unwrap_err();
         let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
         assert_eq!(parsed["error"], true);
         assert_eq!(parsed["exit_code"], 3);
@@ -2392,7 +2392,7 @@ mod tests {
 
     #[test]
     fn nonzero_exit_with_invalid_json_stdout_and_empty_stderr_returns_exit_code_message() {
-        let err = normalize_output(5, b"not-json", b"").unwrap_err();
+        let err = normalize_output(5, b"not-json", b"", false).unwrap_err();
         let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
         assert_eq!(parsed["error"], true);
         assert_eq!(parsed["exit_code"], 5);
@@ -2405,7 +2405,7 @@ mod tests {
 
     #[test]
     fn nonzero_exit_negative_one_with_stderr_uses_stderr() {
-        let err = normalize_output(-1, b"", b"process killed by signal").unwrap_err();
+        let err = normalize_output(-1, b"", b"process killed by signal", false).unwrap_err();
         let parsed: serde_json::Value = serde_json::from_str(&err).unwrap();
         assert_eq!(parsed["exit_code"], -1);
         assert_eq!(parsed["message"], "process killed by signal");

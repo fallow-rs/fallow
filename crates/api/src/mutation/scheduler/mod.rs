@@ -329,16 +329,22 @@ fn timeout_ms(total_duration_ms: f64) -> u64 {
 }
 
 /// Maps a `run_result` to a status with the fail-closed rules 5 and 6.
+/// `tests` are the test ids of the request: the covering tests of `job`
+/// without the tests that a restarted companion dropped.
 ///
 /// An `Err` is a runtime error with its reason.
-fn classify(job: &Job, result: &RunResult) -> Result<(MutantStatus, Option<String>), String> {
+fn classify(
+    job: &Job,
+    tests: &[String],
+    result: &RunResult,
+) -> Result<(MutantStatus, Option<String>), String> {
     if result.mutant_id != job.id {
         return Err(format!(
             "the run result names mutant `{}`, expected `{}`",
             result.mutant_id, job.id
         ));
     }
-    let requested: FxHashSet<&str> = job.tests.iter().map(String::as_str).collect();
+    let requested: FxHashSet<&str> = tests.iter().map(String::as_str).collect();
     match result.status {
         RunStatus::Killed => match &result.killed_by {
             Some(test) if requested.contains(test.as_str()) => {
@@ -356,11 +362,11 @@ fn classify(job: &Job, result: &RunResult) -> Result<(MutantStatus, Option<Strin
             if result.tests_executed == 0 {
                 return Err("zero tests ran".to_owned());
             }
-            if result.tests_executed != job.tests.len() {
+            if result.tests_executed != tests.len() {
                 return Err(format!(
                     "{} of {} requested tests ran",
                     result.tests_executed,
-                    job.tests.len()
+                    tests.len()
                 ));
             }
             if !result.unhandled_errors.is_empty() {
@@ -528,7 +534,7 @@ impl<'a> Worker<'a> {
         }
         let request = Request::Run(RunRequest {
             mutant_id: job.id.clone(),
-            test_ids: tests,
+            test_ids: tests.clone(),
             timeout_ms: job.timeout_ms,
             bail: true,
         });
@@ -541,7 +547,7 @@ impl<'a> Worker<'a> {
             ));
         };
         let mut attempt = match link.request(&request, watchdog) {
-            Ok(Response::Run(result)) => match classify(job, &result) {
+            Ok(Response::Run(result)) => match classify(job, &tests, &result) {
                 Ok((status, killed_by)) => {
                     Attempt::decided(status, killed_by, round_ms(result.duration_ms))
                 }
@@ -1028,6 +1034,10 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
     if let Some(issue) = attempt.issue {
         outcome.issues.push(issue);
     }
+    // The key covers each covering test. A survivor of a run without a
+    // dropped test is not proof against that test, so it is not stored.
+    let partial_survivor =
+        attempt.status == MutantStatus::Survived && !attempt.dropped_tests.is_empty();
     for test in attempt.dropped_tests {
         note_restarted_baseline_failure(outcome, facts, test, &job.id);
     }
@@ -1035,8 +1045,13 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
     // depend on durations, so it lists the covering tests by id.
     let mut covering_tests = job.tests;
     covering_tests.sort_unstable();
-    if let Some(key) = job.cache_key {
-        outcome.cache_keys.insert(job.id.clone(), key);
+    match job.cache_key {
+        Some(key) if !partial_survivor => {
+            outcome.cache_keys.insert(job.id.clone(), key);
+        }
+        _ => {
+            outcome.cache_keys.remove(&job.id);
+        }
     }
     outcome.results.insert(
         job.id,

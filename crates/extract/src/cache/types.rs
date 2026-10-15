@@ -99,14 +99,15 @@ pub struct CachedModule {
     pub ctime_ns: u64,
     /// File size in bytes for fast cache validation.
     pub file_size: u64,
-    /// Seconds-since-epoch at the time this entry was last WRITTEN
-    /// (first parse or content-change refresh). NOT updated on cache-hit
-    /// reads: `update_cache` already iterates every in-scope file every run,
-    /// so refreshing on read would collapse the LRU to "last run this file
-    /// was discovered" for every retained entry. With write-only refresh,
-    /// the LRU genuinely targets stale (in-scope-but-unchanged-for-many-runs)
-    /// entries. Used by `CacheStore::save` for write-time eviction ordering.
-    pub last_access_secs: u64,
+    /// Seconds-since-epoch of the last saved run whose discovery included this
+    /// file. `CacheStore::retain_paths` sets it for every discovered file, so
+    /// a cache hit refreshes it as well as a parse does. `CacheStore::save`
+    /// evicts the smallest values first: entries that only another scope
+    /// sees (test files that `--production` skips, a sibling workspace) go
+    /// before the files that every run reads. An earlier design stamped only
+    /// writes, so a stable file that every run read was the oldest entry and
+    /// was evicted first, and the next run parsed it again.
+    pub last_seen_secs: u64,
     /// Exported symbols.
     pub exports: Vec<CachedExport>,
     /// Import specifiers.

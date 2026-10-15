@@ -31,11 +31,19 @@ macro_rules! embedded {
 /// Each file of the companion. A test checks that this list equals the
 /// directory.
 pub const COMPANION_FILES: &[EmbeddedFile] = embedded!(
+    "adapters/bun-test.mjs",
+    "adapters/child-process.mjs",
+    "adapters/common.mjs",
+    "adapters/node-test.mjs",
     "adapters/vitest.mjs",
     "companion.mjs",
     "generated-protocol.mjs",
     "protocol.mjs",
+    "runtime/bun-test-preload.mjs",
+    "runtime/child-hooks.mjs",
+    "runtime/child.mjs",
     "runtime/global.mjs",
+    "runtime/node-test-preload.mjs",
     "runtime/vitest-setup.mjs",
 );
 

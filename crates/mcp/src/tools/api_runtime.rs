@@ -165,8 +165,27 @@ pub(super) fn workspace_patterns_from_param(value: Option<&str>) -> Option<Vec<S
 /// what keeps a tool from answering differently depending on whether a
 /// parameter happened to force the CLI fallback; it is a no-op on every
 /// envelope that carries none of them.
+///
+/// The body obeys the same 16 MiB cap as the CLI route and is refused with
+/// the same over-limit body, so a parameter that selects the typed route
+/// cannot return more than the CLI route would.
 pub(super) fn json_success(value: &serde_json::Value) -> CallToolResult {
+    json_success_with_limit(value, super::DEFAULT_MAX_OUTPUT_BYTES)
+}
+
+fn json_success_with_limit(value: &serde_json::Value, max_output_bytes: usize) -> CallToolResult {
     let text = super::gate_verdicts::annotate_value(value).unwrap_or_else(|| value.to_string());
+    if text.len() > max_output_bytes {
+        return super::over_limit_result(
+            &super::OverLimit {
+                stream: "result",
+                context: "typed",
+                captured: &text,
+                total: text.len(),
+            },
+            max_output_bytes,
+        );
+    }
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
@@ -256,6 +275,49 @@ pub(super) fn write_type_aware_config(root: &std::path::Path, config: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn result_text(result: &CallToolResult) -> &str {
+        match result.content.first() {
+            Some(ContentBlock::Text(text)) => &text.text,
+            other => panic!("expected a text block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_result_over_the_cap_is_refused_with_the_cli_route_body() {
+        let value = serde_json::json!({ "files": ["x".repeat(64)] });
+        let total = value.to_string().len();
+
+        let result = json_success_with_limit(&value, 32);
+
+        assert_eq!(result.is_error, Some(true));
+        let body: serde_json::Value =
+            serde_json::from_str(result_text(&result)).expect("over-limit body is JSON");
+        assert_eq!(body["error"], true);
+        assert_eq!(body["ok"], false);
+        assert_eq!(body["exit_code"], 2);
+        assert_eq!(body["truncated"], true);
+        assert_eq!(body["result_bytes"], total);
+        assert_eq!(body["limit_bytes"], 32);
+        assert_eq!(body["code"], "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT");
+        assert_eq!(body["context"], "typed");
+        assert_eq!(body["stream"], "result");
+        assert_eq!(
+            body["result_preview"].as_str().map(str::len),
+            Some(32),
+            "the preview never exceeds the cap"
+        );
+    }
+
+    #[test]
+    fn typed_result_within_the_cap_is_returned_unchanged() {
+        let value = serde_json::json!({ "ok": true });
+
+        let result = json_success_with_limit(&value, 1024);
+
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(result_text(&result), value.to_string());
+    }
 
     #[tokio::test]
     async fn api_timeout_returns_structured_tool_error() {

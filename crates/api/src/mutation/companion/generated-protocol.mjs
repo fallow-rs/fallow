@@ -52,6 +52,18 @@ export const MUTATION_RUNNER_PROTOCOL = deepFreeze({
       min_version: "4.0.0",
       max_version_exclusive: "6.0.0",
     },
+    {
+      name: "node-test",
+      package: "node",
+      min_version: "22.18.0",
+      max_version_exclusive: "27.0.0",
+    },
+    {
+      name: "bun-test",
+      package: "bun",
+      min_version: "1.3.0",
+      max_version_exclusive: "2.0.0",
+    },
   ],
 });
 export const WIRE_PROTOCOL_VERSION = MUTATION_RUNNER_PROTOCOL.wire_protocol_version;

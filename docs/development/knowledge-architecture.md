@@ -72,7 +72,9 @@ The public docs archive records a complete content digest and source commit.
 Private consumers pin both values. The portable skill repository records the
 exact Fallow source commit, source root, target root, and declared transform.
 After a skill change lands on `main`, `node scripts/sync-skills-companion.mjs`
-prepares the signed companion commit. The maintainer pushes it.
+prepares the signed companion commit. The companion `main` branch is
+protected, so the maintainer publishes the commit through a fallow-skills pull
+request. The script prints the commands.
 Pull requests compare the published companion with their exact public base
 commit, while required generation checks validate the candidate contracts and
 adapters. Pushes compare the current source and keep failing on landed drift

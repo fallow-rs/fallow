@@ -63,14 +63,30 @@ pub(super) fn cloud_api_key_missing_body(
     )
 }
 
-/// The typed refusal of a cloud tool called without `repo`.
-pub(super) fn cloud_repo_missing_body(tool: &str) -> String {
-    typed_validation_error_body(
-        format!("repo is required for {tool}"),
-        "cloud_repo_missing",
-        "Pass the repository Fallow Cloud knows this project as, in `owner/repo` form.",
-        &format!("{tool}.repo"),
-    )
+/// Trim the `repo` parameter of a cloud tool, or return the typed refusal.
+///
+/// The CLI refuses a dot-only repository too, because the value becomes one
+/// URL path segment in which `.` and `..` are not percent-encoded. Refusing
+/// it here returns the refusal before a subprocess starts.
+pub(super) fn cloud_repo_param<'a>(tool: &str, raw: &'a str) -> Result<&'a str, String> {
+    let repo = raw.trim();
+    if repo.is_empty() {
+        return Err(typed_validation_error_body(
+            format!("repo is required for {tool}"),
+            "cloud_repo_missing",
+            "Pass the repository Fallow Cloud knows this project as, in `owner/repo` form.",
+            &format!("{tool}.repo"),
+        ));
+    }
+    if repo.chars().all(|c| c == '.') {
+        return Err(typed_validation_error_body(
+            format!("repo must name a repository (not only dots), got {repo}"),
+            "cloud_repo_invalid",
+            "Pass the repository Fallow Cloud knows this project as, in `owner/repo` form.",
+            &format!("{tool}.repo"),
+        ));
+    }
+    Ok(repo)
 }
 
 /// Build CLI arguments for the `get_cloud_runtime_context` tool.
@@ -90,10 +106,7 @@ pub fn build_get_cloud_runtime_context_args(
         ));
     }
 
-    let repo = params.repo.trim();
-    if repo.is_empty() {
-        return Err(cloud_repo_missing_body("get_cloud_runtime_context"));
-    }
+    let repo = cloud_repo_param("get_cloud_runtime_context", &params.repo)?;
 
     if let Some(period_days) = params.period_days
         && (period_days == 0 || period_days > MAX_PERIOD_DAYS)

@@ -15,11 +15,19 @@
 export const MUTATION_COMPANION_SOURCE_ROOT = "tools/mutation-runner/src";
 export const MUTATION_COMPANION_TARGET_ROOT = "crates/api/src/mutation/companion";
 export const MUTATION_COMPANION_FILES = Object.freeze([
+  "adapters/bun-test.mjs",
+  "adapters/child-process.mjs",
+  "adapters/common.mjs",
+  "adapters/node-test.mjs",
   "adapters/vitest.mjs",
   "companion.mjs",
   "generated-protocol.mjs",
   "protocol.mjs",
+  "runtime/bun-test-preload.mjs",
+  "runtime/child-hooks.mjs",
+  "runtime/child.mjs",
   "runtime/global.mjs",
+  "runtime/node-test-preload.mjs",
   "runtime/vitest-setup.mjs",
 ]);
 

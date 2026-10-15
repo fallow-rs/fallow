@@ -13,6 +13,7 @@ pub(crate) mod protocol;
 pub(crate) mod report;
 pub(crate) mod result_cache;
 pub(crate) mod run_dir;
+pub(crate) mod runner_select;
 pub(crate) mod scheduler;
 pub(crate) mod transport;
 pub(crate) mod typecheck;
@@ -73,7 +74,9 @@ pub struct MutationRunOptions {
     /// Run in a dirty git worktree, or outside a git worktree. The run still
     /// compares the worktree after the run.
     pub allow_dirty: bool,
-    /// The JavaScript runtime. `None` uses `node`, then `bun`, from `PATH`.
+    /// The JavaScript runtime. `None` uses the runtime of the runner from
+    /// `PATH`: `node` for `node:test`, `bun` for `bun test`, and `node`,
+    /// then `bun`, for Vitest.
     pub runtime: Option<PathBuf>,
     /// The number of companion processes. `None` uses half the logical
     /// cores.

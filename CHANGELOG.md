@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`fallow mutation` measures how well the tests detect code changes.** The
   command makes small changes (mutants) in the changed code and runs the
-  Vitest tests of the project against each one. A mutant that no test fails
+  tests of the project against each one. A mutant that no test fails
   on survives. The report gives the mutation score over the tested mutants,
   the survivors by file with their covering tests, and the share of mutants
   that a test reaches.
@@ -42,9 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `--max-mutants`. The dry run decides their coverage: a pending mutant that
     no test reaches in the dry run is `no_coverage`. A capped run therefore
     reports the coverage of the full run.
+  - A type test (`*.test-d.ts`, `*.spec-d.ts`, or a TypeScript file below
+    `test-d/`) is not a test file of the plan. No runner executes it, so it
+    no longer gives a false baseline failure or decides the runner.
   - A covering test that fails in the dry run of a restarted companion is a
     baseline failure. The mutant runs with its other covering tests and is a
-    runtime error only when no covering test is left.
+    runtime error only when no covering test is left. A survivor of such a
+    run survives: the check of the test count uses the tests of the run,
+    so it no longer gives a runtime error such as `466 of 467 requested
+    tests ran`.
   - The dry-run timeout of a restarted companion grows with the first
     dry-run time and the worker count. It is at least the runner timeout. A
     loaded host no longer turns the mutants of a restarted companion into
@@ -58,11 +64,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A run reuses the killed and survived results of an earlier run from the
     Fallow cache. The key covers the mutant, its covering tests, the content
     of the covering test files and the files that they import, the runner
-    setup files, the lockfile and the runner config. A change to one of them
-    runs the mutant again. Dynamic imports that the module graph does not
-    resolve, and files that a test reads, are not in the key. Each cache entry
-    and the `cache` object of the report record this limit. A reused result
-    has `cached: true`. `--no-cache` runs each mutant.
+    setup files (also the Bun `preload` files), the lockfile, the runner
+    config and the files that it imports, the configs that the root
+    `tsconfig.json` extends, and the runner. A change to one of them runs the
+    mutant again. Dynamic imports that the module graph does not resolve, and
+    files that a test reads, are not in the key. Each cache entry and the
+    `cache` object of the report record this limit. A reused result has
+    `cached: true`. `--no-cache` runs each mutant.
+  - Each run writes the instrumented files to a run directory in the Fallow
+    cache. A staging directory and a rename install it, so a concurrent run
+    on the same plan never reads a partial file. A run reuses a directory
+    with the expected content, and removes old run directories beyond the 5
+    most recently used ones.
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
   - `--typecheck` or `mutation.typecheck` type-checks each survivor through
@@ -70,6 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     error to its file gets the status `compile_error` and leaves the score.
     The check reads only the mutated file and never writes a project file.
     Without a companion, the run exits with 2 before the tests start.
+    The checker cannot read a Vue, Svelte or Astro component, so a survivor
+    in a component stays `survived` with the skip reason
+    `unsupported-file`. (#3471)
   - `fallow health --mutation-report <file>` reads a saved run report and
     adds the mutation score of each complexity finding next to its CRAP
     score, as `mutation` on the finding. A function whose file changed since
@@ -88,6 +104,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The `regex-literal` operator changes one token of a regular expression
     literal. It removes a `^` or `$` anchor, negates a character class, or
     gives `\d`, `\w` or `\s` the opposite case.
+  - The runner is Vitest 4 or 5, `node:test` of Node.js 22.18 or later, or
+    `bun test` of Bun 1.3 or later. `mutation.runner` selects one
+    (`vitest`, `node-test` or `bun-test`). The default `auto` detects it
+    from the `vitest` dependency, the test module that the test files
+    import, a Bun file at the root, or a `node --test` script. `node:test`
+    and `bun test` run each test file in its own process. (#3407)
+    Neither runtime can load a Vue, Svelte or Astro component, so with
+    these runners the plan leaves component files out with the skip reason
+    `runner-cannot-load`, and their mutants do not lower the coverage.
+    The human output prints one `Skipped files:` line. (#3470)
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /
@@ -292,6 +318,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One oxc version in the build.** `oxc_coverage_instrument` moves to
+  0.14, which uses oxc 0.152 like the rest of Fallow. The parser, AST and
+  semantic crates no longer compile twice. `cargo deny` now fails when two
+  versions of the core oxc crates enter the dependency graph.
+
 - **The MCP `audit` tool has a `fallow://tools/audit` guide.** The guide
   names the five diff-risk rules and holds the styling, coverage, baseline,
   grouping, runtime-coverage and `FALLOW_DIFF_FILE` detail. The `audit` tool
@@ -329,6 +360,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The MCP routes now apply the same safety rules.**
+  - Code Mode now refuses an incomplete type-aware run that requires
+    complete evidence (`--type-aware-require complete`, or
+    `typeAware.require: complete` in the config). A direct tool call already
+    returned an error for this run, but Code Mode returned the partial result
+    as a success.
+  - A typed-route tool result over 16 MiB now gets the same refusal as a CLI
+    result over the cap: `isError: true` and code
+    `FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`, with `context: "typed"`.
+  - A Code Mode subprocess now reads stdin from the null device, as a direct
+    tool call does. Before, it shared the MCP server's own stdin.
+  - A cloud repository that is only dots (`.` or `..`) is now refused. The
+    value becomes one URL path segment, so `..` addressed a different route.
+    `fallow coverage analyze --cloud`, the cloud read commands and the cloud
+    MCP tools refuse it, with the rule that already applies to commit SHAs.
+- **Two Fallow processes can save the cache at the same time.** The
+  extraction cache and the graph cache wrote through one fixed temp file
+  (`cache.bin.tmp`, `graph-cache.bin.tmp`). An editor server and a CLI run, or
+  a pre-commit hook beside an editor, that shared `.fallow/` wrote into the
+  same file. A save could then fail, or the cache could hold bytes from two
+  runs and be rebuilt from cold on the next run. Each save now writes its own
+  temp file and renames it into place.
+- **Cache eviction keeps the files that every run reads.** At the size cap
+  (`cache.maxSizeMb`), the extraction cache evicted the entries that it had
+  parsed longest ago. A file that never changes was parsed once and was then
+  the first entry to go, so the next run parsed it again. Eviction now removes
+  first the entries that recent runs did not discover, for example test
+  files after `--production` runs.
+- **`fallow audit --brief` no longer reports every export as new public
+  API after a run without `--brief`.** Only a brief run computes the
+  public exports of the base, but both runs shared one cached base
+  snapshot. A brief run after a plain run on the same base read an empty
+  base set, so `public_api_added` listed every export of the changed public
+  files. The cache key now includes `--brief`, and the cache version moves
+  to 13, so old snapshots are not used.
+
+- **The audit base-snapshot cache no longer grows without a limit.** Each
+  new base commit or changed-file set wrote one more snapshot file of up to
+  16 MiB below `<cache>/cache/audit-base-v*/`, and nothing removed them.
+  Now each save removes the files that are older than `audit.cacheMaxAgeDays`
+  (counted from the last use) and keeps only the newest 32 files.
+  `fallow audit-cache prune` reports and removes these files too, as entries
+  with `pass: "snapshot"`. A file over the cap has the reason
+  `over-capacity`.
+
+- **An edit to `package.json`, `deno.json` or `tsconfig.json` now rebuilds
+  the cached module graph.** The graph cache compared source files only. A
+  change to a `package.json` `imports` map, a workspace package name, a Deno
+  import map, or a `tsconfig.json` that the resolver finds next to a source
+  file (with its `extends` and `references` chain) did not change the cache
+  key. The next run then used the old import targets and could report a live
+  file as unused. Now the cache key includes the content of these files, the
+  workspace names and roots, and the framework static directory mounts. The
+  graph cache version changes, so the first run after an upgrade rebuilds
+  the graph.
+- **The worktree check of `fallow mutation` sees more stray writes.** Before,
+  the check left out the whole cache directory, so a `cache.dir` of `.` or
+  `src` hid each write of the tests. Now it leaves out only
+  `<cache>/mutation` and the output files. A run refuses a cache directory
+  that is the project root or a directory above it, or that holds a planned
+  file, with `FALLOW_MUTATION_UNSAFE_CACHE_DIR` and exit code 2. The check
+  also compares the ignored files that git lists at the start, such as
+  `.env`, so a write to one of them is a `worktree-changed` error. The docs
+  now say that side-effect pruning covers only a function whose own body
+  calls a sink.
+- **Mutation companions no longer outlive Fallow.** A companion that loses
+  its stdin during a request now kills its process group and exits. Before,
+  it waited for the request, and its test workers kept running after Fallow
+  ended. Fallow now also ends the companions on SIGHUP, SIGQUIT and a panic.
+  When Fallow starts with SIGHUP ignored, as under `nohup`, a hangup still
+  does not end the run.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

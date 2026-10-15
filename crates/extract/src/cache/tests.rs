@@ -15,7 +15,7 @@ use super::*;
 /// that they check and take the other fields from this value.
 fn empty_cached_module() -> CachedModule {
     CachedModule {
-        last_access_secs: 0,
+        last_seen_secs: 0,
         ..module_to_cached_from_parts(&ModuleInfo::empty(FileId(0)), 0, 0)
     }
 }
@@ -1419,11 +1419,11 @@ fn module_to_cached_roundtrip_member_decorators() {
 /// Build a minimal `CachedModule` whose serialized size is roughly
 /// proportional to `payload_kb`. Used by the eviction tests to populate
 /// a store with predictable byte cost.
-fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize) -> CachedModule {
+fn synthetic_module(content_hash: u64, last_seen_secs: u64, payload_kb: usize) -> CachedModule {
     let payload = "a".repeat(payload_kb * 1024);
     CachedModule {
         content_hash,
-        last_access_secs,
+        last_seen_secs,
         whole_object_uses: vec![payload].into(),
         ..empty_cached_module()
     }
@@ -2171,4 +2171,118 @@ fn callback_factory_sources_and_consumers_survive_cache_roundtrip() {
     let restored = cached_to_module(&decoded, FileId(8));
     assert_eq!(sources(&restored), expected_sources);
     assert_eq!(consumers(&restored), expected_accesses);
+}
+
+/// Two fallow processes that share `.fallow/` (an editor server and a CLI run,
+/// or a pre-commit hook beside an editor) save the cache at the same time.
+/// Each save must replace the file whole: a reader never sees bytes from two
+/// writers, no save fails because another save moved its temp file, and no
+/// temp file stays behind.
+#[test]
+fn concurrent_saves_never_leave_an_undecodable_cache_or_a_stray_temp_file() {
+    const WRITERS: u64 = 8;
+    const ROUNDS: u64 = 25;
+    let dir = test_cache_dir("concurrent_saves");
+    let failures = std::sync::Mutex::new(Vec::<String>::new());
+    std::thread::scope(|scope| {
+        for writer in 0..WRITERS {
+            let (dir, failures) = (&dir, &failures);
+            scope.spawn(move || {
+                let mut store = CacheStore::new(Path::new(""));
+                for i in 0..40u64 {
+                    store.insert(
+                        Path::new(&format!("w{writer}/file{i}.ts")),
+                        synthetic_module(writer * 1000 + i, i, 4),
+                    );
+                }
+                for _ in 0..ROUNDS {
+                    if let Err(error) = store.save(dir, 7, DEFAULT_CACHE_MAX_SIZE) {
+                        failures.lock().expect("failure list").push(error);
+                    }
+                }
+            });
+        }
+    });
+    let failures = failures.into_inner().expect("failure list");
+    assert!(failures.is_empty(), "saves failed: {failures:?}");
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 7, DEFAULT_CACHE_MAX_SIZE)
+        .expect("the cache written last decodes");
+    assert_eq!(
+        loaded.len(),
+        40,
+        "the file holds exactly one writer's store"
+    );
+
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [".gitignore", "cache.bin"],
+        "no temp file stays behind"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Eviction removes the entries that recent runs did not see before the
+/// entries every run sees. A file that has not changed for weeks is still
+/// parsed again when it is evicted, so the age of its last parse says nothing
+/// about its value. Entries outside the current scope (test files that
+/// `--production` skips, a sibling workspace) go first.
+#[test]
+fn eviction_removes_out_of_scope_entries_before_stable_in_scope_entries() {
+    use fallow_types::discover::DiscoveredFile;
+
+    let dir = test_cache_dir("evict_out_of_scope_first");
+    let source_dir = dir.join("src");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    let mut store = CacheStore::new(Path::new(""));
+    let mut in_scope = Vec::new();
+    for i in 0..25u32 {
+        // Parsed long ago and unchanged since: the oldest write stamps.
+        let path = source_dir.join(format!("stable{i}.ts"));
+        store.insert(&path, synthetic_module(u64::from(i), 1 + u64::from(i), 1));
+        in_scope.push(DiscoveredFile {
+            id: FileId(i),
+            path,
+            size_bytes: 1,
+        });
+    }
+    let mut out_of_scope = Vec::new();
+    for i in 0..25u64 {
+        // Parsed by a recent run with another scope. The files still exist,
+        // so `retain_paths` keeps them.
+        let path = source_dir.join(format!("other{i}.test.ts"));
+        std::fs::write(&path, "").unwrap();
+        store.insert(&path, synthetic_module(100 + i, 1_000 + i, 1));
+        out_of_scope.push(path);
+    }
+
+    store.retain_paths(&in_scope);
+    let cap = 40 * 1024;
+    store.save(&dir, 5, cap).expect("save with eviction");
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after eviction");
+    assert!(loaded.len() < 50, "the cap forced an eviction");
+    let kept_out_of_scope = out_of_scope
+        .iter()
+        .filter(|path| loaded.get_by_path_only(path).is_some())
+        .count();
+    let kept_in_scope = in_scope
+        .iter()
+        .filter(|file| loaded.get_by_path_only(&file.path).is_some())
+        .count();
+    assert!(
+        kept_out_of_scope == 0 || kept_in_scope == in_scope.len(),
+        "eviction kept {kept_out_of_scope} out-of-scope entries but dropped {} in-scope entries",
+        in_scope.len() - kept_in_scope
+    );
+    assert!(kept_in_scope > 0, "in-scope entries survive the eviction");
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
