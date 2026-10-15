@@ -320,19 +320,15 @@ impl<'a> ModuleInfoExtractor {
     fn is_component_loader_call(&self, expr: &CallExpression<'_>) -> bool {
         match expr.callee.without_parentheses() {
             Expression::Identifier(callee) => {
-                !self.component_loader_binding_is_shadowed(&callee.name)
-                    && matches!(
-                        self.component_loader_imports.get(callee.name.as_str()),
-                        Some(ComponentLoaderImport::Function | ComponentLoaderImport::NextDynamic)
-                    )
+                matches!(
+                    self.component_loader_imports.get(callee.name.as_str()),
+                    Some(ComponentLoaderImport::Function | ComponentLoaderImport::NextDynamic)
+                ) && !self.component_loader_binding_is_shadowed(&callee.name)
             }
             Expression::StaticMemberExpression(member) => {
                 let Expression::Identifier(root) = member.object.without_parentheses() else {
                     return false;
                 };
-                if self.component_loader_binding_is_shadowed(&root.name) {
-                    return false;
-                }
                 matches!(
                     (
                         self.component_loader_imports.get(root.name.as_str()),
@@ -343,7 +339,7 @@ impl<'a> ModuleInfoExtractor {
                             Some(ComponentLoaderImport::VueNamespace),
                             "defineAsyncComponent"
                         )
-                )
+                ) && !self.component_loader_binding_is_shadowed(&root.name)
             }
             _ => false,
         }
@@ -387,7 +383,9 @@ impl<'a> ModuleInfoExtractor {
         let Some(Argument::Identifier(ident)) = expr.arguments.first() else {
             return;
         };
-        if self.component_loader_binding_is_shadowed(&ident.name) {
+        if !self.local_import_loaders.contains_key(ident.name.as_str())
+            || self.component_loader_binding_is_shadowed(&ident.name)
+        {
             return;
         }
         let Some(loader) = self.local_import_loaders.get_mut(ident.name.as_str()) else {
@@ -616,9 +614,9 @@ impl<'a> ModuleInfoExtractor {
         let Expression::Identifier(callee) = &expr.callee else {
             return false;
         };
-        if self.component_loader_binding_is_shadowed(&callee.name)
-            || self.component_loader_imports.get(callee.name.as_str())
-                != Some(&ComponentLoaderImport::NextDynamic)
+        if self.component_loader_imports.get(callee.name.as_str())
+            != Some(&ComponentLoaderImport::NextDynamic)
+            || self.component_loader_binding_is_shadowed(&callee.name)
         {
             return false;
         }
