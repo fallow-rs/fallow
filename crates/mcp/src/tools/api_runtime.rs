@@ -177,7 +177,7 @@ fn json_success_with_limit(value: &serde_json::Value, max_output_bytes: usize) -
     let text = super::gate_verdicts::annotate_value(value).unwrap_or_else(|| value.to_string());
     if text.len() > max_output_bytes {
         return super::over_limit_result(
-            super::OverLimit {
+            &super::OverLimit {
                 stream: "result",
                 context: "typed",
                 captured: &text,

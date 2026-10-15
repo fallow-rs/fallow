@@ -729,7 +729,7 @@ fn cli_exit_result(
 /// required complete type-aware evidence and the run reports it incomplete.
 /// Every other exit is an error that keeps a JSON stdout envelope, or else
 /// wraps stderr in one.
-pub(super) fn cli_exit_body(
+fn cli_exit_body(
     exit_code: i32,
     stdout: &str,
     stderr: &str,
@@ -782,7 +782,7 @@ pub(super) fn cli_exit_body(
     .to_string())
 }
 
-pub(super) fn type_aware_complete_required(args: &[String]) -> bool {
+fn type_aware_complete_required(args: &[String]) -> bool {
     args.windows(2)
         .any(|pair| pair == ["--type-aware-require", "complete"])
         || is_semantic_dead_code_trace(args)
@@ -925,7 +925,7 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
         ("stderr", &output.stderr)
     };
     over_limit_result(
-        OverLimit {
+        &OverLimit {
             stream,
             context: "subprocess",
             captured: &String::from_utf8_lossy(&pipe.bytes),
@@ -936,27 +936,39 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
 }
 
 /// One response that went over the output cap.
-pub(super) struct OverLimit<'a> {
+struct OverLimit<'a> {
     /// What produced the bytes: `stdout` or `stderr` of the CLI, or `result`
     /// for a typed-route envelope.
-    pub(super) stream: &'a str,
+    stream: &'a str,
     /// The route: `subprocess` or `typed`.
-    pub(super) context: &'a str,
+    context: &'a str,
     /// The retained bytes; only a short preview of them is returned.
-    pub(super) captured: &'a str,
+    captured: &'a str,
     /// Every byte the response held, including the bytes past the cap.
-    pub(super) total: usize,
+    total: usize,
+}
+
+/// The recovery hint for an over-limit refusal. Only the CLI route takes
+/// `max_output_bytes`, so the typed-route hint does not name that parameter.
+fn over_limit_help(context: &str) -> &'static str {
+    if context == "subprocess" {
+        "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type set). \
+         max_output_bytes only LOWERS the 16 MiB default, so raising it for this call cannot help."
+    } else {
+        "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type set). \
+         The typed route has a fixed 16 MiB cap and no max_output_bytes parameter."
+    }
 }
 
 /// The over-limit refusal body, shared by the CLI route and the typed route
 /// so an agent parses one shape and one `code` on both.
-pub(super) fn over_limit_result(over: OverLimit<'_>, max_output_bytes: usize) -> CallToolResult {
+fn over_limit_result(over: &OverLimit<'_>, max_output_bytes: usize) -> CallToolResult {
     let OverLimit {
         stream,
         context,
         captured,
         total,
-    } = over;
+    } = *over;
     let source = if context == "subprocess" {
         "fallow subprocess"
     } else {
@@ -979,9 +991,7 @@ pub(super) fn over_limit_result(over: OverLimit<'_>, max_output_bytes: usize) ->
         "message": format!(
             "{source} {stream} produced {total} bytes, over the {max_output_bytes}-byte cap"
         ),
-        "help": "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type \
-                 set). max_output_bytes only LOWERS the 16 MiB default, so raising it for this \
-                 call cannot help.",
+        "help": over_limit_help(context),
     });
     CallToolResult::error(vec![ContentBlock::text(body.to_string())])
 }

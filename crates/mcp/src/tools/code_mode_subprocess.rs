@@ -417,6 +417,9 @@ mod tests {
     /// The MCP server reads JSON-RPC frames from its own stdin, so a child
     /// must never share it.
     #[test]
+    // This test discriminates only when the test runner's own stdin is not
+    // `/dev/null`. In CI the runner stdin is often `/dev/null`, and then an
+    // inherited stdin also passes. Run it with `< /dev/zero` to check the fix.
     fn subprocess_stdin_is_the_null_device() {
         let output = run_script(
             r#"if [ /dev/stdin -ef /dev/null ]; then printf '{"stdin":"null"}'; else printf '{"stdin":"inherited"}'; fi"#,
