@@ -133,9 +133,8 @@ const main = () => {
     }
   };
 
-  const handleLine = async (line) => {
+  const handleParsed = async (parsed) => {
     if (stopping) return;
-    const parsed = parseRequestLine(line);
     if (!parsed.ok) {
       await send(errorResponse(parsed.id, parsed.error));
     } else if (parsed.request.type === "shutdown") {
@@ -146,12 +145,38 @@ const main = () => {
   };
 
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  let shutdownReceived = false;
   input.on("line", (line) => {
-    queue = queue.then(() => handleLine(line));
+    const parsed = parseRequestLine(line);
+    if (parsed.ok && parsed.request.type === "shutdown") shutdownReceived = true;
+    queue = queue.then(() => handleParsed(parsed));
   });
+  // The API closes stdin after `shutdown`. Without `shutdown`, the API
+  // stopped or died, and an in-flight request can run for a long time, so
+  // the companion ends its runner workers and itself at once. After
+  // `shutdown`, a request that does not end gets the same treatment after
+  // the grace period.
   input.on("close", () => {
+    if (!shutdownReceived) abandon();
+    setTimeout(abandon, 2 * SHUTDOWN_GRACE_MS).unref();
     queue = queue.then(stop);
   });
+};
+
+/**
+ * Kills the process group of the companion and exits. The API starts the
+ * companion as the leader of its own group on Unix, so the group holds each
+ * runner worker. Without such a group (Windows, or a companion that is not a
+ * group leader) the kill fails, and the Job Object of the API ends the
+ * workers on Windows.
+ */
+const abandon = () => {
+  try {
+    process.kill(-process.pid, "SIGKILL");
+  } catch {
+    // The companion is not a group leader.
+  }
+  process.exit(0);
 };
 
 main();

@@ -153,6 +153,62 @@ fn sigterm_kills_registered_child_and_exits_143() {
     );
 }
 
+/// A closed terminal (SIGHUP) and Ctrl+\ (SIGQUIT) also drain the
+/// registered children. Before they were drained, they ended fallow
+/// with the default action and left children in their own process
+/// group, such as mutation companions, running.
+#[test]
+fn sighup_and_sigquit_kill_registered_child_and_exit_128_plus_signum() {
+    for (signal, code) in [("-HUP", 129), ("-QUIT", 131)] {
+        let (mut fallow, sleep_pid) = spawn_signal_helper();
+        assert!(
+            !wait_for_pid_dead(sleep_pid, Duration::from_millis(100)),
+            "inner sleep PID {sleep_pid} should be alive after helper start"
+        );
+        send_signal(fallow.id(), signal);
+        let status = fallow
+            .wait_timeout_compat(Duration::from_secs(10))
+            .expect("fallow helper exit within 10s");
+        assert_eq!(status.code(), Some(code), "{signal}: {status:?}");
+        assert!(
+            wait_for_pid_dead(sleep_pid, Duration::from_secs(5)),
+            "{signal}: inner sleep PID {sleep_pid} must be dead after the signal handler drains",
+        );
+    }
+}
+
+/// The release binary aborts on a panic, so no `Drop` kills the
+/// registered children. The panic hook drains them. The helper panics on
+/// a second thread, so the `Drop` of the child on the main thread cannot
+/// be what kills it.
+#[test]
+fn a_panic_kills_registered_child() {
+    let fallow_bin = env!("CARGO_BIN_EXE_fallow");
+    let mut fallow = Command::new(fallow_bin)
+        .env("FALLOW_TEST_SIGNAL_HELPER", "panic")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn fallow signal helper");
+    let mut line = String::new();
+    BufReader::new(fallow.stdout.take().expect("piped stdout"))
+        .read_line(&mut line)
+        .expect("read the PID line");
+    let sleep_pid: u32 = line.trim().parse().expect("a PID");
+    let dead = wait_for_pid_dead(sleep_pid, Duration::from_secs(5));
+    let _ = fallow.kill();
+    let _ = fallow.wait();
+    if !dead {
+        let _ = Command::new("kill")
+            .args(["-9", &sleep_pid.to_string()])
+            .status();
+    }
+    assert!(
+        dead,
+        "inner sleep PID {sleep_pid} must be dead after the panic hook drains"
+    );
+}
+
 /// Watch-mode cooperative-shutdown contract: in graceful mode the
 /// signal handler MUST still drain registered children (so git / shell
 /// subprocesses spawned mid-analysis are reaped), but MUST NOT call

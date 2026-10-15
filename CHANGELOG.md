@@ -404,6 +404,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace names and roots, and the framework static directory mounts. The
   graph cache version changes, so the first run after an upgrade rebuilds
   the graph.
+- **The worktree check of `fallow mutation` sees more stray writes.** Before,
+  the check left out the whole cache directory, so a `cache.dir` of `.` or
+  `src` hid each write of the tests. Now it leaves out only
+  `<cache>/mutation` and the output files. A run refuses a cache directory
+  that is the project root or a directory above it, or that holds a planned
+  file, with `FALLOW_MUTATION_UNSAFE_CACHE_DIR` and exit code 2. The check
+  also compares the ignored files that git lists at the start, such as
+  `.env`, so a write to one of them is a `worktree-changed` error. The docs
+  now say that side-effect pruning covers only a function whose own body
+  calls a sink.
+- **Mutation companions no longer outlive Fallow.** A companion that loses
+  its stdin during a request now kills its process group and exits. Before,
+  it waited for the request, and its test workers kept running after Fallow
+  ended. Fallow now also ends the companions on SIGHUP, SIGQUIT and a panic.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

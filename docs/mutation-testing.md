@@ -128,12 +128,33 @@ or relational mutant, so it adds little test-strength signal for its run time.
 - The run refuses a dirty git worktree unless `--allow-dirty` is set. After the
   run, it compares the worktree with the start state and reports each changed
   path.
-- Mutants in functions that reach a file system, process, network or database
-  sink are pruned (`side-effect-sink`). `--allow-side-effects` keeps them. This
-  override is a flag only: the config rejects `allowSideEffects`, so a project
-  config cannot widen what a run executes.
+- The check covers tracked and untracked paths. For ignored files, it covers
+  the files that `git status --ignored=matching` lists at the start, up to
+  10000 files in path order: a write to one of them or a delete is a change.
+  Git lists an ignored directory such as `node_modules/` or `coverage/` as one
+  entry, so the check does not see the files below it. A new ignored file is
+  not a change, because test runs make such files (coverage, logs).
+- The check leaves out `<cache>/mutation` and the output files of the run. For
+  ignored files it also leaves out the whole cache directory, because the
+  analysis writes its own cache files there. The run refuses a cache directory
+  that is the project root or a directory above it, or that holds a planned
+  source or test file (`FALLOW_MUTATION_UNSAFE_CACHE_DIR`, exit code `2`). Such
+  a cache directory would hide the writes of the tests from the check.
+- Mutants in a function whose own body calls a file system, process, network
+  or database sink are pruned (`side-effect-sink`). A mutant in top-level code
+  is pruned when the module calls a sink at the top level. The pruning does
+  not follow calls: a mutant in a function that calls a helper, which then
+  calls a sink, still runs. `--allow-side-effects` keeps the pruned mutants.
+  This override is a flag only: the config rejects `allowSideEffects`, so a
+  project config cannot widen what a run executes.
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
+- The companions run in their own process group on Unix and in a Job Object on
+  Windows. Fallow ends that group when a run ends, and when it receives
+  SIGINT, SIGTERM, SIGHUP or SIGQUIT. The release binary aborts on a panic,
+  and a panic hook ends the group first. A companion whose stdin closes
+  without a `shutdown` request kills its own process group and exits, so it
+  does not outlive a Fallow process that ended in another way.
 
 ## Exit codes
 
@@ -141,7 +162,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run with no executed mutant has no score and exits `0`, also when
