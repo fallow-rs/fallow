@@ -5,7 +5,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use crate::params::{CloudDeploymentChangesParams, CloudReviewPacketParams};
 
 use super::cloud_runtime_context::{
-    MAX_PERIOD_DAYS, api_key_is_set, cloud_api_key_missing_body, cloud_repo_missing_body,
+    MAX_PERIOD_DAYS, api_key_is_set, cloud_api_key_missing_body, cloud_repo_param,
     push_trimmed_flag,
 };
 use super::{push_global, run_tool_with_limit, typed_validation_error_body};
@@ -79,10 +79,7 @@ pub fn build_get_cloud_review_packet_args(
             "Without a key, no cloud tool can answer.",
         ));
     }
-    let repo = params.repo.trim();
-    if repo.is_empty() {
-        return Err(cloud_repo_missing_body(TOOL));
-    }
+    let repo = cloud_repo_param(TOOL, &params.repo)?;
     check_period(params.period_days, TOOL)?;
     let files = params.files.as_deref().unwrap_or_default();
     let functions = params.functions.as_deref().unwrap_or_default();
@@ -153,10 +150,7 @@ pub fn build_get_cloud_deployment_changes_args(
             "Without a key, no cloud tool can answer.",
         ));
     }
-    let repo = params.repo.trim();
-    if repo.is_empty() {
-        return Err(cloud_repo_missing_body(TOOL));
-    }
+    let repo = cloud_repo_param(TOOL, &params.repo)?;
     if let Some(change) = params.change.as_deref().map(str::trim)
         && !change.is_empty()
         && !DEPLOYMENT_CHANGE_KINDS.contains(&change)

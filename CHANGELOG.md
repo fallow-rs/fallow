@@ -339,6 +339,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The MCP routes now apply the same safety rules.**
+  - Code Mode now refuses an incomplete type-aware run that requires
+    complete evidence (`--type-aware-require complete`, or
+    `typeAware.require: complete` in the config). A direct tool call already
+    returned an error for this run, but Code Mode returned the partial result
+    as a success.
+  - A typed-route tool result over 16 MiB now gets the same refusal as a CLI
+    result over the cap: `isError: true` and code
+    `FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`, with `context: "typed"`.
+  - A Code Mode subprocess now reads stdin from the null device, as a direct
+    tool call does. Before, it shared the MCP server's own stdin.
+  - A cloud repository that is only dots (`.` or `..`) is now refused. The
+    value becomes one URL path segment, so `..` addressed a different route.
+    `fallow coverage analyze --cloud`, the cloud read commands and the cloud
+    MCP tools refuse it, with the rule that already applies to commit SHAs.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

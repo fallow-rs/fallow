@@ -98,12 +98,24 @@ Contract rules:
 
 - Prefer typed API execution. Use CLI subprocess fallback only where the policy
   explicitly allows it.
+- Keep the three routes equal on the rules a caller acts on:
+  - The direct subprocess route (`captured_output_result`) and Code Mode
+    (`code_mode_subprocess::normalize_output`) call one exit-code policy,
+    `cli_exit_body`. An exit 1 run that requires complete type-aware evidence
+    and reports it incomplete is an error on both.
+  - The subprocess route and the typed route (`api_runtime::json_success`)
+    share the 16 MiB cap and the over-limit body (`over_limit_result`, code
+    `FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`). The `context` field is
+    `subprocess` or `typed`.
+  - Every spawned CLI reads stdin from the null device unless the tool sends
+    bounded input. The server reads JSON-RPC frames from its own stdin, and a
+    child must not consume them.
 - Return structured results and structured errors. Do not require clients to
   parse human output.
 - Use JSON, quiet mode, and explanation metadata for CLI-backed analysis.
 - A tool result is the analysis envelope plus the run's verdicts, never a
   prose prefix. `--quiet` removes the gate's stderr line and
-  `non_success_result` converts exit 1 into a success, both deliberately, so
+  `cli_exit_body` converts exit 1 into a success, both deliberately, so
   `crates/mcp/src/tools/gate_verdicts.rs` restates what the envelope already
   decided as plain strings on the root `warnings` array: `baseline_staleness`,
   every `gate_outcomes` entry that reported `fail` or `warn`, and one

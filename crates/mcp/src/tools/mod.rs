@@ -615,22 +615,17 @@ fn captured_output_result(
     let stdout = String::from_utf8_lossy(&output.stdout.bytes);
     let stderr = String::from_utf8_lossy(&output.stderr.bytes);
 
-    if !output.status.success() {
-        return gate_verdicts::annotate_gate_verdicts(non_success_result(
-            output.status.code().unwrap_or(-1),
-            &stdout,
-            &stderr,
-            exit_one_is_error,
-        ));
-    }
-
-    if stdout.is_empty() {
-        return CallToolResult::success(vec![ContentBlock::text("{}".to_string())]);
-    }
-
-    gate_verdicts::annotate_gate_verdicts(CallToolResult::success(vec![ContentBlock::text(
-        stdout.to_string(),
-    )]))
+    let exit_code = if output.status.success() {
+        0
+    } else {
+        output.status.code().unwrap_or(-1)
+    };
+    gate_verdicts::annotate_gate_verdicts(cli_exit_result(
+        exit_code,
+        &stdout,
+        &stderr,
+        exit_one_is_error,
+    ))
 }
 
 struct CapturedOutput {
@@ -713,43 +708,64 @@ fn subprocess_error_with_cleanup(
     )
 }
 
-/// Translate a non-zero CLI exit into the MCP result envelope. Exit 1 normally
-/// carries issue JSON as a success, but an explicitly incomplete type-aware
-/// result is an error when the caller required complete evidence.
-fn non_success_result(
+/// Translate one CLI exit into the MCP result envelope through [`cli_exit_body`].
+fn cli_exit_result(
     exit_code: i32,
     stdout: &str,
     stderr: &str,
     type_aware_complete_required: bool,
 ) -> CallToolResult {
+    match cli_exit_body(exit_code, stdout, stderr, type_aware_complete_required) {
+        Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+        Err(text) => CallToolResult::error(vec![ContentBlock::text(text)]),
+    }
+}
+
+/// The exit-code policy of one completed CLI run, shared by the direct tool
+/// route and Code Mode so the two cannot drift: `Ok` is a success body and
+/// `Err` an error body.
+///
+/// Exit 0 and exit 1 carry results. Exit 1 is an error only when the caller
+/// required complete type-aware evidence and the run reports it incomplete.
+/// Every other exit is an error that keeps a JSON stdout envelope, or else
+/// wraps stderr in one.
+pub(super) fn cli_exit_body(
+    exit_code: i32,
+    stdout: &str,
+    stderr: &str,
+    type_aware_complete_required: bool,
+) -> Result<String, String> {
+    let body_or_empty = || {
+        if stdout.is_empty() {
+            "{}".to_string()
+        } else {
+            stdout.to_string()
+        }
+    };
+    if exit_code == 0 {
+        return Ok(body_or_empty());
+    }
     if exit_code == 1 {
         let complete_required =
             type_aware_complete_required || type_aware_output_requires_complete(stdout);
         if complete_required && type_aware_evidence_is_incomplete(stdout) {
-            let text = if stdout.is_empty() {
-                serde_json::json!({
+            if stdout.is_empty() {
+                return Err(serde_json::json!({
                     "error": true,
                     "message": "type-aware completeness was required, but the semantic query was incomplete",
                     "exit_code": 1,
                     "code": "FALLOW_TYPE_AWARE_INCOMPLETE",
                     "context": "analysis.typeAware",
                 })
-                .to_string()
-            } else {
-                stdout.to_string()
-            };
-            return CallToolResult::error(vec![ContentBlock::text(text)]);
+                .to_string());
+            }
+            return Err(stdout.to_string());
         }
-        let text = if stdout.is_empty() {
-            "{}".to_string()
-        } else {
-            stdout.to_string()
-        };
-        return CallToolResult::success(vec![ContentBlock::text(text)]);
+        return Ok(body_or_empty());
     }
 
     if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(stdout).is_ok() {
-        return CallToolResult::error(vec![ContentBlock::text(stdout.to_string())]);
+        return Err(stdout.to_string());
     }
 
     let message = if stderr.is_empty() {
@@ -758,16 +774,15 @@ fn non_success_result(
         stderr.trim().to_string()
     };
 
-    let error_json = serde_json::json!({
+    Err(serde_json::json!({
         "error": true,
         "message": message,
         "exit_code": exit_code,
-    });
-
-    CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
+    })
+    .to_string())
 }
 
-fn type_aware_complete_required(args: &[String]) -> bool {
+pub(super) fn type_aware_complete_required(args: &[String]) -> bool {
     args.windows(2)
         .any(|pair| pair == ["--type-aware-require", "complete"])
         || is_semantic_dead_code_trace(args)
@@ -909,24 +924,60 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
     } else {
         ("stderr", &output.stderr)
     };
-    let captured = String::from_utf8_lossy(&pipe.bytes);
+    over_limit_result(
+        OverLimit {
+            stream,
+            context: "subprocess",
+            captured: &String::from_utf8_lossy(&pipe.bytes),
+            total: pipe.total,
+        },
+        max_output_bytes,
+    )
+}
+
+/// One response that went over the output cap.
+pub(super) struct OverLimit<'a> {
+    /// What produced the bytes: `stdout` or `stderr` of the CLI, or `result`
+    /// for a typed-route envelope.
+    pub(super) stream: &'a str,
+    /// The route: `subprocess` or `typed`.
+    pub(super) context: &'a str,
+    /// The retained bytes; only a short preview of them is returned.
+    pub(super) captured: &'a str,
+    /// Every byte the response held, including the bytes past the cap.
+    pub(super) total: usize,
+}
+
+/// The over-limit refusal body, shared by the CLI route and the typed route
+/// so an agent parses one shape and one `code` on both.
+pub(super) fn over_limit_result(over: OverLimit<'_>, max_output_bytes: usize) -> CallToolResult {
+    let OverLimit {
+        stream,
+        context,
+        captured,
+        total,
+    } = over;
+    let source = if context == "subprocess" {
+        "fallow subprocess"
+    } else {
+        "fallow typed"
+    };
     let body = serde_json::json!({
         "error": true,
         "ok": false,
         "exit_code": 2,
         "truncated": true,
-        "result_bytes": pipe.total,
+        "result_bytes": total,
         "result_preview": code_mode::clamp_utf8(
-            &captured,
+            captured,
             OUTPUT_PREVIEW_BYTES.min(max_output_bytes),
         ),
         "limit_bytes": max_output_bytes,
         "stream": stream,
         "code": "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT",
-        "context": "subprocess",
+        "context": context,
         "message": format!(
-            "fallow subprocess {stream} produced {} bytes, over the {max_output_bytes}-byte cap",
-            pipe.total
+            "{source} {stream} produced {total} bytes, over the {max_output_bytes}-byte cap"
         ),
         "help": "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type \
                  set). max_output_bytes only LOWERS the 16 MiB default, so raising it for this \
@@ -989,7 +1040,7 @@ mod completeness_tests {
         })
         .to_string();
 
-        let result = non_success_result(1, &output, "", false);
+        let result = cli_exit_result(1, &output, "", false);
 
         assert_eq!(result.is_error, Some(true));
     }
@@ -1007,7 +1058,7 @@ mod completeness_tests {
         })
         .to_string();
 
-        let result = non_success_result(1, &output, "", type_aware_complete_required(&args));
+        let result = cli_exit_result(1, &output, "", type_aware_complete_required(&args));
 
         assert_eq!(result.is_error, Some(true));
         assert!(!type_aware_complete_required(
@@ -1027,7 +1078,7 @@ mod completeness_tests {
         })
         .to_string();
 
-        let result = non_success_result(1, &output, "", false);
+        let result = cli_exit_result(1, &output, "", false);
 
         assert_eq!(result.is_error, Some(false));
     }
