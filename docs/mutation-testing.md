@@ -214,12 +214,15 @@ tests detect the mutant.
 with the same scope:
 
 ```bash
-fallow mutation --all --root <project>
+fallow mutation --all --no-cache --root <project>
 cp <project>/.fallow/mutation/last-report.json run-1.json
 # Repeat for run-2.json and run-3.json, then:
 node scripts/mutation-flaky-rate.mjs run-1.json run-2.json run-3.json
 ```
 
+- `--no-cache` makes each run execute each mutant. A result from the result
+  cache did not run: the script leaves it out of `compared`, and `cached`
+  gives its count for each report.
 - `compared` counts the mutants that each run executed.
 - `unstable` counts the compared mutants with a different status between runs
   or a `flaky` status in one run.
@@ -267,6 +270,9 @@ slow or busy host can need more, because the dry run executes each test file.
 
 - For the first runner process, the run stops with exit code 2 and
   `FALLOW_MUTATION_RUNNER_FAILED`, and the help names the flag.
+- The dry run of a restarted runner process gets the larger of
+  `--setup-timeout` and a limit that scales with the first dry run (see
+  Baseline failures).
 - For a restarted runner process, the mutant is `runtime_error`, and its error
   names the flag. The run continues.
 - A reload that passes the limit restarts the runner process.
@@ -285,7 +291,7 @@ mutant. Their results decide no mutant status.
   `errors[]` entry names the mutant.
 - The dry run of a restarted companion shares the host with the other
   workers. Its timeout is the first dry-run time times 2 times the worker
-  count, and at least the runner timeout (120 seconds by default). On a slow
+  count, and at least `--setup-timeout` (2 minutes by default). On a slow
   or loaded host, a fixed timeout made each mutant of a restarted companion a
   `runtime_error`. The time budget does not stop a dry run in progress, so a
   companion that hangs in its dry run can extend the run past the budget.
