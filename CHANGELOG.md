@@ -312,6 +312,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One oxc version in the build.** `oxc_coverage_instrument` moves to
+  0.14, which uses oxc 0.152 like the rest of Fallow. The parser, AST and
+  semantic crates no longer compile twice. `cargo deny` now fails when two
+  versions of the core oxc crates enter the dependency graph.
+
 - **The MCP `audit` tool has a `fallow://tools/audit` guide.** The guide
   names the five diff-risk rules and holds the styling, coverage, baseline,
   grouping, runtime-coverage and `FALLOW_DIFF_FILE` detail. The `audit` tool
