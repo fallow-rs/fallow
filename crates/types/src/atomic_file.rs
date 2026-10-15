@@ -56,8 +56,44 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     tmp.write_all(data)?;
     // Best effort: a filesystem without fsync support still gets the rename.
     let _ = tmp.as_file().sync_all();
+    persist(tmp, path)
+}
+
+/// How often a rename over `path` is tried when another writer holds it.
+#[cfg(windows)]
+const PERSIST_ATTEMPTS: u32 = 20;
+
+/// The pause between two rename attempts.
+#[cfg(windows)]
+const PERSIST_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(5);
+
+#[cfg(not(windows))]
+fn persist(tmp: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
     tmp.persist(path).map_err(|error| error.error)?;
     Ok(())
+}
+
+/// Windows refuses a rename over a file that another writer is replacing at
+/// the same moment (`ERROR_ACCESS_DENIED`). The other rename finishes within
+/// milliseconds, so a short bounded retry lets each writer move its payload
+/// into place.
+#[cfg(windows)]
+fn persist(mut tmp: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
+    let mut attempt = 1;
+    loop {
+        match tmp.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(error)
+                if error.error.kind() == std::io::ErrorKind::PermissionDenied
+                    && attempt < PERSIST_ATTEMPTS =>
+            {
+                tmp = error.file;
+                attempt += 1;
+                std::thread::sleep(PERSIST_RETRY_DELAY);
+            }
+            Err(error) => return Err(error.error),
+        }
+    }
 }
 
 #[cfg(test)]
