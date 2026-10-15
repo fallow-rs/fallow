@@ -858,6 +858,11 @@ jobs:
         run: node scripts/check-comment-quality.mjs --all
       - name: Script tests
         run: node --test scripts/*.test.mjs
+      - name: Changelog fragments
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/changelog-fragments.mjs check --base "origin/$BASE_REF"
       - name: Emitted version drift
         run: npm run check:emitted-versions
       - name: Install type-aware sidecar dependencies

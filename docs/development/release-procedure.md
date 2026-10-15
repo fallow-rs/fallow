@@ -62,11 +62,15 @@ invariants in this file.
 
 ## Prepare
 
-6. Verify the complete `[Unreleased]` changelog against the commit range,
+6. Run `node scripts/changelog-fragments.mjs collect`. It moves every
+   fragment in `changelog.d/` into `[Unreleased]` and deletes the fragment
+   files. Pull requests write fragments instead of `CHANGELOG.md`, so a merge
+   of one pull request cannot make another conflict in the changelog.
+   Verify the complete `[Unreleased]` changelog against the commit range,
    issues, discussions, and external contributors since the prior tag. Ground
    public names, flags, rule IDs, and contributor handles in source or GitHub,
-   not memory. Merge each repeated `###` heading into one heading, because a
-   clean merge of several pull requests can leave two `### Fixed` headings.
+   not memory. `collect` gives each `###` heading once; check that no
+   repeated heading is left.
 7. Draft curated public GitHub release notes before starting the publication
    workflow. They must:
 
@@ -92,8 +96,9 @@ invariants in this file.
      notes are drafted from. It requires one dated `## [X.Y.Z]` section with a
      non-empty body and no em-dash, no `###` heading more than once in that
      section, the matching compare-link definition back to the previous
-     released version, and an empty `[Unreleased]` section so nothing ships
-     uncredited. Publication cannot start without it.
+     released version, an empty `[Unreleased]` section and no fragment left
+     in `changelog.d/`, so nothing ships uncredited. Publication cannot start
+     without it.
    - `release-published.yml` runs it again on the `release: published` event,
      the first moment a title and body exist, against the title prefix, the
      non-empty body, the comparison URL, em-dashes, and third-party names.

@@ -7,6 +7,7 @@ import {
   QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
 } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
+import { FRAGMENT_DIR, changelogFragments, fragmentNames } from "./changelog-fragments.mjs";
 import { releasedSkillNames } from "./released-skills.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -184,8 +185,18 @@ test("package marketplace metadata does not name other analysis tools", () => {
 const unreleasedChangelog = (changelog) =>
   changelog.match(/^## \[Unreleased\]\n([\s\S]*?)(?=^## \[)/mu)?.[1] ?? "";
 
+/** The changelog fragments, which become `[Unreleased]` at the release. */
+const changelogFragmentText = () =>
+  fragmentNames(FRAGMENT_DIR)
+    .map((name) => readFileSync(join(FRAGMENT_DIR, name), "utf8"))
+    .join("\n");
+
 test("unreleased changelog entries do not name other analysis tools", () => {
-  const offenders = unreleasedChangelog(readFileSync("CHANGELOG.md", "utf8"))
+  const offenders = [
+    unreleasedChangelog(readFileSync("CHANGELOG.md", "utf8")),
+    changelogFragmentText(),
+  ]
+    .join("\n")
     .split("\n")
     .filter((line) => COMPARED_TOOLS.test(line));
 
@@ -194,6 +205,13 @@ test("unreleased changelog entries do not name other analysis tools", () => {
     unreleasedChangelog("## [Unreleased]\n\n- Matches knip.\n\n## [1.0.0]\n\n- Old knip note.\n"),
     "\n- Matches knip.\n\n",
     "mutation control: only the Unreleased section is checked",
+  );
+});
+
+test("changelog fragments are valid", () => {
+  assert.equal(
+    changelogFragments(["check"], process.cwd(), () => {}),
+    0,
   );
 });
 

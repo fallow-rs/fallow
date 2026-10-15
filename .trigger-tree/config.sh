@@ -17,7 +17,7 @@ TT_ALWAYS_LOADED_REGEX='(^|/)(?:CLAUDE|AGENTS|GEMINI)\.md$|(^|/)CLAUDE\.local\.m
 # TT_ALWAYS_LOADED_REGEX='...|^\.github/copilot-instructions\.md$|^\.cursor/rules/'
 
 # Markdown that is intentionally human-facing or generated per platform.
-TT_SCOPE_IGNORE='.github/*,.trigger-tree/*,CHANGELOG.md,CODE_OF_CONDUCT.md,action/README.md,apps/*/README.md,crates/*/README.md,editors/*/README.md,editors/vscode/media/*.md,npm/*/README.md,npm/fallow/skills/*,tests/*/README.md,tests/*/*/README.md,tests/*/BASELINE-REPORT.md'
+TT_SCOPE_IGNORE='.github/*,.trigger-tree/*,CHANGELOG.md,changelog.d/*,CODE_OF_CONDUCT.md,action/README.md,apps/*/README.md,crates/*/README.md,editors/*/README.md,editors/vscode/media/*.md,npm/*/README.md,npm/fallow/skills/*,tests/*/README.md,tests/*/*/README.md,tests/*/BASELINE-REPORT.md'
 
 # Comma-separated globs for rare-but-critical documentation that must be reviewed,
 # never treated as an archive candidate. Safety paths are protected regardless.

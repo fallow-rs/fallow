@@ -38,7 +38,10 @@ running.
 
 ## Serial merge of many pull requests
 
-Each merge changes `CHANGELOG.md` on `main`, so the next branch conflicts.
+A pull request adds its changelog entries as a file in `changelog.d/`, so
+merges do not conflict in the changelog. A branch from before `changelog.d/`
+still edits `CHANGELOG.md`. Move its entries to a fragment
+(`changelog.d/README.md`), because the `Changelog fragments` CI step fails it.
 Use these scripts for each pull request, one at a time:
 
 1. Rebase the branch: `node scripts/ship-rebase.mjs --pr <number> --push`.

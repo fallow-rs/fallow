@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 // Rebase one pull request branch on the base branch during a serial merge.
-// Every pull request adds CHANGELOG entries, so each merge makes the next
-// branch conflict in CHANGELOG.md. This script keeps both sides of those
-// conflicts, stops on any other conflict, and then checks that the rebase
-// kept every change, every entry and every version bump of the branch.
+// A branch from before changelog.d/ adds its entries to CHANGELOG.md, so each
+// merge makes such a branch conflict there. This script keeps both sides of
+// those conflicts, stops on any other conflict, and then checks that the
+// rebase kept every change, every entry and every version bump of the branch.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";

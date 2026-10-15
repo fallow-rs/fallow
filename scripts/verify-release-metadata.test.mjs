@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -415,7 +415,19 @@ test("the entry point reads both surfaces from disk and names what it verified",
   assert.deepEqual(verifyReleaseMetadata({ tag: "v3.21.0", root }), [
     "CHANGELOG.md section 3.21.0 (compares back to v3.20.0)",
     "an empty CHANGELOG.md [Unreleased] section",
+    "no fragments in changelog.d/",
   ]);
+
+  // A fragment that the release did not collect blocks the dispatch only.
+  mkdirSync(join(root, "changelog.d"));
+  writeFileSync(join(root, "changelog.d", "README.md"), "# Fragments\n");
+  assert.doesNotThrow(() => verifyReleaseMetadata({ tag: "v3.21.0", root }));
+  writeFileSync(join(root, "changelog.d", "late.md"), "### Fixed\n\n- **Late fix.**\n");
+  assert.throws(
+    () => verifyReleaseMetadata({ tag: "v3.21.0", root }),
+    /changelog\.d\/ still holds fragments, so they would ship uncredited/u,
+  );
+  assert.doesNotThrow(() => verifyReleaseMetadata({ tag: "v3.21.0", releaseJson, root }));
   assert.deepEqual(verifyReleaseMetadata({ tag: "v3.21.0", releaseJson, root }), [
     "CHANGELOG.md section 3.21.0 (compares back to v3.20.0)",
     "published GitHub Release title and body",

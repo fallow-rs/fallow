@@ -18,6 +18,8 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { FRAGMENT_DIR, fragmentNames } from "./changelog-fragments.mjs";
+
 const EM_DASH = "—";
 
 /**
@@ -243,6 +245,19 @@ export const assertNothingUnreleased = (changelog) => {
 };
 
 /**
+ * A fragment left in `changelog.d/` at dispatch was never collected into the
+ * release section, so its entries would ship uncredited.
+ */
+export const assertNoFragments = (root) => {
+  const names = fragmentNames(resolve(root, FRAGMENT_DIR));
+  assert.deepEqual(
+    names,
+    [],
+    `${FRAGMENT_DIR}/ still holds fragments, so they would ship uncredited: run "node scripts/changelog-fragments.mjs collect"`,
+  );
+};
+
+/**
  * The publication-time gate. `release` is a `gh release view --json` payload,
  * `compareUrl` comes from the changelog gate above.
  */
@@ -310,6 +325,8 @@ export const verifyReleaseMetadata = ({
   if (releaseJson === undefined) {
     assertNothingUnreleased(changelog);
     surfaces.push("an empty CHANGELOG.md [Unreleased] section");
+    assertNoFragments(root);
+    surfaces.push(`no fragments in ${FRAGMENT_DIR}/`);
   } else {
     assertPublishedRelease(JSON.parse(readFileSync(releaseJson, "utf8")), tag, compareUrl);
     surfaces.push("published GitHub Release title and body");
