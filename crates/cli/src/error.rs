@@ -8,7 +8,7 @@ pub fn emit_error(message: &str, exit_code: u8, output: OutputFormat) -> ExitCod
     emit_error_with_style(message, exit_code, output, requested_json_style())
 }
 
-fn requested_json_style() -> crate::json_style::JsonStyle {
+pub fn requested_json_style() -> crate::json_style::JsonStyle {
     if std::env::args_os().any(|arg| arg == "--pretty") {
         crate::json_style::JsonStyle::Pretty
     } else {

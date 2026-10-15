@@ -461,9 +461,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Styling details appear in summaries and annotations; missing historical
   attribution remains unknown.
 - **Saved reports retain failure and rule identity.** Failed-run envelopes
-  are rejected with their original message, code and help. Legacy SARIF and
-  CodeClimate keep canonical rule IDs, and CodeClimate distinguishes styling
-  values and subkinds on the same line without changing other fingerprints.
+  are rejected with their original message, code, help and failure exit
+  code. Legacy SARIF and CodeClimate keep canonical rule IDs, and CodeClimate
+  distinguishes styling values and subkinds on the same line without
+  changing other fingerprints. A styling finding rendered from a saved or
+  legacy report gets a new SARIF rule ID and CodeClimate fingerprint one
+  time, so code scanning and the merge request widget show it as new once.
 - **Named exports returned through higher-order import loaders stay in use.**
   Unknown wrappers preserve the imported module's exports instead of assuming
   that only `default` is read. Default-only credit requires a proven component

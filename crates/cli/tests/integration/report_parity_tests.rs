@@ -21,6 +21,46 @@ fn consumer_contract_saved_error_cannot_render_a_successful_kind() {
 }
 
 #[test]
+fn consumer_contract_saved_error_keeps_its_failure_exit_code() {
+    let root = workspace_fixture("tests/fixtures/basic-project");
+    let store = tempfile::tempdir().expect("saved error directory");
+    let path = store.path().join("saved.json");
+    // Exit codes 0 and 1 mean success, so a saved failure never maps to them.
+    for (saved_exit, expected_exit) in [(3, 3), (1, 2), (0, 2), (300, 2)] {
+        let error = serde_json::json!({
+            "error": true,
+            "message": "coverage file cannot be read",
+            "exit_code": saved_exit,
+            "code": "FALLOW_INVALID_COVERAGE_PATH",
+            "help": "check the coverage path before retrying"
+        });
+        std::fs::write(&path, error.to_string()).expect("save failure");
+        let rendered = run(
+            &root,
+            &[
+                "report".to_owned(),
+                "--from".to_owned(),
+                path.display().to_string(),
+                "--quiet".to_owned(),
+                "--format".to_owned(),
+                "github-summary".to_owned(),
+            ],
+        );
+        let stderr = String::from_utf8_lossy(&rendered.stderr);
+        assert_eq!(rendered.status.code(), Some(expected_exit), "{stderr}");
+        assert!(stderr.contains("FALLOW_INVALID_COVERAGE_PATH"), "{stderr}");
+        assert!(
+            stderr.contains("hint: check the coverage path before retrying"),
+            "{stderr}"
+        );
+        assert!(
+            rendered.stdout.is_empty(),
+            "failed runs must not render success"
+        );
+    }
+}
+
+#[test]
 fn consumer_contract_saved_legacy_audit_preserves_styling_rule_identity() {
     let root = workspace_fixture("tests/fixtures/basic-project");
     let store = tempfile::tempdir().expect("legacy audit directory");
