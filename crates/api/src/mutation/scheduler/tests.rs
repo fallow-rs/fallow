@@ -1242,6 +1242,66 @@ fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
     );
 }
 
+/// A survivor that runs without a dropped covering test survives. The run
+/// requests only the tests that passed in the dry run of the restarted
+/// companion, so the count check uses that list, not the first dry run.
+#[test]
+fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
+    let dry = |index: usize| DryRunResult {
+        tests: vec![
+            test("t1", 2.0, TestStatus::Pass),
+            test(
+                "t2",
+                3.0,
+                if index == 0 {
+                    TestStatus::Pass
+                } else {
+                    TestStatus::Fail
+                },
+            ),
+        ],
+        hits: BTreeMap::from([
+            (tid("t1"), vec!["m1".to_owned(), "m2".to_owned()]),
+            (tid("t2"), vec!["m2".to_owned()]),
+        ]),
+        static_hits: Vec::new(),
+        file_hits: None,
+        unhandled_errors: Vec::new(),
+        unloaded_paths: Vec::new(),
+        file_setup_ms: BTreeMap::new(),
+    };
+    let spawner = FakeSpawner::new(script(dry, |_, run| match run.mutant_id.as_str() {
+        "m1" => Err(LinkFault::Timeout),
+        _ => Ok(run_result(run, RunStatus::Survived, None)),
+    }));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config(1)).expect("run");
+
+    let m2_runs: Vec<Vec<String>> = spawner
+        .runs()
+        .into_iter()
+        .filter(|(_, run)| run.mutant_id == "m2")
+        .map(|(_, run)| run.test_ids)
+        .collect();
+    assert!(
+        m2_runs.iter().all(|tests| tests == &vec![tid("t1")]),
+        "m2 runs without t2: {m2_runs:?}"
+    );
+    assert_eq!(
+        status(&outcome, "m2"),
+        MutantStatus::Survived,
+        "{:?}",
+        outcome.issues
+    );
+    assert!(
+        outcome
+            .issues
+            .iter()
+            .all(|issue| issue.mutant_id.as_deref() != Some("m2")),
+        "{:?}",
+        outcome.issues
+    );
+}
+
 #[test]
 fn a_setup_watchdog_fault_is_marked_as_a_timeout() {
     let timed_out = setup_error("dry_run", &LinkFault::Timeout);
