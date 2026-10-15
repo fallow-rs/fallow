@@ -133,7 +133,7 @@ impl ExportNamespaces {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-struct ExportNameId(usize);
+pub(in crate::graph) struct ExportNameId(usize);
 
 impl ExportNameId {
     const DEFAULT: Self = Self(0);
@@ -508,6 +508,23 @@ impl EffectiveExportIndex {
             .map_or(EffectiveExportResolution::Missing, |resolutions| {
                 resolutions.effective(namespace)
             })
+    }
+
+    /// The interned id of `name`, or `None` when no module resolves it.
+    pub(in crate::graph) fn name_id(&self, name: &str) -> Option<ExportNameId> {
+        self.name_ids.get(name).copied()
+    }
+
+    /// The names that resolve on `file_id` in any namespace.
+    pub(in crate::graph) fn names_on(&self, file_id: FileId) -> &[ExportNameId] {
+        self.names_by_file.get(&file_id).map_or(&[], AsRef::as_ref)
+    }
+
+    /// Whether `name` resolves on `file_id` in any namespace. A `false` means
+    /// that [`Self::resolve`] returns `Missing` for both namespaces.
+    pub(in crate::graph) fn has_name(&self, file_id: FileId, name: ExportNameId) -> bool {
+        self.resolutions
+            .contains_key(&ExportKey::new(file_id, name))
     }
 
     pub(super) fn resolves_through(

@@ -13,7 +13,7 @@ use fallow_types::extract::{ExportName, ModuleLoadMechanism, VisibilityTag};
 
 use crate::graph::effective_exports::{
     DeclarationSlotQuery, EffectiveExportBinding, EffectiveExportIndex, EffectiveExportResolution,
-    ExportNamespace,
+    ExportNameId, ExportNamespace,
 };
 use crate::graph::effective_re_exports::InternedEffectiveDeclarationRoute;
 use crate::graph::types::{
@@ -26,6 +26,16 @@ use crate::resolve::ResolvedModule;
 #[cfg(test)]
 thread_local! {
     static STAR_REFERENCE_SET_REBUILDS: Cell<usize> = const { Cell::new(0) };
+    static STAR_NAME_CHECKS: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Count the names that star propagation checks against a star source.
+#[cfg(test)]
+pub(super) fn count_star_name_checks<T>(run: impl FnOnce() -> T) -> (T, usize) {
+    STAR_NAME_CHECKS.set(0);
+    let result = run();
+    let checks = STAR_NAME_CHECKS.get();
+    (result, checks)
 }
 
 #[cfg(test)]
@@ -57,6 +67,74 @@ pub(in crate::graph) struct StarReExportPropagation<'a> {
     pub(in crate::graph) triggering_is_type_only: bool,
     pub(in crate::graph) synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
     pub(in crate::graph) reference_paths: &'a mut ReferencePathInterner,
+    pub(in crate::graph) named_star_refs: &'a mut NamedStarRefCache,
+}
+
+/// Named imports into one star barrel, grouped by name in first-seen order.
+///
+/// The import edges, the binding usage and the effective exports do not change
+/// during propagation, and interning a direct reference path gives the same id
+/// each time, so each barrel builds this once. Before, every `(barrel, source)`
+/// tuple rebuilt it and then checked every name against its source, which cost
+/// imports times star sources on a barrel-heavy monorepo.
+#[derive(Default)]
+pub(in crate::graph) struct BarrelNamedStarRefs {
+    groups: Vec<(String, Vec<RoutedReference>)>,
+    ids: Vec<Option<ExportNameId>>,
+    by_name: FxHashMap<String, usize>,
+    by_id: FxHashMap<ExportNameId, usize>,
+}
+
+pub(in crate::graph) type NamedStarRefCache = FxHashMap<FileId, BarrelNamedStarRefs>;
+
+impl BarrelNamedStarRefs {
+    fn build(
+        named_refs: Vec<(String, RoutedReference)>,
+        effective_exports: &EffectiveExportIndex,
+    ) -> Self {
+        let mut refs = Self::default();
+        for (name, reference) in named_refs {
+            if let Some(&group) = refs.by_name.get(&name) {
+                refs.groups[group].1.push(reference);
+                continue;
+            }
+            let group = refs.groups.len();
+            let id = effective_exports.name_id(&name);
+            if let Some(id) = id {
+                refs.by_id.insert(id, group);
+            }
+            refs.by_name.insert(name.clone(), group);
+            refs.ids.push(id);
+            refs.groups.push((name, vec![reference]));
+        }
+        refs
+    }
+
+    /// Groups whose name resolves on `source_id`, in first-seen order. A name
+    /// that does not resolve on the source cannot pass `resolves_through`, so
+    /// the walk covers the smaller of the two name sets.
+    fn groups_on_source(
+        &self,
+        effective_exports: &EffectiveExportIndex,
+        source_id: FileId,
+    ) -> Vec<usize> {
+        let source_names = effective_exports.names_on(source_id);
+        let mut groups: Vec<usize> = if source_names.len() < self.groups.len() {
+            source_names
+                .iter()
+                .filter_map(|id| self.by_id.get(id).copied())
+                .collect()
+        } else {
+            self.ids
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| id.is_some_and(|id| effective_exports.has_name(source_id, id)))
+                .map(|(group, _)| group)
+                .collect()
+        };
+        groups.sort_unstable();
+        groups
+    }
 }
 
 pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<'_>) -> bool {
@@ -74,6 +152,7 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         triggering_is_type_only,
         synthetic_stubs,
         reference_paths,
+        named_star_refs,
     } = input;
 
     if modules[barrel_idx].is_entry_point()
@@ -91,16 +170,25 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     }
 
     let barrel_file_id = modules[barrel_idx].file_id;
-    let refs_by_name = collect_star_refs_by_name(StarReferenceCollection {
-        modules,
-        edges,
-        edges_by_target,
-        binding_usage,
-        effective_exports,
-        barrel_file_id,
-        barrel_idx,
-        reference_paths,
+    let named = named_star_refs.entry(barrel_file_id).or_insert_with(|| {
+        BarrelNamedStarRefs::build(
+            named_star_refs_for_barrel(
+                edges,
+                edges_by_target,
+                binding_usage,
+                effective_exports,
+                barrel_file_id,
+                reference_paths,
+            ),
+            effective_exports,
+        )
     });
+    let refs_by_name = star_refs_for_source(
+        named,
+        barrel_star_refs(&modules[barrel_idx]),
+        effective_exports,
+        source_id,
+    );
 
     let source_has_star_re_exports = modules[source_idx]
         .re_exports
@@ -113,6 +201,8 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     let mut existing_references: FxHashSet<RoutedReferenceKey> = FxHashSet::default();
     let source = &mut modules[source_idx];
     for (name, refs) in &refs_by_name {
+        #[cfg(test)]
+        STAR_NAME_CHECKS.set(STAR_NAME_CHECKS.get() + 1);
         let type_resolves = effective_exports.resolves_through(
             barrel_id,
             name,
@@ -167,7 +257,7 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
 /// Unlike `ExportNameIndex` (issue #2374), this map keeps a `"default"` key
 /// rather than folding it into a default slot. Star propagation never forwards
 /// `default`, and the `name == "default"` early returns in
-/// `collect_star_refs_by_name` and `apply_star_refs_to_source` mean the entry
+/// `named_refs_for_edge` and `apply_star_refs_to_source` mean the entry
 /// is never read, so the two indexes cannot disagree in practice.
 fn build_named_export_index(source: &ModuleNode) -> FxHashMap<String, Vec<usize>> {
     let mut index: FxHashMap<String, Vec<usize>> =
@@ -180,54 +270,45 @@ fn build_named_export_index(source: &ModuleNode) -> FxHashMap<String, Vec<usize>
     index
 }
 
-/// Collect the per-name references that must propagate through a star
-/// re-export: named imports made directly from the barrel plus any references
-/// already attached to the barrel's own exports.
-struct StarReferenceCollection<'a> {
-    modules: &'a [ModuleNode],
-    edges: &'a [Edge],
-    edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
-    binding_usage: &'a ImportBindingUsageIndex,
-    effective_exports: &'a EffectiveExportIndex,
-    barrel_file_id: FileId,
-    barrel_idx: usize,
-    reference_paths: &'a mut ReferencePathInterner,
-}
-
-fn collect_star_refs_by_name(
-    input: StarReferenceCollection<'_>,
-) -> FxHashMap<String, Vec<RoutedReference>> {
-    let StarReferenceCollection {
-        modules,
-        edges,
-        edges_by_target,
-        binding_usage,
-        effective_exports,
-        barrel_file_id,
-        barrel_idx,
-        reference_paths,
-    } = input;
-    let named_refs = named_star_refs(
-        edges,
-        edges_by_target,
-        binding_usage,
-        effective_exports,
-        barrel_file_id,
-        reference_paths,
-    );
-    let barrel_refs = barrel_star_refs(&modules[barrel_idx]);
-
-    let mut refs_by_name: FxHashMap<String, Vec<RoutedReference>> = FxHashMap::default();
-    for (name, ref_item) in named_refs {
-        refs_by_name.entry(name).or_default().push(ref_item);
-    }
+/// The per-name references that must propagate from a star barrel to one
+/// source: named imports made directly from the barrel plus any references
+/// already attached to the barrel's own exports. Names that do not resolve on
+/// the source are left out, because no reference can pass through for them.
+fn star_refs_for_source(
+    named: &BarrelNamedStarRefs,
+    barrel_refs: Vec<(String, Vec<RoutedReference>)>,
+    effective_exports: &EffectiveExportIndex,
+    source_id: FileId,
+) -> Vec<(String, Vec<RoutedReference>)> {
+    let selected = named.groups_on_source(effective_exports, source_id);
+    let mut refs_by_name: Vec<(String, Vec<RoutedReference>)> = selected
+        .iter()
+        .map(|&group| named.groups[group].clone())
+        .collect();
+    let mut barrel_only: FxHashMap<String, usize> = FxHashMap::default();
     for (name, refs) in barrel_refs {
-        refs_by_name.entry(name).or_default().extend(refs);
+        if let Some(&group) = named.by_name.get(&name) {
+            if let Ok(position) = selected.binary_search(&group) {
+                refs_by_name[position].1.extend(refs);
+            }
+            continue;
+        }
+        if let Some(&position) = barrel_only.get(&name) {
+            refs_by_name[position].1.extend(refs);
+            continue;
+        }
+        let resolves_on_source = effective_exports
+            .name_id(&name)
+            .is_some_and(|id| effective_exports.has_name(source_id, id));
+        if resolves_on_source {
+            barrel_only.insert(name.clone(), refs_by_name.len());
+            refs_by_name.push((name, refs));
+        }
     }
     refs_by_name
 }
 
-fn named_star_refs(
+fn named_star_refs_for_barrel(
     edges: &[Edge],
     edges_by_target: &FxHashMap<FileId, Vec<usize>>,
     binding_usage: &ImportBindingUsageIndex,
