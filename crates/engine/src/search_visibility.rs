@@ -52,8 +52,16 @@ impl<'g> SourceCache<'g> {
     }
 
     /// Whether `file_id` only exports its import binding `local` again and
-    /// has no other use of it. The file is parsed once.
+    /// has no other use of it. The file is parsed once, and only when its text
+    /// can list `local` in an `export { .. }`.
     fn only_forwards(&mut self, file_id: FileId, local: &str) -> bool {
+        if !self.forwarded.contains_key(&file_id)
+            && !self
+                .get(file_id)
+                .is_some_and(|source| may_export_binding(&source.text, local))
+        {
+            return false;
+        }
         if !self.forwarded.contains_key(&file_id) {
             let path = self
                 .graph
@@ -355,6 +363,48 @@ enum Binding<'g> {
 /// a binding in its template, so it has no such bindings. A file that does not
 /// parse has none.
 #[must_use]
+/// Whether `source` can list `local` in an `export { .. }` statement.
+///
+/// [`forwarded_import_bindings`] marks a binding as exported only for a
+/// specifier of an `export { .. }` list. A `false` here proves that no such
+/// list names `local`, so the parse cannot return it. The scan answers `true`
+/// for any text that it cannot read with certainty: an escaped identifier, a
+/// comment after `export`, or a comment or string inside the braces.
+fn may_export_binding(source: &str, local: &str) -> bool {
+    if source.contains("\\u") {
+        return true;
+    }
+    let bytes = source.as_bytes();
+    for (start, keyword) in source.match_indices("export") {
+        let end = start + keyword.len();
+        if start
+            .checked_sub(1)
+            .is_some_and(|index| is_word_byte(bytes[index]))
+            || bytes.get(end).copied().is_some_and(is_word_byte)
+        {
+            continue;
+        }
+        let mut rest = source[end..].trim_start();
+        if let Some(after_type) = strip_keyword(rest, "type") {
+            rest = after_type.trim_start();
+        }
+        if rest.starts_with('/') {
+            return true;
+        }
+        let Some(list) = rest.strip_prefix('{') else {
+            continue;
+        };
+        let Some(close) = list.find('}') else {
+            return true;
+        };
+        let list = &list[..close];
+        if list.contains(['/', '"', '\'', '`']) || contains_whole_word(list, local) {
+            return true;
+        }
+    }
+    false
+}
+
 fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
     use oxc_ast::ast::{ImportDeclarationSpecifier, Statement};
     use oxc_ast_visit::Visit;
@@ -815,6 +865,35 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn export_scan_admits_every_list_that_can_name_the_binding() {
+        for source in [
+            "import { a } from './x';\nexport { a };\n",
+            "import { a } from './x';\nexport {\n  b,\n  a as c,\n};\n",
+            "import type { a } from './x';\nexport type { a };\n",
+            "import { a } from './x';\nexport /* note */ { a };\n",
+            "import { a } from './x';\nexport { /* } */ a };\n",
+            "import { a } from './x';\nexport { b as \"}\", a };\n",
+            "import { \\u0061 } from './x';\nexport { \\u0061 };\n",
+            "import { a } from './x';\nexport { a",
+        ] {
+            assert!(may_export_binding(source, "a"), "{source}");
+        }
+    }
+
+    #[test]
+    fn export_scan_rejects_text_without_a_list_naming_the_binding() {
+        for source in [
+            "import { a } from './x';\nexport const b = a;\n",
+            "import { a } from './x';\nexport { b };\nconsole.log(a);\n",
+            "import { a } from './x';\nexports.a = a;\nreexport { a };\n",
+            "import { a } from './x';\nexport default a;\n",
+            "import { ab } from './x';\nexport { ab };\n",
+        ] {
+            assert!(!may_export_binding(source, "a"), "{source}");
+        }
     }
 
     #[test]
