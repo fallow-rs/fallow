@@ -372,12 +372,12 @@ pub(super) fn resolve_api_key(
 
 pub(super) fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudError> {
     if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
-        return Ok(value.to_owned());
+        return checked_repo(value, "--repo");
     }
     if let Ok(value) = std::env::var("FALLOW_REPO") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
+            return checked_repo(trimmed, "FALLOW_REPO");
         }
     }
     if let Some(from_remote) = git_origin_project_id(root) {
@@ -386,6 +386,18 @@ pub(super) fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String
     Err(CloudError::Validation(
         "Could not infer repository for cloud runtime coverage.\n\nPass it explicitly:\n\n  fallow coverage analyze --cloud --repo owner/repo\n\nor set:\n\n  FALLOW_REPO=owner/repo".to_owned(),
     ))
+}
+
+/// Refuse a repository that is only dots. The value becomes one URL path
+/// segment, and `.` and `..` are not percent-encoded, so they would address
+/// a different route. The same rule guards commit SHAs.
+fn checked_repo(repo: &str, source: &str) -> Result<String, CloudError> {
+    if repo.chars().all(|c| c == '.') {
+        return Err(CloudError::Validation(format!(
+            "{source} must name a repository such as owner/repo (not only dots), got {repo}"
+        )));
+    }
+    Ok(repo.to_owned())
 }
 
 fn git_origin_project_id(root: &Path) -> Option<String> {
@@ -2123,6 +2135,24 @@ mod tests {
             resolve_repo(Some("  fallow-rs/fallow  "), dir.path())
                 .expect("explicit repo should resolve"),
             "fallow-rs/fallow"
+        );
+    }
+
+    #[test]
+    fn resolve_repo_rejects_dot_only_values() {
+        let dir = tempfile::TempDir::new().expect("temp dir should be created");
+
+        for repo in [".", "..", " ... "] {
+            let error = resolve_repo(Some(repo), dir.path())
+                .expect_err("a dot-only repo must not reach the URL path");
+            assert!(
+                matches!(&error, CloudError::Validation(message) if message.contains("not only dots")),
+                "{repo:?}: {error:?}"
+            );
+        }
+        assert_eq!(
+            resolve_repo(Some("acme/.github"), dir.path()).expect("dots inside a name stay valid"),
+            "acme/.github"
         );
     }
 

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use fallow_engine::mutation::{
     DiffIndex, MutantDisposition, MutationPlan, MutationPlanRequest, MutationScope,
-    plan_mutations_for_session,
+    plan_mutations_for_session_with,
 };
 use fallow_engine::session::AnalysisSession;
 use fallow_output::{
@@ -203,8 +203,8 @@ fn config_operators(
 struct Planned {
     resolved: ProgrammaticAnalysisContext,
     cache_dir: PathBuf,
-    /// The `mutation.runner` config value.
-    runner: fallow_config::MutationRunner,
+    /// The test runner, selected from the config value and the first plan.
+    runner: Runner,
     plan: MutationPlan,
     base_ref: Option<String>,
 }
@@ -217,7 +217,7 @@ fn plan_for(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     let session = load_session(&resolved)?;
     let cache_dir = session.config().cache_dir.clone();
-    let runner = session.config().mutation.runner;
+    let configured = session.config().mutation.runner;
     before_plan(resolved.root(), &cache_dir)?;
     let (scope, base_ref) = engine_scope(options, &resolved)?;
     let operators = match &options.operators {
@@ -229,10 +229,22 @@ fn plan_for(
         operators,
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
+        skip_component_files: false,
     };
+    // The runner decision reads the test files of the first plan. A second
+    // plan without the component files keeps that decision.
+    let mut selected = None;
     let plan = resolved
-        .install(|| plan_mutations_for_session(&session, &request))
+        .install(|| {
+            plan_mutations_for_session_with(&session, &request, |plan| {
+                let runner = select_runner(configured, resolved.root(), &plan.test_files);
+                selected = Some(runner);
+                !runner.loads_component_files()
+            })
+        })
         .map_err(|error| mutation_error("FALLOW_MUTATION_PLAN_FAILED", error.to_string()))?;
+    let runner =
+        selected.unwrap_or_else(|| select_runner(configured, resolved.root(), &plan.test_files));
     Ok(Planned {
         resolved,
         cache_dir,
@@ -457,12 +469,14 @@ fn open_result_cache(
     no_cache: bool,
     mutation_cache: &Path,
     root: &Path,
+    runner: &str,
     plan: &MutationPlan,
 ) -> Option<Arc<ResultCache>> {
     (!no_cache).then(|| {
         Arc::new(ResultCache::open(
             mutation_cache,
             root,
+            runner,
             KeyFiles::from_plan(plan),
         ))
     })
@@ -510,7 +524,7 @@ fn execute(
     let setup_started = Instant::now();
     let manifest = manifest()
         .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?;
-    let runner = select_runner(planned.runner, planned.resolved.root(), &plan.test_files);
+    let runner = planned.runner;
     let name = runner.name();
     let range = manifest.runner(name).ok_or_else(|| {
         mutation_error(
@@ -535,8 +549,9 @@ fn execute(
         })
         .collect();
     let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
-    let root = planned.resolved.root().to_path_buf();
-    let result_cache = open_result_cache(planned.resolved.no_cache, &mutation_cache, &root, plan);
+    let resolved = &planned.resolved;
+    let root = resolved.root().to_path_buf();
+    let result_cache = open_result_cache(resolved.no_cache, &mutation_cache, &root, name, plan);
     let config = ScheduleConfig {
         init: InitRequest {
             root: root.to_string_lossy().into_owned(),
@@ -837,8 +852,8 @@ mod tests {
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
         };
-        assert!(open_result_cache(true, dir.path(), dir.path(), &plan).is_none());
-        assert!(open_result_cache(false, dir.path(), dir.path(), &plan).is_some());
+        assert!(open_result_cache(true, dir.path(), dir.path(), "vitest", &plan).is_none());
+        assert!(open_result_cache(false, dir.path(), dir.path(), "vitest", &plan).is_some());
     }
 
     #[test]

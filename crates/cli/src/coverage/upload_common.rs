@@ -177,13 +177,16 @@ pub(super) fn resolve_project_id(
 /// The server accepts any non-empty string without path-traversal, whether
 /// bare (`fallow-cloud-api`) or slash-scoped (`acme/widgets`). Keep validation
 /// minimal: reject only what the server or filesystem would reject (empty,
-/// `..`).
+/// `..`, and a lone `.`, which URL normalization collapses to another route).
 pub(super) fn validate_project_id(id: &str) -> Result<&str, String> {
     if id.is_empty() {
         return Err("project id is empty".to_owned());
     }
     if id.contains("..") {
         return Err("project id must not contain '..' path segments".to_owned());
+    }
+    if id == "." {
+        return Err("project id must not be '.', which addresses a different URL route".to_owned());
     }
     Ok(id)
 }
@@ -638,6 +641,8 @@ mod tests {
         assert!(validate_project_id("../etc/passwd").is_err());
         assert!(validate_project_id("acme/../secret").is_err());
         assert!(validate_project_id("").is_err());
+        assert!(validate_project_id(".").is_err());
+        assert!(validate_project_id("acme/.github").is_ok());
     }
 
     #[test]

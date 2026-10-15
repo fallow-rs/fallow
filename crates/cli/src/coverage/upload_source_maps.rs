@@ -268,6 +268,11 @@ fn validate_repo_name(repo: &str) -> Result<&str, UploadSourceMapsError> {
             "repo name must not contain '..' or backslashes".to_owned(),
         ));
     }
+    if repo == "." {
+        return Err(UploadSourceMapsError::Validation(
+            "repo name must not be '.'; pass --repo owner/repo".to_owned(),
+        ));
+    }
     Ok(repo)
 }
 
@@ -1657,6 +1662,7 @@ mod tests {
         assert!(validate_repo_name("").is_err());
         assert!(validate_repo_name("acme/../widgets").is_err());
         assert!(validate_repo_name("acme\\widgets").is_err());
+        assert!(validate_repo_name(".").is_err());
     }
 
     #[test]

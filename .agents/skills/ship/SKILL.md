@@ -82,10 +82,12 @@ Use these scripts for each pull request, one at a time:
      example `CHECK_SCHEMA_VERSION`.
 2. Wait for CI. Set `--min-checks` to the check count of a recent complete
    run. Without this guard, a read right after the push can show no
-   pending check.
+   pending check. Set `--head` to the pushed tip, which the rebase script
+   prints. Right after a push, GitHub can still report the checks of the
+   old head.
 
    ```bash
-   node scripts/ship-wait-checks.mjs --pr <number> --min-checks <count>
+   node scripts/ship-wait-checks.mjs --pr <number> --head <full sha> --min-checks <count>
    ```
 
    GitHub starts no `pull_request` workflow for a pull request that

@@ -10,13 +10,20 @@ const EXECUTED = new Set(["killed", "timeout", "survived", "flaky", "runtime_err
 const DETECTED = new Set(["killed", "timeout"]);
 const MIN_RUNS = 2;
 
-/** The status of each executed mutant of one report. */
+/**
+ * The status of each mutant that ran in one report. A result from the result
+ * cache did not run, so it says nothing about the stability of this run.
+ */
 const executedStatuses = (report) =>
   new Map(
     (report.mutants ?? [])
-      .filter((mutant) => EXECUTED.has(mutant.status))
+      .filter((mutant) => EXECUTED.has(mutant.status) && mutant.cached !== true)
       .map((mutant) => [mutant.mutant_id, mutant.status]),
   );
+
+/** The count of results from the result cache in one report. */
+const cachedCount = (report) =>
+  (report.mutants ?? []).filter((mutant) => mutant.cached === true).length;
 
 /** The ids that each run executed, sorted. */
 const comparedIds = (runs) => {
@@ -78,6 +85,7 @@ export const compareRuns = (reports) => {
   return {
     runs: reports.length,
     counts: reports.map((report) => report.summary?.counts ?? null),
+    cached: reports.map(cachedCount),
     compared: compared.length,
     unstable: unstable.length,
     unstable_rate: rate(unstable.length),

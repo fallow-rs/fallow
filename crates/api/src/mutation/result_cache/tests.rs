@@ -36,7 +36,7 @@ fn key_files() -> KeyFiles {
 }
 
 fn open(root: &Path) -> ResultCache {
-    ResultCache::open(&root.join(".fallow/mutation"), root, key_files())
+    ResultCache::open(&root.join(".fallow/mutation"), root, "vitest", key_files())
 }
 
 fn ready(runner: &str, runtime: &str) -> Ready {
@@ -120,6 +120,28 @@ fn a_lockfile_in_a_parent_directory_is_a_key_part() {
     let before = key(&root);
     edit(dir.path(), "pnpm-lock.yaml");
     assert_ne!(before, key(&root), "the workspace lockfile above the root");
+}
+
+#[test]
+fn the_runner_name_changes_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let tests = ["test/a.test.ts::adds".to_owned()];
+    let files = ["test/a.test.ts".to_owned()];
+    let key = |runner: &str| {
+        ResultCache::open(
+            &dir.path().join(".fallow/mutation"),
+            dir.path(),
+            runner,
+            key_files(),
+        )
+        .key(&ready("24.0.0", "24.0.0"), &mutant("m1"), &tests, &files)
+    };
+    assert_ne!(
+        key("vitest"),
+        key("node-test"),
+        "a result of one runner never answers a run of another runner"
+    );
 }
 
 #[test]

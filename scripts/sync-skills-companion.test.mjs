@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,12 +144,12 @@ const makeFixture = (versions = [OLD_VERSION, OLD_VERSION, OLD_VERSION, OLD_VERS
 };
 
 /** Run the script in process with the fixture paths and collect its output. */
-const sync = (fixture, argv = [], { skipChecks = true } = {}) => {
+const sync = (fixture, argv = [], { skipChecks = true, env = {} } = {}) => {
   const lines = [];
   const code = run({
     argv,
     repoRoot: fixture.fallow,
-    env: { ...GIT_ENV, FALLOW_SKILLS_DIR: fixture.skills },
+    env: { ...GIT_ENV, FALLOW_SKILLS_DIR: fixture.skills, ...env },
     skipChecks,
     log: (line) => lines.push(line),
     error: (line) => lines.push(line),
@@ -285,7 +293,9 @@ test(
     assert.match(git(skills, "cat-file", "commit", "HEAD"), /^gpgsig /mu);
     assert.equal(git(skills, "status", "--porcelain"), "");
     assert.equal(git(skills, "rev-parse", "origin/main"), before);
-    assert.match(output, /push origin main/u);
+    assert.doesNotMatch(output, /push origin main/u, "the companion main branch is protected");
+    assert.match(output, /push origin HEAD:refs\/heads\/docs\/sync-fallow-/u);
+    assert.match(output, /gh pr create/u);
     assert.match(output, /Public skills contract/u);
   }),
 );
@@ -317,6 +327,27 @@ test(
     },
     [OLD_VERSION, OLD_VERSION, OLD_VERSION, "1.2.0"],
   ),
+);
+
+test(
+  "a missing companion check prerequisite refuses before any write, also in a dry run",
+  withFixture((fixture) => {
+    changeSkill(fixture, "two\n", "fix: update the reference (#42)");
+    const bin = join(fixture.root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "python3"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(bin, "python3"), 0o755);
+    const before = companionState(fixture.skills);
+    for (const argv of [["--dry-run"], []]) {
+      const { code, output } = sync(fixture, argv, {
+        skipChecks: false,
+        env: { PATH: `${bin}:${GIT_ENV.PATH}` },
+      });
+      assert.equal(code, 1, output);
+      assert.match(output, /PyYAML/u);
+      assert.deepEqual(companionState(fixture.skills), before);
+    }
+  }),
 );
 
 test(

@@ -62,3 +62,11 @@ test("only the mutants that each run executed are compared", () => {
 test("fewer than two reports is an error", () => {
   assert.throws(() => compareRuns([report({ a: "killed" })]), /at least 2 reports/u);
 });
+
+test("a result from the result cache did not run and is not compared", () => {
+  const cachedRun = report({ a: "killed", b: "survived" });
+  cachedRun.mutants[1].cached = true;
+  const result = compareRuns([report({ a: "killed", b: "survived" }), cachedRun]);
+  assert.equal(result.compared, 1, "only `a` ran in both runs");
+  assert.deepEqual(result.cached, [0, 1]);
+});

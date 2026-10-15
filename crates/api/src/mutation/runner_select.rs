@@ -37,6 +37,15 @@ impl Runner {
         }
     }
 
+    /// True when the runner loads a Vue, Svelte or Astro component file.
+    /// Vitest loads it through the framework plugin of the project config.
+    /// The `node:test` and `bun test` adapters serve the instrumented file
+    /// through a module hook, and neither runtime has a loader for a
+    /// component file.
+    pub const fn loads_component_files(self) -> bool {
+        matches!(self, Self::Vitest)
+    }
+
     /// The step that installs the runtime of this runner.
     pub const fn runtime_help(self) -> &'static str {
         match self {
