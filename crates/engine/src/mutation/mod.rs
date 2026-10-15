@@ -93,6 +93,10 @@ pub struct MutationPlanRequest {
     /// The maximum number of planned mutants. The mutants after this limit,
     /// in rank order, become `pending`.
     pub max_mutants: Option<usize>,
+    /// Leave each Vue, Svelte and Astro component file out of the plan,
+    /// with the skip reason [`SkipReason::RunnerCannotLoad`]. Set it when
+    /// the test runner has no loader for a component file.
+    pub skip_component_files: bool,
 }
 
 impl MutationPlanRequest {
@@ -104,6 +108,7 @@ impl MutationPlanRequest {
             operators: None,
             allow_side_effects: false,
             max_mutants: None,
+            skip_component_files: false,
         }
     }
 }
@@ -279,6 +284,9 @@ pub enum SkipReason {
     /// The module graph has the file, but the analysis kept no module facts
     /// for it, for example because extraction could not read it.
     NotAnalyzed,
+    /// The test runner cannot load the file: a component file under a runner
+    /// with no component loader.
+    RunnerCannotLoad,
 }
 
 /// A selected file that the plan did not instrument.
@@ -436,6 +444,24 @@ pub fn plan_mutations_for_session(
     session: &AnalysisSession,
     request: &MutationPlanRequest,
 ) -> Result<MutationPlan, MutationPlanError> {
+    plan_mutations_for_session_with(session, request, |_| false)
+}
+
+/// Like [`plan_mutations_for_session`], but `skip_components` reads the
+/// first plan and decides if the component files leave the plan. The test
+/// runner can depend on the test files of the plan, so the caller decides
+/// after the first plan. When the first plan has a component mutant and
+/// `skip_components` returns true, the plan is built again from the same
+/// analysis with [`MutationPlanRequest::skip_component_files`] set.
+///
+/// # Errors
+///
+/// Returns an error when the analysis or the plugin stage fails.
+pub fn plan_mutations_for_session_with(
+    session: &AnalysisSession,
+    request: &MutationPlanRequest,
+    skip_components: impl FnOnce(&MutationPlan) -> bool,
+) -> Result<MutationPlan, MutationPlanError> {
     let artifacts = session.analyze_dead_code_with_artifacts(true, true)?;
     let graph = artifacts
         .graph
@@ -449,17 +475,27 @@ pub fn plan_mutations_for_session(
         .map_err(|error| MutationPlanError::Plugins(error.message().to_owned()))?;
     let framework_config_exports = framework_config_exports(session, graph, &inventory);
     let setup_files = inventory.plugins.backend().setup_files();
-    Ok(plan_mutations(
-        &MutationPlanInputs {
-            root: session.root(),
-            graph,
-            modules,
-            results: &artifacts.results,
-            framework_config_exports: Some(&framework_config_exports),
-            setup_files: &setup_files,
-        },
-        request,
-    ))
+    let inputs = MutationPlanInputs {
+        root: session.root(),
+        graph,
+        modules,
+        results: &artifacts.results,
+        framework_config_exports: Some(&framework_config_exports),
+        setup_files: &setup_files,
+    };
+    let plan = plan_mutations(&inputs, request);
+    let has_component = plan
+        .mutants
+        .iter()
+        .any(|mutant| is_component_file(&mutant.file));
+    if request.skip_component_files || !has_component || !skip_components(&plan) {
+        return Ok(plan);
+    }
+    let request = MutationPlanRequest {
+        skip_component_files: true,
+        ..request.clone()
+    };
+    Ok(plan_mutations(&inputs, &request))
 }
 
 /// The plugin used-export names of each module of the graph.

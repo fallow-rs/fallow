@@ -2,8 +2,8 @@
 //! previously-built [`ModuleGraph`].
 //!
 //! Mirrors the extraction cache store (`fallow_extract::cache::store`): the
-//! payload is postcard-encoded, written atomically via a sibling `.tmp` file
-//! plus best-effort fsync and rename, and a `.gitignore` is written alongside
+//! payload is postcard-encoded, written atomically via a uniquely named temp
+//! file plus best-effort fsync and rename, and a `.gitignore` is written alongside
 //! so `.fallow/` is never committed. Every IO error is swallowed (the graph
 //! cache is best-effort and must never fail analysis); a corrupt or
 //! version-mismatched file misses and the graph is rebuilt fresh, but the
@@ -187,32 +187,11 @@ fn write_cache_gitignore(cache_dir: &Path) -> std::io::Result<()> {
     std::fs::write(cache_dir.join(".gitignore"), "*\n")
 }
 
-/// Write `data` atomically via a sibling `.tmp` file, best-effort fsync, then
-/// rename. Copied from the extraction cache store so the two caches share the
-/// same crash-safe write semantics.
+/// Replace `cache_file` with `data` through a unique temp file. The extraction
+/// cache store uses the same helper, so concurrent fallow processes that share
+/// `.fallow/` never interleave a write to either cache.
 fn atomic_write(cache_file: &Path, data: &[u8]) -> std::io::Result<()> {
-    let tmp_file = match cache_file.file_name() {
-        Some(name) => cache_file.with_file_name({
-            let mut s = name.to_os_string();
-            s.push(".tmp");
-            s
-        }),
-        None => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "graph cache file path has no filename component",
-            ));
-        }
-    };
-
-    {
-        use std::io::Write as _;
-        let mut f = std::fs::File::create(&tmp_file)?;
-        f.write_all(data)?;
-        let _ = f.sync_all();
-    }
-
-    std::fs::rename(&tmp_file, cache_file)
+    fallow_types::atomic_file::write_atomic(cache_file, data)
 }
 
 #[cfg(test)]

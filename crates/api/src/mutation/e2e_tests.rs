@@ -110,6 +110,127 @@ fn a_project_without_tests_reports_no_coverage_without_a_companion() {
     assert_eq!(report.summary.coverage, Some(0.0));
 }
 
+/// A `node:test` project with a Vue component. The test does not import the
+/// component, because Node cannot load it.
+fn component_project(runner: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("dir");
+    let write = |path: &str, text: &str| {
+        let target = dir.path().join(path);
+        fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        fs::write(target, text).expect("write");
+    };
+    write(
+        "package.json",
+        r#"{"name":"p","type":"module","scripts":{"test":"node --test"}}"#,
+    );
+    write(
+        ".fallowrc.json",
+        &format!(r#"{{"mutation":{{"runner":"{runner}"}}}}"#),
+    );
+    write(
+        "src/math.ts",
+        "export function add(a: number, b: number) { return a + b; }\n",
+    );
+    write(
+        "src/Badge.vue",
+        "<template><span>{{ label(1) }}</span></template>\n<script>\nexport function label(n) {\n  return n === 1 ? \"one\" : \"many\";\n}\n</script>\n",
+    );
+    write(
+        "test/math.test.ts",
+        "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { add } from \"../src/math.ts\";\n\ntest(\"add\", () => {\n  assert.equal(add(1, 2), 3);\n});\n",
+    );
+    dir
+}
+
+#[test]
+fn a_runner_that_cannot_load_components_leaves_them_out_of_the_plan() {
+    for runner in ["node-test", "bun-test", "auto"] {
+        let project = component_project(runner);
+        let plan = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
+        assert!(
+            plan.mutants
+                .iter()
+                .all(|mutant| mutant.location.file != "src/Badge.vue"),
+            "{runner}: {:#?}",
+            plan.mutants
+        );
+        assert!(
+            plan.mutants
+                .iter()
+                .any(|mutant| mutant.location.file == "src/math.ts"),
+            "{runner}"
+        );
+        assert_eq!(plan.skipped_files.len(), 1, "{runner}");
+        assert_eq!(plan.skipped_files[0].path, "src/Badge.vue");
+        assert_eq!(plan.skipped_files[0].reason, "runner-cannot-load");
+    }
+
+    let project = component_project("node-test");
+    let only_component = plan_mutation(&options(
+        project.path(),
+        MutationRunScope::Paths(vec![std::path::PathBuf::from("src/Badge.vue")]),
+    ))
+    .expect("plan");
+    assert!(only_component.mutants.is_empty());
+    assert!(only_component.unmatched_paths.is_empty());
+    assert_eq!(only_component.skipped_files.len(), 1);
+    assert_eq!(only_component.skipped_files[0].reason, "runner-cannot-load");
+
+    let project = component_project("vitest");
+    let plan = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
+    assert!(
+        plan.mutants
+            .iter()
+            .any(|mutant| mutant.location.file == "src/Badge.vue"),
+        "Vitest loads a component through the framework plugin"
+    );
+    assert!(plan.skipped_files.is_empty());
+}
+
+/// A type test (`tsd`, Vitest `*.test-d.ts`) is checked by a compiler, not
+/// run by a test runner. It must not count as a test file of the plan.
+#[test]
+fn a_type_test_is_not_a_test_file_of_the_plan() {
+    let dir = tempfile::tempdir().expect("dir");
+    let write = |path: &str, text: &str| {
+        let target = dir.path().join(path);
+        fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        fs::write(target, text).expect("write");
+    };
+    write(
+        "package.json",
+        r#"{"name":"p","main":"index.ts","devDependencies":{"tsd":"0.31.0"}}"#,
+    );
+    write(
+        "index.ts",
+        "export const add = (a: number, b: number) => a + b;\n",
+    );
+    write(
+        "test/types/index.test-d.ts",
+        "import { expectType } from \"tsd\";\nimport { add } from \"../../index\";\nexpectType<number>(add(1, 2));\n",
+    );
+    let plan = plan_mutation(&options(dir.path(), MutationRunScope::All)).expect("plan");
+    assert!(plan.test_files.is_empty(), "{:?}", plan.test_files);
+    assert!(plan.no_test_files);
+    assert_eq!(plan.counts.planned, 0, "no runner test covers a mutant");
+    assert_eq!(plan.counts.no_coverage, plan.counts.total);
+    assert!(
+        plan.mutants.iter().all(|mutant| mutant
+            .test_reach
+            .as_ref()
+            .is_some_and(|reach| reach.reach == fallow_output::TestReachClass::NoneFile)),
+        "a type test is not a test that loads the file: {:#?}",
+        plan.mutants
+    );
+    assert!(
+        plan.files
+            .iter()
+            .all(|file| file.static_test_files.is_empty()),
+        "{:?}",
+        plan.files
+    );
+}
+
 #[test]
 fn the_plan_uses_the_config_operators_unless_the_caller_names_operators() {
     let project = small_project();
@@ -537,6 +658,50 @@ mod end_to_end {
         assert_eq!(runner.name, "node-test");
         assert_eq!(runner.runtime.name, "node");
         assert_math_statuses(&report);
+    }
+
+    /// The acceptance case of #3470: a `node:test` run gives no
+    /// `no_coverage` mutant for a Vue file, and the report names the skip.
+    #[test]
+    fn a_node_test_run_leaves_a_component_out_and_says_why() {
+        use crate::mutation::discovery::RuntimeKind;
+        if child_runner_package("node-test", RuntimeKind::Node).is_none() {
+            return;
+        }
+        let project = super::component_project("auto");
+        commit_all(project.path());
+
+        let report = run_mutation(&options(project.path(), MutationRunScope::All))
+            .expect("the run completes");
+
+        assert_eq!(
+            report.runner.as_ref().expect("a runner ran").name,
+            "node-test"
+        );
+        assert!(
+            report
+                .mutants
+                .iter()
+                .all(|mutant| mutant.location.file != "src/Badge.vue"),
+            "{:#?}",
+            report.mutants
+        );
+        assert_eq!(
+            report.summary.counts.no_coverage, 0,
+            "{:#?}",
+            report.mutants
+        );
+        assert_eq!(report.skipped_files.len(), 1);
+        assert_eq!(report.skipped_files[0].reason, "runner-cannot-load");
+        // The component survivors are unknown, so an empty survivor list of
+        // this run is not conclusive.
+        assert_eq!(report.completion.status, MutationCompletionStatus::Partial);
+        assert!(
+            report
+                .completion
+                .reasons
+                .contains(&fallow_output::MutationIncompleteReason::SkippedFiles)
+        );
     }
 
     #[test]

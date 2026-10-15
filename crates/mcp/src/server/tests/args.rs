@@ -2296,6 +2296,43 @@ fn get_cloud_runtime_context_forwards_every_selector() {
     assert!(args.contains(&"--no-cache".to_string()));
 }
 
+/// A dot-only repo becomes a `.` or `..` URL path segment, so every cloud
+/// tool refuses it before the CLI runs, with the CLI's rule.
+#[test]
+fn cloud_tools_reject_a_dot_only_repo() {
+    for repo in [".", "..", " ... "] {
+        let refusals = [
+            build_get_cloud_runtime_context_args(&cloud_runtime_context(repo), true)
+                .expect_err("runtime context must refuse"),
+            build_get_cloud_review_packet_args(
+                &CloudReviewPacketParams {
+                    repo: repo.to_string(),
+                    ..CloudReviewPacketParams::default()
+                },
+                true,
+            )
+            .expect_err("review packet must refuse"),
+            build_get_cloud_deployment_changes_args(
+                &CloudDeploymentChangesParams {
+                    repo: repo.to_string(),
+                    ..CloudDeploymentChangesParams::default()
+                },
+                true,
+            )
+            .expect_err("deployment changes must refuse"),
+        ];
+        for refusal in refusals {
+            assert_eq!(
+                parse_typed_validation_code(&refusal).as_deref(),
+                Some("cloud_repo_invalid"),
+                "{repo:?}: {refusal}"
+            );
+        }
+    }
+    build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/.github"), true)
+        .expect("dots inside a repository name stay valid");
+}
+
 #[test]
 fn get_cloud_runtime_context_rejects_an_empty_repo_and_an_unservable_window() {
     let empty = build_get_cloud_runtime_context_args(&cloud_runtime_context("   "), true)

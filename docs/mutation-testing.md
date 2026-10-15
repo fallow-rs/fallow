@@ -353,6 +353,30 @@ selects one. The default `auto` reads the project in this order:
   error. The status does not change.
 - The in-process mode of `node:test` (`isolation: "none"`) is not
   supported.
+- Neither runtime can load a Vue, Svelte or Astro component file. The
+  `node:test` hook calls the default loader first, and that loader refuses
+  the file type. The Bun hook serves the copy with a TypeScript loader, and
+  a project plugin that serves the file first serves the original. So the
+  plan leaves each component file out, with the skip reason
+  `runner-cannot-load` in `skipped_files`. Its mutants are not in the plan
+  and not in the coverage.
+- The runner decision reads the static test files of the plan. When the
+  first plan has a component mutant and the runner cannot load components,
+  the plan is built again from the same analysis without the component
+  files (`plan_mutations_for_session_with`). The run keeps the runner of
+  the first decision. `--plan` uses the same rule, so the plan and the run
+  agree.
+
+### Type tests
+
+A type test (`*.test-d.ts`, `*.spec-d.ts`, or a TypeScript file below a
+`test-d` directory) is not a test file of the plan. A compiler checks it (`tsd`,
+`expect-type`, the Vitest type check), and no runner executes it. Before this
+rule, a `tsd` file was the only static test file of some projects. The dry run
+then ran it as a runtime test, it failed as a baseline failure, and runner
+detection read its imports. A project whose only test entry points are type
+tests has `no_test_files: true`. A file that only type tests reach has no
+coverage, and its mutants get the test reach `none-file`.
 
 ## Runner notes
 
@@ -412,7 +436,9 @@ report repeats it in `cache.not_keyed`.
 
 - A `timeout`, `flaky`, `runtime_error` or `pending` result is never stored.
   A timeout depends on the load of the machine. A survivor that the time
-  budget left without a retry is not stored.
+  budget left without a retry is not stored. A survivor of a run without a
+  dropped covering test (see Baseline failures) is not stored, because the
+  key covers that test.
 - A reused result has `cached: true` in `mutants[]`. It counts in the score
   and the coverage the same as a result of this run.
 - `cache` in the report gives `hits`, `stored` and `not_keyed`. It is absent
@@ -629,6 +655,9 @@ reads files only. It runs no test.
   mutants and one `and N more files` line. The JSON report has the full list.
 - The plan prints one `No coverage by test reach` line with the same counts
   when a mutant is `no_coverage` and the project has test files.
+- One `Skipped files:` line with the count of each skip reason, in the run
+  and in the plan. The JSON report lists each path. A `runner-cannot-load` skip adds
+  one line that names `mutation.runner` and Vitest as the next step.
 - The pruned counts by reason, and one line for "no tests" or "no mutation
   data", never one line for each function. A project with no test files gets
   the one "no tests" line with the mutant count, and no no-coverage section.

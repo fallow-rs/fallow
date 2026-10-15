@@ -8368,3 +8368,106 @@ fn audit_literal_regex_change_gates_new_unused_file() {
     assert_eq!(json["verdict"], "fail");
     assert_eq!(output.code, 1);
 }
+
+/// `audit-cache prune` covers the base-snapshot files below the project cache
+/// directory, not only the reusable worktrees in the temp directory.
+#[test]
+fn audit_cache_prune_reports_and_removes_aged_snapshot_files() {
+    let fixture = create_audit_fixture("cache-prune-snapshots");
+    let root = fixture.path();
+    let scan = TempDir::new().expect("scan root should be created");
+    // The current `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` directory.
+    let snapshot_dir = root.join(".fallow/cache/audit-base-v13");
+    fs::create_dir_all(&snapshot_dir).unwrap();
+    let aged = snapshot_dir.join("00000000000000aa.bin");
+    let fresh = snapshot_dir.join("00000000000000bb.bin");
+    fs::write(&aged, b"aged payload").unwrap();
+    fs::write(&fresh, b"fresh payload").unwrap();
+    backdate_days(&aged, 40);
+    let root_arg = root.to_str().expect("root should be utf-8");
+    let args = [
+        "audit-cache",
+        "prune",
+        "--root",
+        root_arg,
+        "--format",
+        "json",
+        "--quiet",
+    ];
+
+    let mut dry_run_args = args.to_vec();
+    dry_run_args.push("--dry-run");
+    let preview = run_prune_with_scan_root(&dry_run_args, scan.path());
+    assert_eq!(preview.code, 0, "prune dry-run failed: {}", preview.stderr);
+    let json = parse_json(&preview);
+    let entries = json["entries"].as_array().expect("entries array");
+    let snapshot = |name: &str| {
+        entries
+            .iter()
+            .find(|entry| {
+                entry["pass"] == "snapshot"
+                    && entry["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with(name))
+            })
+            .unwrap_or_else(|| panic!("{name} must be reported: {json}"))
+            .clone()
+    };
+    assert_eq!(snapshot("00000000000000aa.bin")["reason"], "aged-out");
+    assert_eq!(snapshot("00000000000000aa.bin")["age_days"], 40);
+    assert_eq!(snapshot("00000000000000bb.bin")["reason"], "fresh");
+    assert!(aged.exists(), "a dry run must not remove the file");
+
+    let applied = run_prune_with_scan_root(&args, scan.path());
+    assert_eq!(applied.code, 0, "prune failed: {}", applied.stderr);
+    assert!(!aged.exists(), "prune must remove the aged snapshot");
+    assert!(fresh.exists(), "prune must keep the fresh snapshot");
+}
+
+/// A non-brief run caches a base snapshot without the public-export set. A
+/// later `--brief` run on the same base must not reuse that snapshot, or every
+/// existing export of a changed public file reads as newly added.
+#[test]
+fn audit_brief_after_non_brief_run_reports_only_new_public_exports() {
+    let tmp = TempDir::new().expect("temp dir should be created");
+    let root = tmp.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name": "brief-cache", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/index.ts"),
+        "export const existing = 1;\nexport const kept = 2;\n",
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "base");
+    fs::write(
+        root.join("src/index.ts"),
+        "export const existing = 1;\nexport const kept = 2;\nexport const added = 3;\n",
+    )
+    .unwrap();
+    let root_arg = root.to_str().expect("root should be utf-8");
+
+    let plain = run_fallow_raw(&[
+        "audit", "--root", root_arg, "--base", "HEAD", "--format", "json", "--quiet",
+    ]);
+    assert!(plain.code <= 1, "plain audit failed: {}", plain.stderr);
+
+    let brief = run_fallow_raw(&[
+        "audit", "--root", root_arg, "--base", "HEAD", "--brief", "--format", "json", "--quiet",
+    ]);
+    assert!(brief.code <= 1, "brief audit failed: {}", brief.stderr);
+    let json = parse_json(&brief);
+    let added = json["deltas"]["public_api_added"]
+        .as_array()
+        .unwrap_or_else(|| panic!("brief must carry public_api_added: {json}"));
+    let added: Vec<&str> = added.iter().filter_map(serde_json::Value::as_str).collect();
+    assert_eq!(
+        added,
+        ["src/index.ts::added"],
+        "only the new export is public API growth: {json}"
+    );
+}

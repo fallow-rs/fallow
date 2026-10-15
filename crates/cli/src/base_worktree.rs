@@ -332,7 +332,7 @@ fn write_reusable_sha(reusable_path: &Path, base_sha: &str) -> std::io::Result<(
 /// Default GC threshold for persistent reusable base-snapshot caches.
 const DEFAULT_AUDIT_CACHE_MAX_AGE_DAYS: u32 = 30;
 
-const SECONDS_PER_DAY: u64 = 86_400;
+pub const SECONDS_PER_DAY: u64 = 86_400;
 
 /// Env var that overrides `audit.cacheMaxAgeDays` from the config.
 const AUDIT_CACHE_MAX_AGE_ENV: &str = "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS";
@@ -704,6 +704,9 @@ pub enum SweepPass {
     Legacy,
     /// Entries under other repo hashes (cross-repo pass, issue #2169).
     Foreign,
+    /// Base-snapshot payload files below the project cache directory
+    /// (`<cache>/cache/audit-base-v*/<hash>.bin`).
+    Snapshot,
 }
 
 impl SweepPass {
@@ -713,6 +716,7 @@ impl SweepPass {
             Self::Owned => "owned",
             Self::Legacy => "legacy",
             Self::Foreign => "foreign",
+            Self::Snapshot => "snapshot",
         }
     }
 }
@@ -755,6 +759,10 @@ pub enum SweepDisposition {
     /// pre-#1815 fallow; the root-owned cache cannot reuse it, so it is
     /// deregistered AND removed.
     ReclaimedLegacyRegistered,
+    /// Base-snapshot file past the newest-files cap of its cache directory.
+    /// The cap applies even when age-based GC is disabled, because each
+    /// payload can be large and a snapshot is cheap to compute again.
+    ReclaimedOverCapacity,
     /// The current cache path still REGISTERED as a git worktree by pre-#1815
     /// fallow (a mixed-version registration); only the git registration is
     /// reclaimed and the directory stays warm on disk, so its measured size
@@ -796,7 +804,8 @@ impl SweepDisposition {
             Self::ReclaimedOrphan
             | Self::ReclaimedAged
             | Self::ReclaimedOwnerMissing
-            | Self::ReclaimedLegacyRegistered => SweepDecision::Removed,
+            | Self::ReclaimedLegacyRegistered
+            | Self::ReclaimedOverCapacity => SweepDecision::Removed,
             Self::KeptLegacyDeregistered
             | Self::KeptFresh
             | Self::KeptOwnerLive
@@ -820,6 +829,7 @@ impl SweepDisposition {
             Self::ReclaimedAged => "aged-out",
             Self::ReclaimedOwnerMissing => "owner-missing",
             Self::ReclaimedLegacyRegistered => "legacy-registered",
+            Self::ReclaimedOverCapacity => "over-capacity",
             Self::KeptLegacyDeregistered => "legacy-deregistered",
             Self::KeptFresh => "fresh",
             Self::KeptOwnerLive => "owner-live",

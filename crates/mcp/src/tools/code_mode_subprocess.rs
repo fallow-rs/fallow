@@ -24,9 +24,14 @@ pub(super) fn run_fallow_sync(
         .map_err(|err| format!("failed to create stdout temp file: {err}"))?;
     let mut stderr_file = tempfile::NamedTempFile::new()
         .map_err(|err| format!("failed to create stderr temp file: {err}"))?;
+    let exit_one_is_error = crate::tools::type_aware_complete_required(args);
     let mut command = Command::new(binary);
+    // The MCP server speaks JSON-RPC on its own stdin. A child that inherits
+    // it could consume protocol frames, so it reads from the null device,
+    // the same as the direct tool route.
     command
         .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file.reopen().map_err(|err| {
             format!("failed to reopen stdout temp file: {err}")
         })?))
@@ -78,7 +83,12 @@ pub(super) fn run_fallow_sync(
 
                 let stdout = read_file(stdout_file.as_file_mut(), "stdout")?;
                 let stderr = read_limited_file(stderr_file.as_file_mut(), STDERR_LIMIT_BYTES)?;
-                normalize_output(status.code().unwrap_or(-1), &stdout, &stderr)
+                normalize_output(
+                    status.code().unwrap_or(-1),
+                    &stdout,
+                    &stderr,
+                    exit_one_is_error,
+                )
             })();
             return with_completed_cleanup(result, &cleanup.errors);
         }
@@ -237,38 +247,23 @@ fn read_limited_file(file: &mut fs::File, limit: usize) -> Result<Vec<u8>, Strin
 
 /// Translate one completed Code Mode subprocess into the host call's body.
 ///
-/// Shares the exit-code policy of [`crate::tools::captured_output_result`], and
-/// shares its gate-verdict annotation too: a snippet reading a gated run must
-/// see the same warnings a direct tool call sees, or the two surfaces disagree
-/// about what the same analysis concluded.
+/// Calls the exit-code policy of the direct tool route,
+/// [`crate::tools::cli_exit_body`], so a run that requires complete type-aware
+/// evidence fails the same way on both surfaces. It shares the gate-verdict
+/// annotation too: a snippet reading a gated run must see the same warnings a
+/// direct tool call sees, or the two surfaces disagree about what the same
+/// analysis concluded.
 pub(super) fn normalize_output(
     exit_code: i32,
     stdout: &[u8],
     stderr: &[u8],
+    exit_one_is_error: bool,
 ) -> Result<String, String> {
-    let stdout = String::from_utf8_lossy(stdout).to_string();
-    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
-
-    match exit_code {
-        0 | 1 => Ok(if stdout.is_empty() {
-            "{}".to_string()
-        } else {
-            annotate(stdout)
-        }),
-        _ if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() => {
-            Err(annotate(stdout))
-        }
-        _ => Err(json!({
-            "error": true,
-            "message": if stderr.is_empty() {
-                format!("fallow exited with code {exit_code}")
-            } else {
-                stderr
-            },
-            "exit_code": exit_code
-        })
-        .to_string()),
-    }
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    crate::tools::cli_exit_body(exit_code, &stdout, stderr.trim(), exit_one_is_error)
+        .map(annotate)
+        .map_err(annotate)
 }
 
 #[cfg(all(test, unix))]
@@ -369,6 +364,69 @@ mod tests {
         )
         .expect_err("completed subprocess should enforce the output limit");
         assert_eq!(error, "code mode host output exceeded 16 bytes");
+    }
+
+    fn run_script(script: &str, extra_args: &[&str]) -> Result<String, String> {
+        let mut args = vec!["-c".to_string(), script.to_string()];
+        args.extend(extra_args.iter().map(ToString::to_string));
+        run_fallow_sync(
+            "/bin/sh",
+            "test",
+            &args,
+            Instant::now() + Duration::from_secs(5),
+            1024,
+        )
+    }
+
+    /// Mirrors the direct-route completeness test: a run that requires
+    /// complete type-aware evidence and reports partial evidence fails on
+    /// both surfaces.
+    #[test]
+    fn required_complete_type_aware_run_with_partial_evidence_is_an_error() {
+        let body = r#"{"_meta":{"type_aware":{"identity":{"completeness":"partial"}}}}"#;
+        let error = run_script(
+            &format!("printf '{body}'; exit 1"),
+            &["fallow", "--type-aware-require", "complete"],
+        )
+        .expect_err("exit 1 with incomplete required evidence must be an error");
+        assert_eq!(error, body);
+    }
+
+    #[test]
+    fn configured_complete_requirement_turns_incomplete_exit_one_into_error() {
+        let body = json!({
+            "_meta": {
+                "type_aware": {
+                    "required_completeness": "complete",
+                    "identity": { "completeness": "partial" }
+                }
+            }
+        })
+        .to_string();
+        assert!(normalize_output(1, body.as_bytes(), b"", false).is_err());
+    }
+
+    #[test]
+    fn best_effort_incomplete_exit_one_stays_a_success_body() {
+        let body = r#"{"_meta":{"type_aware":{"identity":{"completeness":"partial"}}}}"#;
+        let output = run_script(&format!("printf '{body}'; exit 1"), &[])
+            .expect("best-effort exit 1 stays a success body");
+        assert_eq!(output, body);
+    }
+
+    /// The MCP server reads JSON-RPC frames from its own stdin, so a child
+    /// must never share it.
+    #[test]
+    // This test discriminates only when the test runner's own stdin is not
+    // `/dev/null`. In CI the runner stdin is often `/dev/null`, and then an
+    // inherited stdin also passes. Run it with `< /dev/zero` to check the fix.
+    fn subprocess_stdin_is_the_null_device() {
+        let output = run_script(
+            r#"if [ /dev/stdin -ef /dev/null ]; then printf '{"stdin":"null"}'; else printf '{"stdin":"inherited"}'; fi"#,
+            &[],
+        )
+        .expect("probe script succeeds");
+        assert_eq!(output, r#"{"stdin":"null"}"#);
     }
 
     #[test]

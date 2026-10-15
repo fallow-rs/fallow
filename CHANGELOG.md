@@ -42,9 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `--max-mutants`. The dry run decides their coverage: a pending mutant that
     no test reaches in the dry run is `no_coverage`. A capped run therefore
     reports the coverage of the full run.
+  - A type test (`*.test-d.ts`, `*.spec-d.ts`, or a TypeScript file below
+    `test-d/`) is not a test file of the plan. No runner executes it, so it
+    no longer gives a false baseline failure or decides the runner.
   - A covering test that fails in the dry run of a restarted companion is a
     baseline failure. The mutant runs with its other covering tests and is a
-    runtime error only when no covering test is left.
+    runtime error only when no covering test is left. A survivor of such a
+    run survives: the check of the test count uses the tests of the run,
+    so it no longer gives a runtime error such as `466 of 467 requested
+    tests ran`.
   - The dry-run timeout of a restarted companion grows with the first
     dry-run time and the worker count. It is at least the runner timeout. A
     loaded host no longer turns the mutants of a restarted companion into
@@ -104,6 +110,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     from the `vitest` dependency, the test module that the test files
     import, a Bun file at the root, or a `node --test` script. `node:test`
     and `bun test` run each test file in its own process. (#3407)
+    Neither runtime can load a Vue, Svelte or Astro component, so with
+    these runners the plan leaves component files out with the skip reason
+    `runner-cannot-load`, and their mutants do not lower the coverage.
+    The human output prints one `Skipped files:` line. (#3470)
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /
@@ -344,6 +354,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bucket.
 
 ### Fixed
+
+- **The MCP routes now apply the same safety rules.**
+  - Code Mode now refuses an incomplete type-aware run that requires
+    complete evidence (`--type-aware-require complete`, or
+    `typeAware.require: complete` in the config). A direct tool call already
+    returned an error for this run, but Code Mode returned the partial result
+    as a success.
+  - A typed-route tool result over 16 MiB now gets the same refusal as a CLI
+    result over the cap: `isError: true` and code
+    `FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`, with `context: "typed"`.
+  - A Code Mode subprocess now reads stdin from the null device, as a direct
+    tool call does. Before, it shared the MCP server's own stdin.
+  - A cloud repository that is only dots (`.` or `..`) is now refused. The
+    value becomes one URL path segment, so `..` addressed a different route.
+    `fallow coverage analyze --cloud`, the cloud read commands and the cloud
+    MCP tools refuse it, with the rule that already applies to commit SHAs.
+- **Two Fallow processes can save the cache at the same time.** The
+  extraction cache and the graph cache wrote through one fixed temp file
+  (`cache.bin.tmp`, `graph-cache.bin.tmp`). An editor server and a CLI run, or
+  a pre-commit hook beside an editor, that shared `.fallow/` wrote into the
+  same file. A save could then fail, or the cache could hold bytes from two
+  runs and be rebuilt from cold on the next run. Each save now writes its own
+  temp file and renames it into place.
+- **Cache eviction keeps the files that every run reads.** At the size cap
+  (`cache.maxSizeMb`), the extraction cache evicted the entries that it had
+  parsed longest ago. A file that never changes was parsed once and was then
+  the first entry to go, so the next run parsed it again. Eviction now removes
+  first the entries that recent runs did not discover, for example test
+  files after `--production` runs.
+- **`fallow audit --brief` no longer reports every export as new public
+  API after a run without `--brief`.** Only a brief run computes the
+  public exports of the base, but both runs shared one cached base
+  snapshot. A brief run after a plain run on the same base read an empty
+  base set, so `public_api_added` listed every export of the changed public
+  files. The cache key now includes `--brief`, and the cache version moves
+  to 13, so old snapshots are not used.
+
+- **The audit base-snapshot cache no longer grows without a limit.** Each
+  new base commit or changed-file set wrote one more snapshot file of up to
+  16 MiB below `<cache>/cache/audit-base-v*/`, and nothing removed them.
+  Now each save removes the files that are older than `audit.cacheMaxAgeDays`
+  (counted from the last use) and keeps only the newest 32 files.
+  `fallow audit-cache prune` reports and removes these files too, as entries
+  with `pass: "snapshot"`. A file over the cap has the reason
+  `over-capacity`.
 
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
