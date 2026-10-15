@@ -2235,6 +2235,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    use fallow_types::discover::FileId;
     use oxc_resolver::{JSONError, ResolveError};
     use rustc_hash::{FxHashMap, FxHashSet};
     use tempfile::tempdir;
@@ -3254,11 +3255,21 @@ mod tests {
     /// Build a `ResolveContext` rooted at `root` with empty lookup tables and
     /// hand it to `f`. Enough for helpers that only read tsconfigs from disk.
     fn with_ctx_at_root<F: FnOnce(&ResolveContext<'_>)>(root: &Path, f: F) {
+        with_ctx_at_root_and_files(root, &[], f);
+    }
+
+    /// Like `with_ctx_at_root`, with `files` registered as project modules so
+    /// that alias targets resolve to their `FileId`.
+    fn with_ctx_at_root_and_files<F: FnOnce(&ResolveContext<'_>)>(
+        root: &Path,
+        files: &[(&Path, FileId)],
+        f: F,
+    ) {
         let resolver = super::create_resolver(root, &[], &[]);
         let style_resolver = super::create_resolver(root, &[], &["style".to_string()]);
         let extensions = react_native::build_extensions(&[]);
-        let path_to_id = FxHashMap::default();
-        let raw_path_to_id = FxHashMap::default();
+        let path_to_id: FxHashMap<&Path, FileId> = files.iter().copied().collect();
+        let raw_path_to_id = path_to_id.clone();
         let workspace_roots = FxHashMap::default();
         let package_manifests = Vec::new();
         let condition_names = react_native::build_condition_names(&[], &[]);
@@ -3809,6 +3820,75 @@ mod tests {
                     root.join("tsconfig.json"),
                 ],
             );
+        });
+    }
+
+    /// A cycle that ends through an absolute `references` path: the root
+    /// config `A` references `b/tsconfig.json` by absolute path and extends
+    /// `c.json`, and `b/tsconfig.json` extends `["../tsconfig.json",
+    /// "../d.json"]`. The root reached again as `b/../tsconfig.json` is a
+    /// repeat, so the walk does not expand it a second time, and `d.json`
+    /// comes before `c.json`. The first config in the chain that declares
+    /// `paths` decides the alias target.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn references_walk_skips_a_repeat_reached_through_an_absolute_reference() {
+        let temp = tempdir().unwrap();
+        let root = dunce::canonicalize(temp.path()).unwrap();
+        let root = root.as_path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("b")).unwrap();
+        let x = root.join("src/x.ts");
+        let c_target = root.join("c-target.ts");
+        let d_target = root.join("d-target.ts");
+        for file in [&x, &c_target, &d_target] {
+            fs::write(file, "export {};").unwrap();
+        }
+        let b_reference = serde_json::to_string(&root.join("b").to_string_lossy()).unwrap();
+        fs::write(
+            root.join("tsconfig.json"),
+            format!(r#"{{"references":[{{"path":{b_reference}}}],"extends":"./c.json"}}"#),
+        )
+        .unwrap();
+        fs::write(
+            root.join("b/tsconfig.json"),
+            r#"{"files":["../src/x.ts"],"extends":["../tsconfig.json","../d.json"]}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("c.json"),
+            r#"{"compilerOptions":{"paths":{"@shared":["./c-target.ts"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("d.json"),
+            r#"{"compilerOptions":{"paths":{"@shared":["./d-target.ts"]}}}"#,
+        )
+        .unwrap();
+
+        let files = [
+            (x.as_path(), FileId(0)),
+            (c_target.as_path(), FileId(1)),
+            (d_target.as_path(), FileId(2)),
+        ];
+        with_ctx_at_root_and_files(root, &files, |ctx| {
+            let chain: Vec<PathBuf> = super::local_tsconfig_chain(ctx, &x)
+                .iter()
+                .map(|path| super::normalize_path_lexically(path))
+                .collect();
+            assert_eq!(
+                chain,
+                vec![
+                    root.join("tsconfig.json"),
+                    root.join("b/tsconfig.json"),
+                    root.join("d.json"),
+                    root.join("c.json"),
+                ],
+            );
+            assert!(matches!(
+                super::try_nearest_tsconfig_path_alias(ctx, &x, "@shared", false),
+                Some(super::ResolveResult::InternalModule(FileId(2)))
+            ));
         });
     }
 }
