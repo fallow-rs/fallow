@@ -510,17 +510,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   did not use this default entry, so it reported every renderer file as
   unused. Now the default HTML entry and the files that it loads are
   reachable.
-- **A `.then()` callback on a dynamic `import()` credits the exports that it
-  reads.** Before, Fallow ignored the callback param in shapes such as
-  `import('./x').then((m) => m.start())`, `.then((m) => { m.start(); })` and
-  `.then(function (m) { m.start(); })`. The exports read on `m` then reported
-  as unused, and so did the types that only those exports use. Now each
-  member that the callback reads on the param is credited. When the callback
-  hands the param to other code, for example `.then((m) => register(m))`,
-  every export of the target module is credited. The shapes
-  `.then((m) => m.start)` and `.then(({ start }) => start())` already worked.
-  The extraction and graph cache versions change, so the first run after the
-  upgrade parses the project again.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export
