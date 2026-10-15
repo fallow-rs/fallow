@@ -922,15 +922,19 @@ impl ModuleGraph {
 
         #[cfg(test)]
         if let Some(legacy_modules) = legacy_modules.as_mut() {
-            Self::run_re_export_full_scan(LegacyReExportFullScan {
-                modules: legacy_modules,
-                edges: &self.edges,
-                re_export_info,
-                entry_star_targets,
-                edges_by_target,
-                module_by_id,
-                effective_exports: &self.effective_exports,
-                reference_paths,
+            // The oracle checks every name against every star source, so it
+            // also proves that the source-name filter drops nothing.
+            propagate::without_star_source_filter(|| {
+                Self::run_re_export_full_scan(LegacyReExportFullScan {
+                    modules: legacy_modules,
+                    edges: &self.edges,
+                    re_export_info,
+                    entry_star_targets,
+                    edges_by_target,
+                    module_by_id,
+                    effective_exports: &self.effective_exports,
+                    reference_paths,
+                });
             });
             assert_eq!(
                 serde_json::to_value(legacy_modules)

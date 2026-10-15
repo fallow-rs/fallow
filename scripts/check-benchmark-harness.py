@@ -337,7 +337,7 @@ LITERAL_THREAD_COUNT = re.compile(
 # `FallowConfig::resolve` takes the thread count as its third positional
 # argument, and the call often spans several lines. `load_default` picks
 # `available_parallelism()` for the file walk.
-LITERAL_RESOLVE_THREADS = re.compile(r"\.resolve\(\s*[^,;()]+,\s*[^,;()]+,\s*\d+\s*,")
+LITERAL_RESOLVE_THREADS = re.compile(r"OutputFormat::\w+\s*,\s*\d+\s*,")
 DEFAULT_PARALLELISM_LOAD = re.compile(r"AnalysisSession::load_default\(")
 
 

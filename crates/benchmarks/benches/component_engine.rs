@@ -195,7 +195,14 @@ fn create_guard_fixture() -> GuardFixture {
         },
         ..FallowConfig::default()
     }
-    .resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
+    .resolve(
+        root.clone(),
+        OutputFormat::Json,
+        bench_threads(),
+        true,
+        true,
+        None,
+    );
     config.rule_packs = vec![RulePackDef {
         schema: None,
         version: 1,

@@ -27,6 +27,27 @@ use crate::resolve::ResolvedModule;
 thread_local! {
     static STAR_REFERENCE_SET_REBUILDS: Cell<usize> = const { Cell::new(0) };
     static STAR_NAME_CHECKS: Cell<usize> = const { Cell::new(0) };
+    static STAR_SOURCE_FILTER_DISABLED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Run with the source-name filter off, so every name reaches
+/// `resolves_through`. The differential check uses it as its oracle.
+#[cfg(test)]
+pub(super) fn without_star_source_filter<T>(run: impl FnOnce() -> T) -> T {
+    let previous = STAR_SOURCE_FILTER_DISABLED.replace(true);
+    let result = run();
+    STAR_SOURCE_FILTER_DISABLED.set(previous);
+    result
+}
+
+#[cfg(test)]
+fn star_source_filter_disabled() -> bool {
+    STAR_SOURCE_FILTER_DISABLED.get()
+}
+
+#[cfg(not(test))]
+const fn star_source_filter_disabled() -> bool {
+    false
 }
 
 /// Count the names that star propagation checks against a star source.
@@ -118,6 +139,9 @@ impl BarrelNamedStarRefs {
         effective_exports: &EffectiveExportIndex,
         source_id: FileId,
     ) -> Vec<usize> {
+        if star_source_filter_disabled() {
+            return (0..self.groups.len()).collect();
+        }
         let source_names = effective_exports.names_on(source_id);
         let mut groups: Vec<usize> = if source_names.len() < self.groups.len() {
             source_names
@@ -202,7 +226,9 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     let source = &mut modules[source_idx];
     for (name, refs) in &refs_by_name {
         #[cfg(test)]
-        STAR_NAME_CHECKS.set(STAR_NAME_CHECKS.get() + 1);
+        if !star_source_filter_disabled() {
+            STAR_NAME_CHECKS.set(STAR_NAME_CHECKS.get() + 1);
+        }
         let type_resolves = effective_exports.resolves_through(
             barrel_id,
             name,
@@ -297,9 +323,10 @@ fn star_refs_for_source(
             refs_by_name[position].1.extend(refs);
             continue;
         }
-        let resolves_on_source = effective_exports
-            .name_id(&name)
-            .is_some_and(|id| effective_exports.has_name(source_id, id));
+        let resolves_on_source = star_source_filter_disabled()
+            || effective_exports
+                .name_id(&name)
+                .is_some_and(|id| effective_exports.has_name(source_id, id));
         if resolves_on_source {
             barrel_only.insert(name.clone(), refs_by_name.len());
             refs_by_name.push((name, refs));

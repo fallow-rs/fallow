@@ -1608,6 +1608,11 @@ pub fn benchmark_audit_analyses(
     opts.brief = false;
     let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
     let focus = fallow_api::audit_run::base_focus_files(&changed_files, &[]);
+    // Production canonicalizes the base root, because a session
+    // canonicalizes its root and a focus set under a symbolic link would
+    // match no finding.
+    let base_root = dunce::canonicalize(base_root).unwrap_or_else(|_| base_root.to_path_buf());
+    let base_root = base_root.as_path();
     let base_focus = fallow_api::audit_run::remap_focus_files(&focus, head_root, base_root);
     let (head, base) = rayon::join(
         || {
@@ -1627,10 +1632,11 @@ pub fn benchmark_audit_analyses(
             )
         },
     );
-    let head = head?;
+    let mut head = head?;
     let mut base = base?;
-    if let (Some(focus), Some(results)) = (base_focus.as_ref(), base.dead_code_results_mut()) {
-        fallow_api::audit_run::scope_dependency_findings(results, base_root, focus);
+    scope_benchmark_dependency_findings(&mut head, &changed_files);
+    if let Some(focus) = base_focus.as_ref() {
+        scope_benchmark_dependency_findings(&mut base, focus);
     }
     let base_snapshot = AuditKeySnapshot::from_view(&base.view());
     let run = attribute_preloaded_run(&opts, head, base_snapshot, changed_files);
@@ -1650,6 +1656,21 @@ pub fn benchmark_audit_analyses(
         clone_group_count,
         health_finding_count,
     })
+}
+
+/// Scope the dependency findings of one side to `files`, under the root that
+/// the dead-code analysis reports, as the production audit does.
+fn scope_benchmark_dependency_findings(analyses: &mut HeadAnalyses, files: &FxHashSet<PathBuf>) {
+    let Some(root) = analyses
+        .view()
+        .dead_code
+        .map(|dead_code| dead_code.root.to_path_buf())
+    else {
+        return;
+    };
+    if let Some(results) = analyses.dead_code_results_mut() {
+        fallow_api::audit_run::scope_dependency_findings(results, &root, files);
+    }
 }
 
 /// Attribute preloaded head analyses against a preloaded base snapshot, with
