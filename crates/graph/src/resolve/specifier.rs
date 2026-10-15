@@ -455,7 +455,12 @@ fn collect_local_tsconfig_chain(
     chain: &mut Vec<PathBuf>,
     seen: &mut rustc_hash::FxHashSet<PathBuf>,
 ) {
-    if !seen.insert(tsconfig_path.to_path_buf()) {
+    // `references` and `extends` paths are joined verbatim. A package config
+    // that extends `../../tsconfig.json` while the root references the package
+    // reaches both configs again under longer `..` spellings, so the cycle
+    // check compares normalized paths. The chain keeps the joined path because
+    // `paths`, `baseUrl` and `rootDirs` resolve against its directory.
+    if !seen.insert(normalize_path_lexically(tsconfig_path)) {
         return;
     }
     let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
@@ -3767,6 +3772,43 @@ mod tests {
             assert!(chain_for(&lib_x, &app_config).contains(&lib_tsconfig));
             assert!(!chain_for(&app_y, &root_config).contains(&lib_tsconfig));
             assert!(!chain_for(&app_y, &app_config).contains(&lib_tsconfig));
+        });
+    }
+
+    /// A package config that extends the root config, which in turn references
+    /// the package, forms a cycle through two spellings of each path:
+    /// `packages/lib/../../tsconfig.json` and `packages/lib/tsconfig.json`
+    /// reached again from the root. The walk must visit each config once.
+    #[test]
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
+    fn references_walk_visits_each_config_once_through_extends_cycle() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        write_two_sibling_packages_with_lib_include(root);
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"include":["src"],"references":[{"path":"packages/lib"}]}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("packages/lib/tsconfig.json"),
+            r#"{"extends":"../../tsconfig.json","include":["src"]}"#,
+        )
+        .unwrap();
+
+        with_ctx_at_root(root, |ctx| {
+            let chain = super::local_tsconfig_chain(ctx, &root.join("packages/lib/src/x.ts"));
+            let chain: Vec<PathBuf> = chain
+                .iter()
+                .map(|path| super::normalize_path_lexically(path))
+                .collect();
+            assert_eq!(
+                chain,
+                vec![
+                    root.join("packages/lib/tsconfig.json"),
+                    root.join("tsconfig.json"),
+                ],
+            );
         });
     }
 }

@@ -919,6 +919,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project with another config extension lost the Nuxt entry points and
   modules.
 
+### Performance
+
+- **Import resolution is fast again in monorepos whose packages extend a root
+  tsconfig that references them.** Since 3.20.0, a package `tsconfig.json`
+  with `"extends": "../../tsconfig.json"`, under a root config that lists the
+  package in `references`, made the tsconfig walk revisit the same configs
+  under longer `../..` spellings until the path was too long for the file
+  system. Each source file then checked about 760 configs in place of about
+  30. The walk now detects a revisit by the normalized path and visits each
+  config once. On a monorepo with 28 references and 4,200 modules,
+  `resolve imports` takes 0.5 s in place of 10.1 s, with the same findings.
+  The walk drops only repeats of a config that it already visited. When a
+  cycle reaches a config again under another spelling, for example through
+  an absolute `references` path, the configs after it can come in another
+  order. If two of them declare `paths`, `baseUrl` or `rootDirs`, the other
+  one can then apply. The graph cache version changes, so the first run after
+  an upgrade rebuilds the graph.
+
 ## [3.33.1] - 2026-10-09
 
 ### Fixed
