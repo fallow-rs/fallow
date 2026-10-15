@@ -69,7 +69,8 @@ const BUN_ROOT_FILES: &[&str] = &["bunfig.toml", "bun.lock", "bun.lockb"];
 ///    files have. A tie goes to Vitest, then `bun test`.
 /// 3. A Bun file at the root (`bunfig.toml`, `bun.lock`, `bun.lockb`) gives
 ///    `bun test`.
-/// 4. A `node --test` command in a `package.json` script gives `node:test`.
+/// 4. A `node --test` or `borp` command in a `package.json` script gives
+///    `node:test`.
 /// 5. Otherwise Vitest.
 pub fn select_runner(configured: MutationRunner, root: &Path, test_files: &[String]) -> Runner {
     match configured {
@@ -91,7 +92,10 @@ fn detect_runner(root: &Path, test_files: &[String]) -> Runner {
     if BUN_ROOT_FILES.iter().any(|file| root.join(file).is_file()) {
         return Runner::BunTest;
     }
-    if manifest.as_ref().is_some_and(has_node_test_script) {
+    if manifest
+        .as_ref()
+        .is_some_and(|manifest| has_node_test_script(manifest) || has_borp_script(manifest))
+    {
         return Runner::NodeTest;
     }
     Runner::Vitest
@@ -123,6 +127,27 @@ fn has_node_test_script(manifest: &serde_json::Value) -> bool {
                 .filter_map(serde_json::Value::as_str)
                 .any(|script| script.contains("node --test"))
         })
+}
+
+/// The name of the `borp` binary, a test runner that runs `node:test`.
+const BORP_BINARY: &str = "borp";
+
+/// True when a `package.json` script runs `borp`, also through a package
+/// manager (`npx borp`) or a binary path (`./node_modules/.bin/borp`).
+fn has_borp_script(manifest: &serde_json::Value) -> bool {
+    script_texts(manifest).any(|script| {
+        script
+            .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')'))
+            .any(|word| word.rsplit('/').next() == Some(BORP_BINARY))
+    })
+}
+
+fn script_texts(manifest: &serde_json::Value) -> impl Iterator<Item = &str> {
+    manifest
+        .get("scripts")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|scripts| scripts.values().filter_map(serde_json::Value::as_str))
 }
 
 /// The runner that the test files import, by count of files.
@@ -279,6 +304,34 @@ mod tests {
         );
         assert_eq!(node, Runner::NodeTest);
         assert_eq!(detect(&[("package.json", "{}")], &[]), Runner::Vitest);
+    }
+
+    #[test]
+    fn a_borp_script_selects_node_test_without_imports() {
+        for script in [
+            "borp -p 'test/**/*.js'",
+            "npm run lint && borp --coverage",
+            "npx borp",
+            "./node_modules/.bin/borp test/a.test.js",
+        ] {
+            let manifest = format!(r#"{{"scripts":{{"test":{}}}}}"#, serde_json::json!(script));
+            let runner = detect(
+                &[
+                    ("package.json", manifest.as_str()),
+                    ("test/a.test.js", "test('x', () => {});\n"),
+                ],
+                &["test/a.test.js"],
+            );
+            assert_eq!(runner, Runner::NodeTest, "`{script}`");
+        }
+        let other = detect(
+            &[(
+                "package.json",
+                r#"{"scripts":{"test":"borpx run","lint":"echo borp-check"}}"#,
+            )],
+            &[],
+        );
+        assert_eq!(other, Runner::Vitest);
     }
 
     #[test]

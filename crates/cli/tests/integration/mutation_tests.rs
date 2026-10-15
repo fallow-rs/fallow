@@ -122,6 +122,36 @@ fn plan_mutates_the_script_blocks_of_vue_svelte_and_astro_components() {
 }
 
 #[test]
+fn plan_reads_the_test_files_of_a_borp_script() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"borp-fixture","private":true,"main":"index.js","scripts":{"test":"borp -p 'test/**/*.js'"}}"#,
+    )
+    .expect("package.json");
+    fs::write(
+        root.join("index.js"),
+        "'use strict'\nmodule.exports = { add: (a, b) => a + b }\n",
+    )
+    .expect("index.js");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("test/add.test.js"),
+        "'use strict'\nconst test = require('node:test')\nconst { add } = require('../index.js')\ntest('add', (t) => {\n  t.assert.strictEqual(add(1, 2), 3)\n})\n",
+    )
+    .expect("add.test.js");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+
+    let (output, value) = json_mutation(root, &["--plan", "--all"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(value["no_test_files"], false, "{value}");
+    assert_eq!(value["counts"]["no_coverage"], 0, "{value}");
+    assert!(value["counts"]["planned"].as_u64().unwrap() > 0, "{value}");
+}
+
+#[test]
 fn plan_human_output_names_scope_counts_and_no_tests_in_one_line() {
     let project = untested_project();
     let output = mutation(project.path(), &["--plan", "--all", "--quiet"]);

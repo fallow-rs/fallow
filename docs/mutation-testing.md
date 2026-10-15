@@ -330,8 +330,8 @@ selects one. The default `auto` reads the project in this order:
    `bun test`.
 3. Otherwise a `bunfig.toml`, `bun.lock` or `bun.lockb` at the root selects
    `bun test`.
-4. Otherwise a `node --test` command in a `package.json` script selects
-   `node:test`.
+4. Otherwise a `node --test` or `borp` command in a `package.json` script
+   selects `node:test`.
 5. Otherwise Vitest.
 
 | Runner | Config value | Versions | Runtime of the companion |
@@ -339,6 +339,16 @@ selects one. The default `auto` reads the project in this order:
 | Vitest | `vitest` | 4 and 5 | `node`, then `bun` |
 | `node:test` | `node-test` | Node.js 22.18 to 26 | `node` |
 | `bun test` | `bun-test` | Bun 1.3 and later 1.x releases | `bun` |
+
+`borp` is a test runner that runs `node:test`. The script parser reads the
+test files of a `borp` command in the order of `borp` 1.0:
+
+1. The positional arguments. A glob that starts with `!` excludes files.
+2. Otherwise the glob of `-p` or `--pattern`.
+3. Otherwise the default glob `**/*.test.{js,mjs,cjs,ts,mts,cts}`.
+
+These files are test entry points, so the plan finds the static test files
+of the project. The parser does not read a `.borp.yaml` file.
 
 `--runtime` must name a runtime that the runner accepts. A Bun runtime for
 `node-test`, or a Node runtime for `bun-test`, exits with code 2 and
