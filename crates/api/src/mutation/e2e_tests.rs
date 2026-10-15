@@ -187,6 +187,42 @@ fn a_runner_that_cannot_load_components_leaves_them_out_of_the_plan() {
     assert!(plan.skipped_files.is_empty());
 }
 
+/// A type test (`tsd`, Vitest `*.test-d.ts`) is checked by a compiler, not
+/// run by a test runner. It must not count as a test file of the plan.
+#[test]
+fn a_type_test_is_not_a_test_file_of_the_plan() {
+    let dir = tempfile::tempdir().expect("dir");
+    let write = |path: &str, text: &str| {
+        let target = dir.path().join(path);
+        fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        fs::write(target, text).expect("write");
+    };
+    write(
+        "package.json",
+        r#"{"name":"p","main":"index.ts","devDependencies":{"tsd":"0.31.0"}}"#,
+    );
+    write(
+        "index.ts",
+        "export const add = (a: number, b: number) => a + b;\n",
+    );
+    write(
+        "test/types/index.test-d.ts",
+        "import { expectType } from \"tsd\";\nimport { add } from \"../../index\";\nexpectType<number>(add(1, 2));\n",
+    );
+    let plan = plan_mutation(&options(dir.path(), MutationRunScope::All)).expect("plan");
+    assert!(plan.test_files.is_empty(), "{:?}", plan.test_files);
+    assert!(plan.no_test_files);
+    assert_eq!(plan.counts.planned, 0, "no runner test covers a mutant");
+    assert_eq!(plan.counts.no_coverage, plan.counts.total);
+    assert!(
+        plan.files
+            .iter()
+            .all(|file| file.static_test_files.is_empty()),
+        "{:?}",
+        plan.files
+    );
+}
+
 #[test]
 fn the_plan_uses_the_config_operators_unless_the_caller_names_operators() {
     let project = small_project();

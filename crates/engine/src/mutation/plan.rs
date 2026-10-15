@@ -76,6 +76,9 @@ struct Context<'a> {
     /// The test entry points that reach each selected test-reachable file,
     /// with the `vi.mock` replacement mask of each test applied.
     test_entries: FxHashMap<FileId, Vec<FileId>>,
+    /// The test-reachable files that only type tests reach. No runner test
+    /// covers them.
+    type_test_only: FxHashSet<FileId>,
 }
 
 /// The result for one file.
@@ -115,6 +118,7 @@ pub(super) fn build(
             ranges: None,
         },
         test_entries: FxHashMap::default(),
+        type_test_only: FxHashSet::default(),
     };
     let (candidates, unmatched_paths) = select_files(&context);
     let reachable: Vec<FileId> = candidates
@@ -123,6 +127,13 @@ pub(super) fn build(
         .filter(|&file_id| graph.is_test_reachable(file_id))
         .collect();
     context.test_entries = graph.test_entry_points_reaching(&reachable);
+    for (&file_id, entries) in &mut context.test_entries {
+        let before = entries.len();
+        entries.retain(|&entry| !is_type_test_entry(graph, inputs.root, entry));
+        if before > 0 && entries.is_empty() {
+            context.type_test_only.insert(file_id);
+        }
+    }
     let outcomes: Vec<FileOutcome> = candidates
         .par_iter()
         .map(|candidate| plan_file(&context, candidate))
@@ -160,7 +171,10 @@ pub(super) fn build(
         test_file_reach: reach.reach,
         support_files: super::reach::support_files(graph, inputs.root, inputs.setup_files),
         test_files,
-        no_test_files: graph.test_entry_points.is_empty(),
+        no_test_files: graph
+            .test_entry_points
+            .iter()
+            .all(|&entry| is_type_test_entry(graph, inputs.root, entry)),
         framework_config_checked: inputs.framework_config_exports.is_some(),
         skipped_files,
         unmatched_paths,
@@ -294,7 +308,8 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         Err(MutationError::ReservedName { .. }) => return skipped(SkipReason::ReservedName),
         Err(MutationError::TooLarge) => return skipped(SkipReason::TooLarge),
     };
-    let covered = context.graph.is_test_reachable(candidate.file_id);
+    let covered = context.graph.is_test_reachable(candidate.file_id)
+        && !context.type_test_only.contains(&candidate.file_id);
     let facts = FileFacts::new(context, candidate, module, source);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
     attach_test_reach(context, candidate, source, covered, &mut mutants);
@@ -764,6 +779,32 @@ fn static_test_files(context: &Context<'_>, file_id: FileId) -> Vec<String> {
     tests.into_iter().collect()
 }
 
+/// File-name markers of a type test (`index.test-d.ts`, `a.spec-d.ts`).
+const TYPE_TEST_FILE_MARKERS: &[&str] = &[".test-d.", ".spec-d."];
+
+/// The directory of `tsd` type tests.
+const TYPE_TEST_DIR_NAME: &str = "test-d";
+
+/// True when the test entry point is a type test (`tsd`, `expect-type`, the
+/// Vitest type-check files). A compiler checks a type test, and no test
+/// runner executes it, so it never covers a mutant.
+fn is_type_test_entry(graph: &ModuleGraph, root: &Path, entry: FileId) -> bool {
+    graph
+        .modules
+        .get(entry.0 as usize)
+        .is_some_and(|node| is_type_test_path(&relative_key_path(&node.path, root)))
+}
+
+fn is_type_test_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let mut segments = lower.split('/').rev();
+    let name = segments.next().unwrap_or_default();
+    TYPE_TEST_FILE_MARKERS
+        .iter()
+        .any(|marker| name.contains(marker))
+        || segments.any(|segment| segment == TYPE_TEST_DIR_NAME)
+}
+
 const fn is_ranked(disposition: MutantDisposition) -> bool {
     matches!(
         disposition,
@@ -836,6 +877,26 @@ fn count(mutants: &[PlannedMutant]) -> MutationPlanCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn type_tests_are_named_by_marker_or_test_d_directory() {
+        for path in [
+            "test/types/index.test-d.ts",
+            "src/a.spec-d.tsx",
+            "test-d/index.ts",
+            "packages/x/Test-D/a.ts",
+        ] {
+            assert!(is_type_test_path(path), "{path}");
+        }
+        for path in [
+            "test/a.test.ts",
+            "src/test-data.ts",
+            "test-d.ts",
+            "src/a-test-d.ts",
+        ] {
+            assert!(!is_type_test_path(path), "{path}");
+        }
+    }
 
     /// `(line, top_level, in_diff)` for each mutant of the source when line 1
     /// is the only added line.

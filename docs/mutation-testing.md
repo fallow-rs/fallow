@@ -367,6 +367,16 @@ selects one. The default `auto` reads the project in this order:
   the first decision. `--plan` uses the same rule, so the plan and the run
   agree.
 
+### Type tests
+
+A type test (`*.test-d.ts`, `*.spec-d.ts`, or a file below a `test-d`
+directory) is not a test file of the plan. A compiler checks it (`tsd`,
+`expect-type`, the Vitest type check), and no runner executes it. Before this
+rule, a `tsd` file was the only static test file of some projects. The dry run
+then ran it as a runtime test, it failed as a baseline failure, and runner
+detection read its imports. A project whose only test entry points are type
+tests has `no_test_files: true`.
+
 ## Runner notes
 
 `runner.notes` lists facts of the runner setup that limit the result. The key
