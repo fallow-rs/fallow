@@ -138,12 +138,148 @@ pub fn clone_group_spread(instances: &[CloneInstance]) -> usize {
 pub fn clone_location_spread<'a>(
     locations: impl IntoIterator<Item = (&'a Path, usize, usize)>,
 ) -> usize {
+    let mut locations = locations.into_iter();
+    let mut small = SmallFileSet::default();
     let mut location_count = 0;
+    while let Some((file, start_line, end_line)) = locations.next() {
+        location_count += 1;
+        if small.include(file, start_line, end_line) {
+            continue;
+        }
+        let new_file = FileLines::new(file, start_line, end_line);
+        if !small.push(new_file) {
+            return large_location_spread(&small, new_file, locations);
+        }
+    }
+
+    if location_count < 2 {
+        return 0;
+    }
+    small.spread()
+}
+
+/// The number of files that [`clone_location_spread`] keeps on the stack.
+/// Most clone groups span two or three files.
+const SMALL_FILE_SET_LIMIT: usize = 8;
+
+/// The line range of the locations in one file.
+#[derive(Clone, Copy)]
+struct FileLines<'a> {
+    file: &'a Path,
+    min_end: usize,
+    max_start: usize,
+    occurrences: usize,
+}
+
+impl<'a> FileLines<'a> {
+    const fn new(file: &'a Path, start_line: usize, end_line: usize) -> Self {
+        Self {
+            file,
+            min_end: end_line,
+            max_start: start_line,
+            occurrences: 1,
+        }
+    }
+
+    fn include(&mut self, start_line: usize, end_line: usize) {
+        self.min_end = self.min_end.min(end_line);
+        self.max_start = self.max_start.max(start_line);
+        self.occurrences += 1;
+    }
+
+    fn same_file_spread(&self) -> usize {
+        self.max_start
+            .saturating_sub(self.min_end)
+            .saturating_sub(1)
+            .div_ceil(SAME_FILE_SPREAD_STEP)
+    }
+}
+
+/// The files of a small clone group, without a heap allocation.
+#[derive(Default)]
+struct SmallFileSet<'a> {
+    files: [Option<FileLines<'a>>; SMALL_FILE_SET_LIMIT],
+    len: usize,
+}
+
+impl<'a> SmallFileSet<'a> {
+    fn iter(&self) -> impl Iterator<Item = &FileLines<'a>> {
+        self.files[..self.len].iter().flatten()
+    }
+
+    /// Add a location to its file. Returns `false` when the file is new.
+    fn include(&mut self, file: &Path, start_line: usize, end_line: usize) -> bool {
+        let Some(lines) = self.files[..self.len]
+            .iter_mut()
+            .flatten()
+            .find(|lines| lines.file == file)
+        else {
+            return false;
+        };
+        lines.include(start_line, end_line);
+        true
+    }
+
+    /// Add a new file. Returns `false` when the set is full.
+    fn push(&mut self, lines: FileLines<'a>) -> bool {
+        let Some(slot) = self.files.get_mut(self.len) else {
+            return false;
+        };
+        *slot = Some(lines);
+        self.len += 1;
+        true
+    }
+
+    /// The spread of the set: the largest same-file spread or the largest
+    /// directory distance between two files. With few files, the pairwise
+    /// maximum is the tree diameter.
+    fn spread(&self) -> usize {
+        let same_file_max = self
+            .iter()
+            .filter(|lines| lines.occurrences >= 2)
+            .map(FileLines::same_file_spread)
+            .max()
+            .unwrap_or(0);
+        let mut diameter = 0;
+        for (index, left) in self.iter().enumerate() {
+            for right in self.iter().skip(index + 1) {
+                diameter = diameter.max(parent_distance(left.file, right.file));
+            }
+        }
+        same_file_max.max(diameter)
+    }
+}
+
+/// The number of parent-directory steps between two files, read in one pass
+/// over each path.
+fn parent_distance(left: &Path, right: &Path) -> usize {
+    let mut left = left.parent().unwrap_or_else(|| Path::new("")).components();
+    let mut right = right.parent().unwrap_or_else(|| Path::new("")).components();
+    loop {
+        match (left.next(), right.next()) {
+            (Some(left_part), Some(right_part)) if left_part == right_part => {}
+            (Some(_), Some(_)) => return 2 + left.count() + right.count(),
+            (Some(_), None) => return 1 + left.count(),
+            (None, Some(_)) => return 1 + right.count(),
+            (None, None) => return 0,
+        }
+    }
+}
+
+/// The spread of a clone group with more files than [`SmallFileSet`] holds.
+fn large_location_spread<'a>(
+    small: &SmallFileSet<'a>,
+    pending: FileLines<'a>,
+    rest: impl Iterator<Item = (&'a Path, usize, usize)>,
+) -> usize {
     let mut file_indices: FxHashMap<&'a Path, usize> = FxHashMap::default();
     let mut by_file: Vec<FileSpread<'a>> = Vec::new();
+    for lines in small.iter().copied().chain(std::iter::once(pending)) {
+        file_indices.insert(lines.file, by_file.len());
+        by_file.push(FileSpread::from_lines(lines));
+    }
 
-    for (file, start_line, end_line) in locations {
-        location_count += 1;
+    for (file, start_line, end_line) in rest {
         let next_index = by_file.len();
         match file_indices.entry(file) {
             Entry::Occupied(entry) => by_file[*entry.get()].include(start_line, end_line),
@@ -152,10 +288,6 @@ pub fn clone_location_spread<'a>(
                 by_file.push(FileSpread::new(file, start_line, end_line));
             }
         }
-    }
-
-    if location_count < 2 {
-        return 0;
     }
 
     let same_file_max = by_file
@@ -176,6 +308,15 @@ struct FileSpread<'a> {
 }
 
 impl<'a> FileSpread<'a> {
+    fn from_lines(lines: FileLines<'a>) -> Self {
+        Self {
+            parent_components: path_parent_components(lines.file),
+            min_end: lines.min_end,
+            max_start: lines.max_start,
+            occurrences: lines.occurrences,
+        }
+    }
+
     fn new(file: &'a Path, start_line: usize, end_line: usize) -> Self {
         Self {
             parent_components: path_parent_components(file),
@@ -753,8 +894,10 @@ mod tests {
         proptest! {
             #[test]
             fn optimized_spread_matches_pairwise_reference(
-                entries in prop::collection::vec((0_u8..8, 1_usize..4_000, 1_usize..500), 0..80)
+                entries in prop::collection::vec((0_u8..16, 1_usize..4_000, 1_usize..500), 0..80)
             ) {
+                // More paths than the small file set holds, so a group can
+                // move to the large path. Two spellings name an earlier path.
                 let paths = [
                     "src/a.ts",
                     "src/b.ts",
@@ -764,6 +907,14 @@ mod tests {
                     "/repo/apps/web/f.ts",
                     "/repo/crates/core/g.ts",
                     "h.ts",
+                    "src//a.ts",
+                    "./src/b.ts",
+                    "packages/c/src/i.ts",
+                    "packages/c/src/deep/j.ts",
+                    "apps/web/k.ts",
+                    "apps/api/src/l.ts",
+                    "tools/m.ts",
+                    "n.ts",
                 ];
                 let instances = entries
                     .into_iter()
