@@ -1342,3 +1342,51 @@ fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
         "{text}"
     );
 }
+
+fn skipped(path: &str, reason: &str) -> fallow_output::MutationSkippedFile {
+    fallow_output::MutationSkippedFile {
+        path: path.to_owned(),
+        reason: reason.to_owned(),
+    }
+}
+
+#[test]
+fn skipped_files_get_one_line_with_the_count_of_each_reason() {
+    let mut run = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::Killed)],
+        vec![MutationIncompleteReason::SkippedFiles],
+    );
+    run.skipped_files = vec![
+        skipped("src/A.vue", "runner-cannot-load"),
+        skipped("src/b.ts", "parse"),
+        skipped("src/C.vue", "runner-cannot-load"),
+    ];
+    let text = run_text(&run, &OPTIONS);
+    assert!(
+        text.contains("Skipped files: 1 parse, 2 runner-cannot-load (see --format json)\n"),
+        "{text}"
+    );
+
+    let plan = MutationPlanOutput {
+        schema_version: MutationPlanSchemaVersion::V1,
+        version: ToolVersion("0.0.0".to_owned()),
+        elapsed_ms: ElapsedMs(0),
+        scope: MutationScopeOutput {
+            kind: MutationScopeKind::All,
+            base_ref: None,
+        },
+        counts: MutationPlanCountsOutput::default(),
+        mutants: Vec::new(),
+        files: Vec::new(),
+        test_files: Vec::new(),
+        no_test_files: false,
+        framework_config_checked: true,
+        skipped_files: vec![skipped("src/A.vue", "runner-cannot-load")],
+        unmatched_paths: Vec::new(),
+    };
+    let text = plain(&render_plan(&plan));
+    assert!(
+        text.contains("Skipped files: 1 runner-cannot-load (see --format json)\n"),
+        "{text}"
+    );
+}

@@ -13,8 +13,8 @@ use colored::Colorize as _;
 use fallow_output::{
     MutantResult, MutantStatus, MutationCompletionStatus, MutationInspectOutput,
     MutationInspectStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
-    MutationScopeKind, MutationScopeOutput, MutationStaleReason, MutationTypecheckOutput,
-    TestReachClass,
+    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
+    MutationTypecheckOutput, TestReachClass,
 };
 use rustc_hash::FxHashMap;
 
@@ -470,6 +470,14 @@ fn prune_counts<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
         .join(", ")
 }
 
+/// One line with the count of each skip reason, or nothing.
+fn write_skipped_files(out: &mut String, skipped: &[MutationSkippedFile]) {
+    let counts = prune_counts(skipped.iter().map(|file| file.reason.as_str()));
+    if !counts.is_empty() {
+        let _ = writeln!(out, "Skipped files: {counts} (see --format json)");
+    }
+}
+
 fn render_footer_lines(out: &mut String, report: &MutationReport) {
     let mut footer = String::new();
     let pruned = prune_counts(
@@ -481,6 +489,7 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
     if !pruned.is_empty() {
         let _ = writeln!(footer, "Pruned: {pruned}");
     }
+    write_skipped_files(&mut footer, &report.skipped_files);
     if let Some(verdicts) = &report.verdicts {
         let _ = writeln!(
             footer,
@@ -729,6 +738,7 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
     if !pruned_by_reason.is_empty() {
         let _ = writeln!(out, "Pruned: {pruned_by_reason}");
     }
+    write_skipped_files(&mut out, &plan.skipped_files);
     let no_coverage_reach = reach_counts(
         plan.mutants
             .iter()

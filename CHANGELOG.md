@@ -98,6 +98,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     from the `vitest` dependency, the test module that the test files
     import, a Bun file at the root, or a `node --test` script. `node:test`
     and `bun test` run each test file in its own process. (#3407)
+    Neither runtime can load a Vue, Svelte or Astro component, so with
+    these runners the plan leaves component files out with the skip reason
+    `runner-cannot-load`, and their mutants do not lower the coverage.
+    The human output prints one `Skipped files:` line. (#3470)
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /

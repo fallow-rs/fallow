@@ -264,6 +264,9 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
             reason,
         }),
     };
+    if context.request.skip_component_files && matches!(candidate.layout, Layout::Component(_)) {
+        return skipped(SkipReason::RunnerCannotLoad);
+    }
     let Some(module) = candidate.module else {
         return skipped(SkipReason::NotAnalyzed);
     };
