@@ -59,17 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Fallow cache. The key covers the mutant, its covering tests, the content
     of the covering test files and the files that they import, the runner
     setup files (also the Bun `preload` files), the lockfile, the runner
-    config and the runner. A change to one of them
-    runs the mutant again. Dynamic imports that the module graph does not
-    resolve, and files that a test reads, are not in the key. Each cache entry
-    and the `cache` object of the report record this limit. A reused result
-    has `cached: true`. `--no-cache` runs each mutant.
-    setup files, the lockfile, the runner config and the files that it
-    imports, and the configs that the root `tsconfig.json` extends. A change
-    to one of them runs the mutant again. Dynamic imports that the module
-    graph does not resolve, and files that a test reads, are not in the key.
-    Each cache entry and the `cache` object of the report record this limit.
-    A reused result has `cached: true`. `--no-cache` runs each mutant.
+    config and the files that it imports, the configs that the root
+    `tsconfig.json` extends, and the runner. A change to one of them runs the
+    mutant again. Dynamic imports that the module graph does not resolve, and
+    files that a test reads, are not in the key. Each cache entry and the
+    `cache` object of the report record this limit. A reused result has
+    `cached: true`. `--no-cache` runs each mutant.
   - Each run writes the instrumented files to a run directory in the Fallow
     cache. A staging directory and a rename install it, so a concurrent run
     on the same plan never reads a partial file. A run reuses a directory
