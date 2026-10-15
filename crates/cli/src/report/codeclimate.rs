@@ -810,6 +810,9 @@ fn envelope_fingerprint(rule_id: &str, path: &str, line: u32, message: &str) -> 
         return codeclimate_fingerprint_hash(&[rule_id, subject]);
     }
     let line = line.to_string();
+    if rule_id.starts_with("fallow/css-") {
+        return codeclimate_fingerprint_hash(&[rule_id, path, &line, message]);
+    }
     if let Some(subject) = first_quoted_subject(message) {
         codeclimate_fingerprint_hash(&[rule_id, path, &line, subject])
     } else {

@@ -1,4 +1,4 @@
-declare const lazyLoad: (load: () => Promise<unknown>) => unknown;
+import { lazy as lazyLoad } from 'react';
 
 const loadView = () => import('./view');
 export const View = lazyLoad(loadView);

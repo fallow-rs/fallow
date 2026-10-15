@@ -1,5 +1,5 @@
 //! The built-in test runners of JavaScript runtimes: `node --test`,
-//! `bun test`, and `deno test`.
+//! `bun test`, and `deno test`, plus `borp`, which runs `node:test`.
 //!
 //! Without file arguments, each runner searches the working directory for
 //! files that match its default patterns and runs each one. With a directory
@@ -21,6 +21,8 @@
 //! The `node --test` directory search follows Node 20. Node 21 and later
 //! read each positional argument as a glob and do not search a directory, so
 //! `node --test test/` reports an error there.
+
+use super::borp;
 
 /// The source extensions of the `node --test` defaults. The TypeScript
 /// extensions apply when Node strips types.
@@ -111,6 +113,9 @@ pub(super) fn takes_non_module_value(token: &str) -> bool {
 /// test runner. The value of a flag is not a test file, unless the module
 /// runs in the test process (`--import`, `--require`).
 pub(super) fn test_file_args(binary: &str, args: &[&str], file_args: &[String]) -> Vec<String> {
+    if borp::is_borp(binary) {
+        return borp::test_files(args);
+    }
     if !runs_tests(binary, args) {
         return Vec::new();
     }
@@ -145,6 +150,9 @@ pub(super) fn with_default_test_patterns(
     args: &[&str],
     mut file_args: Vec<String>,
 ) -> Vec<String> {
+    if borp::is_borp(binary) {
+        return borp::with_test_files(args, file_args);
+    }
     let Some(runner) = TestRunner::of(binary, args) else {
         return file_args;
     };

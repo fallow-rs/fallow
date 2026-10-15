@@ -5,7 +5,9 @@ Use this file when editing `crates/cli/**`.
 ## Ownership
 
 - `main.rs`: thin binary delegator to the reusable CLI library.
-- `lib.rs`: clap definition, top-level command dispatch, and multicall command surface.
+- `lib.rs`: run entry point, startup and pre-dispatch checks, and multicall command surface.
+- `cli_args.rs`: clap definition (`Cli`, `Command`, and the subcommand argument enums).
+- `dispatch.rs`: `dispatch_subcommand` and the per-command `dispatch_*` functions.
 - `check/`: dead-code command filters, severity handling, workspace filtering, and baseline routing.
 - `audit.rs`: changed-code audit orchestration and base snapshot comparison.
 - `report/`: user-visible and machine-readable output formats.

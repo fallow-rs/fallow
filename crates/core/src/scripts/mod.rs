@@ -9,6 +9,7 @@
 //! runners (`npx`, `pnpm exec`, `yarn dlx`), and Node.js runners (`node`, `tsx`,
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
+mod borp;
 pub mod ci;
 #[cfg(test)]
 mod command_forms_tests;
@@ -5360,6 +5361,66 @@ mod tests {
                 result.entry_files
             );
         }
+    }
+
+    #[test]
+    fn borp_scripts_record_test_entry_files() {
+        let borp_default = vec!["**/*.test.{js,mjs,cjs,ts,mts,cts}"];
+        for (script, expected) in [
+            ("borp -p 'test/**/*.js'", vec!["test/**/*.js"]),
+            (
+                "borp --pattern \"test/**/*.test.ts\"",
+                vec!["test/**/*.test.ts"],
+            ),
+            (
+                "borp --pattern=test/**/*.mjs --coverage",
+                vec!["test/**/*.mjs"],
+            ),
+            ("npx borp -C -p 'test/*.js'", vec!["test/*.js"]),
+            ("borp", borp_default.clone()),
+            ("borp --coverage --check-coverage -c 1", borp_default),
+            (
+                "borp -C -c 1 test/a.test.js test/b.test.js",
+                vec!["test/a.test.js", "test/b.test.js"],
+            ),
+            (
+                "borp -p 'src/**/*.js' test/a.test.js",
+                vec!["test/a.test.js"],
+            ),
+            (
+                "borp 'test/**/*.test.js' '!test/fixtures/**'",
+                vec!["test/**/*.test.js"],
+            ),
+            (
+                "borp -r ./test/reporter.js -i 'test/fixtures/**' -p 'test/*.js'",
+                vec!["test/*.js"],
+            ),
+        ] {
+            let result = analyze_command(script, Path::new("/nonexistent"), &FxHashMap::default());
+            assert_eq!(result.test_entry_files, expected, "`{script}`");
+            assert!(
+                expected
+                    .iter()
+                    .all(|file| result.entry_files.contains(&(*file).to_string())),
+                "`{script}` keeps the files as entry files: {:?}",
+                result.entry_files
+            );
+            assert!(
+                !result.entry_files.iter().any(|file| file.starts_with('!')),
+                "`{script}` keeps no exclusion glob as an entry file: {:?}",
+                result.entry_files
+            );
+        }
+    }
+
+    #[test]
+    fn borp_flag_values_that_name_no_test_file_are_not_entry_files() {
+        let result = analyze_command(
+            "borp -p 'src/**/*.js' -i 'test/fixtures/**' -X 'test/**' test/a.test.js",
+            Path::new("/nonexistent"),
+            &FxHashMap::default(),
+        );
+        assert_eq!(result.entry_files, vec!["test/a.test.js"]);
     }
 
     #[test]

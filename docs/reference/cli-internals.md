@@ -7,8 +7,9 @@ inventory.
 ## Ownership
 
 - `crates/cli/src/main.rs` is a thin binary delegator.
-- `crates/cli/src/lib.rs` owns Clap definitions, top-level dispatch, and the
-  multicall surface.
+- `crates/cli/src/lib.rs` owns the run entry point and the multicall surface.
+- `crates/cli/src/cli_args.rs` owns the Clap definitions.
+- `crates/cli/src/dispatch.rs` owns subcommand dispatch.
 - `crates/cli/src/check/`, `audit.rs`, `dupes.rs`, `health/`, `security.rs`,
   and `coverage/` translate CLI options into engine or API calls.
 - `crates/cli/src/report/` owns terminal rendering and CLI format dispatch.
@@ -345,7 +346,7 @@ after every gate set the exit code.
   `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT`, then `health.coverage` /
   `health.coverageRoot`, then auto-detection.
   `fallow_api::coverage::resolve_coverage_inputs` is the single, pure owner of
-  that order (#2368); `resolve_coverage_inputs` in `crates/cli/src/lib.rs`
+  that order (#2368); `resolve_coverage_inputs` in `crates/cli/src/dispatch.rs`
   reads the env vars at the CLI boundary, loads config lazily, and delegates,
   and the MCP `audit` / `check_health` typed route delegates the same way. The
   resolved paths land in `AuditOptions`, so the head pass, the base-worktree
@@ -812,7 +813,7 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
 ## Trace targets
 
 - `fallow trace` has three targets. `dispatch_trace_command`
-  (`crates/cli/src/lib.rs`) runs `trace_path::run_trace_path` for `--path`
+  (`crates/cli/src/dispatch.rs`) runs `trace_path::run_trace_path` for `--path`
   and `trace_chain::run_trace` for a `FILE:SYMBOL`. `--dependency` goes to
   `dispatch_trace_dependency` and `trace_dependency::run_trace_dependency`.
 - `fallow trace --dependency` and `fallow dead-code --trace-dependency` build

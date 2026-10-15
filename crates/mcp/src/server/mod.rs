@@ -20,17 +20,17 @@ use crate::params::{
     TraceErrorParams, TraceExportParams, TraceFileParams, TraceImportPathParams,
 };
 use crate::tools::{
-    execute_code_mode, inspect_target, run_analyze, run_architecture, run_audit, run_check_changed,
-    run_check_runtime_coverage, run_decision_surface, run_explain, run_feature_flags,
-    run_find_dupes, run_find_similar_code, run_fix_apply, run_fix_preview, run_get_blast_radius,
-    run_get_cleanup_candidates, run_get_cloud_deployment_changes, run_get_cloud_review_packet,
-    run_get_cloud_runtime_context, run_get_hot_paths, run_get_importance,
-    run_get_token_blast_radius, run_guard, run_health, run_impact, run_impact_all,
-    run_impact_closure, run_inspect_similar_code, run_list_boundaries, run_list_suppressions,
-    run_mutation_inspect, run_mutation_plan, run_project_info, run_recommend,
-    run_security_candidates, run_symbol_impact, run_symbol_trace, run_trace_clone_tool,
-    run_trace_dependency_tool, run_trace_error_tool, run_trace_export_tool, run_trace_file_tool,
-    run_trace_import_path_tool, with_request_cancellation,
+    execute_code_mode, inspect_target, request_cancellation, run_analyze, run_architecture,
+    run_audit, run_check_changed, run_check_runtime_coverage, run_decision_surface, run_explain,
+    run_feature_flags, run_find_dupes, run_find_similar_code, run_fix_apply, run_fix_preview,
+    run_get_blast_radius, run_get_cleanup_candidates, run_get_cloud_deployment_changes,
+    run_get_cloud_review_packet, run_get_cloud_runtime_context, run_get_hot_paths,
+    run_get_importance, run_get_token_blast_radius, run_guard, run_health, run_impact,
+    run_impact_all, run_impact_closure, run_inspect_similar_code, run_list_boundaries,
+    run_list_suppressions, run_mutation_inspect, run_mutation_plan, run_project_info,
+    run_recommend, run_security_candidates, run_symbol_impact, run_symbol_trace,
+    run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool, run_trace_export_tool,
+    run_trace_file_tool, run_trace_import_path_tool, with_request_cancellation,
 };
 
 #[cfg(test)]
@@ -92,7 +92,10 @@ impl FallowMcp {
     ) -> Result<CallToolResult, McpError> {
         let binary = self.binary.clone();
         let params = params.0;
-        tokio::task::spawn_blocking(move || execute_code_mode(binary, params))
+        // The blocking thread is outside the task-local request scope, so the
+        // token goes to the snippet as an argument.
+        let request = request_cancellation();
+        tokio::task::spawn_blocking(move || execute_code_mode(binary, params, request))
             .await
             .map_err(|err| McpError::internal_error(format!("code mode task failed: {err}"), None))
             .map(|result| match result {

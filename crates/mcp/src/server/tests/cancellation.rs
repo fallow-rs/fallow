@@ -9,8 +9,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use super::super::FallowMcp;
 
 const GIVE_UP: Duration = Duration::from_secs(60);
-/// Far below the fake CLI sleep and the 120 s tool deadline, so only the
-/// cancel can end the subprocess in time.
+/// Below the fake CLI sleep, the 120 s tool deadline and the 30 s Code Mode
+/// deadline, so only the cancel can end the subprocess in time.
 const EXIT_WAIT: Duration = Duration::from_secs(20);
 
 async fn send(writer: &mut (impl AsyncWriteExt + Unpin), message: serde_json::Value) {
@@ -71,13 +71,12 @@ async fn wait_for_exit(pid: u32) -> bool {
     true
 }
 
-#[tokio::test]
-async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
+/// Write a fake CLI that records its PID and then sleeps far past every
+/// deadline of the test.
+fn fake_cli(dir: &std::path::Path, pid_path: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
-    let temp = tempfile::tempdir().expect("temp directory");
-    let pid_path = temp.path().join("cli.pid");
-    let binary = temp.path().join("fake-fallow");
+    let binary = dir.join("fake-fallow");
     std::fs::write(
         &binary,
         format!(
@@ -88,6 +87,16 @@ async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
     .expect("write the fake CLI");
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
         .expect("make the fake CLI executable");
+    binary
+}
+
+/// Start a server on the fake CLI, send `tools/call` request 2 with `name`
+/// and `arguments`, cancel it once the CLI runs, and report whether the CLI
+/// process exited in time.
+async fn cancel_tool_call(name: &str, arguments: serde_json::Value) -> (u32, bool) {
+    let temp = tempfile::tempdir().expect("temp directory");
+    let pid_path = temp.path().join("cli.pid");
+    let binary = fake_cli(temp.path(), &pid_path);
 
     let server = FallowMcp {
         binary: binary.to_string_lossy().into_owned(),
@@ -131,7 +140,7 @@ async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
-            "params": { "name": "list_suppressions", "arguments": {} }
+            "params": { "name": name, "arguments": arguments }
         }),
     )
     .await;
@@ -153,9 +162,32 @@ async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
             .status();
     }
     running.abort();
+    (pid, exited)
+}
 
+#[tokio::test]
+async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
+    let (pid, exited) = cancel_tool_call("list_suppressions", serde_json::json!({})).await;
     assert!(
         exited,
         "the cancelled call left its subprocess {pid} running"
+    );
+}
+
+/// Code Mode runs its snippet on a blocking thread, outside the request
+/// scope. The cancel must still reach the subprocess of a host call.
+#[tokio::test]
+async fn a_client_cancel_kills_the_subprocess_of_a_code_mode_host_call() {
+    let (pid, exited) = cancel_tool_call(
+        "code_execute",
+        serde_json::json!({
+            "code": "return fallow.analyze({});",
+            "timeout_ms": 30_000
+        }),
+    )
+    .await;
+    assert!(
+        exited,
+        "the cancelled Code Mode call left its subprocess {pid} running"
     );
 }

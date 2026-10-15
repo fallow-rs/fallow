@@ -128,6 +128,7 @@ fn e2e_code_execute_runs_project_info_on_basic_project() {
             timeout_ms: Some(10_000),
             max_output_bytes: Some(1_000_000),
         },
+        None,
     )
     .unwrap_or_else(|err| panic!("code mode should succeed: {err}"));
 
@@ -172,6 +173,7 @@ fn e2e_code_execute_batches_real_analyses_and_reuses_the_memo() {
             timeout_ms: Some(30_000),
             max_output_bytes: Some(4_000_000),
         },
+        None,
     )
     .unwrap_or_else(|err| panic!("batched code mode should succeed: {err}"));
 
@@ -205,6 +207,7 @@ fn e2e_code_execute_enforces_host_output_limit() {
             timeout_ms: Some(10_000),
             max_output_bytes: Some(1),
         },
+        None,
     )
     .expect_err("code mode should cap host output");
 
@@ -231,6 +234,7 @@ fn e2e_code_execute_rejects_fix_apply() {
             timeout_ms: Some(1_000),
             max_output_bytes: Some(10_000),
         },
+        None,
     )
     .expect_err("code mode should reject fix_apply");
 
@@ -720,6 +724,7 @@ fn e2e_code_execute_trace_dependency_accepts_usage_fields() {
             timeout_ms: Some(30_000),
             max_output_bytes: Some(1_000_000),
         },
+        None,
     )
     .unwrap_or_else(|err| panic!("code mode should succeed: {err}"));
     let json: serde_json::Value = serde_json::from_str(&output)

@@ -2002,8 +2002,56 @@ fn introduced_label(item: &Value) -> &'static str {
     match item.get("introduced").and_then(Value::as_bool) {
         Some(true) => "new",
         Some(false) => "inherited",
-        None => "-",
+        None => "unknown",
     }
+}
+
+fn audit_rule_severity(item: &Value) -> &'static str {
+    match item
+        .get("effective_severity")
+        .or_else(|| item.get("severity"))
+        .and_then(Value::as_str)
+    {
+        Some("error") => "error",
+        Some("warn") => "warn",
+        _ => "unknown",
+    }
+}
+
+fn audit_priority(env: &Value, severity: &str, status: &str) -> (u8, u8) {
+    let severity = match severity {
+        "error" => 0,
+        "warn" => 1,
+        _ => 2,
+    };
+    let status = if env["attribution"]["gate"] == "new-only" {
+        match status {
+            "new" => 0,
+            "inherited" => 1,
+            _ => 2,
+        }
+    } else {
+        0
+    };
+    (severity, status)
+}
+
+fn sorted_audit_findings<'a>(env: &Value, section: &'a Value, key: &str) -> Vec<&'a Value> {
+    let mut findings: Vec<&Value> = arr(section, key).collect();
+    findings.sort_by(|a, b| {
+        audit_priority(env, audit_rule_severity(a), introduced_label(a))
+            .cmp(&audit_priority(
+                env,
+                audit_rule_severity(b),
+                introduced_label(b),
+            ))
+            .then_with(|| s(a, "path").cmp(s(b, "path")))
+            .then_with(|| u(a, "line").cmp(&u(b, "line")))
+            .then_with(|| s(a, "name").cmp(s(b, "name")))
+            .then_with(|| s(a, "code").cmp(s(b, "code")))
+            .then_with(|| s(a, "value").cmp(s(b, "value")))
+    });
+    findings
 }
 
 struct AuditRow {
@@ -2011,6 +2059,7 @@ struct AuditRow {
     location: String,
     item: String,
     status: &'static str,
+    severity: &'static str,
 }
 
 fn audit_row(kind: &'static str, location: String, item: String, finding: &Value) -> AuditRow {
@@ -2019,6 +2068,7 @@ fn audit_row(kind: &'static str, location: String, item: String, finding: &Value
         location,
         item,
         status: introduced_label(finding),
+        severity: audit_rule_severity(finding),
     }
 }
 
@@ -2441,7 +2491,7 @@ fn audit_dead_code_rows(dead_code: &Value) -> Vec<AuditRow> {
 
 fn audit_complexity_section(env: &Value) -> String {
     let complexity = env.get("complexity").cloned().unwrap_or(Value::Null);
-    let findings: Vec<&Value> = arr(&complexity, "findings").collect();
+    let findings = sorted_audit_findings(env, &complexity, "findings");
     if findings.is_empty() {
         return String::new();
     }
@@ -2450,10 +2500,11 @@ fn audit_complexity_section(env: &Value) -> String {
         .take(15)
         .map(|it| {
             format!(
-                "| {} | {} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                 path_line_cell(it),
                 code_cell(it, "name"),
                 introduced_label(it),
+                audit_rule_severity(it),
                 markdown_table_text(str_or(it, "severity", "moderate")),
                 num(it, "cyclomatic"),
                 num(it, "cognitive"),
@@ -2474,7 +2525,7 @@ fn audit_complexity_section(env: &Value) -> String {
         String::new()
     };
     format!(
-        "### Complexity\n\n| File | Function | Status | Severity | Cyclomatic | Cognitive | Coverage | CRAP |\n|:-----|:---------|:-------|:---------|:-----------|:----------|:---------|:-----|\n{rows}{tail}{}\n\n",
+        "### Complexity\n\n| File | Function | Status | Rule severity | Complexity band | Cyclomatic | Cognitive | Coverage | CRAP |\n|:-----|:---------|:-------|:--------------|:----------------|:-----------|:----------|:---------|:-----|\n{rows}{tail}{}\n\n",
         audit_coverage_model_note(&complexity),
     )
 }
@@ -2528,7 +2579,16 @@ fn audit_coverage_model_note(complexity: &Value) -> String {
 
 fn audit_duplication_section(env: &Value) -> String {
     let duplication = env.get("duplication").cloned().unwrap_or(Value::Null);
-    let groups: Vec<&Value> = arr(&duplication, "clone_groups").collect();
+    let mut groups: Vec<&Value> = arr(&duplication, "clone_groups").collect();
+    groups.sort_by(|a, b| {
+        audit_priority(env, "unknown", introduced_label(a))
+            .cmp(&audit_priority(env, "unknown", introduced_label(b)))
+            .then_with(|| s(&a["instances"][0], "file").cmp(s(&b["instances"][0], "file")))
+            .then_with(|| {
+                u(&a["instances"][0], "start_line").cmp(&u(&b["instances"][0], "start_line"))
+            })
+            .then_with(|| u(a, "token_count").cmp(&u(b, "token_count")))
+    });
     if groups.is_empty() {
         return String::new();
     }
@@ -2587,11 +2647,44 @@ fn audit_duplication_section(env: &Value) -> String {
     )
 }
 
+fn audit_styling_section(env: &Value) -> String {
+    let findings = sorted_audit_findings(env, &env["complexity"], "styling_findings");
+    if findings.is_empty() {
+        return String::new();
+    }
+    let rows = findings
+        .iter()
+        .take(15)
+        .map(|finding| {
+            format!(
+                "| {} | {} | {} | {} | {} |",
+                code_cell(finding, "code"),
+                path_line(finding),
+                code_cell(finding, "value"),
+                introduced_label(finding),
+                audit_rule_severity(finding),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tail = if findings.len() > 15 {
+        format!(
+            "\n\n> {} more styling findings in the full audit report",
+            findings.len() - 15,
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "### Styling\n\n| Rule | Location | Value | Status | Rule severity |\n|:-----|:---------|:------|:-------|:--------------|\n{rows}{tail}\n\n"
+    )
+}
+
 /// The diff-risk findings of an audit. Every finding is introduced by the
 /// change and can set the verdict, so the summary lists each one.
 fn audit_diff_risk_section(env: &Value) -> String {
     let diff_risk = env.get("diff_risk").cloned().unwrap_or(Value::Null);
-    let findings: Vec<&Value> = arr(&diff_risk, "findings").collect();
+    let findings = sorted_audit_findings(env, &diff_risk, "findings");
     if findings.is_empty() {
         return String::new();
     }
@@ -2646,10 +2739,16 @@ fn audit_category_row(
     {
         return format!("| {label} | skipped | - | - |");
     }
+    let count = |suffix: &str| {
+        attribution
+            .get(format!("{attribution_prefix}_{suffix}"))
+            .and_then(Value::as_u64)
+            .map_or_else(|| "unknown".to_owned(), |count| count.to_string())
+    };
     format!(
         "| {label} | {findings} | {} | {} |",
-        num(attribution, &format!("{attribution_prefix}_introduced")),
-        num(attribution, &format!("{attribution_prefix}_inherited")),
+        count("introduced"),
+        count("inherited"),
     )
 }
 
@@ -2660,7 +2759,14 @@ fn render_audit_summary(env: &Value) -> String {
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let attribution = env.get("attribution").cloned().unwrap_or(Value::Null);
     let dead_code = env.get("dead_code").cloned().unwrap_or(Value::Null);
-    let dead_rows = audit_dead_code_rows(&dead_code);
+    let mut dead_rows = audit_dead_code_rows(&dead_code);
+    dead_rows.sort_by(|a, b| {
+        audit_priority(env, a.severity, a.status)
+            .cmp(&audit_priority(env, b.severity, b.status))
+            .then_with(|| a.location.cmp(&b.location))
+            .then_with(|| a.kind.cmp(b.kind))
+            .then_with(|| a.item.cmp(&b.item))
+    });
 
     let styling_count = env
         .get("complexity")
@@ -2716,8 +2822,8 @@ fn render_audit_summary(env: &Value) -> String {
             .take(10)
             .map(|row| {
                 format!(
-                    "| {} | {} | {} | {} |",
-                    row.kind, row.location, row.item, row.status
+                    "| {} | {} | {} | {} | {} |",
+                    row.kind, row.location, row.item, row.status, row.severity,
                 )
             })
             .collect::<Vec<_>>()
@@ -2732,16 +2838,19 @@ fn render_audit_summary(env: &Value) -> String {
         };
         let _ = write!(
             out,
-            "### Dead Code\n\n| Type | Location | Item | Status |\n|:-----|:---------|:-----|:-------|\n{rows}{tail}\n\n"
+            "### Dead Code\n\n| Type | Location | Item | Status | Rule severity |\n|:-----|:---------|:-----|:-------|:--------------|\n{rows}{tail}\n\n"
         );
     }
     out.push_str(&audit_complexity_section(env));
     out.push_str(&audit_duplication_section(env));
+    out.push_str(&audit_styling_section(env));
     out.push_str(&audit_diff_risk_section(env));
-    out.push_str(if s(&attribution, "gate") == "all" {
-        "*Audit gate: all. Every finding in changed files affects the verdict.*"
-    } else {
-        "*Audit gate: new-only. Inherited findings are reported but do not fail the verdict.*"
+    out.push_str(match s(&attribution, "gate") {
+        "all" => "*Audit gate: all. Every finding in changed files affects the verdict.*",
+        "new-only" => {
+            "*Audit gate: new-only. Inherited findings are reported but do not fail the verdict.*"
+        }
+        _ => "*Audit gate: unknown. New-versus-inherited attribution is unavailable.*",
     });
     out
 }
@@ -3619,7 +3728,17 @@ mod tests {
                     "complexity_findings": 1,
                     "duplication_clone_groups": 0
                 },
-                "attribution": {"gate": "new-only", "complexity_introduced": 1}
+                "attribution": {
+                    "gate": "new-only",
+                    "dead_code_introduced": 0,
+                    "dead_code_inherited": 0,
+                    "complexity_introduced": 1,
+                    "complexity_inherited": 0,
+                    "duplication_introduced": 0,
+                    "duplication_inherited": 0,
+                    "styling_introduced": 0,
+                    "styling_inherited": 0
+                }
             })
         };
         let out = render_audit_summary(&audit(true, false, false));

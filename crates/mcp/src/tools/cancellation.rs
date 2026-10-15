@@ -10,7 +10,9 @@
 //! The token travels as a task-local value instead of a parameter of every
 //! tool function. Each direct tool runs inline in the `call_tool` future, so
 //! one scope there reaches every route, and a new tool gets the same behavior
-//! without a change to its signature.
+//! without a change to its signature. Code Mode is the exception: it runs its
+//! snippet on a blocking thread outside the scope, so `code_execute` reads the
+//! token first and passes it to the snippet as an argument.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -29,7 +31,7 @@ pub async fn with_request_cancellation<F: Future>(token: CancellationToken, work
 
 /// The cancellation token of the current request, when the call runs inside
 /// [`with_request_cancellation`]. Unit tests call the tools without one.
-pub(super) fn request_cancellation() -> Option<CancellationToken> {
+pub fn request_cancellation() -> Option<CancellationToken> {
     REQUEST_CANCELLATION.try_with(CancellationToken::clone).ok()
 }
 

@@ -106,6 +106,7 @@ mod visit_sveltekit_load;
 #[path = "visit_impl_taint_sources.rs"]
 mod visit_taint_sources;
 
+pub(super) use visit_dynamic_imports::ComponentLoaderImport;
 pub(super) use visit_factory_returns::count_returns_in_statements;
 use visit_factory_returns::{
     FactoryReturnFunctionInput, classify_factory_assigned_value, collect_self_scope_assignments,
@@ -3787,6 +3788,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_local_function_return_types(program);
         self.preseed_direct_object_binding_targets(&program.body);
         self.record_program_local_import_loaders(program);
+        self.record_program_component_loader_imports(program);
         walk::walk_program(self, program);
         self.finish_local_import_loaders();
         self.finish_promise_import_bindings();

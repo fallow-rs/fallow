@@ -1003,7 +1003,7 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
             telemetry::FailureReason::Validation,
         )
     })?;
-    serde_json::from_str(&source).map_err(|err| {
+    let envelope: serde_json::Value = serde_json::from_str(&source).map_err(|err| {
         crate::emit_known_failure(
             &format!(
                 "{} is not valid JSON ({err}); generate it with `fallow ... --format json`",
@@ -1013,7 +1013,39 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
             output,
             telemetry::FailureReason::Validation,
         )
-    })
+    })?;
+    if envelope.get("error").and_then(serde_json::Value::as_bool) == Some(true) {
+        let message = envelope
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("the original run did not include an error message");
+        let code = envelope.get("code").and_then(serde_json::Value::as_str);
+        // Exit codes 0 and 1 mean success, so a saved failure never maps to them.
+        let exit_code = envelope
+            .get("exit_code")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|code| u8::try_from(code).ok())
+            .filter(|code| *code >= 2)
+            .unwrap_or(2);
+        let label = code.map_or_else(String::new, |code| format!(" [{code}]"));
+        let mut error = fallow_api::ProgrammaticError::new(
+            format!("saved Fallow run failed{label}: {message}"),
+            exit_code,
+        );
+        if let Some(code) = code {
+            error = error.with_code(code);
+        }
+        if let Some(help) = envelope.get("help").and_then(serde_json::Value::as_str) {
+            error = error.with_help(help);
+        }
+        telemetry::note_failure_reason(telemetry::FailureReason::Validation);
+        return Err(crate::error::emit_programmatic_error(
+            &error,
+            output,
+            crate::error::requested_json_style(),
+        ));
+    }
+    Ok(envelope)
 }
 
 fn envelope_kind(

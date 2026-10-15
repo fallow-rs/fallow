@@ -123,6 +123,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     of a test file that does not load now starts with the error line, for
     example `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: ...`, not
     with a stack line. (#3487)
+  - A `borp` script is a `node:test` run. The files of its `-p` /
+    `--pattern` glob, or of its positional arguments, are test entry
+    points. Without a file and a pattern, the default `borp` glob
+    `**/*.test.{js,mjs,cjs,ts,mts,cts}` applies. `auto` selects `node-test`
+    for a project with a `borp` script. Before, the plan of such a project
+    had no test file, and each mutant was `no_coverage`. Fallow does not
+    read `.borp.yaml`, so a bare `borp` command gets the default glob. (#3482)
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /
@@ -468,12 +475,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Code Mode and the direct tools now share one count of in-process calls
     that still run after their caller stopped. While that count is full, a
     Code Mode host call uses the subprocess.
+- **A `code_execute` call now stops when the client cancels it.** Before, a
+  cancel did not reach Code Mode, and only `timeout_ms` ended the snippet.
+  - The snippet stops, and a host call that starts after the cancel runs
+    nothing.
+  - A subprocess host call stops its complete process tree at once.
+  - An in-process host call sets the cancellation flag of the analysis, as on
+    a timeout.
 - **The typed and CLI routes of an MCP tool now read the same settings.**
   - `production: false` now gives `--no-production` on the CLI route. Before,
     only the typed route turned production mode off, and the CLI route used
     the config value.
   - `feature_flags` on the CLI route now ignores an empty `root`, `config` or
     `workspace`, as the typed route does.
+- **Health recommendations use valid config keys.** `fallow recommend` and
+  the taste-choice catalog use `health.maxCyclomatic`, `health.maxCognitive`
+  and `health.maxCrap`, matching the config reader.
+- **GitHub audits keep blocking findings visible.** Summary sections sort
+  errors before warnings and prioritize introduced findings under `new-only`
+  before truncation. Rule severity is separate from the complexity band.
+  Styling details appear in summaries and annotations; missing historical
+  attribution remains unknown.
+- **Saved reports retain failure and rule identity.** Failed-run envelopes
+  are rejected with their original message, code, help and failure exit
+  code. Legacy SARIF and CodeClimate keep canonical rule IDs, and CodeClimate
+  distinguishes styling values and subkinds on the same line without
+  changing other fingerprints. A styling finding rendered from a saved or
+  legacy report gets a new SARIF rule ID and CodeClimate fingerprint one
+  time, so code scanning and the merge request widget show it as new once.
+- **Named exports returned through higher-order import loaders stay in use.**
+  Unknown wrappers preserve the imported module's exports instead of assuming
+  that only `default` is read. Default-only credit requires a proven component
+  loader import with no local shadowing. The extraction and graph caches rebuild
+  so cached results use the corrected import facts.
+
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

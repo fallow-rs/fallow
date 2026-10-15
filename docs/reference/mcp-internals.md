@@ -232,7 +232,7 @@ Contract rules:
 - Each Code Mode host call has exactly one backing, `CodeModeBacking::Api` or
   `CodeModeBacking::Subprocess`, derived from the single `api_route` match that
   also performs the dispatch, so no tool can be listed as in-process without a
-  route. `fallow-api` cancellation is cooperative: a deadline sets the call's
+  route. `fallow-api` cancellation is cooperative: a deadline or a client cancel sets the call's
   token and the analysis stops at its next pipeline stage boundary, or inside
   the per-file parse loop, which is the one place work stops per item. That has
   no upper bound, because duplication detection and the dead-code detectors
@@ -414,7 +414,7 @@ server is not universally a subprocess wrapper. The Code Mode backing policy
 above is a separate timeout boundary. `FALLOW_BIN` selects the CLI for routes
 that need it, and `FALLOW_TIMEOUT_SECS` controls response deadlines.
 
-A direct tool call stops for two reasons: its deadline passes, or the client
+A tool call stops for two reasons: its deadline passes, or the client
 sends `notifications/cancelled`. rmcp reports a cancel only through the
 request's token and keeps polling the handler, so the server's `call_tool`
 runs every tool inside that token's scope
@@ -431,6 +431,14 @@ a parameter, so a new tool gets the same behavior without a signature change.
   ends, the call counts as abandoned, in the same count that Code Mode reads
   before it starts in-process work. The `audit` base worktree is removed on
   drop, so an early stop does not leave it behind.
+- Code Mode runs its snippet on a blocking thread, outside the task-local
+  scope. `code_execute` therefore reads the request token before
+  `spawn_blocking` and passes it to `execute_code_mode`. A cancel then acts at
+  each place where the deadline acts. The sandbox interrupt handler stops the
+  snippet. A new host call or batch element runs nothing. A subprocess host
+  call kills its process tree in the `run_fallow_sync` poll loop. An in-process
+  host call sets its cancellation flag and counts as abandoned, as on a
+  timeout.
 
 A cancelled call gets no response on the wire. rmcp removes the request from
 its pool when `notifications/cancelled` arrives, and drops the response that

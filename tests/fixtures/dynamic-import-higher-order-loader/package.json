@@ -1,0 +1,4 @@
+{
+  "name": "dynamic-import-higher-order-loader",
+  "main": "src/index.ts"
+}

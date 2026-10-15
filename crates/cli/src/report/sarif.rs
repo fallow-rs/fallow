@@ -760,6 +760,14 @@ fn sarif_rule_ids(document: &serde_json::Value) -> Vec<String> {
 }
 
 pub(super) fn native_rule_id(title: &str) -> String {
+    if title.strip_prefix("fallow/").is_some_and(|suffix| {
+        !suffix.is_empty()
+            && suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    }) {
+        return title.to_owned();
+    }
     let fixed = match title {
         "Dynamic segment conflict" => Some("fallow/dynamic-segment-name-conflict"),
         "Unused devDependency" => Some("fallow/unused-dev-dependency"),
@@ -1020,6 +1028,22 @@ mod tests {
             native_rule_id("High CRAP score (critical)"),
             "fallow/high-crap-score"
         );
+    }
+
+    #[test]
+    fn consumer_contract_canonical_rule_ids_are_idempotent_and_titles_still_normalize() {
+        for (title, expected) in [
+            ("fallow/css-token-drift", "fallow/css-token-drift"),
+            ("fallow/added-dependency", "fallow/added-dependency"),
+            ("fallow/removed-export", "fallow/removed-export"),
+            ("fallow/rule-123", "fallow/rule-123"),
+            ("fallow/", "fallow/fallow"),
+            ("fallow/CSS-token-drift", "fallow/fallow-css-token-drift"),
+            ("fallow/css/token", "fallow/fallow-css-token"),
+            ("Unused export", "fallow/unused-export"),
+        ] {
+            assert_eq!(native_rule_id(title), expected, "{title}");
+        }
     }
 
     #[test]

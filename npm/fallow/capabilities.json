@@ -7173,9 +7173,9 @@
       "first_run": false,
       "framework_gated": false,
       "config_paths": [
-        "health.maxCyclomaticComplexity",
-        "health.maxCognitiveComplexity",
-        "health.maxCrapThreshold",
+        "health.maxCyclomatic",
+        "health.maxCognitive",
+        "health.maxCrap",
         "health.maxUnitSize"
       ],
       "default_summary": "cyclomatic 20, cognitive 15, CRAP 30, unit size 60 lines. These are SIG-aligned; raise them for an established codebase that would otherwise report a large existing backlog.",

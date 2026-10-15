@@ -602,3 +602,38 @@ fn escaping_dynamic_import_namespace_credits_whole_module() {
          discarded `import()` or an unread promise binding credits nothing"
     );
 }
+
+#[test]
+fn higher_order_dynamic_import_loader_preserves_named_exports() {
+    let root = fixture_path("dynamic-import-higher-order-loader");
+    let results = fallow_core::analyze(&create_config(root)).expect("analysis should succeed");
+    let mut unused: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|finding| {
+            (
+                finding
+                    .export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                finding.export.export_name.clone(),
+            )
+        })
+        .collect();
+    unused.sort();
+    assert_eq!(
+        unused,
+        [
+            ("discarded.ts".to_string(), "dead".to_string()),
+            ("discarded.ts".to_string(), "used".to_string()),
+            ("precise.ts".to_string(), "dead".to_string()),
+            ("unread.ts".to_string(), "dead".to_string()),
+            ("unread.ts".to_string(), "used".to_string()),
+            ("view.ts".to_string(), "dead".to_string()),
+        ],
+        "unknown higher-order callers can consume named exports, while ordinary loaders remain precise"
+    );
+}

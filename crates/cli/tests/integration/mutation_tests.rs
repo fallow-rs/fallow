@@ -121,6 +121,55 @@ fn plan_mutates_the_script_blocks_of_vue_svelte_and_astro_components() {
     );
 }
 
+/// The test file has no `node:test` import and no default test file name,
+/// so only the `borp` script makes it a test file and selects `node-test`.
+/// The `node-test` runner cannot load a component file, so the plan skips
+/// the Svelte file.
+#[test]
+fn plan_reads_the_test_files_and_the_runner_of_a_borp_script() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"borp-fixture","private":true,"main":"index.js","scripts":{"test":"borp -p 'spec/**/*.js'"}}"#,
+    )
+    .expect("package.json");
+    fs::write(
+        root.join("index.js"),
+        "'use strict'\nconst Toggle = require('./Toggle.svelte')\nmodule.exports = { Toggle, add: (a, b) => a + b }\n",
+    )
+    .expect("index.js");
+    fs::write(
+        root.join("Toggle.svelte"),
+        "<script>\n  let on = $state(false);\n  function flip() {\n    on = !on;\n  }\n</script>\n<button onclick={flip}>{on ? 'on' : 'off'}</button>\n",
+    )
+    .expect("Toggle.svelte");
+    fs::create_dir_all(root.join("spec")).expect("spec");
+    fs::write(
+        root.join("spec/add.js"),
+        "'use strict'\nconst assert = require('node:assert')\nconst { add } = require('../index.js')\nassert.strictEqual(add(1, 2), 3)\n",
+    )
+    .expect("add.js");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+
+    let (output, value) = json_mutation(root, &["--plan", "--all"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(value["no_test_files"], false, "{value}");
+    assert_eq!(
+        value["test_files"],
+        serde_json::json!(["spec/add.js"]),
+        "{value}"
+    );
+    assert_eq!(value["counts"]["no_coverage"], 0, "{value}");
+    assert!(value["counts"]["planned"].as_u64().unwrap() > 0, "{value}");
+    assert_eq!(
+        value["skipped_files"],
+        serde_json::json!([{"path": "Toggle.svelte", "reason": "runner-cannot-load"}]),
+        "{value}"
+    );
+}
+
 #[test]
 fn plan_human_output_names_scope_counts_and_no_tests_in_one_line() {
     let project = untested_project();

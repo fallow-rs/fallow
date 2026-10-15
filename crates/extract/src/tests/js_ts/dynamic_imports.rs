@@ -951,7 +951,9 @@ fn fully_runtime_conditional_dynamic_import_records_nothing() {
 
 #[test]
 fn conditional_arrow_wrapped_import_credits_default_on_both_branches() {
-    let info = parse_source("const C = React.lazy(() => import(flag ? './A.jsx' : './B.jsx'));");
+    let info = parse_source(
+        "import * as React from 'react'; const C = React.lazy(() => import(flag ? './A.jsx' : './B.jsx'));",
+    );
     assert_eq!(info.dynamic_imports.len(), 2);
     for imp in &info.dynamic_imports {
         assert_eq!(
@@ -1058,7 +1060,8 @@ fn dynamic_import_concat_prefix_and_suffix() {
 
 #[test]
 fn arrow_wrapped_import_expression_body() {
-    let info = parse_source("const Foo = React.lazy(() => import('./Foo'));");
+    let info =
+        parse_source("import React from 'react'; const Foo = React.lazy(() => import('./Foo'));");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./Foo");
     assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
@@ -1066,7 +1069,9 @@ fn arrow_wrapped_import_expression_body() {
 
 #[test]
 fn arrow_wrapped_import_block_body() {
-    let info = parse_source("const Foo = lazy(() => { return import('./Foo'); });");
+    let info = parse_source(
+        "import { lazy } from 'react'; const Foo = lazy(() => { return import('./Foo'); });",
+    );
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./Foo");
     assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
@@ -1074,7 +1079,9 @@ fn arrow_wrapped_import_block_body() {
 
 #[test]
 fn arrow_wrapped_import_function_expression() {
-    let info = parse_source("const Foo = loadable(function() { return import('./Foo'); });");
+    let info = parse_source(
+        "import { lazy } from 'react'; const Foo = lazy(function() { return import('./Foo'); });",
+    );
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./Foo");
     assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
@@ -1082,7 +1089,9 @@ fn arrow_wrapped_import_function_expression() {
 
 #[test]
 fn arrow_wrapped_import_vue_define_async() {
-    let info = parse_source("const Comp = defineAsyncComponent(() => import('./MyComp'));");
+    let info = parse_source(
+        "import { defineAsyncComponent } from 'vue'; const Comp = defineAsyncComponent(() => import('./MyComp'));",
+    );
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./MyComp");
     assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
@@ -1090,7 +1099,7 @@ fn arrow_wrapped_import_vue_define_async() {
 
 #[test]
 fn arrow_wrapped_import_no_duplicate() {
-    let info = parse_source("React.lazy(() => import('./Foo'));");
+    let info = parse_source("import * as React from 'react'; React.lazy(() => import('./Foo'));");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
 }
@@ -1106,12 +1115,15 @@ fn arrow_wrapped_import_second_argument() {
     let info = parse_source("const Foo = createLazy(config, () => import('./Foo'));");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./Foo");
-    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert!(info.dynamic_imports[0].value_escapes);
 }
 
 #[test]
 fn arrow_wrapped_import_async_arrow() {
-    let info = parse_source("const Foo = lazy(async () => import('./Foo'));");
+    let info = parse_source(
+        "import { lazy } from 'react'; const Foo = lazy(async () => import('./Foo'));",
+    );
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./Foo");
 }
@@ -1121,7 +1133,8 @@ fn arrow_wrapped_import_with_non_import_first_arg() {
     let info = parse_source("const Foo = wrapper('options', () => import('./Foo'));");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].source, "./Foo");
-    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+    assert!(info.dynamic_imports[0].destructured_names.is_empty());
+    assert!(info.dynamic_imports[0].value_escapes);
 }
 
 #[test]
@@ -1810,6 +1823,7 @@ fn dynamic_import_shapes(info: &ModuleInfo) -> Vec<(&str, Vec<&str>, Option<&str
 fn local_loader_passed_as_argument_credits_default() {
     let info = parse_source(
         r"
+import { lazy } from 'react';
 const loadView = () => import('./view');
 export const View = lazy(loadView);
 ",
@@ -1850,6 +1864,7 @@ function loadTools() {
 fn local_loader_with_other_use_credits_whole_module() {
     let info = parse_source(
         r"
+import { lazy } from 'react';
 const loadPanel = () => import('./panel');
 lazy(loadPanel);
 export const ready = loadPanel().then((panel) => panel);
@@ -2080,4 +2095,105 @@ fn local_loader_binds_nested_returned_imports() {
             .iter()
             .any(|access| access.object == "m" && access.member == "create")
     );
+}
+
+#[test]
+fn unknown_higher_order_loader_keeps_escaping_namespace() {
+    let info = parse_source(
+        r"
+async function run() {
+    const { used } = await awaitPreservingAbortReason(async () => await import('./provider'));
+    used();
+}
+const View = component(() => import('./view'));
+import { lazy as component } from 'react';
+",
+    );
+    assert_eq!(info.dynamic_imports.len(), 2);
+    let provider = info
+        .dynamic_imports
+        .iter()
+        .find(|edge| edge.source == "./provider")
+        .unwrap();
+    assert!(
+        provider.value_escapes,
+        "an unknown caller can consume named exports"
+    );
+    assert!(provider.destructured_names.is_empty());
+    let view = info
+        .dynamic_imports
+        .iter()
+        .find(|edge| edge.source == "./view")
+        .unwrap();
+    assert_eq!(view.destructured_names, ["default"]);
+    assert!(!view.value_escapes);
+}
+
+#[test]
+fn unknown_named_loader_argument_keeps_whole_namespace() {
+    let info = parse_source(
+        "const load = async () => await import('./provider'); const result = awaitPreservingAbortReason(load);",
+    );
+    assert_eq!(
+        dynamic_import_shapes(&info),
+        [("./provider", vec![], Some("load"))]
+    );
+    assert!(info.whole_object_uses.iter().any(|name| name == "load"));
+}
+
+#[test]
+fn component_loader_contract_requires_unshadowed_import_provenance() {
+    for source in [
+        "import { lazy as component } from 'react'; component(() => import('./target'));",
+        "import React from 'react'; React.lazy(() => import('./target'));",
+        "import * as React from 'react'; React.lazy(() => import('./target'));",
+        "import { defineAsyncComponent as component } from 'vue'; component(() => import('./target'));",
+        "import * as Vue from 'vue'; Vue.defineAsyncComponent(() => import('./target'));",
+        "component(() => import('./target')); import component from 'next/dynamic';",
+    ] {
+        let info = parse_source(source);
+        assert_eq!(
+            dynamic_import_shapes(&info),
+            [("./target", vec!["default"], None)],
+            "{source}"
+        );
+        assert!(!info.dynamic_imports[0].value_escapes, "{source}");
+    }
+    for source in [
+        "const lazy = load => load(); lazy(() => import('./target'));",
+        "import { lazy } from 'react'; function run(lazy) { return lazy(() => import('./target')); }",
+        "import * as React from 'react'; function run(React) { return React.lazy(() => import('./target')); }",
+        "import loadable from '@loadable/component'; loadable(() => import('./target'), { resolveComponent: mod => mod.named });",
+        "import { lazy } from './local-wrapper'; lazy(() => import('./target'));",
+        "import type { lazy } from 'react'; lazy(() => import('./target'));",
+        "import { type lazy } from 'react'; lazy(() => import('./target'));",
+        "import type * as React from 'react'; React.lazy(() => import('./target'));",
+        "import { lazy } from 'react'; lazy(null, () => import('./target'));",
+    ] {
+        let info = parse_source(source);
+        assert_eq!(info.dynamic_imports.len(), 1, "{source}");
+        assert!(info.dynamic_imports[0].value_escapes, "{source}");
+        assert!(
+            info.dynamic_imports[0].destructured_names.is_empty(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn component_loader_contract_abstains_in_incomplete_namespace_and_catch_scopes() {
+    for source in [
+        "import { lazy } from 'react'; namespace N { const lazy = load => load(); export const result = lazy(() => import('./target')); }",
+        "import { lazy } from 'react'; export namespace N { const lazy = load => load(); export const result = lazy(() => import('./target')); }",
+        "import { lazy } from 'react'; try {} catch (lazy) { lazy(() => import('./target')); }",
+        "import * as React from 'react'; try {} catch (React) { React.lazy(() => import('./target')); }",
+    ] {
+        let info = parse_source(source);
+        assert_eq!(info.dynamic_imports.len(), 1, "{source}");
+        assert!(info.dynamic_imports[0].value_escapes, "{source}");
+        assert!(
+            info.dynamic_imports[0].destructured_names.is_empty(),
+            "{source}"
+        );
+    }
 }

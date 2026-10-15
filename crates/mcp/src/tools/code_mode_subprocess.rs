@@ -5,6 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
 
 use fallow_process::{
     ProcessTree, cleanup_std_child, configure_std_command, spawn_retrying_busy_executable,
@@ -13,11 +14,15 @@ use fallow_process::{
 const STDERR_LIMIT_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// Run one subprocess host call until it exits, the deadline passes, the
+/// output cap is hit, or the client cancels `request`. Each stop except a
+/// normal exit kills the owned process tree.
 pub(super) fn run_fallow_sync(
     binary: &str,
     tool: &'static str,
     args: &[String],
     deadline: Instant,
+    request: Option<&CancellationToken>,
     max_output_bytes: usize,
 ) -> Result<String, String> {
     let mut stdout_file = tempfile::NamedTempFile::new()
@@ -100,6 +105,13 @@ pub(super) fn run_fallow_sync(
                 &cleanup.errors,
             ));
         }
+        if super::is_cancelled(request) {
+            let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
+            return Err(with_cleanup_context(
+                super::CANCELLED_BY_CLIENT.to_string(),
+                &cleanup.errors,
+            ));
+        }
         let stdout_len = match file_len(stdout_file.as_file()) {
             Ok(stdout_len) => stdout_len,
             Err(error) => {
@@ -147,6 +159,7 @@ fn spawn_managed_child(
 fn is_contract_refusal(message: &str) -> bool {
     message.starts_with("code mode host output exceeded")
         || message == "code mode execution timed out while running fallow"
+        || message == super::CANCELLED_BY_CLIENT
 }
 
 /// Report best-effort teardown failures without letting them reach the caller.
@@ -326,6 +339,7 @@ mod tests {
             "test",
             &args,
             Instant::now() + Duration::from_secs(5),
+            None,
             max_output_bytes,
         );
         let descendant_pid: u32 = fs::read_to_string(&descendant_pid_path)
@@ -366,6 +380,62 @@ mod tests {
         assert_eq!(error, "code mode host output exceeded 16 bytes");
     }
 
+    /// A client cancel kills the whole process tree of a running host call
+    /// long before its deadline.
+    #[test]
+    fn a_client_cancel_kills_the_subprocess_tree() {
+        let temp = tempfile::tempdir().expect("temp directory");
+        let descendant_pid_path = temp.path().join("descendant.pid");
+        let args = [
+            "-c".to_string(),
+            r#"trap '' HUP; sleep 30 & echo $! > "$1"; sleep 30"#.to_string(),
+            "fallow-code-mode-cancel-test".to_string(),
+            descendant_pid_path.to_string_lossy().into_owned(),
+        ];
+        let request = CancellationToken::new();
+        let canceller = {
+            let request = request.clone();
+            let descendant_pid_path = descendant_pid_path.clone();
+            thread::spawn(move || {
+                let give_up_at = Instant::now() + Duration::from_secs(10);
+                while !descendant_pid_path.exists() && Instant::now() < give_up_at {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                request.cancel();
+            })
+        };
+
+        let started = Instant::now();
+        let result = run_fallow_sync(
+            "/bin/sh",
+            "test",
+            &args,
+            Instant::now() + Duration::from_secs(60),
+            Some(&request),
+            1024,
+        );
+        canceller.join().expect("the canceller ends");
+        let descendant_pid: u32 = fs::read_to_string(&descendant_pid_path)
+            .expect("descendant PID file")
+            .trim()
+            .parse()
+            .expect("descendant PID");
+        let _cleanup = ProcessCleanup(descendant_pid);
+
+        assert_eq!(
+            result.expect_err("a cancelled host call must fail"),
+            super::super::CANCELLED_BY_CLIENT
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "the cancel, not the deadline, must end the host call"
+        );
+        assert!(
+            wait_for_process_exit(descendant_pid),
+            "cancelled subprocess descendant {descendant_pid} survived"
+        );
+    }
+
     fn run_script(script: &str, extra_args: &[&str]) -> Result<String, String> {
         let mut args = vec!["-c".to_string(), script.to_string()];
         args.extend(extra_args.iter().map(ToString::to_string));
@@ -374,6 +444,7 @@ mod tests {
             "test",
             &args,
             Instant::now() + Duration::from_secs(5),
+            None,
             1024,
         )
     }
@@ -525,6 +596,7 @@ $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
             "test",
             &args,
             Instant::now() + FIXTURE_COMPLETION_TIMEOUT,
+            None,
             1024,
         )
         .expect("completed subprocess should preserve successful output");
@@ -550,6 +622,7 @@ $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
         for message in [
             "code mode host output exceeded 500 bytes",
             "code mode execution timed out while running fallow",
+            super::super::CANCELLED_BY_CLIENT,
         ] {
             assert_eq!(
                 with_cleanup_context(message.to_string(), &cleanup),

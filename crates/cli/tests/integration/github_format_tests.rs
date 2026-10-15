@@ -27,6 +27,297 @@ fn plain_options() -> RenderOptions {
     }
 }
 
+#[test]
+fn consumer_contract_audit_dead_code_cap_keeps_new_errors_visible() {
+    let inherited: Vec<Value> = (0..11)
+        .map(|index| {
+            json!({
+                "path": format!("a/inherited_{index:02}.ts"),
+                "introduced": false, "effective_severity": "error"
+            })
+        })
+        .collect();
+    let mut env = json!({
+        "kind": "audit", "verdict": "fail", "attribution": { "gate": "new-only" },
+        "dead_code": { "unused_files": inherited, "unused_exports": [{
+            "path": "z/new.ts", "line": 42, "export_name": "newUnused",
+            "introduced": true, "effective_severity": "error"
+        }] }
+    });
+    let summary = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+    assert!(summary.contains("`newUnused` | new | error |"), "{summary}");
+    assert!(summary.contains("inherited_00.ts"), "{summary}");
+    assert!(!summary.contains("inherited_10.ts"), "{summary}");
+    env["attribution"]["gate"] = json!("all");
+    let all = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+    assert!(all.contains("inherited_00.ts"), "{all}");
+    assert!(
+        !all.contains("newUnused"),
+        "all-scope errors retain deterministic location order: {all}"
+    );
+}
+
+#[test]
+fn consumer_contract_audit_complexity_cap_keeps_new_errors_visible() {
+    let mut findings: Vec<Value> = (0..16)
+        .map(|index| {
+            json!({
+                "path": format!("a/inherited_{index:02}.ts"), "line": 1, "name": "oldComplex",
+                "introduced": false, "effective_severity": "error", "severity": "critical"
+            })
+        })
+        .collect();
+    findings.push(json!({
+        "path": "z/new.ts", "line": 12, "name": "newComplex", "introduced": true,
+        "effective_severity": "error", "severity": "moderate"
+    }));
+    let env = json!({ "kind": "audit", "verdict": "fail", "attribution": { "gate": "new-only" },
+        "complexity": { "findings": findings } });
+    let summary = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+    assert!(
+        summary.contains("`newComplex` | new | error | moderate |"),
+        "{summary}"
+    );
+    assert!(summary.contains("inherited_00.ts"), "{summary}");
+    assert!(!summary.contains("inherited_15.ts"), "{summary}");
+}
+
+#[test]
+fn consumer_contract_audit_rule_severity_is_distinct_from_complexity_band() {
+    for gate in ["new-only", "all"] {
+        let env = json!({ "kind": "audit", "attribution": { "gate": gate }, "complexity": {
+            "findings": [
+                { "path": "a/warn.ts", "name": "warningBand", "severity": "critical", "effective_severity": "warn", "introduced": true },
+                { "path": "z/error.ts", "name": "errorBand", "severity": "moderate", "effective_severity": "error", "introduced": true }
+            ]
+        } });
+        let summary = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+        assert!(
+            summary.contains("`warningBand` | new | warn | critical |"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("`errorBand` | new | error | moderate |"),
+            "{summary}"
+        );
+        assert!(
+            summary.find("errorBand") < summary.find("warningBand"),
+            "{summary}"
+        );
+    }
+}
+
+#[test]
+fn consumer_contract_audit_duplication_cap_keeps_new_groups_visible() {
+    let mut groups: Vec<Value> = (0..11)
+        .map(|index| {
+            json!({
+                "introduced": false, "line_count": 10, "token_count": 80,
+                "instances": [
+                    { "file": format!("a/inherited_{index:02}.ts"), "start_line": 1, "end_line": 10 },
+                    { "file": format!("b/copy_{index:02}.ts"), "start_line": 1, "end_line": 10 }
+                ]
+            })
+        })
+        .collect();
+    groups.push(
+        json!({ "introduced": true, "line_count": 10, "token_count": 80,
+        "instances": [
+            { "file": "z/newDuplicate.ts", "start_line": 24, "end_line": 33 },
+            { "file": "z/otherDuplicate.ts", "start_line": 24, "end_line": 33 }
+        ] }),
+    );
+    let env = json!({ "kind": "audit", "attribution": { "gate": "new-only" },
+        "duplication": { "clone_groups": groups } });
+    let summary = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+    assert!(summary.contains("z/newDuplicate.ts:24"), "{summary}");
+    assert!(summary.contains("inherited_00.ts"), "{summary}");
+    assert!(!summary.contains("inherited_10.ts"), "{summary}");
+}
+
+#[test]
+fn consumer_contract_audit_styling_details_keep_new_errors_visible() {
+    let mut findings: Vec<Value> = (0..16)
+        .map(|index| {
+            json!({
+                "path": format!("a/inherited_{index:02}.css"), "line": 1, "code": "css-token-drift",
+                "value": "old", "introduced": false, "effective_severity": "error"
+            })
+        })
+        .collect();
+    findings.push(
+        json!({ "path": "z/button.tsx", "line": 7, "code": "css-token-drift",
+        "value": "w-[13px]", "introduced": true, "effective_severity": "error" }),
+    );
+    let env = json!({ "kind": "audit", "verdict": "fail", "attribution": { "gate": "new-only" },
+        "complexity": { "styling_findings": findings } });
+    let summary = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+    assert!(summary.contains("### Styling"), "{summary}");
+    assert!(
+        summary.contains("`z/button.tsx:7` | `w-[13px]` | new | error |"),
+        "{summary}"
+    );
+    assert!(summary.contains("inherited_00.css"), "{summary}");
+    assert!(!summary.contains("inherited_15.css"), "{summary}");
+}
+
+#[test]
+fn consumer_contract_audit_legacy_attribution_is_unknown() {
+    let env = json!({ "kind": "audit", "summary": { "dead_code_issues": 1 },
+        "dead_code": { "unused_exports": [{ "path": "src/old.ts", "export_name": "legacyExport" }] } });
+    let summary = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+    assert!(
+        summary.contains("`legacyExport` | unknown | unknown |"),
+        "{summary}"
+    );
+    assert!(
+        summary.contains("| Dead code | 1 | unknown | unknown |"),
+        "{summary}"
+    );
+    assert!(summary.contains("Audit gate: unknown"), "{summary}");
+    assert!(!summary.contains("Audit gate: new-only"), "{summary}");
+}
+
+#[test]
+fn consumer_contract_audit_diff_risk_cap_keeps_errors_visible() {
+    let mut findings: Vec<Value> = (0..16)
+        .map(|index| {
+            json!({
+                "path": format!("a/advisory_{index:02}.ts"), "line": 1,
+                "rule": "added-dependency", "severity": "warn", "introduced": true,
+                "evidence": "new dependency"
+            })
+        })
+        .collect();
+    findings.push(json!({ "path": "z/breaking.ts", "line": 3,
+        "rule": "removed-export", "severity": "error", "introduced": true,
+        "evidence": "breaking-api-removal" }));
+    for gate in ["new-only", "all"] {
+        let env = json!({ "kind": "audit", "attribution": { "gate": gate },
+            "diff_risk": { "findings": findings } });
+        let summary = render_summary(EnvelopeKind::Audit, &env, &LinkContext::default());
+        assert!(summary.contains("breaking-api-removal"), "{summary}");
+        assert!(summary.contains("advisory_00.ts"), "{summary}");
+        assert!(!summary.contains("advisory_15.ts"), "{summary}");
+    }
+}
+
+#[test]
+fn consumer_contract_audit_annotations_prioritize_new_equal_errors() {
+    let mut exports: Vec<Value> = (0..12)
+        .map(|index| {
+            json!({
+                "path": format!("a/inherited_{index:02}.ts"), "line": 1, "export_name": "old",
+                "introduced": false, "effective_severity": "error"
+            })
+        })
+        .collect();
+    exports.push(
+        json!({ "path": "z/new.ts", "line": 42, "export_name": "newUnused",
+        "introduced": true, "effective_severity": "error" }),
+    );
+    exports.push(
+        json!({ "path": "0/warn.ts", "line": 1, "export_name": "warning",
+        "introduced": true, "effective_severity": "warn" }),
+    );
+    let mut env = json!({ "kind": "audit", "attribution": { "gate": "new-only" },
+        "dead_code": { "unused_exports": exports } });
+    let annotations = render_annotations(EnvelopeKind::Audit, &env, &plain_options());
+    assert!(
+        annotations
+            .lines()
+            .next()
+            .expect("annotation")
+            .contains("z/new.ts"),
+        "{annotations}"
+    );
+    assert!(annotations.contains("a/inherited_00.ts"), "{annotations}");
+    assert!(annotations.contains("0/warn.ts"), "{annotations}");
+    assert!(
+        annotations.find("a/inherited_00.ts") < annotations.find("0/warn.ts"),
+        "{annotations}"
+    );
+    env["attribution"]["gate"] = json!("all");
+    let all = render_annotations(EnvelopeKind::Audit, &env, &plain_options());
+    assert!(
+        all.lines()
+            .next()
+            .expect("annotation")
+            .contains("a/inherited_00.ts"),
+        "{all}"
+    );
+    let check = render_annotations(EnvelopeKind::DeadCode, &env["dead_code"], &plain_options());
+    assert!(
+        check
+            .lines()
+            .next()
+            .expect("annotation")
+            .contains("a/inherited_00.ts"),
+        "{check}"
+    );
+}
+
+#[test]
+fn consumer_contract_audit_annotations_keep_unlocated_and_parent_provenance() {
+    for finding in [
+        json!({ "unused_files": [{ "path": "z/new.ts", "introduced": true, "effective_severity": "error" }] }),
+        json!({ "unused_dependencies": [{ "path": "z/package.json", "line": 0, "package_name": "unused", "introduced": true, "effective_severity": "error" }] }),
+        json!({ "circular_dependencies": [{ "files": ["z/new.ts", "z/other.ts"], "line": 0, "introduced": true, "effective_severity": "error" }] }),
+        json!({ "re_export_cycles": [{ "files": ["z/new.ts", "z/other.ts"], "kind": "cycle", "introduced": true, "effective_severity": "error" }] }),
+        json!({ "package_cycles": [{ "packages": ["@app/a", "@app/b"], "introduced": true, "effective_severity": "error", "edges": [{ "path": "z/new.ts", "line": 3, "from_package": "@app/a", "to_package": "@app/b" }] }] }),
+        json!({ "unlisted_dependencies": [{ "package_name": "missing", "introduced": true, "effective_severity": "error", "imported_from": [{ "path": "z/new.ts", "line": 3 }] }] }),
+        json!({ "duplicate_exports": [{ "export_name": "shared", "introduced": true, "effective_severity": "error", "locations": [{ "path": "z/new.ts", "line": 3 }] }] }),
+    ] {
+        let mut dead_code = finding;
+        dead_code["unused_exports"] = json!([{ "path": "a/inherited.ts", "line": 1,
+            "export_name": "old", "introduced": false, "effective_severity": "error" }]);
+        let env = json!({ "kind": "audit", "attribution": { "gate": "new-only" }, "dead_code": dead_code });
+        let annotations = render_annotations(EnvelopeKind::Audit, &env, &plain_options());
+        assert!(
+            annotations
+                .lines()
+                .next()
+                .expect("annotation")
+                .contains("file=z/"),
+            "{annotations}"
+        );
+        assert!(annotations.contains("a/inherited.ts"), "{annotations}");
+    }
+}
+
+#[test]
+fn consumer_contract_audit_annotations_include_styling_once() {
+    let health = json!({ "styling_findings": [
+        { "path": "z/button.tsx", "line": 7, "code": "css-token-drift", "value": "w-[13px]", "introduced": true, "effective_severity": "error" },
+        { "path": "a/old.css", "line": 2, "code": "css-token-drift", "value": "old", "introduced": false, "effective_severity": "warn" }
+    ], "findings": [{ "path": "src/complex.ts", "line": 4, "name": "complex", "severity": "high", "effective_severity": "error" }] });
+    let env =
+        json!({ "kind": "audit", "attribution": { "gate": "new-only" }, "complexity": health });
+    let annotations = render_annotations(EnvelopeKind::Audit, &env, &plain_options());
+    assert!(
+        annotations
+            .lines()
+            .next()
+            .expect("annotation")
+            .contains("z/button.tsx,line=7"),
+        "{annotations}"
+    );
+    assert!(annotations.contains("css-token-drift"), "{annotations}");
+    assert!(annotations.contains("w-[13px]"), "{annotations}");
+    assert!(
+        annotations.contains("::warning file=a/old.css"),
+        "{annotations}"
+    );
+    assert_eq!(
+        annotations.matches("file=src/complex.ts").count(),
+        1,
+        "{annotations}"
+    );
+    let standalone = render_annotations(EnvelopeKind::Health, &health, &plain_options());
+    assert!(standalone.contains("file=src/complex.ts"), "{standalone}");
+    assert!(!standalone.contains("css-token-drift"), "{standalone}");
+}
+
 fn check_envelope() -> Value {
     json!({
         "kind": "dead-code",
