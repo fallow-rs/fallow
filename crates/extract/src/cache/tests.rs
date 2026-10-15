@@ -311,6 +311,30 @@ fn cache_store_insert_and_get() {
 }
 
 #[test]
+fn cache_store_refresh_fingerprint_keeps_the_payload() {
+    use fallow_types::source_fingerprint::SourceFingerprint;
+
+    let mut store = CacheStore::new(Path::new(""));
+    store.insert(
+        Path::new("test.ts"),
+        CachedModule {
+            content_hash: 42,
+            complexity_extracted: true,
+            last_access_secs: 7,
+            ..empty_cached_module()
+        },
+    );
+    let fingerprint = SourceFingerprint::with_ctime(11, 12, 13);
+
+    assert!(store.refresh_fingerprint(Path::new("test.ts"), fingerprint));
+    assert!(!store.refresh_fingerprint(Path::new("missing.ts"), fingerprint));
+    let entry = store.get(Path::new("test.ts"), 42).expect("entry stays");
+    assert_eq!(entry.source_fingerprint(), fingerprint);
+    assert!(entry.complexity_extracted);
+    assert_eq!(entry.last_access_secs, 7);
+}
+
+#[test]
 fn cache_store_hash_mismatch_returns_none() {
     let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {

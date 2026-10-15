@@ -1574,7 +1574,10 @@ fn update_parse_cache(
             {
                 let stale_metadata = cached.source_fingerprint() != fingerprint;
                 let adds_complexity = need_complexity && !cached.complexity_extracted;
-                if stale_metadata || adds_complexity {
+                if stale_metadata && !adds_complexity {
+                    store.refresh_fingerprint(&file.path, fingerprint);
+                    dirty = true;
+                } else if adds_complexity {
                     let preserved_last_access = cached.last_access_secs;
                     let preserved_complexity = (!need_complexity && cached.complexity_extracted)
                         .then(|| cached.complexity.clone());

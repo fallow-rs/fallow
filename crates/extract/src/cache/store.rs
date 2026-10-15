@@ -375,6 +375,28 @@ impl CacheStore {
         self.entries.insert(key, module);
     }
 
+    /// Replace the source fingerprint of the entry for `path`, and keep the
+    /// rest of the entry.
+    ///
+    /// A fresh checkout or a restored cache moves the file timestamps but not
+    /// the content. Rebuilding such an entry from the module copies every
+    /// extracted fact again, so a caller whose content hash still matches
+    /// refreshes only the metadata. Returns `false` when no entry exists.
+    pub fn refresh_fingerprint(
+        &mut self,
+        path: &Path,
+        fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
+    ) -> bool {
+        let key = self.key_for(path);
+        let Some(entry) = self.entries.get_mut(&key) else {
+            return false;
+        };
+        entry.mtime_ns = fingerprint.mtime_ns;
+        entry.ctime_ns = fingerprint.ctime_ns;
+        entry.file_size = fingerprint.file_size;
+        true
+    }
+
     /// Look up a cached module by path only (ignoring hash).
     #[must_use]
     pub fn get_by_path_only(&self, path: &Path) -> Option<&CachedModule> {
