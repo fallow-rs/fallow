@@ -109,6 +109,7 @@ mod tests {
         names
     }
 
+    #[cfg_attr(miri, ignore = "the filesystem is blocked by Miri isolation")]
     #[test]
     fn write_replaces_the_file_and_leaves_no_temp_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -119,6 +120,7 @@ mod tests {
         assert_eq!(dir_names(dir.path()), ["cache.bin"]);
     }
 
+    #[cfg_attr(miri, ignore = "the filesystem is blocked by Miri isolation")]
     #[test]
     fn concurrent_writers_each_move_one_whole_payload_into_place() {
         const WRITERS: u8 = 8;
@@ -155,6 +157,7 @@ mod tests {
     /// A cache that another user or a CI container reads must keep the mode a
     /// plain `File::create` gives, not the private mode of a temp file.
     #[cfg(unix)]
+    #[cfg_attr(miri, ignore = "the filesystem is blocked by Miri isolation")]
     #[test]
     fn the_file_gets_the_mode_that_file_create_gives() {
         use std::os::unix::fs::PermissionsExt as _;
