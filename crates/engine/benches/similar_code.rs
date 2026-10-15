@@ -10,7 +10,7 @@
 use std::hint::black_box;
 use std::mem::size_of;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_engine::similar_code::{
     EXTRACTION_SEMANTICS_VERSION, FunctionLocation, FunctionVector, SimilarCodeLimits,
     SimilarCodeSourceDigest, SimilarCodeVectorCache, VectorCacheKey, evaluate_similar_code,
@@ -128,13 +128,23 @@ fn bench_similar_code(c: &mut Criterion) {
 
     c.bench_function("similar_code/vector_cache_miss_insert", |bencher| {
         let mut index = 0u64;
-        bencher.iter(|| {
-            let mut cache = SimilarCodeVectorCache::new(4 * 1024 * 1024);
-            let mut key = cache_key.clone();
-            key.function_source_sha256 = digest(index);
-            index = index.wrapping_add(1);
-            black_box(cache.insert(key, vec![1.0; VECTOR_DIMENSIONS]));
-        });
+        bencher.iter_batched(
+            || {
+                let mut key = cache_key.clone();
+                key.function_source_sha256 = digest(index);
+                index = index.wrapping_add(1);
+                (
+                    SimilarCodeVectorCache::new(4 * 1024 * 1024),
+                    key,
+                    vec![1.0; VECTOR_DIMENSIONS],
+                )
+            },
+            |(mut cache, key, vector)| {
+                black_box(cache.insert(key, vector));
+                cache
+            },
+            BatchSize::SmallInput,
+        );
     });
 }
 

@@ -9,6 +9,9 @@ use std::path::PathBuf;
 use fallow_config::{BoundaryConfig, FallowConfig, OutputFormat};
 use tempfile::TempDir;
 
+#[path = "../../benchmarks/benches/support/threads.rs"]
+mod threads;
+
 #[must_use]
 #[allow(
     dead_code,
@@ -67,7 +70,14 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, no_cache, true, None)
+    .resolve(
+        root,
+        OutputFormat::Human,
+        threads::bench_threads(),
+        no_cache,
+        true,
+        None,
+    )
 }
 
 /// Generate a synthetic project with `file_count` source files.

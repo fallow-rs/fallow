@@ -44,6 +44,7 @@ REQUIRED_FAST_TARGETS = {
     ("fallow-core", "analysis"),
     ("fallow-core", "entry_point_discovery"),
     ("fallow-engine", "dupes_detect"),
+    ("fallow-engine", "similar_code"),
     ("fallow-benchmarks", "programmatic_stable"),
     ("fallow-benchmarks", "representative_sources"),
     ("fallow-benchmarks", "component_cache"),
@@ -333,6 +334,11 @@ THREAD_HELPER = REPO_ROOT / "crates" / "benchmarks" / "benches" / "support" / "t
 LITERAL_THREAD_COUNT = re.compile(
     r"threads:\s*Some\(\s*\d|num_threads\(\s*\d|const\s+\w*THREADS\w*\s*:\s*usize\s*=\s*\d"
 )
+# `FallowConfig::resolve` takes the thread count as its third positional
+# argument, and the call often spans several lines. `load_default` picks
+# `available_parallelism()` for the file walk.
+LITERAL_RESOLVE_THREADS = re.compile(r"\.resolve\(\s*[^,;()]+,\s*[^,;()]+,\s*\d+\s*,")
+DEFAULT_PARALLELISM_LOAD = re.compile(r"AnalysisSession::load_default\(")
 
 
 def job_block(text: str, job: str) -> str:
@@ -348,12 +354,25 @@ def validate_thread_determinism(text: str) -> list[str]:
     for path in sorted((REPO_ROOT / "crates").glob("*/benches/**/*.rs")):
         if path == THREAD_HELPER:
             continue
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), 1):
             if LITERAL_THREAD_COUNT.search(line):
                 errors.append(
                     f"{path.relative_to(REPO_ROOT)}:{number} sets a literal thread count; "
                     "use bench_threads() from benches/support/threads.rs"
                 )
+        for match in LITERAL_RESOLVE_THREADS.finditer(text):
+            number = text.count("\n", 0, match.start()) + 1
+            errors.append(
+                f"{path.relative_to(REPO_ROOT)}:{number} passes a literal thread count to "
+                "resolve(); use bench_threads() from benches/support/threads.rs"
+            )
+        for match in DEFAULT_PARALLELISM_LOAD.finditer(text):
+            number = text.count("\n", 0, match.start()) + 1
+            errors.append(
+                f"{path.relative_to(REPO_ROOT)}:{number} loads a session with all CPU threads; "
+                "use load_default_with_config and set threads to bench_threads()"
+            )
     return errors
 
 

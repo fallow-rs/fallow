@@ -22,10 +22,28 @@ test("global benchmark files select every fast benchmark", () => {
     names(selectFastTargets(["crates/benchmarks/Cargo.toml"])),
     names(allFastTargets()),
   );
+  assert.deepEqual(
+    names(selectFastTargets(["crates/benchmarks/benches/support/threads.rs"])),
+    names(allFastTargets()),
+  );
+});
+
+test("similar-code changes select the similar-code shard", () => {
+  assert.deepEqual(names(selectFastTargets(["crates/engine/benches/similar_code.rs"])), [
+    "component_engine",
+    "dupes_detect",
+    "lsp_save_publish",
+    "programmatic_stable",
+    "similar_code",
+  ]);
+  assert.ok(
+    names(selectFastTargets(["crates/engine/src/similar_code.rs"])).includes("similar_code"),
+  );
 });
 
 test("output-only changes select the output component and API stable surface", () => {
   assert.deepEqual(names(selectFastTargets(["crates/output/src/health.rs"])), [
+    "component_engine",
     "component_output",
     "programmatic_stable",
   ]);
@@ -42,6 +60,7 @@ test("graph changes select graph-sensitive targets", () => {
     "analysis",
     "component_engine",
     "component_graph",
+    "lsp_save_publish",
     "programmatic_stable",
   ]);
 });
@@ -74,6 +93,7 @@ test("discovery changes select the entry point discovery shard", () => {
     "analysis",
     "component_engine",
     "entry_point_discovery",
+    "lsp_save_publish",
     "programmatic_stable",
     "representative_sources",
   ]);
@@ -92,6 +112,7 @@ test("health ingestion and CRAP scoring changes select engine benchmark coverage
     assert.deepEqual(names(selectFastTargets([file])), [
       "component_engine",
       "dupes_detect",
+      "lsp_save_publish",
       "programmatic_stable",
     ]);
   }
@@ -109,6 +130,7 @@ test("stable CLI production changes select the stable programmatic shard", () =>
     "crates/cli/src/audit_walkthrough.rs",
     "crates/cli/src/audit_weakening.rs",
     "crates/cli/src/check/mod.rs",
+    "crates/cli/src/fix/mod.rs",
     "crates/cli/src/init.rs",
     "crates/cli/src/inspect.rs",
     "crates/cli/src/json_style.rs",
@@ -116,7 +138,9 @@ test("stable CLI production changes select the stable programmatic shard", () =>
     "crates/cli/src/list.rs",
     "crates/cli/src/onboarding.rs",
     "crates/cli/src/output_runtime.rs",
+    "crates/cli/src/rule_pack/mod.rs",
     "crates/cli/src/security.rs",
+    "crates/cli/src/viz/mod.rs",
     "crates/cli/src/watch.rs",
   ]) {
     assert.deepEqual(names(selectFastTargets([file])), ["programmatic_stable"]);

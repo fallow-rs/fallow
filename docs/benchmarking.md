@@ -11,7 +11,11 @@ instruction count changes between runs of the same code. A benchmark takes its
 thread count from `bench_threads()` in `crates/benchmarks/benches/support/threads.rs`,
 which follows that variable and keeps four threads for a local run.
 `scripts/check-benchmark-harness.py` rejects a simulation job without the
-variable and a literal thread count in a benchmark file.
+variable and a literal thread count in a benchmark file. It also rejects a
+literal thread argument to `resolve()` and a call to
+`AnalysisSession::load_default`, because the file walk of that call uses every
+CPU. Benchmarks outside `crates/benchmarks` include the same helper with a
+`#[path]` module.
 
 Simulation leaves syscall time out of the value. A benchmark that CodSpeed
 marks "dominated by syscalls" does not show file-system cost, so do not use it
@@ -52,7 +56,8 @@ Fast PR shards are selected by `.github/scripts/generate-benchmark-matrix.mjs`.
 Like Oxc's benchmark workflow, this keeps the tracked surface broad while only
 running the shards affected by a given change. Manual and merge-queue runs use
 the full fast matrix, and global benchmark or Cargo changes fall back to all
-fast shards.
+fast shards. The shared fixtures under `crates/benchmarks/benches/support/`
+count as a global benchmark change.
 
 ## Work counters and the process clock
 
@@ -106,9 +111,12 @@ CodSpeed CPU simulation with the exec harness, so each run of the whole CLI
 gets an instruction-based value:
 
 - Projects: preact, zod and vue-core, each at a pinned commit.
-- Commands: `dead-code` and `audit --base HEAD~1`.
+- Commands: `dead-code`. The lane does not run `audit`, because `audit`
+  reads the changeset with git and the harness does not count child
+  processes.
 - Cache states: cold (`--no-cache`) and warm (a cache that the prepare step
-  fills).
+  fills). The prepare step runs each command once, so the warm benchmark is
+  the second run on that cache.
 
 `benchmarks/cli-instructions.sh` owns the corpus and the benchmark list. It
 passes `--threads 1`, because the CLI does not read `RAYON_NUM_THREADS`. It
@@ -154,6 +162,9 @@ Fast PR shards:
   roughly 78 to 88 percent of the stage.
 - `fallow-engine/dupes_detect`: duplicate-detection engine paths (triggered by
   `crates/engine/`, `crates/extract/`, and `crates/types/` changes).
+- `fallow-engine/similar_code`: similar-code vector validation, retrieval,
+  ranking, and the vector cache (triggered by `crates/engine/src/similar_code.rs`
+  and its bench file).
 - `fallow-benchmarks/programmatic_stable`: deterministic programmatic API,
   session reuse, warm parse-cache, health-cache, dead-code analysis and compact
   JSON rendering, fix dry-run planning, opt-in security and rule-pack policy

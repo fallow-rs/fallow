@@ -561,11 +561,11 @@ fn namespace_re_export_propagation(c: &mut Criterion) {
         bencher.iter_batched_ref(
             create_namespace_re_export_input,
             |input| {
-                fallow_core::graph::ModuleGraph::build(
+                std::hint::black_box(fallow_core::graph::ModuleGraph::build(
                     &input.resolved_modules,
                     &input.entry_points,
                     &input.files,
-                );
+                ))
             },
             BatchSize::LargeInput,
         );
@@ -872,11 +872,11 @@ fn namespace_object_alias_propagation(c: &mut Criterion) {
         bencher.iter_batched_ref(
             create_namespace_object_alias_input,
             |input| {
-                fallow_core::graph::ModuleGraph::build(
+                std::hint::black_box(fallow_core::graph::ModuleGraph::build(
                     &input.resolved_modules,
                     &input.entry_points,
                     &input.files,
-                );
+                ))
             },
             BatchSize::LargeInput,
         );
@@ -1124,11 +1124,11 @@ fn resolve_re_export_chains(c: &mut Criterion) {
         bencher.iter_batched_ref(
             create_re_export_input,
             |input| {
-                fallow_core::graph::ModuleGraph::build(
+                std::hint::black_box(fallow_core::graph::ModuleGraph::build(
                     &input.resolved_modules,
                     &input.entry_points,
                     &input.files,
-                );
+                ))
             },
             BatchSize::LargeInput,
         );
@@ -1523,7 +1523,7 @@ fn cache_round_trip(c: &mut Criterion) {
             create_cache_round_trip_input,
             |module| {
                 let cached = module_to_cached(module, SourceFingerprint::new(0, 0), false);
-                let _ = cached_to_module(&cached, FileId(0));
+                std::hint::black_box(cached_to_module(&cached, FileId(0)))
             },
             BatchSize::LargeInput,
         );

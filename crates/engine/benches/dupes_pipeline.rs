@@ -15,6 +15,9 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_config::{BoundaryConfig, FallowConfig, OutputFormat};
 use tempfile::TempDir;
 
+#[path = "../../benchmarks/benches/support/threads.rs"]
+mod threads;
+
 struct DupesInput {
     _temp_dir: TempDir,
     root: PathBuf,
@@ -70,7 +73,14 @@ fn make_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         fail_on_parse_error: false,
         cache: fallow_config::CacheConfig::default(),
     }
-    .resolve(root, OutputFormat::Human, 4, true, true, None)
+    .resolve(
+        root,
+        OutputFormat::Human,
+        threads::bench_threads(),
+        true,
+        true,
+        None,
+    )
 }
 
 /// Generate a synthetic project with duplicated code blocks for dupe detection benchmarks.
