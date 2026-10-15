@@ -423,14 +423,21 @@ a parameter, so a new tool gets the same behavior without a signature change.
 
 - The subprocess route waits for the deadline, the cancel, or the process,
   whichever comes first. On a cancel it kills the owned process tree, as on a
-  timeout, and returns `FALLOW_MCP_CANCELLED`.
+  timeout.
 - The typed route gives each call one cancellation flag, which goes into
-  `AnalysisOptions::cancellation`. A timeout or a cancel sets it and returns
-  `FALLOW_MCP_API_TIMEOUT` or `FALLOW_MCP_CANCELLED` at once. The stop is
+  `AnalysisOptions::cancellation`. A timeout or a cancel sets it and the call
+  returns at once. The stop is
   cooperative: the analysis ends at its next stage boundary. Until the worker
   ends, the call counts as abandoned, in the same count that Code Mode reads
   before it starts in-process work. The `audit` base worktree is removed on
   drop, so an early stop does not leave it behind.
+
+A cancelled call gets no response on the wire. rmcp removes the request from
+its pool when `notifications/cancelled` arrives, and drops the response that
+the handler returns later, as the MCP specification requires. The handler
+still builds a `FALLOW_MCP_CANCELLED` result, but only tests that call a tool
+directly see it. Only a timeout gives the client a structured error:
+`FALLOW_MCP_SUBPROCESS_TIMEOUT` or `FALLOW_MCP_API_TIMEOUT`.
 
 Each typed options builder starts from `shared_analysis_options` in
 `api_runtime.rs`. It maps root, config, remote extends, cache and threads,

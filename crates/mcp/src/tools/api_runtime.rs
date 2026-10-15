@@ -58,6 +58,10 @@ struct ApiCall {
     abandoned: &'static AbandonedApiCalls,
 }
 
+/// Run `task` on a blocking thread until it ends, the deadline passes, or the
+/// client cancels the request. A timeout returns `FALLOW_MCP_API_TIMEOUT` to
+/// the client. A cancel returns `FALLOW_MCP_CANCELLED`, but rmcp drops the
+/// response of a cancelled request, so no client receives that code.
 async fn run_api_call<T, F>(
     call: ApiCall,
     task: F,

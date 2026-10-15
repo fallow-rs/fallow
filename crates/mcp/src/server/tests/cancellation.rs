@@ -71,7 +71,6 @@ async fn wait_for_exit(pid: u32) -> bool {
     true
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_client_cancel_kills_the_subprocess_of_a_direct_tool_call() {
     use std::os::unix::fs::PermissionsExt;

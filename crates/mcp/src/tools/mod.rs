@@ -938,6 +938,10 @@ fn collect_semantic_completeness(value: &serde_json::Value, signals: &mut Vec<bo
 
 /// The result of a subprocess call the client cancelled. The server killed
 /// the process tree; `cleanup_errors` names any part it could not stop.
+///
+/// No client receives this result: rmcp drops the response of a cancelled
+/// request, as the MCP specification requires. It exists so the handler
+/// returns, and so tests that call a tool directly can see the outcome.
 fn cancelled_result(cleanup_errors: &[String]) -> CallToolResult {
     let mut error_json = serde_json::json!({
         "error": true,

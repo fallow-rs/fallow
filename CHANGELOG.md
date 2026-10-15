@@ -425,12 +425,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A client `notifications/cancelled` now reaches the work of the call.
     Before, the server kept the analysis running until it finished or until
     the response deadline.
-  - A subprocess call stops its complete process tree at once and returns
-    code `FALLOW_MCP_CANCELLED`.
+  - A subprocess call stops its complete process tree at once.
   - A typed call sets the cancellation flag of the analysis, on a cancel and
     on a timeout. The analysis then stops at its next stage boundary. Before,
-    a timed-out typed call continued to run to the end. A cancel returns code
-    `FALLOW_MCP_CANCELLED`, and a timeout keeps `FALLOW_MCP_API_TIMEOUT`.
+    a timed-out typed call continued to run to the end.
+  - The client gets no response for a cancelled call, as the MCP
+    specification requires. A timeout still returns a structured error:
+    `FALLOW_MCP_SUBPROCESS_TIMEOUT` or `FALLOW_MCP_API_TIMEOUT`.
   - Code Mode and the direct tools now share one count of in-process calls
     that still run after their caller stopped. While that count is full, a
     Code Mode host call uses the subprocess.
