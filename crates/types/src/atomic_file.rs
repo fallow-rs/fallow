@@ -73,20 +73,36 @@ fn persist(tmp: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// `ERROR_ACCESS_DENIED`: another writer replaces the target at this moment.
+#[cfg(windows)]
+const ERROR_ACCESS_DENIED: i32 = 5;
+/// `ERROR_SHARING_VIOLATION`: a reader holds the target open.
+#[cfg(windows)]
+const ERROR_SHARING_VIOLATION: i32 = 32;
+/// `ERROR_LOCK_VIOLATION`: a process holds a lock on part of the target.
+#[cfg(windows)]
+const ERROR_LOCK_VIOLATION: i32 = 33;
+
+/// Whether a failed rename is a short-lived conflict with another process.
+#[cfg(windows)]
+fn is_transient_rename_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)
+    )
+}
+
 /// Windows refuses a rename over a file that another writer is replacing at
-/// the same moment (`ERROR_ACCESS_DENIED`). The other rename finishes within
-/// milliseconds, so a short bounded retry lets each writer move its payload
-/// into place.
+/// the same moment (`ERROR_ACCESS_DENIED`), or that a reader or a scanner
+/// holds open. Those conflicts end within milliseconds, so a short bounded
+/// retry lets each writer move its payload into place.
 #[cfg(windows)]
 fn persist(mut tmp: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
     let mut attempt = 1;
     loop {
         match tmp.persist(path) {
             Ok(_) => return Ok(()),
-            Err(error)
-                if error.error.kind() == std::io::ErrorKind::PermissionDenied
-                    && attempt < PERSIST_ATTEMPTS =>
-            {
+            Err(error) if is_transient_rename_error(&error.error) && attempt < PERSIST_ATTEMPTS => {
                 tmp = error.file;
                 attempt += 1;
                 std::thread::sleep(PERSIST_RETRY_DELAY);
