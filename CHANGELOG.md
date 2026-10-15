@@ -42,9 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `--max-mutants`. The dry run decides their coverage: a pending mutant that
     no test reaches in the dry run is `no_coverage`. A capped run therefore
     reports the coverage of the full run.
-  - A type test (`*.test-d.ts`, `*.spec-d.ts`, or a file below `test-d/`)
-    is not a test file of the plan. No runner executes it, so it no longer
-    gives a false baseline failure or decides the runner.
+  - A type test (`*.test-d.ts`, `*.spec-d.ts`, or a TypeScript file below
+    `test-d/`) is not a test file of the plan. No runner executes it, so it
+    no longer gives a false baseline failure or decides the runner.
   - A covering test that fails in the dry run of a restarted companion is a
     baseline failure. The mutant runs with its other covering tests and is a
     runtime error only when no covering test is left. A survivor of such a

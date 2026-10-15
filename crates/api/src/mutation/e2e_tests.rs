@@ -215,6 +215,14 @@ fn a_type_test_is_not_a_test_file_of_the_plan() {
     assert_eq!(plan.counts.planned, 0, "no runner test covers a mutant");
     assert_eq!(plan.counts.no_coverage, plan.counts.total);
     assert!(
+        plan.mutants.iter().all(|mutant| mutant
+            .test_reach
+            .as_ref()
+            .is_some_and(|reach| reach.reach == fallow_output::TestReachClass::NoneFile)),
+        "a type test is not a test that loads the file: {:#?}",
+        plan.mutants
+    );
+    assert!(
         plan.files
             .iter()
             .all(|file| file.static_test_files.is_empty()),

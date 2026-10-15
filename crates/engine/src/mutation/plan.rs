@@ -567,6 +567,21 @@ fn attach_test_reach(
     {
         return;
     }
+    // No test that runs loads a file that only type tests reach.
+    if context.type_test_only.contains(&candidate.file_id) {
+        for entry in mutants
+            .iter_mut()
+            .filter(|entry| !matches!(entry.planned.disposition, MutantDisposition::Pruned(_)))
+        {
+            entry.planned.test_reach = Some(MutantTestReach {
+                reach: ExportTestReach::NoneFile,
+                export_name: None,
+                tests: Vec::new(),
+                mocked_targets: Vec::new(),
+            });
+        }
+        return;
+    }
     let graph = context.graph;
     let root = context.inputs.root;
     let mut is_test_file = |file_id: FileId| -> bool {
@@ -785,6 +800,10 @@ const TYPE_TEST_FILE_MARKERS: &[&str] = &[".test-d.", ".spec-d."];
 /// The directory of `tsd` type tests.
 const TYPE_TEST_DIR_NAME: &str = "test-d";
 
+/// The extensions of a type test below [`TYPE_TEST_DIR_NAME`]. `tsd` reads
+/// TypeScript files only.
+const TYPE_TEST_DIR_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".mts", ".cts"];
+
 /// True when the test entry point is a type test (`tsd`, `expect-type`, the
 /// Vitest type-check files). A compiler checks a type test, and no test
 /// runner executes it, so it never covers a mutant.
@@ -802,7 +821,10 @@ fn is_type_test_path(path: &str) -> bool {
     TYPE_TEST_FILE_MARKERS
         .iter()
         .any(|marker| name.contains(marker))
-        || segments.any(|segment| segment == TYPE_TEST_DIR_NAME)
+        || (TYPE_TEST_DIR_EXTENSIONS
+            .iter()
+            .any(|extension| name.ends_with(extension))
+            && segments.any(|segment| segment == TYPE_TEST_DIR_NAME))
 }
 
 const fn is_ranked(disposition: MutantDisposition) -> bool {
@@ -893,6 +915,7 @@ mod tests {
             "src/test-data.ts",
             "test-d.ts",
             "src/a-test-d.ts",
+            "test-d/helper.js",
         ] {
             assert!(!is_type_test_path(path), "{path}");
         }
