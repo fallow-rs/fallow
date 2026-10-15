@@ -2560,6 +2560,63 @@ fn base_snapshot_sweep_keeps_only_the_newest_files() {
 }
 
 #[test]
+fn base_snapshot_sweep_removes_only_files_it_wrote() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let cache_root = tmp.path().join(".fallow");
+    let now = std::time::SystemTime::now();
+    let old = now - Duration::from_hours(40 * 24);
+    let files = write_snapshot_files(&cache_root, 1, old);
+    let dir = audit_base_snapshot_cache_dir(&cache_root);
+    let foreign = dir.join("notes.bin");
+    fs::write(&foreign, b"user data").expect("foreign file should write");
+
+    let entries = sweep_base_snapshot_cache(
+        &cache_root,
+        Some(Duration::from_hours(30 * 24)),
+        SweepMode::Apply,
+        now,
+    );
+
+    assert_eq!(entries.len(), 1);
+    assert!(!files[0].exists(), "the aged snapshot must be removed");
+    assert!(foreign.exists(), "a file the cache did not write must stay");
+}
+
+#[cfg(unix)]
+#[test]
+fn base_snapshot_sweep_does_not_follow_a_symlinked_version_dir() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&outside).expect("outside dir should be created");
+    let victim = outside.join(format!("{:016x}.bin", 7));
+    fs::write(&victim, b"payload").expect("victim should write");
+    let now = std::time::SystemTime::now();
+    fs::File::options()
+        .write(true)
+        .open(&victim)
+        .and_then(|file| file.set_modified(now - Duration::from_hours(40 * 24)))
+        .expect("mtime should be set");
+    let cache_root = tmp.path().join(".fallow");
+    let dir = audit_base_snapshot_cache_dir(&cache_root);
+    fs::create_dir_all(dir.parent().expect("version dir has a parent"))
+        .expect("cache dir should be created");
+    std::os::unix::fs::symlink(&outside, &dir).expect("symlink should be created");
+
+    let entries = sweep_base_snapshot_cache(
+        &cache_root,
+        Some(Duration::from_hours(30 * 24)),
+        SweepMode::Apply,
+        now,
+    );
+
+    assert!(entries.is_empty());
+    assert!(
+        victim.exists(),
+        "the sweep must not delete through a symlink"
+    );
+}
+
+#[test]
 fn base_snapshot_sweep_reclaims_aged_files_and_dry_run_keeps_them() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let cache_root = tmp.path().join(".fallow");

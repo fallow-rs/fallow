@@ -338,7 +338,25 @@ struct SnapshotFile {
     len: u64,
 }
 
+/// Whether `name` has the exact shape that [`audit_base_snapshot_cache_file`]
+/// writes: 16 lowercase hex digits and the snapshot suffix.
+///
+/// The sweep deletes files, so it matches only names that it wrote itself.
+fn is_snapshot_file_name(name: &str) -> bool {
+    name.strip_suffix(SNAPSHOT_FILE_SUFFIX).is_some_and(|stem| {
+        stem.len() == 16
+            && stem
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
 fn list_snapshot_files(dir: &Path) -> Vec<SnapshotFile> {
+    // A symlinked version directory can point outside the cache. The sweep
+    // deletes files, so it does not follow the link.
+    if std::fs::symlink_metadata(dir).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Vec::new();
+    }
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -348,7 +366,7 @@ fn list_snapshot_files(dir: &Path) -> Vec<SnapshotFile> {
             entry
                 .file_name()
                 .to_str()
-                .is_some_and(|name| name.ends_with(SNAPSHOT_FILE_SUFFIX))
+                .is_some_and(is_snapshot_file_name)
         })
         .filter_map(|entry| {
             let metadata = entry.metadata().ok()?;
