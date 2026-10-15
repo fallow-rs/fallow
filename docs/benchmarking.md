@@ -150,7 +150,9 @@ not available on macOS.
 Fast PR shards:
 
 - `fallow-core/analysis`: core parser, graph, cache, resolver, and duplicate
-  detector paths.
+  detector paths. `star_barrel_monorepo/{8,32,128}` scales the package count of a
+  monorepo with `export *` barrels and one import for each package through the
+  root barrel. Compare the ratio between sizes: the work must grow linearly.
 - `fallow-core/entry_point_discovery`: entry-point discovery on a monorepo
   fixture, covering root-package discovery, per-workspace discovery, and
   plugin-glob discovery (triggered by `crates/core/src/discover/` changes).
