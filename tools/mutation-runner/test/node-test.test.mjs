@@ -38,6 +38,7 @@ const createEnumProject = () => {
     "project/src/color.ts":
       "export enum Color { Red = 1 }\nexport const isRed = (value: number): boolean => value === Color.Red;\n",
     "project/support/setup.mjs": 'globalThis.fallowSetup = "loaded";\n',
+    "project/support/noisy.mjs": 'console.error("Error: retrying the connection");\n',
     [`project/${COLOR_TEST}`]: [
       'import assert from "node:assert/strict";',
       'import { test } from "node:test";',
@@ -122,6 +123,19 @@ describe("node-test adapter with the Node flags of the test script", () => {
   test("a test file that does not load gives a message that starts with the error line", async () => {
     companion = startCompanion();
     const ready = await init({ env: {} });
+    assert.equal(ready.type, "ready", JSON.stringify(ready));
+    const dryRun = await request({ type: "dry_run", test_files: [COLOR_TEST] });
+    assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
+    assert.equal(dryRun.unhandled_errors.length, 1, JSON.stringify(dryRun));
+    assert.match(
+      dryRun.unhandled_errors[0].message,
+      /^SyntaxError \[ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX\]: TypeScript enum is not supported/u,
+    );
+  });
+
+  test("an earlier unrelated error line in the stderr does not replace the load error", async () => {
+    companion = startCompanion();
+    const ready = await init({ env: {}, node_args: ["--import", "./support/noisy.mjs"] });
     assert.equal(ready.type, "ready", JSON.stringify(ready));
     const dryRun = await request({ type: "dry_run", test_files: [COLOR_TEST] });
     assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));

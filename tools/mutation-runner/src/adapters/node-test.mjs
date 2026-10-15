@@ -94,10 +94,14 @@ const ERROR_LINE = /^\w*(?:Error|Exception)(?: \[\w+\])?: /u;
 
 const stderrLines = (stderr) => stderr.join("").trim().split("\n");
 
-/** Gives the error line and the last lines of the stderr of a file process. */
+/**
+ * Gives the error line and the last lines of the stderr of a file process.
+ * The error line is the last match, because a test file or a preload can
+ * print an unrelated error line before the error that stops the process.
+ */
 const stderrDetail = (stderr) => {
   const lines = stderrLines(stderr);
-  const errorLine = lines.find((line) => ERROR_LINE.test(line));
+  const errorLine = lines.findLast((line) => ERROR_LINE.test(line));
   const tail = lines
     .slice(-STDERR_TAIL_LINES)
     .filter((line) => line !== errorLine)

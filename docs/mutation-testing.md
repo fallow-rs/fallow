@@ -366,8 +366,13 @@ selects one. The default `auto` reads the project in this order:
   relative `--import`, `--require` or loader value resolves against the
   project root. The preload of the adapter comes before these flags, so a
   loader of the project wraps the hook of the preload.
+- The detection reads only a command whose program is `node`. A wrapper
+  command, for example `cross-env X=1 node --test` or `tsx --test`, gives
+  no flags. `npm run` indirection needs no special step, because the API
+  reads every script.
 - `NODE_OPTIONS` of the `fallow mutation` process also reaches each test
-  process. Use it for a flag that the script detection does not read.
+  process. Use it for a flag that the script detection does not read, for
+  example when the baseline fails with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
 - A test file that does not load (for example a TypeScript `enum` without
   `--experimental-transform-types`) is a baseline failure. Its message
   starts with the error line of the test process stderr, for example
