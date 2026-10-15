@@ -385,19 +385,29 @@ The key hashes these parts:
   The run computes one digest for each test file and its reach, and each
   mutant key combines the digests of its covering test files;
 - the content of the runner setup files (Vitest `setupFiles`, the `preload`
-  files of `bunfig.toml`) and of the files that they reach
-  (`MutationPlan::support_files`);
+  files of `bunfig.toml`), of the runner config modules at the root
+  (`vitest.config.*`, `vite.config.*` and `vitest.workspace.*`), and of the
+  files that they reach through static imports (`MutationPlan::support_files`).
+  A change to a config fragment that the runner config imports changes the
+  key;
 - the lockfiles of the first directory from the root upward that has one;
 - the runner config files at the root: `vitest.config.*`, `vite.config.*`,
   `vitest.workspace.*`, `bunfig.toml`, `package.json` and `tsconfig.json`. An
-  absent file is also a key fact, so a new config file changes the key.
+  absent file is also a key fact, so a new config file changes the key;
+- the configs of the `extends` chain of the root `tsconfig.json`, at most 32
+  files. A relative `extends` resolves to the path, or to the path with
+  `.json`. A package `extends` resolves in each `node_modules` directory from
+  the config upward, to the path, the path with `.json`, or `tsconfig.json`
+  in the path. The `exports` map of a package is not read. An `extends` that
+  does not resolve adds only its text to the key.
 
 The reach ignores `vi.mock`, so a replaced module is still in the key. This
 gives more misses, never a stale hit.
 
 Known limit: dynamic imports that the module graph does not resolve, and files
-that a test reads, are not in the key. A change to them does not invalidate a
-stored result. Each cache entry records this limit in `not_keyed`, and the
+that a test or a runner config reads, are not in the key. Runner configs and
+tsconfig files below the root, for example in a workspace package, are not in
+the key. A change to them does not invalidate a stored result. Each cache entry records this limit in `not_keyed`, and the
 report repeats it in `cache.not_keyed`.
 
 - A `timeout`, `flaky`, `runtime_error` or `pending` result is never stored.
@@ -418,6 +428,25 @@ report repeats it in `cache.not_keyed`.
 - The scheduler talks to the cache through the `ResultLookup` trait in
   `crates/api/src/mutation/scheduler`. The key and the file live in
   `crates/api/src/mutation/result_cache`.
+
+## Run directory
+
+The run writes the instrumented files, `paths.json` and the runtime hooks to
+`<cache dir>/mutation/runs/<content hash>/`. The hash covers each planned
+path and its instrumented text, so two runs of the same plan share one
+directory.
+
+- The write goes to a `.staging-*` directory below `runs/`, which the run
+  renames into place. A crash or a concurrent run never leaves a partial
+  directory, and a run that reads the directory never sees a partial file.
+- A directory whose files have the expected content is used again without a
+  write. A directory with other content is replaced in one rename.
+- Each run records its use in a `.last-used` marker file. At the start of a
+  run, Fallow removes the run directories that are not among the 5 most
+  recently used ones and that no run used in the last hour. The hour keeps
+  the directory of a concurrent run. The run never removes its own
+  directory. A `.staging-*` directory older than one hour, which a crash can
+  leave, is also removed.
 
 ## Type check of survivors
 

@@ -122,6 +122,75 @@ fn a_lockfile_in_a_parent_directory_is_a_key_part() {
     assert_ne!(before, key(&root), "the workspace lockfile above the root");
 }
 
+fn write(root: &Path, path: &str, text: &str) {
+    let file = root.join(path);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(file, text).unwrap();
+}
+
+/// A tsconfig chain: the root config extends a relative base (with a
+/// comment and without the `.json` extension), the base extends a package
+/// config, and an array entry extends a second relative config.
+fn tsconfig_chain(root: &Path) {
+    write(
+        root,
+        "tsconfig.json",
+        "{\n  // the shared options\n  \"extends\": [\"./configs/base\", \"./configs/paths.json\"],\n}\n",
+    );
+    write(
+        root,
+        "configs/base.json",
+        "{ \"extends\": \"@acme/tsconfig/strict.json\" }\n",
+    );
+    write(root, "configs/paths.json", "{ \"compilerOptions\": {} }\n");
+    write(
+        root,
+        "node_modules/@acme/tsconfig/strict.json",
+        "{ \"extends\": \"./base.json\", \"compilerOptions\": { \"strict\": true } }\n",
+    );
+    write(
+        root,
+        "node_modules/@acme/tsconfig/base.json",
+        "{ \"compilerOptions\": {} }\n",
+    );
+}
+
+#[test]
+fn a_change_to_a_config_that_tsconfig_extends_changes_the_key() {
+    for path in [
+        "configs/base.json",
+        "configs/paths.json",
+        "node_modules/@acme/tsconfig/strict.json",
+        "node_modules/@acme/tsconfig/base.json",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        project(dir.path());
+        tsconfig_chain(dir.path());
+        let before = key(dir.path());
+        edit(dir.path(), path);
+        assert_ne!(before, key(dir.path()), "{path}");
+    }
+}
+
+#[test]
+fn a_tsconfig_extends_cycle_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    write(
+        dir.path(),
+        "tsconfig.json",
+        "{ \"extends\": \"./a.json\" }\n",
+    );
+    write(
+        dir.path(),
+        "a.json",
+        "{ \"extends\": \"./tsconfig.json\" }\n",
+    );
+    let before = key(dir.path());
+    edit(dir.path(), "a.json");
+    assert_ne!(before, key(dir.path()));
+}
+
 #[test]
 fn the_runner_name_changes_the_key() {
     let dir = tempfile::tempdir().unwrap();
