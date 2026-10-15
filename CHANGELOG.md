@@ -298,6 +298,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Runs with a restored cache are faster.** A fresh checkout moves the
+  timestamps of every source file, so each run of a CI job that restores its
+  cache rewrote every cache entry. A cache entry whose content did not change
+  now gets only its new timestamps. On a large monorepo, such a run is about a
+  fifth faster. The dead-code run also frees its parsed modules on a helper
+  thread, so the report starts sooner.
+
+- **Barrels that `export *` many packages no longer slow the graph down.**
+  Each import through such a barrel was checked against every package that
+  the barrel re-exports. Now it is checked only against the packages that
+  export its name, so the cost grows with the number of imports, not with
+  imports times packages. Findings do not change.
+
 - **The MCP `audit` tool has a `fallow://tools/audit` guide.** The guide
   names the five diff-risk rules and holds the styling, coverage, baseline,
   grouping, runtime-coverage and `FALLOW_DIFF_FILE` detail. The `audit` tool
