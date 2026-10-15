@@ -27,6 +27,7 @@ use crate::mutation::companion::{COMPANION_FILES, install};
 use crate::mutation::discovery::discover_runtime;
 use crate::mutation::last_report::ignore_cache_dir;
 use crate::mutation::manifest::manifest;
+use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
 use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
@@ -554,6 +555,19 @@ fn store_results(cache: &ResultCache, outcome: &mut ScheduleOutcome) -> Mutation
     }
 }
 
+/// The `init` options of the runner. The `node:test` runner gets the module
+/// loading flags of the `node --test` command in the project scripts.
+fn init_options(runner: Runner, root: &Path) -> InitOptions {
+    let node_args = match runner {
+        Runner::NodeTest => node_test_args(root),
+        Runner::Vitest | Runner::BunTest => Vec::new(),
+    };
+    InitOptions {
+        node_args,
+        ..InitOptions::default()
+    }
+}
+
 /// The public error of a schedule that stopped the run.
 fn execute(
     options: &MutationRunOptions,
@@ -612,7 +626,7 @@ fn execute(
             config_path: None,
             run_dir: run_dir.dir.to_string_lossy().into_owned(),
             path_map: run_dir.path_map.clone(),
-            options: InitOptions::default(),
+            options: init_options(runner, &root),
         },
         runner: range.clone(),
         concurrency: options.concurrency.unwrap_or_else(default_concurrency),

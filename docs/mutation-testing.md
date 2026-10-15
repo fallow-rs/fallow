@@ -353,6 +353,26 @@ selects one. The default `auto` reads the project in this order:
   synchronous module hook (`module.registerHooks`), so `import` and
   `require` both get the instrumented file. Node strips the types of a
   TypeScript file. `bun test` uses a `Bun.plugin` load hook.
+- The `node:test` adapter gives each test process the module loading flags
+  of the project test script. The API reads the `package.json` scripts at
+  the root: the `test` script first, then the other scripts in name order.
+  The first `node ... --test` command gives the flags
+  (`crates/api/src/mutation/node_args.rs`). The init request carries them
+  in `options.node_args`, each flag with a value as two entries.
+- These flags pass: `--experimental-transform-types`,
+  `--experimental-strip-types`, `--no-experimental-strip-types`,
+  `--import`, `--require` (`-r`), `--experimental-loader` (`--loader`) and
+  `--conditions` (`-C`). Other flags of the command are ignored. A
+  relative `--import`, `--require` or loader value resolves against the
+  project root. The preload of the adapter comes before these flags, so a
+  loader of the project wraps the hook of the preload.
+- `NODE_OPTIONS` of the `fallow mutation` process also reaches each test
+  process. Use it for a flag that the script detection does not read.
+- A test file that does not load (for example a TypeScript `enum` without
+  `--experimental-transform-types`) is a baseline failure. Its message
+  starts with the error line of the test process stderr, for example
+  `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript enum is not
+  supported in strip-only mode`. The last lines of the stderr follow.
 - The test files are the files that the default patterns of the runner
   match, without `node_modules` and `.git`. A static test file that the
   patterns do not match is not run, and the report says so.

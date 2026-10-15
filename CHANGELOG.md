@@ -114,6 +114,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     these runners the plan leaves component files out with the skip reason
     `runner-cannot-load`, and their mutants do not lower the coverage.
     The human output prints one `Skipped files:` line. (#3470)
+  - The `node:test` runner gives each test process the module loading flags
+    of the `node --test` command in the project scripts:
+    `--experimental-transform-types`, the strip-types flags, `--import`,
+    `--require`, `--experimental-loader` and `--conditions`. A project
+    whose test script uses `--experimental-transform-types` for a
+    TypeScript `enum` now runs with no `NODE_OPTIONS`. The baseline failure
+    of a test file that does not load now starts with the error line, for
+    example `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: ...`, not
+    with a stack line. (#3487)
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /

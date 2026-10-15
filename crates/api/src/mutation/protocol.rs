@@ -13,6 +13,10 @@ pub struct InitOptions {
     pub test_files: Vec<String>,
     /// Extra environment variables for the runner.
     pub env: BTreeMap<String, String>,
+    /// The Node flags for each test process of the `node:test` runner. A
+    /// flag with a value is two entries.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub node_args: Vec<String>,
 }
 
 /// The body of an `init` request.

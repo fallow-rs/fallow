@@ -9,6 +9,7 @@ pub(crate) mod companion;
 pub(crate) mod discovery;
 pub(crate) mod last_report;
 pub(crate) mod manifest;
+pub(crate) mod node_args;
 pub(crate) mod protocol;
 pub(crate) mod report;
 pub(crate) mod result_cache;

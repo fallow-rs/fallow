@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { run as runNodeTests } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { CompanionError } from "../protocol.mjs";
 import { CHILD_ENV, HITS_DIAGNOSTIC } from "../runtime/child.mjs";
@@ -84,20 +85,68 @@ const isSuite = (data) => detailsOf(data).type === "suite";
 const isSuiteError = (type, data) =>
   type === "test:fail" && isSuite(data) && errorOf(data).failureType !== SUBTEST_FAILURE;
 
-const stderrTail = (stderr) =>
-  stderr.join("").trim().split("\n").slice(-STDERR_TAIL_LINES).join("\n");
+/**
+ * The first line of an uncaught error that Node writes to stderr, for
+ * example `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript enum
+ * is not supported in strip-only mode`.
+ */
+const ERROR_LINE = /^\w*(?:Error|Exception)(?: \[\w+\])?: /u;
+
+const stderrLines = (stderr) => stderr.join("").trim().split("\n");
+
+/** Gives the error line and the last lines of the stderr of a file process. */
+const stderrDetail = (stderr) => {
+  const lines = stderrLines(stderr);
+  const errorLine = lines.find((line) => ERROR_LINE.test(line));
+  const tail = lines
+    .slice(-STDERR_TAIL_LINES)
+    .filter((line) => line !== errorLine)
+    .join("\n");
+  return { errorLine, tail };
+};
+
+const causeText = (error) => errorMessage(error.cause ?? error.message ?? "failed");
+
+const joinDetail = (head, tail) => (tail.length === 0 ? head : `${head}: ${tail}`);
 
 /**
  * Gives the message of a failure outside a test. A file process that fails
- * has only a generic error, so the message adds the end of its stderr.
+ * has only a generic error, so the message adds its stderr. When the stderr
+ * has an error line, the message starts with that line, and the last lines
+ * of the stderr follow.
  */
-const causeText = (error) => errorMessage(error.cause ?? error.message ?? "failed");
-
 const failureMessage = (data, stderr) => {
   const message = causeText(errorOf(data));
-  const tail = isFileResult(data) ? stderrTail(stderr) : "";
-  return tail.length === 0 ? message : `${message}: ${tail}`;
+  if (!isFileResult(data)) return message;
+  const { errorLine, tail } = stderrDetail(stderr);
+  if (errorLine === undefined) return joinDetail(message, tail);
+  return tail.length === 0 ? errorLine : `${errorLine}\n${tail}`;
 };
+
+/** The Node flags whose value is a module specifier or a module path. */
+const URL_FLAGS = new Set(["--import", "--experimental-loader", "--loader"]);
+const PATH_FLAGS = new Set(["--require", "-r"]);
+
+const isRelativePath = (value) => /^\.\.?(?:[\\/]|$)/u.test(value);
+
+/**
+ * Resolves a relative module value of `--import`, `--require` or a loader
+ * flag against the project root. `--import` and a loader take a URL, and
+ * `--require` takes a path. Another value does not change.
+ */
+const resolveNodeArg = (root, flag, value) => {
+  if (!isRelativePath(value)) return value;
+  const path = resolve(root, value);
+  if (URL_FLAGS.has(flag)) return pathToFileURL(path).href;
+  return PATH_FLAGS.has(flag) ? path : value;
+};
+
+/**
+ * Gives the Node flags of the test script for each test process. Each flag
+ * with a value is a separate entry, followed by its value.
+ */
+const nodeArgs = (root, args = []) =>
+  args.map((arg, index) => (index === 0 ? arg : resolveNodeArg(root, args[index - 1], arg)));
 
 const testFailureKind = (status, data) => (status === "fail" ? failureKind(errorOf(data)) : null);
 
@@ -270,6 +319,8 @@ export const createAdapter = async (init) => {
   const overlay = buildOverlay(root, init.run_dir, init.path_map);
   const testFiles = initTestFiles(root, init, TEST_FILE_PATTERNS);
   const workDir = createWorkDir("fallow-mutation-node-", overlay);
+  // The preload comes first, so a loader of the project wraps its hook.
+  const execArgv = ["--import", PRELOAD, ...nodeArgs(root, init.options?.node_args)];
   // A companion that a node:test process starts inherits its test context.
   // The test processes of the adapter must report to this companion instead.
   delete process.env.NODE_TEST_CONTEXT;
@@ -294,7 +345,7 @@ export const createAdapter = async (init) => {
         isolation: "process",
         concurrency: 1,
         signal: controller.signal,
-        execArgv: ["--import", PRELOAD],
+        execArgv,
         ...runOptions(options),
       });
       return await readFileEvents(stream, file, stopAtFailure);

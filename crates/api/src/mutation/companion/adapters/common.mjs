@@ -72,6 +72,10 @@ export const validateInit = (init) => {
     "options.test_files must be a list of paths",
   );
   expectRequest(isOptional(options.env, isStringMap), "options.env must map names to strings");
+  expectRequest(
+    isOptional(options.node_args, isStringList),
+    "options.node_args must be a list of strings",
+  );
 };
 
 export const validateDryRun = (request) => {
