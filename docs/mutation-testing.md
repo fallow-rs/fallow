@@ -415,7 +415,9 @@ report repeats it in `cache.not_keyed`.
 
 - A `timeout`, `flaky`, `runtime_error` or `pending` result is never stored.
   A timeout depends on the load of the machine. A survivor that the time
-  budget left without a retry is not stored.
+  budget left without a retry is not stored. A survivor of a run without a
+  dropped covering test (see Baseline failures) is not stored, because the
+  key covers that test.
 - A reused result has `cached: true` in `mutants[]`. It counts in the score
   and the coverage the same as a result of this run.
 - `cache` in the report gives `hits`, `stored` and `not_keyed`. It is absent

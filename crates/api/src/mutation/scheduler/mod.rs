@@ -1034,6 +1034,10 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
     if let Some(issue) = attempt.issue {
         outcome.issues.push(issue);
     }
+    // The key covers each covering test. A survivor of a run without a
+    // dropped test is not proof against that test, so it is not stored.
+    let partial_survivor =
+        attempt.status == MutantStatus::Survived && !attempt.dropped_tests.is_empty();
     for test in attempt.dropped_tests {
         note_restarted_baseline_failure(outcome, facts, test, &job.id);
     }
@@ -1041,8 +1045,13 @@ fn record(outcome: &mut ScheduleOutcome, facts: &DryRunFacts, job: Job, attempt:
     // depend on durations, so it lists the covering tests by id.
     let mut covering_tests = job.tests;
     covering_tests.sort_unstable();
-    if let Some(key) = job.cache_key {
-        outcome.cache_keys.insert(job.id.clone(), key);
+    match job.cache_key {
+        Some(key) if !partial_survivor => {
+            outcome.cache_keys.insert(job.id.clone(), key);
+        }
+        _ => {
+            outcome.cache_keys.remove(&job.id);
+        }
     }
     outcome.results.insert(
         job.id,

@@ -1244,7 +1244,8 @@ fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
 
 /// A survivor that runs without a dropped covering test survives. The run
 /// requests only the tests that passed in the dry run of the restarted
-/// companion, so the count check uses that list, not the first dry run.
+/// companion, so the count check uses that list, not the first dry run. The
+/// result cache does not store such a survivor.
 #[test]
 fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
     let dry = |index: usize| DryRunResult {
@@ -1261,7 +1262,7 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
             ),
         ],
         hits: BTreeMap::from([
-            (tid("t1"), vec!["m1".to_owned(), "m2".to_owned()]),
+            (tid("t1"), vec!["m3".to_owned(), "m2".to_owned()]),
             (tid("t2"), vec!["m2".to_owned()]),
         ]),
         static_hits: Vec::new(),
@@ -1271,10 +1272,12 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
         file_setup_ms: BTreeMap::new(),
     };
     let spawner = FakeSpawner::new(script(dry, |_, run| match run.mutant_id.as_str() {
-        "m1" => Err(LinkFault::Timeout),
+        "m3" => Err(LinkFault::Timeout),
         _ => Ok(run_result(run, RunStatus::Survived, None)),
     }));
-    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config(1)).expect("run");
+    let mut config = config(1);
+    config.cache = Some(Arc::new(FakeCache::default()) as Arc<dyn ResultLookup>);
+    let outcome = run_schedule(&spawner, &plan(&["m3", "m2"]), &config).expect("run");
 
     let m2_runs: Vec<Vec<String>> = spawner
         .runs()
@@ -1300,6 +1303,45 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
         "{:?}",
         outcome.issues
     );
+    assert!(
+        !outcome.cache_keys.contains_key("m2"),
+        "t2 did not run against m2, so the key over t1 and t2 must not store the survivor"
+    );
+}
+
+/// A dropped test was not requested, so a result that names it as the
+/// killer is not trusted.
+#[test]
+fn a_dropped_test_cannot_be_the_killer() {
+    let dry = |index: usize| DryRunResult {
+        tests: vec![
+            test("t1", 2.0, TestStatus::Pass),
+            test(
+                "t2",
+                3.0,
+                if index == 0 {
+                    TestStatus::Pass
+                } else {
+                    TestStatus::Fail
+                },
+            ),
+        ],
+        hits: BTreeMap::from([
+            (tid("t1"), vec!["m3".to_owned(), "m2".to_owned()]),
+            (tid("t2"), vec!["m2".to_owned()]),
+        ]),
+        static_hits: Vec::new(),
+        file_hits: None,
+        unhandled_errors: Vec::new(),
+        unloaded_paths: Vec::new(),
+        file_setup_ms: BTreeMap::new(),
+    };
+    let spawner = FakeSpawner::new(script(dry, |_, run| match run.mutant_id.as_str() {
+        "m3" => Err(LinkFault::Timeout),
+        _ => Ok(run_result(run, RunStatus::Killed, Some(&tid("t2")))),
+    }));
+    let outcome = run_schedule(&spawner, &plan(&["m3", "m2"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m2"), MutantStatus::RuntimeError);
 }
 
 #[test]
