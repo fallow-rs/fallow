@@ -128,18 +128,28 @@ pub fn apply_outcomes(
 }
 
 /// The summary and the issue of a type check that failed. The survivors keep
-/// the status `survived`.
+/// the status `survived`. The `unsupported` component survivors did not
+/// depend on the companion, so the summary still counts them.
 pub fn failed_output(
     survivors: usize,
+    unsupported: usize,
     message: &str,
 ) -> (MutationTypecheckOutput, MutationRunIssue) {
+    let skipped = if unsupported == 0 {
+        Vec::new()
+    } else {
+        vec![MutationTypecheckSkip {
+            reason: MutationTypecheckSkipReason::UnsupportedFile,
+            count: unsupported,
+        }]
+    };
     (
         MutationTypecheckOutput {
             completed: false,
             survivors,
             checked: 0,
             compile_errors: 0,
-            skipped: Vec::new(),
+            skipped,
         },
         MutationRunIssue {
             code: "typecheck-failed".to_owned(),
@@ -187,7 +197,8 @@ pub fn typecheck_survivors(
             (apply_outcomes(results, outcomes), None)
         }
         Err(error) => {
-            let (output, issue) = failed_output(survivors, &error.to_string());
+            let (output, issue) =
+                failed_output(survivors, request.unsupported.len(), &error.to_string());
             (output, Some(issue))
         }
     };
@@ -200,8 +211,6 @@ pub fn typecheck_survivors(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use fallow_engine::mutation::{
         Mutant, MutantDisposition, MutantId, MutationPlanCounts, Operator, PlannedFile,
         PlannedMutant,
@@ -344,6 +353,7 @@ mod tests {
     fn a_component_survivor_is_not_sent_and_gets_its_own_reason() {
         let plan = plan_with(&[
             "src/a.ts",
+            "src/store.svelte.ts",
             "src/Button.vue",
             "src/Card.svelte",
             "src/Page.astro",
@@ -363,16 +373,18 @@ mod tests {
             .iter()
             .map(|file| file.path.as_str())
             .collect();
-        assert_eq!(sent, vec!["src/a.ts"]);
+        assert_eq!(sent, vec!["src/a.ts", "src/store.svelte.ts"]);
         let mut results = results;
         let mut outcomes = request.unsupported;
-        outcomes.push((
-            plan.mutants[0].mutant.id.as_str().to_owned(),
-            TypecheckOutcome::Compiles,
-        ));
+        for planned in &plan.mutants[..2] {
+            outcomes.push((
+                planned.mutant.id.as_str().to_owned(),
+                TypecheckOutcome::Compiles,
+            ));
+        }
         let output = apply_outcomes(&mut results, outcomes);
-        assert_eq!(output.survivors, 4);
-        assert_eq!(output.checked, 1);
+        assert_eq!(output.survivors, 5);
+        assert_eq!(output.checked, 2);
         assert_eq!(
             output.skipped,
             vec![MutationTypecheckSkip {
@@ -383,10 +395,38 @@ mod tests {
     }
 
     #[test]
+    fn only_component_survivors_complete_without_the_companion() {
+        let plan = plan_with(&["src/Button.vue"]);
+        let mut results = vec![result("m0", MutantStatus::Survived)];
+        results[0].location.file = "src/Button.vue".to_owned();
+        let step = typecheck_survivors(true, Path::new("/nonexistent"), &plan, &mut results);
+        assert!(step.issue.is_none());
+        let output = step.output.expect("a summary");
+        assert!(output.completed);
+        assert_eq!(output.survivors, 1);
+        assert_eq!(output.checked, 0);
+        assert_eq!(
+            output.skipped,
+            vec![MutationTypecheckSkip {
+                reason: MutationTypecheckSkipReason::UnsupportedFile,
+                count: 1,
+            }]
+        );
+        assert_eq!(results[0].status, MutantStatus::Survived);
+    }
+
+    #[test]
     fn a_failed_check_reports_an_issue() {
-        let (output, issue) = failed_output(2, "the companion exited with code 1");
+        let (output, issue) = failed_output(3, 1, "the companion exited with code 1");
         assert!(!output.completed);
-        assert_eq!(output.survivors, 2);
+        assert_eq!(output.survivors, 3);
+        assert_eq!(
+            output.skipped,
+            vec![MutationTypecheckSkip {
+                reason: MutationTypecheckSkipReason::UnsupportedFile,
+                count: 1,
+            }]
+        );
         assert_eq!(issue.code, "typecheck-failed");
         assert!(issue.message.ends_with("the companion exited with code 1"));
     }

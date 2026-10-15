@@ -454,6 +454,8 @@ are not checked, so the cost grows with the number of survivors only.
 - When the companion fails after the tests, the survivors keep the status
   `survived`. The report has `typecheck.completed: false`, an error with the
   code `typecheck-failed`, and the completion reason `typecheck-failed`.
+  `typecheck.skipped` still counts the component survivors, because they
+  never go to the companion.
 - `typecheck` is absent from the report when the option is off. A run
   without the option never sets `compile_error`.
 - `--plan --typecheck` exits with code 2, because a plan has no survivors.
