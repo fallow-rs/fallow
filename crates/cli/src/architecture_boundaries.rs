@@ -1937,10 +1937,19 @@ fn mcp_api_routes_honor_ambient_changed_since_scope() {
         let source = read_source_without_line_comments(source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         assert!(
-            source.contains("env_changed_since()"),
-            "{source_path} must apply FALLOW_CHANGED_SINCE when tool params omit changed_since"
+            source.contains("shared_analysis_options(") && !source.contains("EnvScope::Own"),
+            "{source_path} must apply FALLOW_CHANGED_SINCE through shared_analysis_options \
+             when tool params omit changed_since"
         );
     }
+    let helper_path = "crates/mcp/src/tools/api_runtime.rs";
+    let helper = read_source_without_line_comments(helper_path)
+        .unwrap_or_else(|error| panic!("read {helper_path}: {error}"));
+    assert!(
+        helper.contains("EnvScope::Ambient => (None, env_changed_since(), env_diff_file())")
+            && helper.contains("EnvScope::HardRef => (env_changed_since(), None, env_diff_file())"),
+        "{helper_path} must read FALLOW_CHANGED_SINCE for the ambient and hard-ref scopes"
+    );
 }
 
 #[test]

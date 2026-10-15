@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::HealthParams;
 
 use fallow_api::{
@@ -10,9 +13,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        env_changed_since, env_diff_file, non_empty_path, non_empty_string,
-        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result, typed_type_aware,
-        workspace_patterns_from_param,
+        EnvScope, call_cancellation, non_empty_path, non_empty_string,
+        resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
+        typed_tool_result, typed_type_aware, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
     push_baseline, push_global, push_remote_extends, push_scope, push_str_flag, run_tool,
@@ -23,12 +26,15 @@ use super::{
 /// programmatic contract, falling back to the CLI for CLI-only surfaces.
 pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
-        let options = match health_options_from_params(&params) {
+        let cancellation = call_cancellation();
+        let options = match health_options_from_params(&params, Some(Arc::clone(&cancellation))) {
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        let result =
-            run_api_blocking("check_health", move || health_typed_value(options, None)).await?;
+        let result = run_api_blocking("check_health", cancellation, move || {
+            health_typed_value(options, None)
+        })
+        .await?;
         if let Some(result) = typed_tool_result(result) {
             return Ok(result);
         }
@@ -65,7 +71,7 @@ fn run_health_api_value_with_env(
         return Ok(None);
     }
 
-    let options = health_options_from_params(params)?;
+    let options = health_options_from_params(params, None)?;
     super::api_runtime::typed_api_value(health_typed_value(options, env))
 }
 
@@ -343,23 +349,19 @@ fn requires_cli_fallback(params: &HealthParams) -> bool {
         || grouped_requested(params.group_by.as_deref())
 }
 
-fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions, String> {
+fn health_options_from_params(
+    params: &HealthParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<ComplexityOptions, String> {
     Ok(ComplexityOptions {
         analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache.unwrap_or(false),
-            threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
             changed_since: non_empty_string(params.changed_since.as_deref()),
-            ambient_changed_since: env_changed_since(),
-            ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             type_aware: typed_type_aware(params.type_aware),
-            ..AnalysisOptions::default()
+            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
         },
         max_cyclomatic: params.max_cyclomatic,
         max_cognitive: params.max_cognitive,
@@ -440,7 +442,7 @@ mod tests {
         };
 
         assert!(!requires_cli_fallback(&params));
-        let options = health_options_from_params(&params).expect("options");
+        let options = health_options_from_params(&params, None).expect("options");
         assert_eq!(
             options.analysis.workspace,
             Some(vec!["web".to_string(), "admin".to_string()])
@@ -481,7 +483,7 @@ mod tests {
         };
 
         assert!(!requires_cli_fallback(&params));
-        let options = health_options_from_params(&params).expect("options");
+        let options = health_options_from_params(&params, None).expect("options");
         assert!(options.analysis.root.is_none());
         assert!(options.analysis.config_path.is_none());
         assert_eq!(options.analysis.changed_since.as_deref(), Some("main"));
@@ -526,14 +528,14 @@ mod tests {
             sort: Some("weighted".to_string()),
             ..HealthParams::default()
         };
-        let err = health_options_from_params(&bad_sort).expect_err("invalid sort");
+        let err = health_options_from_params(&bad_sort, None).expect_err("invalid sort");
         assert!(err.contains("Invalid sort"));
 
         let bad_effort = HealthParams {
             effort: Some("extreme".to_string()),
             ..HealthParams::default()
         };
-        let err = health_options_from_params(&bad_effort).expect_err("invalid effort");
+        let err = health_options_from_params(&bad_effort, None).expect_err("invalid effort");
         assert!(err.contains("Invalid effort"));
     }
 
@@ -817,5 +819,25 @@ mod tests {
             .expect("typed health")
             .expect("a health section stays on the typed route");
         assert_eq!(value["kind"], "health");
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Both routes of `health` express the same shared settings.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::route_parity::assert_routes_agree(
+            "check_health",
+            &serde_json::json!({}),
+            |params: HealthParams| build_health_args(&params),
+            |params: HealthParams| {
+                health_options_from_params(&params, None)
+                    .expect("options")
+                    .analysis
+            },
+        );
     }
 }

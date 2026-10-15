@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Pinned JavaScript coverage producers recorded by the coverage producer conformance corpus. Never installed by the repository root.",
   "dependencies": {
-    "acorn": "8.18.0",
+    "acorn": "8.19.0",
     "ast-v8-to-istanbul": "1.0.7",
     "istanbul-lib-instrument": "6.0.3",
     "oxc-coverage-instrument": "0.13.0",

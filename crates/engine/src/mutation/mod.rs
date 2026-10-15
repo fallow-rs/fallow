@@ -40,6 +40,30 @@ use crate::session::AnalysisSession;
 use crate::source::ModuleInfo;
 use fallow_types::results::AnalysisResults;
 
+/// The runner config modules at the project root. Each test run loads them,
+/// so they and the files that they reach through static imports are in
+/// [`MutationPlan::support_files`].
+pub const RUNNER_CONFIG_MODULES: [&str; 18] = [
+    "vitest.config.ts",
+    "vitest.config.mts",
+    "vitest.config.cts",
+    "vitest.config.js",
+    "vitest.config.mjs",
+    "vitest.config.cjs",
+    "vite.config.ts",
+    "vite.config.mts",
+    "vite.config.cts",
+    "vite.config.js",
+    "vite.config.mjs",
+    "vite.config.cjs",
+    "vitest.workspace.ts",
+    "vitest.workspace.mts",
+    "vitest.workspace.cts",
+    "vitest.workspace.js",
+    "vitest.workspace.mjs",
+    "vitest.workspace.cjs",
+];
+
 /// The files and lines that a plan mutates.
 #[derive(Debug, Clone)]
 pub enum MutationScope {
@@ -133,7 +157,8 @@ pub struct MutationPlanInputs<'a> {
     pub framework_config_exports: Option<&'a FrameworkConfigExports>,
     /// The setup files of the test runner config, absolute or relative to
     /// the root, with or without an extension. They fill
-    /// [`MutationPlan::support_files`].
+    /// [`MutationPlan::support_files`], with the runner config modules at the
+    /// root.
     pub setup_files: &'a [PathBuf],
 }
 
@@ -323,9 +348,10 @@ pub struct MutationPlan {
     /// content of these files.
     #[serde(skip)]
     pub test_file_reach: BTreeMap<String, Vec<u32>>,
-    /// The setup files of the test runner and the files that they reach
-    /// through static imports, sorted. Each test loads them, so the result
-    /// cache keys on their content for each mutant.
+    /// The setup files of the test runner, the runner config modules at the
+    /// root ([`RUNNER_CONFIG_MODULES`]), and the files that they reach through
+    /// static imports, sorted. Each test loads them, so the result cache keys
+    /// on their content for each mutant.
     #[serde(skip)]
     pub support_files: Vec<String>,
     /// The number of mutants for each disposition.

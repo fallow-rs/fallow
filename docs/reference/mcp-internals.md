@@ -246,7 +246,9 @@ Contract rules:
   An in-process call that does outlive `timeout_ms` is counted as abandoned,
   and while abandoned work is still winding down later host calls fall back to
   the subprocess, which bounds how much orphaned analysis a long-lived server
-  can accumulate.
+  can accumulate. The direct tools count into the same total, so Code Mode
+  also falls back while a direct typed call that timed out or was cancelled
+  still winds down.
 - Host calls are memoized per snippet, keyed on the tool plus its merged params
   in canonical form (object keys sorted, array order preserved), so
   `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` are one entry. A hit spawns nothing,
@@ -410,9 +412,40 @@ Contract rules:
 The standalone tools choose typed execution or an explicit CLI fallback; the
 server is not universally a subprocess wrapper. The Code Mode backing policy
 above is a separate timeout boundary. `FALLOW_BIN` selects the CLI for routes
-that need it, and `FALLOW_TIMEOUT_SECS` controls response deadlines. A typed
-blocking task can continue after its deadline response, as documented by the
-structured `FALLOW_MCP_API_TIMEOUT` error.
+that need it, and `FALLOW_TIMEOUT_SECS` controls response deadlines.
+
+A direct tool call stops for two reasons: its deadline passes, or the client
+sends `notifications/cancelled`. rmcp reports a cancel only through the
+request's token and keeps polling the handler, so the server's `call_tool`
+runs every tool inside that token's scope
+(`crates/mcp/src/tools/cancellation.rs`). The scope is a task-local value, not
+a parameter, so a new tool gets the same behavior without a signature change.
+
+- The subprocess route waits for the deadline, the cancel, or the process,
+  whichever comes first. On a cancel it kills the owned process tree, as on a
+  timeout.
+- The typed route gives each call one cancellation flag, which goes into
+  `AnalysisOptions::cancellation`. A timeout or a cancel sets it and the call
+  returns at once. The stop is
+  cooperative: the analysis ends at its next stage boundary. Until the worker
+  ends, the call counts as abandoned, in the same count that Code Mode reads
+  before it starts in-process work. The `audit` base worktree is removed on
+  drop, so an early stop does not leave it behind.
+
+A cancelled call gets no response on the wire. rmcp removes the request from
+its pool when `notifications/cancelled` arrives, and drops the response that
+the handler returns later, as the MCP specification requires. The handler
+still builds a `FALLOW_MCP_CANCELLED` result, but only tests that call a tool
+directly see it. Only a timeout gives the client a structured error:
+`FALLOW_MCP_SUBPROCESS_TIMEOUT` or `FALLOW_MCP_API_TIMEOUT`.
+
+Each typed options builder starts from `shared_analysis_options` in
+`api_runtime.rs`. It maps root, config, remote extends, cache and threads,
+places `FALLOW_CHANGED_SINCE` and `FALLOW_DIFF_FILE` by `EnvScope`, and sets
+the cancellation flag. A tool sets only its own fields on top. A tool with
+both routes has a parity test (`tools/route_parity.rs`) that builds the argv
+and the typed options from the same params and compares the shared settings,
+`production` included: `false` is `--no-production` on the CLI route.
 
 The server installs one store of parsed modules for the process
 (`crates/mcp/src/warm_session.rs`, `fallow_engine::warm_parse`). Each typed

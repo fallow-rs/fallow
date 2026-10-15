@@ -33,6 +33,8 @@ schemars = { workspace = true, optional = true }
 # `IssueAction` at runtime), so `serde_json` ships unconditionally.
 serde_json = { workspace = true }
 rustc-hash = { workspace = true }
+# Unique temp files for the atomic cache write in `atomic_file`.
+tempfile = { workspace = true }
 
 [features]
 # Adds `#[derive(schemars::JsonSchema)]` to result and extract types so the

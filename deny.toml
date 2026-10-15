@@ -30,6 +30,15 @@ confidence-threshold = 0.8
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Two oxc versions compile the parser, AST and semantic crates twice and grow
+# the binary. A dependency that pins an older oxc must be bumped first.
+deny = [
+    { crate = "oxc_allocator", deny-multiple-versions = true },
+    { crate = "oxc_ast", deny-multiple-versions = true },
+    { crate = "oxc_parser", deny-multiple-versions = true },
+    { crate = "oxc_semantic", deny-multiple-versions = true },
+    { crate = "oxc_span", deny-multiple-versions = true },
+]
 
 [sources]
 unknown-registry = "deny"

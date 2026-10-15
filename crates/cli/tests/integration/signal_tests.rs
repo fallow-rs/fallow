@@ -46,6 +46,28 @@ use std::time::{Duration, Instant};
 /// that drops the Child handle without a visible `wait()`; we satisfy
 /// it by killing-and-waiting on the not-found path explicitly.
 fn spawn_signal_helper_with(graceful: bool) -> (std::process::Child, u32) {
+    spawn_signal_helper_full(graceful, libc::SIG_DFL)
+}
+
+/// Set the SIGHUP disposition of the current process to `hangup`.
+#[expect(unsafe_code, reason = "setting a signal disposition requires FFI")]
+fn set_hangup(hangup: libc::sighandler_t) -> std::io::Result<()> {
+    // SAFETY: `hangup` is `SIG_DFL` or `SIG_IGN`, so no handler code runs.
+    if unsafe { libc::signal(libc::SIGHUP, hangup) } == libc::SIG_ERR {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Spawn the helper with `hangup` as the SIGHUP disposition at exec. The
+/// test sets the disposition explicitly, so a test harness that itself runs
+/// with SIGHUP ignored (for example under `nohup`) cannot change the result.
+fn spawn_signal_helper_full(
+    graceful: bool,
+    hangup: libc::sighandler_t,
+) -> (std::process::Child, u32) {
+    use std::os::unix::process::CommandExt as _;
+
     let fallow_bin = env!("CARGO_BIN_EXE_fallow");
     let mut builder = Command::new(fallow_bin);
     builder
@@ -54,6 +76,12 @@ fn spawn_signal_helper_with(graceful: bool) -> (std::process::Child, u32) {
         .stderr(Stdio::piped());
     if graceful {
         builder.env("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL", "1");
+    }
+    #[expect(unsafe_code, reason = "pre_exec is an unsafe API")]
+    // SAFETY: the closure calls only `signal`, which is async-signal-safe,
+    // between fork and exec.
+    unsafe {
+        builder.pre_exec(move || set_hangup(hangup));
     }
     let mut child = builder.spawn().expect("spawn fallow signal helper");
     let stdout = child.stdout.take().expect("piped stdout");
@@ -150,6 +178,84 @@ fn sigterm_kills_registered_child_and_exits_143() {
     assert!(
         wait_for_pid_dead(sleep_pid, Duration::from_secs(5)),
         "inner sleep PID {sleep_pid} must be dead after the signal handler drains",
+    );
+}
+
+/// A closed terminal (SIGHUP) and Ctrl+\ (SIGQUIT) also drain the
+/// registered children. Before they were drained, they ended fallow
+/// with the default action and left children in their own process
+/// group, such as mutation companions, running.
+#[test]
+fn sighup_and_sigquit_kill_registered_child_and_exit_128_plus_signum() {
+    for (signal, code) in [("-HUP", 129), ("-QUIT", 131)] {
+        let (mut fallow, sleep_pid) = spawn_signal_helper();
+        assert!(
+            !wait_for_pid_dead(sleep_pid, Duration::from_millis(100)),
+            "inner sleep PID {sleep_pid} should be alive after helper start"
+        );
+        send_signal(fallow.id(), signal);
+        let status = fallow
+            .wait_timeout_compat(Duration::from_secs(10))
+            .expect("fallow helper exit within 10s");
+        assert_eq!(status.code(), Some(code), "{signal}: {status:?}");
+        assert!(
+            wait_for_pid_dead(sleep_pid, Duration::from_secs(5)),
+            "{signal}: inner sleep PID {sleep_pid} must be dead after the signal handler drains",
+        );
+    }
+}
+
+/// `nohup` and daemon wrappers start fallow with SIGHUP ignored. fallow
+/// must keep that disposition, so a hangup does not end the run or its
+/// children.
+#[test]
+fn an_inherited_ignored_sighup_stays_ignored() {
+    let (mut fallow, sleep_pid) = spawn_signal_helper_full(false, libc::SIG_IGN);
+    send_signal(fallow.id(), "-HUP");
+    std::thread::sleep(Duration::from_millis(500));
+    let exited = fallow.try_wait().expect("try_wait");
+    let sleep_alive = !wait_for_pid_dead(sleep_pid, Duration::from_millis(100));
+    let _ = fallow.kill();
+    let _ = fallow.wait();
+    let _ = Command::new("kill")
+        .args(["-9", &sleep_pid.to_string()])
+        .status();
+    assert_eq!(exited, None, "an ignored SIGHUP must not end fallow");
+    assert!(
+        sleep_alive,
+        "an ignored SIGHUP must not kill the registered child"
+    );
+}
+
+/// The release binary aborts on a panic, so no `Drop` kills the
+/// registered children. The panic hook drains them. The helper panics on
+/// a second thread, so the `Drop` of the child on the main thread cannot
+/// be what kills it.
+#[test]
+fn a_panic_kills_registered_child() {
+    let fallow_bin = env!("CARGO_BIN_EXE_fallow");
+    let mut fallow = Command::new(fallow_bin)
+        .env("FALLOW_TEST_SIGNAL_HELPER", "panic")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn fallow signal helper");
+    let mut line = String::new();
+    BufReader::new(fallow.stdout.take().expect("piped stdout"))
+        .read_line(&mut line)
+        .expect("read the PID line");
+    let sleep_pid: u32 = line.trim().parse().expect("a PID");
+    let dead = wait_for_pid_dead(sleep_pid, Duration::from_secs(5));
+    let _ = fallow.kill();
+    let _ = fallow.wait();
+    if !dead {
+        let _ = Command::new("kill")
+            .args(["-9", &sleep_pid.to_string()])
+            .status();
+    }
+    assert!(
+        dead,
+        "inner sleep PID {sleep_pid} must be dead after the panic hook drains"
     );
 }
 

@@ -36,7 +36,7 @@ oxc_semantic = "0.152"
 oxc_span = "0.152"
 oxc_str = "0.152"
 oxc_syntax = "0.152"
-oxc_coverage_instrument = "0.13.0"
+oxc_coverage_instrument = "0.14.0"
 # CSS AST parser (browser-grade, built on Mozilla cssparser/selectors). Pinned
 # exact because it has no stable release line and pre-release semver matching is
 # brittle. Used by fallow-extract for CSS class/import extraction and analytics.
@@ -112,6 +112,7 @@ postcard = { version = "1", default-features = false, features = ["alloc"] }
 ls-types = "0.0.6"
 tower-lsp-server = "0.23"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "signal", "time"] }
+tokio-util = { version = "0.7", default-features = false }
 
 # File watching
 notify = "8"

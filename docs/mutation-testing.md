@@ -128,12 +128,34 @@ or relational mutant, so it adds little test-strength signal for its run time.
 - The run refuses a dirty git worktree unless `--allow-dirty` is set. After the
   run, it compares the worktree with the start state and reports each changed
   path.
-- Mutants in functions that reach a file system, process, network or database
-  sink are pruned (`side-effect-sink`). `--allow-side-effects` keeps them. This
-  override is a flag only: the config rejects `allowSideEffects`, so a project
-  config cannot widen what a run executes.
+- The check covers tracked and untracked paths. For ignored files, it covers
+  the files that `git status --ignored=matching` lists at the start, up to
+  10000 files in path order: a write to one of them or a delete is a change.
+  Git lists an ignored directory such as `node_modules/` or `coverage/` as one
+  entry, so the check does not see the files below it. A new ignored file is
+  not a change, because test runs make such files (coverage, logs).
+- The check leaves out `<cache>/mutation` and the output files of the run. For
+  ignored files it also leaves out the whole cache directory, because the
+  analysis writes its own cache files there. The run refuses a cache directory
+  that is the project root or a directory above it, or that holds a planned
+  source or test file (`FALLOW_MUTATION_UNSAFE_CACHE_DIR`, exit code `2`). Such
+  a cache directory would hide the writes of the tests from the check.
+- Mutants in a function whose own body calls a file system, process, network
+  or database sink are pruned (`side-effect-sink`). A mutant in top-level code
+  is pruned when the module calls a sink at the top level. The pruning does
+  not follow calls: a mutant in a function that calls a helper, which then
+  calls a sink, still runs. `--allow-side-effects` keeps the pruned mutants.
+  This override is a flag only: the config rejects `allowSideEffects`, so a
+  project config cannot widen what a run executes.
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
+- The companions run in their own process group on Unix and in a Job Object on
+  Windows. Fallow ends that group when a run ends, and when it receives
+  SIGINT, SIGTERM, SIGHUP or SIGQUIT. When Fallow starts with SIGHUP ignored,
+  as under `nohup`, it keeps SIGHUP ignored. The release binary aborts on a
+  panic, and a panic hook ends the group first. A companion whose stdin closes
+  without a `shutdown` request kills its own process group and exits, so it
+  does not outlive a Fallow process that ended in another way.
 
 ## Exit codes
 
@@ -141,7 +163,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run with no executed mutant has no score and exits `0`, also when
@@ -331,6 +353,31 @@ selects one. The default `auto` reads the project in this order:
   synchronous module hook (`module.registerHooks`), so `import` and
   `require` both get the instrumented file. Node strips the types of a
   TypeScript file. `bun test` uses a `Bun.plugin` load hook.
+- The `node:test` adapter gives each test process the module loading flags
+  of the project test script. The API reads the `package.json` scripts at
+  the root: the `test` script first, then the other scripts in name order.
+  The first `node ... --test` command gives the flags
+  (`crates/api/src/mutation/node_args.rs`). The init request carries them
+  in `options.node_args`, each flag with a value as two entries.
+- These flags pass: `--experimental-transform-types`,
+  `--experimental-strip-types`, `--no-experimental-strip-types`,
+  `--import`, `--require` (`-r`), `--experimental-loader` (`--loader`) and
+  `--conditions` (`-C`). Other flags of the command are ignored. A
+  relative `--import`, `--require` or loader value resolves against the
+  project root. The preload of the adapter comes before these flags, so a
+  loader of the project wraps the hook of the preload.
+- The detection reads only a command whose program is `node`. A wrapper
+  command, for example `cross-env X=1 node --test` or `tsx --test`, gives
+  no flags. `npm run` indirection needs no special step, because the API
+  reads every script.
+- `NODE_OPTIONS` of the `fallow mutation` process also reaches each test
+  process. Use it for a flag that the script detection does not read, for
+  example when the baseline fails with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
+- A test file that does not load (for example a TypeScript `enum` without
+  `--experimental-transform-types`) is a baseline failure. Its message
+  starts with the error line of the test process stderr, for example
+  `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript enum is not
+  supported in strip-only mode`. The last lines of the stderr follow.
 - The test files are the files that the default patterns of the runner
   match, without `node_modules` and `.git`. A static test file that the
   patterns do not match is not run, and the report says so.
@@ -409,19 +456,29 @@ The key hashes these parts:
   The run computes one digest for each test file and its reach, and each
   mutant key combines the digests of its covering test files;
 - the content of the runner setup files (Vitest `setupFiles`, the `preload`
-  files of `bunfig.toml`) and of the files that they reach
-  (`MutationPlan::support_files`);
+  files of `bunfig.toml`), of the runner config modules at the root
+  (`vitest.config.*`, `vite.config.*` and `vitest.workspace.*`), and of the
+  files that they reach through static imports (`MutationPlan::support_files`).
+  A change to a config fragment that the runner config imports changes the
+  key;
 - the lockfiles of the first directory from the root upward that has one;
 - the runner config files at the root: `vitest.config.*`, `vite.config.*`,
   `vitest.workspace.*`, `bunfig.toml`, `package.json` and `tsconfig.json`. An
-  absent file is also a key fact, so a new config file changes the key.
+  absent file is also a key fact, so a new config file changes the key;
+- the configs of the `extends` chain of the root `tsconfig.json`, at most 32
+  files. A relative `extends` resolves to the path, or to the path with
+  `.json`. A package `extends` resolves in each `node_modules` directory from
+  the config upward, to the path, the path with `.json`, or `tsconfig.json`
+  in the path. The `exports` map of a package is not read. An `extends` that
+  does not resolve adds only its text to the key.
 
 The reach ignores `vi.mock`, so a replaced module is still in the key. This
 gives more misses, never a stale hit.
 
 Known limit: dynamic imports that the module graph does not resolve, and files
-that a test reads, are not in the key. A change to them does not invalidate a
-stored result. Each cache entry records this limit in `not_keyed`, and the
+that a test or a runner config reads, are not in the key. Runner configs and
+tsconfig files below the root, for example in a workspace package, are not in
+the key. A change to them does not invalidate a stored result. Each cache entry records this limit in `not_keyed`, and the
 report repeats it in `cache.not_keyed`.
 
 - A `timeout`, `flaky`, `runtime_error` or `pending` result is never stored.
@@ -444,6 +501,25 @@ report repeats it in `cache.not_keyed`.
 - The scheduler talks to the cache through the `ResultLookup` trait in
   `crates/api/src/mutation/scheduler`. The key and the file live in
   `crates/api/src/mutation/result_cache`.
+
+## Run directory
+
+The run writes the instrumented files, `paths.json` and the runtime hooks to
+`<cache dir>/mutation/runs/<content hash>/`. The hash covers each planned
+path and its instrumented text, so two runs of the same plan share one
+directory.
+
+- The write goes to a `.staging-*` directory below `runs/`, which the run
+  renames into place. A crash or a concurrent run never leaves a partial
+  directory, and a run that reads the directory never sees a partial file.
+- A directory whose files have the expected content is used again without a
+  write. A directory with other content is replaced in one rename.
+- Each run records its use in a `.last-used` marker file. At the start of a
+  run, Fallow removes the run directories that are not among the 5 most
+  recently used ones and that no run used in the last hour. The hour keeps
+  the directory of a concurrent run. The run never removes its own
+  directory. A `.staging-*` directory older than one hour, which a crash can
+  leave, is also removed.
 
 ## Type check of survivors
 

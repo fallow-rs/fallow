@@ -46,7 +46,7 @@ pub use pnpm_overrides::{
     is_valid_override_value, override_misconfig_reason, override_source_label, parse_override_key,
     parse_pnpm_package_json_overrides, parse_pnpm_workspace_overrides,
 };
-pub use tsconfig::{TsconfigOutputMap, TsconfigOutputResolution};
+pub use tsconfig::{TsconfigOutputMap, TsconfigOutputResolution, tsconfig_linked_files};
 
 /// Workspace configuration for monorepo support.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

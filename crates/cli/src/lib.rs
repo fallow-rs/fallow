@@ -2467,8 +2467,10 @@ enum AuditCacheCli {
     /// Runs the same reclaim policy every `fallow audit` run already applies
     /// silently: orphaned-sidecar cleanup, age-based reclaim under the
     /// resolved threshold, and cross-repo reclaim of abandoned entries whose
-    /// recorded owner root no longer exists. Entries owned by other live
-    /// projects are never touched. Use `--dry-run` to preview every decision
+    /// recorded owner root no longer exists. It also bounds the base-snapshot
+    /// files in the project cache directory (`pass: "snapshot"`): files older
+    /// than the threshold go, and only the newest 32 stay. Entries owned by
+    /// other live projects are never touched. Use `--dry-run` to preview every decision
     /// the policy would take without touching the filesystem. `--root` is
     /// optional and defaults to the current directory. Reported sizes come
     /// from a full recursive walk of each cache entry, which can take a few
@@ -3500,7 +3502,10 @@ impl DispatchContext<'_> {
 /// signal handler kills the child (proving drain runs unconditionally)
 /// but does NOT call `std::process::exit`, so the helper itself sees
 /// `wait_with_output` return and exits 0. This is the path the
-/// integration test asserts: graceful drain + clean exit. Lives in
+/// integration test asserts: graceful drain + clean exit.
+///
+/// With `FALLOW_TEST_SIGNAL_HELPER=panic`, a thread panics after the PID
+/// line, so the test can assert that the panic hook kills the child. Lives in
 /// `main.rs` (not tests/) because clap is already parsed below and we
 /// need to intercept before that.
 #[cfg(unix)]
@@ -3527,6 +3532,11 @@ fn signal_test_helper() -> ExitCode {
     let _ = writeln!(lock, "{pid}");
     let _ = lock.flush();
     drop(lock);
+    if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER").is_some_and(|value| value == "panic") {
+        // A panic on another thread leaves this thread and its `Drop` alive,
+        // so only the panic hook can end the child.
+        let _ = std::thread::spawn(|| panic!("signal helper panic")).join();
+    }
     let _ = child.wait_with_output();
     if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL").is_some() {
         return ExitCode::SUCCESS;
@@ -3624,6 +3634,7 @@ pub fn run() -> ExitCode {
 fn run_command() -> ExitCode {
     process_clock::mark_process_start();
     install_signal_handlers();
+    signal::install_panic_drain();
     install_spawn_hooks();
 
     if std::env::var_os("FALLOW_TEST_SIGNAL_HELPER").is_some() {

@@ -935,3 +935,20 @@ fn a_runner_setup_file_and_its_imports_are_support_files() {
         "a setup path without an extension resolves to the graph file, its imports follow, and a missing setup file adds nothing"
     );
 }
+
+#[test]
+fn a_runner_config_file_and_its_imports_are_support_files() {
+    let root = fixture("mutation-config-reach");
+    let session = session(&root);
+    let plan = plan_mutations_for_session(&session, &MutationPlanRequest::new(MutationScope::All))
+        .expect("plan");
+    assert_eq!(
+        plan.support_files,
+        vec![
+            "config/environment.ts".to_owned(),
+            "config/shared.ts".to_owned(),
+            "vitest.config.ts".to_owned(),
+        ],
+        "the runner config at the root and each file that it reaches through static imports are support files, so a change to a config fragment changes the result cache key"
+    );
+}

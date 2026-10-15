@@ -223,15 +223,15 @@ impl CacheStore {
         Ok(())
     }
 
-    /// Evict LRU entries until the re-encoded size is under `target_bytes`
-    /// or only one entry remains.
+    /// Evict the entries that runs saw least recently until the re-encoded
+    /// size is under `target_bytes` or only one entry remains.
     fn evict_lru_to_target(&mut self, target_bytes: usize, mut encoded: Vec<u8>) -> Vec<u8> {
         let mut order: Vec<(u64, String, usize)> = self
             .entries
             .iter()
             .map(|(key, entry)| {
                 (
-                    entry.last_access_secs,
+                    entry.last_seen_secs,
                     key.clone(),
                     bitcode::encode(entry)
                         .len()
@@ -403,9 +403,18 @@ impl CacheStore {
         self.entries.get(&self.key_for(path))
     }
 
-    /// Remove cache entries for files that no longer exist on disk.
+    /// Remove cache entries for files that no longer exist on disk, and mark
+    /// the entries for every discovered file as seen by this run.
     ///
-    /// Returns `true` when any entry was removed.
+    /// Returns `true` when any entry was removed. The seen stamp alone does
+    /// not make the store dirty: a run that saves nothing else does not
+    /// rewrite the whole blob to persist it, and the next run that saves
+    /// stamps the same files again.
+    ///
+    /// The seen stamp orders eviction. A file that every run discovers keeps a
+    /// current stamp even when it never changes, so `evict_lru_to_target`
+    /// removes the entries that only another scope reads before it removes
+    /// the files that this scope reads on every run.
     ///
     /// The predicate is deliberately "still exists", not "was discovered by
     /// this run". Discovery is scoped: `--production` drops test and story
@@ -432,6 +441,12 @@ impl CacheStore {
             .cloned()
             .collect();
         self.entries.retain(|key, _| retained.contains(key));
+        let now = super::conversion::current_unix_seconds();
+        for key in &current_keys {
+            if let Some(entry) = self.entries.get_mut(key) {
+                entry.last_seen_secs = now;
+            }
+        }
         self.entries.len() != before
     }
 
@@ -542,29 +557,11 @@ fn write_cache_gitignore(cache_dir: &Path) -> Result<(), String> {
         .map_err(|e| format!("Failed to write cache .gitignore: {e}"))
 }
 
-/// Write `data` atomically via a sibling `.tmp` file, best-effort fsync, then rename.
+/// Replace `cache_file` with `data` through a unique temp file, so concurrent
+/// fallow processes that share `.fallow/` never interleave their writes.
 fn atomic_write(cache_file: &Path, data: &[u8]) -> Result<(), String> {
-    let tmp_file = match cache_file.file_name() {
-        Some(name) => cache_file.with_file_name({
-            let mut s = name.to_os_string();
-            s.push(".tmp");
-            s
-        }),
-        None => return Err("Cache file path has no filename component".to_owned()),
-    };
-
-    {
-        use std::io::Write as _;
-        let mut f = std::fs::File::create(&tmp_file)
-            .map_err(|e| format!("Failed to create cache tmp: {e}"))?;
-        f.write_all(data)
-            .map_err(|e| format!("Failed to write cache tmp: {e}"))?;
-        let _ = f.sync_all();
-    }
-
-    std::fs::rename(&tmp_file, cache_file)
-        .map_err(|e| format!("Failed to rename cache tmp into place: {e}"))?;
-    Ok(())
+    fallow_types::atomic_file::write_atomic(cache_file, data)
+        .map_err(|e| format!("Failed to write cache file: {e}"))
 }
 
 impl Default for CacheStore {

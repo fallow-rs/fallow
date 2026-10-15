@@ -319,6 +319,41 @@ fn the_last_report_is_saved_in_the_ignored_cache() {
 }
 
 #[test]
+fn a_cache_dir_that_hides_project_files_is_refused() {
+    for (dir, shown) in [(".", "the project root"), ("src", "src/a.ts")] {
+        let project = small_project();
+        fs::write(
+            project.path().join(".fallowrc.json"),
+            format!(r#"{{"cache":{{"dir":"{dir}"}}}}"#),
+        )
+        .expect("config");
+        // A `node --test` file makes `src/a.ts` a planned file. The refusal
+        // comes before the run looks for a runtime.
+        fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"p","type":"module","main":"src/a.ts","scripts":{"test":"node --test"}}"#,
+        )
+        .expect("write");
+        fs::create_dir_all(project.path().join("test")).expect("dir");
+        fs::write(
+            project.path().join("test/a.test.ts"),
+            "import { test } from \"node:test\";\nimport { add } from \"../src/a.ts\";\n\ntest(\"add\", () => {\n  if (add(1, 2) !== 3) throw new Error(\"add\");\n});\n",
+        )
+        .expect("write");
+        commit_all(project.path());
+        let error = run_mutation(&options(project.path(), MutationRunScope::All)).unwrap_err();
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_UNSAFE_CACHE_DIR"),
+            "{dir}: {}",
+            error.message
+        );
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains(shown), "{dir}: {}", error.message);
+    }
+}
+
+#[test]
 fn invalid_limits_are_refused() {
     let project = small_project();
     let mut zero = options(project.path(), MutationRunScope::All);
@@ -701,6 +736,110 @@ mod end_to_end {
                 .completion
                 .reasons
                 .contains(&fallow_output::MutationIncompleteReason::SkippedFiles)
+        );
+    }
+
+    /// The acceptance case of #3487: the `test` script loads an enum with
+    /// `--experimental-transform-types`, and the run uses that flag.
+    #[test]
+    fn a_node_test_run_uses_the_module_flags_of_the_test_script() {
+        use crate::mutation::discovery::RuntimeKind;
+        if child_runner_package("node-test", RuntimeKind::Node).is_none() {
+            return;
+        }
+        let project = tempfile::tempdir().expect("dir");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        let files = [
+            (
+                "package.json",
+                r#"{"name":"p","type":"module","scripts":{"test":"tsc && node --experimental-transform-types --test test/a.test.ts"}}"#,
+            ),
+            (
+                "src/color.ts",
+                "export enum Color {\n  Red = 1,\n}\n\nexport function isRed(value: number): boolean {\n  return value === Color.Red;\n}\n",
+            ),
+            (
+                "test/a.test.ts",
+                "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { isRed } from \"../src/color.ts\";\n\ntest(\"red\", () => {\n  assert.equal(isRed(1), true);\n  assert.equal(isRed(2), false);\n});\n",
+            ),
+        ];
+        for (file, text) in files {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+            fs::write(target, text).expect("write");
+        }
+        commit_all(&root);
+
+        let report =
+            run_mutation(&options(&root, MutationRunScope::All)).expect("the run completes");
+
+        assert_eq!(
+            report.runner.as_ref().expect("a runner ran").name,
+            "node-test"
+        );
+        assert!(
+            report.baseline_failures.is_empty(),
+            "{:#?}",
+            report.baseline_failures
+        );
+        assert_eq!(
+            report.summary.counts.no_coverage, 0,
+            "{:#?}",
+            report.mutants
+        );
+        assert!(
+            report
+                .mutants
+                .iter()
+                .any(|mutant| mutant.status == MutantStatus::Killed),
+            "{:#?}",
+            report.mutants
+        );
+    }
+
+    #[test]
+    fn a_test_that_writes_to_the_root_is_reported_as_a_worktree_change() {
+        use crate::mutation::discovery::RuntimeKind;
+        let Some(package) = child_runner_package("node-test", RuntimeKind::Node) else {
+            return;
+        };
+        let (_project, root) = fixture_repository(
+            &package.join("test/fixtures/node-basic"),
+            &["package.json", "src/math.ts", "test/math.test.ts"],
+        );
+        fs::write(
+            root.join("test/touch.test.ts"),
+            "import assert from \"node:assert/strict\";\n\
+             import { writeFileSync } from \"node:fs\";\n\
+             import { test } from \"node:test\";\n\n\
+             import { add } from \"../src/math.ts\";\n\n\
+             test(\"touch\", () => {\n  writeFileSync(\"touched.txt\", \"x\");\n  assert.equal(add(1, 2), 3);\n});\n",
+        )
+        .expect("write");
+        commit_all(&root);
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        ))
+        .expect("the run completes");
+
+        assert!(report.worktree.checked);
+        assert_eq!(report.worktree.changed_paths, vec!["touched.txt"]);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|issue| issue.code == "worktree-changed"),
+            "{:#?}",
+            report.errors
+        );
+        assert_eq!(report.completion.status, MutationCompletionStatus::Partial);
+        assert!(
+            report
+                .completion
+                .reasons
+                .contains(&fallow_output::MutationIncompleteReason::WorktreeChanged)
         );
     }
 

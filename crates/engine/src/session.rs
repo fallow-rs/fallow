@@ -1578,7 +1578,6 @@ fn update_parse_cache(
                     store.refresh_fingerprint(&file.path, fingerprint);
                     dirty = true;
                 } else if adds_complexity {
-                    let preserved_last_access = cached.last_access_secs;
                     let preserved_complexity = (!need_complexity && cached.complexity_extracted)
                         .then(|| cached.complexity.clone());
                     let mut refreshed = fallow_extract::cache::module_to_cached(
@@ -1586,7 +1585,6 @@ fn update_parse_cache(
                         fingerprint,
                         need_complexity,
                     );
-                    refreshed.last_access_secs = preserved_last_access;
                     if let Some(complexity) = preserved_complexity {
                         refreshed.complexity = complexity;
                         refreshed.complexity_extracted = true;

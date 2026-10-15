@@ -61,6 +61,23 @@ pub fn install_handlers() -> std::io::Result<()> {
     result
 }
 
+/// Install a panic hook that kills every registered child after the previous
+/// hook reports the panic. Idempotent.
+///
+/// The release binary aborts on a panic, so no `Drop` runs. A child in its
+/// own process group, such as a mutation companion, then survives fallow
+/// without this hook.
+pub fn install_panic_drain() {
+    static PANIC_HOOK: OnceLock<()> = OnceLock::new();
+    PANIC_HOOK.get_or_init(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            previous(info);
+            fallow_process::try_drain_and_kill();
+        }));
+    });
+}
+
 /// True after a signal has been observed. Read by long-running loops
 /// (currently `fallow watch`) to break out cooperatively.
 pub fn is_shutting_down() -> bool {

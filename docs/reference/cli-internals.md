@@ -202,7 +202,10 @@ after every gate set the exit code.
     import site of a package that the base already reports stays inherited.
     A change to
     the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
-    `crates/cli/src/audit_cache.rs`.
+    `crates/cli/src/audit_cache.rs`. Each option that changes what the base
+    pass puts in the snapshot must be part of the cache key. For example,
+    only a `--brief` base pass computes the public-export set, so `brief`
+    is a key field.
 - The unused-file cascade filter is
   `fallow_engine::dead_code::hide_cascade_findings`. It runs inside
   `apply_rule_severities`, so the CLI, the programmatic API, MCP, the Node
@@ -760,6 +763,17 @@ garbage-collects. Two subcommands with distinct semantics:
   the matching human summary line and never adds its size to
   `reclaimed_bytes`. Released SHA-keyed registrations are genuinely removed
   (reason `legacy-registered`) and stay counted as reclaimed.
+- Base-snapshot payload files: each audit base pass that misses the cache
+  writes `<cache>/cache/audit-base-v<N>/<key-hash>.bin`, and the key folds in
+  the base SHA and the changed files. After each save, audit removes the
+  files that are older than the resolved threshold (measured from the last
+  write or cache hit, because a hit refreshes the file mtime) and keeps only
+  the newest `MAX_AUDIT_BASE_SNAPSHOT_FILES` (32) files. The cap applies
+  also when the threshold is `0`. Prune reports these files with
+  `pass: "snapshot"` and reasons `aged-out`, `over-capacity`, `fresh` or
+  `age-gc-disabled`. It resolves the cache directory from
+  `FALLOW_CACHE_DIR`, then `cache.dir`, then `<root>/.fallow`
+  (`crates/cli/src/audit_cache.rs`).
 
 Shared invariants (`crates/cli/src/base_worktree.rs`):
 

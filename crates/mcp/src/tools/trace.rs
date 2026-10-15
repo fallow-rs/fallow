@@ -21,8 +21,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        env_changed_since, env_diff_file, json_success, non_empty_path, programmatic_error_body,
-        run_api_blocking, typed_api_value, typed_tool_result, workspace_patterns_from_param,
+        EnvScope, SharedParams, call_cancellation, json_success, programmatic_error_body,
+        run_api_blocking, shared_analysis_options, shared_params, typed_api_value,
+        typed_tool_result, workspace_patterns_from_param,
     },
     duplication_mode_from_param, min_occurrences_from_param, push_global, push_remote_extends,
     push_scope, require_non_empty, run_tool, validation_error_body,
@@ -35,11 +36,12 @@ pub async fn run_trace_export_tool(
     binary: &str,
     params: TraceExportParams,
 ) -> Result<CallToolResult, McpError> {
-    let options = match trace_export_options_from_params(&params) {
+    let cancellation = call_cancellation();
+    let options = match trace_export_options_from_params(&params, Some(Arc::clone(&cancellation))) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
-    let result = run_api_blocking("trace_export", move || {
+    let result = run_api_blocking("trace_export", cancellation, move || {
         run_trace_export(&options).and_then(serialize_trace_export_programmatic_json)
     })
     .await?;
@@ -54,11 +56,12 @@ pub async fn run_trace_export_tool(
 
 /// Run `trace_file` through the typed API.
 pub async fn run_trace_file_tool(params: TraceFileParams) -> Result<CallToolResult, McpError> {
-    let options = match trace_file_options_from_params(&params) {
+    let cancellation = call_cancellation();
+    let options = match trace_file_options_from_params(&params, Some(Arc::clone(&cancellation))) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
-    let result = run_api_blocking("trace_file", move || {
+    let result = run_api_blocking("trace_file", cancellation, move || {
         run_trace_file(&options).and_then(serialize_trace_file_programmatic_json)
     })
     .await?
@@ -73,11 +76,13 @@ pub async fn run_trace_file_tool(params: TraceFileParams) -> Result<CallToolResu
 pub async fn run_trace_import_path_tool(
     params: TraceImportPathParams,
 ) -> Result<CallToolResult, McpError> {
-    let options = match trace_import_path_options_from_params(&params) {
-        Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
-    };
-    let result = run_api_blocking("trace_import_path", move || {
+    let cancellation = call_cancellation();
+    let options =
+        match trace_import_path_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+            Ok(options) => options,
+            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+        };
+    let result = run_api_blocking("trace_import_path", cancellation, move || {
         run_trace_import_path(&options).and_then(serialize_trace_import_path_programmatic_json)
     })
     .await?
@@ -90,8 +95,9 @@ pub async fn run_trace_import_path_tool(
 
 /// Run `trace_error` through the typed API.
 pub async fn run_trace_error_tool(params: TraceErrorParams) -> Result<CallToolResult, McpError> {
-    let options = trace_error_options_from_params(&params);
-    let result = run_api_blocking("trace_error", move || {
+    let cancellation = call_cancellation();
+    let options = trace_error_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let result = run_api_blocking("trace_error", cancellation, move || {
         run_trace_error(&options).and_then(serialize_trace_error_programmatic_json)
     })
     .await?
@@ -106,11 +112,13 @@ pub async fn run_trace_error_tool(params: TraceErrorParams) -> Result<CallToolRe
 pub async fn run_trace_dependency_tool(
     params: TraceDependencyParams,
 ) -> Result<CallToolResult, McpError> {
-    let options = match trace_dependency_options_from_params(&params) {
-        Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
-    };
-    let result = run_api_blocking("trace_dependency", move || {
+    let cancellation = call_cancellation();
+    let options =
+        match trace_dependency_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+            Ok(options) => options,
+            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+        };
+    let result = run_api_blocking("trace_dependency", cancellation, move || {
         run_trace_dependency(&options).and_then(serialize_trace_dependency_programmatic_json)
     })
     .await?
@@ -123,11 +131,12 @@ pub async fn run_trace_dependency_tool(
 
 /// Run `trace_clone` through the typed API.
 pub async fn run_trace_clone_tool(params: TraceCloneParams) -> Result<CallToolResult, McpError> {
-    let options = match trace_clone_options_from_params(&params) {
+    let cancellation = call_cancellation();
+    let options = match trace_clone_options_from_params(&params, Some(Arc::clone(&cancellation))) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
-    let result = run_api_blocking("trace_clone", move || {
+    let result = run_api_blocking("trace_clone", cancellation, move || {
         run_trace_clone(&options).and_then(serialize_trace_clone_programmatic_json)
     })
     .await?
@@ -144,8 +153,7 @@ pub fn run_trace_export_api_value(
     params: &TraceExportParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let mut options = trace_export_options_from_params(params)?;
-    options.analysis.cancellation = cancellation;
+    let options = trace_export_options_from_params(params, cancellation)?;
     typed_api_value(run_trace_export(&options).and_then(serialize_trace_export_programmatic_json))
 }
 
@@ -153,8 +161,7 @@ pub fn run_trace_file_api_value(
     params: &TraceFileParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<serde_json::Value, String> {
-    let mut options = trace_file_options_from_params(params)?;
-    options.analysis.cancellation = cancellation;
+    let options = trace_file_options_from_params(params, cancellation)?;
     run_trace_file(&options)
         .and_then(serialize_trace_file_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
@@ -164,8 +171,7 @@ pub fn run_trace_dependency_api_value(
     params: &TraceDependencyParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<serde_json::Value, String> {
-    let mut options = trace_dependency_options_from_params(params)?;
-    options.analysis.cancellation = cancellation;
+    let options = trace_dependency_options_from_params(params, cancellation)?;
     run_trace_dependency(&options)
         .and_then(serialize_trace_dependency_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
@@ -175,8 +181,7 @@ pub fn run_trace_clone_api_value(
     params: &TraceCloneParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<serde_json::Value, String> {
-    let mut options = trace_clone_options_from_params(params)?;
-    options.duplication.analysis.cancellation = cancellation;
+    let options = trace_clone_options_from_params(params, cancellation)?;
     run_trace_clone(&options)
         .and_then(serialize_trace_clone_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
@@ -432,55 +437,51 @@ fn push_trace_clone_numeric_options(
 
 fn trace_export_options_from_params(
     params: &TraceExportParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<TraceExportOptions, String> {
     require_non_empty("file", &params.file).map_err(validation_error_body)?;
     require_non_empty("export_name", &params.export_name).map_err(validation_error_body)?;
     Ok(TraceExportOptions {
-        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
-            root: params.root.as_deref(),
-            config: params.config.as_deref(),
-            allow_remote_extends: params.allow_remote_extends,
-            production: params.production,
-            workspace: params.workspace.as_deref(),
-            no_cache: params.no_cache,
-            threads: params.threads,
-        }),
+        analysis: dead_code_analysis_options(
+            shared_params!(params),
+            params.production,
+            params.workspace.as_deref(),
+            cancellation,
+        ),
         file: params.file.clone(),
         export_name: params.export_name.clone(),
     })
 }
 
-fn trace_file_options_from_params(params: &TraceFileParams) -> Result<TraceFileOptions, String> {
+fn trace_file_options_from_params(
+    params: &TraceFileParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<TraceFileOptions, String> {
     require_non_empty("file", &params.file).map_err(validation_error_body)?;
     Ok(TraceFileOptions {
-        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
-            root: params.root.as_deref(),
-            config: params.config.as_deref(),
-            allow_remote_extends: params.allow_remote_extends,
-            production: params.production,
-            workspace: params.workspace.as_deref(),
-            no_cache: params.no_cache,
-            threads: params.threads,
-        }),
+        analysis: dead_code_analysis_options(
+            shared_params!(params),
+            params.production,
+            params.workspace.as_deref(),
+            cancellation,
+        ),
         file: params.file.clone(),
     })
 }
 
 fn trace_import_path_options_from_params(
     params: &TraceImportPathParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<TraceImportPathOptions, String> {
     require_non_empty("from", &params.from).map_err(validation_error_body)?;
     require_non_empty("to", &params.to).map_err(validation_error_body)?;
     Ok(TraceImportPathOptions {
-        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
-            root: params.root.as_deref(),
-            config: params.config.as_deref(),
-            allow_remote_extends: params.allow_remote_extends,
-            production: params.production,
-            workspace: params.workspace.as_deref(),
-            no_cache: params.no_cache,
-            threads: params.threads,
-        }),
+        analysis: dead_code_analysis_options(
+            shared_params!(params),
+            params.production,
+            params.workspace.as_deref(),
+            cancellation,
+        ),
         from: params.from.clone(),
         to: params.to.clone(),
         eager_only: false,
@@ -498,7 +499,10 @@ const MCP_TRACE_SOURCE: &str = "mcp";
 /// and a `context`; short-circuiting the empty case here replaced that with a
 /// bare `{error, message, exit_code}` body, so the weakest refusal on the tool
 /// was the one an agent hits first.
-fn trace_error_options_from_params(params: &TraceErrorParams) -> TraceErrorOptions {
+fn trace_error_options_from_params(
+    params: &TraceErrorParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> TraceErrorOptions {
     let source = params
         .source
         .as_deref()
@@ -506,15 +510,12 @@ fn trace_error_options_from_params(params: &TraceErrorParams) -> TraceErrorOptio
         .filter(|source| !source.is_empty())
         .unwrap_or(MCP_TRACE_SOURCE);
     TraceErrorOptions {
-        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
-            root: params.root.as_deref(),
-            config: params.config.as_deref(),
-            allow_remote_extends: params.allow_remote_extends,
-            production: params.production,
-            workspace: params.workspace.as_deref(),
-            no_cache: params.no_cache,
-            threads: params.threads,
-        }),
+        analysis: dead_code_analysis_options(
+            shared_params!(params),
+            params.production,
+            params.workspace.as_deref(),
+            cancellation,
+        ),
         trace: params.trace.clone(),
         source: source.to_string(),
     }
@@ -522,18 +523,16 @@ fn trace_error_options_from_params(params: &TraceErrorParams) -> TraceErrorOptio
 
 fn trace_dependency_options_from_params(
     params: &TraceDependencyParams,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<TraceDependencyOptions, String> {
     require_non_empty("package_name", &params.package_name).map_err(validation_error_body)?;
     Ok(TraceDependencyOptions {
-        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
-            root: params.root.as_deref(),
-            config: params.config.as_deref(),
-            allow_remote_extends: params.allow_remote_extends,
-            production: params.production,
-            workspace: params.workspace.as_deref(),
-            no_cache: params.no_cache,
-            threads: params.threads,
-        }),
+        analysis: dead_code_analysis_options(
+            shared_params!(params),
+            params.production,
+            params.workspace.as_deref(),
+            cancellation,
+        ),
         package_name: params.package_name.clone(),
         usage: dependency_usage_query(params)?,
     })
@@ -575,21 +574,18 @@ fn dependency_usage_query(
     .map_err(|err| validation_error_body(err.to_string()))
 }
 
-fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceCloneOptions, String> {
+fn trace_clone_options_from_params(
+    params: &TraceCloneParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<TraceCloneOptions, String> {
     Ok(TraceCloneOptions {
         duplication: DuplicationOptions {
             analysis: AnalysisOptions {
-                root: non_empty_path(params.root.as_deref()),
-                config_path: non_empty_path(params.config.as_deref()),
-                allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-                no_cache: params.no_cache.unwrap_or(false),
-                threads: params.threads,
-                // This envelope carries no `request_outcomes`, so a ref that stood
-                // down would widen the result with nothing to say so: keep the
-                // hard error of an explicit ref.
-                changed_since: env_changed_since(),
                 workspace: workspace_patterns_from_param(params.workspace.as_deref()),
-                ..AnalysisOptions::default()
+                // This envelope carries no `request_outcomes`, so a ref that
+                // stood down would widen the result with nothing to say so:
+                // keep the hard error of an explicit ref.
+                ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
             },
             mode: duplication_mode_from_param(params.mode.as_deref())?,
             near: params.near,
@@ -608,33 +604,20 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
     })
 }
 
-#[derive(Clone, Copy)]
-struct DeadCodeAnalysisInput<'a> {
-    root: Option<&'a str>,
-    config: Option<&'a str>,
-    allow_remote_extends: Option<bool>,
+/// The analysis options of the dead-code trace routes. This envelope carries
+/// no `request_outcomes`, so a ref that stood down would widen the result with
+/// nothing to say so: keep the hard error of an explicit ref.
+fn dead_code_analysis_options(
+    shared: SharedParams<'_>,
     production: Option<bool>,
-    workspace: Option<&'a str>,
-    no_cache: Option<bool>,
-    threads: Option<usize>,
-}
-
-fn dead_code_analysis_options(input: DeadCodeAnalysisInput<'_>) -> AnalysisOptions {
+    workspace: Option<&str>,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> AnalysisOptions {
     AnalysisOptions {
-        root: non_empty_path(input.root),
-        config_path: non_empty_path(input.config),
-        allow_remote_extends: input.allow_remote_extends.unwrap_or(false),
-        no_cache: input.no_cache.unwrap_or(false),
-        threads: input.threads,
-        production: input.production.unwrap_or(false),
-        production_override: input.production,
-        // This envelope carries no `request_outcomes`, so a ref that stood
-        // down would widen the result with nothing to say so: keep the
-        // hard error of an explicit ref.
-        changed_since: env_changed_since(),
-        ambient_diff_file: env_diff_file(),
-        workspace: workspace_patterns_from_param(input.workspace),
-        ..AnalysisOptions::default()
+        production: production.unwrap_or(false),
+        production_override: production,
+        workspace: workspace_patterns_from_param(workspace),
+        ..shared_analysis_options(shared, EnvScope::HardRef, cancellation)
     }
 }
 
@@ -755,7 +738,7 @@ mod tests {
 
         assert!(args.contains(&"--near".to_string()));
         assert_eq!(
-            trace_clone_options_from_params(&params)
+            trace_clone_options_from_params(&params, None)
                 .expect("trace clone options")
                 .duplication
                 .near,
@@ -784,21 +767,21 @@ mod tests {
             .expect("trace dependency params");
 
             assert_eq!(
-                trace_export_options_from_params(&export)
+                trace_export_options_from_params(&export, None)
                     .expect("trace export options")
                     .analysis
                     .allow_remote_extends,
                 expected
             );
             assert_eq!(
-                trace_file_options_from_params(&file)
+                trace_file_options_from_params(&file, None)
                     .expect("trace file options")
                     .analysis
                     .allow_remote_extends,
                 expected
             );
             assert_eq!(
-                trace_dependency_options_from_params(&dependency)
+                trace_dependency_options_from_params(&dependency, None)
                     .expect("trace dependency options")
                     .analysis
                     .allow_remote_extends,
@@ -844,5 +827,56 @@ mod tests {
         write_type_aware_config(project.path(), r#"{"typeAware":{"enabled":true}}"#);
         assert_eq!(run_trace_export_api_value(&params(), None), Ok(None));
         assert_cli_fallback_ran(run_trace_export_tool(MISSING_FALLBACK_BINARY, params()).await);
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Every trace tool with both routes expresses the same shared settings on each.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::route_parity::assert_routes_agree(
+            "trace_export",
+            &serde_json::json!({ "file": "src/a.ts", "export_name": "used" }),
+            |params: TraceExportParams| build_trace_export_args(&params).expect("argv"),
+            |params: TraceExportParams| {
+                trace_export_options_from_params(&params, None)
+                    .expect("options")
+                    .analysis
+            },
+        );
+        super::super::route_parity::assert_routes_agree(
+            "trace_file",
+            &serde_json::json!({ "file": "src/a.ts" }),
+            |params: TraceFileParams| build_trace_file_args(&params).expect("argv"),
+            |params: TraceFileParams| {
+                trace_file_options_from_params(&params, None)
+                    .expect("options")
+                    .analysis
+            },
+        );
+        super::super::route_parity::assert_routes_agree(
+            "trace_dependency",
+            &serde_json::json!({ "package_name": "react" }),
+            |params: TraceDependencyParams| build_trace_dependency_args(&params).expect("argv"),
+            |params: TraceDependencyParams| {
+                trace_dependency_options_from_params(&params, None)
+                    .expect("options")
+                    .analysis
+            },
+        );
+        super::super::route_parity::assert_routes_agree(
+            "trace_clone",
+            &serde_json::json!({ "fingerprint": "dup:0123abcd" }),
+            |params: TraceCloneParams| build_trace_clone_args(&params).expect("argv"),
+            |params: TraceCloneParams| {
+                trace_clone_options_from_params(&params, None)
+                    .expect("options")
+                    .duplication
+                    .analysis
+            },
+        );
     }
 }

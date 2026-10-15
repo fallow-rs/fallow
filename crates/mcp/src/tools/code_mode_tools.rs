@@ -19,8 +19,8 @@ use fallow_api::{
 use super::super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        env_changed_since, env_diff_file, non_empty_path, non_empty_string,
-        programmatic_error_body, resolve_typed_coverage_inputs, typed_api_value,
+        EnvScope, non_empty_path, non_empty_string, programmatic_error_body,
+        resolve_typed_coverage_inputs, shared_analysis_options, shared_params, typed_api_value,
         workspace_patterns_from_param,
     },
     build_analyze_args, build_architecture_args, build_audit_args, build_check_changed_args,
@@ -34,7 +34,7 @@ use super::super::{
     flags::run_feature_flags_api_value,
     list_boundaries::run_list_boundaries_api_value,
     project_info::run_project_info_api_value,
-    push_global, push_remote_extends,
+    push_global, push_production, push_remote_extends,
     trace::{
         run_trace_clone_api_value, run_trace_dependency_api_value, run_trace_export_api_value,
         run_trace_file_api_value,
@@ -564,26 +564,21 @@ fn run_combined_api_value(
     params: &CombinedParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let mut options = combined_options_from_params(params)?;
-    options.analysis.cancellation = cancellation;
+    let options = combined_options_from_params(params, cancellation)?;
     typed_api_value(run_combined(&options).and_then(serialize_combined_programmatic_json))
 }
 
-fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptions, String> {
+fn combined_options_from_params(
+    params: &CombinedParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<CombinedOptions, String> {
     let analysis = AnalysisOptions {
-        root: non_empty_path(params.root.as_deref()),
-        config_path: non_empty_path(params.config.as_deref()),
-        allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-        no_cache: params.no_cache.unwrap_or(false),
-        threads: params.threads,
         production: params.production.unwrap_or(false),
         production_override: params.production,
         changed_since: non_empty_string(params.changed_since.as_deref()),
-        ambient_changed_since: env_changed_since(),
-        ambient_diff_file: env_diff_file(),
         workspace: workspace_patterns_from_param(params.workspace.as_deref()),
         explain: true,
-        ..AnalysisOptions::default()
+        ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
     };
     let coverage = resolve_typed_coverage_inputs(
         &analysis,
@@ -658,9 +653,7 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
         params.threads,
     );
     push_remote_extends(&mut args, params.allow_remote_extends);
-    if params.production == Some(true) {
-        args.push("--production".to_string());
-    }
+    push_production(&mut args, params.production);
     push_opt_arg(&mut args, "--workspace", params.workspace.as_deref());
     push_opt_arg(
         &mut args,
@@ -928,8 +921,8 @@ mod tests {
 
     #[test]
     fn combined_params_default_to_cli_combined_health_sections() {
-        let options =
-            combined_options_from_params(&CombinedParams::default()).expect("combined options");
+        let options = combined_options_from_params(&CombinedParams::default(), None)
+            .expect("combined options");
 
         assert!(options.health_options.complexity);
         assert!(options.health_options.file_scores);
@@ -940,11 +933,14 @@ mod tests {
 
     #[test]
     fn combined_params_forward_explicit_coverage_inputs() {
-        let options = combined_options_from_params(&CombinedParams {
-            coverage: Some("artifacts/coverage-final.json".to_string()),
-            coverage_root: Some("/ci/workspace".to_string()),
-            ..CombinedParams::default()
-        })
+        let options = combined_options_from_params(
+            &CombinedParams {
+                coverage: Some("artifacts/coverage-final.json".to_string()),
+                coverage_root: Some("/ci/workspace".to_string()),
+                ..CombinedParams::default()
+            },
+            None,
+        )
         .expect("combined options");
 
         assert_eq!(
@@ -988,7 +984,7 @@ mod tests {
             dupes_near: Some(true),
             ..CombinedParams::default()
         };
-        let options = combined_options_from_params(&params).expect("combined options");
+        let options = combined_options_from_params(&params, None).expect("combined options");
         let args = build_combined_args(&params);
 
         assert_eq!(options.duplication_options.near, Some(true));
@@ -1013,7 +1009,7 @@ mod tests {
                 dupes_ignore_symlinks: Some(value),
                 ..CombinedParams::default()
             };
-            let options = combined_options_from_params(&params).expect("combined options");
+            let options = combined_options_from_params(&params, None).expect("combined options");
             let args = build_combined_args(&params);
 
             assert_eq!(options.duplication_options.ignore_symlinks, Some(value));
@@ -1199,5 +1195,25 @@ mod tests {
                 tool.name()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Both routes of the `combined` host call express the same shared settings.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::super::route_parity::assert_routes_agree(
+            "combined",
+            &serde_json::json!({ "coverage": "coverage-final.json", "coverage_root": "/parity/ci" }),
+            |params: CombinedParams| build_combined_args(&params),
+            |params: CombinedParams| {
+                combined_options_from_params(&params, None)
+                    .expect("options")
+                    .analysis
+            },
+        );
     }
 }

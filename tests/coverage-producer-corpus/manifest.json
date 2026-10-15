@@ -2,10 +2,10 @@
   "$schema": "fallow-coverage-producer-conformance/v1",
   "recorded": {
     "node_pin": "v24.18.0",
-    "platform": "darwin-arm64",
+    "platform": "linux-x64",
     "coverage_root": "/fallow/corpus",
     "producers_lock_file": "producers/package-lock.json",
-    "producers_lock_sha256": "c650f17ad4ae5262dd1f84d99299a96619d93b66b43c4b0b97fc44d69d3ea165"
+    "producers_lock_sha256": "90e3386b3aca872dd25657e28a7515606276ff00bd6af99c366abe9e479b8aab"
   },
   "invariants": [
     {

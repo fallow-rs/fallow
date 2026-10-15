@@ -116,6 +116,9 @@ pub struct AuditCacheKeyPayload {
     pub include_entry_exports: bool,
     /// Keep the export and member findings of unused files (`--show-cascade`).
     pub show_cascade: bool,
+    /// Whether the base pass ran for the review brief (`--brief`). Only a
+    /// brief base pass computes the public-export set of the snapshot.
+    pub brief: bool,
     /// CRAP threshold override.
     pub max_crap: Option<f64>,
     /// Coverage input fingerprint.
@@ -177,6 +180,7 @@ impl AuditCacheKeyBuilder {
                 group_by: None,
                 include_entry_exports: false,
                 show_cascade: false,
+                brief: false,
                 max_crap: None,
                 coverage: None,
                 coverage_root: None,
@@ -230,6 +234,13 @@ impl AuditCacheKeyBuilder {
     #[must_use]
     pub const fn show_cascade(mut self, show_cascade: bool) -> Self {
         self.payload.show_cascade = show_cascade;
+        self
+    }
+
+    /// Set whether the base pass ran for the review brief (`--brief`).
+    #[must_use]
+    pub const fn brief(mut self, brief: bool) -> Self {
+        self.payload.brief = brief;
         self
     }
 

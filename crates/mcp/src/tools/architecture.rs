@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::params::ArchitectureParams;
 
@@ -11,8 +13,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        env_changed_since, env_diff_file, json_success, non_empty_path, programmatic_error_body,
-        run_api_blocking, workspace_patterns_from_param,
+        EnvScope, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
+        shared_analysis_options, shared_params, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested},
     push_baseline, push_global, push_remote_extends, push_scope, push_str_flag, run_tool,
@@ -29,8 +31,9 @@ pub async fn run_architecture(
         return run_tool(binary, "check_architecture", &args).await;
     }
 
-    let options = architecture_options_from_params(&params);
-    let result = run_api_blocking("check_architecture", move || {
+    let cancellation = call_cancellation();
+    let options = architecture_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let result = run_api_blocking("check_architecture", cancellation, move || {
         run_api_architecture(&options).and_then(serialize_architecture_programmatic_json)
     })
     .await?
@@ -88,7 +91,10 @@ fn requires_cli_fallback(params: &ArchitectureParams) -> bool {
         || grouped_requested(params.group_by.as_deref())
 }
 
-fn architecture_options_from_params(params: &ArchitectureParams) -> ArchitectureOptions {
+fn architecture_options_from_params(
+    params: &ArchitectureParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> ArchitectureOptions {
     let changed_since = params
         .changed_since
         .as_deref()
@@ -96,19 +102,12 @@ fn architecture_options_from_params(params: &ArchitectureParams) -> Architecture
         .map(str::to_string);
     ArchitectureOptions {
         analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache.unwrap_or(false),
-            threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
-            ambient_changed_since: env_changed_since(),
-            ambient_diff_file: env_diff_file(),
             changed_since,
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
-            ..AnalysisOptions::default()
+            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
         },
         files: params
             .file
@@ -181,11 +180,30 @@ mod tests {
 
     #[test]
     fn options_map_the_selectors() {
-        let options = architecture_options_from_params(&ArchitectureParams {
-            boundaries: Some(true),
-            ..ArchitectureParams::default()
-        });
+        let options = architecture_options_from_params(
+            &ArchitectureParams {
+                boundaries: Some(true),
+                ..ArchitectureParams::default()
+            },
+            None,
+        );
         assert!(options.boundaries && !options.cycles && !options.policy);
         assert!(options.analysis.explain);
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Both routes of `architecture` express the same shared settings.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::route_parity::assert_routes_agree(
+            "check_architecture",
+            &serde_json::json!({}),
+            |params: ArchitectureParams| build_architecture_args(&params),
+            |params: ArchitectureParams| architecture_options_from_params(&params, None).analysis,
+        );
     }
 }

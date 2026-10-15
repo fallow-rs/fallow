@@ -65,11 +65,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Fallow cache. The key covers the mutant, its covering tests, the content
     of the covering test files and the files that they import, the runner
     setup files (also the Bun `preload` files), the lockfile, the runner
-    config and the runner. A change to one of them
-    runs the mutant again. Dynamic imports that the module graph does not
-    resolve, and files that a test reads, are not in the key. Each cache entry
-    and the `cache` object of the report record this limit. A reused result
-    has `cached: true`. `--no-cache` runs each mutant.
+    config and the files that it imports, the configs that the root
+    `tsconfig.json` extends, and the runner. A change to one of them runs the
+    mutant again. Dynamic imports that the module graph does not resolve, and
+    files that a test reads, are not in the key. Each cache entry and the
+    `cache` object of the report record this limit. A reused result has
+    `cached: true`. `--no-cache` runs each mutant.
+  - Each run writes the instrumented files to a run directory in the Fallow
+    cache. A staging directory and a rename install it, so a concurrent run
+    on the same plan never reads a partial file. A run reuses a directory
+    with the expected content, and removes old run directories beyond the 5
+    most recently used ones.
   - The new `mutation` config section sets the runner, the operators, the
     minimum score and the concurrency.
   - `--typecheck` or `mutation.typecheck` type-checks each survivor through
@@ -108,6 +114,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     these runners the plan leaves component files out with the skip reason
     `runner-cannot-load`, and their mutants do not lower the coverage.
     The human output prints one `Skipped files:` line. (#3470)
+  - The `node:test` runner gives each test process the module loading flags
+    of the `node --test` command in the project scripts:
+    `--experimental-transform-types`, the strip-types flags, `--import`,
+    `--require`, `--experimental-loader` and `--conditions`. A project
+    whose test script uses `--experimental-transform-types` for a
+    TypeScript `enum` now runs with no `NODE_OPTIONS`. The baseline failure
+    of a test file that does not load now starts with the error line, for
+    example `SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: ...`, not
+    with a stack line. (#3487)
 
 - **`fallow audit` can skip sub-analyses.** `fallow audit` now takes
   `--only` and `--skip` with the values and rules of bare `fallow --only` /
@@ -325,6 +340,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   export its name, so the cost grows with the number of imports, not with
   imports times packages. Findings do not change.
 
+- **One oxc version in the build.** `oxc_coverage_instrument` moves to
+  0.14, which uses oxc 0.152 like the rest of Fallow. The parser, AST and
+  semantic crates no longer compile twice. `cargo deny` now fails when two
+  versions of the core oxc crates enter the dependency graph.
+
 - **The MCP `audit` tool has a `fallow://tools/audit` guide.** The guide
   names the five diff-risk rules and holds the styling, coverage, baseline,
   grouping, runtime-coverage and `FALLOW_DIFF_FILE` detail. The `audit` tool
@@ -377,6 +397,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     value becomes one URL path segment, so `..` addressed a different route.
     `fallow coverage analyze --cloud`, the cloud read commands and the cloud
     MCP tools refuse it, with the rule that already applies to commit SHAs.
+- **Two Fallow processes can save the cache at the same time.** The
+  extraction cache and the graph cache wrote through one fixed temp file
+  (`cache.bin.tmp`, `graph-cache.bin.tmp`). An editor server and a CLI run, or
+  a pre-commit hook beside an editor, that shared `.fallow/` wrote into the
+  same file. A save could then fail, or the cache could hold bytes from two
+  runs and be rebuilt from cold on the next run. Each save now writes its own
+  temp file and renames it into place.
+- **Cache eviction keeps the files that every run reads.** At the size cap
+  (`cache.maxSizeMb`), the extraction cache evicted the entries that it had
+  parsed longest ago. A file that never changes was parsed once and was then
+  the first entry to go, so the next run parsed it again. Eviction now removes
+  first the entries that recent runs did not discover, for example test
+  files after `--production` runs.
+- **`fallow audit --brief` no longer reports every export as new public
+  API after a run without `--brief`.** Only a brief run computes the
+  public exports of the base, but both runs shared one cached base
+  snapshot. A brief run after a plain run on the same base read an empty
+  base set, so `public_api_added` listed every export of the changed public
+  files. The cache key now includes `--brief`, and the cache version moves
+  to 13, so old snapshots are not used.
+
+- **The audit base-snapshot cache no longer grows without a limit.** Each
+  new base commit or changed-file set wrote one more snapshot file of up to
+  16 MiB below `<cache>/cache/audit-base-v*/`, and nothing removed them.
+  Now each save removes the files that are older than `audit.cacheMaxAgeDays`
+  (counted from the last use) and keeps only the newest 32 files.
+  `fallow audit-cache prune` reports and removes these files too, as entries
+  with `pass: "snapshot"`. A file over the cap has the reason
+  `over-capacity`.
+
+- **An edit to `package.json`, `deno.json` or `tsconfig.json` now rebuilds
+  the cached module graph.** The graph cache compared source files only. A
+  change to a `package.json` `imports` map, a workspace package name, a Deno
+  import map, or a `tsconfig.json` that the resolver finds next to a source
+  file (with its `extends` and `references` chain) did not change the cache
+  key. The next run then used the old import targets and could report a live
+  file as unused. Now the cache key includes the content of these files, the
+  workspace names and roots, and the framework static directory mounts. The
+  graph cache version changes, so the first run after an upgrade rebuilds
+  the graph.
+- **The worktree check of `fallow mutation` sees more stray writes.** Before,
+  the check left out the whole cache directory, so a `cache.dir` of `.` or
+  `src` hid each write of the tests. Now it leaves out only
+  `<cache>/mutation` and the output files. A run refuses a cache directory
+  that is the project root or a directory above it, or that holds a planned
+  file, with `FALLOW_MUTATION_UNSAFE_CACHE_DIR` and exit code 2. The check
+  also compares the ignored files that git lists at the start, such as
+  `.env`, so a write to one of them is a `worktree-changed` error. The docs
+  now say that side-effect pruning covers only a function whose own body
+  calls a sink.
+- **Mutation companions no longer outlive Fallow.** A companion that loses
+  its stdin during a request now kills its process group and exits. Before,
+  it waited for the request, and its test workers kept running after Fallow
+  ended. Fallow now also ends the companions on SIGHUP, SIGQUIT and a panic.
+  When Fallow starts with SIGHUP ignored, as under `nohup`, a hangup still
+  does not end the run.
+- **A direct MCP tool call now stops when the client cancels it or when it
+  times out.**
+  - A client `notifications/cancelled` now reaches the work of the call.
+    Before, the server kept the analysis running until it finished or until
+    the response deadline.
+  - A subprocess call stops its complete process tree at once.
+  - A typed call sets the cancellation flag of the analysis, on a cancel and
+    on a timeout. The analysis then stops at its next stage boundary. Before,
+    a timed-out typed call continued to run to the end.
+  - The client gets no response for a cancelled call, as the MCP
+    specification requires. A timeout still returns a structured error:
+    `FALLOW_MCP_SUBPROCESS_TIMEOUT` or `FALLOW_MCP_API_TIMEOUT`.
+  - Code Mode and the direct tools now share one count of in-process calls
+    that still run after their caller stopped. While that count is full, a
+    Code Mode host call uses the subprocess.
+- **The typed and CLI routes of an MCP tool now read the same settings.**
+  - `production: false` now gives `--no-production` on the CLI route. Before,
+    only the typed route turned production mode off, and the CLI route used
+    the config value.
+  - `feature_flags` on the CLI route now ignores an empty `root`, `config` or
+    `workspace`, as the typed route does.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

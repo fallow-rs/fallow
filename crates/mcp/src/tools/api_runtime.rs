@@ -1,5 +1,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use fallow_api::{
@@ -8,45 +10,100 @@ use fallow_api::{
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
+use tokio_util::sync::CancellationToken;
 
+use super::cancellation::{
+    ABANDONED_API_CALLS, AbandonedApiCalls, request_cancellation, request_cancelled,
+};
+
+/// Run one typed call on the blocking pool under the response deadline and the
+/// cancellation of the request.
+///
+/// `cancellation` must be the token in the call's `AnalysisOptions`. When the
+/// deadline passes or the client cancels the request, this sets the token, so
+/// the analysis stops at its next `fallow-api` stage boundary, and returns a
+/// structured error at once. That stop is cooperative: the call is counted in
+/// [`ABANDONED_API_CALLS`] until the worker ends, the same total Code Mode
+/// reads before it starts in-process work.
 pub(super) async fn run_api_blocking<T, F>(
     tool: &'static str,
+    cancellation: Arc<AtomicBool>,
     task: F,
 ) -> Result<Result<T, ProgrammaticError>, McpError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, ProgrammaticError> + Send + 'static,
 {
-    let timeout = super::timeout_duration();
-    run_api_blocking_with_timeout(tool, timeout, task).await
+    let call = ApiCall {
+        tool,
+        timeout: super::timeout_duration(),
+        request: request_cancellation(),
+        cancellation,
+        abandoned: &ABANDONED_API_CALLS,
+    };
+    run_api_call(call, task).await
 }
 
-async fn run_api_blocking_with_timeout<T, F>(
+/// A fresh cancellation token for one typed call.
+pub(super) fn call_cancellation() -> Arc<AtomicBool> {
+    Arc::new(AtomicBool::new(false))
+}
+
+/// The stop conditions of one typed call.
+struct ApiCall {
     tool: &'static str,
     timeout: Duration,
+    request: Option<CancellationToken>,
+    cancellation: Arc<AtomicBool>,
+    abandoned: &'static AbandonedApiCalls,
+}
+
+/// Run `task` on a blocking thread until it ends, the deadline passes, or the
+/// client cancels the request. A timeout returns `FALLOW_MCP_API_TIMEOUT` to
+/// the client. A cancel returns `FALLOW_MCP_CANCELLED`, but rmcp drops the
+/// response of a cancelled request, so no client receives that code.
+async fn run_api_call<T, F>(
+    call: ApiCall,
     task: F,
 ) -> Result<Result<T, ProgrammaticError>, McpError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, ProgrammaticError> + Send + 'static,
 {
-    let task = tokio::task::spawn_blocking(task);
-    match tokio::time::timeout(timeout, task).await {
-        Ok(Ok(result)) => Ok(result),
-        Ok(Err(err)) => Err(McpError::internal_error(
-            format!("{tool} task failed: {err}"),
-            None,
-        )),
-        Err(_) => Ok(Err(ProgrammaticError::new(
-            format!("{tool} task timed out after {}s", timeout.as_secs()),
+    let (state, completion) = call.abandoned.start();
+    let mut task = tokio::task::spawn_blocking(move || {
+        let _completion = completion;
+        task()
+    });
+    let timed_out = tokio::select! {
+        biased;
+        joined = &mut task => {
+            return joined.map_err(|err| {
+                McpError::internal_error(format!("{} task failed: {err}", call.tool), None)
+            });
+        }
+        () = tokio::time::sleep(call.timeout) => true,
+        () = request_cancelled(call.request.as_ref()) => false,
+    };
+    call.cancellation.store(true, Ordering::SeqCst);
+    state.abandon();
+    let error = if timed_out {
+        ProgrammaticError::new(
+            format!("{} task timed out after {}s", call.tool, call.timeout.as_secs()),
             2,
         )
         .with_code("FALLOW_MCP_API_TIMEOUT")
         .with_help(
-            "Set FALLOW_TIMEOUT_SECS to increase the response deadline. API-backed analysis may finish in-process after the MCP timeout response.",
+            "Set FALLOW_TIMEOUT_SECS to increase the response deadline. The server told the in-process analysis to stop; it stops at its next stage boundary.",
         )
-        .with_context(tool))),
-    }
+    } else {
+        ProgrammaticError::new(format!("{} task was cancelled by the client", call.tool), 2)
+            .with_code("FALLOW_MCP_CANCELLED")
+            .with_help(
+                "The server told the in-process analysis to stop; it stops at its next stage boundary.",
+            )
+    };
+    Ok(Err(error.with_context(call.tool)))
 }
 
 /// `FALLOW_DIFF_FILE` for the typed route. It goes into
@@ -133,6 +190,74 @@ fn changed_since_from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Optio
 /// hard error, and it takes precedence over this value.
 pub(super) fn env_changed_since() -> Option<String> {
     changed_since_from_lookup(|name| std::env::var_os(name))
+}
+
+/// The settings every typed route reads from its tool params. The CLI route
+/// writes the same fields with `push_global` and `push_remote_extends`.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct SharedParams<'a> {
+    pub root: Option<&'a str>,
+    pub config: Option<&'a str>,
+    pub allow_remote_extends: Option<bool>,
+    pub no_cache: Option<bool>,
+    pub threads: Option<usize>,
+}
+
+/// Read the [`SharedParams`] of a tool params struct that has the usual
+/// `root`, `config`, `allow_remote_extends`, `no_cache` and `threads` fields.
+macro_rules! shared_params {
+    ($params:expr) => {
+        $crate::tools::api_runtime::SharedParams {
+            root: $params.root.as_deref(),
+            config: $params.config.as_deref(),
+            allow_remote_extends: $params.allow_remote_extends,
+            no_cache: $params.no_cache,
+            threads: $params.threads,
+        }
+    };
+}
+pub(super) use shared_params;
+
+/// Where a typed route puts the inherited `FALLOW_CHANGED_SINCE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EnvScope {
+    /// `ambient_changed_since`: a ref that does not resolve stands down and
+    /// the envelope states it in `request_outcomes`.
+    Ambient,
+    /// `changed_since`: the ref is the base ref of the tool, or the envelope
+    /// has no `request_outcomes` to state a stand-down, so a bad ref keeps the
+    /// hard error of an explicit ref.
+    HardRef,
+    /// Neither variable: the tool sets its own scope from its params.
+    Own,
+}
+
+/// The [`AnalysisOptions`] every typed route shares: the [`SharedParams`],
+/// the environment scope (`FALLOW_CHANGED_SINCE`, `FALLOW_DIFF_FILE`), and the
+/// cancellation token of the call. A route sets its own fields on top with
+/// struct update syntax.
+pub(super) fn shared_analysis_options(
+    shared: SharedParams<'_>,
+    env: EnvScope,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> AnalysisOptions {
+    let (changed_since, ambient_changed_since, ambient_diff_file) = match env {
+        EnvScope::Ambient => (None, env_changed_since(), env_diff_file()),
+        EnvScope::HardRef => (env_changed_since(), None, env_diff_file()),
+        EnvScope::Own => (None, None, None),
+    };
+    AnalysisOptions {
+        root: non_empty_path(shared.root),
+        config_path: non_empty_path(shared.config),
+        allow_remote_extends: shared.allow_remote_extends == Some(true),
+        no_cache: shared.no_cache == Some(true),
+        threads: shared.threads,
+        changed_since,
+        ambient_changed_since,
+        ambient_diff_file,
+        cancellation,
+        ..AnalysisOptions::default()
+    }
 }
 
 pub(super) fn non_empty_path(value: Option<&str>) -> Option<PathBuf> {
@@ -319,19 +444,117 @@ mod tests {
         assert_eq!(result_text(&result), value.to_string());
     }
 
-    #[tokio::test]
-    async fn api_timeout_returns_structured_tool_error() {
-        let result = run_api_blocking_with_timeout("analyze", Duration::ZERO, || {
-            std::thread::sleep(Duration::from_millis(25));
-            Ok::<_, ProgrammaticError>(serde_json::json!({ "ok": true }))
+    /// Wait until the waiter sets `flag`, then report what the worker saw.
+    /// The worker gives up after a bound, so a waiter that never sets the
+    /// flag fails the test instead of hanging it.
+    fn observe_flag(flag: &AtomicBool) -> bool {
+        let give_up_at = std::time::Instant::now() + Duration::from_secs(10);
+        while !flag.load(Ordering::SeqCst) && std::time::Instant::now() < give_up_at {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        flag.load(Ordering::SeqCst)
+    }
+
+    async fn wait_until_drained(abandoned: &AbandonedApiCalls) {
+        let give_up_at = tokio::time::Instant::now() + Duration::from_secs(10);
+        while abandoned.saturated() && tokio::time::Instant::now() < give_up_at {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Run `call` with a worker that waits for its own token and reports
+    /// whether the token was set.
+    async fn run_observed_call(call: ApiCall) -> (Result<bool, ProgrammaticError>, bool) {
+        let worker_flag = Arc::clone(&call.cancellation);
+        let (seen_tx, seen_rx) = std::sync::mpsc::channel();
+        let result = run_api_call(call, move || {
+            let seen = observe_flag(&worker_flag);
+            let _ = seen_tx.send(seen);
+            Ok(seen)
         })
         .await
-        .expect("timeout should stay a tool result");
+        .expect("the stop stays a tool result");
+        let seen = tokio::task::spawn_blocking(move || seen_rx.recv().expect("the worker reports"))
+            .await
+            .expect("the receiver ends");
+        (result, seen)
+    }
+
+    #[tokio::test]
+    async fn api_timeout_returns_structured_tool_error_and_stops_the_work() {
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
+        let call = ApiCall {
+            tool: "analyze",
+            timeout: Duration::ZERO,
+            request: None,
+            cancellation: call_cancellation(),
+            abandoned: &ABANDONED,
+        };
+
+        let (result, seen) = run_observed_call(call).await;
 
         let err = result.expect_err("timeout should be structured error");
         assert_eq!(err.exit_code, 2);
         assert_eq!(err.code.as_deref(), Some("FALLOW_MCP_API_TIMEOUT"));
         assert_eq!(err.context.as_deref(), Some("analyze"));
+        assert!(seen, "the deadline must set the call's cancellation token");
+        wait_until_drained(&ABANDONED).await;
+        assert!(
+            !ABANDONED.saturated(),
+            "the stopped worker releases its slot"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_request_stops_the_typed_call() {
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
+        let request = CancellationToken::new();
+        let call = ApiCall {
+            tool: "check_health",
+            timeout: Duration::from_secs(600),
+            request: Some(request.clone()),
+            cancellation: call_cancellation(),
+            abandoned: &ABANDONED,
+        };
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            request.cancel();
+        });
+
+        let (result, seen) = run_observed_call(call).await;
+        canceller.await.expect("the canceller ends");
+
+        let err = result.expect_err("cancellation should be a structured error");
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(err.code.as_deref(), Some("FALLOW_MCP_CANCELLED"));
+        assert_eq!(err.context.as_deref(), Some("check_health"));
+        assert!(
+            seen,
+            "the request cancellation must reach the analysis token"
+        );
+        wait_until_drained(&ABANDONED).await;
+        assert!(!ABANDONED.saturated());
+    }
+
+    #[tokio::test]
+    async fn a_typed_call_that_finishes_in_time_is_not_cancelled() {
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
+        let cancellation = call_cancellation();
+        let call = ApiCall {
+            tool: "project_info",
+            timeout: Duration::from_secs(600),
+            request: Some(CancellationToken::new()),
+            cancellation: Arc::clone(&cancellation),
+            abandoned: &ABANDONED,
+        };
+
+        let result = run_api_call(call, || Ok::<_, ProgrammaticError>(7))
+            .await
+            .expect("the call ends");
+
+        assert_eq!(result.expect("the call succeeds"), 7);
+        assert!(!cancellation.load(Ordering::SeqCst));
+        assert!(!ABANDONED.saturated());
     }
 
     #[test]

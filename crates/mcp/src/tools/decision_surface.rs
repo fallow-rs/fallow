@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::DecisionSurfaceParams;
 
 use fallow_api::{
@@ -8,8 +11,8 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::api_runtime::{
-    env_changed_since, env_diff_file, json_success, non_empty_path, non_empty_string,
-    programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
+    EnvScope, call_cancellation, json_success, non_empty_string, programmatic_error_body,
+    run_api_blocking, shared_analysis_options, shared_params, workspace_patterns_from_param,
 };
 
 /// Run the `decision_surface` tool through the typed programmatic API.
@@ -17,8 +20,9 @@ pub async fn run_decision_surface(
     _binary: &str,
     params: DecisionSurfaceParams,
 ) -> Result<CallToolResult, McpError> {
-    let options = decision_surface_options_from_params(&params);
-    let result = run_api_blocking("decision_surface", move || {
+    let cancellation = call_cancellation();
+    let options = decision_surface_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let result = run_api_blocking("decision_surface", cancellation, move || {
         run_decision_surface_api(&options).and_then(serialize_decision_surface_programmatic_json)
     })
     .await?
@@ -29,21 +33,16 @@ pub async fn run_decision_surface(
     Ok(result)
 }
 
-fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> DecisionSurfaceOptions {
+fn decision_surface_options_from_params(
+    params: &DecisionSurfaceParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> DecisionSurfaceOptions {
     DecisionSurfaceOptions {
         analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache.unwrap_or(false),
-            threads: params.threads,
-            ambient_diff_file: env_diff_file(),
+            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             // The base ref of this tool, not a narrowing request: the
             // runtime reads it from `changed_since`, so it stays there.
-            changed_since: env_changed_since(),
-            workspace: workspace_patterns_from_param(params.workspace.as_deref()),
-            explain: false,
-            ..AnalysisOptions::default()
+            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
         },
         base: non_empty_string(params.base.as_deref()),
         max_decisions: params.max_decisions,
@@ -59,7 +58,7 @@ mod tests {
     #[test]
     fn default_decision_surface_maps_to_programmatic_api_options() {
         let params = DecisionSurfaceParams::default();
-        let options = decision_surface_options_from_params(&params);
+        let options = decision_surface_options_from_params(&params, None);
         assert_eq!(options.max_decisions, None);
     }
 
@@ -70,7 +69,7 @@ mod tests {
             max_decisions: Some(5),
             ..DecisionSurfaceParams::default()
         };
-        let options = decision_surface_options_from_params(&params);
+        let options = decision_surface_options_from_params(&params, None);
         assert_eq!(options.base.as_deref(), Some("origin/main"));
         assert_eq!(options.max_decisions, Some(5));
     }
@@ -81,7 +80,7 @@ mod tests {
             workspace: Some("apps/web".to_string()),
             ..DecisionSurfaceParams::default()
         };
-        let options = decision_surface_options_from_params(&params);
+        let options = decision_surface_options_from_params(&params, None);
         assert_eq!(
             options.analysis.workspace,
             Some(vec!["apps/web".to_string()])
