@@ -1367,7 +1367,7 @@ fn skipped_files_get_one_line_with_the_count_of_each_reason() {
         "{text}"
     );
 
-    let plan = MutationPlanOutput {
+    let mut plan = MutationPlanOutput {
         schema_version: MutationPlanSchemaVersion::V1,
         version: ToolVersion("0.0.0".to_owned()),
         elapsed_ms: ElapsedMs(0),
@@ -1389,4 +1389,11 @@ fn skipped_files_get_one_line_with_the_count_of_each_reason() {
         text.contains("Skipped files: 1 runner-cannot-load (see --format json)\n"),
         "{text}"
     );
+    assert!(
+        text.contains("Set mutation.runner to vitest to test component files.\n"),
+        "{text}"
+    );
+    plan.skipped_files = vec![skipped("src/b.ts", "parse")];
+    let text = plain(&render_plan(&plan));
+    assert!(!text.contains("mutation.runner"), "{text}");
 }

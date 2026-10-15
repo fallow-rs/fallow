@@ -614,7 +614,8 @@ reads files only. It runs no test.
 - The plan prints one `No coverage by test reach` line with the same counts
   when a mutant is `no_coverage` and the project has test files.
 - One `Skipped files:` line with the count of each skip reason, in the run
-  and in the plan. The JSON report lists each path.
+  and in the plan. The JSON report lists each path. A `runner-cannot-load` skip adds
+  one line that names `mutation.runner` and Vitest as the next step.
 - The pruned counts by reason, and one line for "no tests" or "no mutation
   data", never one line for each function. A project with no test files gets
   the one "no tests" line with the mutant count, and no no-coverage section.

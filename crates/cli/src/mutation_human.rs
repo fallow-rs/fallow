@@ -470,11 +470,20 @@ fn prune_counts<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
         .join(", ")
 }
 
-/// One line with the count of each skip reason, or nothing.
+/// The skip reason of a component file under `node:test` or `bun test`.
+const RUNNER_CANNOT_LOAD: &str = "runner-cannot-load";
+
+/// One line with the count of each skip reason, or nothing. A
+/// `runner-cannot-load` skip adds the next step.
 fn write_skipped_files(out: &mut String, skipped: &[MutationSkippedFile]) {
     let counts = prune_counts(skipped.iter().map(|file| file.reason.as_str()));
     if !counts.is_empty() {
         let _ = writeln!(out, "Skipped files: {counts} (see --format json)");
+    }
+    if skipped.iter().any(|file| file.reason == RUNNER_CANNOT_LOAD) {
+        out.push_str(
+            "Node.js and Bun cannot load a component file. Set mutation.runner to vitest to test component files.\n",
+        );
     }
 }
 

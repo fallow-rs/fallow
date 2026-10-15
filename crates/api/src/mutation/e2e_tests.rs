@@ -165,6 +165,17 @@ fn a_runner_that_cannot_load_components_leaves_them_out_of_the_plan() {
         assert_eq!(plan.skipped_files[0].reason, "runner-cannot-load");
     }
 
+    let project = component_project("node-test");
+    let only_component = plan_mutation(&options(
+        project.path(),
+        MutationRunScope::Paths(vec![std::path::PathBuf::from("src/Badge.vue")]),
+    ))
+    .expect("plan");
+    assert!(only_component.mutants.is_empty());
+    assert!(only_component.unmatched_paths.is_empty());
+    assert_eq!(only_component.skipped_files.len(), 1);
+    assert_eq!(only_component.skipped_files[0].reason, "runner-cannot-load");
+
     let project = component_project("vitest");
     let plan = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
     assert!(
@@ -638,6 +649,15 @@ mod end_to_end {
         );
         assert_eq!(report.skipped_files.len(), 1);
         assert_eq!(report.skipped_files[0].reason, "runner-cannot-load");
+        // The component survivors are unknown, so an empty survivor list of
+        // this run is not conclusive.
+        assert_eq!(report.completion.status, MutationCompletionStatus::Partial);
+        assert!(
+            report
+                .completion
+                .reasons
+                .contains(&fallow_output::MutationIncompleteReason::SkippedFiles)
+        );
     }
 
     #[test]
