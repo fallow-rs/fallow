@@ -377,6 +377,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first entry to go, so the next run parsed it again. Eviction now removes
   first the entries that recent runs did not discover, for example test
   files after `--production` runs.
+- **`fallow audit --brief` no longer reports every export as new public
+  API after a run without `--brief`.** Only a brief run computes the
+  public exports of the base, but both runs shared one cached base
+  snapshot. A brief run after a plain run on the same base read an empty
+  base set, so `public_api_added` listed every export of the changed public
+  files. The cache key now includes `--brief`, and the cache version moves
+  to 13, so old snapshots are not used.
+
+- **The audit base-snapshot cache no longer grows without a limit.** Each
+  new base commit or changed-file set wrote one more snapshot file of up to
+  16 MiB below `<cache>/cache/audit-base-v*/`, and nothing removed them.
+  Now each save removes the files that are older than `audit.cacheMaxAgeDays`
+  (counted from the last use) and keeps only the newest 32 files.
+  `fallow audit-cache prune` reports and removes these files too, as entries
+  with `pass: "snapshot"`. A file over the cap has the reason
+  `over-capacity`.
+
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export
