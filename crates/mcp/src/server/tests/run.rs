@@ -935,6 +935,76 @@ async fn run_fallow_timeout_terminates_and_reaps_process_tree() {
     );
 }
 
+/// A client cancel (`notifications/cancelled`) reaches the subprocess route:
+/// the call returns at once and the whole process tree is gone, long before
+/// the response deadline.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_fallow_request_cancel_terminates_and_reaps_process_tree() {
+    let temp = tempfile::tempdir().expect("temp directory");
+    let direct_pid_path = temp.path().join("direct.pid");
+    let descendant_pid_path = temp.path().join("descendant.pid");
+    let script = r#"echo $$ > "$1"; sleep 30 & echo $! > "$2"; exec sleep 30"#;
+    let request = tokio_util::sync::CancellationToken::new();
+    let canceller = {
+        let request = request.clone();
+        let descendant_pid_path = descendant_pid_path.clone();
+        tokio::spawn(async move {
+            read_pid(&descendant_pid_path).await;
+            request.cancel();
+        })
+    };
+
+    let started = std::time::Instant::now();
+    let result = crate::tools::with_request_cancellation(
+        request,
+        run_tool_with_timeout(
+            "/bin/sh",
+            "analyze",
+            &[
+                "-c".to_string(),
+                script.to_string(),
+                "fallow-mcp-cancel-test".to_string(),
+                direct_pid_path.to_string_lossy().into_owned(),
+                descendant_pid_path.to_string_lossy().into_owned(),
+            ],
+            Duration::from_secs(60),
+            None,
+        ),
+    )
+    .await
+    .expect("cancellation should stay a tool result");
+    canceller.await.expect("the canceller ends");
+
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "the cancelled call must not wait for its deadline"
+    );
+    assert_eq!(result.is_error, Some(true));
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("cancel body is JSON");
+    assert_eq!(body["code"], "FALLOW_MCP_CANCELLED");
+    assert_eq!(body["exit_code"], 2);
+    let direct_pid = read_pid(&direct_pid_path).await;
+    let descendant_pid = read_pid(&descendant_pid_path).await;
+    let mut cleanup = ProcessCleanup(vec![direct_pid, descendant_pid]);
+    let direct_exited = wait_for_process_exit(direct_pid).await;
+    let descendant_exited = wait_for_process_exit(descendant_pid).await;
+    if direct_exited {
+        cleanup.disarm(direct_pid);
+    }
+    if descendant_exited {
+        cleanup.disarm(descendant_pid);
+    }
+
+    assert!(
+        direct_exited && descendant_exited,
+        "cancelled process tree survived: direct={direct_pid} alive={}, descendant={descendant_pid} alive={}",
+        process_exists(direct_pid),
+        process_exists(descendant_pid),
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn run_fallow_timeout_is_not_held_open_by_escaped_pipe_writer() {

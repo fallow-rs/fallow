@@ -12,8 +12,8 @@ use crate::params::CheckChangedParams;
 
 use super::{
     api_runtime::{
-        env_diff_file, non_empty_path, run_api_blocking, typed_api_value, typed_tool_result,
-        workspace_patterns_from_param,
+        EnvScope, call_cancellation, run_api_blocking, shared_analysis_options, shared_params,
+        typed_api_value, typed_tool_result, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, regression_requested},
     push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
@@ -27,8 +27,9 @@ pub async fn run_check_changed(
     params: CheckChangedParams,
 ) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
-        let options = check_changed_options_from_params(&params);
-        let result = run_api_blocking("check_changed", move || {
+        let cancellation = call_cancellation();
+        let options = check_changed_options_from_params(&params, Some(Arc::clone(&cancellation)));
+        let result = run_api_blocking("check_changed", cancellation, move || {
             run_dead_code(&options).and_then(serialize_dead_code_programmatic_json)
         })
         .await?;
@@ -49,8 +50,7 @@ pub fn run_check_changed_api_value(
         return Ok(None);
     }
 
-    let mut options = check_changed_options_from_params(params);
-    options.analysis.cancellation = cancellation;
+    let options = check_changed_options_from_params(params, cancellation);
     typed_api_value(run_dead_code(&options).and_then(serialize_dead_code_programmatic_json))
 }
 
@@ -108,22 +108,20 @@ fn requires_cli_fallback(params: &CheckChangedParams) -> bool {
         )
 }
 
-fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOptions {
+fn check_changed_options_from_params(
+    params: &CheckChangedParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> DeadCodeOptions {
     DeadCodeOptions {
         finding_ids: Vec::new(),
         analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache.unwrap_or(false),
-            threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
+            // The tool's own `since` wins over any inherited ref.
             changed_since: Some(params.since.clone()),
-            ambient_diff_file: env_diff_file(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
-            ..AnalysisOptions::default()
+            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
         },
         filters: DeadCodeFilters::default(),
         files: Vec::new(),
@@ -267,5 +265,21 @@ mod tests {
         assert!(!requires_cli_fallback(&params));
         assert_eq!(run_check_changed_api_value(&params, None), Ok(None));
         assert_cli_fallback_ran(run_check_changed(MISSING_FALLBACK_BINARY, params).await);
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Both routes of `check_changed` express the same shared settings.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::route_parity::assert_routes_agree(
+            "check_changed",
+            &serde_json::json!({ "since": "main" }),
+            |params: CheckChangedParams| build_check_changed_args(params),
+            |params: CheckChangedParams| check_changed_options_from_params(&params, None).analysis,
+        );
     }
 }

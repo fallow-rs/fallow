@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -15,6 +15,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::json;
 
 use crate::params::CodeExecuteParams;
+
+use super::cancellation::{ABANDONED_API_CALLS, AbandonedApiCalls};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const MAX_TIMEOUT_MS: u64 = 30_000;
@@ -1168,7 +1170,7 @@ fn run_api_tool_with_deadline(
         params,
         deadline,
         run_api_tool,
-        &ABANDONED_API_HOST_CALLS,
+        &ABANDONED_API_CALLS,
     )
 }
 
@@ -1188,7 +1190,7 @@ fn run_api_tool_with_deadline_and_runner<F>(
     params: serde_json::Value,
     deadline: Instant,
     runner: F,
-    abandoned: &'static AbandonedHostCalls,
+    abandoned: &'static AbandonedApiCalls,
 ) -> Result<Option<serde_json::Value>, String>
 where
     F: FnOnce(
@@ -1208,11 +1210,7 @@ where
     if abandoned.saturated() {
         return Ok(None);
     }
-    let state = Arc::new(AtomicU8::new(HOST_CALL_RUNNING));
-    let completion = HostCallCompletion {
-        state: Arc::clone(&state),
-        abandoned,
-    };
+    let (state, completion) = abandoned.start();
     let cancellation = Arc::new(AtomicBool::new(false));
     let call_cancellation = Arc::clone(&cancellation);
     let (tx, rx) = mpsc::channel();
@@ -1229,62 +1227,11 @@ where
         Ok(result) => result,
         Err(mpsc::RecvTimeoutError::Timeout) => {
             cancellation.store(true, Ordering::SeqCst);
-            abandoned.record(&state);
+            state.abandon();
             Err("code mode execution timed out while running fallow".to_string())
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             Err("code mode API host call failed".to_string())
-        }
-    }
-}
-
-/// In-process host calls that outlived their deadline and are still unwinding.
-static ABANDONED_API_HOST_CALLS: AbandonedHostCalls = AbandonedHostCalls::new();
-
-const HOST_CALL_RUNNING: u8 = 0;
-const HOST_CALL_FINISHED: u8 = 1;
-const HOST_CALL_ABANDONED: u8 = 2;
-
-/// How many abandoned in-process analyses Code Mode carries before it stops
-/// starting new ones. One is the whole point: the next host call takes the
-/// killable subprocess instead of stacking a second analysis on top of one that
-/// is still winding down.
-const MAX_ABANDONED_API_HOST_CALLS: usize = 1;
-
-/// Running total of in-process host calls nobody is waiting for any more.
-struct AbandonedHostCalls(AtomicUsize);
-
-impl AbandonedHostCalls {
-    const fn new() -> Self {
-        Self(AtomicUsize::new(0))
-    }
-
-    fn saturated(&self) -> bool {
-        self.0.load(Ordering::SeqCst) >= MAX_ABANDONED_API_HOST_CALLS
-    }
-
-    /// Claim `state`'s call as abandoned. The swap decides the race with the
-    /// worker: whoever gets there first owns the accounting, so a call that
-    /// finished just after the deadline is never counted.
-    fn record(&self, state: &AtomicU8) {
-        if state.swap(HOST_CALL_ABANDONED, Ordering::SeqCst) == HOST_CALL_RUNNING {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-}
-
-/// Worker-side half of the accounting. Dropping it publishes the call as
-/// finished and releases the slot when the deadline already gave up on it, so a
-/// panicking host call cannot strand the count.
-struct HostCallCompletion {
-    state: Arc<AtomicU8>,
-    abandoned: &'static AbandonedHostCalls,
-}
-
-impl Drop for HostCallCompletion {
-    fn drop(&mut self) {
-        if self.state.swap(HOST_CALL_FINISHED, Ordering::SeqCst) == HOST_CALL_ABANDONED {
-            self.abandoned.0.fetch_sub(1, Ordering::SeqCst);
         }
     }
 }
@@ -1806,7 +1753,7 @@ mod tests {
 
     #[test]
     fn api_host_calls_time_out_while_running() {
-        static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
 
         // The deadline must still be ahead when the call starts. A deadline
         // that passes before the call returns the earlier timeout message,
@@ -1831,7 +1778,7 @@ mod tests {
     /// worker actually observed that and returned because of it.
     #[test]
     fn the_deadline_cancels_the_work_the_host_abandons() {
-        static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
 
         let observed_cancellation = Arc::new(AtomicBool::new(false));
         let worker_view = Arc::clone(&observed_cancellation);
@@ -1876,7 +1823,7 @@ mod tests {
     /// A host call that returns inside its deadline is never cancelled.
     #[test]
     fn an_in_time_host_call_is_left_alone() {
-        static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
 
         let result = run_api_tool_with_deadline_and_runner(
             CodeModeTool::ProjectInfo,
@@ -1901,7 +1848,7 @@ mod tests {
     /// the next host call must not stack a second analysis on top of it.
     #[test]
     fn abandoned_in_process_work_pushes_later_host_calls_to_the_subprocess() {
-        static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
 
         let (release_tx, release_rx) = mpsc::channel::<()>();
         let timed_out = run_api_tool_with_deadline_and_runner(
@@ -1949,7 +1896,7 @@ mod tests {
     /// a host call whose result arrives in time leaves the count untouched.
     #[test]
     fn completed_in_process_calls_are_never_counted_as_abandoned() {
-        static ABANDONED: AbandonedHostCalls = AbandonedHostCalls::new();
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
 
         let result = run_api_tool_with_deadline_and_runner(
             CodeModeTool::ProjectInfo,

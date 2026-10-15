@@ -1,9 +1,9 @@
-use rmcp::handler::server::tool::ToolRouter;
+use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, ContentBlock, Implementation, ListResourceTemplatesResult, ListResourcesResult,
-    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
-    ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
+    ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
@@ -30,7 +30,7 @@ use crate::tools::{
     run_mutation_inspect, run_mutation_plan, run_project_info, run_recommend,
     run_security_candidates, run_symbol_impact, run_symbol_trace, run_trace_clone_tool,
     run_trace_dependency_tool, run_trace_error_tool, run_trace_export_tool, run_trace_file_tool,
-    run_trace_import_path_tool,
+    run_trace_import_path_tool, with_request_cancellation,
 };
 
 #[cfg(test)]
@@ -39,13 +39,6 @@ mod tests;
 #[derive(Clone)]
 pub struct FallowMcp {
     binary: String,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by the rmcp tool_router macro expansion and unit tests"
-        )
-    )]
     tool_router: ToolRouter<Self>,
 }
 
@@ -509,6 +502,22 @@ impl ServerHandler for FallowMcp {
                  Resources are read-only, run no analysis, and are safe to cache per server version: fallow://tools, fallow://issue-types, fallow://explain and fallow://explain/{issue_type}, fallow://task-matrix, and fallow://schema/config, fallow://schema/plugin, fallow://schema/rule-pack, fallow://schema/similar-code-snapshot (JSON Schemas). \
                  Every analysis result is JSON in a single text block: parse it. The root warnings array restates this run's verdicts with their remedy: gate_outcomes entries, baseline staleness, and a degraded analysis. An absent gate_outcomes is not proof of a pass, because audit and the combined analyses publish none on the in-process route.",
             )
+    }
+
+    /// Dispatch one tool call inside the cancellation scope of its request.
+    ///
+    /// rmcp answers `notifications/cancelled` by cancelling `context.ct` only;
+    /// it keeps polling this future. The scope makes the token visible to the
+    /// work of the call, so the subprocess route kills its process tree and
+    /// the typed route sets the analysis cancellation flag.
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        let cancellation = context.ct.clone();
+        let call = ToolCallContext::new(self, request, context);
+        with_request_cancellation(cancellation, self.tool_router.call(call)).await
     }
 
     async fn list_resources(

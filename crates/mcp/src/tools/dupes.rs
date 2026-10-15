@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::FindDupesParams;
 
 use fallow_api::{
@@ -9,8 +12,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        env_changed_since, env_diff_file, json_success, non_empty_path, non_empty_string,
-        programmatic_error_body, run_api_blocking, workspace_patterns_from_param,
+        EnvScope, call_cancellation, json_success, non_empty_string, programmatic_error_body,
+        run_api_blocking, shared_analysis_options, shared_params, workspace_patterns_from_param,
     },
     duplication_mode_from_param,
     fallback_policy::{baseline_requested, duplication_needs_cli},
@@ -31,12 +34,13 @@ pub async fn run_find_dupes(
         };
     }
 
-    let options = match duplication_options_from_params(&params) {
+    let cancellation = call_cancellation();
+    let options = match duplication_options_from_params(&params, Some(Arc::clone(&cancellation))) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
 
-    let result = run_api_blocking("find_dupes", move || {
+    let result = run_api_blocking("find_dupes", cancellation, move || {
         run_duplication(&options).and_then(serialize_duplication_programmatic_json)
     })
     .await?
@@ -96,21 +100,17 @@ fn requires_cli_fallback(params: &FindDupesParams) -> bool {
         )
 }
 
-fn duplication_options_from_params(params: &FindDupesParams) -> Result<DuplicationOptions, String> {
+fn duplication_options_from_params(
+    params: &FindDupesParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<DuplicationOptions, String> {
     Ok(DuplicationOptions {
         analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache.unwrap_or(false),
-            threads: params.threads,
             changed_since: non_empty_string(params.changed_since.as_deref()),
-            ambient_changed_since: env_changed_since(),
-            ambient_diff_file: env_diff_file(),
             no_package_baselines: params.no_package_baselines.unwrap_or(false),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
-            ..AnalysisOptions::default()
+            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
         },
         mode: duplication_mode_from_param(params.mode.as_deref())?,
         near: params.near,
@@ -249,7 +249,7 @@ mod tests {
         };
 
         assert!(!requires_cli_fallback(&params));
-        let options = duplication_options_from_params(&params).expect("options");
+        let options = duplication_options_from_params(&params, None).expect("options");
         assert!(options.analysis.root.is_none());
         assert!(options.analysis.config_path.is_none());
         assert_eq!(
@@ -277,7 +277,7 @@ mod tests {
             mode: Some("SEMANTIC".to_string()),
             ..FindDupesParams::default()
         };
-        let err = duplication_options_from_params(&params).expect_err("invalid mode");
+        let err = duplication_options_from_params(&params, None).expect_err("invalid mode");
         assert!(err.contains("Invalid mode"));
     }
 
@@ -287,7 +287,8 @@ mod tests {
             min_occurrences: Some(1),
             ..FindDupesParams::default()
         };
-        let err = duplication_options_from_params(&params).expect_err("invalid min occurrences");
+        let err =
+            duplication_options_from_params(&params, None).expect_err("invalid min occurrences");
         assert!(err.contains("min_occurrences must be at least 2"));
     }
 
@@ -318,13 +319,16 @@ mod tests {
     #[test]
     fn fragments_are_opt_in_over_mcp() {
         let default_options =
-            duplication_options_from_params(&FindDupesParams::default()).expect("options");
+            duplication_options_from_params(&FindDupesParams::default(), None).expect("options");
         assert_eq!(default_options.include_fragments, Some(false));
 
-        let requested = duplication_options_from_params(&FindDupesParams {
-            include_fragments: Some(true),
-            ..FindDupesParams::default()
-        })
+        let requested = duplication_options_from_params(
+            &FindDupesParams {
+                include_fragments: Some(true),
+                ..FindDupesParams::default()
+            },
+            None,
+        )
         .expect("options");
         assert_eq!(requested.include_fragments, Some(true));
     }
@@ -388,5 +392,25 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(text).expect("json");
         assert_eq!(json["kind"], "dupes");
         assert!(json["clone_groups"].is_array());
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Both routes of `dupes` express the same shared settings.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::route_parity::assert_routes_agree(
+            "find_dupes",
+            &serde_json::json!({}),
+            |params: FindDupesParams| build_find_dupes_args(&params).expect("argv"),
+            |params: FindDupesParams| {
+                duplication_options_from_params(&params, None)
+                    .expect("options")
+                    .analysis
+            },
+        );
     }
 }

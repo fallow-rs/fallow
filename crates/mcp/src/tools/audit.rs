@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::params::AuditParams;
 
 use fallow_api::{
@@ -10,9 +13,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_AUDIT_GATES,
     api_runtime::{
-        env_changed_since, env_diff_file, non_empty_path, non_empty_string,
-        resolve_typed_coverage_inputs, run_api_blocking, typed_tool_result, typed_type_aware,
-        workspace_patterns_from_param,
+        EnvScope, call_cancellation, non_empty_path, non_empty_string,
+        resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
+        typed_tool_result, typed_type_aware, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
     push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
@@ -25,11 +28,15 @@ use super::{
 /// [`super::api_runtime::typed_error_needs_cli`].
 pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
-        let options = match audit_options_from_params(&params) {
+        let cancellation = call_cancellation();
+        let options = match audit_options_from_params(&params, Some(Arc::clone(&cancellation))) {
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
-        let result = run_api_blocking("audit", move || audit_typed_value(options, None)).await?;
+        let result = run_api_blocking("audit", cancellation, move || {
+            audit_typed_value(options, None)
+        })
+        .await?;
         if let Some(result) = typed_tool_result(result) {
             return Ok(result);
         }
@@ -72,7 +79,7 @@ fn run_audit_api_value_with_env(
     if requires_cli_fallback(params) {
         return Ok(None);
     }
-    let options = audit_options_from_params(params)?;
+    let options = audit_options_from_params(params, None)?;
     super::api_runtime::typed_api_value(audit_typed_value(options, env))
 }
 
@@ -300,26 +307,24 @@ fn requires_cli_fallback(params: &AuditParams) -> bool {
         || filled(params.runtime_coverage.as_deref())
 }
 
-fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, String> {
+/// Build the typed audit options. A stop through `cancellation` is safe for
+/// the base-ref worktree: `TemporaryBaseWorktree` removes it on drop, also
+/// when the run returns early with the cancellation error.
+fn audit_options_from_params(
+    params: &AuditParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<AuditOptions, String> {
     let gate = audit_gate_from_param(params.gate.as_deref())?;
     Ok(AuditOptions {
         analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache.unwrap_or(false),
-            threads: params.threads,
-            ambient_diff_file: env_diff_file(),
             production: params.production.unwrap_or(false),
             production_override: params.production,
-            // The base ref of this tool, not a narrowing request: the
-            // runtime reads it from `changed_since`, so it stays there.
-            changed_since: env_changed_since(),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
-            changed_workspaces: None,
             explain: true,
             type_aware: typed_type_aware(params.type_aware),
-            ..AnalysisOptions::default()
+            // The base ref of this tool, not a narrowing request: the
+            // runtime reads it from `changed_since`, so it stays there.
+            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
         },
         base: non_empty_string(params.base.as_deref()),
         production: params.production.unwrap_or(false),
@@ -436,7 +441,7 @@ mod tests {
     fn default_audit_uses_programmatic_api_route_and_defers_the_gate() {
         let params = AuditParams::default();
         assert!(!requires_cli_fallback(&params));
-        let options = audit_options_from_params(&params).expect("audit options");
+        let options = audit_options_from_params(&params, None).expect("audit options");
         assert_eq!(options.gate, None);
     }
 
@@ -633,7 +638,7 @@ mod tests {
             ..AuditParams::default()
         };
         assert!(!requires_cli_fallback(&params));
-        let options = audit_options_from_params(&params).expect("audit options");
+        let options = audit_options_from_params(&params, None).expect("audit options");
         assert_eq!(options.gate, Some(AuditGate::All));
         assert!(options.analysis.explain);
     }
@@ -1035,5 +1040,25 @@ mod tests {
         .expect("typed audit")
         .expect("a syntactic audit stays on the typed route");
         assert!(value["verdict"].is_string(), "{value}");
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Both routes of `audit` express the same shared settings.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::route_parity::assert_routes_agree(
+            "audit",
+            &serde_json::json!({}),
+            |params: AuditParams| build_audit_args(&params).expect("argv"),
+            |params: AuditParams| {
+                audit_options_from_params(&params, None)
+                    .expect("options")
+                    .analysis
+            },
+        );
     }
 }

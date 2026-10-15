@@ -4,6 +4,7 @@ mod architecture;
 mod audit;
 #[cfg(test)]
 mod base_root_fixture;
+mod cancellation;
 mod check_changed;
 mod check_runtime_coverage;
 mod cloud_reads;
@@ -26,6 +27,8 @@ mod list_boundaries;
 mod mutation;
 mod project_info;
 mod recommend;
+#[cfg(test)]
+mod route_parity;
 mod security;
 mod semantic;
 mod similar_code;
@@ -35,6 +38,7 @@ mod trace;
 pub use analyze::{build_analyze_args, run_analyze};
 pub use architecture::{build_architecture_args, run_architecture};
 pub use audit::{build_audit_args, run_audit};
+pub use cancellation::with_request_cancellation;
 pub use check_changed::{build_check_changed_args, run_check_changed};
 #[cfg(test)]
 pub use check_runtime_coverage::build_get_token_blast_radius_args;
@@ -177,10 +181,19 @@ fn push_global(
 
 /// Push production mode and workspace scope flags.
 fn push_scope(args: &mut Vec<String>, production: Option<bool>, workspace: Option<&str>) {
-    if production == Some(true) {
-        args.push("--production".to_string());
-    }
+    push_production(args, production);
     push_str_flag(args, "--workspace", workspace);
+}
+
+/// Push the production choice of a call. `false` is an explicit opt-out, as
+/// `production_override: Some(false)` is on the typed route, so it overrides
+/// a config that turns production mode on. `None` leaves it to the config.
+fn push_production(args: &mut Vec<String>, production: Option<bool>) {
+    match production {
+        Some(true) => args.push("--production".to_string()),
+        Some(false) => args.push("--no-production".to_string()),
+        None => {}
+    }
 }
 
 /// Push baseline comparison flags.
@@ -460,7 +473,49 @@ async fn spawn_fallow(
         stderr_task,
         exit_one_is_error: type_aware_complete_required,
     };
-    complete_fallow_process(binary, process, timeout, max_output_bytes).await
+    let stop = ProcessStop {
+        deadline: tokio::time::Instant::now() + timeout,
+        timeout,
+        request: cancellation::request_cancellation(),
+    };
+    complete_fallow_process(binary, process, &stop, max_output_bytes).await
+}
+
+/// The two ends of a subprocess call: its response deadline and the
+/// cancellation of the request that started it.
+struct ProcessStop {
+    deadline: tokio::time::Instant,
+    timeout: Duration,
+    request: Option<tokio_util::sync::CancellationToken>,
+}
+
+/// How a bounded wait on the subprocess ended.
+enum Waited<T> {
+    Done(T),
+    TimedOut,
+    Cancelled,
+}
+
+impl ProcessStop {
+    /// Wait for `work` until the deadline passes or the client cancels the
+    /// request, whichever comes first.
+    async fn wait<F: std::future::Future>(&self, work: F) -> Waited<F::Output> {
+        tokio::select! {
+            biased;
+            output = work => Waited::Done(output),
+            () = tokio::time::sleep_until(self.deadline) => Waited::TimedOut,
+            () = cancellation::request_cancelled(self.request.as_ref()) => Waited::Cancelled,
+        }
+    }
+
+    /// The result of a call that stopped before the subprocess finished.
+    fn stopped_result(&self, cancelled: bool, cleanup_errors: &[String]) -> CallToolResult {
+        if cancelled {
+            cancelled_result(cleanup_errors)
+        } else {
+            timeout_result(self.timeout, cleanup_errors)
+        }
+    }
 }
 
 struct RunningFallowProcess {
@@ -475,7 +530,7 @@ struct RunningFallowProcess {
 async fn complete_fallow_process(
     binary: &str,
     process: RunningFallowProcess,
-    timeout: Duration,
+    stop: &ProcessStop,
     max_output_bytes: usize,
 ) -> Result<CallToolResult, McpError> {
     let RunningFallowProcess {
@@ -486,47 +541,25 @@ async fn complete_fallow_process(
         mut stderr_task,
         exit_one_is_error,
     } = process;
-    let deadline = tokio::time::Instant::now() + timeout;
 
     #[cfg(unix)]
-    let (status, cleanup_errors) =
-        match tokio::time::timeout_at(deadline, process_tree.wait_for_exit_without_reaping()).await
-        {
-            Ok(Ok(())) => {
-                let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
-                let Some(status) = cleanup.status else {
-                    abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
-                    return Err(subprocess_error_with_cleanup(
-                        binary,
-                        io::Error::other("completed subprocess status unavailable"),
-                        &cleanup.errors,
-                    ));
-                };
-                (status, cleanup.errors)
-            }
-            Ok(Err(error)) => {
-                let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+    let (status, cleanup_errors) = match stop
+        .wait(process_tree.wait_for_exit_without_reaping())
+        .await
+    {
+        Waited::Done(Ok(())) => {
+            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            let Some(status) = cleanup.status else {
                 abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
                 return Err(subprocess_error_with_cleanup(
                     binary,
-                    error,
+                    io::Error::other("completed subprocess status unavailable"),
                     &cleanup.errors,
                 ));
-            }
-            Err(_) => {
-                let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
-                abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
-                return Ok(timeout_result(timeout, &cleanup.errors));
-            }
-        };
-
-    #[cfg(not(unix))]
-    let (status, cleanup_errors) = match tokio::time::timeout_at(deadline, child.wait()).await {
-        Ok(Ok(status)) => {
-            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            };
             (status, cleanup.errors)
         }
-        Ok(Err(error)) => {
+        Waited::Done(Err(error)) => {
             let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
             abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
             return Err(subprocess_error_with_cleanup(
@@ -535,10 +568,32 @@ async fn complete_fallow_process(
                 &cleanup.errors,
             ));
         }
-        Err(_) => {
+        stopped @ (Waited::TimedOut | Waited::Cancelled) => {
             let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
             abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
-            return Ok(timeout_result(timeout, &cleanup.errors));
+            return Ok(stop.stopped_result(matches!(stopped, Waited::Cancelled), &cleanup.errors));
+        }
+    };
+
+    #[cfg(not(unix))]
+    let (status, cleanup_errors) = match stop.wait(child.wait()).await {
+        Waited::Done(Ok(status)) => {
+            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            (status, cleanup.errors)
+        }
+        Waited::Done(Err(error)) => {
+            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
+            return Err(subprocess_error_with_cleanup(
+                binary,
+                error,
+                &cleanup.errors,
+            ));
+        }
+        stopped @ (Waited::TimedOut | Waited::Cancelled) => {
+            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
+            return Ok(stop.stopped_result(matches!(stopped, Waited::Cancelled), &cleanup.errors));
         }
     };
 
@@ -550,9 +605,9 @@ async fn complete_fallow_process(
         let stderr = (&mut stderr_task).await.map_err(io::Error::other)??;
         Ok::<_, io::Error>((stdout, stderr))
     };
-    let (stdout, stderr) = match tokio::time::timeout_at(deadline, drain_output).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => {
+    let (stdout, stderr) = match stop.wait(drain_output).await {
+        Waited::Done(Ok(output)) => output,
+        Waited::Done(Err(error)) => {
             abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
             return Err(subprocess_error_with_cleanup(
                 binary,
@@ -560,9 +615,9 @@ async fn complete_fallow_process(
                 &cleanup_errors,
             ));
         }
-        Err(_) => {
+        stopped @ (Waited::TimedOut | Waited::Cancelled) => {
             abort_process_tasks(stdin_task.as_ref(), &stdout_task, &stderr_task);
-            return Ok(timeout_result(timeout, &cleanup_errors));
+            return Ok(stop.stopped_result(matches!(stopped, Waited::Cancelled), &cleanup_errors));
         }
     };
     if !cleanup_errors.is_empty() {
@@ -879,6 +934,27 @@ fn collect_semantic_completeness(value: &serde_json::Value, signals: &mut Vec<bo
         }
         _ => {}
     }
+}
+
+/// The result of a subprocess call the client cancelled. The server killed
+/// the process tree; `cleanup_errors` names any part it could not stop.
+fn cancelled_result(cleanup_errors: &[String]) -> CallToolResult {
+    let mut error_json = serde_json::json!({
+        "error": true,
+        "message": "fallow subprocess was cancelled by the client",
+        "exit_code": 2,
+        "code": "FALLOW_MCP_CANCELLED",
+        "context": "subprocess",
+    });
+    if !cleanup_errors.is_empty()
+        && let Some(error) = error_json.as_object_mut()
+    {
+        error.insert(
+            "cleanup_errors".to_string(),
+            serde_json::json!(cleanup_errors),
+        );
+    }
+    CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
 }
 
 fn timeout_result(timeout: Duration, cleanup_errors: &[String]) -> CallToolResult {

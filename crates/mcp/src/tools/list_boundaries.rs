@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 use crate::params::ListBoundariesParams;
 
 use fallow_api::{
-    AnalysisOptions, ListBoundariesOptions, run_list_boundaries as run_api_list_boundaries,
+    ListBoundariesOptions, run_list_boundaries as run_api_list_boundaries,
     serialize_list_boundaries_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
@@ -12,8 +12,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        env_changed_since, env_diff_file, json_success, non_empty_path, programmatic_error_body,
-        run_api_blocking,
+        EnvScope, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
+        shared_analysis_options, shared_params,
     },
     push_global, push_remote_extends,
 };
@@ -23,8 +23,9 @@ pub async fn run_list_boundaries(
     _binary: &str,
     params: ListBoundariesParams,
 ) -> Result<CallToolResult, McpError> {
-    let options = list_boundaries_options_from_params(&params);
-    let result = run_api_blocking("list_boundaries", move || {
+    let cancellation = call_cancellation();
+    let options = list_boundaries_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let result = run_api_blocking("list_boundaries", cancellation, move || {
         run_api_list_boundaries(&options).and_then(serialize_list_boundaries_programmatic_json)
     })
     .await?
@@ -39,8 +40,7 @@ pub fn run_list_boundaries_api_value(
     params: &ListBoundariesParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let mut options = list_boundaries_options_from_params(params);
-    options.analysis.cancellation = cancellation;
+    let options = list_boundaries_options_from_params(params, cancellation);
     let value = run_api_list_boundaries(&options)
         .and_then(serialize_list_boundaries_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
@@ -69,27 +69,15 @@ pub fn build_list_boundaries_args(params: &ListBoundariesParams) -> Vec<String> 
     args
 }
 
-fn list_boundaries_options_from_params(params: &ListBoundariesParams) -> ListBoundariesOptions {
+fn list_boundaries_options_from_params(
+    params: &ListBoundariesParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> ListBoundariesOptions {
     ListBoundariesOptions {
-        analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache == Some(true),
-            threads: params.threads,
-            ambient_diff_file: env_diff_file(),
-            production: false,
-            production_override: None,
-            // This envelope carries no `request_outcomes`, so a ref that stood
-            // down would widen the result with nothing to say so: keep the
-            // hard error of an explicit ref.
-            changed_since: env_changed_since(),
-            workspace: None,
-            changed_workspaces: None,
-            explain: false,
-            type_aware: fallow_api::TypeAwareOptions::default(),
-            ..AnalysisOptions::default()
-        },
+        // This envelope carries no `request_outcomes`, so a ref that stood
+        // down would widen the result with nothing to say so: keep the hard
+        // error of an explicit ref.
+        analysis: shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation),
     }
 }
 
@@ -157,5 +145,23 @@ mod tests {
         assert_eq!(json["kind"], "list-boundaries");
         assert_eq!(json["boundaries"]["zone_count"], 2);
         assert_eq!(json["boundaries"]["rule_count"], 1);
+    }
+}
+
+#[cfg(test)]
+mod route_parity_tests {
+    use super::*;
+
+    /// Both routes of `list_boundaries` express the same shared settings.
+    #[test]
+    fn typed_and_cli_routes_agree_on_shared_settings() {
+        super::super::route_parity::assert_routes_agree(
+            "list_boundaries",
+            &serde_json::json!({}),
+            |params: ListBoundariesParams| build_list_boundaries_args(&params),
+            |params: ListBoundariesParams| {
+                list_boundaries_options_from_params(&params, None).analysis
+            },
+        );
     }
 }

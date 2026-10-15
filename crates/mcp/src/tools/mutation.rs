@@ -3,16 +3,19 @@
 //! host permission decision, so it stays with the `fallow mutation` CLI.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use fallow_api::mutation::Operator;
-use fallow_api::{AnalysisOptions, MutationRunOptions, MutationRunScope, plan_mutation};
+use fallow_api::{MutationRunOptions, MutationRunScope, plan_mutation};
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use crate::params::{MutationInspectParams, MutationPlanParams};
 
 use super::api_runtime::{
-    json_success, non_empty_path, non_empty_string, programmatic_error_body, run_api_blocking,
+    EnvScope, call_cancellation, json_success, non_empty_path, non_empty_string,
+    programmatic_error_body, run_api_blocking, shared_analysis_options, shared_params,
 };
 use super::{push_global, push_remote_extends, run_tool, validation_error_body};
 
@@ -23,11 +26,12 @@ pub async fn run_mutation_plan(
     _binary: &str,
     params: MutationPlanParams,
 ) -> Result<CallToolResult, McpError> {
-    let options = match mutation_plan_options(&params) {
+    let cancellation = call_cancellation();
+    let options = match mutation_plan_options(&params, Some(Arc::clone(&cancellation))) {
         Ok(options) => options,
         Err(message) => return Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
     };
-    let result = run_api_blocking("mutation_plan", move || {
+    let result = run_api_blocking("mutation_plan", cancellation, move || {
         plan_mutation(&options).and_then(|plan| {
             fallow_output::serialize_mutation_plan_json_output(plan).map_err(|error| {
                 fallow_api::ProgrammaticError::new(
@@ -66,16 +70,14 @@ pub async fn run_mutation_inspect(
 ///
 /// Returns a validation error body for conflicting scopes, an empty path, or
 /// an unknown operator name.
-pub fn mutation_plan_options(params: &MutationPlanParams) -> Result<MutationRunOptions, String> {
+pub fn mutation_plan_options(
+    params: &MutationPlanParams,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> Result<MutationRunOptions, String> {
     Ok(MutationRunOptions {
-        analysis: AnalysisOptions {
-            root: non_empty_path(params.root.as_deref()),
-            config_path: non_empty_path(params.config.as_deref()),
-            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
-            no_cache: params.no_cache == Some(true),
-            threads: params.threads,
-            ..AnalysisOptions::default()
-        },
+        // The plan scope comes from the tool's own `changed_since`, `paths`
+        // and `all` params, not from the inherited environment.
+        analysis: shared_analysis_options(shared_params!(params), EnvScope::Own, cancellation),
         scope: plan_scope(params)?,
         operators: plan_operators(params.operators.as_deref())?,
         max_mutants: params.max_mutants,
@@ -226,22 +228,25 @@ mod tests {
             ),
         ];
         for (input, expected) in cases {
-            let options = mutation_plan_options(&plan_params(input.clone())).unwrap();
+            let options = mutation_plan_options(&plan_params(input.clone()), None).unwrap();
             assert_eq!(options.scope, expected, "input {input}");
         }
     }
 
     #[test]
     fn plan_options_carry_the_limit_operators_and_project_flags() {
-        let options = mutation_plan_options(&plan_params(serde_json::json!({
-            "root": "/repo",
-            "config": "/repo/.fallowrc.json",
-            "allow_remote_extends": true,
-            "no_cache": true,
-            "threads": 2,
-            "max_mutants": 25,
-            "operators": ["relational-operator", "return-value"],
-        })))
+        let options = mutation_plan_options(
+            &plan_params(serde_json::json!({
+                "root": "/repo",
+                "config": "/repo/.fallowrc.json",
+                "allow_remote_extends": true,
+                "no_cache": true,
+                "threads": 2,
+                "max_mutants": 25,
+                "operators": ["relational-operator", "return-value"],
+            })),
+            None,
+        )
         .unwrap();
         assert_eq!(options.max_mutants, Some(25));
         assert_eq!(
@@ -292,7 +297,7 @@ mod tests {
             ),
         ];
         for (input, expected) in cases {
-            let error = mutation_plan_options(&plan_params(input.clone()))
+            let error = mutation_plan_options(&plan_params(input.clone()), None)
                 .err()
                 .unwrap_or_else(|| panic!("input {input} must be refused"));
             let message = error_message(&error);
@@ -305,9 +310,12 @@ mod tests {
 
     #[test]
     fn unknown_operator_refusal_lists_the_valid_names() {
-        let error = mutation_plan_options(&plan_params(serde_json::json!({
-            "operators": ["relational"],
-        })))
+        let error = mutation_plan_options(
+            &plan_params(serde_json::json!({
+                "operators": ["relational"],
+            })),
+            None,
+        )
         .unwrap_err();
         let message = error_message(&error);
         for name in ["relational-operator", "removed-call", "optional-chaining"] {
@@ -317,10 +325,13 @@ mod tests {
 
     #[test]
     fn plan_ignores_an_explicit_false_all_flag() {
-        let options = mutation_plan_options(&plan_params(serde_json::json!({
-            "all": false,
-            "changed_since": "main",
-        })))
+        let options = mutation_plan_options(
+            &plan_params(serde_json::json!({
+                "all": false,
+                "changed_since": "main",
+            })),
+            None,
+        )
         .unwrap();
         assert_eq!(
             options.scope,

@@ -420,6 +420,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ended. Fallow now also ends the companions on SIGHUP, SIGQUIT and a panic.
   When Fallow starts with SIGHUP ignored, as under `nohup`, a hangup still
   does not end the run.
+- **A direct MCP tool call now stops when the client cancels it or when it
+  times out.**
+  - A client `notifications/cancelled` now reaches the work of the call.
+    Before, the server kept the analysis running until it finished or until
+    the response deadline.
+  - A subprocess call stops its complete process tree at once and returns
+    code `FALLOW_MCP_CANCELLED`.
+  - A typed call sets the cancellation flag of the analysis, on a cancel and
+    on a timeout. The analysis then stops at its next stage boundary. Before,
+    a timed-out typed call continued to run to the end. A cancel returns code
+    `FALLOW_MCP_CANCELLED`, and a timeout keeps `FALLOW_MCP_API_TIMEOUT`.
+  - Code Mode and the direct tools now share one count of in-process calls
+    that still run after their caller stopped. While that count is full, a
+    Code Mode host call uses the subprocess.
+- **The typed and CLI routes of an MCP tool now read the same settings.**
+  - `production: false` now gives `--no-production` on the CLI route. Before,
+    only the typed route turned production mode off, and the CLI route used
+    the config value.
+  - `feature_flags` on the CLI route now ignores an empty `root`, `config` or
+    `workspace`, as the typed route does.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export
