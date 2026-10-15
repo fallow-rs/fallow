@@ -29,6 +29,7 @@ pub mod git_env;
 mod package_assets;
 pub mod plugins;
 pub(crate) mod progress;
+mod resolution_inputs;
 pub mod results;
 pub(crate) mod scripts;
 /// Public hook for the fuzz harness (fuzz/fuzz_targets/fuzz_scripts.rs) only;
@@ -1253,14 +1254,15 @@ fn try_load_analysis_graph_cache(
     let t = Instant::now();
     input.progress.set_stage("loading module graph cache...");
     let unseeded_declaration_files = orphan_module_declaration_files(input, modules);
-    let current = build_graph_cache_manifest(
-        input.config,
-        input.plugin_result,
-        &entry_points.entry_points,
-        input.files,
+    let current = build_graph_cache_manifest(&GraphCacheManifestInput {
+        config: input.config,
+        plugin_result: input.plugin_result,
+        entry_points: &entry_points.entry_points,
+        files: input.files,
+        workspaces: input.workspaces,
         modules,
-        &unseeded_declaration_files,
-    );
+        unseeded_declaration_files: &unseeded_declaration_files,
+    });
     let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir).map_err(Some)?;
     if store.manifest.matches_inputs(&current) {
         let project = restore_cached_resolved_project(input, modules, &store.resolved_project)?;
@@ -1840,14 +1842,15 @@ struct BuildAnalysisGraphInput<'a> {
 fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGraph {
     let caching_enabled = !input.config.no_cache;
     let current_manifest = caching_enabled.then(|| {
-        build_graph_cache_manifest(
-            input.config,
-            input.plugin_result,
-            input.entry_points,
-            input.files,
-            input.modules,
-            input.unseeded_declaration_files,
-        )
+        build_graph_cache_manifest(&GraphCacheManifestInput {
+            config: input.config,
+            plugin_result: input.plugin_result,
+            entry_points: input.entry_points,
+            files: input.files,
+            workspaces: input.workspaces,
+            modules: input.modules,
+            unseeded_declaration_files: input.unseeded_declaration_files,
+        })
     });
 
     let mut graph = graph::ModuleGraph::build_with_declaration_seeding(
@@ -1887,18 +1890,33 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
     graph
 }
 
+/// The run state that keys the persisted graph cache.
+struct GraphCacheManifestInput<'a> {
+    config: &'a ResolvedConfig,
+    plugin_result: &'a plugins::AggregatedPluginResult,
+    entry_points: &'a discover::CategorizedEntryPoints,
+    files: &'a [discover::DiscoveredFile],
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+    modules: &'a [extract::ModuleInfo],
+    unseeded_declaration_files: &'a FxHashSet<discover::FileId>,
+}
+
 /// Build the current `GraphCacheManifest` from the run's discovered files and
 /// graph-affecting option hashes.
 fn build_graph_cache_manifest(
-    config: &ResolvedConfig,
-    plugin_result: &plugins::AggregatedPluginResult,
-    entry_points: &discover::CategorizedEntryPoints,
-    files: &[discover::DiscoveredFile],
-    modules: &[extract::ModuleInfo],
-    unseeded_declaration_files: &FxHashSet<discover::FileId>,
+    input: &GraphCacheManifestInput<'_>,
 ) -> graph_cache::GraphCacheManifest {
+    let GraphCacheManifestInput {
+        config,
+        plugin_result,
+        entry_points,
+        files,
+        workspaces,
+        modules,
+        unseeded_declaration_files,
+    } = *input;
     let mode = graph_cache::GraphCacheMode::new(
-        resolver_options_hash(config),
+        resolver_options_hash(config, workspaces, files),
         entry_points_hash(
             entry_points,
             files,
@@ -1925,8 +1943,15 @@ fn build_graph_cache_manifest(
     })
 }
 
-/// Hash the resolver-affecting options: the extraction config hash and the
-/// user-supplied resolve `conditions`.
+/// Hash the resolver-affecting options: the extraction config hash, the
+/// user-supplied resolve `conditions`, and the resolver input files and
+/// workspace names (see [`resolution_inputs::resolution_inputs_hash`]).
+///
+/// The source manifest fingerprints source files only. A `package.json`
+/// `imports` map, a workspace rename, a Deno import map or a discovered
+/// `tsconfig.json` can move an import target without a source edit, so their
+/// content keys the mode too. A config above the root is keyed with `../`
+/// steps, so its path does not bring the absolute root back into the hash.
 ///
 /// The project root is deliberately NOT hashed. It is not a resolver option:
 /// it is where the project happens to sit, and hashing it meant a container
@@ -1942,11 +1967,16 @@ fn build_graph_cache_manifest(
 /// `production` and `ignore_patterns` intentionally stay out of this hash:
 /// they shape discovery, so changed file sets already miss through stable file
 /// keys and source fingerprints in the manifest.
-fn resolver_options_hash(config: &ResolvedConfig) -> u64 {
+fn resolver_options_hash(
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+    files: &[discover::DiscoveredFile],
+) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
     config.cache_config_hash.hash(&mut hasher);
     config.resolve.conditions.hash(&mut hasher);
+    resolution_inputs::resolution_inputs_hash(&config.root, workspaces, files).hash(&mut hasher);
     hasher.finish()
 }
 
@@ -2067,19 +2097,33 @@ fn plugin_config_hash(
         path.hash(&mut hasher);
     }
 
-    let mut static_dir_mappings: Vec<(String, &str)> = plugin_result
-        .static_dir_mappings
+    hash_static_dir_mappings(&plugin_result.static_dir_mappings, root, &mut hasher);
+    hash_static_dir_mappings(
+        &plugin_result.framework_static_dir_mappings,
+        root,
+        &mut hasher,
+    );
+
+    hasher.finish()
+}
+
+/// Hash `(directory, mount)` pairs sorted, with each directory root-relative.
+fn hash_static_dir_mappings(
+    mappings: &[(std::path::PathBuf, String)],
+    root: &std::path::Path,
+    hasher: &mut rustc_hash::FxHasher,
+) {
+    use std::hash::Hash;
+    let mut keys: Vec<(String, &str)> = mappings
         .iter()
         .map(|(from_dir, mount)| (root_relative_key(root, from_dir), mount.as_str()))
         .collect();
-    static_dir_mappings.sort_unstable();
-    static_dir_mappings.len().hash(&mut hasher);
-    for (from_dir, mount) in static_dir_mappings {
-        from_dir.hash(&mut hasher);
-        mount.hash(&mut hasher);
+    keys.sort_unstable();
+    keys.len().hash(hasher);
+    for (from_dir, mount) in keys {
+        from_dir.hash(hasher);
+        mount.hash(hasher);
     }
-
-    hasher.finish()
 }
 
 fn hash_active_plugins(
@@ -3725,8 +3769,8 @@ mod tests {
         let config_b = session_config(dir_b.path());
 
         assert_eq!(
-            resolver_options_hash(&config_a),
-            resolver_options_hash(&config_b),
+            resolver_options_hash(&config_a, &[], &[]),
+            resolver_options_hash(&config_b, &[], &[]),
             "root identity is handled separately from resolver options"
         );
     }
@@ -3775,8 +3819,8 @@ mod tests {
         config_b.resolve.conditions.push("react-server".to_string());
 
         assert_ne!(
-            resolver_options_hash(&config_a),
-            resolver_options_hash(&config_b),
+            resolver_options_hash(&config_a, &[], &[]),
+            resolver_options_hash(&config_b, &[], &[]),
             "resolve condition changes must invalidate the graph cache"
         );
     }
@@ -3816,6 +3860,30 @@ mod tests {
             plugin_config_hash(&with_scoped_auto_import, std::path::Path::new("")),
             plugin_config_hash(&with_auto_import, std::path::Path::new("")),
             "auto-import scope changes must invalidate the graph cache"
+        );
+    }
+
+    #[test]
+    fn graph_cache_plugin_hash_includes_framework_static_dir_mappings() {
+        let base = plugin_result();
+        let mut with_mount = plugin_result();
+        with_mount
+            .framework_static_dir_mappings
+            .push((PathBuf::from("/project/public"), "/".to_string()));
+        let mut tool_mount = plugin_result();
+        tool_mount
+            .static_dir_mappings
+            .push((PathBuf::from("/project/public"), "/".to_string()));
+        let root = std::path::Path::new("/project");
+        assert_ne!(
+            plugin_config_hash(&base, root),
+            plugin_config_hash(&with_mount, root),
+            "framework static mounts feed the resolver and must key the graph cache"
+        );
+        assert_ne!(
+            plugin_config_hash(&tool_mount, root),
+            plugin_config_hash(&with_mount, root),
+            "a framework mount and a tool mount resolve differently"
         );
     }
 

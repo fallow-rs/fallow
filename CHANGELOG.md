@@ -394,6 +394,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `pass: "snapshot"`. A file over the cap has the reason
   `over-capacity`.
 
+- **An edit to `package.json`, `deno.json` or `tsconfig.json` now rebuilds
+  the cached module graph.** The graph cache compared source files only. A
+  change to a `package.json` `imports` map, a workspace package name, a Deno
+  import map, or a `tsconfig.json` that the resolver finds next to a source
+  file (with its `extends` and `references` chain) did not change the cache
+  key. The next run then used the old import targets and could report a live
+  file as unused. Now the cache key includes the content of these files, the
+  workspace names and roots, and the framework static directory mounts. The
+  graph cache version changes, so the first run after an upgrade rebuilds
+  the graph.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

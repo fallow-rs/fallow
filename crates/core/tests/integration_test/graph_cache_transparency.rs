@@ -771,3 +771,205 @@ fn a_graph_cache_from_another_root_never_reuses_original_checkout_paths() {
             .all(|finding| finding.export.path.starts_with(&relocated))
     );
 }
+
+/// Write `(relative path, content)` pairs under `root`.
+fn write_project_files(root: &Path, files: &[(&str, &str)]) {
+    for (relative, content) in files {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dir");
+        }
+        std::fs::write(&path, content).expect("write project file");
+    }
+}
+
+fn sorted_unused_file_paths(
+    root: &Path,
+    results: &fallow_types::results::AnalysisResults,
+) -> Vec<String> {
+    let mut paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|finding| {
+            finding
+                .file
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&finding.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    paths.sort_unstable();
+    paths
+}
+
+/// Run `files` cold with a cache, apply `edits` to non-source files only (so
+/// the source manifest stays the same), then run warm against the same cache.
+/// The warm run must equal a cache-free run on the edited tree. The edit must
+/// also change the cache-free verdict, or the test proves nothing.
+fn assert_resolution_input_edit_misses_cache(files: &[(&str, &str)], edits: &[(&str, &str)]) {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    write_project_files(&root, files);
+    let cache_dir = temp.path().join("cache");
+    let config = create_config_with_cache(root.clone(), cache_dir.clone());
+
+    let before = fallow_core::analyze(&config).expect("cold analysis");
+    assert!(
+        cache_dir.join("graph-cache.bin").exists(),
+        "cold run must persist graph-cache.bin"
+    );
+
+    write_project_files(&root, edits);
+
+    let warm = fallow_core::analyze(&config).expect("warm analysis after edit");
+    let mut uncached = create_config_with_cache(root.clone(), temp.path().join("cold-cache"));
+    uncached.no_cache = true;
+    let cold = fallow_core::analyze(&uncached).expect("cache-free analysis after edit");
+
+    let before_unused = sorted_unused_file_paths(&root, &before);
+    let cold_unused = sorted_unused_file_paths(&root, &cold);
+    assert_ne!(
+        before_unused, cold_unused,
+        "the edit must change the cache-free verdict, or this test proves nothing"
+    );
+    assert_eq!(
+        sorted_unused_file_paths(&root, &warm),
+        cold_unused,
+        "a warm run after a resolution-input edit must match a cache-free run"
+    );
+    let cold_json = serde_json::to_value(&cold).expect("serialize cold results");
+    let warm_json = serde_json::to_value(&warm).expect("serialize warm results");
+    assert_eq!(
+        cold_json, warm_json,
+        "warm results after a resolution-input edit must equal cache-free results"
+    );
+}
+
+const DB_IMPORT_SOURCES: &[(&str, &str)] = &[
+    ("src/db-a.ts", "export const db = 'a';\n"),
+    ("src/db-b.ts", "export const db = 'b';\n"),
+];
+
+#[test]
+fn package_json_imports_edit_misses_graph_cache() {
+    let mut files = vec![
+        (
+            "package.json",
+            r##"{"name":"app","main":"src/index.ts","imports":{"#db":"./src/db-a.ts"}}"##,
+        ),
+        (
+            "src/index.ts",
+            "import { db } from '#db';\nconsole.log(db);\n",
+        ),
+    ];
+    files.extend_from_slice(DB_IMPORT_SOURCES);
+    assert_resolution_input_edit_misses_cache(
+        &files,
+        &[(
+            "package.json",
+            r##"{"name":"app","main":"src/index.ts","imports":{"#db":"./src/db-b.ts"}}"##,
+        )],
+    );
+}
+
+#[test]
+fn workspace_name_swap_misses_graph_cache() {
+    assert_resolution_input_edit_misses_cache(
+        &[
+            (
+                "package.json",
+                r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+            ),
+            (
+                "packages/app/package.json",
+                r#"{"name":"@demo/app","main":"src/index.ts","dependencies":{"@demo/lib":"*"}}"#,
+            ),
+            (
+                "packages/app/src/index.ts",
+                "import { value } from '@demo/lib/src/util';\nconsole.log(value);\n",
+            ),
+            ("packages/lib/package.json", r#"{"name":"@demo/lib"}"#),
+            ("packages/lib/src/util.ts", "export const value = 'lib';\n"),
+            ("packages/other/package.json", r#"{"name":"@demo/other"}"#),
+            (
+                "packages/other/src/util.ts",
+                "export const value = 'other';\n",
+            ),
+        ],
+        &[
+            ("packages/lib/package.json", r#"{"name":"@demo/other"}"#),
+            ("packages/other/package.json", r#"{"name":"@demo/lib"}"#),
+        ],
+    );
+}
+
+#[test]
+fn deno_import_map_edit_misses_graph_cache() {
+    let mut files = vec![
+        (
+            "deno.json",
+            r#"{"name":"app","exports":"./main.ts","imports":{"db":"./src/db-a.ts"}}"#,
+        ),
+        ("main.ts", "import { db } from 'db';\nconsole.log(db);\n"),
+    ];
+    files.extend_from_slice(DB_IMPORT_SOURCES);
+    assert_resolution_input_edit_misses_cache(
+        &files,
+        &[(
+            "deno.json",
+            r#"{"name":"app","exports":"./main.ts","imports":{"db":"./src/db-b.ts"}}"#,
+        )],
+    );
+}
+
+#[test]
+fn extended_tsconfig_paths_edit_misses_graph_cache() {
+    let mut files = vec![
+        ("package.json", r#"{"name":"app","main":"src/index.ts"}"#),
+        (
+            "tsconfig.json",
+            r#"{"extends":"./config/tsconfig.base.json"}"#,
+        ),
+        (
+            "config/tsconfig.base.json",
+            r#"{"compilerOptions":{"baseUrl":"..","paths":{"@db":["./src/db-a.ts"]}}}"#,
+        ),
+        (
+            "src/index.ts",
+            "import { db } from '@db';\nconsole.log(db);\n",
+        ),
+    ];
+    files.extend_from_slice(DB_IMPORT_SOURCES);
+    assert_resolution_input_edit_misses_cache(
+        &files,
+        &[(
+            "config/tsconfig.base.json",
+            r#"{"compilerOptions":{"baseUrl":"..","paths":{"@db":["./src/db-b.ts"]}}}"#,
+        )],
+    );
+}
+
+#[test]
+fn nested_tsconfig_paths_edit_misses_graph_cache() {
+    let mut files = vec![
+        ("package.json", r#"{"name":"app","main":"src/index.ts"}"#),
+        (
+            "src/tsconfig.json",
+            r#"{"compilerOptions":{"paths":{"@db":["./db-a.ts"]}}}"#,
+        ),
+        (
+            "src/index.ts",
+            "import { db } from '@db';\nconsole.log(db);\n",
+        ),
+    ];
+    files.extend_from_slice(DB_IMPORT_SOURCES);
+    assert_resolution_input_edit_misses_cache(
+        &files,
+        &[(
+            "src/tsconfig.json",
+            r#"{"compilerOptions":{"paths":{"@db":["./db-b.ts"]}}}"#,
+        )],
+    );
+}
