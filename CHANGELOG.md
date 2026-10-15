@@ -58,7 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A run reuses the killed and survived results of an earlier run from the
     Fallow cache. The key covers the mutant, its covering tests, the content
     of the covering test files and the files that they import, the runner
-    setup files, the lockfile and the runner config. A change to one of them
+    setup files (also the Bun `preload` files), the lockfile, the runner
+    config and the runner. A change to one of them
     runs the mutant again. Dynamic imports that the module graph does not
     resolve, and files that a test reads, are not in the key. Each cache entry
     and the `cache` object of the report record this limit. A reused result

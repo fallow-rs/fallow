@@ -371,15 +371,16 @@ mutant. The dry run always runs, because it gives the covering tests.
 The key hashes these parts:
 
 - the key format and the Fallow version;
-- the runner version and the runtime version;
+- the runner name, the runner version and the runtime version;
 - the mutant id, and the content of the mutated source file;
 - the covering test ids;
 - the content of the covering test files, and of the files that they reach
   through static imports in the module graph (`MutationPlan::test_file_reach`).
   The run computes one digest for each test file and its reach, and each
   mutant key combines the digests of its covering test files;
-- the content of the runner setup files (Vitest `setupFiles`) and of the
-  files that they reach (`MutationPlan::support_files`);
+- the content of the runner setup files (Vitest `setupFiles`, the `preload`
+  files of `bunfig.toml`) and of the files that they reach
+  (`MutationPlan::support_files`);
 - the lockfiles of the first directory from the root upward that has one;
 - the runner config files at the root: `vitest.config.*`, `vite.config.*`,
   `vitest.workspace.*`, `bunfig.toml`, `package.json` and `tsconfig.json`. An

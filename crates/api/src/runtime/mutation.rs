@@ -457,12 +457,14 @@ fn open_result_cache(
     no_cache: bool,
     mutation_cache: &Path,
     root: &Path,
+    runner: &str,
     plan: &MutationPlan,
 ) -> Option<Arc<ResultCache>> {
     (!no_cache).then(|| {
         Arc::new(ResultCache::open(
             mutation_cache,
             root,
+            runner,
             KeyFiles::from_plan(plan),
         ))
     })
@@ -535,8 +537,9 @@ fn execute(
         })
         .collect();
     let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
-    let root = planned.resolved.root().to_path_buf();
-    let result_cache = open_result_cache(planned.resolved.no_cache, &mutation_cache, &root, plan);
+    let resolved = &planned.resolved;
+    let root = resolved.root().to_path_buf();
+    let result_cache = open_result_cache(resolved.no_cache, &mutation_cache, &root, name, plan);
     let config = ScheduleConfig {
         init: InitRequest {
             root: root.to_string_lossy().into_owned(),
@@ -837,8 +840,8 @@ mod tests {
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
         };
-        assert!(open_result_cache(true, dir.path(), dir.path(), &plan).is_none());
-        assert!(open_result_cache(false, dir.path(), dir.path(), &plan).is_some());
+        assert!(open_result_cache(true, dir.path(), dir.path(), "vitest", &plan).is_none());
+        assert!(open_result_cache(false, dir.path(), dir.path(), "vitest", &plan).is_some());
     }
 
     #[test]

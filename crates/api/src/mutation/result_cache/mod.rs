@@ -39,7 +39,7 @@ use super::scheduler::{CachedResult, ResultLookup, ScheduleOutcome, ScheduledMut
 pub const RESULT_CACHE_FILE: &str = "results.json";
 /// The version of the key and of the file format. A change to the key
 /// parts or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 /// The inputs of a test that the key does not hash.
@@ -215,11 +215,11 @@ pub struct CacheCounts {
 }
 
 impl ResultCache {
-    /// Opens the cache of `mutation_cache` for a project at `root`. A missing
-    /// file, a file of another format, or a file that does not parse gives
-    /// an empty cache.
+    /// Opens the cache of `mutation_cache` for a project at `root` and the
+    /// `runner` of the run. A missing file, a file of another format, or a
+    /// file that does not parse gives an empty cache.
     #[must_use]
-    pub fn open(mutation_cache: &Path, root: &Path, files: KeyFiles) -> Self {
+    pub fn open(mutation_cache: &Path, root: &Path, runner: &str, files: KeyFiles) -> Self {
         let file = mutation_cache.join(RESULT_CACHE_FILE);
         let state = std::fs::read(&file)
             .ok()
@@ -233,6 +233,7 @@ impl ResultCache {
         let mut hasher = Sha256::new();
         feed(&mut hasher, &FORMAT_VERSION.to_string());
         feed(&mut hasher, env!("CARGO_PKG_VERSION"));
+        feed(&mut hasher, runner);
         feed(&mut hasher, &lockfile_digest(root));
         feed(&mut hasher, &runner_config_digest(root));
         hasher.update((files.support_files.len() as u64).to_le_bytes());
