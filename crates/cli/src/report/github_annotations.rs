@@ -88,6 +88,10 @@ pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Pat
 pub fn render_annotations(kind: EnvelopeKind, envelope: &Value, options: &RenderOptions) -> String {
     let mut annotations = collect_annotations(kind, envelope, options.pm);
     sort_annotations(&mut annotations);
+    if kind == EnvelopeKind::Audit && envelope["attribution"]["gate"] == "new-only" {
+        annotations
+            .sort_by_key(|annotation| (annotation.level, annotation.introduced != Some(true)));
+    }
     let mut lines: Vec<String> = Vec::with_capacity(annotations.len() + 1);
     for annotation in &mut annotations {
         annotation.path = options.rebase.apply(&annotation.path);
@@ -115,6 +119,7 @@ pub(crate) fn collect_annotations(
         EnvelopeKind::Audit => {
             collect_section(envelope, "dead_code", pm, &mut out, collect_check);
             collect_value_section(envelope, "complexity", &mut out, collect_health);
+            collect_value_section(envelope, "complexity", &mut out, collect_audit_styling);
             collect_value_section(envelope, "duplication", &mut out, collect_dupes);
             collect_value_section(envelope, "diff_risk", &mut out, collect_diff_risk);
         }
@@ -154,19 +159,26 @@ fn collect_value_section(
     }
 }
 
-/// Line/column anchor for one annotation.
+/// Location and source-finding provenance for one annotation.
 #[derive(Clone, Copy, Default)]
 struct Anchor {
     line: Option<u64>,
     col: Option<u64>,
+    introduced: Option<bool>,
 }
 
 impl Anchor {
+    fn with_introduced(mut self, finding: &Value) -> Self {
+        self.introduced = finding.get("introduced").and_then(Value::as_bool);
+        self
+    }
+
     /// Unconditional `line=` + 1-based `col=` (the common jq shape).
     fn line_col(item: &Value) -> Self {
         Self {
             line: Some(u(item, "line")),
             col: Some(one_based_col(u(item, "col"))),
+            ..Self::default().with_introduced(item)
         }
     }
 
@@ -175,6 +187,7 @@ impl Anchor {
         Self {
             line: Some(u(item, "line")),
             col: None,
+            ..Self::default().with_introduced(item)
         }
     }
 
@@ -183,7 +196,7 @@ impl Anchor {
         if u(item, "line") > 0 {
             Self::line_col(item)
         } else {
-            Self::default()
+            Self::default().with_introduced(item)
         }
     }
 
@@ -193,6 +206,7 @@ impl Anchor {
         Self {
             line: (line > 0).then_some(line),
             col: None,
+            ..Self::default().with_introduced(item)
         }
     }
 }
@@ -213,6 +227,7 @@ fn push(
         col: anchor.col,
         title,
         message,
+        introduced: anchor.introduced,
     });
 }
 
@@ -253,8 +268,8 @@ fn push_each(
     }
 }
 
-fn no_anchor(_item: &Value) -> Anchor {
-    Anchor::default()
+fn no_anchor(item: &Value) -> Anchor {
+    Anchor::default().with_introduced(item)
 }
 
 fn joined_strs(item: &Value, key: &str, separator: &str) -> String {
@@ -343,6 +358,7 @@ fn collect_prop_drilling(env: &Value, out: &mut Vec<Annotation>) {
             Anchor {
                 line: Some(u(source, "line")),
                 col: None,
+                ..no_anchor(item)
             },
             "Prop drilling".to_owned(),
             format!(
@@ -475,7 +491,7 @@ fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Ann
                 out,
                 gate_level(dependency, AnnotationLevel::Warning),
                 s(site, "path"),
-                Anchor::line_col(site),
+                Anchor::line_col(site).with_introduced(dependency),
                 "Unlisted dependency".to_owned(),
                 format!(
                     "Package '{package}' is imported here but not listed in package.json.\n\nRun: {}",
@@ -606,7 +622,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
                 out,
                 gate_level(duplicate, AnnotationLevel::Warning),
                 s(location, "path"),
-                Anchor::line_col(location),
+                Anchor::line_col(location).with_introduced(duplicate),
                 "Duplicate export".to_owned(),
                 format!(
                     "Export '{name}' is defined in {} modules:\n{listing}\n\nThis causes ambiguity for consumers. Keep one canonical location.",
@@ -651,7 +667,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
             out,
             gate_level(cycle, AnnotationLevel::Warning),
             files.first().copied().unwrap_or_default(),
-            Anchor::default(),
+            no_anchor(cycle),
             "Re-export cycle".to_owned(),
             format!(
                 "{headline}\n\nChain propagation through the loop is a no-op, so imports through any member may silently come up empty.\n{remedy}",
@@ -697,7 +713,7 @@ fn collect_check_package_cycles(env: &Value, out: &mut Vec<Annotation>) {
             out,
             gate_level(cycle, AnnotationLevel::Warning),
             s(anchor, "path"),
-            Anchor::line_col(anchor),
+            Anchor::line_col(anchor).with_introduced(cycle),
             "Package cycle".to_owned(),
             format!(
                 "Workspace packages import each other in a loop:\n{} \u{2192} {first}\n{hops}\n\nPackages in a cycle cannot be built in dependency order.\nRemove the imports on one hop to break the cycle.{note}",
@@ -1235,6 +1251,7 @@ fn collect_dupes(env: &Value, out: &mut Vec<Annotation>) {
                     num(group, "token_count"),
                     instances.len(),
                 ),
+                introduced: group.get("introduced").and_then(Value::as_bool),
             });
         }
     }
@@ -1366,6 +1383,24 @@ fn collect_health(env: &Value, out: &mut Vec<Annotation>) {
     collect_runtime_coverage(env, out);
     collect_coverage_intelligence(env, out);
     collect_targets(env, out);
+}
+
+fn collect_audit_styling(env: &Value, out: &mut Vec<Annotation>) {
+    for finding in arr(env, "styling_findings") {
+        push(
+            out,
+            gate_level(finding, AnnotationLevel::Warning),
+            s(finding, "path"),
+            Anchor::line_only(finding),
+            format!("fallow/{}", s(finding, "code")),
+            format!(
+                "[{}] {}: {}",
+                s(finding, "code"),
+                s(finding, "sub_kind"),
+                s(finding, "value"),
+            ),
+        );
+    }
 }
 
 fn collect_runtime_coverage(env: &Value, out: &mut Vec<Annotation>) {

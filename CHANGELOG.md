@@ -452,6 +452,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the config value.
   - `feature_flags` on the CLI route now ignores an empty `root`, `config` or
     `workspace`, as the typed route does.
+- **Health recommendations use valid config keys.** `fallow recommend` and
+  the taste-choice catalog use `health.maxCyclomatic`, `health.maxCognitive`
+  and `health.maxCrap`, matching the config reader.
+- **GitHub audits keep blocking findings visible.** Summary sections sort
+  errors before warnings and prioritize introduced findings under `new-only`
+  before truncation. Rule severity is separate from the complexity band.
+  Styling details appear in summaries and annotations; missing historical
+  attribution remains unknown.
+- **Saved reports retain failure and rule identity.** Failed-run envelopes
+  are rejected with their original message, code and help. Legacy SARIF and
+  CodeClimate keep canonical rule IDs, and CodeClimate distinguishes styling
+  values and subkinds on the same line without changing other fingerprints.
+- **Named exports returned through higher-order import loaders stay in use.**
+  Unknown wrappers preserve the imported module's exports instead of assuming
+  that only `default` is read. Default-only credit requires a proven component
+  loader import with no local shadowing. The extraction and graph caches rebuild
+  so cached results use the corrected import facts.
+
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

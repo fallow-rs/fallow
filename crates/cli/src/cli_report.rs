@@ -1003,7 +1003,7 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
             telemetry::FailureReason::Validation,
         )
     })?;
-    serde_json::from_str(&source).map_err(|err| {
+    let envelope: serde_json::Value = serde_json::from_str(&source).map_err(|err| {
         crate::emit_known_failure(
             &format!(
                 "{} is not valid JSON ({err}); generate it with `fallow ... --format json`",
@@ -1013,7 +1013,28 @@ fn load_envelope(from: &Path, output: OutputFormat) -> Result<serde_json::Value,
             output,
             telemetry::FailureReason::Validation,
         )
-    })
+    })?;
+    if envelope.get("error").and_then(serde_json::Value::as_bool) == Some(true) {
+        let message = envelope
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("the original run did not include an error message");
+        let code = envelope
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(String::new, |code| format!(" [{code}]"));
+        let help = envelope
+            .get("help")
+            .and_then(serde_json::Value::as_str)
+            .map_or_else(String::new, |help| format!("\n  hint: {help}"));
+        return Err(crate::emit_known_failure(
+            &format!("saved Fallow run failed{code}: {message}{help}"),
+            2,
+            output,
+            telemetry::FailureReason::Validation,
+        ));
+    }
+    Ok(envelope)
 }
 
 fn envelope_kind(

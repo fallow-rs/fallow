@@ -8,6 +8,201 @@ use std::process::{Command, Output};
 
 use crate::common::{fallow_bin, git, strip_volatile_fields};
 
+#[test]
+fn consumer_contract_saved_errors_preserve_original_failure() {
+    assert_saved_error_preserves_failure(&serde_json::json!({}));
+}
+
+#[test]
+fn consumer_contract_saved_error_cannot_render_a_successful_kind() {
+    assert_saved_error_preserves_failure(&serde_json::json!({
+        "kind": "audit", "verdict": "pass", "summary": {}, "attribution": {}
+    }));
+}
+
+#[test]
+fn consumer_contract_saved_legacy_audit_preserves_styling_rule_identity() {
+    let root = workspace_fixture("tests/fixtures/basic-project");
+    let store = tempfile::tempdir().expect("legacy audit directory");
+    let path = store.path().join("styling.json");
+    // The untyped legacy section forces both formats through their annotation fallback.
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "kind": "audit", "dead_code": false, "complexity": { "styling_findings": [{
+                "path": "src/button.tsx", "line": 7, "code": "css-token-drift",
+                "sub_kind": "tailwind-arbitrary-value", "value": "w-[13px]",
+                "effective_severity": "error", "introduced": true, "actions": []
+            }, {
+                "path": "src/button.tsx", "line": 7, "code": "css-token-drift",
+                "sub_kind": "tailwind-arbitrary-value", "value": "h-[17px]",
+                "effective_severity": "error", "introduced": true, "actions": []
+            }, {
+                "path": "src/button.tsx", "line": 7, "code": "css-token-drift",
+                "sub_kind": "css-declaration-value", "value": "w-[13px]",
+                "effective_severity": "error", "introduced": true, "actions": []
+        }] }, "diff_risk": { "findings": [{
+            "path": "package.json", "line": 1, "rule": "added-dependency",
+            "severity": "warn", "introduced": true,
+            "message": "new dependency", "evidence": "left-pad"
+        }] }
+        })
+        .to_string(),
+    )
+    .expect("save legacy audit");
+    for format in ["sarif", "codeclimate"] {
+        let args = [
+            "report".to_owned(),
+            "--from".to_owned(),
+            path.display().to_string(),
+            "--format".to_owned(),
+            format.to_owned(),
+            "--quiet".to_owned(),
+        ];
+        let rendered = run(&root, &args);
+        assert_eq!(
+            rendered.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&rendered.stderr)
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(&rendered.stdout).expect("report JSON");
+        if format == "sarif" {
+            let results = value["runs"][0]["results"]
+                .as_array()
+                .expect("SARIF results");
+            assert_eq!(results.len(), 4);
+            let styling = results
+                .iter()
+                .find(|result| result["ruleId"] == "fallow/css-token-drift")
+                .expect("canonical styling rule");
+            let risk = results
+                .iter()
+                .find(|result| result["ruleId"] == "fallow/added-dependency")
+                .expect("canonical diff-risk rule");
+            assert_eq!(styling["level"], "error");
+            assert_eq!(risk["level"], "warning");
+            assert_eq!(
+                styling["locations"][0]["physicalLocation"]["region"]["startLine"],
+                7
+            );
+        } else {
+            let issues = value.as_array().expect("CodeClimate issues");
+            assert_eq!(issues.len(), 4);
+            let styling = issues
+                .iter()
+                .find(|issue| issue["check_name"] == "fallow/css-token-drift")
+                .expect("canonical styling rule");
+            let risk = issues
+                .iter()
+                .find(|issue| issue["check_name"] == "fallow/added-dependency")
+                .expect("canonical diff-risk rule");
+            assert_eq!(risk["fingerprint"], "cafb30822aca4e49");
+            assert_eq!(styling["categories"], serde_json::json!(["Style"]));
+            assert_eq!(styling["location"]["lines"]["begin"], 7);
+            let fingerprints: std::collections::BTreeSet<&str> = issues
+                .iter()
+                .filter(|issue| issue["check_name"] == "fallow/css-token-drift")
+                .map(|issue| issue["fingerprint"].as_str().expect("styling fingerprint"))
+                .collect();
+            assert_eq!(
+                fingerprints.len(),
+                3,
+                "each value and subkind needs its own identity"
+            );
+            let repeated = run(&root, &args);
+            assert_eq!(repeated.status.code(), Some(0));
+            assert_eq!(
+                rendered.stdout, repeated.stdout,
+                "fingerprints must remain stable"
+            );
+        }
+    }
+}
+
+fn assert_saved_error_preserves_failure(extra: &serde_json::Value) {
+    let root = workspace_fixture("tests/fixtures/basic-project");
+    let store = tempfile::tempdir().expect("saved error directory");
+    let path = store.path().join("saved.json");
+    let mut error = serde_json::json!({
+        "error": true,
+        "message": "coverage file cannot be read",
+        "exit_code": 2,
+        "code": "FALLOW_INVALID_COVERAGE_PATH",
+        "help": "check the coverage path before retrying"
+    });
+    error
+        .as_object_mut()
+        .expect("error object")
+        .extend(extra.as_object().expect("extra fields").clone());
+    std::fs::write(&path, error.to_string()).expect("save failure");
+    for format in ["github-summary", "github-annotations"] {
+        let rendered = run(
+            &root,
+            &[
+                "report".to_owned(),
+                "--from".to_owned(),
+                path.display().to_string(),
+                "--root".to_owned(),
+                root.display().to_string(),
+                "--quiet".to_owned(),
+                "--format".to_owned(),
+                format.to_owned(),
+            ],
+        );
+        let stderr = String::from_utf8_lossy(&rendered.stderr);
+        assert_eq!(rendered.status.code(), Some(2), "{format}: {stderr}");
+        assert!(stderr.contains("coverage file cannot be read"), "{stderr}");
+        assert!(stderr.contains("FALLOW_INVALID_COVERAGE_PATH"), "{stderr}");
+        assert!(
+            stderr.contains("check the coverage path before retrying"),
+            "{stderr}"
+        );
+        assert!(
+            rendered.stdout.is_empty(),
+            "failed runs must not render success"
+        );
+    }
+    for invalid in ["{}", "{"] {
+        std::fs::write(&path, invalid).expect("save invalid input");
+        let rendered = run(
+            &root,
+            &[
+                "report".to_owned(),
+                "--from".to_owned(),
+                path.display().to_string(),
+                "--format".to_owned(),
+                "github-summary".to_owned(),
+            ],
+        );
+        assert_eq!(rendered.status.code(), Some(2));
+        assert!(rendered.stdout.is_empty());
+    }
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "kind": "dead-code", "total_issues": 1,
+                "unused_exports": [{ "path": "src/unused.ts", "line": 1, "col": 0,
+                    "export_name": "legacyUnused", "is_re_export": false, "is_type_only": false }]
+        })
+        .to_string(),
+    )
+    .expect("save legacy success");
+    let rendered = run(
+        &root,
+        &[
+            "report".to_owned(),
+            "--from".to_owned(),
+            path.display().to_string(),
+            "--format".to_owned(),
+            "github-summary".to_owned(),
+        ],
+    );
+    assert_eq!(rendered.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&rendered.stdout).contains("legacyUnused"));
+}
+
 fn workspace_fixture(path: &str) -> PathBuf {
     std::path::PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),

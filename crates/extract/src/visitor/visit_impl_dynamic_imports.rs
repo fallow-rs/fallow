@@ -5,6 +5,15 @@ use crate::visitor::{
     LoaderImport, LocalImportLoader, collect_loader_imports, collect_returned_imports,
 };
 
+/// The default-export contract of an imported component loader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::visitor) enum ComponentLoaderImport {
+    Function,
+    ReactNamespace,
+    VueNamespace,
+    NextDynamic,
+}
+
 impl<'a> ModuleInfoExtractor {
     /// Record each `new URL(path, import.meta.url)` passed directly to a
     /// filesystem call, so `visit_new_expression` marks it speculative.
@@ -252,7 +261,100 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    /// Register runtime component-loader imports before visiting calls, including
+    /// imports declared later in the file. Local lookalikes provide no contract.
+    pub(super) fn record_program_component_loader_imports(&mut self, program: &Program<'_>) {
+        self.component_loader_imports.clear();
+        for statement in &program.body {
+            let Statement::ImportDeclaration(decl) = statement else {
+                continue;
+            };
+            if decl.import_kind.is_type() {
+                continue;
+            }
+            for specifier in decl.specifiers.iter().flatten() {
+                let imported = match specifier {
+                    ImportDeclarationSpecifier::ImportSpecifier(named)
+                        if !named.import_kind.is_type() =>
+                    {
+                        Some(named.imported.name())
+                    }
+                    ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => Some("default".into()),
+                    _ => None,
+                };
+                let contract = match (decl.source.value.as_str(), imported.as_deref(), specifier) {
+                    ("react", Some("lazy"), _) | ("vue", Some("defineAsyncComponent"), _) => {
+                        Some(ComponentLoaderImport::Function)
+                    }
+                    ("react", Some("default"), _)
+                    | ("react", _, ImportDeclarationSpecifier::ImportNamespaceSpecifier(_)) => {
+                        Some(ComponentLoaderImport::ReactNamespace)
+                    }
+                    ("vue", _, ImportDeclarationSpecifier::ImportNamespaceSpecifier(_)) => {
+                        Some(ComponentLoaderImport::VueNamespace)
+                    }
+                    ("next/dynamic", Some("default"), _) => {
+                        Some(ComponentLoaderImport::NextDynamic)
+                    }
+                    _ => None,
+                };
+                if let Some(contract) = contract {
+                    self.component_loader_imports
+                        .insert(specifier.local().name.to_string(), contract);
+                }
+            }
+        }
+    }
+
+    fn component_loader_binding_is_shadowed(&self, name: &str) -> bool {
+        // Exported namespaces do not maintain the ordinary declaration stack.
+        // Other lexical roots also include catch bindings and local namespaces.
+        self.namespace_depth > 0
+            || self.nested_scope_shadows(name)
+            || self
+                .scoped_direct_object_binding_roots
+                .iter()
+                .any(|roots| roots.contains(name))
+    }
+
+    fn is_component_loader_call(&self, expr: &CallExpression<'_>) -> bool {
+        match expr.callee.without_parentheses() {
+            Expression::Identifier(callee) => {
+                !self.component_loader_binding_is_shadowed(&callee.name)
+                    && matches!(
+                        self.component_loader_imports.get(callee.name.as_str()),
+                        Some(ComponentLoaderImport::Function | ComponentLoaderImport::NextDynamic)
+                    )
+            }
+            Expression::StaticMemberExpression(member) => {
+                let Expression::Identifier(root) = member.object.without_parentheses() else {
+                    return false;
+                };
+                if self.component_loader_binding_is_shadowed(&root.name) {
+                    return false;
+                }
+                matches!(
+                    (
+                        self.component_loader_imports.get(root.name.as_str()),
+                        member.property.name.as_str()
+                    ),
+                    (Some(ComponentLoaderImport::ReactNamespace), "lazy")
+                        | (
+                            Some(ComponentLoaderImport::VueNamespace),
+                            "defineAsyncComponent"
+                        )
+                )
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn record_arrow_wrapped_dynamic_import(&mut self, expr: &CallExpression<'_>) {
+        // Unknown callbacks can return a namespace to arbitrary code. Let the
+        // ordinary import walk retain its escaping-value credit instead.
+        if !self.is_component_loader_call(expr) {
+            return;
+        }
         self.record_loader_argument_dynamic_imports(expr);
         if let Some((import_expr, sources)) = try_extract_arrow_wrapped_import(&expr.arguments) {
             self.push_dynamic_import_branches(
@@ -282,27 +384,28 @@ impl<'a> ModuleInfoExtractor {
         if self.local_import_loaders.is_empty() {
             return;
         }
-        for arg in &expr.arguments {
-            let Argument::Identifier(ident) = arg else {
-                continue;
-            };
-            let Some(loader) = self.local_import_loaders.get_mut(ident.name.as_str()) else {
-                continue;
-            };
-            loader.credited_references += 1;
-            let imports = loader.imports.clone();
-            let is_client_only = self.is_next_dynamic_ssr_false_call(expr);
-            for import in imports {
-                self.push_dynamic_import_branches(
-                    &import.sources,
-                    import.span,
-                    &["default".to_string()],
-                    None,
-                );
-                if is_client_only {
-                    self.client_only_dynamic_import_spans
-                        .push(import.span.start);
-                }
+        let Some(Argument::Identifier(ident)) = expr.arguments.first() else {
+            return;
+        };
+        if self.component_loader_binding_is_shadowed(&ident.name) {
+            return;
+        }
+        let Some(loader) = self.local_import_loaders.get_mut(ident.name.as_str()) else {
+            return;
+        };
+        loader.credited_references += 1;
+        let imports = loader.imports.clone();
+        let is_client_only = self.is_next_dynamic_ssr_false_call(expr);
+        for import in imports {
+            self.push_dynamic_import_branches(
+                &import.sources,
+                import.span,
+                &["default".to_string()],
+                None,
+            );
+            if is_client_only {
+                self.client_only_dynamic_import_spans
+                    .push(import.span.start);
             }
         }
     }
@@ -513,7 +616,10 @@ impl<'a> ModuleInfoExtractor {
         let Expression::Identifier(callee) = &expr.callee else {
             return false;
         };
-        if !self.is_default_import_from(&callee.name, "next/dynamic") {
+        if self.component_loader_binding_is_shadowed(&callee.name)
+            || self.component_loader_imports.get(callee.name.as_str())
+                != Some(&ComponentLoaderImport::NextDynamic)
+        {
             return false;
         }
         let Some(Argument::ObjectExpression(options)) = expr.arguments.get(1) else {
@@ -525,16 +631,6 @@ impl<'a> ModuleInfoExtractor {
             };
             prop.key.static_name().as_deref() == Some("ssr")
                 && matches!(&prop.value, Expression::BooleanLiteral(lit) if !lit.value)
-        })
-    }
-
-    /// Whether `local_name` is bound to the default import of `source`
-    /// (`import dynamic from "next/dynamic"`, or an aliased default).
-    fn is_default_import_from(&self, local_name: &str, source: &str) -> bool {
-        self.imports.iter().any(|import| {
-            import.source == source
-                && import.local_name == local_name
-                && matches!(import.imported_name, ImportedName::Default)
         })
     }
 

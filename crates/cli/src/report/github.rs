@@ -83,6 +83,8 @@ pub struct Annotation {
     pub(crate) col: Option<u64>,
     pub(crate) title: String,
     pub(crate) message: String,
+    /// Saved audit provenance, used only for new-only annotation ordering.
+    pub(crate) introduced: Option<bool>,
 }
 
 /// Render one annotation as a workflow-command line. Property order matches
@@ -470,6 +472,7 @@ mod tests {
             col: None,
             title: "T".to_owned(),
             message: "m".to_owned(),
+            introduced: None,
         }
     }
 
@@ -483,6 +486,7 @@ mod tests {
             col: Some(5),
             title: "Code duplication".to_owned(),
             message: "first\nsecond".to_owned(),
+            introduced: None,
         });
         assert_eq!(
             rendered,

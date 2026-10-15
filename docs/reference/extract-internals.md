@@ -180,6 +180,17 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   rollup, the runtime-coverage static payload, and the editor code lens all
   exclude it.
 
+A callback returning a dynamic import reads only `default` when its callee has a
+proven component-loader contract: React `lazy`, Vue `defineAsyncComponent`, or
+Next.js `next/dynamic`. Runtime import bindings are registered before the walk,
+and lexical shadowing removes that meaning. Exported namespaces abstain while
+namespace-local import provenance is unavailable. Only the first loader argument
+uses this contract. Unknown wrappers, including configurable module resolvers such as
+`@loadable/component`, retain whole-module credit through the escaping-value or
+local-loader fallback. Ordinary awaited loader calls still credit their accessed
+members; discarded imports and unread promise bindings credit no export. Changes
+to these cached import facts invalidate both extraction and graph caches.
+
 ## Embedded-source and import regression boundaries
 
 Asset references in HTML, JSX and HTML tagged templates must come from literal

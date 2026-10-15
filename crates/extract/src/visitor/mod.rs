@@ -633,6 +633,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// returns an `import()`. Registered before the body walk because a
     /// function declaration is hoisted above the code that calls it.
     local_import_loaders: FxHashMap<String, LocalImportLoader>,
+    /// Imported component loaders whose proven contract reads the default export.
+    component_loader_imports: FxHashMap<String, visit_impl::ComponentLoaderImport>,
     namespace_binding_names: Vec<String>,
     module_namespace_binding_names: FxHashSet<String>,
     scoped_namespace_binding_names: Vec<FxHashSet<String>>,
@@ -4258,18 +4260,12 @@ pub(crate) fn ssr_load_module_source(call: &CallExpression<'_>) -> Option<String
 fn try_extract_arrow_wrapped_import<'a, 'b>(
     arguments: &'b [Argument<'a>],
 ) -> Option<(&'b ImportExpression<'a>, Vec<String>)> {
-    for arg in arguments {
-        let Some(expr) = arg.as_expression() else {
-            continue;
-        };
-        let Some(import_expr) = extract_import_from_callable(expr) else {
-            continue;
-        };
-        let mut sources = Vec::new();
-        collect_static_import_specifiers(&import_expr.source, &mut sources);
-        if !sources.is_empty() {
-            return Some((import_expr, sources));
-        }
+    let expr = arguments.first()?.as_expression()?;
+    let import_expr = extract_import_from_callable(expr)?;
+    let mut sources = Vec::new();
+    collect_static_import_specifiers(&import_expr.source, &mut sources);
+    if !sources.is_empty() {
+        return Some((import_expr, sources));
     }
     None
 }

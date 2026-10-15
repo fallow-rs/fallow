@@ -168,9 +168,9 @@ pub const TASTE_CHOICES: &[TasteChoice] = &[
         first_run: false,
         framework_gated: false,
         config_paths: &[
-            "health.maxCyclomaticComplexity",
-            "health.maxCognitiveComplexity",
-            "health.maxCrapThreshold",
+            "health.maxCyclomatic",
+            "health.maxCognitive",
+            "health.maxCrap",
             "health.maxUnitSize",
         ],
         default_summary: "cyclomatic 20, cognitive 15, CRAP 30, unit size 60 lines. These \
@@ -770,6 +770,34 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn recommended_complexity_paths_load_and_preserve_thresholds() {
+        let choices = taste_choices_schema();
+        let paths = choices
+            .as_array()
+            .expect("taste choices")
+            .iter()
+            .find(|choice| choice["id"] == "complexity-ceilings")
+            .expect("complexity ceilings")["config_paths"]
+            .as_array()
+            .expect("config paths");
+        let mut health = serde_json::Map::new();
+        for path in paths {
+            let key = path
+                .as_str()
+                .and_then(|path| path.strip_prefix("health."))
+                .expect("health config path");
+            health.insert(key.to_owned(), serde_json::json!(47));
+        }
+        let config: fallow_config::FallowConfig =
+            serde_json::from_value(serde_json::json!({ "health": health }))
+                .expect("recommended paths must load through FallowConfig");
+        assert_eq!(config.health.max_cyclomatic, 47);
+        assert_eq!(config.health.max_cognitive, 47);
+        assert_eq!(config.health.max_crap, 47.0);
+        assert_eq!(config.health.max_unit_size, 47);
     }
 
     #[test]
