@@ -13,6 +13,7 @@ use rquickjs::prelude::{Func, MutFn};
 use rquickjs::{Context, Ctx, Error as JsError, Exception, FromJs, Object, Runtime, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
 
 use crate::params::CodeExecuteParams;
 
@@ -58,6 +59,20 @@ const RESULT_PREVIEW_BYTES: usize = 256;
 /// below a length that keeps a structured programmatic error readable.
 const MAX_ERROR_BYTES: usize = 4_096;
 
+/// How often a wait on in-process work checks the request cancellation. The
+/// deadline alone needs no poll, but a client cancel has no wake-up of its own
+/// on this blocking thread.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// The error of a snippet or a host call that the client cancelled. rmcp
+/// drops the response of a cancelled request, so only tests read it.
+const CANCELLED_BY_CLIENT: &str = "code mode execution was cancelled by the client";
+
+/// Whether the client cancelled the request that runs the snippet.
+fn is_cancelled(request: Option<&CancellationToken>) -> bool {
+    request.is_some_and(CancellationToken::is_cancelled)
+}
+
 #[path = "code_mode_subprocess.rs"]
 mod code_mode_subprocess;
 #[path = "code_mode_tools.rs"]
@@ -73,7 +88,19 @@ use code_mode_tools::{
     run_api_tool,
 };
 
-pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<String, String> {
+/// Run one Code Mode snippet on the current blocking thread.
+///
+/// `request` is the cancellation token of the MCP request. The snippet runs
+/// outside the task-local request scope, so the caller captures the token
+/// before it moves the run to a blocking thread. A cancel stops the snippet
+/// at its next interrupt check, kills the process tree of a running
+/// subprocess host call, and sets the cancellation flag of a running
+/// in-process host call.
+pub fn execute_code_mode(
+    binary: String,
+    params: CodeExecuteParams,
+    request: Option<CancellationToken>,
+) -> Result<String, String> {
     let timeout_ms = params
         .timeout_ms
         .unwrap_or(DEFAULT_TIMEOUT_MS)
@@ -95,13 +122,14 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
     }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
-    let runtime = build_code_mode_runtime(deadline)?;
+    let runtime = build_code_mode_runtime(deadline, request.clone())?;
     let context =
         Context::full(&runtime).map_err(|err| format!("failed to create JS context: {err}"))?;
     let state = Rc::new(RefCell::new(CodeModeState::new(
         binary,
         params.root,
         deadline,
+        request,
         max_output_bytes,
     )));
 
@@ -138,7 +166,7 @@ pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<St
         })
         .to_string()),
         Err(err) => Err(error_envelope(
-            &normalize_code_mode_error(&err, deadline),
+            &normalize_code_mode_error(&err, deadline, borrowed.request.as_ref()),
             calls,
             calls_omitted,
             &limits,
@@ -222,17 +250,33 @@ fn run_code_mode_eval(
 }
 
 /// Build the sandboxed QuickJS runtime with memory, stack, and deadline limits.
-fn build_code_mode_runtime(deadline: Instant) -> Result<Runtime, String> {
+/// The interrupt handler also stops the snippet when the client cancels the
+/// request.
+fn build_code_mode_runtime(
+    deadline: Instant,
+    request: Option<CancellationToken>,
+) -> Result<Runtime, String> {
     let runtime = Runtime::new().map_err(|err| format!("failed to create JS runtime: {err}"))?;
     runtime.set_memory_limit(MEMORY_LIMIT_BYTES);
     runtime.set_max_stack_size(MAX_STACK_BYTES);
-    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    runtime.set_interrupt_handler(Some(Box::new(move || {
+        Instant::now() >= deadline || is_cancelled(request.as_ref())
+    })));
     Ok(runtime)
 }
 
-fn normalize_code_mode_error(err: &str, deadline: Instant) -> String {
-    if err == "interrupted" && Instant::now() >= deadline {
-        return "code mode execution timed out".to_string();
+fn normalize_code_mode_error(
+    err: &str,
+    deadline: Instant,
+    request: Option<&CancellationToken>,
+) -> String {
+    if err == "interrupted" {
+        if is_cancelled(request) {
+            return CANCELLED_BY_CLIENT.to_string();
+        }
+        if Instant::now() >= deadline {
+            return "code mode execution timed out".to_string();
+        }
     }
     err.to_string()
 }
@@ -480,6 +524,8 @@ struct CodeModeState {
     binary: String,
     default_root: Option<String>,
     deadline: Instant,
+    /// Cancellation token of the MCP request that runs the snippet.
+    request: Option<CancellationToken>,
     max_output_bytes: usize,
     output_bytes: usize,
     calls: Vec<CodeModeCall>,
@@ -513,12 +559,14 @@ impl CodeModeState {
         binary: String,
         default_root: Option<String>,
         deadline: Instant,
+        request: Option<CancellationToken>,
         max_output_bytes: usize,
     ) -> Self {
         Self {
             binary,
             default_root,
             deadline,
+            request,
             max_output_bytes,
             output_bytes: 0,
             calls: Vec::new(),
@@ -527,6 +575,15 @@ impl CodeModeState {
             dispatched: 0,
             memo: FxHashMap::default(),
         }
+    }
+
+    /// The error that stops a new host call: the client cancelled the
+    /// request, or the deadline passed.
+    fn stop_reason(&self) -> Option<&'static str> {
+        if is_cancelled(self.request.as_ref()) {
+            return Some(CANCELLED_BY_CLIENT);
+        }
+        (Instant::now() >= self.deadline).then_some("code mode execution timed out")
     }
 
     /// Validate a host call before it can cost anything: resolve the tool
@@ -656,8 +713,8 @@ impl CodeModeState {
                 "code mode host call limit exceeded ({MAX_HOST_CALLS})"
             ));
         }
-        if Instant::now() >= self.deadline {
-            return Err("code mode execution timed out".to_string());
+        if let Some(reason) = self.stop_reason() {
+            return Err(reason.to_string());
         }
         let budget = self.remaining_output_bytes();
         if budget == 0 {
@@ -675,6 +732,7 @@ impl CodeModeState {
             resolved.tool,
             resolved.params,
             self.deadline,
+            self.request.as_ref(),
             budget,
         );
         call.duration_ms = started.elapsed().as_millis();
@@ -710,8 +768,8 @@ impl CodeModeState {
                 requests.len()
             ));
         }
-        if Instant::now() >= self.deadline {
-            return Err("code mode execution timed out".to_string());
+        if let Some(reason) = self.stop_reason() {
+            return Err(reason.to_string());
         }
 
         let plan = self.plan_batch(requests);
@@ -807,7 +865,13 @@ impl CodeModeState {
                 .collect();
         }
         self.dispatched += pending.len();
-        run_batch_dispatches(&self.binary, self.deadline, share, pending)
+        run_batch_dispatches(
+            &self.binary,
+            self.deadline,
+            self.request.as_ref(),
+            share,
+            pending,
+        )
     }
 
     /// Charge, memoize, and record the batch in element order, then render the
@@ -988,16 +1052,28 @@ fn dispatch_host_call(
     tool: CodeModeTool,
     params: serde_json::Value,
     deadline: Instant,
+    request: Option<&CancellationToken>,
     max_output_bytes: usize,
 ) -> Result<String, String> {
     // `resolve` refuses the write first, with no slot spent. This guard keeps
     // any other route to a backing from writing a file.
     reject_file_write_params(tool, &params)?;
-    if let Some(value) = run_api_tool_with_deadline(tool, params.clone(), deadline)? {
+    // A batch element can start after the client cancelled the request.
+    if is_cancelled(request) {
+        return Err(CANCELLED_BY_CLIENT.to_string());
+    }
+    if let Some(value) = run_api_tool_with_deadline(tool, params.clone(), deadline, request)? {
         return Ok(serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string()));
     }
     let args = build_tool_args(tool, params)?;
-    run_fallow_sync(binary, "code_execute", &args, deadline, max_output_bytes)
+    run_fallow_sync(
+        binary,
+        "code_execute",
+        &args,
+        deadline,
+        request,
+        max_output_bytes,
+    )
 }
 
 /// Parameters that make a host call write a baseline, regression baseline or
@@ -1037,10 +1113,11 @@ fn timed_dispatch(
     tool: CodeModeTool,
     params: serde_json::Value,
     deadline: Instant,
+    request: Option<&CancellationToken>,
     max_output_bytes: usize,
 ) -> BatchOutcome {
     let started = Instant::now();
-    let result = dispatch_host_call(binary, tool, params, deadline, max_output_bytes);
+    let result = dispatch_host_call(binary, tool, params, deadline, request, max_output_bytes);
     BatchOutcome {
         duration_ms: started.elapsed().as_millis(),
         result,
@@ -1063,6 +1140,7 @@ fn timed_dispatch(
 fn run_batch_dispatches(
     binary: &str,
     deadline: Instant,
+    request: Option<&CancellationToken>,
     element_output_bytes: usize,
     pending: Vec<PendingHostCall>,
 ) -> FxHashMap<String, BatchOutcome> {
@@ -1086,6 +1164,7 @@ fn run_batch_dispatches(
                         call.tool,
                         call.params.clone(),
                         deadline,
+                        request,
                         element_output_bytes,
                     );
                     if tx.send((call.key.clone(), outcome)).is_err() {
@@ -1102,6 +1181,7 @@ fn run_batch_dispatches(
                 call.tool,
                 call.params,
                 deadline,
+                request,
                 element_output_bytes,
             );
             outcomes.insert(call.key, outcome);
@@ -1164,11 +1244,13 @@ fn run_api_tool_with_deadline(
     tool: CodeModeTool,
     params: serde_json::Value,
     deadline: Instant,
+    request: Option<&CancellationToken>,
 ) -> Result<Option<serde_json::Value>, String> {
     run_api_tool_with_deadline_and_runner(
         tool,
         params,
         deadline,
+        request,
         run_api_tool,
         &ABANDONED_API_CALLS,
     )
@@ -1177,7 +1259,8 @@ fn run_api_tool_with_deadline(
 /// Run an in-process host call under the sandbox deadline, or decline it so the
 /// caller falls back to the killable subprocess.
 ///
-/// The deadline sets the call's cancellation token, so the abandoned analysis
+/// The deadline and a client cancel of `request` set the call's cancellation
+/// token, so the abandoned analysis
 /// stops at its next `fallow-api` stage boundary rather than always running to
 /// completion. That stop is cooperative and has no upper bound: a token set
 /// inside a long stage is not seen until the stage ends, and one route
@@ -1189,6 +1272,7 @@ fn run_api_tool_with_deadline_and_runner<F>(
     tool: CodeModeTool,
     params: serde_json::Value,
     deadline: Instant,
+    request: Option<&CancellationToken>,
     runner: F,
     abandoned: &'static AbandonedApiCalls,
 ) -> Result<Option<serde_json::Value>, String>
@@ -1204,9 +1288,9 @@ where
     if tool.backing() == CodeModeBacking::Subprocess {
         return Ok(None);
     }
-    let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+    if deadline.checked_duration_since(Instant::now()).is_none() {
         return Err("code mode execution timed out".to_string());
-    };
+    }
     if abandoned.saturated() {
         return Ok(None);
     }
@@ -1223,17 +1307,24 @@ where
         })
         .map_err(|err| format!("failed to start code mode API host call: {err}"))?;
 
-    match rx.recv_timeout(remaining) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            cancellation.store(true, Ordering::SeqCst);
-            state.abandon();
-            Err("code mode execution timed out while running fallow".to_string())
+    let stopped = loop {
+        if is_cancelled(request) {
+            break CANCELLED_BY_CLIENT;
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            Err("code mode API host call failed".to_string())
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            break "code mode execution timed out while running fallow";
+        };
+        match rx.recv_timeout(remaining.min(CANCEL_POLL_INTERVAL)) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("code mode API host call failed".to_string());
+            }
         }
-    }
+    };
+    cancellation.store(true, Ordering::SeqCst);
+    state.abandon();
+    Err(stopped.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -1389,6 +1480,7 @@ mod tests {
                 timeout_ms: Some(1_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect_err("oversized snippets should be rejected");
 
@@ -1427,6 +1519,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect_err("heavy analyze should use the cancellable subprocess path");
 
@@ -1460,6 +1553,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect("api-backed combined should not need the binary");
 
@@ -1491,6 +1585,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect_err("missing coverage should stay a structured API error");
 
@@ -1556,6 +1651,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect("api-backed checkChanged should not need the binary");
 
@@ -1590,6 +1686,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect("api-backed feature flags should not need the binary");
 
@@ -1648,6 +1745,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect("api-backed list boundaries should not need the binary");
 
@@ -1670,6 +1768,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect("api-backed explain should not need the binary");
 
@@ -1704,6 +1803,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(200_000),
             },
+            None,
         )
         .expect("api-backed projectInfo should not need the binary");
 
@@ -1725,6 +1825,7 @@ mod tests {
                 timeout_ms: Some(1),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect_err("cpu-bound snippets should time out");
 
@@ -1745,6 +1846,7 @@ mod tests {
             Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .expect("past instant"),
+            None,
         );
 
         let err = result.expect_err("expired deadline must reject API host calls");
@@ -1762,6 +1864,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_millis(100),
+            None,
             |_tool, _params, _cancellation| {
                 std::thread::sleep(Duration::from_secs(1));
                 Ok(Some(serde_json::json!({"ok": true})))
@@ -1786,6 +1889,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_millis(20),
+            None,
             move |_tool, _params, cancellation| {
                 let cancellation =
                     cancellation.expect("the host must hand its in-process work a token");
@@ -1820,6 +1924,110 @@ mod tests {
         );
     }
 
+    /// Cancel `request` from another thread after a short delay.
+    fn cancel_soon(request: &CancellationToken) -> thread::JoinHandle<()> {
+        let request = request.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            request.cancel();
+        })
+    }
+
+    /// A client cancel ends the wait on an in-process host call long before
+    /// its deadline, and sets the cancellation flag of the abandoned work.
+    #[test]
+    fn a_client_cancel_sets_the_flag_of_an_in_process_host_call() {
+        static ABANDONED: AbandonedApiCalls = AbandonedApiCalls::new();
+
+        let request = CancellationToken::new();
+        let canceller = cancel_soon(&request);
+        let observed_cancellation = Arc::new(AtomicBool::new(false));
+        let worker_view = Arc::clone(&observed_cancellation);
+        let started = Instant::now();
+        let cancelled = run_api_tool_with_deadline_and_runner(
+            CodeModeTool::ProjectInfo,
+            serde_json::json!({}),
+            Instant::now() + Duration::from_secs(30),
+            Some(&request),
+            move |_tool, _params, cancellation| {
+                let cancellation =
+                    cancellation.expect("the host must hand its in-process work a token");
+                let give_up_at = Instant::now() + Duration::from_secs(10);
+                while !cancellation.load(Ordering::SeqCst) && Instant::now() < give_up_at {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                worker_view.store(cancellation.load(Ordering::SeqCst), Ordering::SeqCst);
+                Ok(Some(serde_json::json!({"ok": true})))
+            },
+            &ABANDONED,
+        );
+        canceller.join().expect("the canceller ends");
+
+        assert_eq!(
+            cancelled.expect_err("the cancel must end the host call"),
+            CANCELLED_BY_CLIENT
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the cancel, not the deadline, must end the wait"
+        );
+        let drained = Instant::now() + Duration::from_secs(10);
+        while ABANDONED.saturated() && Instant::now() < drained {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            observed_cancellation.load(Ordering::SeqCst),
+            "the abandoned work must have seen the cancel"
+        );
+    }
+
+    /// A client cancel stops a snippet that makes no host call, through the
+    /// interrupt handler of the sandbox.
+    #[test]
+    fn a_client_cancel_interrupts_a_running_snippet() {
+        let request = CancellationToken::new();
+        let canceller = cancel_soon(&request);
+        let started = Instant::now();
+        let output = execute_code_mode(
+            "fallow".to_string(),
+            CodeExecuteParams {
+                code: "while (true) {}".to_string(),
+                root: None,
+                timeout_ms: Some(30_000),
+                max_output_bytes: Some(10_000),
+            },
+            Some(request),
+        )
+        .expect_err("a cancelled snippet must fail");
+        canceller.join().expect("the canceller ends");
+
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["error"].as_str(), Some(CANCELLED_BY_CLIENT));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the cancel, not the deadline, must stop the snippet"
+        );
+    }
+
+    /// A host call that starts after the cancel runs nothing.
+    #[test]
+    fn a_host_call_after_a_client_cancel_runs_nothing() {
+        let request = CancellationToken::new();
+        request.cancel();
+        let mut state = CodeModeState::new(
+            "/definitely/not/fallow".to_string(),
+            None,
+            Instant::now() + Duration::from_secs(30),
+            Some(request),
+            1_000_000,
+        );
+        assert_eq!(
+            state.run_tool("analyze", "{}"),
+            Err(CANCELLED_BY_CLIENT.to_string())
+        );
+        assert_eq!(state.dispatched, 0, "the cancelled call must spend no slot");
+    }
+
     /// A host call that returns inside its deadline is never cancelled.
     #[test]
     fn an_in_time_host_call_is_left_alone() {
@@ -1829,6 +2037,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_secs(30),
+            None,
             |_tool, _params, cancellation| {
                 let cancellation = cancellation.expect("the host always supplies a token");
                 Ok(Some(serde_json::json!({
@@ -1855,6 +2064,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_millis(1),
+            None,
             move |_tool, _params, _cancellation| {
                 let _ = release_rx.recv();
                 Ok(Some(serde_json::json!({"ok": true})))
@@ -1871,6 +2081,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_secs(30),
+            None,
             |_tool, _params, _cancellation| {
                 panic!("a saturated host must not start in-process work")
             },
@@ -1902,6 +2113,7 @@ mod tests {
             CodeModeTool::ProjectInfo,
             serde_json::json!({}),
             Instant::now() + Duration::from_secs(30),
+            None,
             |_tool, _params, _cancellation| Ok(Some(serde_json::json!({"ok": true}))),
             &ABANDONED,
         );
@@ -1958,6 +2170,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect_err("Code Mode must reject similar-code dispatch");
 
@@ -2001,6 +2214,7 @@ mod tests {
                     timeout_ms: Some(5_000),
                     max_output_bytes: Some(10_000),
                 },
+                None,
             )
             .expect_err("Code Mode must refuse a file write");
             let json: serde_json::Value = serde_json::from_str(&output).expect("code mode JSON");
@@ -2174,7 +2388,7 @@ mod tests {
     #[test]
     fn interrupted_before_deadline_is_not_timeout() {
         let future_deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
-        let result = normalize_code_mode_error("interrupted", future_deadline);
+        let result = normalize_code_mode_error("interrupted", future_deadline, None);
         assert_eq!(result, "interrupted");
     }
 
@@ -2183,7 +2397,7 @@ mod tests {
         let past_deadline = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_millis(1))
             .unwrap();
-        let result = normalize_code_mode_error("interrupted", past_deadline);
+        let result = normalize_code_mode_error("interrupted", past_deadline, None);
         assert_eq!(result, "code mode execution timed out");
     }
 
@@ -2192,7 +2406,7 @@ mod tests {
         let past_deadline = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_millis(1))
             .unwrap();
-        let result = normalize_code_mode_error("some other error", past_deadline);
+        let result = normalize_code_mode_error("some other error", past_deadline, None);
         assert_eq!(result, "some other error");
     }
 
@@ -2620,6 +2834,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect_err("non-function snippet should be rejected");
 
@@ -2644,6 +2859,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect("returning a plain object should succeed");
 
@@ -2664,6 +2880,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect("root access should succeed");
 
@@ -2682,6 +2899,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect("null return should succeed");
 
@@ -2700,6 +2918,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect_err("throwing should produce Err");
 
@@ -2724,6 +2943,7 @@ mod tests {
                 timeout_ms: Some(2_000),
                 max_output_bytes: Some(50_000),
             },
+            None,
         )
         .expect("should succeed");
 
@@ -2747,6 +2967,7 @@ mod tests {
                 timeout_ms: Some(MAX_TIMEOUT_MS + 99_999),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect("should succeed with capped timeout");
 
@@ -2764,6 +2985,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(MAX_OUTPUT_BYTES + 1),
             },
+            None,
         )
         .expect("should succeed with capped output limit");
 
@@ -2781,6 +3003,7 @@ mod tests {
                 timeout_ms: None,
                 max_output_bytes: None,
             },
+            None,
         )
         .expect("should succeed with defaults");
 
@@ -2803,6 +3026,7 @@ mod tests {
                     timeout_ms: Some(5_000),
                     max_output_bytes: Some(10_000),
                 },
+                None,
             )
             .expect("typeof check should not throw");
 
@@ -2824,6 +3048,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect("fallow typeof should succeed");
 
@@ -2841,6 +3066,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect_err("missing binary should produce Err");
 
@@ -2863,6 +3089,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect_err("fix_apply should be rejected");
 
@@ -2884,6 +3111,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
             },
+            None,
         )
         .expect("pure computation should succeed");
 
@@ -2911,6 +3139,7 @@ mod tests {
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(max_output_bytes),
             },
+            None,
         ) {
             Ok(output) => (true, output),
             Err(output) => (false, output),
@@ -3924,6 +4153,7 @@ mod tests {
             Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .expect("past instant"),
+            None,
             1_000_000,
         );
 
@@ -3947,6 +4177,7 @@ mod tests {
             Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .expect("past instant"),
+            None,
             1_000_000,
             vec![
                 PendingHostCall {
@@ -4026,6 +4257,7 @@ mod tests {
         let outcomes = run_batch_dispatches(
             &binary,
             Instant::now() + Duration::from_secs(30),
+            None,
             1_000_000,
             subprocess_batch(SUBPROCESS_BATCH),
         );
@@ -4063,6 +4295,7 @@ mod tests {
             binary,
             None,
             Instant::now() + Duration::from_secs(30),
+            None,
             2_000,
         );
         let outcomes = state.dispatch_batch(subprocess_batch(SUBPROCESS_BATCH));
@@ -4096,6 +4329,7 @@ mod tests {
         let outcomes = run_batch_dispatches(
             &binary,
             Instant::now() + Duration::from_millis(400),
+            None,
             1_000_000,
             subprocess_batch(SUBPROCESS_BATCH),
         );

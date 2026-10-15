@@ -455,6 +455,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Code Mode and the direct tools now share one count of in-process calls
     that still run after their caller stopped. While that count is full, a
     Code Mode host call uses the subprocess.
+- **A `code_execute` call now stops when the client cancels it.** Before, a
+  cancel did not reach Code Mode, and only `timeout_ms` ended the snippet.
+  - The snippet stops, and a host call that starts after the cancel runs
+    nothing.
+  - A subprocess host call stops its complete process tree at once.
+  - An in-process host call sets the cancellation flag of the analysis, as on
+    a timeout.
 - **The typed and CLI routes of an MCP tool now read the same settings.**
   - `production: false` now gives `--no-production` on the CLI route. Before,
     only the typed route turned production mode off, and the CLI route used

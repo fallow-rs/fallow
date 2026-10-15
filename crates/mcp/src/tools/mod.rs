@@ -38,6 +38,7 @@ mod trace;
 pub use analyze::{build_analyze_args, run_analyze};
 pub use architecture::{build_architecture_args, run_architecture};
 pub use audit::{build_audit_args, run_audit};
+pub use cancellation::request_cancellation;
 pub use cancellation::with_request_cancellation;
 pub use check_changed::{build_check_changed_args, run_check_changed};
 #[cfg(test)]
