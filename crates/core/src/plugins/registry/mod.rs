@@ -47,6 +47,21 @@ pub fn builtin_config_patterns() -> Vec<&'static str> {
     patterns
 }
 
+/// The config file globs of the named built-in plugins, sorted and without
+/// duplicates. A name that is not a built-in plugin adds no glob. A pattern
+/// is relative to the directory the plugin searches.
+#[must_use]
+pub fn builtin_config_patterns_of(plugin_names: &[String]) -> Vec<&'static str> {
+    let mut patterns: Vec<&'static str> = builtin::create_builtin_plugins()
+        .iter()
+        .filter(|plugin| plugin_names.iter().any(|name| name == plugin.name()))
+        .flat_map(|plugin| plugin.config_patterns().iter().copied())
+        .collect();
+    patterns.sort_unstable();
+    patterns.dedup();
+    patterns
+}
+
 pub use helpers::ConfigCandidateIndex;
 pub use helpers::is_external_plugin_active;
 use helpers::{

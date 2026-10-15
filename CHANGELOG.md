@@ -101,6 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the arguments and destructure defaults of `defineProps` and the other
     Vue compiler macros, an expression that holds a Svelte rune call, and an exported declaration in
     the Astro frontmatter. The arguments of a rune still get mutants.
+  - The plan prunes the mutants in the default export of a tool config file,
+    such as `vite.config.ts` or `.eslintrc.js`, with the reason
+    `framework-config`. No test loads these files, so their mutants were
+    `no_coverage` and lowered the coverage. A `module.exports = ...` config
+    counts as the default export. A mutant inside a function of the config,
+    for example an inline Vite plugin, stays in the plan. (#3483)
   - The `regex-literal` operator changes one token of a regular expression
     literal. It removes a `^` or `$` anchor, negates a character class, or
     gives `\d`, `\w` or `\s` the opposite case.

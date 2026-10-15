@@ -147,6 +147,16 @@ or relational mutant, so it adds little test-strength signal for its run time.
   calls a sink, still runs. `--allow-side-effects` keeps the pruned mutants.
   This override is a flag only: the config rejects `allowSideEffects`, so a
   project config cannot widen what a run executes.
+- Mutants in framework config are pruned (`framework-config`). Framework
+  config is an export that an active plugin marks as used, for example
+  `export const revalidate = 60` in a Next.js page. It is also the default
+  export of a tool config file, which is a file that the `config_patterns`
+  of an active plugin match (`vite.config.ts`, `eslint.config.js`,
+  `.eslintrc.js`). A top-level `module.exports = ...` statement counts as the
+  default export. A mutant inside a function in such an export is not
+  pruned, so an inline Vite plugin keeps its mutants. The rule lives in
+  `framework_config_exports` (`crates/engine/src/mutation/mod.rs`) and
+  `framework_regions` (`crates/engine/src/mutation/plan.rs`).
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
 - The companions run in their own process group on Unix and in a Job Object on

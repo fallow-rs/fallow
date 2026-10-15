@@ -438,6 +438,22 @@ impl BackendAggregatedPluginResult {
         &self.inner.active_plugins
     }
 
+    /// The config file globs of the active plugins, sorted and without
+    /// duplicates. A workspace run keeps its active plugins but not its
+    /// config globs, so the built-in globs come from the plugin names. A glob
+    /// is relative to the directory that the plugin searches.
+    pub fn config_patterns(&self) -> Vec<String> {
+        let mut patterns: Vec<String> =
+            fallow_core::plugins::registry::builtin_config_patterns_of(&self.inner.active_plugins)
+                .into_iter()
+                .map(str::to_owned)
+                .chain(self.inner.config_patterns.iter().cloned())
+                .collect();
+        patterns.sort_unstable();
+        patterns.dedup();
+        patterns
+    }
+
     /// The setup files that the plugins found in tool configs, such as
     /// Vitest `setupFiles`, absolute or relative to the root.
     pub fn setup_files(&self) -> Vec<PathBuf> {

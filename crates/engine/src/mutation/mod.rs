@@ -498,19 +498,51 @@ pub fn plan_mutations_for_session_with(
     Ok(plan_mutations(&inputs, &request))
 }
 
-/// The plugin used-export names of each module of the graph.
+/// The plugin used-export names of each module of the graph. A tool reads
+/// the default export of its config file, so the default export of each file
+/// that an active plugin config glob matches is framework config too.
 fn framework_config_exports(
     session: &AnalysisSession,
     graph: &RetainedModuleGraph,
     inventory: &crate::list_inventory::ListingInventory,
 ) -> FrameworkConfigExports {
-    let names = inventory.plugins.backend().used_export_names();
+    let backend = inventory.plugins.backend();
+    let names = backend.used_export_names();
+    let config_files = config_file_globs(&backend.config_patterns());
     let mut exports = FrameworkConfigExports::default();
     for node in &graph.as_graph().modules {
         let rel = crate::module_graph::relative_key_path(&node.path, session.root());
         for name in names.names_for(&rel) {
             exports.insert(rel.clone(), name);
         }
+        if config_files.is_match(&rel) {
+            exports.insert(rel, DEFAULT_EXPORT);
+        }
     }
     exports
+}
+
+/// The export name of `export default` and of `module.exports = ...`.
+const DEFAULT_EXPORT: &str = "default";
+
+/// The plugin config globs, each also tried under `**/`, because a glob is
+/// relative to the directory that the plugin searches, for example a
+/// workspace root.
+fn config_file_globs(patterns: &[String]) -> globset::GlobSet {
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in patterns {
+        let anywhere = if pattern.starts_with("**/") {
+            pattern.clone()
+        } else {
+            format!("**/{pattern}")
+        };
+        for candidate in [pattern.as_str(), anywhere.as_str()] {
+            if let Ok(glob) = globset::Glob::new(candidate) {
+                builder.add(glob);
+            }
+        }
+    }
+    builder
+        .build()
+        .unwrap_or_else(|_| globset::GlobSet::empty())
 }

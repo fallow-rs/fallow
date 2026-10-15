@@ -231,6 +231,40 @@ fn the_session_entry_point_prunes_plugin_known_config_exports() {
 }
 
 #[test]
+fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
+    let root = fixture("mutation-plan-tool-config");
+    let plan = plan_mutations_for_session(
+        &session(&root),
+        &MutationPlanRequest::new(MutationScope::All),
+    )
+    .expect("plan");
+    let config = MutantDisposition::Pruned(PruneReason::FrameworkConfig);
+
+    let vite = function_dispositions(&plan, "vite.config.ts");
+    assert_eq!(vite.get("<top-level>"), Some(&config), "{vite:?}");
+    assert_eq!(
+        vite.values()
+            .filter(|&&disposition| disposition == NO_COVERAGE)
+            .count(),
+        1,
+        "only the inline plugin function keeps a mutant: {vite:?}"
+    );
+    assert_eq!(vite.len(), 2, "{vite:?}");
+
+    let eslint = function_dispositions(&plan, ".eslintrc.cjs");
+    assert_eq!(
+        eslint,
+        BTreeMap::from([("<top-level>".to_owned(), config)]),
+        "a CommonJS config counts as the default export"
+    );
+
+    assert_eq!(
+        dispositions(&plan).get("src/math.ts"),
+        Some(&set(&[PLANNED]))
+    );
+}
+
+#[test]
 fn a_file_reached_only_by_a_test_that_mocks_it_has_no_coverage() {
     let plan = plan_all(&fixture("mutation-plan"));
     let map = dispositions(&plan);

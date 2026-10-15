@@ -1,0 +1,9 @@
+{
+  "name": "mutation-plan-tool-config",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -760,7 +760,9 @@ fn framework_regions(
         })
         .map(|export| export.span.start)
         .collect();
-    if starts.is_empty() {
+    let commonjs_default =
+        module.has_cjs_exports && names.iter().any(|name| name == "*" || name == "default");
+    if starts.is_empty() && !commonjs_default {
         return Vec::new();
     }
     let (text, kind) = layout.parse_view(source);
@@ -770,12 +772,36 @@ fn framework_regions(
         .program
         .body
         .iter()
+        .filter(|statement| {
+            let span = statement.span();
+            starts
+                .iter()
+                .any(|&offset| span.start <= offset && offset < span.end)
+                || (commonjs_default && assigns_module_exports(statement))
+        })
         .map(|statement| {
             let span = statement.span();
             (span.start, span.end)
         })
-        .filter(|&(start, end)| starts.iter().any(|&offset| start <= offset && offset < end))
         .collect()
+}
+
+/// True for a top-level `module.exports = ...` statement. A CommonJS config
+/// file sets its config this way, so it counts as the default export.
+fn assigns_module_exports(statement: &oxc_ast::ast::Statement<'_>) -> bool {
+    use oxc_ast::ast::{AssignmentTarget, Expression, Statement};
+
+    let Statement::ExpressionStatement(statement) = statement else {
+        return false;
+    };
+    let Expression::AssignmentExpression(assignment) = &statement.expression else {
+        return false;
+    };
+    let AssignmentTarget::StaticMemberExpression(member) = &assignment.left else {
+        return false;
+    };
+    member.property.name == "exports"
+        && matches!(&member.object, Expression::Identifier(object) if object.name == "module")
 }
 
 /// The test entry points that reach the file, sorted by root-relative path.
