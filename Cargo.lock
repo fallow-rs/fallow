@@ -1170,6 +1170,7 @@ dependencies = [
  "insta",
  "jsonc-parser",
  "jsonschema",
+ "libc",
  "miette",
  "mimalloc",
  "notify",

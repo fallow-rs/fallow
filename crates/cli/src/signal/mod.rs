@@ -73,7 +73,7 @@ pub fn install_panic_drain() {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             previous(info);
-            fallow_process::drain_and_kill();
+            fallow_process::try_drain_and_kill();
         }));
     });
 }

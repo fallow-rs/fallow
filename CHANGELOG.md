@@ -418,6 +418,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its stdin during a request now kills its process group and exits. Before,
   it waited for the request, and its test workers kept running after Fallow
   ended. Fallow now also ends the companions on SIGHUP, SIGQUIT and a panic.
+  When Fallow starts with SIGHUP ignored, as under `nohup`, a hangup still
+  does not end the run.
 - **The review brief labels an edited export `modified`.** The `test_reach`
   section labelled an export `new` when every line of its declaration was an
   added line. A one-line edit replaces the line, so an edited one-line export

@@ -151,8 +151,9 @@ or relational mutant, so it adds little test-strength signal for its run time.
   Fallow cache. The report lists any path that the tests changed.
 - The companions run in their own process group on Unix and in a Job Object on
   Windows. Fallow ends that group when a run ends, and when it receives
-  SIGINT, SIGTERM, SIGHUP or SIGQUIT. The release binary aborts on a panic,
-  and a panic hook ends the group first. A companion whose stdin closes
+  SIGINT, SIGTERM, SIGHUP or SIGQUIT. When Fallow starts with SIGHUP ignored,
+  as under `nohup`, it keeps SIGHUP ignored. The release binary aborts on a
+  panic, and a panic hook ends the group first. A companion whose stdin closes
   without a `shutdown` request kills its own process group and exits, so it
   does not outlive a Fallow process that ended in another way.
 

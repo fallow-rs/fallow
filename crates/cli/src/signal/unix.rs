@@ -35,10 +35,40 @@ const fn exit_code(signal: i32) -> i32 {
     }
 }
 
-/// Install handlers for [`DRAINED_SIGNALS`]. Spawns a daemon thread that
-/// outlives every fallow subcommand; the OS reaps it on process exit.
+/// True when the process started with `signal` ignored.
+#[expect(
+    unsafe_code,
+    reason = "reading a signal disposition requires sigaction FFI"
+)]
+fn is_ignored(signal: i32) -> bool {
+    let mut current = std::mem::MaybeUninit::<libc::sigaction>::zeroed();
+    // SAFETY: a null new action only reads the current disposition into
+    // `current`, which is a valid, writable `sigaction`.
+    let result = unsafe { libc::sigaction(signal, std::ptr::null(), current.as_mut_ptr()) };
+    if result != 0 {
+        return false;
+    }
+    // SAFETY: `sigaction` returned 0, so it wrote `current`.
+    let current = unsafe { current.assume_init() };
+    current.sa_sigaction == libc::SIG_IGN
+}
+
+/// True when fallow installs a handler for `signal`. `nohup` and daemon
+/// wrappers start fallow with SIGHUP ignored, so that a closed terminal does
+/// not end the run. A handler would replace that inherited disposition, so
+/// fallow keeps an ignored SIGHUP ignored, as a POSIX shell does.
+fn is_drained(signal: i32) -> bool {
+    signal != SIGHUP || !is_ignored(SIGHUP)
+}
+
+/// Install handlers for [`DRAINED_SIGNALS`], except an inherited ignored
+/// SIGHUP. Spawns a daemon thread that outlives every fallow subcommand; the
+/// OS reaps it on process exit.
 pub fn install() -> io::Result<()> {
-    let mut signals = Signals::new(DRAINED_SIGNALS)?;
+    let drained = DRAINED_SIGNALS
+        .into_iter()
+        .filter(|signal| is_drained(*signal));
+    let mut signals = Signals::new(drained)?;
     thread::Builder::new()
         .name("fallow-signal-listener".into())
         .spawn(move || {

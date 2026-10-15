@@ -46,6 +46,28 @@ use std::time::{Duration, Instant};
 /// that drops the Child handle without a visible `wait()`; we satisfy
 /// it by killing-and-waiting on the not-found path explicitly.
 fn spawn_signal_helper_with(graceful: bool) -> (std::process::Child, u32) {
+    spawn_signal_helper_full(graceful, libc::SIG_DFL)
+}
+
+/// Set the SIGHUP disposition of the current process to `hangup`.
+#[expect(unsafe_code, reason = "setting a signal disposition requires FFI")]
+fn set_hangup(hangup: libc::sighandler_t) -> std::io::Result<()> {
+    // SAFETY: `hangup` is `SIG_DFL` or `SIG_IGN`, so no handler code runs.
+    if unsafe { libc::signal(libc::SIGHUP, hangup) } == libc::SIG_ERR {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Spawn the helper with `hangup` as the SIGHUP disposition at exec. The
+/// test sets the disposition explicitly, so a test harness that itself runs
+/// with SIGHUP ignored (for example under `nohup`) cannot change the result.
+fn spawn_signal_helper_full(
+    graceful: bool,
+    hangup: libc::sighandler_t,
+) -> (std::process::Child, u32) {
+    use std::os::unix::process::CommandExt as _;
+
     let fallow_bin = env!("CARGO_BIN_EXE_fallow");
     let mut builder = Command::new(fallow_bin);
     builder
@@ -54,6 +76,12 @@ fn spawn_signal_helper_with(graceful: bool) -> (std::process::Child, u32) {
         .stderr(Stdio::piped());
     if graceful {
         builder.env("FALLOW_TEST_SIGNAL_HELPER_GRACEFUL", "1");
+    }
+    #[expect(unsafe_code, reason = "pre_exec is an unsafe API")]
+    // SAFETY: the closure calls only `signal`, which is async-signal-safe,
+    // between fork and exec.
+    unsafe {
+        builder.pre_exec(move || set_hangup(hangup));
     }
     let mut child = builder.spawn().expect("spawn fallow signal helper");
     let stdout = child.stdout.take().expect("piped stdout");
@@ -175,6 +203,28 @@ fn sighup_and_sigquit_kill_registered_child_and_exit_128_plus_signum() {
             "{signal}: inner sleep PID {sleep_pid} must be dead after the signal handler drains",
         );
     }
+}
+
+/// `nohup` and daemon wrappers start fallow with SIGHUP ignored. fallow
+/// must keep that disposition, so a hangup does not end the run or its
+/// children.
+#[test]
+fn an_inherited_ignored_sighup_stays_ignored() {
+    let (mut fallow, sleep_pid) = spawn_signal_helper_full(false, libc::SIG_IGN);
+    send_signal(fallow.id(), "-HUP");
+    std::thread::sleep(Duration::from_millis(500));
+    let exited = fallow.try_wait().expect("try_wait");
+    let sleep_alive = !wait_for_pid_dead(sleep_pid, Duration::from_millis(100));
+    let _ = fallow.kill();
+    let _ = fallow.wait();
+    let _ = Command::new("kill")
+        .args(["-9", &sleep_pid.to_string()])
+        .status();
+    assert_eq!(exited, None, "an ignored SIGHUP must not end fallow");
+    assert!(
+        sleep_alive,
+        "an ignored SIGHUP must not kill the registered child"
+    );
 }
 
 /// The release binary aborts on a panic, so no `Drop` kills the
