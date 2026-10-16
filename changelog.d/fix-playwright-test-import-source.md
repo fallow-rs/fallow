@@ -10,3 +10,9 @@
   class members. Now both sources work the same. The extraction and graph
   cache versions change, so the first run after the upgrade parses the
   project again.
+- **A project that depends only on `playwright` and has a Playwright config
+  activates the Playwright plugin.** Before, only `@playwright/test` activated
+  it, so the spec files of such a project reported as unused files. The
+  `playwright` package alone still does not activate the plugin without a
+  `playwright.config.ts` or `playwright.config.js` file, because Vitest and
+  Rstest browser modes use it without the test runner.

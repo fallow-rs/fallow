@@ -33,18 +33,61 @@ const TEST_FILE_NAME_PATTERNS: &[&str] =
 /// `**/*.@(spec|test).?(c|m)[jt]s?(x)`.
 const TEST_FILE_EXTENSIONS: &str = "{ts,tsx,js,jsx,mts,cts,mjs,cjs}";
 
-define_plugin!(
-    struct PlaywrightPlugin => "playwright",
-    enablers: &["@playwright/test"],
-    entry_patterns: DEFAULT_TEST_ENTRY_PATTERNS,
-    config_patterns: &["playwright.config.{ts,js}"],
-    always_used: &["playwright.config.{ts,js}"],
-    tooling_dependencies: &["@playwright/test", "playwright"],
-    fixture_glob_patterns: &[
-        "**/fixtures/**/*.{ts,tsx,js,jsx,json}",
-        "e2e/fixtures/**/*.{ts,tsx,js,jsx,json}",
-    ],
-    resolve_config(config_path, source, root) {
+/// The test runner package. It activates the plugin by itself.
+const TEST_RUNNER_PACKAGE: &str = "@playwright/test";
+
+/// The core package. It also exports the test runner at `playwright/test`, but
+/// Vitest and Rstest browser modes and automation scripts use it without the
+/// runner. It activates the plugin only together with a Playwright config.
+const CORE_PACKAGE: &str = "playwright";
+
+/// The config files that the plugin reads. A root config with the core package
+/// shows that the project uses the test runner.
+const CONFIG_FILES: &[&str] = &["playwright.config.ts", "playwright.config.js"];
+
+const CONFIG_PATTERNS: &[&str] = &["playwright.config.{ts,js}"];
+
+pub struct PlaywrightPlugin;
+
+impl Plugin for PlaywrightPlugin {
+    fn name(&self) -> &'static str {
+        "playwright"
+    }
+
+    fn enablers(&self) -> &'static [&'static str] {
+        &[TEST_RUNNER_PACKAGE]
+    }
+
+    fn is_enabled_with_deps(&self, deps: &[String], root: &Path) -> bool {
+        let has = |name: &str| deps.iter().any(|dep| dep == name);
+        has(TEST_RUNNER_PACKAGE)
+            || (has(CORE_PACKAGE) && CONFIG_FILES.iter().any(|file| root.join(file).is_file()))
+    }
+
+    fn entry_patterns(&self) -> &'static [&'static str] {
+        DEFAULT_TEST_ENTRY_PATTERNS
+    }
+
+    fn config_patterns(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
+    fn always_used(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
+    fn tooling_dependencies(&self) -> &'static [&'static str] {
+        &[TEST_RUNNER_PACKAGE, CORE_PACKAGE]
+    }
+
+    fn fixture_glob_patterns(&self) -> &'static [&'static str] {
+        &[
+            "**/fixtures/**/*.{ts,tsx,js,jsx,json}",
+            "e2e/fixtures/**/*.{ts,tsx,js,jsx,json}",
+        ]
+    }
+
+    fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
         let config_dir = config_path
@@ -91,8 +134,8 @@ define_plugin!(
         result.accumulate_config_entry_patterns = true;
 
         result
-    },
-);
+    }
+}
 
 /// A `testDir` or `testMatch` value of one config scope.
 #[derive(Clone, Copy)]
@@ -475,6 +518,31 @@ fn collect_web_server(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn deps(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    #[test]
+    fn enabled_by_test_package_without_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        assert!(PlaywrightPlugin.is_enabled_with_deps(&deps(&["@playwright/test"]), temp.path()));
+    }
+
+    #[test]
+    fn enabled_by_bare_package_with_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(temp.path().join("playwright.config.ts"), "").expect("write config");
+        assert!(PlaywrightPlugin.is_enabled_with_deps(&deps(&["playwright"]), temp.path()));
+    }
+
+    #[test]
+    fn bare_package_without_config_does_not_enable() {
+        // Vitest browser mode, Rstest browser mode, and browser automation
+        // scripts use the `playwright` package without the test runner.
+        let temp = tempfile::tempdir().expect("tempdir");
+        assert!(!PlaywrightPlugin.is_enabled_with_deps(&deps(&["playwright"]), temp.path()));
+    }
 
     #[test]
     fn resolve_config_global_setup() {

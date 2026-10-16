@@ -1,0 +1,6 @@
+{
+  "name": "playwright-bare-package",
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

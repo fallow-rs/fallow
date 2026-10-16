@@ -543,6 +543,8 @@ mod issue_873_firebase_messaging_sw;
 mod issue_956_playwright_pnpm_exec;
 #[path = "integration_test/lexical_nodes.rs"]
 mod lexical_nodes;
+#[path = "integration_test/playwright_bare_package.rs"]
+mod playwright_bare_package;
 #[path = "integration_test/playwright_test_dir.rs"]
 mod playwright_test_dir;
 #[path = "integration_test/script_multiplexers.rs"]
