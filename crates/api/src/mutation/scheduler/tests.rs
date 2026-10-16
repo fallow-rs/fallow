@@ -360,6 +360,34 @@ fn a_survivor_reruns_in_a_new_companion_and_a_different_result_is_flaky() {
 }
 
 #[test]
+fn a_survivor_with_a_timed_out_retry_stays_survived() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |index, run| {
+            if index == 0 {
+                Ok(run_result(run, RunStatus::Survived, None))
+            } else {
+                Err(LinkFault::Timeout)
+            }
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    let result = &outcome.results["m1"];
+    assert_eq!(
+        result.status,
+        MutantStatus::Survived,
+        "the first run finished with the mutant active, and a timeout under host load is no detection"
+    );
+    assert!(result.retried);
+    assert_eq!(
+        result.duration_ms,
+        Some(12),
+        "a survivor keeps the duration of the first run"
+    );
+    assert_eq!(spawner.runs().len(), 2);
+}
+
+#[test]
 fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
     type Respond = fn(&RunRequest) -> Response;
     let cases: Vec<(&str, Respond)> = vec![

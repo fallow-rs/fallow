@@ -311,6 +311,96 @@ fn exit_code_is_1_only_when_a_minimum_is_set_and_missed() {
     assert_eq!(run_exit_code(&unscored, Some(100.0)), 0);
 }
 
+fn baseline_failure(test_id: Option<&str>, message: Option<&str>) -> MutationBaselineFailure {
+    MutationBaselineFailure {
+        file: Some("test/env.test.ts".to_owned()),
+        test_id: test_id.map(str::to_owned),
+        message: message.map(str::to_owned),
+        mutant_ids: Vec::new(),
+    }
+}
+
+#[test]
+fn a_run_with_baseline_failures_and_no_executed_mutant_exits_2() {
+    let mut blocked = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::NoCoverage)],
+        vec![MutationIncompleteReason::BaselineFailure],
+    );
+    blocked.baseline_failures = vec![baseline_failure(
+        Some("test/env.test.ts::loads"),
+        Some("Invalid environment variables"),
+    )];
+    let exit = baseline_blocked_run_error(&blocked).map(|error| error.exit_code);
+    assert_eq!(exit, Some(2));
+    blocked
+        .baseline_failures
+        .push(baseline_failure(None, Some("second")));
+    let error = baseline_blocked_run_error(&blocked).expect("a blocked run");
+    assert_eq!(
+        error.code.as_deref(),
+        Some("FALLOW_MUTATION_BASELINE_FAILED")
+    );
+    assert_eq!(
+        error.message,
+        "no mutant ran, because the test suite fails with no active mutant: test/env.test.ts::loads: Invalid environment variables (1 more failure, see `baseline_failures` in the JSON report)"
+    );
+    assert!(error.help.is_some());
+}
+
+#[test]
+fn a_run_with_only_no_coverage_mutants_and_no_baseline_failure_exits_0() {
+    let unreached = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::NoCoverage)],
+        Vec::new(),
+    );
+    assert!(baseline_blocked_run_error(&unreached).is_none());
+    assert_eq!(run_exit_code(&unreached, None), 0);
+}
+
+#[test]
+fn a_baseline_failure_does_not_fail_a_run_with_an_executed_mutant() {
+    let mut partial = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::Killed),
+            mutant("m2", "src/a.ts", 2, MutantStatus::NoCoverage),
+        ],
+        vec![MutationIncompleteReason::BaselineFailure],
+    );
+    partial.baseline_failures = vec![baseline_failure(Some("test/env.test.ts::loads"), None)];
+    assert!(baseline_blocked_run_error(&partial).is_none());
+    assert_eq!(run_exit_code(&partial, None), 0);
+}
+
+#[test]
+fn human_baseline_footer_shows_the_first_line_of_the_failure_message() {
+    let mut with_test = report(Vec::new(), vec![MutationIncompleteReason::BaselineFailure]);
+    with_test.baseline_failures = vec![baseline_failure(
+        Some("test/env.test.ts::loads"),
+        Some("Invalid environment variables:\n  NODE_ENV: expected test"),
+    )];
+    let text = run_text(&with_test, &OPTIONS);
+    assert!(
+        text.contains(
+            "Baseline failure: test/env.test.ts::loads fails with no active mutant, so no mutant uses its result.\n  Message: Invalid environment variables:\n"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("NODE_ENV"), "{text}");
+
+    let mut file_only = report(Vec::new(), vec![MutationIncompleteReason::BaselineFailure]);
+    file_only.baseline_failures = vec![
+        baseline_failure(None, Some("Cannot find module './setup'")),
+        baseline_failure(None, None),
+    ];
+    let text = run_text(&file_only, &OPTIONS);
+    assert!(
+        text.contains(
+            "First: test/env.test.ts (see --format json)\n  Message: Cannot find module './setup'\n"
+        ),
+        "{text}"
+    );
+}
+
 #[test]
 fn human_run_report_groups_survivors_by_file_in_rank_order() {
     let report = report(

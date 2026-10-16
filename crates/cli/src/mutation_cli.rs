@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Args, Subcommand};
-use fallow_api::mutation::{MAX_VERDICT_INPUT_BYTES, Operator};
+use fallow_api::mutation::{MAX_VERDICT_INPUT_BYTES, Operator, baseline_blocked_run_error};
 use fallow_api::{
     AnalysisOptions, MutationRunOptions, MutationRunScope, ProgrammaticError,
     apply_mutation_verdicts, plan_mutation, run_mutation, validate_mutation_verdicts,
@@ -299,9 +299,11 @@ fn absolute_output_path(path: &Path) -> PathBuf {
     std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
 }
 
-/// The exit code of a finished run: 1 only when a minimum score is set and
-/// the measured score is lower. Survivors alone never fail a run. A run with no counted mutant
-/// has no score and passes.
+/// The exit code of the score of a finished run: 1 only when a minimum
+/// score is set and the measured score is lower. Survivors alone never fail
+/// a run. A run with no counted mutant has no score and passes here; a run
+/// that executed no mutant while tests failed with no active mutant exits 2
+/// through [`baseline_blocked_run_error`] instead.
 #[must_use]
 pub fn run_exit_code(report: &MutationReport, min_score: Option<f64>) -> u8 {
     match (min_score, report.summary.score) {
@@ -486,6 +488,9 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     }
     let mut report = run_mutation(&options)?;
     complete_file_digests(&mut report, input.root);
+    // Before the verdicts: an equivalent verdict for a survivor does not make
+    // the run one that executed no mutant.
+    let blocked = baseline_blocked_run_error(&report);
     if let Some(verdicts) = verdicts {
         apply_mutation_verdicts(&mut report, &verdicts)?;
     }
@@ -497,16 +502,20 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             2,
         )
     })?;
-    let saved = match fallow_api::mutation::save_last_mutation_report(&options.analysis, &value) {
-        Ok(_) => true,
-        Err(error) => {
-            eprintln!(
-                "fallow: warning: the mutation report was not saved for `fallow mutation inspect`: {}",
-                error.message
-            );
-            false
-        }
-    };
+    let saved_path = save_report(&options.analysis, &value);
+    let saved = saved_path.is_some();
+    let blocked = blocked.map(|error| with_saved_report_help(error, saved_path.as_deref()));
+    if let Some(error) = &blocked
+        && matches!(input.output, OutputFormat::Json)
+    {
+        // The JSON contract of exit code 2 is the error envelope. The saved
+        // report keeps the full result for `fallow mutation inspect`.
+        return Ok(crate::error::emit_programmatic_error(
+            error,
+            input.output,
+            input.json_style,
+        ));
+    }
     if let Some(path) = input.output_file
         && let Err(code) = crate::redirect_report_to_file(path, input.output)
     {
@@ -534,7 +543,42 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     {
         return Ok(code);
     }
+    if let Some(error) = &blocked {
+        return Ok(crate::error::emit_programmatic_error(
+            error,
+            input.output,
+            input.json_style,
+        ));
+    }
     Ok(ExitCode::from(exit))
+}
+
+/// Saves the report for `fallow mutation inspect` and gives its path. A
+/// failed save is a warning, not a run error.
+fn save_report(analysis: &AnalysisOptions, value: &serde_json::Value) -> Option<PathBuf> {
+    match fallow_api::mutation::save_last_mutation_report(analysis, value) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            eprintln!(
+                "fallow: warning: the mutation report was not saved for `fallow mutation inspect`: {}",
+                error.message
+            );
+            None
+        }
+    }
+}
+
+/// Adds the path of the saved report to the help of a run error, because
+/// the error replaces the JSON report on stdout.
+fn with_saved_report_help(error: ProgrammaticError, saved: Option<&Path>) -> ProgrammaticError {
+    let Some(path) = saved else {
+        return error;
+    };
+    let help = match &error.help {
+        Some(help) => format!("{help}; the report of this run is in {}", path.display()),
+        None => format!("the report of this run is in {}", path.display()),
+    };
+    error.with_help(help)
 }
 
 fn emit_json(value: &serde_json::Value, style: JsonStyle) -> Result<(), ProgrammaticError> {

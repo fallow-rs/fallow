@@ -179,11 +179,29 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion. |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run with baseline failures and no executed mutant. |
 
 The flag wins over the config key. The minimum applies to the score, in
-percent. A run with no executed mutant has no score and exits `0`, also when
-each mutant is `no_coverage`.
+percent. A run with no executed mutant has no score. It exits `0` when it
+has no baseline failure, also when each mutant is `no_coverage`.
+
+A run with baseline failures and no executed mutant exits `2` with
+`FALLOW_MUTATION_BASELINE_FAILED`, the same code as a dry run that fails
+outside each test file. An executed mutant is `killed`, `timeout`,
+`survived`, `runtime_error`, `flaky` or `compile_error`. The failed tests
+cannot detect a mutant, so the run measured nothing.
+
+- The error names the first baseline failure and the first line of its
+  message.
+- With `--format json`, the error envelope replaces the report on stdout.
+  The run saves the report to `last-report.json` (see Inspect), and the
+  `help` field gives its path.
+- The human output prints the report and then the error.
+- This check uses the statuses before `--verdicts`. An `equivalent`
+  verdict for a survivor does not change the exit code to `2`. The
+  `--min-score` check uses the statuses after the verdicts.
+- `fallow_api::mutation::baseline_blocked_run_error` gives the same error
+  to a caller of the programmatic API. MCP does not run mutants.
 
 ## Mutant limit
 
@@ -245,11 +263,16 @@ tests detect the mutant.
 | First result | Retry result | Final status |
 |---|---|---|
 | `survived` | `survived` | `survived` |
+| `survived` | `timeout` | `survived` |
 | `timeout` | `timeout` | `timeout` |
 | `timeout` | `killed` | `killed` |
 | any | `runtime_error` | `runtime_error` |
 | any | other result | `flaky` |
 
+- A `survived` result with a `timeout` retry stays `survived`. The first
+  run finished all tests with the mutant active. Host load alone can make
+  the retry time out, so the timeout is no proof that the tests detect the
+  mutant. A `killed` retry of a survivor gives `flaky`.
 - The retry of a `timeout` waits twice as long. Host load often lasts into
   the retry, and a real infinite loop still times out.
 - A `killed` result gets no retry. In repeated runs under host load, no
@@ -358,6 +381,8 @@ mutant. Their results decide no mutant status.
   `runtime_error`. The time budget does not stop a dry run in progress, so a
   companion that hangs in its dry run can extend the run past the budget.
 - A baseline failure makes the completion `partial` (`baseline-failure`).
+- A run with baseline failures and no executed mutant exits `2` (see Exit
+  codes).
 
 ## Runners
 
@@ -783,7 +808,9 @@ reads files only. It runs no test.
   `[OK]` when the score meets the minimum, `[X]` when it misses the minimum,
   and `[-]` when no score is measured.
 - One line for the baseline failures. It names the failing test when there
-  is one, and the count and the first test when there are more.
+  is one, and the count and the first test when there are more. A `Message`
+  line under it shows the first line of the message of the first failure, at
+  most 120 characters, for example `Invalid environment variables`.
 - Each `Error` line names its mutant when the error belongs to one mutant.
 - A separate no-coverage section with one line for each file and its count.
   The line adds the counts by test reach class, for example

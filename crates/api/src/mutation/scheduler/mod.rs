@@ -1317,11 +1317,15 @@ fn mark_unreached_pending(
 
 /// Gives the final status from the first and the retry status. A retry that
 /// changes whether the tests detect the mutant gives `flaky`. A timeout with
-/// a killed retry stays detected and is `killed`.
+/// a killed retry stays detected and is `killed`. A survivor with a timed-out
+/// retry stays `survived`: the first run finished all tests with the mutant
+/// active, and host load alone can make the retry time out.
 const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatus {
     match (first, retry) {
         (_, MutantStatus::RuntimeError) => MutantStatus::RuntimeError,
-        (MutantStatus::Survived, MutantStatus::Survived) => MutantStatus::Survived,
+        (MutantStatus::Survived, MutantStatus::Survived | MutantStatus::Timeout) => {
+            MutantStatus::Survived
+        }
         (MutantStatus::Timeout, MutantStatus::Timeout) => MutantStatus::Timeout,
         (MutantStatus::Timeout, MutantStatus::Killed) => MutantStatus::Killed,
         _ => MutantStatus::Flaky,

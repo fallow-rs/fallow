@@ -101,6 +101,18 @@ pub struct MutationStatusCounts {
 }
 
 impl MutationStatusCounts {
+    /// The mutants that ran against the tests: `killed`, `timeout`,
+    /// `survived`, `runtime_error`, `flaky` and `compile_error`.
+    #[must_use]
+    pub const fn executed(&self) -> usize {
+        self.killed
+            + self.timeout
+            + self.survived
+            + self.runtime_error
+            + self.flaky
+            + self.compile_error
+    }
+
     /// Adds one mutant with `status`.
     pub const fn add(&mut self, status: MutantStatus) {
         self.total += 1;

@@ -1,19 +1,21 @@
 //! Builds the public mutation envelopes from the plan and the schedule.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use fallow_engine::module_graph::ExportTestReach;
 use fallow_engine::mutation::{MutantDisposition, MutationPlan, PlannedMutant, PruneReason};
 use fallow_output::{
     MutantLocation, MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure,
     MutationCompletion, MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
-    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationRunIssue,
-    MutationSkippedFile, MutationStatusCounts, MutationSummary, TestReachClass,
+    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationReport,
+    MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary, TestReachClass,
 };
 use fallow_types::envelope::ToolVersion;
 use rustc_hash::FxHashSet;
 
 use super::scheduler::ScheduleOutcome;
+use crate::ProgrammaticError;
 
 /// The kebab-case name of a serde enum value.
 fn kebab<T: serde::Serialize>(value: &T) -> String {
@@ -337,6 +339,54 @@ fn has_unloaded_reached_file(
                 .iter()
                 .any(|mutant| mutant.file == file.path && is_scheduled(mutant, promoted))
     })
+}
+
+/// The error of a run that executed no mutant while tests failed with no
+/// active mutant.
+///
+/// Such a run measured nothing, because the failed tests could not detect a
+/// mutant. A run without a baseline failure and with only `no_coverage`
+/// mutants is a fact about the tests and gets no error. The error has exit
+/// code 2 and the code `FALLOW_MUTATION_BASELINE_FAILED`, the same as a dry
+/// run that fails outside each test file. It names the first failure and the
+/// first line of its message.
+#[must_use]
+pub fn baseline_blocked_run_error(report: &MutationReport) -> Option<ProgrammaticError> {
+    if report.summary.counts.executed() > 0 {
+        return None;
+    }
+    let first = report.baseline_failures.first()?;
+    let name = first
+        .test_id
+        .as_deref()
+        .or(first.file.as_deref())
+        .unwrap_or("a test file");
+    let mut message =
+        format!("no mutant ran, because the test suite fails with no active mutant: {name}");
+    if let Some(line) = first.message.as_deref().and_then(first_message_line) {
+        message.push_str(": ");
+        message.push_str(line);
+    }
+    let others = report.baseline_failures.len() - 1;
+    if others > 0 {
+        let noun = if others == 1 { "failure" } else { "failures" };
+        let _ = write!(
+            message,
+            " ({others} more {noun}, see `baseline_failures` in the JSON report)"
+        );
+    }
+    Some(
+        ProgrammaticError::new(message, 2)
+            .with_code("FALLOW_MUTATION_BASELINE_FAILED")
+            .with_help(
+                "run the tests with the runner directly and make them pass, for example with the environment variables that the package test script sets, then run fallow mutation again",
+            ),
+    )
+}
+
+/// The first line of a failure message that has text, trimmed.
+fn first_message_line(message: &str) -> Option<&str> {
+    message.lines().map(str::trim).find(|line| !line.is_empty())
 }
 
 /// The public baseline failures of a schedule.

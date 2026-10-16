@@ -26,6 +26,8 @@ const MAX_FRAGMENT_CHARS: usize = 60;
 const ELLIPSIS: &str = "...";
 /// The longest covering-test name that a survivor line shows.
 const MAX_TEST_NAME_CHARS: usize = 60;
+/// The longest baseline failure message the footer shows, in characters.
+const MAX_BASELINE_MESSAGE_CHARS: usize = 120;
 /// The length of a full hex commit SHA.
 const FULL_SHA_CHARS: usize = 40;
 /// The length of a shortened commit SHA in the scope line.
@@ -121,6 +123,11 @@ fn shorten(text: &str, max: usize) -> String {
     }
     let kept: String = text.chars().take(max - ELLIPSIS.len()).collect();
     format!("{kept}{ELLIPSIS}")
+}
+
+/// The first line of `text` that has text, trimmed.
+fn first_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
 }
 
 fn percent(score: Option<f64>) -> String {
@@ -510,13 +517,10 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         );
     }
     if let Some(first) = report.baseline_failures.first() {
+        let message = first.message.as_deref().and_then(first_line);
+        let named = first.test_id.as_deref().or(first.file.as_deref());
         let name = shorten(
-            first
-                .test_id
-                .as_deref()
-                .or(first.file.as_deref())
-                .or(first.message.as_deref())
-                .unwrap_or("a test file"),
+            named.or(message).unwrap_or("a test file"),
             MAX_TEST_NAME_CHARS,
         );
         let failed = report.baseline_failures.len();
@@ -529,6 +533,15 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
             let _ = writeln!(
                 footer,
                 "Baseline failures: {failed} tests fail with no active mutant, so no mutant uses their results. First: {name} (see --format json)"
+            );
+        }
+        if named.is_some()
+            && let Some(message) = message
+        {
+            let _ = writeln!(
+                footer,
+                "  Message: {}",
+                shorten(&collapse(message), MAX_BASELINE_MESSAGE_CHARS)
             );
         }
     }
@@ -673,13 +686,7 @@ fn typecheck_line(typecheck: &MutationTypecheckOutput) -> String {
 
 /// Renders the human report of a run.
 pub fn render_run(report: &MutationReport, options: &RunReportOptions<'_>) -> String {
-    let counts = &report.summary.counts;
-    let tested = counts.killed
-        + counts.survived
-        + counts.timeout
-        + counts.runtime_error
-        + counts.flaky
-        + counts.compile_error;
+    let tested = report.summary.counts.executed();
     let mut out = if report.runner.is_some() || tested > 0 {
         String::from("Mutation testing (ran the project tests)\n")
     } else {
