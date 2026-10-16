@@ -25,7 +25,11 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    with the run count of a recent push to `main`. A newer push to `main`
    cancels the runs of the merged commit. With `--follow-main`, the script
    then waits for the newest commit of `origin/main` that contains the
-   merged commit, and prints one line for each move. Before you retry a
+   merged commit, and prints one line for each move. On a busy `main`, new
+   pushes can cancel each long run, and the wait can time out with pending
+   runs. Then do not start the same wait again. For each workflow without a
+   pass, watch its newest in-progress run on a commit that contains the
+   merged commit (`gh run watch <run id> --exit-status`). Before you retry a
    failed job, confirm that the branch contains the current base
    (`git merge-base --is-ancestor origin/main HEAD`). A second identical
    failure is a defect, not a flake: diagnose it instead of a third retry.
