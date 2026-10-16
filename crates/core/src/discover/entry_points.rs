@@ -1633,7 +1633,7 @@ fn compile_entry_rule<'a>(
     plugin_name: &'a str,
     plugin_result: &'a crate::plugins::AggregatedPluginResult,
 ) -> Option<(globset::Glob, CompiledEntryRule<'a>)> {
-    let include = match fallow_config::compile_path_glob(&rule.pattern) {
+    let include = match crate::plugins::entry_rule_glob(&rule.pattern) {
         Ok(glob) => glob,
         Err(err) => {
             tracing::warn!("invalid entry pattern '{}': {err}", rule.pattern);

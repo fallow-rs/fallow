@@ -23,7 +23,6 @@ mod jsx_runtime;
 mod memo;
 mod output_entry;
 mod path_info;
-mod pattern_glob;
 mod re_exports;
 mod react_native;
 mod require_imports;

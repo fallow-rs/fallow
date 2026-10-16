@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind};
 
 use super::config_parser;
-use super::{Plugin, PluginResult};
+use super::{PathRule, Plugin, PluginResult};
 use crate::scripts;
 
 /// Test entry patterns for a project without a config, or with a config whose
@@ -126,7 +126,7 @@ impl Plugin for PlaywrightPlugin {
         match test_entry_patterns(source, config_path, root, config_dir) {
             Some(test_dir_patterns) => {
                 result.extend_entry_patterns(TEST_FILE_NAME_PATTERNS.iter().copied());
-                result.extend_entry_patterns(test_dir_patterns);
+                result.entry_patterns.extend(test_dir_patterns);
             }
             None => result.extend_entry_patterns(DEFAULT_TEST_ENTRY_PATTERNS.iter().copied()),
         }
@@ -178,7 +178,7 @@ fn test_entry_patterns(
     config_path: &Path,
     root: &Path,
     config_dir: &Path,
-) -> Option<Vec<String>> {
+) -> Option<Vec<PathRule>> {
     let scopes = config_parser::extract_from_source(source, config_path, |program| {
         if let Some(arguments) = config_parser::find_config_merge_arguments(program) {
             return Some(config_test_scopes(
@@ -220,17 +220,28 @@ fn test_entry_patterns(
             ScopeValue::Absent => {
                 let glob =
                     case_insensitive_glob(&format!("*.{{spec,test}}.{TEST_FILE_EXTENSIONS}"));
-                patterns.push(format!("{prefix}**/{glob}"));
+                patterns.push(PathRule::new(format!("{prefix}**/{glob}")));
             }
             ScopeValue::Static(globs) => {
                 for glob in globs {
                     let glob = glob.strip_prefix("**/").unwrap_or(&glob);
-                    let glob = case_insensitive_glob(glob);
-                    patterns.push(format!("{prefix}**/{glob}"));
+                    let rewritten = fallow_config::extglob::rewrite_include(glob);
+                    let below_test_dir =
+                        |glob: &str| format!("{prefix}**/{}", case_insensitive_glob(glob));
+                    patterns.push(
+                        PathRule::new(below_test_dir(&rewritten.include)).with_excluded_globs(
+                            rewritten
+                                .excludes
+                                .iter()
+                                .map(|exclude| below_test_dir(exclude)),
+                        ),
+                    );
                 }
             }
             ScopeValue::Dynamic => {
-                patterns.push(format!("{prefix}**/*.{TEST_FILE_EXTENSIONS}"));
+                patterns.push(PathRule::new(format!(
+                    "{prefix}**/*.{TEST_FILE_EXTENSIONS}"
+                )));
             }
         }
     }
@@ -238,11 +249,11 @@ fn test_entry_patterns(
 }
 
 /// The conventional test directory patterns of [`DEFAULT_TEST_ENTRY_PATTERNS`].
-fn conventional_test_dir_patterns() -> impl Iterator<Item = String> {
+fn conventional_test_dir_patterns() -> impl Iterator<Item = PathRule> {
     DEFAULT_TEST_ENTRY_PATTERNS
         .iter()
         .skip(TEST_FILE_NAME_PATTERNS.len())
-        .map(|pattern| (*pattern).to_string())
+        .map(|pattern| PathRule::new(*pattern))
 }
 
 /// The value of `key` in a `defineConfig(a, b, ...)` call. Playwright merges
@@ -383,14 +394,10 @@ fn scope_property<'a>(obj: &'a ObjectExpression<'a>, key: &str) -> ScopeValue<&'
     ScopeValue::Absent
 }
 
-/// Extglob group openers. Playwright matches `testMatch` with extglob
-/// support, for example `**/*.@(spec|test).ts`, but the entry glob matcher
-/// reads these characters literally, so such a glob matches no file.
-const EXTGLOB_OPENERS: [&str; 5] = ["@(", "?(", "+(", "*(", "!("];
-
 /// The globs of a string or string-array `testMatch`. Returns `None` for a
 /// regular expression, a non-literal value, a glob that names a path outside
-/// `testDir`, a glob with an extglob group, or a glob with a directory part.
+/// `testDir`, a glob with a character class or an escape, or a glob with a
+/// directory part. A glob can have extglob groups, such as `*.@(spec|test).ts`.
 ///
 /// Playwright adds a `**/` prefix and matches the glob against the absolute
 /// file path. Thus the directory part of a glob such as `tests/**/*.e2e.ts`
@@ -411,11 +418,7 @@ fn static_globs(expr: &Expression<'_>) -> Option<Vec<String>> {
     };
     let file_name_only = |glob: &String| !glob.strip_prefix("**/").unwrap_or(glob).contains('/');
     let usable = |glob: &String| {
-        in_test_dir(glob)
-            && file_name_only(glob)
-            && glob.is_ascii()
-            && !glob.contains(['[', '\\'])
-            && !EXTGLOB_OPENERS.iter().any(|opener| glob.contains(opener))
+        in_test_dir(glob) && file_name_only(glob) && glob.is_ascii() && !glob.contains(['[', '\\'])
     };
     (!globs.is_empty() && globs.iter().all(usable)).then_some(globs)
 }
@@ -1089,21 +1092,39 @@ mod tests {
     }
 
     #[test]
-    fn extglob_test_match_keeps_every_script_below_test_dir() {
+    fn test_match_accepts_every_extglob_form() {
         let result = resolve(
             r"export default {
                 testDir: './e2e',
-                testMatch: '**/*.@(e2e|smoke).ts',
+                testMatch: [
+                    '**/*.@(e2e|smoke).ts',
+                    '**/!(*.skip).flow.ts',
+                    '**/*.check.?(m)js',
+                    '**/*.+(a|b).run.ts',
+                    '**/x*(y).run.ts',
+                ],
             };",
         );
-        assert_eq!(
-            test_dir_patterns(&result),
-            vec!["e2e/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"]
-        );
+        let matches = |path: &str| super::super::entry_rules_match(&result, path);
+
+        assert!(matches("e2e/a.e2e.ts"));
+        assert!(matches("e2e/deep/a.SMOKE.ts"));
+        assert!(!matches("e2e/a.unit.ts"));
+        assert!(matches("e2e/a.flow.ts"));
+        assert!(!matches("e2e/a.skip.flow.ts"));
+        assert!(!matches("e2e/a.SKIP.flow.ts"));
+        assert!(matches("e2e/a.check.js"));
+        assert!(matches("e2e/a.check.mjs"));
+        assert!(matches("e2e/c.a.run.ts"));
+        assert!(matches("e2e/c.ab.run.ts"));
+        assert!(!matches("e2e/c.run.ts"));
+        assert!(matches("e2e/x.run.ts"));
+        assert!(matches("e2e/xyy.run.ts"));
+        assert!(!matches("other/a.e2e.ts"));
     }
 
     #[test]
-    fn extglob_in_one_test_match_glob_keeps_every_script_below_test_dir() {
+    fn class_in_one_test_match_glob_keeps_every_script_below_test_dir() {
         let result = resolve(
             r"export default {
                 testDir: './e2e',

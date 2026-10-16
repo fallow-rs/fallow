@@ -278,6 +278,17 @@ value before pushing it as a pattern. Bracketed route filenames and `*` in a
 path would otherwise both miss the named file and cover files the config does
 not name.
 
+A tool glob can hold extglob groups, such as `*.@(js|ts)` or `!(*.dev)`, which
+the entry glob matcher reads as literal text. Build the rule with
+`PathRule::from_extglob` and add tool excludes with
+`PathRule::with_excluded_extglobs`. Both use the shared rewrite in
+`fallow_config::extglob`. The include rewrite matches at least the files of the
+tool, and each negated group becomes an excluded glob. The exclude rewrite
+matches at most the files of the tool, so an exclude with a negated group
+removes no file. A glob set that holds several includes with one shared exclude
+list, such as a Vitest JSX rule, needs one rule per include that has a negated
+group, because its excludes apply only to that include.
+
 A config value that names a module request is credited as a dependency and is
 never pushed as an entry pattern. An entry pattern is a glob over project files,
 so a value a bundler resolves through module resolution, one without a leading

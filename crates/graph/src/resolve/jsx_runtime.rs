@@ -74,12 +74,17 @@ pub fn compile_jsx_rules(rules: &[JsxImportSourceRule]) -> Vec<CompiledJsxRule<'
 }
 
 /// Compile the valid patterns into one set, with the number of patterns
-/// that compiled.
+/// that compiled. A pattern can have an empty alternative, such as `{,m}js`,
+/// because the rewrite of an extglob `?(m)` group gives one.
 fn compile_globs(patterns: &[String]) -> (GlobSet, usize) {
     let mut builder = GlobSetBuilder::new();
     let mut added = 0;
     for pattern in patterns {
-        if let Ok(glob) = GlobBuilder::new(pattern).literal_separator(true).build() {
+        if let Ok(glob) = GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .empty_alternates(true)
+            .build()
+        {
             builder.add(glob);
             added += 1;
         }

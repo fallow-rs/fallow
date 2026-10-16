@@ -83,6 +83,17 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "wxt",
 ];
 
+/// Whether an entry rule of `result` matches the project-relative `path`, as
+/// entry point discovery compiles and matches the rules.
+#[cfg(test)]
+pub(crate) fn entry_rules_match(result: &PluginResult, path: &str) -> bool {
+    result
+        .entry_patterns
+        .iter()
+        .filter_map(|rule| CompiledPathRule::for_entry_rule(rule, "entry pattern"))
+        .any(|rule| rule.matches(path))
+}
+
 #[cfg(test)]
 const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "alchemy",
@@ -999,6 +1010,31 @@ impl PathRule {
         Self::new(pattern)
     }
 
+    /// A rule for a tool glob with extglob groups, such as `!(*.spec)`. The
+    /// rule matches at least the paths that the tool matches. Each negated
+    /// group becomes an excluded glob.
+    #[must_use]
+    pub(crate) fn from_extglob(pattern: &str) -> Self {
+        let rewritten = fallow_config::extglob::rewrite_include(pattern);
+        Self::new(rewritten.include).with_excluded_globs(rewritten.excludes)
+    }
+
+    /// Exclude the paths of tool globs with extglob groups. An excluded glob
+    /// never removes more paths than the tool does, so a glob with a negated
+    /// group excludes nothing.
+    #[must_use]
+    pub(crate) fn with_excluded_extglobs<I, S>(self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let excluded: Vec<String> = patterns
+            .into_iter()
+            .filter_map(|pattern| fallow_config::extglob::rewrite_exclude(pattern.as_ref()))
+            .collect();
+        self.with_excluded_globs(excluded)
+    }
+
     #[must_use]
     pub(crate) fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
     where
@@ -1034,17 +1070,19 @@ impl PathRule {
 
     #[must_use]
     fn prefixed(&self, ws_prefix: &str) -> Self {
-        let pattern = if self.parent_relative && self.pattern.starts_with("../") {
-            resolve_parent_relative_pattern(&self.pattern, ws_prefix)
-        } else {
-            prefix_workspace_pattern(&self.pattern, ws_prefix)
+        let prefix = |pattern: &str| {
+            if self.parent_relative && pattern.starts_with("../") {
+                resolve_parent_relative_pattern(pattern, ws_prefix)
+            } else {
+                prefix_workspace_pattern(pattern, ws_prefix)
+            }
         };
         Self {
-            pattern,
+            pattern: prefix(&self.pattern),
             exclude_globs: self
                 .exclude_globs
                 .iter()
-                .map(|pattern| prefix_workspace_pattern(pattern, ws_prefix))
+                .map(|pattern| prefix(pattern))
                 .collect(),
             exclude_regexes: self
                 .exclude_regexes
@@ -1196,7 +1234,20 @@ impl ProvidedDependencyRule {
     }
 }
 
+/// Compile the include glob of an entry rule. Its `*` stays in one path
+/// segment, and it accepts an empty alternative, such as `{,m}js`, because
+/// the rewrite of an extglob `?(m)` group gives one.
+pub(crate) fn entry_rule_glob(pattern: &str) -> Result<globset::Glob, globset::Error> {
+    globset::GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .empty_alternates(true)
+        .build()
+}
+
 /// A compiled path rule matcher shared by entry-point and used-export matching.
+///
+/// Every glob accepts an empty alternative, such as `{,m}js`, because the
+/// rewrite of an extglob `?(m)` group gives one.
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledPathRule {
     include: globset::GlobMatcher,
@@ -1207,7 +1258,7 @@ pub(crate) struct CompiledPathRule {
 
 impl CompiledPathRule {
     pub(crate) fn for_entry_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
-        let include = match fallow_config::compile_path_glob(&rule.pattern) {
+        let include = match entry_rule_glob(&rule.pattern) {
             Ok(glob) => glob.compile_matcher(),
             Err(err) => {
                 tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
@@ -1231,7 +1282,7 @@ impl CompiledPathRule {
     }
 
     pub(crate) fn for_used_export_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
-        let include = match fallow_config::compile_path_glob(&rule.pattern) {
+        let include = match entry_rule_glob(&rule.pattern) {
             Ok(glob) => glob.compile_matcher(),
             Err(err) => {
                 tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
@@ -1318,16 +1369,22 @@ fn compile_excluded_globs(
 ) -> Vec<globset::GlobMatcher> {
     patterns
         .iter()
-        .filter_map(|pattern| match fallow_config::compile_path_glob(pattern) {
-            Ok(glob) => Some(glob.compile_matcher()),
-            Err(err) => {
-                tracing::warn!(
-                    "skipping invalid excluded glob '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                None
+        .filter_map(|pattern| {
+            match globset::GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .empty_alternates(true)
+                .build()
+            {
+                Ok(glob) => Some(glob.compile_matcher()),
+                Err(err) => {
+                    tracing::warn!(
+                        "skipping invalid excluded glob '{}' for {} '{}': {err}",
+                        pattern,
+                        rule_kind,
+                        rule_pattern
+                    );
+                    None
+                }
             }
         })
         .collect()

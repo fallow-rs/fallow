@@ -6,7 +6,7 @@
 //! dependencies.
 
 use super::config_parser;
-use super::{Plugin, PluginResult, ProvidedDependencyRule};
+use super::{PathRule, Plugin, PluginResult, ProvidedDependencyRule};
 use std::path::{Path, PathBuf};
 
 const ENABLERS: &[&str] = &["storybook", "@storybook/"];
@@ -141,7 +141,8 @@ const DEFAULT_SPECIFIER_FILES: &str = "**/*.@(mdx|stories.@(js|jsx|mjs|ts|tsx))"
 /// `{ directory, files }` names the `files` glob under `directory`. A glob that
 /// leaves the plugin root but stays inside the project, such as a central docs
 /// app that loads stories from a sibling workspace, is parent-relative. A glob
-/// that leaves the project matches no file.
+/// that leaves the project matches no file. Storybook supports extglob groups,
+/// such as `*.@(js|ts)` and `!(*.dev)`, so each glob becomes an extglob rule.
 fn add_story_patterns(result: &mut PluginResult, source: &str, config_path: &Path, root: &Path) {
     let mut globs = config_parser::extract_config_string_array(source, config_path, &["stories"]);
     globs.extend(extract_story_specifier_globs(source, config_path));
@@ -149,11 +150,13 @@ fn add_story_patterns(result: &mut PluginResult, source: &str, config_path: &Pat
         if let Some(pattern) =
             config_parser::normalize_filesystem_config_path(&glob, config_path, root)
         {
-            result.push_entry_pattern(brace_story_extglob(&pattern));
+            result.entry_patterns.push(PathRule::from_extglob(&pattern));
         } else if let Some(pattern) =
             config_parser::parent_relative_config_path(&glob, config_path, root)
         {
-            result.push_parent_relative_entry_pattern(brace_story_extglob(&pattern));
+            let mut rule = PathRule::from_extglob(&pattern);
+            rule.parent_relative = true;
+            result.entry_patterns.push(rule);
         }
     }
 }
@@ -184,62 +187,6 @@ fn extract_story_specifier_globs(source: &str, config_path: &Path) -> Vec<String
         Some(globs)
     })
     .unwrap_or_default()
-}
-
-/// Rewrite each Storybook `@(a|b)` group as the brace group `{a,b}`, which the
-/// glob matcher supports. The Storybook config template uses this form.
-///
-/// A nested `@(..)` group becomes a nested brace group, as in the Storybook
-/// default `*.@(mdx|stories.@(js|ts))`. A group with other syntax stays as it
-/// is. Other extglob forms (`!(..)`, `+(..)`, `*(..)`, `?(..)`) also stay, so
-/// they match nothing.
-fn brace_story_extglob(pattern: &str) -> String {
-    const OPEN: &str = "@(";
-    let mut out = String::with_capacity(pattern.len());
-    let mut rest = pattern;
-    while let Some(start) = rest.find(OPEN) {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + OPEN.len()..];
-        let Some(end) = closing_paren(after) else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
-        let group_end = start + OPEN.len() + end + 1;
-        if let Some(alternatives) = brace_group_body(&after[..end]) {
-            out.push('{');
-            out.push_str(&alternatives);
-            out.push('}');
-        } else {
-            out.push_str(&rest[start..group_end]);
-        }
-        rest = &rest[group_end..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Byte offset of the `)` that closes a group whose body starts `text`.
-fn closing_paren(text: &str) -> Option<usize> {
-    let mut depth = 0_usize;
-    for (idx, byte) in text.bytes().enumerate() {
-        match byte {
-            b'(' => depth += 1,
-            b')' if depth == 0 => return Some(idx),
-            b')' => depth -= 1,
-            _ => {}
-        }
-    }
-    None
-}
-
-/// The brace alternatives of an `@(..)` group body, or `None` when the body
-/// holds syntax other than plain alternatives and nested `@(..)` groups.
-fn brace_group_body(body: &str) -> Option<String> {
-    if body.is_empty() || body.contains(['{', '}', ',']) {
-        return None;
-    }
-    let nested = brace_story_extglob(body);
-    (!nested.contains(['(', ')', '@', '!', '+', '*', '?'])).then(|| nested.replace('|', ","))
 }
 
 define_plugin! {
@@ -469,59 +416,33 @@ mod tests {
     }
 
     #[test]
-    fn story_extglob_groups_become_brace_alternatives() {
-        let plugin = StorybookPlugin;
-        let result = plugin.resolve_config(
+    fn stories_accept_every_extglob_form() {
+        let result = StorybookPlugin.resolve_config(
             Path::new("/project/.storybook/main.ts"),
             r#"export default { stories: [
-                "../src/**/*.stories.@(js|jsx|ts|tsx)",
-                "../src/**/*.story.@(ts|tsx)",
-                "../src/**/!(*.dev).stories.@(js|ts)",
-                "../src/**/*.+(ts|tsx)",
+                "../src/neg/**/!(*.dev).stories.@(js|ts)",
+                "../src/opt/*.stories.?(m)js",
+                "../src/plus/*.+(a|b).stories.js",
+                "../src/star/x*(y).stories.js",
+                "../src/nested/*.@(mdx|stories.@(js|ts))",
             ] };"#,
             Path::new("/project"),
         );
-        let patterns: Vec<_> = result
-            .entry_patterns
-            .iter()
-            .map(|pattern| pattern.pattern.as_str())
-            .collect();
+        let matches = |path: &str| super::super::entry_rules_match(&result, path);
 
-        assert_eq!(
-            patterns,
-            [
-                "src/**/*.stories.{js,jsx,ts,tsx}",
-                "src/**/*.story.{ts,tsx}",
-                "src/**/!(*.dev).stories.{js,ts}",
-                "src/**/*.+(ts|tsx)",
-            ]
-        );
-    }
-
-    #[test]
-    fn nested_story_extglob_groups_become_nested_brace_groups() {
-        assert_eq!(
-            brace_story_extglob("src/*.@(mdx|stories.@(js|ts))"),
-            "src/*.{mdx,stories.{js,ts}}"
-        );
-        assert_eq!(
-            brace_story_extglob("src/*.@(a|@(b|@(c|d)))"),
-            "src/*.{a,{b,{c,d}}}"
-        );
-        assert_eq!(
-            brace_story_extglob("a/*.@(x|y)/b/*.@(mdx|s.@(js|ts))"),
-            "a/*.{x,y}/b/*.{mdx,s.{js,ts}}"
-        );
-    }
-
-    #[test]
-    fn story_extglob_group_with_other_syntax_is_unchanged() {
-        assert_eq!(
-            brace_story_extglob("src/*.@(a|!(b|c))"),
-            "src/*.@(a|!(b|c))"
-        );
-        assert_eq!(brace_story_extglob("src/*.@(a,b)"), "src/*.@(a,b)");
-        assert_eq!(brace_story_extglob("src/*.@(ts"), "src/*.@(ts");
+        assert!(matches("src/neg/a.stories.js"));
+        assert!(matches("src/neg/deep/a.stories.ts"));
+        assert!(!matches("src/neg/a.dev.stories.js"));
+        assert!(matches("src/opt/a.stories.js"));
+        assert!(matches("src/opt/a.stories.mjs"));
+        assert!(matches("src/plus/c.a.stories.js"));
+        assert!(matches("src/plus/c.ab.stories.js"));
+        assert!(!matches("src/plus/c.stories.js"));
+        assert!(matches("src/star/x.stories.js"));
+        assert!(matches("src/star/xyy.stories.js"));
+        assert!(matches("src/nested/a.mdx"));
+        assert!(matches("src/nested/a.stories.ts"));
+        assert!(!matches("src/nested/a.stories.css"));
     }
 
     #[test]

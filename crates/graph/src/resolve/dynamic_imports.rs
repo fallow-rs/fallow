@@ -24,9 +24,9 @@ use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo,
 use super::ResolveResult;
 use super::ResolvedImport;
 use super::fallbacks::make_glob_from_pattern;
-use super::pattern_glob::PatternGlob;
 use super::specifier::resolve_import_specifier;
 use super::types::ResolveContext;
+use fallow_config::extglob::ExtglobMatcher;
 
 /// Resolve dynamic `import()` calls, expanding destructured names into individual imports.
 pub(super) fn resolve_dynamic_imports(
@@ -203,13 +203,13 @@ fn dynamic_import_with(
 /// malformed pattern is not recompiled or reported again per module.
 #[derive(Default)]
 pub(super) struct GlobMatcherCache {
-    map: Mutex<FxHashMap<String, Option<Arc<PatternGlob>>>>,
+    map: Mutex<FxHashMap<String, Option<Arc<ExtglobMatcher>>>>,
 }
 
 impl GlobMatcherCache {
     /// Return the cached matcher for `glob_str` with the exclude globs
     /// `excludes`, compiling it on first miss.
-    fn get(&self, glob_str: &str, excludes: &[&str]) -> Option<Arc<PatternGlob>> {
+    fn get(&self, glob_str: &str, excludes: &[&str]) -> Option<Arc<ExtglobMatcher>> {
         // A NUL byte cannot occur in a path glob, so it separates the globs
         // of the key without ambiguity.
         let mut key = glob_str.to_string();
@@ -222,7 +222,7 @@ impl GlobMatcherCache {
         {
             return value.clone();
         }
-        let value = PatternGlob::new(glob_str, excludes).map(Arc::new);
+        let value = ExtglobMatcher::new(glob_str, excludes).map(Arc::new);
         // Two threads can compile the same pattern at the same time. Only the
         // thread that inserts the entry first gives the warning.
         let first_insert = self

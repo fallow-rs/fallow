@@ -59,9 +59,6 @@ const MAX_PROJECT_DEPTH: usize = 3;
 /// Limits for the expansion of a glob entry in `projects`.
 const MAX_PROJECT_GLOB_MATCHES: usize = 1_000;
 
-/// The maximum number of patterns that one extglob pattern expands into.
-const MAX_EXTGLOB_VARIANTS: usize = 64;
-
 pub struct RstestPlugin;
 
 impl Plugin for RstestPlugin {
@@ -279,13 +276,13 @@ impl ResolveContext<'_> {
         }
         let excluded: Vec<String> = excludes
             .iter()
-            .flat_map(|pattern| self.project_patterns(pattern, project_root))
+            .filter_map(|pattern| self.project_pattern(pattern, project_root))
             .collect();
         for pattern in includes {
-            for include in self.project_patterns(pattern, project_root) {
+            if let Some(include) = self.project_pattern(pattern, project_root) {
                 self.result
                     .entry_patterns
-                    .push(PathRule::new(include).with_excluded_globs(excluded.iter().cloned()));
+                    .push(PathRule::from_extglob(&include).with_excluded_extglobs(&excluded));
             }
         }
 
@@ -336,14 +333,12 @@ impl ResolveContext<'_> {
         }
     }
 
-    /// The root-relative patterns of one project pattern, with the extglob
-    /// groups expanded.
-    fn project_patterns(&self, pattern: &str, project_root: &Path) -> Vec<String> {
+    /// The root-relative pattern of one project pattern. The pattern keeps
+    /// its extglob groups for the entry rule.
+    fn project_pattern(&self, pattern: &str, project_root: &Path) -> Option<String> {
         let pattern = replace_root_dir(pattern, project_root);
         let absolute = join_path(project_root, &pattern);
         config_parser::normalize_config_path(&absolute, self.config_path, self.root)
-            .map(|normalized| expand_extglob(&normalized))
-            .unwrap_or_default()
     }
 
     fn add_projects(
@@ -531,56 +526,6 @@ fn join_path(dir: &Path, value: &str) -> PathBuf {
     config_parser::lexical_normalize(&dir.join(config_parser::path_from_config_string(value)))
 }
 
-/// Expand the extglob groups `?(a|b)`, `@(a|b)` and `+(a|b)` of a pattern
-/// into plain patterns, which the glob matcher supports. A `+(..)` group
-/// matches its body once only, which is the common case. Other groups stay
-/// as written.
-pub(super) fn expand_extglob(pattern: &str) -> Vec<String> {
-    let mut variants = vec![String::new()];
-    let mut rest = pattern;
-    while let Some((start, operator)) = next_extglob_group(rest) {
-        let after_open = &rest[start + 2..];
-        let Some(close) = after_open.find(')') else {
-            break;
-        };
-        let body = &after_open[..close];
-        let mut options: Vec<&str> = body.split('|').collect();
-        if operator == '?' {
-            options.insert(0, "");
-        }
-        if variants.len() * options.len() > MAX_EXTGLOB_VARIANTS {
-            return vec![pattern.to_owned()];
-        }
-        let prefix = &rest[..start];
-        variants = variants
-            .iter()
-            .flat_map(|variant| {
-                options
-                    .iter()
-                    .map(move |option| format!("{variant}{prefix}{option}"))
-            })
-            .collect();
-        rest = &after_open[close + 1..];
-    }
-    variants
-        .into_iter()
-        .map(|variant| format!("{variant}{rest}"))
-        .collect()
-}
-
-/// The byte offset and operator of the next `?(`, `@(` or `+(` group whose
-/// body has no nested group.
-fn next_extglob_group(pattern: &str) -> Option<(usize, char)> {
-    pattern.char_indices().find_map(|(index, operator)| {
-        if !matches!(operator, '?' | '@' | '+') || !pattern[index + 1..].starts_with('(') {
-            return None;
-        }
-        let body = &pattern[index + 2..];
-        let close = body.find(')')?;
-        (!body[..close].contains(['(', '{', '}', ','])).then_some((index, operator))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,22 +557,38 @@ mod tests {
     }
 
     #[test]
-    fn extglob_groups_expand_into_plain_patterns() {
-        let mut expanded = expand_extglob("**/*.test.?(c|m)[jt]s?(x)");
-        expanded.sort_unstable();
-        assert_eq!(
-            expanded,
-            [
-                "**/*.test.[jt]s",
-                "**/*.test.[jt]sx",
-                "**/*.test.c[jt]s",
-                "**/*.test.c[jt]sx",
-                "**/*.test.m[jt]s",
-                "**/*.test.m[jt]sx",
-            ]
+    fn include_and_exclude_accept_every_extglob_form() {
+        let result = resolve(
+            "/project/rstest.config.ts",
+            "export default defineConfig({\n\
+               include: [\n\
+                 'neg/**/!(*.skip).test.ts',\n\
+                 'opt/*.test.?(m)js',\n\
+                 'plus/*.+(a|b).test.js',\n\
+                 'star/x*(y).test.js',\n\
+                 'at/*.@(unit|e2e).ts',\n\
+                 '!at/*.@(e2e).ts',\n\
+                 '!opt/*.!(x).test.js',\n\
+               ],\n\
+             });",
         );
-        assert_eq!(expand_extglob("src/**/*.ts"), ["src/**/*.ts"]);
-        assert_eq!(expand_extglob("a/@(x|y).js"), ["a/x.js", "a/y.js"]);
+        let matches = |path: &str| super::super::entry_rules_match(&result, path);
+
+        assert!(matches("neg/a.test.ts"));
+        assert!(matches("neg/deep/a.test.ts"));
+        assert!(!matches("neg/a.skip.test.ts"));
+        assert!(matches("opt/a.test.js"));
+        assert!(matches("opt/a.test.mjs"));
+        assert!(matches("plus/c.a.test.js"));
+        assert!(matches("plus/c.ab.test.js"));
+        assert!(!matches("plus/c.test.js"));
+        assert!(matches("star/x.test.js"));
+        assert!(matches("star/xyy.test.js"));
+        assert!(matches("at/a.unit.ts"));
+        assert!(!matches("at/a.e2e.ts"));
+        // A negated group in an exclude has no safe rewrite, so the exclude
+        // removes no file.
+        assert!(matches("opt/a.y.test.js"));
     }
 
     #[test]
@@ -638,9 +599,11 @@ mod tests {
              export default defineConfig({ testEnvironment: 'happy-dom' });",
         );
         assert!(result.replace_entry_patterns);
-        let patterns = entry_patterns(&result);
-        assert!(patterns.contains(&"**/*.{test,spec}.[jt]s".to_owned()));
-        assert!(patterns.contains(&"**/__mocks__/**/*.m[jt]sx".to_owned()));
+        let matches = |path: &str| super::super::entry_rules_match(&result, path);
+        assert!(matches("src/a.test.ts"));
+        assert!(matches("src/a.spec.cjs"));
+        assert!(matches("src/__mocks__/x/a.mjsx"));
+        assert!(!matches("src/a.ts"));
         let deps = deps(&result);
         assert!(deps.contains(&"happy-dom".to_owned()));
         assert!(deps.contains(&"@rstest/coverage-istanbul".to_owned()));

@@ -7,7 +7,6 @@
 use std::path::Path;
 
 use super::config_parser;
-use super::rstest::expand_extglob;
 use super::{PathRule, Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["jasmine"];
@@ -75,12 +74,12 @@ impl Plugin for JasminePlugin {
         let mut excludes = Vec::new();
         // The default is relative to the project root, not to `spec_dir`.
         if spec_files.is_empty() {
-            includes.extend(expand_extglob(DEFAULT_SPEC_FILES));
+            includes.push(DEFAULT_SPEC_FILES.to_string());
         }
         for pattern in spec_files.iter().chain(&helpers) {
             match pattern.strip_prefix('!') {
-                Some(excluded) => excludes.extend(spec_dir_patterns(&spec_dir, excluded, root)),
-                None => includes.extend(spec_dir_patterns(&spec_dir, pattern, root)),
+                Some(excluded) => excludes.extend(spec_dir_pattern(&spec_dir, excluded, root)),
+                None => includes.extend(spec_dir_pattern(&spec_dir, pattern, root)),
             }
         }
 
@@ -91,7 +90,7 @@ impl Plugin for JasminePlugin {
         for include in includes {
             result
                 .entry_patterns
-                .push(PathRule::new(include).with_excluded_globs(excludes.iter().cloned()));
+                .push(PathRule::from_extglob(&include).with_excluded_extglobs(&excludes));
         }
 
         // Jasmine resolves `requires` and `loader` from the working directory,
@@ -118,9 +117,10 @@ impl Plugin for JasminePlugin {
     }
 }
 
-/// The root-relative patterns of one `spec_files` or `helpers` value, which
-/// Jasmine reads relative to `spec_dir`.
-fn spec_dir_patterns(spec_dir: &str, pattern: &str, root: &Path) -> Vec<String> {
+/// The root-relative pattern of one `spec_files` or `helpers` value, which
+/// Jasmine reads relative to `spec_dir`. The pattern keeps its extglob groups
+/// for the entry rule.
+fn spec_dir_pattern(spec_dir: &str, pattern: &str, root: &Path) -> Option<String> {
     let joined = if Path::new(pattern).is_absolute() {
         config_parser::path_from_config_string(pattern)
     } else {
@@ -128,10 +128,8 @@ fn spec_dir_patterns(spec_dir: &str, pattern: &str, root: &Path) -> Vec<String> 
             .join(config_parser::path_from_config_string(pattern))
     };
     let normalized = config_parser::lexical_normalize(&joined);
-    let Ok(relative) = normalized.strip_prefix(root) else {
-        return Vec::new();
-    };
-    expand_extglob(&config_parser::path_to_config_string(relative))
+    let relative = normalized.strip_prefix(root).ok()?;
+    Some(config_parser::path_to_config_string(relative))
 }
 
 #[cfg(test)]
@@ -177,14 +175,46 @@ mod tests {
     }
 
     #[test]
-    fn json_config_expands_the_init_default() {
+    fn json_config_matches_the_init_default() {
         let result = resolve(
             "/project/spec/support/jasmine.json",
             r#"{"spec_dir":"spec","spec_files":["**/*[sS]pec.?(m)js"],"helpers":["helpers/**/*.?(m)js"]}"#,
         );
-        rule(&result, "spec/**/*[sS]pec.js");
-        rule(&result, "spec/**/*[sS]pec.mjs");
-        rule(&result, "spec/helpers/**/*.mjs");
+        let matches = |path: &str| super::super::entry_rules_match(&result, path);
+        assert!(matches("spec/a/fooSpec.js"));
+        assert!(matches("spec/a/foo.spec.mjs"));
+        assert!(matches("spec/helpers/setup.mjs"));
+        assert!(matches("spec/helpers/setup.js"));
+        assert!(!matches("spec/a/foo.js"));
+    }
+
+    #[test]
+    fn spec_files_accept_every_extglob_form() {
+        let result = resolve(
+            "/project/spec/support/jasmine.json",
+            r#"{"spec_dir":"spec","spec_files":[
+                "neg/**/!(*.skip).spec.js",
+                "opt/*.spec.?(m)js",
+                "plus/*.+(a|b).spec.js",
+                "star/x*(y).spec.js",
+                "at/*.@(unit|e2e).js",
+                "!at/*.@(e2e).js"
+            ]}"#,
+        );
+        let matches = |path: &str| super::super::entry_rules_match(&result, path);
+
+        assert!(matches("spec/neg/a.spec.js"));
+        assert!(matches("spec/neg/deep/a.spec.js"));
+        assert!(!matches("spec/neg/a.skip.spec.js"));
+        assert!(matches("spec/opt/a.spec.js"));
+        assert!(matches("spec/opt/a.spec.mjs"));
+        assert!(matches("spec/plus/c.a.spec.js"));
+        assert!(matches("spec/plus/c.ab.spec.js"));
+        assert!(!matches("spec/plus/c.spec.js"));
+        assert!(matches("spec/star/x.spec.js"));
+        assert!(matches("spec/star/xyy.spec.js"));
+        assert!(matches("spec/at/a.unit.js"));
+        assert!(!matches("spec/at/a.e2e.js"));
     }
 
     #[test]

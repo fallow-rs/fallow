@@ -1353,7 +1353,7 @@ pub(super) fn make_glob_from_pattern(
     pattern: &fallow_types::extract::DynamicImportPattern,
 ) -> String {
     if has_wildcard_or_alternates(&pattern.prefix)
-        || super::pattern_glob::has_extglob_group(&pattern.prefix)
+        || fallow_config::extglob::has_extglob_group(&pattern.prefix)
     {
         return pattern.prefix.clone();
     }

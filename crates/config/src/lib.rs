@@ -28,6 +28,8 @@ mod config;
 mod config_inputs;
 mod config_writer;
 mod external_plugin;
+/// Extglob groups, such as `!(*.spec)`, rewritten for `globset`.
+pub mod extglob;
 mod fixability;
 /// JSONC parsing helpers pinning the dialect fallow accepts.
 pub mod jsonc;
