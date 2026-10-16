@@ -398,13 +398,20 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_program_function_type_aliases(&mut self, program: &Program<'_>) {
+    /// Record top-level function and store type aliases before the visit, so a
+    /// use that comes before the alias declaration still resolves.
+    pub(super) fn record_program_type_aliases(&mut self, program: &Program<'_>) {
         for statement in &program.body {
-            if let Some(alias) = Self::statement_type_alias(statement)
-                && let Some(params) = Self::function_type_alias_params(alias)
-            {
+            let Some(alias) = Self::statement_type_alias(statement) else {
+                continue;
+            };
+            if let Some(params) = Self::function_type_alias_params(alias) {
                 self.function_type_alias_params
                     .insert(alias.id.name.to_string(), params);
+            }
+            if let Some(factory) = Self::store_factory_from_return_type(&alias.type_annotation) {
+                self.type_alias_store_factory
+                    .insert(alias.id.name.to_string(), factory);
             }
         }
     }

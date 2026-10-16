@@ -358,6 +358,19 @@ fn pinia_credits_member_read_on_param_typed_store_alias() {
 }
 
 #[test]
+fn pinia_credits_member_read_on_param_typed_later_declared_store_alias() {
+    // Issue #3357: the alias is declared after the helper that uses it.
+    let info = parse(
+        "import type { useCounterStore } from './store'\nexport const readCount = (store: CounterStore) => store.count\ntype CounterStore = ReturnType<typeof useCounterStore>",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "count".to_string())),
+        "a read on a later-declared alias should credit the store factory: {accesses:?}"
+    );
+}
+
+#[test]
 fn pinia_does_not_credit_non_store_inline_refs_arg() {
     let info = parse(
         "import { storeToRefs } from 'pinia'\nfunction makeThing() { return { count: 1 } }\nconst { count } = storeToRefs(makeThing())",

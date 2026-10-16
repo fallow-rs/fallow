@@ -12,6 +12,12 @@ impl ModuleInfoExtractor {
     ) {
         match ty {
             TSType::TSTypeReference(reference) => {
+                // `ReturnType<typeof useFooStore>`: a member read through an
+                // imported alias credits the store factory.
+                if let Some(factory) = Self::store_factory_from_return_type(ty) {
+                    targets.push(factory);
+                    return;
+                }
                 let Some((name, _)) = type_name_root(&reference.type_name) else {
                     return;
                 };

@@ -225,3 +225,20 @@ fn credits_setup_store_members_read_by_typed_helpers_and_setup_body() {
         "only the never-read returned member must flag: {members:?}"
     );
 }
+
+#[test]
+fn credits_store_members_read_through_imported_and_later_declared_aliases() {
+    // Issue #3357: `doubled` is read through a `ReturnType` alias that another
+    // file declares and exports. `label` is read through a `ReturnType` alias
+    // that the same file declares after the helper. `deadFlag` is the control.
+    let root = fixture_path("pinia-store-return-type-alias");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let members = store_members(&results, &root);
+
+    assert_eq!(
+        members,
+        vec![("src/store.ts".to_string(), "deadFlag".to_string())],
+        "only the never-read returned member must flag: {members:?}"
+    );
+}

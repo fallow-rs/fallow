@@ -1675,13 +1675,6 @@ impl ModuleInfoExtractor {
         self.record_local_type_declaration(&alias.id.name, alias.id.span);
         self.record_type_alias_surface_targets(alias);
         self.record_playwright_fixture_type_alias(alias);
-        if let Some(factory) = Self::store_factory_from_return_type(&alias.type_annotation) {
-            // `type CounterStore = ReturnType<typeof useCounterStore>`: remember the
-            // store factory so a param typed `CounterStore` credits store members
-            // (issue #1489 Case 2).
-            self.type_alias_store_factory
-                .insert(alias.id.name.to_string(), factory);
-        }
         let refs = Self::collect_type_alias_signature_refs(alias);
         self.record_local_signature_refs(&alias.id.name, refs);
         if let TSType::TSTypeLiteral(type_lit) = &alias.type_annotation {
@@ -3782,7 +3775,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.prepare_factory_property_imports(program);
         self.record_program_namespace_import_locals(program);
         self.record_program_spy_api_locals(program);
-        self.record_program_function_type_aliases(program);
+        self.record_program_type_aliases(program);
         self.record_program_prologue(program);
         self.record_program_sanitizer_functions(program);
         self.record_local_function_return_types(program);
