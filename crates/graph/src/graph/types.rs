@@ -67,6 +67,23 @@ impl ModuleNode {
         self.flags & FLAG_CJS_EXPORTS != 0
     }
 
+    /// Whether the module object of this module is its forwarded default
+    /// export, as with `import x from './y'; export = x`.
+    ///
+    /// Each read of a member of the module object (`m.run()` on a require
+    /// binding, `import { run }`, `const { run } = require(..)`) reads a member
+    /// of that default export (issue #3392). A file that mixes CommonJS
+    /// exports with an ES `default` re-export also matches. The extra credit
+    /// that follows can only hide a finding, never add one.
+    #[must_use]
+    pub fn forwards_default_as_module_object(&self) -> bool {
+        self.has_cjs_exports()
+            && self
+                .re_exports
+                .iter()
+                .any(|re_export| re_export.exported_name == "default")
+    }
+
     /// Set whether this module is reachable from any entry point.
     #[inline]
     pub fn set_reachable(&mut self, v: bool) {

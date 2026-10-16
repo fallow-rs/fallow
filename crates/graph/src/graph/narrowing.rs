@@ -403,22 +403,6 @@ pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
     }
 }
 
-/// Whether the module object of `module` is its forwarded default export, as
-/// with `import x from './y'; export = x`.
-///
-/// A member read on a require binding of such a module (`import m =
-/// require('./x'); m.run()`) reads a member of that default export, so the
-/// read credits `default` too (issue #3392). A file that mixes CommonJS
-/// exports with an ES `default` re-export also matches. That extra credit can
-/// only hide a finding, never add one.
-fn forwards_default_as_module_object(module: &ModuleNode) -> bool {
-    module.has_cjs_exports()
-        && module
-            .re_exports
-            .iter()
-            .any(|re_export| re_export.exported_name == "default")
-}
-
 /// Handle namespace import narrowing for `import * as ns from './x'`.
 ///
 /// If member accesses can be determined, only those exports are marked as used.
@@ -432,7 +416,7 @@ fn narrow_namespace_references(
 ) {
     let source_mod = ctx.module_by_id.get(&site.from_file);
     let mut accessed_members = extract_accessed_members(source_mod, sym_local_name);
-    if !accessed_members.is_empty() && forwards_default_as_module_object(module) {
+    if !accessed_members.is_empty() && module.forwards_default_as_module_object() {
         accessed_members.push("default".to_string());
     }
 
@@ -591,6 +575,7 @@ fn attach_direct_export_references(
     target_module: &mut ModuleNode,
     site: ReferenceSite,
     sym: &ImportedSymbol,
+    target_name: &ImportedName,
     ref_kind: ReferenceKind,
     ctx: AttachContext<'_>,
 ) {
@@ -602,7 +587,7 @@ fn attach_direct_export_references(
         ..
     } = ctx;
     let source_mod = module_by_id.get(&site.from_file);
-    let matching_exports: &[usize] = export_index.matches(&sym.imported_name);
+    let matching_exports: &[usize] = export_index.matches(target_name);
 
     if matching_exports.is_empty() {
         return;
@@ -620,7 +605,7 @@ fn attach_direct_export_references(
         .collect();
 
     let usage = desired_import_namespaces(sym, source_mod);
-    let imported_name = match &sym.imported_name {
+    let imported_name = match target_name {
         ImportedName::Named(name) => name.as_str(),
         ImportedName::Default => "default",
         ImportedName::Namespace | ImportedName::SideEffect => return,
@@ -749,6 +734,20 @@ fn resolved_import_namespaces(
     usage.namespaces()
 }
 
+/// Whether a named import of `imported_name` from `target_module` reads a
+/// member of the default export that an `export = x` forward makes the module
+/// object: `import { run } from './fwd'` or `const { run } = require('./fwd')`
+/// (issue #3392). A name that the module exports itself resolves directly.
+fn reads_member_of_forwarded_default(
+    target_module: &ModuleNode,
+    imported_name: &ImportedName,
+    ctx: &AttachContext<'_>,
+) -> bool {
+    matches!(imported_name, ImportedName::Named(name) if name != "default")
+        && target_module.forwards_default_as_module_object()
+        && ctx.export_index.matches(imported_name).is_empty()
+}
+
 /// Process a single imported symbol, attaching references to the target module's exports.
 ///
 /// Handles: direct export matching, namespace import narrowing, and CSS module narrowing.
@@ -776,7 +775,24 @@ pub(super) fn attach_symbol_reference(
             .get(&target_module.file_id)
             .is_some_and(|module| is_single_static_cjs_object_map(module));
     if !narrows_default_object_map {
-        attach_direct_export_references(target_module, site, sym, ref_kind, ctx.reborrow());
+        attach_direct_export_references(
+            target_module,
+            site,
+            sym,
+            &sym.imported_name,
+            ref_kind,
+            ctx.reborrow(),
+        );
+    }
+    if reads_member_of_forwarded_default(target_module, &sym.imported_name, &ctx) {
+        attach_direct_export_references(
+            target_module,
+            site,
+            sym,
+            &ImportedName::Default,
+            ref_kind,
+            ctx.reborrow(),
+        );
     }
 
     if matches!(sym.imported_name, ImportedName::Namespace) {

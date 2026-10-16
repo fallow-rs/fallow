@@ -106,6 +106,21 @@ fn compile_used_export_rule(
     })
 }
 
+/// Whether the only export of `module` is the default that an `export = x`
+/// forward of an import makes (issue #3392).
+///
+/// `export = x` sets the whole module object, the same as `module.exports =
+/// x`, so it is never an unused export: a module that only assigns
+/// `module.exports` is skipped too. The `remove-export` fix also cannot apply
+/// to it, because `export =` has no `export` keyword to remove.
+fn is_export_assignment_forwarder(module: &ModuleNode) -> bool {
+    module.forwards_default_as_module_object()
+        && module
+            .exports
+            .iter()
+            .all(|export| matches!(export.name, ExportName::Default))
+}
+
 /// Check whether a module should be skipped for unused-export analysis.
 fn should_skip_module(
     module: &ModuleNode,
@@ -119,6 +134,9 @@ fn should_skip_module(
         return module.exports.iter().all(|e| e.references.is_empty());
     }
     if module.has_cjs_exports() && module.exports.is_empty() {
+        return true;
+    }
+    if is_export_assignment_forwarder(module) {
         return true;
     }
     module.path.extension().is_some_and(|ext| ext == "svelte")
