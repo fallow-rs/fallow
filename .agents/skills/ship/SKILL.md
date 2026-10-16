@@ -5,7 +5,12 @@ description: Land completed Fallow work after review, run pre-push parity, monit
 
 # Ship
 
-1. Confirm the branch and diff exactly match the reviewed scope.
+1. Confirm the branch and diff exactly match the reviewed scope. To put
+   the branch on the current base, run
+   `node scripts/ship-rebase.mjs --pr <number> --push`, also for one pull
+   request. Do not rebase by hand. The script compares the result with a
+   merge and checks each version constant. A failed manual
+   `rebase --continue` leaves commits on a detached HEAD.
 2. Re-run the required checks from `docs/development/quality-gates.md`.
 3. Verify that public contracts and generated files are pushed. Merge each
    companion change into the default branch of its repository (for example

@@ -612,8 +612,11 @@ and that the cache (`.fallow/`) does not serve an older result.
 ### Behavior comparison on public projects
 
 When runtime behavior changes, run `npm run conformance:public-smoke` twice:
-once with `--fallow-bin` set to the branch build and once with the latest
-released binary, each with its own `--out-dir`. Pass `--clone` with a shared
+once with `--fallow-bin` set to the branch build and once with a release
+build of the merge base (`git merge-base origin/main HEAD`), each with its
+own `--out-dir`. Do not use the latest released binary as the baseline when
+`main` has unreleased runtime changes: the diff then mixes those changes
+with the changes of the branch. Pass `--clone` with a shared
 `--cache-dir`: without a local project path, every project is skipped and the
 script exits 2. Explain every difference in the pull request. An unexplained
 difference is a finding.
