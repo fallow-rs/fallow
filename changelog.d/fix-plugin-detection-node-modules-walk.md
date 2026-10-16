@@ -8,9 +8,10 @@
   full dependency store once for each workspace, and plugin detection took
   minutes. The walk now does not enter `node_modules`, `.git`, or a
   gitignored path, such as a local build output. It still follows a symlinked
-  project directory, and it stops at a symlink loop. A limit on the number of
-  read directories bounds each glob, and fallow shows a warning when a glob
-  reaches it. The Jest `projects` and Rstest `projects` globs use the same
+  project directory inside the project root, and it stops at a symlink loop.
+  It does not enter a symlink that points out of the project root. A limit on
+  the number of read files and directories bounds each glob, and fallow shows
+  a warning when a glob reaches it. The Jest `projects` and Rstest `projects` globs use the same
   walk.
   Thanks [@wouterkroes](https://github.com/wouterkroes) for the report.
   (Closes [#3532](https://github.com/fallow-rs/fallow/issues/3532))

@@ -503,7 +503,7 @@ fn expand_project_entry(
         return configs;
     }
     let mut iterations = 0_usize;
-    for matched in super::project_glob::expand(base, pattern).paths {
+    for matched in super::project_glob::expand(base, pattern, project_root).paths {
         iterations += 1;
         if iterations > MAX_GLOB_ITERATIONS || configs.len() >= MAX_EXPANDED_PROJECTS {
             break;

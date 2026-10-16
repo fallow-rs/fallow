@@ -440,7 +440,7 @@ fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     if !config_parser::glob_base_is_inside_root(dir, pattern, root) {
         return Vec::new();
     }
-    super::project_glob::expand(dir, pattern)
+    super::project_glob::expand(dir, pattern, root)
         .paths
         .into_iter()
         .filter(|path| {

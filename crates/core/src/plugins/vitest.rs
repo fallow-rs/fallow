@@ -863,7 +863,7 @@ fn project_config_paths(entry: &str, config_dir: &Path, project_root: &Path) -> 
     if !config_parser::glob_base_is_inside_root(config_dir, relative, project_root) {
         return Vec::new();
     }
-    super::project_glob::expand(config_dir, relative)
+    super::project_glob::expand(config_dir, relative, project_root)
         .paths
         .into_iter()
         .filter(|path| {
