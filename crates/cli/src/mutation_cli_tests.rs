@@ -342,9 +342,52 @@ fn a_run_with_baseline_failures_and_no_executed_mutant_exits_2() {
     );
     assert_eq!(
         error.message,
-        "no mutant ran, because the test suite fails with no active mutant: test/env.test.ts::loads: Invalid environment variables (1 more failure, see `baseline_failures` in the JSON report)"
+        "no mutant has a test result, because the test suite fails with no active mutant: test/env.test.ts::loads: Invalid environment variables (1 more failure, see `baseline_failures` in the JSON report)"
     );
     assert!(error.help.is_some());
+}
+
+#[test]
+fn a_baseline_failure_does_not_fail_a_run_that_left_mutants_pending() {
+    let mut stopped = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::Pending),
+            mutant("m2", "src/a.ts", 2, MutantStatus::NoCoverage),
+        ],
+        vec![
+            MutationIncompleteReason::TimeBudget,
+            MutationIncompleteReason::BaselineFailure,
+        ],
+    );
+    stopped.baseline_failures = vec![baseline_failure(Some("test/env.test.ts::loads"), None)];
+    assert!(
+        baseline_blocked_run_error(&stopped).is_none(),
+        "the time budget or --max-mutants stopped the run, not the baseline failure"
+    );
+    assert_eq!(run_exit_code(&stopped, None), 0);
+}
+
+#[test]
+fn a_run_with_only_runtime_errors_and_baseline_failures_exits_2() {
+    let mut errored = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::RuntimeError),
+            mutant("m2", "src/a.ts", 2, MutantStatus::CompileError),
+            mutant("m3", "src/a.ts", 3, MutantStatus::NoCoverage),
+        ],
+        vec![MutationIncompleteReason::BaselineFailure],
+    );
+    errored.baseline_failures = vec![baseline_failure(
+        Some("test/env.test.ts::loads"),
+        Some("Invalid environment variables"),
+    )];
+    let error = baseline_blocked_run_error(&errored).expect("a blocked run");
+    assert_eq!(error.exit_code, 2);
+    assert!(
+        error.message.starts_with("no mutant has a test result"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]

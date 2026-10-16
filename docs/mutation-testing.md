@@ -34,7 +34,8 @@ read-only next steps. It never writes a test and never proposes a code change.
   `<cache dir>/mutation/last-report.json` (by default `.fallow/mutation/`).
   The cache directory has a `.gitignore` with `*`, so the saved report does
   not make the worktree dirty.
-- `-o <path>` (`--output-file`) writes the report only after the run. The
+- `-o <path>` (`--output-file`) writes the report only after the run, also
+  for a run that exits `2` because of baseline failures. The
   worktree check leaves that path out, so a report from an earlier run does
   not make the worktree dirty. A shell redirect such as `> mutation.json`
   creates the file before Fallow starts, so the dirty-worktree check refuses
@@ -179,24 +180,32 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run with baseline failures and no executed mutant. |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result. |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run with no executed mutant has no score. It exits `0` when it
 has no baseline failure, also when each mutant is `no_coverage`.
 
-A run with baseline failures and no executed mutant exits `2` with
-`FALLOW_MUTATION_BASELINE_FAILED`, the same code as a dry run that fails
-outside each test file. An executed mutant is `killed`, `timeout`,
-`survived`, `runtime_error`, `flaky` or `compile_error`. The failed tests
-cannot detect a mutant, so the run measured nothing.
+A run in which baseline failures leave each mutant without a test result
+exits `2` with `FALLOW_MUTATION_BASELINE_FAILED`, the same code as a dry run
+that fails outside each test file. The failed tests cannot detect a mutant,
+so the run measured nothing.
 
+- A mutant has a test result when it is `killed`, `timeout`, `survived` or
+  `flaky`. A run with only `runtime_error`, `compile_error` and
+  `no_coverage` mutants and a baseline failure exits `2`.
+- A `pending` mutant keeps the exit code at `0`. The time budget or
+  `--max-mutants` stopped that run, so the baseline failure is not the
+  cause. The completion is `partial`.
 - The error names the first baseline failure and the first line of its
   message.
-- With `--format json`, the error envelope replaces the report on stdout.
-  The run saves the report to `last-report.json` (see Inspect), and the
-  `help` field gives its path.
-- The human output prints the report and then the error.
+- The run always saves the full report to
+  `<cache dir>/mutation/last-report.json`, and to the `-o` file when `-o`
+  is given. The `help` field of the error gives these paths.
+- With `--format json`, stdout gets the error envelope. When the run cannot
+  save `last-report.json` and has no `-o`, stdout gets the report, so the
+  data stays available, and the error goes to stderr.
+- The human output prints the report and then the error on stderr.
 - This check uses the statuses before `--verdicts`. An `equivalent`
   verdict for a survivor does not change the exit code to `2`. The
   `--min-score` check uses the statuses after the verdicts.
@@ -381,8 +390,8 @@ mutant. Their results decide no mutant status.
   `runtime_error`. The time budget does not stop a dry run in progress, so a
   companion that hangs in its dry run can extend the run past the budget.
 - A baseline failure makes the completion `partial` (`baseline-failure`).
-- A run with baseline failures and no executed mutant exits `2` (see Exit
-  codes).
+- A run in which baseline failures leave each mutant without a test
+  result exits `2` (see Exit codes).
 
 ## Runners
 

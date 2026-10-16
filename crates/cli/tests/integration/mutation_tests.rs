@@ -1086,4 +1086,80 @@ export default {
         );
         assert!(shown.stdout.contains("fresh"), "{}", shown.stdout);
     }
+
+    /// Each test file fails at load with no active mutant, so no mutant gets
+    /// a test result. The run exits 2 with the baseline error and still
+    /// saves the report, also to `--output-file`.
+    #[test]
+    fn a_run_that_baseline_failures_block_exits_2_and_keeps_the_report() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package, "");
+        fs::write(
+            root.join("test/math.test.ts"),
+            "import { test } from \"vitest\";\nimport { add } from \"../src/math\";\n\nif (add(1, 1) === 2) {\n  throw new Error(\"Invalid environment variables\");\n}\n\ntest(\"adds\", () => {});\n",
+        )
+        .expect("test file");
+        commit_all(&root, "a test file that fails at load");
+        let args = ["src/math.ts", "--concurrency", "1"];
+
+        let (output, envelope) = json_mutation(&root, &args);
+        assert_eq!(output.code, 2, "{}", output.stderr);
+        assert_eq!(
+            envelope["code"], "FALLOW_MUTATION_BASELINE_FAILED",
+            "{envelope}"
+        );
+        let message = envelope["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("Invalid environment variables"),
+            "{envelope}"
+        );
+        let saved_path = root.join(".fallow/mutation/last-report.json");
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&saved_path).expect("saved report"))
+                .expect("json");
+        assert_eq!(saved["kind"], "mutation", "{saved}");
+        assert!(
+            saved["baseline_failures"]
+                .as_array()
+                .is_some_and(|failures| !failures.is_empty()),
+            "{saved}"
+        );
+        assert!(
+            envelope["help"]
+                .as_str()
+                .is_some_and(|help| help.contains("last-report.json")),
+            "{envelope}"
+        );
+
+        let reports = tempfile::tempdir().expect("dir");
+        let file = reports.path().join("mutation.json");
+        let mut with_file = args.to_vec();
+        with_file.extend(["-o", file.to_str().expect("path")]);
+        let (output, envelope) = json_mutation(&root, &with_file);
+        assert_eq!(output.code, 2, "{}", output.stderr);
+        assert_eq!(
+            envelope["code"], "FALLOW_MUTATION_BASELINE_FAILED",
+            "{envelope}"
+        );
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&file).expect("output file")).expect("json");
+        assert_eq!(written["kind"], "mutation", "{written}");
+
+        let human = mutation(&root, &["src/math.ts", "--concurrency", "1", "--quiet"]);
+        assert_eq!(human.code, 2, "{}", human.stderr);
+        assert!(
+            human
+                .stdout
+                .contains("  Message: Invalid environment variables"),
+            "{}",
+            human.stdout
+        );
+        assert!(
+            human.stderr.contains("no mutant has a test result"),
+            "{}",
+            human.stderr
+        );
+    }
 }

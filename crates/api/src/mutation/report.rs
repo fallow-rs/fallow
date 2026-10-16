@@ -341,18 +341,24 @@ fn has_unloaded_reached_file(
     })
 }
 
-/// The error of a run that executed no mutant while tests failed with no
-/// active mutant.
+/// The error of a run in which no mutant got a test result while tests
+/// failed with no active mutant.
 ///
-/// Such a run measured nothing, because the failed tests could not detect a
-/// mutant. A run without a baseline failure and with only `no_coverage`
-/// mutants is a fact about the tests and gets no error. The error has exit
-/// code 2 and the code `FALLOW_MUTATION_BASELINE_FAILED`, the same as a dry
-/// run that fails outside each test file. It names the first failure and the
-/// first line of its message.
+/// A mutant has a test result when it is `killed`, `timeout`, `survived` or
+/// `flaky`. Such a run measured nothing, because the failed tests could not
+/// detect a mutant. The error fires only when each other mutant is final
+/// (`no_coverage`, `runtime_error`, `compile_error`, `equivalent` or
+/// `pruned`). A `pending` mutant means that the time budget or
+/// `--max-mutants` stopped the run, so the baseline failure is not the cause.
+/// A run without a baseline failure and with only `no_coverage` mutants is a
+/// fact about the tests and gets no error. The error has exit code 2 and the
+/// code `FALLOW_MUTATION_BASELINE_FAILED`, the same as a dry run that fails
+/// outside each test file. It names the first failure and the first line of
+/// its message.
 #[must_use]
 pub fn baseline_blocked_run_error(report: &MutationReport) -> Option<ProgrammaticError> {
-    if report.summary.counts.executed() > 0 {
+    let counts = &report.summary.counts;
+    if has_test_result(counts) || counts.pending > 0 {
         return None;
     }
     let first = report.baseline_failures.first()?;
@@ -361,8 +367,9 @@ pub fn baseline_blocked_run_error(report: &MutationReport) -> Option<Programmati
         .as_deref()
         .or(first.file.as_deref())
         .unwrap_or("a test file");
-    let mut message =
-        format!("no mutant ran, because the test suite fails with no active mutant: {name}");
+    let mut message = format!(
+        "no mutant has a test result, because the test suite fails with no active mutant: {name}"
+    );
     if let Some(line) = first.message.as_deref().and_then(first_message_line) {
         message.push_str(": ");
         message.push_str(line);
@@ -382,6 +389,12 @@ pub fn baseline_blocked_run_error(report: &MutationReport) -> Option<Programmati
                 "run the tests with the runner directly and make them pass, for example with the environment variables that the package test script sets, then run fallow mutation again",
             ),
     )
+}
+
+/// True when a mutant got a test result: `killed`, `timeout`, `survived` or
+/// `flaky`.
+const fn has_test_result(counts: &MutationStatusCounts) -> bool {
+    counts.killed + counts.timeout + counts.survived + counts.flaky > 0
 }
 
 /// The first line of a failure message that has text, trimmed.
