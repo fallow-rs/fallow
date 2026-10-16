@@ -48,6 +48,7 @@ struct CachedTokenFile {
     token_spans: Vec<CachedSpan>,
     function_spans: Vec<CachedSpan>,
     atomic_invocation_spans: Vec<CachedSpan>,
+    literal_argument_spans: Vec<CachedSpan>,
     source: String,
     line_count: u64,
     suppressions: Vec<CachedSuppression>,
@@ -340,6 +341,11 @@ impl CachedTokenFile {
                 .iter()
                 .map(|span| cached_span(*span))
                 .collect(),
+            literal_argument_spans: file_tokens
+                .literal_argument_spans
+                .iter()
+                .map(|span| cached_span(*span))
+                .collect(),
             source: file_tokens.source.clone(),
             line_count: file_tokens.line_count as u64,
             suppressions: suppressions.iter().map(cached_suppression).collect(),
@@ -364,6 +370,11 @@ impl CachedTokenFile {
                 .collect(),
             atomic_invocation_spans: self
                 .atomic_invocation_spans
+                .iter()
+                .map(|span| Span::new(span.start, span.end))
+                .collect(),
+            literal_argument_spans: self
+                .literal_argument_spans
                 .iter()
                 .map(|span| Span::new(span.start, span.end))
                 .collect(),
@@ -475,6 +486,7 @@ mod tests {
                 }],
                 function_spans: vec![Span::new(0, 5)],
                 atomic_invocation_spans: Vec::new(),
+                literal_argument_spans: Vec::new(),
                 source: source.to_owned(),
                 line_count: 1,
             },

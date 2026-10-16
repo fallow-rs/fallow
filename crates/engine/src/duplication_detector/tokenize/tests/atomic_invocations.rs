@@ -45,3 +45,33 @@ fn returned_call_with_data_arguments_is_atomic() {
     let code = "function build() { return createWidget(project.id, MARKER); }";
     assert!(marker_is_atomic(code, "MARKER"));
 }
+
+/// True when a literal argument span covers the first occurrence of `marker`.
+fn marker_is_in_literal_argument(code: &str, marker: &str) -> bool {
+    let offset = u32::try_from(code.find(marker).expect("marker in code")).unwrap();
+    let path = PathBuf::from("test.ts");
+    tokenize_file(&path, code, false)
+        .literal_argument_spans
+        .iter()
+        .any(|span| span.start <= offset && offset < span.end)
+}
+
+#[test]
+fn object_argument_of_atomic_call_is_a_literal_argument() {
+    let code = "export default defineComponent({ props: { title: { type: MARKER } } });";
+    assert!(marker_is_atomic(code, "MARKER"));
+    assert!(marker_is_in_literal_argument(code, "MARKER"));
+}
+
+#[test]
+fn array_argument_behind_a_type_assertion_is_a_literal_argument() {
+    let code = "register([first, second, MARKER] as const);";
+    assert!(marker_is_in_literal_argument(code, "MARKER"));
+}
+
+#[test]
+fn positional_argument_is_not_a_literal_argument() {
+    let code = "createWidget(project.id, MARKER, { source: 'settings' });";
+    assert!(marker_is_atomic(code, "MARKER"));
+    assert!(!marker_is_in_literal_argument(code, "MARKER"));
+}

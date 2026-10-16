@@ -182,6 +182,7 @@ mod tests {
                 tokens: Vec::new(),
                 function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
+                literal_argument_spans: Vec::new(),
                 source: String::new(),
                 line_count: 1,
             },

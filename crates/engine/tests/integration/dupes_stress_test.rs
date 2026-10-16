@@ -56,6 +56,7 @@ fn make_file_tokens_for(count: usize) -> FileTokens {
         tokens: make_source_tokens(count),
         function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
+        literal_argument_spans: Vec::new(),
         source,
         line_count,
     }
@@ -425,6 +426,7 @@ fn empty_files_mixed_with_normal_files_do_not_crash() {
                 tokens: vec![],
                 function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
+                literal_argument_spans: Vec::new(),
                 source: String::new(),
                 line_count: 0,
             },
@@ -441,6 +443,7 @@ fn empty_files_mixed_with_normal_files_do_not_crash() {
                 tokens: vec![],
                 function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
+                literal_argument_spans: Vec::new(),
                 source: String::new(),
                 line_count: 0,
             },

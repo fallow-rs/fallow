@@ -913,6 +913,61 @@ export default defineComponent({
 }
 
 #[test]
+fn dupes_reports_data_in_an_object_passed_to_a_call() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-define-component-props","private":true,"type":"module"}"#,
+    )
+    .unwrap();
+    let component = r"import { defineComponent } from 'vue';
+
+export default defineComponent({
+    name: 'cart-badge',
+    props: {
+        title: { type: String, required: true, default: '' },
+        subtitle: { type: String, required: false, default: '' },
+        count: { type: Number, required: false, default: 0 },
+        items: { type: Array, required: false, default: null },
+        active: { type: Boolean, required: false, default: false },
+        size: { type: String, required: false, default: 'medium' },
+        variant: { type: String, required: false, default: 'primary' },
+        icon: { type: String, required: false, default: null },
+        disabled: { type: Boolean, required: false, default: false },
+        loading: { type: Boolean, required: false, default: false },
+    },
+});
+";
+    std::fs::write(dir.path().join("src/cart-badge.ts"), component).unwrap();
+    std::fs::write(
+        dir.path().join("src/order-badge.ts"),
+        component.replace("cart-badge", "order-badge"),
+    )
+    .unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let groups = json["clone_groups"].as_array().unwrap();
+    assert_eq!(
+        groups.len(),
+        1,
+        "a props block in a defineComponent object should be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    for instance in groups[0]["instances"].as_array().unwrap() {
+        assert_eq!(instance["start_line"].as_u64(), Some(5), "{instance}");
+        assert_eq!(instance["end_line"].as_u64(), Some(17), "{instance}");
+    }
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "test fixture; linear setup/assert, length is not a maintainability concern"

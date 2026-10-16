@@ -290,6 +290,10 @@ pub struct FileTokens {
     /// reported as actionable duplicate code when the whole clone fits inside
     /// one of these spans.
     pub atomic_invocation_spans: Vec<Span>,
+    /// Source spans of the object and array literal arguments of atomic
+    /// invocations. A clone that starts inside one of these spans does not
+    /// hold the callee, so the atomic invocation filter keeps it.
+    pub literal_argument_spans: Vec<Span>,
     /// Source text (needed for extracting fragments).
     pub source: String,
     /// Total number of lines in the source.

@@ -137,11 +137,18 @@ fn span_is_atomic_invocation(file: &FileData, start: u32, end: u32) -> bool {
     file.atomic_invocation_spans
         .iter()
         .any(|span| span.start <= start && end <= span.end)
+        && !file
+            .file_tokens
+            .literal_argument_spans
+            .iter()
+            .any(|span| span.start <= start && start < span.end)
 }
 
 /// Return true when the entire clone group is just repeated invocation syntax,
 /// optionally wrapped by a return/await/expression statement. Those findings
 /// tend to be non-actionable: the shared abstraction is already the callee.
+/// A clone that starts inside an object or array literal argument does not
+/// hold the callee. It is copied data, so it is not invocation syntax.
 fn is_atomic_invocation_group(rg: &RawGroup, files: &[FileData]) -> bool {
     let mut seen: FxHashSet<(usize, usize)> = FxHashSet::default();
     let mut checked = 0;
@@ -605,6 +612,7 @@ mod tests {
                 tokens: vec![],
                 function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
+                literal_argument_spans: Vec::new(),
                 source: source.to_string(),
                 line_count: source.lines().count().max(1),
             },
@@ -680,6 +688,7 @@ mod tests {
                 tokens,
                 function_spans: Vec::new(),
                 atomic_invocation_spans: Vec::new(),
+                literal_argument_spans: Vec::new(),
                 source: source.to_string(),
                 line_count: source.lines().count().max(1),
             },

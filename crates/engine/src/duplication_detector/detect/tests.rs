@@ -36,6 +36,7 @@ fn make_file_tokens(source: &str, count: usize) -> FileTokens {
         tokens: make_source_tokens(count),
         function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
+        literal_argument_spans: Vec::new(),
         source: source.to_string(),
         line_count: source.lines().count().max(1),
     }
@@ -60,6 +61,7 @@ fn make_boundary_test_file(path: &str, has_boundary: bool) -> FileData {
             }],
             function_spans: Vec::new(),
             atomic_invocation_spans: Vec::new(),
+            literal_argument_spans: Vec::new(),
             source: "x".to_string(),
             line_count: 1,
         },

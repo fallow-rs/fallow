@@ -55,6 +55,7 @@ fn make_file_tokens_for(count: usize) -> fallow_engine::duplicates::tokenize::Fi
         tokens,
         function_spans: Vec::new(),
         atomic_invocation_spans: Vec::new(),
+        literal_argument_spans: Vec::new(),
         source,
         line_count,
     }
