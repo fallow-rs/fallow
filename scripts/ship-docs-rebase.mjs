@@ -38,6 +38,12 @@ Options:
                     The remote or URL that holds the branch, when it is not
                     --remote. With --pr, a pull request from a fork that
                     allows maintainer edits sets it to the fork.
+  --upstream <commit>
+                    The old tip of the parent branch of a stacked branch.
+                    Use it after the parent pull request merged with a
+                    squash. The script then rebases only the commits after
+                    this commit, and the checks compare only those commits.
+                    This option needs Git 2.40 or later.
   --push            Push the result with a lease on the old branch tip
                     when all checks pass.
   -h, --help        Show this help.
