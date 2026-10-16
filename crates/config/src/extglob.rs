@@ -355,9 +355,16 @@ mod tests {
     }
 
     #[test]
-    fn plain_globs_and_escapes_keep_their_meaning() {
+    fn plain_globs_keep_their_meaning() {
         assert!(matches("**/*.ts", "deep/nested.ts"));
         assert!(matches("{a,b}/*.js", "b/x.js"));
+    }
+
+    // On Windows, globset reads a backslash as a path separator, not as an
+    // escape, so an escaped group cannot match there.
+    #[cfg(not(windows))]
+    #[test]
+    fn escaped_group_stays_literal() {
         assert!(matches(r"\!(x).js", "!(x).js"));
         assert!(!matches(r"\!(x).js", "y.js"));
     }
