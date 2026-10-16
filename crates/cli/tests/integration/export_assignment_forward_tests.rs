@@ -132,3 +132,32 @@ fn named_import_from_export_assignment_forwarder_credits_default() {
     assert!(unused_export_keys(&output).is_empty(), "{output}");
     assert_traced_from_consumer(root);
 }
+
+/// The unused default export of `src/fwd.ts`, in a project where
+/// `src/index.ts` only loads the forwarding file for its side effects.
+fn unused_forwarded_default(forwarder: &str) -> serde_json::Value {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    write_project(root, "import './fwd';\n");
+    fs::write(root.join("src/fwd.ts"), forwarder).expect("write forwarder");
+
+    let output = dead_code(root);
+    output["unused_exports"]
+        .as_array()
+        .and_then(|list| {
+            list.iter()
+                .find(|entry| entry["path"] == "src/fwd.ts" && entry["export_name"] == "default")
+        })
+        .cloned()
+        .unwrap_or_else(|| panic!("unused default export of src/fwd.ts: {output}"))
+}
+
+#[test]
+fn unused_export_default_forward_reports_as_re_export() {
+    let binding = unused_forwarded_default("import api from './lib';\nexport default api;\n");
+    let specifier =
+        unused_forwarded_default("import api from './lib';\nexport { api as default };\n");
+
+    assert_eq!(binding["is_re_export"], true, "{binding}");
+    assert_eq!(binding["actions"], specifier["actions"], "{binding}");
+}
