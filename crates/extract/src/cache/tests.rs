@@ -1185,12 +1185,14 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
                 suffix: Some(".vue".to_string()),
                 span: Span::new(0, 50),
                 mechanism: crate::ModuleLoadMechanism::EsModule,
+                excludes: vec!["./components/skip.vue".to_string()],
             },
             crate::DynamicImportPattern {
                 prefix: "./pages/**/".to_string(),
                 suffix: None,
                 span: Span::new(60, 100),
                 mechanism: crate::ModuleLoadMechanism::CommonJsRequire,
+                excludes: Vec::new(),
             },
         ],
         ..ModuleInfo::empty(FileId(0))
@@ -1205,6 +1207,11 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         restored.dynamic_import_patterns[0].suffix,
         Some(".vue".to_string())
     );
+    assert_eq!(
+        restored.dynamic_import_patterns[0].excludes,
+        vec!["./components/skip.vue".to_string()]
+    );
+    assert!(restored.dynamic_import_patterns[1].excludes.is_empty());
     assert_eq!(restored.dynamic_import_patterns[0].span.start, 0);
     assert_eq!(restored.dynamic_import_patterns[0].span.end, 50);
     assert_eq!(

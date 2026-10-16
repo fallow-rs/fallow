@@ -18,6 +18,12 @@
 //!   that picomatch matches through a different path segment.
 //!
 //! A negated group inside another group becomes `*` and excludes nothing.
+//!
+//! A pattern can also have exclude globs of its own, from the negative entries
+//! of an `import.meta.glob` array. An exclude glob must never match more files
+//! than picomatch does, so only an exclude glob with exact groups (`@(..)` and
+//! `?(..)`) or no groups removes files. An exclude glob that is not valid
+//! removes no file.
 
 use std::path::Path;
 
@@ -31,17 +37,25 @@ pub(super) struct PatternGlob {
 }
 
 impl PatternGlob {
-    /// Compile `pattern`. Returns `None` when the pattern is not a valid glob.
-    pub(super) fn new(pattern: &str) -> Option<Self> {
+    /// Compile `pattern` with the exclude globs `excludes`. Returns `None`
+    /// when `pattern` is not a valid glob.
+    pub(super) fn new(pattern: &str, excludes: &[&str]) -> Option<Self> {
         let (include, negated_groups) = rewrite(pattern, None);
         let include = build_glob(&include, false)?.compile_matcher();
-        let mut excludes = GlobSetBuilder::new();
+        let mut exclude_set = GlobSetBuilder::new();
         for group in 0..negated_groups {
-            excludes.add(build_glob(&rewrite(pattern, Some(group)).0, true)?);
+            exclude_set.add(build_glob(&rewrite(pattern, Some(group)).0, true)?);
+        }
+        for exclude in excludes {
+            if has_only_exact_groups(exclude)
+                && let Some(glob) = build_glob(&rewrite(exclude, None).0, true)
+            {
+                exclude_set.add(glob);
+            }
         }
         Some(Self {
             include,
-            excludes: excludes.build().ok()?,
+            excludes: exclude_set.build().ok()?,
         })
     }
 
@@ -63,6 +77,20 @@ pub(super) fn has_extglob_group(pattern: &str) -> bool {
         rest = &rest[body_start..];
     }
     false
+}
+
+/// Whether every closed extglob group of `pattern` has an exact rewrite.
+/// Only `@(..)` and `?(..)` do, also when they are nested.
+fn has_only_exact_groups(pattern: &str) -> bool {
+    let mut rest = pattern;
+    while let Some((start, operator)) = next_group(rest) {
+        let body_start = start + 2;
+        if matches!(operator, b'+' | b'*' | b'!') && group_body_len(&rest[body_start..]).is_some() {
+            return false;
+        }
+        rest = &rest[body_start..];
+    }
+    true
 }
 
 /// Build a glob. An exclude glob sets `literal_separator`, so that its `*`
@@ -190,9 +218,95 @@ mod tests {
     use super::*;
 
     fn matches(pattern: &str, path: &str) -> bool {
-        PatternGlob::new(pattern)
+        matches_with_excludes(pattern, &[], path)
+    }
+
+    fn matches_with_excludes(pattern: &str, excludes: &[&str], path: &str) -> bool {
+        PatternGlob::new(pattern, excludes)
             .expect("pattern should compile")
             .is_match(Path::new(path))
+    }
+
+    #[test]
+    fn exclude_globs_remove_their_matches() {
+        let excludes = ["pages/skip.js", "**/draft.js"];
+        assert!(matches_with_excludes(
+            "pages/*.js",
+            &excludes,
+            "pages/home.js"
+        ));
+        assert!(!matches_with_excludes(
+            "pages/*.js",
+            &excludes,
+            "pages/skip.js"
+        ));
+        assert!(!matches_with_excludes(
+            "pages/*.js",
+            &excludes,
+            "pages/draft.js"
+        ));
+    }
+
+    #[test]
+    fn exclude_glob_star_stays_in_one_segment() {
+        let excludes = ["pages/*.js"];
+        assert!(!matches_with_excludes(
+            "pages/**/*.js",
+            &excludes,
+            "pages/a.js"
+        ));
+        assert!(matches_with_excludes(
+            "pages/**/*.js",
+            &excludes,
+            "pages/deep/a.js"
+        ));
+    }
+
+    #[test]
+    fn exclude_glob_keeps_only_exact_extglob_groups() {
+        let pattern = "pages/*.js";
+        assert!(!matches_with_excludes(
+            pattern,
+            &["pages/@(a|b).js"],
+            "pages/a.js"
+        ));
+        assert!(matches_with_excludes(
+            pattern,
+            &["pages/@(a|b).js"],
+            "pages/c.js"
+        ));
+        // A wider rewrite of `+(..)`, `*(..)` or `!(..)` could drop a file that
+        // Vite loads, so such an exclude glob removes no file.
+        assert!(matches_with_excludes(
+            pattern,
+            &["pages/+(a)x.js"],
+            "pages/ax.js"
+        ));
+        assert!(matches_with_excludes(
+            pattern,
+            &["pages/!(a).js"],
+            "pages/b.js"
+        ));
+    }
+
+    #[test]
+    fn invalid_exclude_glob_removes_no_file() {
+        assert!(matches_with_excludes(
+            "pages/*.js",
+            &["pages/["],
+            "pages/a.js"
+        ));
+    }
+
+    #[test]
+    fn one_character_classes_match_literal_metacharacters() {
+        let pattern = "[[]id[]]/*.js";
+        assert!(matches(pattern, "[id]/page.js"));
+        assert!(!matches(pattern, "i/page.js"));
+        assert!(!matches(pattern, "d/page.js"));
+        assert!(matches("[{]group[}]/[*][?]/*.js", "{group}/*?/a.js"));
+        assert!(matches("x[(]a)/*.js", "x(a)/b.js"));
+        assert!(!has_extglob_group("@[(]a|b)/*.js"));
     }
 
     #[test]
@@ -285,6 +399,6 @@ mod tests {
 
     #[test]
     fn invalid_glob_does_not_compile() {
-        assert!(PatternGlob::new("[").is_none());
+        assert!(PatternGlob::new("[", &[]).is_none());
     }
 }

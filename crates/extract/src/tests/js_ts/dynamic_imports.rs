@@ -145,6 +145,67 @@ fn extracts_require_context_recursive() {
 }
 
 #[test]
+fn import_meta_glob_negative_entries_become_excludes() {
+    let info = parse_source(
+        "const mods = import.meta.glob(['./pages/*.ts', '!./pages/skip.ts', './layouts/*.ts', '!**/draft.ts', '!lib/x.ts']);",
+    );
+    let patterns: Vec<(&str, Vec<&str>)> = info
+        .dynamic_import_patterns
+        .iter()
+        .map(|pattern| {
+            (
+                pattern.prefix.as_str(),
+                pattern.excludes.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        patterns,
+        vec![
+            ("./pages/*.ts", vec!["./pages/skip.ts", "**/draft.ts"]),
+            ("./layouts/*.ts", vec!["./pages/skip.ts", "**/draft.ts"]),
+        ]
+    );
+}
+
+#[test]
+fn template_literal_pattern_escapes_glob_metacharacters() {
+    let info = parse_source("const m = import(`./[id]/${name}[x].js`);");
+    assert_eq!(info.dynamic_import_patterns.len(), 1);
+    assert_eq!(info.dynamic_import_patterns[0].prefix, "./[[]id[]]/");
+    assert_eq!(
+        info.dynamic_import_patterns[0].suffix.as_deref(),
+        Some("[[]x[]].js")
+    );
+    assert!(info.dynamic_import_patterns[0].excludes.is_empty());
+}
+
+#[test]
+fn concat_pattern_escapes_glob_metacharacters() {
+    let info = parse_source("const m = import('./{group}/*?/' + name + '.js');");
+    assert_eq!(info.dynamic_import_patterns.len(), 1);
+    assert_eq!(
+        info.dynamic_import_patterns[0].prefix,
+        "./[{]group[}]/[*][?]/"
+    );
+    assert_eq!(
+        info.dynamic_import_patterns[0].suffix.as_deref(),
+        Some(".js")
+    );
+}
+
+#[test]
+fn require_context_pattern_escapes_glob_metacharacters() {
+    let info = parse_source(r"const ctx = require.context('./[locale]', true, /\.json$/);");
+    assert_eq!(info.dynamic_import_patterns.len(), 1);
+    assert_eq!(info.dynamic_import_patterns[0].prefix, "./[[]locale[]]/**/");
+    assert_eq!(
+        info.dynamic_import_patterns[0].suffix.as_deref(),
+        Some(".json")
+    );
+}
+
+#[test]
 fn vitest_mock_records_target_and_auto_mock_sibling() {
     let info = parse_source("vi.mock('./services/api');");
     assert_eq!(info.dynamic_imports.len(), 2);

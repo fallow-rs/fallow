@@ -1092,6 +1092,7 @@ fn dynamic_patterns_matches_files_in_dir() {
         suffix: Some(".json".into()),
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
+        excludes: Vec::new(),
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/locales/en.json"),
@@ -1139,12 +1140,14 @@ fn dynamic_patterns_no_matches_preserves_empty_target_row() {
             suffix: Some(".json".into()),
             span: dummy_span(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         },
         DynamicImportPattern {
             prefix: "./[".into(),
             suffix: None,
             span: dummy_span(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         },
     ];
     let canonical_paths = vec![PathBuf::from("/project/src/utils.ts")];
@@ -1188,6 +1191,54 @@ fn dynamic_patterns_empty_patterns_list() {
 }
 
 #[test]
+fn dynamic_patterns_apply_excludes_and_escaped_literals() {
+    let from_dir = Path::new("/project/src");
+    let paths = [
+        "/project/src/pages/home.js",
+        "/project/src/pages/skip.js",
+        "/project/src/pages/draft.js",
+        "/project/src/[id]/view.js",
+        "/project/src/i/view.js",
+    ];
+    let files: Vec<DiscoveredFile> = paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| DiscoveredFile {
+            id: FileId(u32::try_from(index).expect("small index")),
+            path: PathBuf::from(path),
+            size_bytes: 100,
+        })
+        .collect();
+    let patterns = vec![
+        DynamicImportPattern {
+            prefix: "./pages/*.js".into(),
+            suffix: None,
+            span: dummy_span(),
+            mechanism: ModuleLoadMechanism::EsModule,
+            excludes: vec!["./pages/skip.js".into(), "**/draft.js".into()],
+        },
+        DynamicImportPattern {
+            prefix: "./[[]id[]]/".into(),
+            suffix: Some(".js".into()),
+            span: dummy_span(),
+            mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
+        },
+    ];
+
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        from_dir,
+        &patterns,
+        &[],
+        &files,
+    );
+
+    assert_eq!(result[0].1, vec![FileId(0)]);
+    assert_eq!(result[1].1, vec![FileId(3)]);
+}
+
+#[test]
 fn dynamic_patterns_glob_prefix_passthrough() {
     let from_dir = Path::new("/project/src");
     let patterns = vec![DynamicImportPattern {
@@ -1195,6 +1246,7 @@ fn dynamic_patterns_glob_prefix_passthrough() {
         suffix: None,
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
+        excludes: Vec::new(),
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/utils.ts"),
@@ -1404,6 +1456,7 @@ fn dynamic_patterns_prefix_without_suffix() {
         suffix: None,
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
+        excludes: Vec::new(),
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/pages/Home.tsx"),
@@ -1450,6 +1503,7 @@ fn dynamic_patterns_empty_canonical_paths() {
         suffix: Some(".json".into()),
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
+        excludes: Vec::new(),
     }];
 
     let result =

@@ -66,7 +66,7 @@ assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 96);
 assert_cached_type_size!(CachedReExport, 104);
 assert_cached_type_size!(CachedMember, 88);
-assert_cached_type_size!(CachedDynamicImportPattern, 64);
+assert_cached_type_size!(CachedDynamicImportPattern, 88);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
@@ -606,6 +606,8 @@ pub struct CachedDynamicImportPattern {
     pub(crate) prefix: String,
     /// Static suffix, if any.
     pub(crate) suffix: Option<String>,
+    /// Globs of the files that the pattern does not load.
+    pub(crate) excludes: Vec<String>,
     /// Byte offset of the span start.
     pub(crate) span_start: u32,
     /// Byte offset of the span end.

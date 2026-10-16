@@ -164,6 +164,7 @@ fn cached_dynamic_patterns_to_module(
         .map(|pattern| crate::DynamicImportPattern {
             prefix: pattern.prefix.clone(),
             suffix: pattern.suffix.clone(),
+            excludes: pattern.excludes.clone(),
             span: Span::new(pattern.span_start, pattern.span_end),
             mechanism: pattern.mechanism,
         })
@@ -380,6 +381,7 @@ fn module_dynamic_patterns_to_cached(
         .map(|pattern| CachedDynamicImportPattern {
             prefix: pattern.prefix.clone(),
             suffix: pattern.suffix.clone(),
+            excludes: pattern.excludes.clone(),
             span_start: pattern.span.start,
             span_end: pattern.span.end,
             mechanism: pattern.mechanism,

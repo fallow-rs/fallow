@@ -824,6 +824,7 @@ mod tests {
                                 suffix: None,
                                 span: oxc_span::Span::new(0, 10),
                                 mechanism,
+                                excludes: Vec::new(),
                             },
                             vec![FileId(1)],
                         )

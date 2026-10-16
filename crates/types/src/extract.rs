@@ -1962,10 +1962,17 @@ impl ImportLoadKind {
 /// A dynamic import with a partially resolved pattern.
 #[derive(Debug, Clone)]
 pub struct DynamicImportPattern {
-    /// Static prefix of the import path (e.g., "./locales/"). May contain glob characters.
+    /// Glob prefix of the import path (e.g., "./locales/"). An
+    /// `import.meta.glob` pattern is the full glob. For a template literal, a
+    /// string concatenation, or `require.context`, each glob metacharacter of
+    /// the literal text is escaped as a one-character class, such as `[[]`.
     pub prefix: String,
-    /// Static suffix of the import path (e.g., ".json"), if any.
+    /// Glob suffix of the import path (e.g., ".json"), if any.
     pub suffix: Option<String>,
+    /// Globs of the files that the pattern does not load. Vite reads a
+    /// negative `import.meta.glob` array entry, such as `'!./a/skip.js'`, as
+    /// an exclude for every positive entry of the same call.
+    pub excludes: Vec<String>,
     /// Source span in the original file.
     pub span: Span,
     /// Runtime mechanism used to load modules matching this pattern.
@@ -4592,6 +4599,7 @@ mod tests {
                 suffix: Some(".tsx".to_string()),
                 span: span(),
                 mechanism: ModuleLoadMechanism::EsModule,
+                excludes: Vec::new(),
             }],
             require_calls: vec![RequireCallInfo {
                 source: "./required".to_string(),

@@ -1352,8 +1352,7 @@ fn resolve_workspace_self_reference(
 pub(super) fn make_glob_from_pattern(
     pattern: &fallow_types::extract::DynamicImportPattern,
 ) -> String {
-    if pattern.prefix.contains('*')
-        || pattern.prefix.contains('{')
+    if has_wildcard_or_alternates(&pattern.prefix)
         || super::pattern_glob::has_extglob_group(&pattern.prefix)
     {
         return pattern.prefix.clone();
@@ -1362,6 +1361,22 @@ pub(super) fn make_glob_from_pattern(
         || format!("{}*", pattern.prefix),
         |suffix| format!("{}*{}", pattern.prefix, suffix),
     )
+}
+
+/// Whether `prefix` has a `*` or a `{` outside a one-character class. The
+/// extractor escapes a literal metacharacter as a one-character class, such
+/// as `[*]`, so an escaped character is not glob syntax.
+fn has_wildcard_or_alternates(prefix: &str) -> bool {
+    let bytes = prefix.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'[' if bytes.get(index + 2) == Some(&b']') => index += 3,
+            b'*' | b'{' => return true,
+            _ => index += 1,
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -2269,6 +2284,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*");
     }
@@ -2280,8 +2296,21 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/@(en|nl).js");
+    }
+
+    #[test]
+    fn make_glob_keeps_suffix_after_escaped_metacharacters() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./[{]group[}]/[*]/".to_string(),
+            suffix: Some(".js".to_string()),
+            span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./[{]group[}]/[*]/*.js");
     }
 
     #[test]
@@ -2291,6 +2320,7 @@ mod tests {
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*.json");
     }
@@ -2302,6 +2332,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./pages/**/*.tsx");
     }
@@ -2313,6 +2344,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./i18n/{en,de,fr}.json");
     }
@@ -2324,6 +2356,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "*");
     }
@@ -2335,6 +2368,7 @@ mod tests {
             suffix: Some(".ts".to_string()),
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "*.ts");
     }
@@ -2346,6 +2380,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./pages/*");
     }
@@ -2357,6 +2392,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./modules/*");
     }
@@ -2368,6 +2404,7 @@ mod tests {
             suffix: Some(".vue".to_string()),
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./views/*.vue");
     }
@@ -2379,6 +2416,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -2394,6 +2432,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -2409,6 +2448,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -2424,6 +2464,7 @@ mod tests {
             suffix: Some(".extra".to_string()),
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(
             make_glob_from_pattern(&pattern),
@@ -2439,6 +2480,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./*");
     }
@@ -2450,6 +2492,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./config*");
     }
@@ -2461,6 +2504,7 @@ mod tests {
             suffix: Some(".ts".to_string()),
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         assert_eq!(make_glob_from_pattern(&pattern), "../shared/*.ts");
     }

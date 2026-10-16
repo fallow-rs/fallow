@@ -207,19 +207,28 @@ pub(super) struct GlobMatcherCache {
 }
 
 impl GlobMatcherCache {
-    /// Return the cached matcher for `glob_str`, compiling it on first miss.
-    fn get(&self, glob_str: &str) -> Option<Arc<PatternGlob>> {
+    /// Return the cached matcher for `glob_str` with the exclude globs
+    /// `excludes`, compiling it on first miss.
+    fn get(&self, glob_str: &str, excludes: &[&str]) -> Option<Arc<PatternGlob>> {
+        // A NUL byte cannot occur in a path glob, so it separates the globs
+        // of the key without ambiguity.
+        let mut key = glob_str.to_string();
+        for exclude in excludes {
+            key.push('\0');
+            key.push_str(exclude);
+        }
         if let Ok(cache) = self.map.lock()
-            && let Some(value) = cache.get(glob_str)
+            && let Some(value) = cache.get(&key)
         {
             return value.clone();
         }
-        let value = PatternGlob::new(glob_str).map(Arc::new);
+        let value = PatternGlob::new(glob_str, excludes).map(Arc::new);
         // Two threads can compile the same pattern at the same time. Only the
         // thread that inserts the entry first gives the warning.
-        let first_insert = self.map.lock().map_or(true, |mut cache| {
-            cache.insert(glob_str.to_string(), value.clone()).is_none()
-        });
+        let first_insert = self
+            .map
+            .lock()
+            .map_or(true, |mut cache| cache.insert(key, value.clone()).is_none());
         if value.is_none() && first_insert {
             tracing::warn!(
                 "Dynamic import pattern `{glob_str}` is not a valid glob and matches no files"
@@ -249,7 +258,13 @@ pub(super) fn resolve_dynamic_patterns(
             // leading "./". Stripping the prefix from the glob once lets each
             // candidate be matched as-is instead of allocating a "./"-prefixed
             // String per file per pattern.
-            let Some(matcher) = glob_cache.get(glob_str.strip_prefix("./").unwrap_or(&glob_str))
+            let excludes: Vec<&str> = pattern
+                .excludes
+                .iter()
+                .map(|exclude| exclude.strip_prefix("./").unwrap_or(exclude))
+                .collect();
+            let Some(matcher) =
+                glob_cache.get(glob_str.strip_prefix("./").unwrap_or(&glob_str), &excludes)
             else {
                 return (pattern.clone(), Vec::new());
             };

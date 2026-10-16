@@ -1871,11 +1871,35 @@ pub(super) fn ts_import_type_qualifier_root<'a>(
     }
 }
 
+/// Escape the glob metacharacters of a literal path part.
+///
+/// The resolver reads a dynamic import pattern as a glob. A literal part, such
+/// as the `./[id]/` prefix of a template literal, must match only itself. Each
+/// metacharacter becomes a one-character class, for example `[` becomes
+/// `[[]`. A class works on every platform, but a backslash escape does not
+/// work on Windows. The escape of `(` stops the resolver from reading a text
+/// such as `@(a)` as an extglob group.
+pub(super) fn escape_glob_literal(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        if matches!(character, '*' | '?' | '[' | ']' | '{' | '}' | '(') {
+            escaped.push('[');
+            escaped.push(character);
+            escaped.push(']');
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
+}
+
+/// The glob prefix and suffix of a `'./dir/' + name + '.js'` concatenation.
+/// Both parts are glob-escaped literal text.
 pub(super) fn extract_concat_parts(
     expr: &BinaryExpression<'_>,
 ) -> Option<(String, Option<String>)> {
-    let prefix = extract_leading_string(&expr.left)?;
-    let suffix = extract_trailing_string(&expr.right);
+    let prefix = escape_glob_literal(&extract_leading_string(&expr.left)?);
+    let suffix = extract_trailing_string(&expr.right).map(|suffix| escape_glob_literal(&suffix));
     Some((prefix, suffix))
 }
 

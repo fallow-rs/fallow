@@ -61,6 +61,8 @@ mod deprecated_exports;
 mod directory_resolution;
 #[path = "integration_test/duplicate_prop_shape.rs"]
 mod duplicate_prop_shape;
+#[path = "integration_test/dynamic_import_glob_excludes.rs"]
+mod dynamic_import_glob_excludes;
 #[path = "integration_test/dynamic_import_then.rs"]
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]

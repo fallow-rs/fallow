@@ -28,7 +28,7 @@ use crate::function_body::BodyRef;
 use crate::html::is_remote_url;
 
 use super::helpers::{
-    array_element_type_from_type, extract_angular_component_metadata,
+    array_element_type_from_type, escape_glob_literal, extract_angular_component_metadata,
     extract_angular_inputs_outputs, extract_angular_signal_query,
     extract_class_generic_instance_bindings, extract_class_members,
     extract_class_type_parameter_names, extract_concat_parts, extract_custom_element_tag_reference,
@@ -4563,6 +4563,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                             suffix,
                             span: expr.span,
                             mechanism: ModuleLoadMechanism::EsModule,
+                            excludes: Vec::new(),
                         });
                     }
                 }

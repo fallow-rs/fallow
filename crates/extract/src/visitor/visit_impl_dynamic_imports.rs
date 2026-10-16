@@ -30,13 +30,19 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    fn push_relative_dynamic_import_pattern(&mut self, prefix: String, span: Span) {
+    fn push_relative_dynamic_import_pattern(
+        &mut self,
+        prefix: String,
+        excludes: &[String],
+        span: Span,
+    ) {
         if prefix.starts_with("./") || prefix.starts_with("../") {
             self.dynamic_import_patterns.push(DynamicImportPattern {
                 prefix,
                 suffix: None,
                 span,
                 mechanism: ModuleLoadMechanism::EsModule,
+                excludes: excludes.to_vec(),
             });
         }
     }
@@ -55,13 +61,27 @@ impl<'a> ModuleInfoExtractor {
             }
             match first_arg {
                 Argument::StringLiteral(lit) => {
-                    self.push_relative_dynamic_import_pattern(lit.value.to_string(), expr.span);
+                    self.push_relative_dynamic_import_pattern(
+                        lit.value.to_string(),
+                        &[],
+                        expr.span,
+                    );
                 }
                 Argument::ArrayExpression(arr) => {
-                    for elem in &arr.elements {
-                        if let ArrayExpressionElement::StringLiteral(lit) = elem {
+                    let entries: Vec<&str> = arr
+                        .elements
+                        .iter()
+                        .filter_map(|elem| match elem {
+                            ArrayExpressionElement::StringLiteral(lit) => Some(lit.value.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    let excludes = import_meta_glob_excludes(&entries);
+                    for entry in entries {
+                        if !entry.starts_with('!') {
                             self.push_relative_dynamic_import_pattern(
-                                lit.value.to_string(),
+                                entry.to_string(),
+                                &excludes,
                                 expr.span,
                             );
                         }
@@ -79,7 +99,7 @@ impl<'a> ModuleInfoExtractor {
             && obj.name == "require"
             && let Some(Argument::StringLiteral(dir_lit)) = expr.arguments.first()
         {
-            let dir = dir_lit.value.to_string();
+            let dir = escape_glob_literal(&dir_lit.value);
             if dir.starts_with("./") || dir.starts_with("../") {
                 let recursive = expr
                     .arguments
@@ -99,6 +119,7 @@ impl<'a> ModuleInfoExtractor {
                     suffix,
                     span: expr.span,
                     mechanism: ModuleLoadMechanism::CommonJsRequire,
+                    excludes: Vec::new(),
                 });
             }
         }
@@ -650,7 +671,7 @@ impl<'a> ModuleInfoExtractor {
         tpl: &TemplateLiteral<'a>,
         span: Span,
     ) {
-        let first_quasi = tpl.quasis[0].value.raw.to_string();
+        let first_quasi = escape_glob_literal(&tpl.quasis[0].value.raw);
         if !(first_quasi.starts_with("./") || first_quasi.starts_with("../")) {
             return;
         }
@@ -661,7 +682,7 @@ impl<'a> ModuleInfoExtractor {
         };
         let suffix = if tpl.quasis.len() > 1 {
             let last = &tpl.quasis[tpl.quasis.len() - 1];
-            let s = last.value.raw.to_string();
+            let s = escape_glob_literal(&last.value.raw);
             if s.is_empty() { None } else { Some(s) }
         } else {
             None
@@ -671,8 +692,22 @@ impl<'a> ModuleInfoExtractor {
             suffix,
             span,
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         });
     }
+}
+
+/// The exclude globs of an `import.meta.glob` array: each negative entry
+/// without its `!`. Vite reads a negative entry that starts with `./`, `../`
+/// or `**`. Other negative entries need the alias resolver of Vite, so they
+/// give no exclude, and the pattern keeps the files.
+fn import_meta_glob_excludes(entries: &[&str]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| entry.strip_prefix('!'))
+        .filter(|glob| glob.starts_with("./") || glob.starts_with("../") || glob.starts_with("**"))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Whether an `import.meta.glob` options argument sets `eager: true`, which

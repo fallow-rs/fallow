@@ -1560,6 +1560,7 @@ mod tests {
             suffix: Some(".json".to_string()),
             span: oxc_span::Span::new(0, 10),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),
@@ -1586,6 +1587,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::new(0, 1),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),
@@ -1625,6 +1627,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::new(0, 1),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         let importer_a = ResolvedModule {
             file_id: FileId(0),
@@ -1663,6 +1666,7 @@ mod tests {
             suffix: None,
             span: oxc_span::Span::new(0, 1),
             mechanism,
+            excludes: Vec::new(),
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),

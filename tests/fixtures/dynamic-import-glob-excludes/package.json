@@ -1,0 +1,6 @@
+{
+  "name": "dynamic-import-glob-excludes",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js"
+}
