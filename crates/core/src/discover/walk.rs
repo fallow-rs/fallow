@@ -394,6 +394,35 @@ fn report_skipped_large_files(
     diagnostics
 }
 
+/// Warn once for each config glob that matches fewer discovered files now
+/// that a single `*` or `?` stays within one path segment.
+///
+/// The old matcher compiles only for patterns with a single-segment
+/// wildcard, and one pass over the discovered files counts every pattern.
+/// The warning goes to stderr only; JSON output does not change.
+fn warn_legacy_glob_narrowings(config: &ResolvedConfig, files: &[DiscoveredFile]) {
+    if config.quiet || config.legacy_glob_groups.is_empty() {
+        return;
+    }
+    let relative: Vec<&Path> = files
+        .iter()
+        .map(|file| file.path.strip_prefix(&config.root).unwrap_or(&file.path))
+        .collect();
+    for narrowing in
+        fallow_config::find_legacy_glob_narrowings(&config.legacy_glob_groups, &relative)
+    {
+        let message = narrowing.message();
+        if should_emit_note_once(format!(
+            "legacy-glob::{}::{}::{}",
+            config.root.display(),
+            narrowing.field,
+            narrowing.pattern
+        )) {
+            tracing::warn!("{message}");
+        }
+    }
+}
+
 /// Build the typed diagnostics for generated minified JS files skipped before
 /// parsing. The caller writes the returned list to the registry.
 fn report_skipped_minified_files(
@@ -1594,6 +1623,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
         .collect();
 
     note_largest_files(config, &files);
+    warn_legacy_glob_narrowings(config, &files);
 
     DiscoveredSources {
         files,

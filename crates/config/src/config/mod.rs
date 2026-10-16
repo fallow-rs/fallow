@@ -8,6 +8,7 @@ mod format;
 pub mod glob_validation;
 mod health;
 mod ignore_patterns;
+mod legacy_glob;
 mod mutation;
 mod parsing;
 mod resolution;
@@ -41,6 +42,10 @@ pub use health::{
     ChangeCouplingConfig, EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig,
 };
 pub use ignore_patterns::{IgnorePatternSet, UNLIFTABLE_IGNORE_SEGMENTS};
+pub use legacy_glob::{
+    LegacyGlobGroup, LegacyGlobNarrowing, find_legacy_glob_narrowings, has_single_segment_wildcard,
+    suggest_cross_directory_rewrite,
+};
 pub use mutation::{MutationConfig, MutationOperatorName, MutationRunner};
 pub use parsing::{CONFIG_FILE_NAMES, ConfigLoadOptions};
 pub use resolution::{

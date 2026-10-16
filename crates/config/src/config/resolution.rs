@@ -388,6 +388,10 @@ pub struct ResolvedConfig {
     /// surface changes after resolution (for example `--include-entry-exports`)
     /// are not in it; the analysis fingerprint adds them.
     pub detection_config_digest: String,
+    /// User config path glob lists with a single `*` or `?` that matched `/`
+    /// under the old glob rule. Source discovery compares the old and the new
+    /// rule on these lists and warns for each pattern that lost matches.
+    pub legacy_glob_groups: Vec<super::LegacyGlobGroup>,
 }
 
 /// Top-level config keys that do not change which dead-code findings a run
@@ -998,6 +1002,7 @@ impl FallowConfig {
         quiet: bool,
         cache_max_size_mb: Option<u32>,
     ) -> ResolvedConfig {
+        let mut legacy_glob_groups = super::legacy_glob::collect_config_legacy_glob_groups(&self);
         let compiled_ignores = compile_ignore_settings(&self);
         let config_json = detection_config_json(&self);
 
@@ -1025,6 +1030,12 @@ impl FallowConfig {
             }),
             &canonical_json_string(&plugins.rule_packs),
         ]);
+
+        super::legacy_glob::extend_legacy_glob_groups(
+            &mut legacy_glob_groups,
+            &plugins.external_plugins,
+            &plugins.rule_packs,
+        );
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
         let (workspace_patterns, workspace_changed_since) = self
@@ -1091,6 +1102,7 @@ impl FallowConfig {
             max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
             analysis_snapshot: AnalysisSnapshot::Current,
             detection_config_digest,
+            legacy_glob_groups,
         }
     }
 }
