@@ -396,8 +396,12 @@ test run.
 - The Vitest adapter calls `createVitest` directly and not the `vitest`
   command. Without these variables, Vite sets `NODE_ENV=development`, and
   the test workers inherit it.
-- A `NODE_ENV` value of the `fallow mutation` process stays.
-- The `options.env` values of the init request come last, so they win.
+- A `NODE_ENV` value of the environment wins, the same as with the Vitest
+  CLI. For example, `NODE_ENV=production fallow mutation` runs the tests
+  under `NODE_ENV=production`.
+- Internal protocol detail: the companion applies the `options.env` values
+  of the init request after these variables, so they win. The API sends an
+  empty `options.env`.
 
 ### `node:test` and `bun test`
 

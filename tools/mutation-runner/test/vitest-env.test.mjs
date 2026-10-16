@@ -11,10 +11,11 @@ const id = (name) => `${ENV_TEST}::${name}`;
 const VITEST_CLI_ENV = ["NODE_ENV", "TEST", "VITEST"];
 
 // The companion gets none of the variables that the Vitest CLI sets, as when
-// `fallow mutation` runs from a plain shell.
-const startProject = async ({ packageName, env }) => {
+// `fallow mutation` runs from a plain shell. `processEnv` adds variables to
+// the environment of the companion, as a shell does.
+const startProject = async ({ packageName, env, processEnv = {} }) => {
   const fixture = createFixtureProject({ packageName });
-  const companion = startCompanion({ unsetEnv: VITEST_CLI_ENV });
+  const companion = startCompanion({ unsetEnv: VITEST_CLI_ENV, setEnv: processEnv });
   let nextId = 1;
   const request = (message) => companion.request({ v: 1, id: nextId++, ...message });
   const ready = await request({
@@ -68,6 +69,26 @@ for (const { packageName, version } of VITEST_MAJORS) {
       });
       assert.equal(result.status, "killed", JSON.stringify(result));
       assert.equal(result.killed_by, id(LOADS));
+    });
+  });
+
+  describe(`vitest ${version} with NODE_ENV in the environment`, () => {
+    let project;
+
+    before(async () => {
+      project = await startProject({
+        packageName,
+        processEnv: { NODE_ENV: "production", EXPECTED_NODE_ENV: "production" },
+      });
+    });
+
+    after(() => project?.stop());
+
+    test("the NODE_ENV value of the environment wins, as with the Vitest CLI", async () => {
+      const dryRun = await project.request({ type: "dry_run" });
+      assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
+      assert.deepEqual(dryRun.errors ?? [], [], JSON.stringify(dryRun));
+      assert.deepEqual(statuses(dryRun), { [LOADS]: "pass", [CLI_VARS]: "pass" });
     });
   });
 

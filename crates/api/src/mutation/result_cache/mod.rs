@@ -41,7 +41,7 @@ use super::scheduler::{CachedResult, ResultLookup, ScheduleOutcome, ScheduledMut
 pub const RESULT_CACHE_FILE: &str = "results.json";
 /// The version of the key and of the file format. A change to the key
 /// parts or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 /// The inputs of a test that the key does not hash.
