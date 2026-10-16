@@ -196,8 +196,9 @@ coverage. The scheduler corrects this after the dry run:
   use the limit.
 - Each free place goes to the next covered `pending` mutant in rank order.
   That mutant runs and gets a normal status.
-- The run executes `min(N, covered mutants)` mutants. The covered mutants
-  after the filled limit stay `pending`.
+- `min(N, covered mutants)` mutants are inside the limit. Each of them gets
+  a job or a result from the cache, so a run with the cache can execute
+  fewer mutants. The covered mutants after the filled limit stay `pending`.
 - A statically `no_coverage` mutant that the dry run hits (a static map
   miss) runs outside the limit.
 - The completion has `mutant-limit` only when a covered mutant stays

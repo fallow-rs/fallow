@@ -1524,6 +1524,35 @@ fn a_cache_hit_skips_the_mutant_run_and_a_miss_reports_its_key() {
 }
 
 #[test]
+fn a_cached_result_uses_a_place_in_the_mutant_limit() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    // The limit is one mutant. The planned mutant `m1` is covered and has a
+    // cached result, so it fills the limit without a run.
+    let mut plan = plan(&["m1"]);
+    plan.pending = vec![ScheduledMutant {
+        id: "m2".to_owned(),
+        file: "src/a.ts".to_owned(),
+    }];
+    let mut config = config(1);
+    config.cache = Some(Arc::new(FakeCache::default()) as Arc<dyn ResultLookup>);
+    let outcome = run_schedule(&spawner, &plan, &config).expect("run");
+
+    assert!(
+        spawner.runs().is_empty(),
+        "the cached mutant fills the limit"
+    );
+    assert!(outcome.results["m1"].cached);
+    assert!(
+        !outcome.results.contains_key("m2"),
+        "a covered pending mutant after the filled limit stays pending"
+    );
+    assert!(outcome.promoted.is_empty());
+}
+
+#[test]
 fn without_a_cache_each_covered_mutant_runs_and_no_key_is_reported() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
