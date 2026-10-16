@@ -1137,6 +1137,7 @@ mod tests {
             suffix: Some(".ts".into()),
             span: Span::new(0, 1),
             mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
         };
         let module = ModuleInfo {
             dynamic_import_patterns: vec![pattern.clone()],
