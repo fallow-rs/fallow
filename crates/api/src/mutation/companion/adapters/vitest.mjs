@@ -453,6 +453,19 @@ const collectRunTests = (testModules, testIdByTask) =>
   );
 
 /**
+ * Sets the variables that the Vitest CLI sets before it calls `createVitest`.
+ * The adapter calls `createVitest` directly, so without this step Vite sets
+ * `NODE_ENV=development` and the test workers inherit it. A `NODE_ENV` value
+ * of the environment stays, as with the CLI. The `options.env` values of the
+ * init request come after this step, so they win.
+ */
+const setVitestEnv = () => {
+  process.env.TEST = "true";
+  process.env.VITEST = "true";
+  process.env.NODE_ENV ??= "test";
+};
+
+/**
  * Creates the Vitest adapter for an `init` request. It starts one Vitest
  * instance with no file parallelism and one worker, and keeps the project
  * `isolate` setting.
@@ -467,6 +480,7 @@ export const createAdapter = async (init) => {
   const { createVitest, version } = await loadProjectVitest(root);
   const overlay = buildOverlay(root, init.run_dir, init.path_map);
   const loaded = new Set();
+  setVitestEnv();
   Object.assign(process.env, init.options?.env ?? {});
 
   const vitest = await createVitestInstance({

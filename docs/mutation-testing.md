@@ -381,6 +381,24 @@ files in `.borp.yaml` and runs a bare `borp` command gets the default glob.
 `node-test`, or a Node runtime for `bun-test`, exits with code 2 and
 `FALLOW_MUTATION_RUNTIME_NOT_FOUND`.
 
+### Test environment
+
+Each adapter gives the tests the environment variables that the native
+runner command sets. Code that reads `NODE_ENV` then behaves as in a normal
+test run.
+
+| Runner | Variables | Source |
+|---|---|---|
+| Vitest | `TEST=true`, `VITEST=true`, `NODE_ENV=test` when it is not set | The adapter sets them as the `vitest` command does |
+| `node:test` | None | `node --test` sets no `NODE_ENV` |
+| `bun test` | `NODE_ENV=test` when it is not set | `bun test` sets it in each test process |
+
+- The Vitest adapter calls `createVitest` directly and not the `vitest`
+  command. Without these variables, Vite sets `NODE_ENV=development`, and
+  the test workers inherit it.
+- A `NODE_ENV` value of the `fallow mutation` process stays.
+- The `options.env` values of the init request come last, so they win.
+
 ### `node:test` and `bun test`
 
 - Each dry run and each mutant run starts one test process for each test

@@ -15,13 +15,17 @@ const COMPANION = fileURLToPath(new URL("../../src/companion.mjs", import.meta.u
  * `token: null` starts the companion with no token. `runtime` is the
  * executable that runs the companion, Node by default. `detached: true` starts
  * the companion in its own process group, as the API does on Unix.
+ * `unsetEnv` names the variables of this process that the companion does not
+ * get.
  */
 export const startCompanion = ({
   token = randomBytes(16).toString("hex"),
   runtime = process.execPath,
   detached = false,
+  unsetEnv = [],
 } = {}) => {
   const env = { ...process.env };
+  for (const name of unsetEnv) delete env[name];
   delete env[SESSION_TOKEN_ENV];
   if (token !== null) env[SESSION_TOKEN_ENV] = token;
   const child = spawn(runtime, [COMPANION], { stdio: ["pipe", "pipe", "pipe"], env, detached });
