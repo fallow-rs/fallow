@@ -355,6 +355,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn scope_glob_single_star_stays_within_one_segment() {
+        let matchers = compile_scope_globs(&["src/*.ts".to_string()]);
+        let matches = |path: &str| matchers.iter().any(|m| m.is_match(path));
+        assert!(matches("src/a.ts"));
+        assert!(!matches("src/nested/a.ts"));
+    }
+
     fn resolve(root: &Path, configure: impl FnOnce(&mut FallowConfig)) -> ResolvedConfig {
         let mut config = FallowConfig {
             rules: RulesConfig {

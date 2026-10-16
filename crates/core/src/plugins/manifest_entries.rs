@@ -1233,6 +1233,29 @@ mod tests {
     }
 
     #[test]
+    fn manifests_glob_single_star_stays_within_one_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_manifest(root, "plugins/alpha/kibana.jsonc", r#"{"type":"plugin"}"#);
+        write_manifest(
+            root,
+            "plugins/group/beta/kibana.jsonc",
+            r#"{"type":"plugin"}"#,
+        );
+        let ext = plugin_with(vec![rule(
+            "plugins/*/kibana.jsonc",
+            &[],
+            vec![seed("public/index.ts", &[])],
+        )]);
+
+        let reports = check_manifest_entries(&ext, root);
+        assert_eq!(
+            reports[0].manifests_matched,
+            vec!["plugins/alpha/kibana.jsonc".to_string()]
+        );
+    }
+
+    #[test]
     fn check_warns_manifests_matched_none() {
         let dir = tempfile::tempdir().unwrap();
         let ext = plugin_with(vec![rule(

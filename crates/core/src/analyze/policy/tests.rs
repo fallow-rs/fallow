@@ -17,7 +17,8 @@ use crate::resolve::ResolvedModule;
 use crate::suppress::SuppressionContext;
 
 use super::{
-    PolicyAnalysisInput, compile_rules, find_policy_violations as find_policy_violations_raw,
+    PolicyAnalysisInput, compile_rules, compile_scope_globs,
+    find_policy_violations as find_policy_violations_raw,
 };
 
 fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
@@ -1109,4 +1110,12 @@ fn message_is_carried_onto_findings() {
         violations[0].message.as_deref(),
         Some("Use the logger facade.")
     );
+}
+
+#[test]
+fn scope_glob_single_star_stays_within_one_segment() {
+    let matchers = compile_scope_globs(&["src/*.ts".to_string()]);
+    let matches = |path: &str| matchers.iter().any(|m| m.is_match(path));
+    assert!(matches("src/a.ts"));
+    assert!(!matches("src/nested/a.ts"));
 }

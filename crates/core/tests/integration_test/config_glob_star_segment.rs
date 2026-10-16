@@ -1,6 +1,7 @@
 //! A single `*` in a config path glob stays within one path segment. Only
-//! `**` crosses directories, as in gitignore, picomatch, and the `entry`
-//! globs.
+//! `**` crosses directories, as in picomatch and the `entry` globs. Fallow
+//! matches file paths, not directories, so `src/generated/*` does not ignore
+//! a nested file (gitignore does, because it skips a matched directory).
 
 use std::path::Path;
 

@@ -2065,6 +2065,13 @@ mod tests {
         EmbeddingBatch, EmbeddingBatchVector, EmbeddingSession, EmbeddingSessionFactory,
     };
 
+    #[test]
+    fn ignore_glob_single_star_stays_within_one_segment() {
+        let set = build_ignore_set(&["src/*.ts".to_string()]).unwrap();
+        assert!(set.is_match("src/a.ts"));
+        assert!(!set.is_match("src/nested/a.ts"));
+    }
+
     #[derive(Default)]
     struct FakeProviderState {
         spawns: usize,

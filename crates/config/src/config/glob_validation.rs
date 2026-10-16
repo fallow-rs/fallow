@@ -191,8 +191,10 @@ fn has_traversal_segment(pattern: &str) -> bool {
 /// Compile a glob that matches project-root-relative file paths.
 ///
 /// A single `*` stays within one path segment, and only `**` crosses
-/// directories. This is the rule of gitignore, picomatch, and the plugin
-/// entry patterns. Every path glob that a user writes in the config compiles
+/// directories. This is the rule of picomatch and the plugin entry patterns.
+/// The glob matches file paths only, not directories, so `src/generated/*`
+/// does not match the files in the subfolders of `src/generated` (gitignore
+/// ignores them, because it skips a matched directory). Every path glob that a user writes in the config compiles
 /// through this function, so all of these fields match a path the same way.
 ///
 /// # Errors
