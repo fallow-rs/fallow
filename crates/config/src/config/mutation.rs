@@ -10,7 +10,7 @@ pub enum MutationRunner {
     /// `node --test` script.
     #[default]
     Auto,
-    /// Vitest 4 or 5 from the project `node_modules`.
+    /// Vitest 4.1 to 5 from the project `node_modules`.
     Vitest,
     /// `node:test` of Node.js 22.18 or later. Each test file runs in its own
     /// Node process.

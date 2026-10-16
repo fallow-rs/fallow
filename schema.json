@@ -1156,7 +1156,7 @@
           "const": "auto"
         },
         {
-          "description": "Vitest 4 or 5 from the project `node_modules`.",
+          "description": "Vitest 4.1 to 5 from the project `node_modules`.",
           "type": "string",
           "const": "vitest"
         },
