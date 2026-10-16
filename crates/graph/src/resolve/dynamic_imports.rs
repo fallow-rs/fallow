@@ -13,7 +13,7 @@
 //!    directory, producing a list of candidate `FileId`s.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use oxc_span::Span;
 use rustc_hash::FxHashMap;
@@ -24,6 +24,7 @@ use fallow_types::extract::{DynamicImportInfo, DynamicImportPattern, ImportInfo,
 use super::ResolveResult;
 use super::ResolvedImport;
 use super::fallbacks::make_glob_from_pattern;
+use super::pattern_glob::PatternGlob;
 use super::specifier::resolve_import_specifier;
 use super::types::ResolveContext;
 
@@ -199,23 +200,26 @@ fn dynamic_import_with(
 /// The glob string derives only from the pattern text, not the importing
 /// directory, so one compiled matcher serves every module that contains the
 /// same dynamic import pattern. Failed compilations are cached as `None` so a
-/// malformed pattern is not recompiled per module.
+/// malformed pattern is not recompiled or reported again per module.
 #[derive(Default)]
 pub(super) struct GlobMatcherCache {
-    map: Mutex<FxHashMap<String, Option<globset::GlobMatcher>>>,
+    map: Mutex<FxHashMap<String, Option<Arc<PatternGlob>>>>,
 }
 
 impl GlobMatcherCache {
     /// Return the cached matcher for `glob_str`, compiling it on first miss.
-    fn get(&self, glob_str: &str) -> Option<globset::GlobMatcher> {
+    fn get(&self, glob_str: &str) -> Option<Arc<PatternGlob>> {
         if let Ok(cache) = self.map.lock()
             && let Some(value) = cache.get(glob_str)
         {
             return value.clone();
         }
-        let value = globset::Glob::new(glob_str)
-            .ok()
-            .map(|g| g.compile_matcher());
+        let value = PatternGlob::new(glob_str).map(Arc::new);
+        if value.is_none() {
+            tracing::warn!(
+                "Dynamic import pattern `{glob_str}` is not a valid glob and matches no files"
+            );
+        }
         if let Ok(mut cache) = self.map.lock() {
             cache.insert(glob_str.to_string(), value.clone());
         }

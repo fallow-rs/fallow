@@ -419,6 +419,8 @@ mod issue_2842_storybook_cross_workspace;
 mod issue_2876_federation_follow_ups;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
+#[path = "integration_test/issue_3489_import_meta_glob_extglob.rs"]
+mod issue_3489_import_meta_glob_extglob;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]

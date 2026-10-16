@@ -1,0 +1,6 @@
+{
+  "name": "issue-3489-import-meta-glob-extglob",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js"
+}
