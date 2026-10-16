@@ -501,8 +501,9 @@ fn expand_project_entry(
     if !config_parser::glob_base_is_inside_root(base, pattern, project_root) {
         return configs;
     }
-    let pattern_str = if Path::new(pattern).is_absolute() {
-        pattern.to_string()
+    let pattern = fallow_config::glob_validation::disk_glob_pattern(pattern);
+    let pattern_str = if Path::new(pattern.as_ref()).is_absolute() {
+        pattern.into_owned()
     } else {
         format!(
             "{}/{pattern}",
@@ -1835,6 +1836,28 @@ mod tests {
                 .referenced_dependencies
                 .contains(&"ts-jest".to_string()),
             "a sibling inside the project root must be followed, got: {:?}",
+            result.referenced_dependencies,
+        );
+    }
+
+    /// A `.*` segment still matches a dot directory inside the project root.
+    #[test]
+    fn resolve_config_projects_dot_wildcard_matches_dot_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_preset_config(&root.join(".jest/a"), "ts-jest");
+
+        let parent_source = r#"module.exports = { projects: ["<rootDir>/.*/a"] };"#;
+        let parent_path = root.join("jest.config.js");
+        std::fs::write(&parent_path, parent_source).unwrap();
+
+        let result = JestPlugin.resolve_config(&parent_path, parent_source, root);
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"ts-jest".to_string()),
+            "got: {:?}",
             result.referenced_dependencies,
         );
     }

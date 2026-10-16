@@ -866,7 +866,11 @@ fn project_config_paths(entry: &str, config_dir: &Path, project_root: &Path) -> 
     let Some(dir) = config_dir.to_str() else {
         return Vec::new();
     };
-    let pattern = format!("{}/{relative}", glob::Pattern::escape(dir));
+    let pattern = format!(
+        "{}/{}",
+        glob::Pattern::escape(dir),
+        fallow_config::glob_validation::disk_glob_pattern(relative)
+    );
     let Ok(matches) = glob::glob(&pattern) else {
         return Vec::new();
     };

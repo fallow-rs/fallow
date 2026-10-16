@@ -463,14 +463,17 @@ fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
 /// An absolute glob for a pattern relative to `dir`.
 fn glob_in(dir: &Path, pattern: &str) -> Option<String> {
     if Path::new(pattern).is_absolute() {
-        return Some(pattern.trim_end_matches('/').to_owned());
+        return Some(
+            fallow_config::glob_validation::disk_glob_pattern(pattern.trim_end_matches('/'))
+                .into_owned(),
+        );
     }
     let dir = dir.to_str()?;
     let relative = pattern.strip_prefix("./").unwrap_or(pattern);
     Some(format!(
         "{}/{}",
         glob::Pattern::escape(dir),
-        relative.trim_end_matches('/')
+        fallow_config::glob_validation::disk_glob_pattern(relative.trim_end_matches('/'))
     ))
 }
 
