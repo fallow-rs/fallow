@@ -221,6 +221,14 @@ pub fn resolve_all_imports_with_session(
     let tsconfig_cache = types::TsconfigCache::default();
     let canonicalize_cache = types::CanonicalizeCache::default();
     let glob_matcher_cache = GlobMatcherCache::default();
+    // Dynamic import patterns match against canonical file paths when the
+    // root is not canonical, so their root containment check needs the
+    // canonical root too.
+    let pattern_root = if canonical_paths.is_empty() {
+        input.root.to_path_buf()
+    } else {
+        dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf())
+    };
     let jsx_rules = compile_jsx_rules(input.jsx_import_sources);
 
     let ctx = ResolveContext {
@@ -254,6 +262,7 @@ pub fn resolve_all_imports_with_session(
                 &ctx,
                 &ProjectResolveRules {
                     glob_matcher_cache: &glob_matcher_cache,
+                    pattern_root: &pattern_root,
                     jsx_rules: &jsx_rules,
                 },
                 &file_paths,
@@ -413,6 +422,7 @@ fn build_path_to_id<'a>(
 /// Per-run state that every module resolution reads.
 struct ProjectResolveRules<'a> {
     glob_matcher_cache: &'a GlobMatcherCache,
+    pattern_root: &'a Path,
     jsx_rules: &'a [CompiledJsxRule<'a>],
 }
 
@@ -461,6 +471,7 @@ fn resolve_module_imports(
             module,
             ctx,
             glob_matcher_cache: rules.glob_matcher_cache,
+            pattern_root: rules.pattern_root,
             file_path,
             from_dir,
             canonical_paths,
@@ -557,6 +568,7 @@ struct ResolvedModuleBuildInput<'a> {
     module: &'a ModuleInfo,
     ctx: &'a ResolveContext<'a>,
     glob_matcher_cache: &'a GlobMatcherCache,
+    pattern_root: &'a Path,
     file_path: &'a Path,
     from_dir: &'a Path,
     canonical_paths: &'a [PathBuf],
@@ -611,6 +623,7 @@ fn resolved_module_without_export_hints(input: ResolvedModuleBuildInput<'_>) -> 
         ),
         resolved_dynamic_patterns: resolve_dynamic_patterns(
             input.glob_matcher_cache,
+            input.pattern_root,
             input.from_dir,
             &input.module.dynamic_import_patterns,
             input.canonical_paths,

@@ -687,6 +687,15 @@ directory removes the matched segment and the files become visible: that is the
 keeps matching at every root, so re-rooting re-excludes the same file; those
 entries say so and point at renaming instead.
 
+### Dynamic import pattern base
+
+`resolve_dynamic_patterns` matches a dynamic import pattern relative to the
+directory of the importing file. Each leading `../` step of the pattern moves
+the match base up one directory, as Vite and webpack do. The exclude globs move
+to the same base. An exclude that starts above that base removes no file. A
+base outside the project root matches no file. With canonical file paths, the
+root check uses the canonical root.
+
 ### Workspace sources
 
 `collect_workspaces_and_diagnostics` in `crates/config/src/workspace/mod.rs`

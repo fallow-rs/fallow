@@ -1119,6 +1119,7 @@ fn dynamic_patterns_matches_files_in_dir() {
 
     let result = resolve_dynamic_patterns(
         &GlobMatcherCache::default(),
+        Path::new("/project"),
         from_dir,
         &patterns,
         &canonical_paths,
@@ -1159,6 +1160,7 @@ fn dynamic_patterns_no_matches_preserves_empty_target_row() {
 
     let result = resolve_dynamic_patterns(
         &GlobMatcherCache::default(),
+        Path::new("/project"),
         from_dir,
         &patterns,
         &canonical_paths,
@@ -1182,6 +1184,7 @@ fn dynamic_patterns_empty_patterns_list() {
 
     let result = resolve_dynamic_patterns(
         &GlobMatcherCache::default(),
+        Path::new("/project"),
         from_dir,
         &[],
         &canonical_paths,
@@ -1228,6 +1231,7 @@ fn dynamic_patterns_apply_excludes_and_escaped_literals() {
 
     let result = resolve_dynamic_patterns(
         &GlobMatcherCache::default(),
+        Path::new("/project"),
         from_dir,
         &patterns,
         &[],
@@ -1267,6 +1271,7 @@ fn dynamic_patterns_glob_prefix_passthrough() {
 
     let result = resolve_dynamic_patterns(
         &GlobMatcherCache::default(),
+        Path::new("/project"),
         from_dir,
         &patterns,
         &canonical_paths,
@@ -1483,6 +1488,7 @@ fn dynamic_patterns_prefix_without_suffix() {
 
     let result = resolve_dynamic_patterns(
         &GlobMatcherCache::default(),
+        Path::new("/project"),
         from_dir,
         &patterns,
         &canonical_paths,
@@ -1506,10 +1512,137 @@ fn dynamic_patterns_empty_canonical_paths() {
         excludes: Vec::new(),
     }];
 
-    let result =
-        resolve_dynamic_patterns(&GlobMatcherCache::default(), from_dir, &patterns, &[], &[]);
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        Path::new("/project"),
+        from_dir,
+        &patterns,
+        &[],
+        &[],
+    );
     assert_eq!(result.len(), 1);
     assert!(result[0].1.is_empty());
+}
+
+fn parent_pattern_files(paths: &[&str]) -> Vec<DiscoveredFile> {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(idx, path)| DiscoveredFile {
+            id: FileId(u32::try_from(idx).expect("small fixture")),
+            path: PathBuf::from(path),
+            size_bytes: 100,
+        })
+        .collect()
+}
+
+fn parent_pattern(prefix: &str, excludes: &[&str]) -> DynamicImportPattern {
+    DynamicImportPattern {
+        prefix: prefix.into(),
+        suffix: None,
+        span: dummy_span(),
+        mechanism: ModuleLoadMechanism::EsModule,
+        excludes: excludes
+            .iter()
+            .map(|exclude| (*exclude).to_string())
+            .collect(),
+    }
+}
+
+#[test]
+fn dynamic_patterns_parent_steps_match_relative_to_the_importer() {
+    let files = parent_pattern_files(&[
+        "/project/src/components/button.js",
+        "/project/src/components/skip.js",
+        "/project/src/[id]/local.js",
+        "/project/src/[id]/kept.js",
+        "/project/lib/util.js",
+    ]);
+    let patterns = vec![
+        parent_pattern("../components/*.js", &["../components/skip.js"]),
+        parent_pattern("../../src/*/*.js", &["./local.js", "../components/**"]),
+    ];
+
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        Path::new("/project"),
+        Path::new("/project/src/[id]"),
+        &patterns,
+        &[],
+        &files,
+    );
+
+    assert_eq!(result[0].1, vec![FileId(0)]);
+    assert_eq!(result[1].1, vec![FileId(3)]);
+}
+
+#[test]
+fn dynamic_patterns_parent_steps_stay_inside_the_root() {
+    let files = parent_pattern_files(&["/project/src/a.js", "/other/b.js"]);
+    let patterns = vec![
+        parent_pattern("../../*.js", &[]),
+        parent_pattern("../../other/*.js", &[]),
+        parent_pattern("../../../../../*.js", &[]),
+    ];
+
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        Path::new("/project"),
+        Path::new("/project/src"),
+        &patterns,
+        &[],
+        &files,
+    );
+
+    assert_eq!(result.len(), 3);
+    assert!(result.iter().all(|(_, matched)| matched.is_empty()));
+}
+
+#[test]
+fn dynamic_patterns_parent_steps_match_canonical_paths() {
+    let files = parent_pattern_files(&[
+        "/link/src/a/x.js",
+        "/link/src/b/y.js",
+        "/link/src/b/skip.js",
+    ]);
+    let canonical_paths = vec![
+        PathBuf::from("/real/src/a/x.js"),
+        PathBuf::from("/real/src/b/y.js"),
+        PathBuf::from("/real/src/b/skip.js"),
+    ];
+    let patterns = vec![
+        parent_pattern("./../../src/*/*.js", &["../b/skip.js"]),
+        parent_pattern("../b/*.js", &[]),
+    ];
+
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        Path::new("/real"),
+        Path::new("/real/src/a"),
+        &patterns,
+        &canonical_paths,
+        &files,
+    );
+
+    assert_eq!(result[0].1, vec![FileId(0), FileId(1)]);
+    assert_eq!(result[1].1, vec![FileId(1), FileId(2)]);
+}
+
+#[test]
+fn dynamic_patterns_exclude_above_the_base_removes_no_file() {
+    let files = parent_pattern_files(&["/project/src/pages/a.js"]);
+    let patterns = vec![parent_pattern("./*.js", &["../pages/a.js"])];
+
+    let result = resolve_dynamic_patterns(
+        &GlobMatcherCache::default(),
+        Path::new("/project"),
+        Path::new("/project/src/pages"),
+        &patterns,
+        &[],
+        &files,
+    );
+
+    assert_eq!(result[0].1, vec![FileId(0)]);
 }
 
 #[test]

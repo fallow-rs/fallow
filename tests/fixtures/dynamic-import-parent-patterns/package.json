@@ -1,0 +1,6 @@
+{
+  "name": "dynamic-import-parent-patterns",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js"
+}

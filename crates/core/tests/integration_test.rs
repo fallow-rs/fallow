@@ -63,6 +63,8 @@ mod directory_resolution;
 mod duplicate_prop_shape;
 #[path = "integration_test/dynamic_import_glob_excludes.rs"]
 mod dynamic_import_glob_excludes;
+#[path = "integration_test/dynamic_import_parent_patterns.rs"]
+mod dynamic_import_parent_patterns;
 #[path = "integration_test/dynamic_import_then.rs"]
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]
