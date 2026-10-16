@@ -2533,7 +2533,7 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Per-path rule overrides
   "overrides": [
     {
-      "files": ["*.test.ts", "*.spec.ts"],
+      "files": ["**/*.test.ts", "**/*.spec.ts"],
       "rules": { "unused-exports": "off" }
     }
   ],
@@ -2638,7 +2638,7 @@ ignoreDefaults = true
 ignoredClones = ["dup:6f12ab34:2"]
 
 [[overrides]]
-files = ["*.test.ts"]
+files = ["**/*.test.ts"]
 [overrides.rules]
 unused-exports = "off"
 
@@ -2652,6 +2652,7 @@ preset = "bulletproof"
 - `publicPackages`: workspace packages that are public libraries; exported API surface from these packages is not flagged as unused
 - `entry`: glob patterns for files that are manual entry points. A single `*` stays within one path segment; use `**` to match across directories
 - `dynamicallyLoaded`: glob patterns for files loaded at runtime (plugin dirs, locale files); treated as always-used. A single `*` stays within one path segment; use `**` to match across directories
+- Path globs in other fields (`ignorePatterns`, `ignoreFindings`, `overrides[].files`, `ignoreExports[].file`, `duplicates.ignore`, `health.ignore`, boundary zones, rule-pack and `framework[]` globs) use the same rule: a single `*` stays within one path segment. Write `**/*.test.ts` to match test files at any depth
 - `cache.dir`: override the persistent extraction cache directory. `FALLOW_CACHE_DIR` wins over this config field, and `--no-cache` disables caching entirely
 - `cache.maxSizeMb`: cap the serialized extraction cache size in megabytes. `FALLOW_CACHE_MAX_SIZE` wins over this config field
 - `workspaces.changedSince`: map exact workspace roots (as `fallow list --workspaces` prints them) to Git refs. `check`, `dead-code` and `dupes` then report the findings of a mapped package only for files changed since its ref; unlisted packages and root files stay in full scope. A global `--changed-since` replaces the map for one run; `--no-package-baselines` or `FALLOW_PACKAGE_BASELINES=false` turns it off. A key that names no workspace, or a ref Git cannot resolve, leaves every package in full scope with a warning and `request_outcomes["package-baselines"]` as `not-applied`. Save a whole-project baseline with `--no-package-baselines`.

@@ -343,7 +343,7 @@ fn find_file_in_roots<'a>(
             continue;
         }
         if pattern.starts_with("**") {
-            if let Ok(glob) = globset::Glob::new(pattern) {
+            if let Ok(glob) = fallow_config::compile_path_glob(pattern) {
                 deep.add(glob);
                 has_deep = true;
             }

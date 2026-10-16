@@ -248,7 +248,7 @@ fn build_rule_report(rule: &ManifestEntryRule, root: &Path) -> RuleReport {
         return report;
     }
 
-    let Ok(glob) = globset::Glob::new(&rule.manifests) else {
+    let Ok(glob) = fallow_config::compile_path_glob(&rule.manifests) else {
         // Glob validity is enforced at config load; a compile failure here is
         // defensive and, like a non-matching glob, seeds nothing.
         report.warnings.push(CheckWarning::glob(

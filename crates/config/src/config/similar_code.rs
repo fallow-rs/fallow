@@ -62,6 +62,7 @@ pub struct SimilarCodeConfig {
 
     /// Additional project-root-relative globs excluded only from similar-code
     /// extraction. Global `ignorePatterns` remain authoritative first.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub ignore: Vec<String>,
 }

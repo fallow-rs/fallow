@@ -13,6 +13,7 @@ use super::boundaries::ResolvedBoundaryConfig;
 use super::duplicates_config::DuplicatesConfig;
 use super::flags::FlagsConfig;
 use super::format::OutputFormat;
+use super::glob_validation::compile_path_glob;
 use super::health::HealthConfig;
 use super::mutation::MutationConfig;
 use super::resolve::ResolveConfig;
@@ -63,6 +64,7 @@ fn reset_inter_file_warn_dedup_for_test() {
 #[serde(deny_unknown_fields)]
 pub struct IgnoreExportRule {
     /// Glob pattern for files.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     pub file: String,
     /// Export names to ignore (`*` for all).
     pub exports: Vec<String>,
@@ -86,7 +88,7 @@ pub struct IgnoreCatalogReferenceRule {
     /// Optional catalog-name filter: when set, the rule suppresses only references to this exact catalog name (string equality), and when omitted it applies regardless of which catalog is referenced. Use it to scope suppression to one catalog (e.g. `"react18"`) while leaving other catalog references for the same package reportable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<String>,
-    /// Optional glob matched against the consuming workspace `package.json` path (compiled into a glob matcher at config load): when set, the rule suppresses the finding only for consumers whose path matches, and when omitted it applies to every consumer. Use it to suppress a catalog reference in one specific workspace during a staged migration.
+    /// Optional glob matched against the consuming workspace `package.json` path (compiled into a glob matcher at config load): when set, the rule suppresses the finding only for consumers whose path matches, and when omitted it applies to every consumer. Use it to suppress a catalog reference in one specific workspace during a staged migration. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consumer: Option<String>,
 }
@@ -165,7 +167,7 @@ impl CompiledIgnoreDependencyOverrideRule {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfigOverride {
-    /// Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `["src/generated/**", "**/*.test.ts"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict).
+    /// Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `["src/generated/**", "**/*.test.ts"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories.
     pub files: Vec<String>,
     /// Partial per-rule severity map applied only to files matching this entry's `files` globs; each rule key takes `error`, `warn`, or `off`, and omitted rules keep their top-level severity. Set to change how specific rules (e.g. unused-exports, unused-files) behave for the scoped paths. Inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override; fallow warns during analysis and names the right mechanism instead (top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for circular-dependencies and re-export-cycle).
     #[serde(default)]
@@ -660,13 +662,14 @@ fn compile_ignore_patterns(ignore_patterns: &[String]) -> (IgnorePatternSet, usi
         }
         let normalized = normalize_user_glob_pattern(pattern);
         ignore_builder.add(
-            Glob::new(normalized).expect("ignorePatterns entry was validated at config load time"),
+            compile_path_glob(normalized)
+                .expect("ignorePatterns entry was validated at config load time"),
         );
         user_pattern_count += 1;
     }
 
     for pattern in DEFAULT_IGNORE_PATTERNS {
-        ignore_builder.add(Glob::new(pattern).expect("default ignore pattern is valid"));
+        ignore_builder.add(compile_path_glob(pattern).expect("default ignore pattern is valid"));
     }
 
     let set = IgnorePatternSet::new(ignore_builder.build().unwrap_or_default(), &exceptions);
@@ -774,7 +777,7 @@ fn compile_overrides(overrides: Vec<ConfigOverride>) -> Vec<ResolvedOverride> {
                 .files
                 .iter()
                 .map(|pattern| {
-                    Glob::new(pattern)
+                    compile_path_glob(pattern)
                         .expect("overrides[].files pattern was validated at config load time")
                         .compile_matcher()
                 })
@@ -800,7 +803,7 @@ fn compile_ignore_export_rules(rules: &[IgnoreExportRule]) -> Vec<CompiledIgnore
     rules
         .iter()
         .map(|rule| CompiledIgnoreExportRule {
-            matcher: Glob::new(&rule.file)
+            matcher: compile_path_glob(&rule.file)
                 .expect("ignoreExports[].file was validated at config load time")
                 .compile_matcher(),
             exports: rule.exports.clone(),
@@ -822,7 +825,7 @@ fn compile_ignore_catalog_reference_rules(
             package: rule.package.clone(),
             catalog: rule.catalog.clone(),
             consumer_matcher: rule.consumer.as_ref().map(|pattern| {
-                Glob::new(pattern)
+                compile_path_glob(pattern)
                     .expect("ignoreCatalogReferences[].consumer was validated at config load time")
                     .compile_matcher()
             }),
@@ -1188,6 +1191,64 @@ mod tests {
         );
     }
 
+    /// A single `*` in a config path glob stays within one path segment.
+    /// Only `**` crosses directories.
+    #[test]
+    fn single_star_stays_within_one_segment_in_config_path_globs() {
+        let authored: FallowConfig = serde_json::from_str(
+            r#"{
+                "ignorePatterns": ["gen/*.ts"],
+                "ignoreFindings": ["legacy/*.ts"],
+                "overrides": [{ "files": ["old/*.ts"], "rules": { "unused-files": "off" } }],
+                "ignoreExports": [{ "file": "api/*.ts", "exports": ["*"] }],
+                "ignoreCatalogReferences": [{ "package": "react", "consumer": "apps/*/package.json" }],
+                "boundaries": {
+                    "zones": [{ "name": "ui", "patterns": ["ui/*.ts"] }],
+                    "coverage": { "allowUnmatched": ["scripts/*.ts"] }
+                }
+            }"#,
+        )
+        .expect("config deserializes");
+        let resolved = authored.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert!(resolved.ignore_patterns.is_match("gen/a.ts"));
+        assert!(!resolved.ignore_patterns.is_match("gen/deep/a.ts"));
+
+        assert!(resolved.ignore_findings.is_ignored("legacy/a.ts"));
+        assert!(!resolved.ignore_findings.is_ignored("legacy/deep/a.ts"));
+
+        let off = |path: &str| {
+            resolved
+                .resolve_rules_for_path(Path::new(path))
+                .unused_files
+                == Severity::Off
+        };
+        assert!(off("/project/old/a.ts"));
+        assert!(!off("/project/old/deep/a.ts"));
+
+        let export_rule = &resolved.compiled_ignore_exports[0].matcher;
+        assert!(export_rule.is_match("api/a.ts"));
+        assert!(!export_rule.is_match("api/deep/a.ts"));
+
+        let catalog_rule = &resolved.compiled_ignore_catalog_references[0];
+        assert!(catalog_rule.matches("react", "default", "apps/web/package.json"));
+        assert!(!catalog_rule.matches("react", "default", "apps/web/nested/package.json"));
+
+        assert_eq!(resolved.boundaries.classify_zone("ui/a.ts"), Some("ui"));
+        assert_eq!(resolved.boundaries.classify_zone("ui/deep/a.ts"), None);
+
+        let allow_unmatched = &resolved.boundaries.coverage.allow_unmatched[0];
+        assert!(allow_unmatched.is_match("scripts/a.ts"));
+        assert!(!allow_unmatched.is_match("scripts/deep/a.ts"));
+    }
+
     #[test]
     fn workspace_patterns_reach_resolved_config() {
         let authored: FallowConfig =
@@ -1386,7 +1447,7 @@ mod tests {
             rule_packs: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
-                files: vec!["*.test.ts".to_string()],
+                files: vec!["**/*.test.ts".to_string()],
                 rules: PartialRulesConfig {
                     unused_exports: Some(Severity::Off),
                     ..Default::default()

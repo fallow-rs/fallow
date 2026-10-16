@@ -43,7 +43,7 @@
       "default": []
     },
     "ignorePatterns": {
-      "description": "An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `[\"generated/**\"]`) to drop generated or vendored trees from every detector; patterns are validated at load. A `!`-prefixed entry is an exception that applies after the defaults and the positive patterns: `\"!src/policy/coverage/**\"` brings back hand-written source under a built-in default such as `**/coverage/**`, and `\"!.config/**\"` adds a hidden directory to discovery. Paths under `node_modules` or `.git` can not be lifted, and a `!` entry that names one of these segments is a config error.",
+      "description": "An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `[\"generated/**\"]`) to drop generated or vendored trees from every detector; patterns are validated at load. A `!`-prefixed entry is an exception that applies after the defaults and the positive patterns: `\"!src/policy/coverage/**\"` brings back hand-written source under a built-in default such as `**/coverage/**`, and `\"!.config/**\"` adds a hidden directory to discovery. Paths under `node_modules` or `.git` can not be lifted, and a `!` entry that names one of these segments is a config error. A single `*` stays within one path segment; use `**` to match across directories.",
       "type": "array",
       "items": {
         "type": "string"
@@ -51,7 +51,7 @@
       "default": []
     },
     "ignoreFindings": {
-      "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all.",
+      "description": "An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A single `*` stays within one path segment; use `**` to match across directories.",
       "type": "array",
       "items": {
         "type": "string"
@@ -101,7 +101,7 @@
       "default": []
     },
     "ignoreExports": {
-      "description": "A list of per-file rules that exempt named exports from `unused-export` and from duplicate-exports grouping for files matching a glob. Each entry is `{ file: <glob>, exports: [<name>, ...] }` where `exports: [\"*\"]` exempts every export in the file and a name list exempts only those names; built for component-library barrels (shadcn/Radix/bits-ui `index.ts`) that intentionally re-export the same short names across many files.",
+      "description": "A list of per-file rules that exempt named exports from `unused-export` and from duplicate-exports grouping for files matching a glob. Each entry is `{ file: <glob>, exports: [<name>, ...] }` where `exports: [\"*\"]` exempts every export in the file and a name list exempts only those names; built for component-library barrels (shadcn/Radix/bits-ui `index.ts`) that intentionally re-export the same short names across many files. A single `*` stays within one path segment; use `**` to match across directories.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/IgnoreExportRule"
@@ -358,7 +358,7 @@
       "default": []
     },
     "overrides": {
-      "description": "An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten rules for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict); inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override (fallow warns during analysis and points to the right mechanism: top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for the others).",
+      "description": "An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten rules for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict); inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override (fallow warns during analysis and points to the right mechanism: top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for the others). A single `*` stays within one path segment; use `**` to match across directories.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/ConfigOverride"
@@ -549,7 +549,7 @@
           "type": "object",
           "properties": {
             "pattern": {
-              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).",
+              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).\nA single `*` stays within one path segment; use `**` to match across directories.",
               "type": "string"
             },
             "type": {
@@ -631,7 +631,7 @@
       "type": "object",
       "properties": {
         "manifests": {
-          "description": "Recursive glob selecting the manifest files to read (e.g. `**/kibana.jsonc`).",
+          "description": "Recursive glob selecting the manifest files to read (e.g. `**/kibana.jsonc`).\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "string"
         },
         "format": {
@@ -727,7 +727,7 @@
       "type": "object",
       "properties": {
         "pattern": {
-          "description": "Glob pattern for files.",
+          "description": "Glob pattern for files.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "string"
         },
         "exports": {
@@ -813,7 +813,7 @@
       "type": "object",
       "properties": {
         "file": {
-          "description": "Glob pattern for files.",
+          "description": "Glob pattern for files.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "string"
         },
         "exports": {
@@ -846,7 +846,7 @@
           ]
         },
         "consumer": {
-          "description": "Optional glob matched against the consuming workspace `package.json` path (compiled into a glob matcher at config load): when set, the rule suppresses the finding only for consumers whose path matches, and when omitted it applies to every consumer. Use it to suppress a catalog reference in one specific workspace during a staged migration.",
+          "description": "Optional glob matched against the consuming workspace `package.json` path (compiled into a glob matcher at config load): when set, the rule suppresses the finding only for consumers whose path matches, and when omitted it applies to every consumer. Use it to suppress a catalog reference in one specific workspace during a staged migration. A single `*` stays within one path segment; use `**` to match across directories.",
           "type": [
             "string",
             "null"
@@ -955,7 +955,7 @@
           "default": 0.0
         },
         "ignore": {
-          "description": "Additional ignore patterns for duplication analysis.",
+          "description": "Additional ignore patterns for duplication analysis.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1089,7 +1089,7 @@
           "default": 3
         },
         "ignore": {
-          "description": "Additional project-root-relative globs excluded only from similar-code\nextraction. Global `ignorePatterns` remain authoritative first.",
+          "description": "Additional project-root-relative globs excluded only from similar-code\nextraction. Global `ignorePatterns` remain authoritative first.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1295,7 +1295,7 @@
           "default": null
         },
         "ignore": {
-          "description": "Glob patterns to exclude from complexity analysis.",
+          "description": "Glob patterns to exclude from complexity analysis.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1347,7 +1347,7 @@
       "type": "object",
       "properties": {
         "files": {
-          "description": "Project-root-relative file globs this override applies to.",
+          "description": "Project-root-relative file globs this override applies to.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
@@ -1997,7 +1997,7 @@
           "type": "string"
         },
         "patterns": {
-          "description": "Membership patterns.",
+          "description": "Membership patterns.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
@@ -2059,7 +2059,7 @@
           "type": "boolean"
         },
         "allowUnmatched": {
-          "description": "Glob patterns for files that may remain unmatched by any zone.",
+          "description": "Glob patterns for files that may remain unmatched by any zone.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
@@ -2322,7 +2322,7 @@
       "type": "object",
       "properties": {
         "files": {
-          "description": "Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `[\"src/generated/**\", \"**/*.test.ts\"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict).",
+          "description": "Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `[\"src/generated/**\", \"**/*.test.ts\"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict). A single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"

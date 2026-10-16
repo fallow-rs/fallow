@@ -24,7 +24,7 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
@@ -602,7 +602,8 @@ fn build_ignore_set(config: &DuplicatesConfig) -> Option<IgnoreSet> {
 
     if config.ignore_defaults {
         for pattern in DUPES_DEFAULT_IGNORES {
-            let glob = Glob::new(pattern).expect("default duplication ignore pattern is valid");
+            let glob = fallow_config::compile_path_glob(pattern)
+                .expect("default duplication ignore pattern is valid");
             defaults.push(*pattern);
             builder.add(glob);
         }
@@ -610,7 +611,7 @@ fn build_ignore_set(config: &DuplicatesConfig) -> Option<IgnoreSet> {
 
     for pattern in &config.ignore {
         builder.add(
-            Glob::new(pattern)
+            fallow_config::compile_path_glob(pattern)
                 .expect("duplicates.ignore pattern was validated at config load time"),
         );
     }
@@ -725,6 +726,18 @@ mod tests {
         assert!(ignore_set_matches(&set, "src/foo.test.ts"));
         assert!(ignore_set_matches(&set, "src/bar.spec.ts"));
         assert!(!ignore_set_matches(&set, "src/baz.ts"));
+    }
+
+    #[test]
+    fn build_ignore_set_single_star_stays_within_one_segment() {
+        let config = DuplicatesConfig {
+            ignore_defaults: false,
+            ignore: vec!["src/gen/*.ts".to_string()],
+            ..DuplicatesConfig::default()
+        };
+        let set = build_ignore_set(&config).expect("ignore set");
+        assert!(ignore_set_matches(&set, "src/gen/a.ts"));
+        assert!(!ignore_set_matches(&set, "src/gen/deep/a.ts"));
     }
 
     #[test]

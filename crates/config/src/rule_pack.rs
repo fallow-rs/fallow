@@ -134,6 +134,7 @@ pub struct RulePackRule {
     pub exports: Vec<String>,
     /// Project-root-relative globs allowed to call `@gdp-ts/core.defineProof`
     /// (`gdp-proof-producer` only). At least one pattern is required.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_files: Vec<String>,
     /// Exact literal proof labels checked by a `gdp-proof-producer` rule.
@@ -149,9 +150,11 @@ pub struct RulePackRule {
     pub ignore_type_only: bool,
     /// Optional include globs (project-root-relative). Empty or absent means
     /// the rule applies to every analyzed file.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
     /// Optional exclude globs (project-root-relative), applied after `files`.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
     /// Optional boundary zones this rule applies to. Empty or absent means the

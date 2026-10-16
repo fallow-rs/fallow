@@ -1207,10 +1207,7 @@ pub(crate) struct CompiledPathRule {
 
 impl CompiledPathRule {
     pub(crate) fn for_entry_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
-        let include = match globset::GlobBuilder::new(&rule.pattern)
-            .literal_separator(true)
-            .build()
-        {
+        let include = match fallow_config::compile_path_glob(&rule.pattern) {
             Ok(glob) => glob.compile_matcher(),
             Err(err) => {
                 tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
@@ -1234,7 +1231,7 @@ impl CompiledPathRule {
     }
 
     pub(crate) fn for_used_export_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
-        let include = match globset::Glob::new(&rule.pattern) {
+        let include = match fallow_config::compile_path_glob(&rule.pattern) {
             Ok(glob) => glob.compile_matcher(),
             Err(err) => {
                 tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
@@ -1321,21 +1318,16 @@ fn compile_excluded_globs(
 ) -> Vec<globset::GlobMatcher> {
     patterns
         .iter()
-        .filter_map(|pattern| {
-            match globset::GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .build()
-            {
-                Ok(glob) => Some(glob.compile_matcher()),
-                Err(err) => {
-                    tracing::warn!(
-                        "skipping invalid excluded glob '{}' for {} '{}': {err}",
-                        pattern,
-                        rule_kind,
-                        rule_pattern
-                    );
-                    None
-                }
+        .filter_map(|pattern| match fallow_config::compile_path_glob(pattern) {
+            Ok(glob) => Some(glob.compile_matcher()),
+            Err(err) => {
+                tracing::warn!(
+                    "skipping invalid excluded glob '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                None
             }
         })
         .collect()

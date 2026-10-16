@@ -74,7 +74,7 @@ fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
     // drops only that pattern, like the callee patterns in `compile_rules`.
     patterns
         .iter()
-        .filter_map(|pattern| globset::Glob::new(pattern).ok())
+        .filter_map(|pattern| fallow_config::compile_path_glob(pattern).ok())
         .map(|glob| glob.compile_matcher())
         .collect()
 }

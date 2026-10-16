@@ -274,6 +274,7 @@ pub struct HealthConfig {
     pub coverage_root: Option<PathBuf>,
 
     /// Glob patterns to exclude from complexity analysis.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub ignore: Vec<String>,
 
@@ -331,6 +332,7 @@ impl Default for HealthConfig {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct HealthThresholdOverride {
     /// Project-root-relative file globs this override applies to.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     pub files: Vec<String>,
     /// Exact emitted function names this override applies to. Empty means every
     /// function in matching files. Synthetic units are matched by their emitted

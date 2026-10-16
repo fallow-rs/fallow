@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobSet, GlobSetBuilder};
 
 /// Compiled project-relative patterns for hiding source-owned findings.
 ///
@@ -94,7 +94,7 @@ impl FindingIgnoreMatcher {
                 (&mut hidden, &mut hidden_origins, pattern.as_str())
             };
             let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-            builder.add(Glob::new(pattern)?);
+            builder.add(super::compile_path_glob(pattern)?);
             origins.push(index);
         }
 

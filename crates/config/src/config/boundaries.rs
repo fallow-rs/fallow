@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use globset::Glob;
+use super::glob_validation::compile_path_glob;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -325,6 +325,7 @@ pub struct BoundaryCoverageConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     pub require_all_files: bool,
     /// Glob patterns for files that may remain unmatched by any zone.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow_unmatched: Vec<String>,
 }
@@ -400,6 +401,7 @@ pub struct BoundaryZone {
     /// Zone name.
     pub name: String,
     /// Membership patterns.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<String>,
     /// Directories whose children become zones.
@@ -1064,7 +1066,7 @@ impl BoundaryConfig {
                     .patterns
                     .iter()
                     .map(|pattern| {
-                        Glob::new(pattern)
+                        compile_path_glob(pattern)
                             .expect("boundaries.zones[].patterns was validated at config load time")
                             .compile_matcher()
                     })
@@ -1093,7 +1095,7 @@ impl BoundaryConfig {
                 .allow_unmatched
                 .iter()
                 .map(|pattern| {
-                    Glob::new(pattern)
+                    compile_path_glob(pattern)
                         .expect(
                             "boundaries.coverage.allowUnmatched was validated at config load time",
                         )

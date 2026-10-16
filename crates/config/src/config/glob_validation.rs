@@ -20,7 +20,7 @@
 use std::fmt;
 use std::path::{Component, Path};
 
-use globset::Glob;
+use globset::{Glob, GlobBuilder};
 
 use super::finding_ignore::FindingIgnoreMatcher;
 
@@ -188,6 +188,20 @@ fn has_traversal_segment(pattern: &str) -> bool {
             .any(|c| matches!(c, Component::ParentDir))
 }
 
+/// Compile a glob that matches project-root-relative file paths.
+///
+/// A single `*` stays within one path segment, and only `**` crosses
+/// directories. This is the rule of gitignore, picomatch, and the plugin
+/// entry patterns. Every path glob that a user writes in the config compiles
+/// through this function, so all of these fields match a path the same way.
+///
+/// # Errors
+///
+/// Returns the `globset` error when the pattern is not valid glob syntax.
+pub fn compile_path_glob(pattern: &str) -> Result<Glob, globset::Error> {
+    GlobBuilder::new(pattern).literal_separator(true).build()
+}
+
 /// Validate that `pattern` is a relative, non-traversal, syntactically valid
 /// glob; return the compiled glob on success.
 ///
@@ -201,7 +215,7 @@ fn has_traversal_segment(pattern: &str) -> bool {
 /// - `AbsolutePath` if the pattern is rooted at `/`, `\`, `\\`, `//`, or a
 ///   Windows drive letter
 /// - `TraversalSegment` if any path segment of the pattern is `..`
-/// - `InvalidSyntax` if `globset::Glob::new` rejects the pattern
+/// - `InvalidSyntax` if [`compile_path_glob`] rejects the pattern
 pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, GlobValidationError> {
     if is_absolute_pattern(pattern) {
         return Err(GlobValidationError::AbsolutePath {
@@ -215,7 +229,7 @@ pub fn compile_user_glob(pattern: &str, field: &'static str) -> Result<Glob, Glo
             pattern: pattern.to_owned(),
         });
     }
-    Glob::new(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
+    compile_path_glob(pattern).map_err(|source| GlobValidationError::InvalidSyntax {
         field,
         pattern: pattern.to_owned(),
         source,

@@ -120,7 +120,7 @@
           "type": "object",
           "properties": {
             "pattern": {
-              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).",
+              "description": "Project-root-relative glob; the plugin activates when any\ndiscovered file matches it. Validated at load like other user\nglobs (no absolute paths or `..` segments).\nA single `*` stays within one path segment; use `**` to match across directories.",
               "type": "string"
             },
             "type": {
@@ -202,7 +202,7 @@
       "type": "object",
       "properties": {
         "manifests": {
-          "description": "Recursive glob selecting the manifest files to read (e.g. `**/kibana.jsonc`).",
+          "description": "Recursive glob selecting the manifest files to read (e.g. `**/kibana.jsonc`).\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "string"
         },
         "format": {
@@ -298,7 +298,7 @@
       "type": "object",
       "properties": {
         "pattern": {
-          "description": "Glob pattern for files.",
+          "description": "Glob pattern for files.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "string"
         },
         "exports": {

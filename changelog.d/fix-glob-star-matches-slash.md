@@ -6,7 +6,6 @@
   entry point, so fallow did not report it as an unused file. A single `*` now
   stays within one path segment and only `**` crosses directories, as in
   gitignore, picomatch, and the plugin entry patterns. If your config used a
-  single `*` to match nested files, change it to `**`. Other glob fields,
-  such as `ignorePatterns`, keep their current matching. Thanks
+  single `*` to match nested files, change it to `**`. Thanks
   [@jleifeld](https://github.com/jleifeld) for the report.
   (Closes [#3490](https://github.com/fallow-rs/fallow/issues/3490))

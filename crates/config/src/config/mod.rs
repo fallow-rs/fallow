@@ -36,6 +36,7 @@ pub use entry_span::ConfigEntrySpan;
 pub use finding_ignore::FindingIgnoreMatcher;
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
+pub use glob_validation::compile_path_glob;
 pub use health::{
     ChangeCouplingConfig, EmailMode, HealthConfig, HealthThresholdOverride, OwnershipConfig,
 };
@@ -326,11 +327,11 @@ pub struct FallowConfig {
     #[serde(default)]
     pub entry: Vec<String>,
 
-    /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load. A `!`-prefixed entry is an exception that applies after the defaults and the positive patterns: `"!src/policy/coverage/**"` brings back hand-written source under a built-in default such as `**/coverage/**`, and `"!.config/**"` adds a hidden directory to discovery. Paths under `node_modules` or `.git` can not be lifted, and a `!` entry that names one of these segments is a config error.
+    /// An array of project-root-relative glob patterns for files to exclude from analysis entirely; entries are unioned with fallow's built-in defaults (**/node_modules/**, **/dist/**, **/build/**, **/.git/**, **/coverage/**, **/*.min.js, **/*.min.mjs, **/*.min.cjs, **/*.bundle.js), so custom globs add to rather than replace them. Set it (e.g. `["generated/**"]`) to drop generated or vendored trees from every detector; patterns are validated at load. A `!`-prefixed entry is an exception that applies after the defaults and the positive patterns: `"!src/policy/coverage/**"` brings back hand-written source under a built-in default such as `**/coverage/**`, and `"!.config/**"` adds a hidden directory to discovery. Paths under `node_modules` or `.git` can not be lifted, and a `!` entry that names one of these segments is a config error. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
 
-    /// An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all.
+    /// An array of project-root-relative glob patterns whose source-owned dead-code findings are hidden after analysis without excluding matching files from discovery, parsing, resolution, or the module graph. Use `/` as the path separator on every platform. Positive patterns select paths to hide; `!`-prefixed patterns keep matching paths reportable, and a negated-only array reports only those exception paths. A finding with multiple source owners is hidden only when every owner matches, so a cycle, duplicate-export group, or unlisted dependency with any reportable location remains visible. Architecture, policy, suppression-hygiene, and framework-correctness findings remain visible even when a referenced path matches, as do manifest-owned findings that no source file owns: unused dependencies, unused dev and optional dependencies, catalog entries, and dependency overrides. Use `ignorePatterns` instead when a generated or vendored file must not be analyzed at all. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_findings: Vec<String>,
 
@@ -354,7 +355,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub ignore_unresolved_imports: Vec<String>,
 
-    /// A list of per-file rules that exempt named exports from `unused-export` and from duplicate-exports grouping for files matching a glob. Each entry is `{ file: <glob>, exports: [<name>, ...] }` where `exports: ["*"]` exempts every export in the file and a name list exempts only those names; built for component-library barrels (shadcn/Radix/bits-ui `index.ts`) that intentionally re-export the same short names across many files.
+    /// A list of per-file rules that exempt named exports from `unused-export` and from duplicate-exports grouping for files matching a glob. Each entry is `{ file: <glob>, exports: [<name>, ...] }` where `exports: ["*"]` exempts every export in the file and a name list exempts only those names; built for component-library barrels (shadcn/Radix/bits-ui `index.ts`) that intentionally re-export the same short names across many files. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub ignore_exports: Vec<IgnoreExportRule>,
 
@@ -465,7 +466,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub dynamically_loaded: Vec<String>,
 
-    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten rules for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict); inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override (fallow warns during analysis and points to the right mechanism: top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for the others).
+    /// An ordered list of per-file rule-severity overrides: each entry re-severities specific analysis rules for files its globs match, layered on top of the top-level `rules` defaults. Set to relax or tighten rules for a subset of paths (e.g. downgrade unused-exports to warn under a generated directory); each entry has `files` (glob-pattern array) and `rules` (a partial per-rule severity map of error/warn/off). Entries apply in list order and a file matched by several entries takes every matching entry's overrides (later entries win on conflict); inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override (fallow warns during analysis and points to the right mechanism: top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for the others). A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 

@@ -77,7 +77,7 @@
           }
         },
         "allowedFiles": {
-          "description": "Project-root-relative globs allowed to call `@gdp-ts/core.defineProof`\n(`gdp-proof-producer` only). At least one pattern is required.",
+          "description": "Project-root-relative globs allowed to call `@gdp-ts/core.defineProof`\n(`gdp-proof-producer` only). At least one pattern is required.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
@@ -95,14 +95,14 @@
           "type": "boolean"
         },
         "files": {
-          "description": "Optional include globs (project-root-relative). Empty or absent means\nthe rule applies to every analyzed file.",
+          "description": "Optional include globs (project-root-relative). Empty or absent means\nthe rule applies to every analyzed file.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "exclude": {
-          "description": "Optional exclude globs (project-root-relative), applied after `files`.",
+          "description": "Optional exclude globs (project-root-relative), applied after `files`.\nA single `*` stays within one path segment; use `**` to match across directories.",
           "type": "array",
           "items": {
             "type": "string"

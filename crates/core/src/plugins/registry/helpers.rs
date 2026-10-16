@@ -797,7 +797,9 @@ pub fn check_plugin_detection(
     match detection {
         PluginDetection::Dependency { package } => all_deps.iter().any(|d| *d == package),
         PluginDetection::FileExists { pattern } => {
-            if let Ok(matcher) = globset::Glob::new(pattern).map(|g| g.compile_matcher()) {
+            if let Ok(matcher) =
+                fallow_config::compile_path_glob(pattern).map(|g| g.compile_matcher())
+            {
                 for file in discovered_files {
                     let relative = file.strip_prefix(root).unwrap_or(file);
                     if matcher.is_match(relative) {

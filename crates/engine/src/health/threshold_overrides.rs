@@ -48,7 +48,7 @@ impl ThresholdOverrideResolver {
             .map(|(index, override_entry)| {
                 let mut builder = globset::GlobSetBuilder::new();
                 for pattern in &override_entry.files {
-                    if let Ok(glob) = globset::Glob::new(pattern) {
+                    if let Ok(glob) = fallow_config::compile_path_glob(pattern) {
                         builder.add(glob);
                     }
                 }

@@ -96,7 +96,7 @@ impl IgnorePatternSet {
         let mut builder = GlobSetBuilder::new();
         let mut exception_scopes = Vec::with_capacity(exception_bodies.len());
         for body in exception_bodies {
-            if let Ok(glob) = globset::Glob::new(body) {
+            if let Ok(glob) = super::compile_path_glob(body) {
                 builder.add(glob);
                 exception_scopes.push(ExceptionScope::parse(body));
             }

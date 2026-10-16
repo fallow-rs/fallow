@@ -119,6 +119,7 @@ pub enum PluginDetection {
         /// Project-root-relative glob; the plugin activates when any
         /// discovered file matches it. Validated at load like other user
         /// globs (no absolute paths or `..` segments).
+        /// A single `*` stays within one path segment; use `**` to match across directories.
         pattern: String,
     },
     /// All conditions must be true.
@@ -230,6 +231,7 @@ pub struct ExternalPluginDef {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalUsedExport {
     /// Glob pattern for files.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     pub pattern: String,
     /// Export names always considered used.
     pub exports: Vec<String>,
@@ -501,6 +503,7 @@ pub struct ManifestExistsPredicate {
 #[serde(rename_all = "camelCase")]
 pub struct ManifestEntryRule {
     /// Recursive glob selecting the manifest files to read (e.g. `**/kibana.jsonc`).
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     pub manifests: String,
 
     /// Manifest format. Defaults to `jsonc` (which also parses plain JSON).

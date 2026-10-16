@@ -633,16 +633,6 @@ fn relative_paths_for(files: &[DiscoveredFile], root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Compile a user `entry` or `dynamicallyLoaded` glob.
-///
-/// A single `*` stays within one path segment and only `**` crosses
-/// directories, as in gitignore, picomatch, and the plugin entry patterns.
-fn compile_user_entry_glob(pattern: &str) -> Result<globset::Glob, globset::Error> {
-    globset::GlobBuilder::new(pattern)
-        .literal_separator(true)
-        .build()
-}
-
 /// Push entries for files matching the user-configured manual entry glob patterns.
 #[expect(
     clippy::expect_used,
@@ -657,7 +647,7 @@ fn push_manual_entry_matches(
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in &config.entry_patterns {
         builder.add(
-            compile_user_entry_glob(pattern)
+            fallow_config::compile_path_glob(pattern)
                 .expect("entry pattern was validated at config load time"),
         );
     }
@@ -1459,10 +1449,7 @@ fn build_plugin_glob_meta(
         .chain(plugin_result.always_used.iter())
         .chain(plugin_result.fixture_patterns.iter())
     {
-        if let Ok(glob) = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
+        if let Ok(glob) = fallow_config::compile_path_glob(pattern) {
             builder.add(glob);
             if let Some(path) = crate::plugins::CompiledPathRule::for_entry_rule(
                 &crate::plugins::PathRule::new(pattern.clone()),
@@ -1601,7 +1588,7 @@ pub fn discover_dynamically_loaded_entry_points(
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in &config.dynamically_loaded {
         builder.add(
-            compile_user_entry_glob(pattern)
+            fallow_config::compile_path_glob(pattern)
                 .expect("dynamicallyLoaded pattern was validated at config load time"),
         );
     }
@@ -1646,10 +1633,7 @@ fn compile_entry_rule<'a>(
     plugin_name: &'a str,
     plugin_result: &'a crate::plugins::AggregatedPluginResult,
 ) -> Option<(globset::Glob, CompiledEntryRule<'a>)> {
-    let include = match globset::GlobBuilder::new(&rule.pattern)
-        .literal_separator(true)
-        .build()
-    {
+    let include = match fallow_config::compile_path_glob(&rule.pattern) {
         Ok(glob) => glob,
         Err(err) => {
             tracing::warn!("invalid entry pattern '{}': {err}", rule.pattern);
@@ -1679,10 +1663,7 @@ pub fn compile_glob_set(patterns: &[String]) -> Option<globset::GlobSet> {
     }
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in patterns {
-        if let Ok(glob) = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
+        if let Ok(glob) = fallow_config::compile_path_glob(pattern) {
             builder.add(glob);
         }
     }

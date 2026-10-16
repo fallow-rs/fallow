@@ -137,6 +137,7 @@ pub struct DuplicatesConfig {
     pub threshold: f64,
 
     /// Additional ignore patterns for duplication analysis.
+    /// A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub ignore: Vec<String>,
 
