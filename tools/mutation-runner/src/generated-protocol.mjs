@@ -60,7 +60,7 @@ export const MUTATION_RUNNER_PROTOCOL = deepFreeze({
     {
       name: "bun-test",
       package: "bun",
-      min_version: "1.3.0",
+      min_version: "1.4.0",
       max_version_exclusive: "2.0.0",
     },
   ],

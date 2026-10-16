@@ -902,7 +902,7 @@ mod tests {
             [
                 "install vitest 4.1.0 or a later version below 6.0.0; a vitest 4.x release from 4.1.0 is in the range",
                 "install node 22.18.0 or a later version below 27.0.0; a node 22.x release from 22.18.0 is in the range",
-                "install bun 1.3.0 or a later version below 2.0.0; a bun 1.x release from 1.3.0 is in the range",
+                "install bun 1.4.0 or a later version below 2.0.0; a bun 1.x release from 1.4.0 is in the range",
             ]
         );
 

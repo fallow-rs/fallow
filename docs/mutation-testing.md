@@ -412,7 +412,7 @@ selects one. The default `auto` reads the project in this order:
 |---|---|---|---|
 | Vitest | `vitest` | 4.1 to 5 | `node`, then `bun` |
 | `node:test` | `node-test` | Node.js 22.18 to 26 | `node` |
-| `bun test` | `bun-test` | Bun 1.3 and later 1.x releases | `bun` |
+| `bun test` | `bun-test` | Bun 1.4 and later 1.x releases | `bun` |
 
 The companion refuses a runner version outside this range. The run exits
 with code 2 and `FALLOW_MUTATION_RUNNER_UNSUPPORTED`. The message names the
@@ -428,6 +428,11 @@ install vitest 4.1.0 or a later version below 6.0.0; a vitest 4.x release from 4
 Vitest 4.0 is not supported. It reads the test-id filter of a test
 specification as a list of test lines. Each mutant run then fails with an
 error, and each mutant looks killed. Vitest 4.1 added the test-id filter.
+
+Bun 1.3 is not supported. Bun 1.3.0 to 1.3.9 write no JUnit report when
+`--bail` is set, so a run gets no test results. Bun 1.3 also gives each
+failed test the JUnit type `AssertionError`, so a runtime error looks like
+an assertion failure. Bun 1.4 fixes both.
 
 `borp` is a test runner that runs `node:test`. The script parser reads the
 test files of a `borp` command in the order of `borp` 1.0:
@@ -519,9 +524,6 @@ test run.
 - With `bail`, a run stops the test process at the first failure. Node 22
   applies the run timeout to the whole test file process. A requested test
   with no result after that timeout counts as a timeout.
-- Bun 1.3 gives each failed test the JUnit type `AssertionError`, so the
-  `failure_kind` of a run on Bun 1.3 is `assertion`, also for a runtime
-  error. The status does not change.
 - The in-process mode of `node:test` (`isolation: "none"`) is not
   supported.
 - Neither runtime can load a Vue, Svelte or Astro component file. The

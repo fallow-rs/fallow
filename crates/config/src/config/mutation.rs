@@ -15,7 +15,7 @@ pub enum MutationRunner {
     /// `node:test` of Node.js 22.18 or later. Each test file runs in its own
     /// Node process.
     NodeTest,
-    /// `bun test` of Bun 1.3 or later. Each test file runs in its own Bun
+    /// `bun test` of Bun 1.4 or later. Each test file runs in its own Bun
     /// process.
     BunTest,
 }
