@@ -25,13 +25,16 @@ invariants in this file.
    ```
 
    Require the `release` environment to admit `main` only, and check where each
-   publication secret lives. GitHub never returns a secret value, so a secret
-   moves into the environment only when its value is entered again, which in
-   practice means at its next rotation. Until then it stays a repository
-   secret, readable by a workflow on any ref, and the environment does not
-   protect it: the check names those secrets instead of failing. Once a secret
-   is in the environment the repository copy must be gone, and the check fails
-   on duplicate copies. A missing secret fails only when its active mode requires it.
+   publication secret lives. GitHub's API never returns a secret value. A
+   secret can be entered again at rotation. The existing signing key can also
+   move through a reviewed, one-time ciphertext-only transfer. Require an
+   independently checked signature proof from the protected environment before
+   retiring the repository copy. The transfer must preserve the key and its
+   consumers. Until retirement, the repository copy remains readable by a
+   workflow on any ref; the environment does not protect it. The preflight
+   names those copies and fails on duplicates, so complete the verified
+   transfer before running it. A missing secret fails only when its active
+   mode requires it.
    Run this block with Bash and stop on any failed command:
 
    ```bash
@@ -75,7 +78,7 @@ invariants in this file.
      case "${in_env}${in_repo}" in
        10) ;;
        11) echo "$name exists at both levels; delete the repository copy" >&2; exit 1 ;;
-       01) echo "NOTE: $name is a repository secret, unprotected by the release environment; move it at its next rotation" >&2 ;;
+       01) echo "NOTE: $name is a repository secret, unprotected by the release environment; move it into the protected environment after verification" >&2 ;;
        00) [ "$required" = 0 ] || { echo "$name is missing" >&2; exit 1; } ;;
      esac
    done

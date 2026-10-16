@@ -2,6 +2,12 @@ name: Verify Marketplace identity
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_publisher:
+        description: Require the app to hold a publishing role after the owner grants access
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -24,7 +30,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: .github/scripts/marketplace-profile.mjs
+          sparse-checkout: |
+            .github/scripts/marketplace-profile.mjs
+            .github/publishers/marketplace
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -34,6 +42,10 @@ jobs:
 
       - name: Validate configured app identity
         run: node .github/scripts/marketplace-profile.mjs --validate-config
+
+      - name: Install frozen Marketplace verifier
+        if: inputs.verify_publisher
+        run: npm ci --prefix .github/publishers/marketplace --ignore-scripts --no-audit --no-fund
 
       - name: Authenticate configured app with Microsoft Entra
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
@@ -46,3 +58,11 @@ jobs:
       - name: Read validated Marketplace profile ID
         id: profile
         run: node .github/scripts/marketplace-profile.mjs
+
+      - name: Check app publishing role
+        if: inputs.verify_publisher
+        run: node .github/scripts/marketplace-profile.mjs --verify-publisher
+
+      - name: Verify native Marketplace Azure credential chain
+        if: inputs.verify_publisher
+        run: node .github/scripts/marketplace-profile.mjs --verify-vsce

@@ -107,11 +107,78 @@ export const resolveMarketplaceProfile = async (
   ) {
     return { ok: false, error: "Marketplace Azure token tenant does not match configuration" };
   }
-  return lookupMarketplaceProfile(credential.accessToken, fetchProfile);
+  const profile = await lookupMarketplaceProfile(credential.accessToken, fetchProfile);
+  if (!profile.ok || !config.verifyPublisher) return profile;
+  try {
+    const response = await fetchProfile(
+      "https://marketplace.visualstudio.com/_apis/securityroles/scopes/gallery.publisher/roleassignments/resources/fallow-rs?api-version=3.2-preview.1",
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${credential.accessToken}`, Accept: "application/json" },
+        redirect: "error",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+    if (response.status !== 200) throw new Error("Publisher access refused");
+    const assignments = await response.json();
+    const permitted =
+      Array.isArray(assignments?.value) &&
+      assignments.value.some(
+        (assignment) =>
+          typeof assignment?.identity?.id === "string" &&
+          assignment.identity.id.toLowerCase() === profile.profileId.toLowerCase() &&
+          ["Contributor", "Owner", "Creator"].includes(assignment?.role?.name) &&
+          assignment.role.denyPermissions === 0,
+      );
+    if (permitted) return { ...profile, publisherVerified: true };
+  } catch {
+    return { ok: false, error: "Marketplace publisher permission lookup failed" };
+  }
+  return { ok: false, error: "Marketplace app has no verified publishing role for fallow-rs" };
+};
+
+/** Verify the frozen VSCE Azure credential chain without publishing or exposing CLI output. */
+export const verifyMarketplaceAzureCredential = (runNative = execFileSync, env = process.env) => {
+  const safeEnv = { ...env };
+  for (const name of [
+    "VSCE_PAT",
+    "AZURE_CLIENT_SECRET",
+    "AZURE_CLIENT_CERTIFICATE_PATH",
+    "AZURE_CLIENT_CERTIFICATE_PASSWORD",
+  ]) {
+    delete safeEnv[name];
+  }
+  try {
+    runNative(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL("../publishers/marketplace/node_modules/@vscode/vsce/vsce", import.meta.url),
+        ),
+        "verify-pat",
+        "fallow-rs",
+        "--azure-credential",
+      ],
+      {
+        env: safeEnv,
+        encoding: "utf8",
+        timeout: TOKEN_TIMEOUT_MS,
+        maxBuffer: TOKEN_OUTPUT_LIMIT,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Marketplace native Azure credential verification failed" };
+  }
 };
 
 const main = async () => {
-  const config = { clientId: process.env.AZURE_CLIENT_ID, tenantId: process.env.AZURE_TENANT_ID };
+  const config = {
+    clientId: process.env.AZURE_CLIENT_ID,
+    tenantId: process.env.AZURE_TENANT_ID,
+    verifyPublisher: process.argv[2] === "--verify-publisher",
+  };
   if (process.env.GITHUB_ACTIONS !== "true" || process.env.GITHUB_REF !== "refs/heads/main") {
     console.error("Marketplace identity verification requires the protected main workflow");
     return 1;
@@ -122,7 +189,14 @@ const main = async () => {
     return 1;
   }
   if (process.argv.length === 3 && process.argv[2] === "--validate-config") return 0;
-  if (process.argv.length !== 2) {
+  if (process.argv.length === 3 && process.argv[2] === "--verify-vsce") {
+    const native = verifyMarketplaceAzureCredential();
+    console.log(
+      native.ok ? "Marketplace native Azure credential verification passed" : native.error,
+    );
+    return native.ok ? 0 : 1;
+  }
+  if (process.argv.length !== 2 && !(process.argv.length === 3 && config.verifyPublisher)) {
     console.error("Unsupported Marketplace identity verification arguments");
     return 1;
   }
@@ -135,6 +209,7 @@ const main = async () => {
     appendFileSync(process.env.GITHUB_OUTPUT, `profile_id=${result.profileId}\n`);
   }
   console.log(`Marketplace profile ID: ${result.profileId}`);
+  if (result.publisherVerified) console.log("Marketplace app has a publishing role for fallow-rs");
   return 0;
 };
 

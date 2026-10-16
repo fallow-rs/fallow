@@ -7,13 +7,18 @@ on:
         description: Version tag to publish, for example v3.11.0
         required: true
         type: string
+      auth_check:
+        description: Check registry identities without a release
+        required: false
+        default: false
+        type: boolean
       pgo:
         description: Build the Rust release binaries with profile-guided optimization (PGO)
         required: false
         default: true
         type: boolean
 
-run-name: Release ${{ inputs.tag }} from ${{ github.sha }}
+run-name: ${{ inputs.auth_check && 'Check registry identities' || format('Release {0}', inputs.tag) }} from ${{ github.sha }}
 
 concurrency:
   group: release
@@ -28,6 +33,7 @@ env:
 jobs:
   release-context:
     name: Verify tag-last release context
+    if: ${{ !inputs.auth_check }}
     runs-on: ubuntu-26.04
     # The CI gate below waits up to 150 min for runs on the release commit.
     # The free plan queue can hold push runs for a long time.
@@ -177,6 +183,7 @@ jobs:
 
   publish-crates:
     name: Publish Rust crates
+    if: ${{ !inputs.auth_check }}
     needs: [release-verified, release-assets]
     # Every credential-bearing job runs in the `release` environment. Its
     # deployment branch policy admits `main` only, so a copy of this workflow
@@ -282,6 +289,7 @@ jobs:
   # runs, so a skipped job cannot skip the jobs after it.
   pgo-profile:
     name: Train PGO profile (${{ matrix.target }})
+    if: ${{ !inputs.auth_check }}
     needs: release-context
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -404,6 +412,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.target }})
+    if: ${{ !inputs.auth_check }}
     needs: [release-context, pgo-profile]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
@@ -855,6 +864,7 @@ jobs:
   # Fresh runners keep build scripts and dependency execution away from the key.
   sign:
     name: Sign (${{ matrix.npm_dir }})
+    if: ${{ !inputs.auth_check }}
     needs: build
     environment: release
     runs-on: ubuntu-26.04
@@ -1000,6 +1010,7 @@ jobs:
 
   validate:
     name: Release validation
+    if: ${{ !inputs.auth_check }}
     needs: release-context
     uses: ./.github/workflows/release-validation.yml
     permissions:
@@ -1007,6 +1018,7 @@ jobs:
 
   similar-code-conformance:
     name: Similar-code production conformance
+    if: ${{ !inputs.auth_check }}
     needs: [build, sign]
     runs-on: ubuntu-26.04
     timeout-minutes: 75
@@ -1098,6 +1110,7 @@ jobs:
 
   release-assets:
     name: Stage GitHub Release assets
+    if: ${{ !inputs.auth_check }}
     needs: [release-verified, vscode-prep, vscode-host-smoke]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -1197,6 +1210,7 @@ jobs:
   # never install).
   release-verified:
     name: Release verified
+    if: ${{ !inputs.auth_check }}
     needs: [build, sign, validate, similar-code-conformance]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -1211,6 +1225,7 @@ jobs:
   # publish job. See the npm-publish job below for the matching pattern.
   npm-prep:
     name: Pack npm tarballs
+    if: ${{ !inputs.auth_check }}
     needs: [build, sign]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -1478,6 +1493,7 @@ jobs:
 
   npm-publish:
     name: Publish to npm
+    if: ${{ !inputs.auth_check }}
     # Privileged job. Keep the surface tiny:
     # - downloads pre-packed tarballs (no fresh checkout, no installs)
     # - the only network calls are `npm publish`, the single stage call for
@@ -1690,6 +1706,7 @@ jobs:
   # this run staged. No credentials: this job only reads the public registry.
   npm-root-approved:
     name: Wait for the approved fallow root
+    if: ${{ !inputs.auth_check }}
     needs: npm-publish
     runs-on: ubuntu-26.04
     # GitHub stops a job after 6 hours. The loop gives up before that with the
@@ -1761,6 +1778,7 @@ jobs:
   # check out or build repository code while a registry token is present.
   vscode-prep:
     name: Build VS Code target VSIX files
+    if: ${{ !inputs.auth_check }}
     needs: [build, sign]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -1850,6 +1868,7 @@ jobs:
   # binaries before any registry token or GitHub release asset staging runs.
   vscode-host-smoke:
     name: VS Code release target host (${{ matrix.target }})
+    if: ${{ !inputs.auth_check }}
     needs: vscode-prep
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -1999,6 +2018,7 @@ jobs:
 
   vscode-publish-marketplace:
     name: Publish VS Code Marketplace targets
+    if: ${{ !inputs.auth_check }}
     needs: [vscode-prep, vscode-host-smoke, release-assets, npm-root-approved]
     environment: release
     runs-on: ubuntu-26.04
@@ -2161,6 +2181,7 @@ jobs:
 
   vscode-publish-open-vsx:
     name: Publish Open VSX targets
+    if: ${{ !inputs.auth_check }}
     needs: [vscode-prep, vscode-host-smoke, release-assets, npm-root-approved]
     environment: release
     runs-on: ubuntu-26.04
@@ -2279,6 +2300,7 @@ jobs:
 
   vscode-public-verify:
     name: Verify public VS Code registry targets
+    if: ${{ !inputs.auth_check }}
     needs: [vscode-prep, vscode-publish-marketplace, vscode-publish-open-vsx]
     runs-on: ubuntu-26.04
     timeout-minutes: 45
@@ -2304,6 +2326,7 @@ jobs:
 
   release-ready:
     name: Release ready for signed tag
+    if: ${{ !inputs.auth_check }}
     needs: [publish-crates, npm-publish, npm-root-approved, vscode-public-verify, release-assets]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -2333,3 +2356,28 @@ jobs:
             exit 1
           fi
           echo "Release workflow completed with ${TAG_NAME} still absent"
+
+
+  publisher-auth-check:
+    name: Check registry publishing identities
+    if: inputs.auth_check && github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout reviewed identity check
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts/publisher-auth-check.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Check trusted registry identities
+        run: node .github/scripts/publisher-auth-check.mjs

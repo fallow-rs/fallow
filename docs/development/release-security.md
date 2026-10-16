@@ -96,14 +96,62 @@ connection, Azure resource role or subscription ID is part of this workflow.
 The manual-only `verify-marketplace-identity.yml` workflow provides the profile
 lookup prerequisite after owner-approved source integration. It runs only on
 `main` in the protected `release` environment, uses the configured app's Entra
-identity, and makes only the fixed global profile GET with API version 7.1.
+identity, and makes the fixed global profile GET with API version 7.1.
 It requires Azure CLI's active account to be the configured service principal
 and tenant before obtaining a token. It emits a validated profile ID, never a
-token or upstream response body, and refuses redirects. It has no signing, PAT, dependency installation or publication
-step. Running it still requires separate owner approval, app registration and
+token or upstream response body, and refuses redirects. The default lookup
+installs no dependencies. Neither mode reads signing or PAT secrets or publishes
+an extension. Running it still requires separate owner approval, app registration and
 federation setup; the prepared workflow is not provider verification. Use the
 returned ID for owner-controlled publisher membership and read it back there.
+After the owner grants the profile a publishing role, dispatch that workflow
+with `verify_publisher=true`. It also reads the fixed publisher role-assignment
+endpoint and requires this profile to hold Contributor, Owner or Creator with
+no denied permissions. Reader access does not pass. This optional path installs
+only the frozen Marketplace CLI with lifecycle scripts disabled, before Azure
+login. It also runs `verify-pat fallow-rs --azure-credential` to check the native
+credential chain used by publication. CLI output stays captured, and only a
+fixed pass or fail message reaches the log. The native command alone accepts
+Reader, so the strict app-profile role check remains required.
 The real publisher job must never be dispatched as an identity capability probe.
+
+Open VSX binds identity to `release.yml`. Its owner-approved check therefore
+uses that workflow with `auth_check=true`, `tag=auth-check` and `pgo=false`.
+The deliberately invalid version tag provides a second barrier if the release
+context guard regresses. The check runs only on `main` in the protected
+`release` environment. `release-context` and all release build, signing and
+publication jobs skip. The separate check job installs no dependencies and
+reads no package, PAT or signing secret. It requests GitHub identity for
+`https://open-vsx.org`, exchanges it for the fixed `fallow-rs.fallow-vscode`
+extension, and calls the namespace permission GET with Bearer authority.
+No registry URL or namespace is supplied by an input. Redirects and refusal
+fail closed, with no PAT fallback and no provider response or token in logs.
+
+The exchange issues short-lived authority at the provider. The permission
+request does not consume that authority or upload a package. A successful
+check proves the binding and namespace publishing permission at that time;
+it does not prove an extension upload or change either active auth mode.
+
+The same fixed diagnostic path checks npm exchange for each package in the
+release workflow's exact npm inventory. It uses audience
+`npm:registry.npmjs.org`, requires the documented HTTP 201 OIDC response, and
+checks `created` and `expires` for a future, bounded lifetime. It then requests
+`crates.io` identity and performs one token-only exchange. Both identities
+must have the expected audience and a valid, bounded expiration before they
+reach a registry. Requests have fixed timeouts and refuse redirects. No
+package bytes, versions, upload, staging call or version reservation are sent.
+Authority remains in memory and is not written to logs, outputs or artifacts.
+
+An npm exchange does not prove that the `fallow` root's policy is stage-only:
+ordinary and staged publication use the same exchange. The crates.io response
+returns an opaque token with no crate inventory or expiration field. A valid
+response proves some matching configuration, not all release crates. The
+server defines its temporary lifetime, which this response cannot verify.
+Read back the full crate configuration inventory and npm root permissions
+with owner credentials before declaring complete publication readiness.
+References: [npm exchange API](https://api-docs.npmjs.com/),
+[pinned npm exchange implementation](https://github.com/npm/cli/blob/v11.19.0/lib/utils/oidc.js),
+and [crates.io exchange implementation](https://github.com/rust-lang/crates.io/blob/main/src/controllers/trustpub/tokens/exchange/mod.rs).
 
 App registration, federation, publisher membership, mode activation and legacy
 PAT retirement are separate owner actions. A prepared source route does not
@@ -124,14 +172,18 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   check in `release-context` is part of the workflow file, so it stops a
   mistaken dispatch but not an edited copy of the workflow on another ref; the
   environment is enforced by GitHub outside the file.
-- Move `VSCE_PAT`, `OVSX_PAT`, and `ED25519_BINARY_SIGNING_PRIVATE_KEY` into the
-  `release` environment as each one is rotated, and delete the repository copy
-  in the same pass. GitHub never returns a secret value, so a move needs the
-  value entered again. A secret that is still at repository level is readable
-  by any workflow on any ref: the environment does not protect it. The
-  maintainer preflight verifies the branch policy, names every secret that is
-  still unprotected, and fails on a secret that exists at both levels, because
-  the workflow token cannot read environment settings.
+- Keep required publication secrets in the protected `release` environment.
+  Rotation can move `VSCE_PAT`, `OVSX_PAT`, or
+  `ED25519_BINARY_SIGNING_PRIVATE_KEY` when its value is entered again.
+  The existing signing key can also move through a reviewed, one-time
+  ciphertext-only transfer without changing the key or its consumers.
+  Independently verify a signature made with the protected environment copy
+  before retiring the repository copy. GitHub's API does not return secret
+  values. A repository copy remains readable by a workflow on any ref and is
+  not protected by the environment. The maintainer preflight verifies the
+  branch policy, names unprotected copies, and rejects duplicates; complete
+  transfer verification and retirement before running that preflight.
+  The workflow token cannot read environment settings.
 - Pin the crates.io trusted publishing configs to the `release` environment.
   crates.io accepts an environment claim when a config sets none, and rejects a
   token without the matching claim once it does, so the pin is what stops an

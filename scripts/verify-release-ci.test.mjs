@@ -256,7 +256,52 @@ test("each required workflow exists, runs on push to main, and has the right dis
   }
 });
 
-test("release.yml runs the CI gate before every other job", () => {
+const assertReleaseJobsGated = (jobs) => {
+  // A job is safe when it is release-context, or when it needs at least one
+  // job and every needed job is safe. The path set stops a cycle.
+  const reachesContext = (name, path = new Set()) => {
+    if (name === "release-context") return true;
+    if (path.has(name)) return false;
+    const job = jobs.get(name);
+    assert.ok(job, `release.yml needs an unknown job: ${name}`);
+    const needs = needsOf(job);
+    const next = new Set(path).add(name);
+    return needs.length > 0 && needs.every((need) => reachesContext(need, next));
+  };
+  for (const [name, job] of jobs) {
+    if (name === "publisher-auth-check") {
+      assert.match(job, /^ {4}if: inputs.auth_check && github.ref == 'refs\/heads\/main'$/mu);
+      assert.match(job, /^ {4}environment: release$/mu);
+      assert.deepEqual(needsOf(job), []);
+      const permissions = /^ {4}permissions:\n((?: {6}.*\n)*)/mu.exec(job)?.[1];
+      assert.deepEqual(
+        permissions
+          ?.trim()
+          .split("\n")
+          .map((line) => line.trim()),
+        ["contents: read", "id-token: write"],
+      );
+      const commands = [...job.matchAll(/^ +run: (.+)$/gmu)].map((match) => match[1]);
+      assert.deepEqual(commands, ["node .github/scripts/publisher-auth-check.mjs"]);
+      const actions = [...job.matchAll(/^ +(?:- )?uses: (\S+)/gmu)].map((match) => match[1]);
+      assert.equal(actions.length, 2);
+      assert.match(actions[0], /^actions\/checkout@[a-f0-9]{40}$/u);
+      assert.match(actions[1], /^actions\/setup-node@[a-f0-9]{40}$/u);
+      assert.match(job, /ref: \$\{\{ github.sha \}\}/u);
+      assert.match(job, /persist-credentials: false/u);
+      assert.match(job, /sparse-checkout: .github\/scripts\/publisher-auth-check.mjs/u);
+      assert.doesNotMatch(
+        job,
+        /secrets\.|\b(?:npm|npx|cargo|publish|stage|upload-artifact|download-artifact)\b/u,
+      );
+      continue;
+    }
+    assert.match(job, /^ {4}if: \$\{\{ !inputs.auth_check \}\}$/mu, name);
+    assert.ok(reachesContext(name), `job ${name} can start before release-context passes`);
+  }
+};
+
+test("release.yml runs the CI gate before every publication job", () => {
   const jobs = jobBlocks(readWorkflowFile("release.yml"));
   const context = jobs.get("release-context");
   assert.ok(context, "release.yml has no release-context job");
@@ -277,20 +322,40 @@ test("release.yml runs the CI gate before every other job", () => {
     "the release-context timeout must be longer than the gate timeout",
   );
 
-  // A job is safe when it is release-context, or when it needs at least one
-  // job and every needed job is safe. The path set stops a cycle.
-  const reachesContext = (name, path = new Set()) => {
-    if (name === "release-context") return true;
-    if (path.has(name)) return false;
-    const job = jobs.get(name);
-    assert.ok(job, `release.yml needs an unknown job: ${name}`);
-    const needs = needsOf(job);
-    const next = new Set(path).add(name);
-    return needs.length > 0 && needs.every((need) => reachesContext(need, next));
-  };
-  for (const name of jobs.keys()) {
-    assert.ok(reachesContext(name), `job ${name} can start before release-context passes`);
+  assertReleaseJobsGated(jobs);
+});
+
+test("release CI gate exception rejects unsafe diagnostic and normal jobs", () => {
+  const jobs = jobBlocks(readWorkflowFile("release.yml"));
+  const auth = jobs.get("publisher-auth-check");
+  assert.ok(auth);
+  for (const [before, after] of [
+    ["if: inputs.auth_check && github.ref == 'refs/heads/main'", "if: true"],
+    ["environment: release", "environment: other"],
+    ["contents: read", "contents: write"],
+    ["node .github/scripts/publisher-auth-check.mjs", "npm publish"],
+    [
+      "sparse-checkout: .github/scripts/publisher-auth-check.mjs",
+      "sparse-checkout: .github/scripts/other.mjs",
+    ],
+  ]) {
+    assert.ok(auth.includes(before));
+    const changed = new Map(jobs).set("publisher-auth-check", auth.replace(before, after));
+    assert.throws(() => assertReleaseJobsGated(changed));
   }
+  const publish = jobs.get("npm-publish");
+  assert.ok(publish);
+  for (const changed of [
+    publish.replace("if: ${{ !inputs.auth_check }}", "if: true"),
+    publish.replace(/^ {4}needs:.*\n/mu, ""),
+  ])
+    assert.throws(() => assertReleaseJobsGated(new Map(jobs).set("npm-publish", changed)));
+  assert.throws(() =>
+    assertReleaseJobsGated(
+      new Map(jobs).set("other-root", "other-root:\n    if: ${{ !inputs.auth_check }}\n"),
+    ),
+  );
+  assertReleaseJobsGated(jobs);
 });
 
 test("node scripts/verify-release-ci.mjs runs main and rejects a run without a token", () => {
