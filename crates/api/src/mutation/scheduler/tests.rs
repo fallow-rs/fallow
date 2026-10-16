@@ -2130,7 +2130,11 @@ fn load_kill_job() -> Job {
 }
 
 fn memo_value(memo: &ControlMemo, tests: &[String]) -> Option<bool> {
-    *memo.cell(tests).lock().expect("cell")
+    memo.cell(tests)
+        .lock()
+        .expect("cell")
+        .as_ref()
+        .map(|verdict| *verdict == ControlVerdict::Passed)
 }
 
 #[test]
@@ -2188,4 +2192,53 @@ fn a_self_check_drop_inside_the_mutant_limit_gives_the_place_to_a_covered_pendin
     assert_eq!(status(&outcome, "m2"), MutantStatus::NoCoverage);
     assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
     assert_eq!(outcome.promoted, vec!["m1".to_owned()]);
+}
+
+#[test]
+fn a_hanging_control_set_costs_one_control_run_for_each_load_kill_mutant_with_it() {
+    // The self-check of t1 passes. m2 and m3 break the module load, and the
+    // control run of their tests (t1, t2) times out. The timeout is stored:
+    // m3 gets the same reason at once, and neither mutant retries into a
+    // second control run.
+    let spawner = FakeSpawner::new(script(
+        |_| shared_set_dry(),
+        |_, run| Ok(m1_killed_others_fail_at_load(run)),
+    ))
+    .with_control(|_, run| {
+        if run.test_ids.len() == 1 {
+            Ok(run_result(run, RunStatus::Survived, None))
+        } else {
+            Err(LinkFault::Timeout)
+        }
+    });
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    let mut reasons = Vec::new();
+    for id in ["m2", "m3"] {
+        assert_eq!(status(&outcome, id), MutantStatus::RuntimeError, "{id}");
+        let issue = outcome
+            .issues
+            .iter()
+            .find(|issue| issue.mutant_id.as_deref() == Some(id))
+            .expect("an issue");
+        assert!(
+            issue.message.contains("the control run timed out"),
+            "{}",
+            issue.message
+        );
+        reasons.push(issue.message.clone());
+    }
+    assert_eq!(reasons[0], reasons[1], "the same reason");
+    let set_controls = spawner
+        .controls()
+        .iter()
+        .filter(|(_, run)| run.test_ids.len() == 2)
+        .count();
+    assert_eq!(set_controls, 1, "one control run for the hanging set");
+    let mutant_runs = spawner
+        .runs()
+        .iter()
+        .filter(|(_, run)| run.mutant_id.as_deref() != Some("m1"))
+        .count();
+    assert_eq!(mutant_runs, 2, "no retry of m2 or m3");
 }

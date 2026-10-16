@@ -469,6 +469,10 @@ at least `--setup-timeout`. The scheduler uses control runs in two places:
    - The scheduler stores the control result of each test set for the run.
      Each distinct test set gets at most one control run, and the test set
      of the self-check gets none. A fault of the companion is not stored.
+   - A control run that times out is stored for its test set. The mutant
+     is `runtime_error` with no retry, and each later mutant of this kind
+     with the same tests gets the same reason at once. A test set that
+     hangs therefore costs one control run.
    - After the `--time-budget` deadline, a control run that has no stored
      result does not start, and the mutant is `pending`.
 

@@ -536,14 +536,27 @@ fn sorted_tests(tests: &[String]) -> Vec<&str> {
     sorted
 }
 
-/// The control result of one test set: `Some(true)` when the tests pass with
-/// no active mutant, `None` before a control run gave a result.
-type ControlCell = Arc<Mutex<Option<bool>>>;
+/// The stored control result of one test set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ControlVerdict {
+    /// The tests pass with no active mutant.
+    Passed,
+    /// A test failed with no active mutant.
+    Failed,
+    /// The control run timed out, with the reason. A later control run of
+    /// the same tests would wait as long again.
+    TimedOut(String),
+}
+
+/// The control result of one test set: `None` before a control run gave a
+/// result.
+type ControlCell = Arc<Mutex<Option<ControlVerdict>>>;
 
 /// The control result of each test set within one run. A mutant kill with
 /// no executed test needs a control run of its tests, and each test set gets
-/// at most one. A fault of the companion is not stored, so a later mutant
-/// with the same tests runs the control again. The memo also keeps the tests
+/// at most one. A timeout is stored, so a hanging test set costs one control
+/// run. A fault of the companion is not stored, so a later mutant with the
+/// same tests runs the control again. The memo also keeps the tests
 /// that failed in a control run: each later mutant run leaves them out.
 #[derive(Default)]
 struct ControlMemo {
@@ -563,9 +576,9 @@ impl ControlMemo {
         Arc::clone(entries.entry(key).or_default())
     }
 
-    fn store(&self, tests: &[String], passed: bool) {
+    fn store(&self, tests: &[String], verdict: ControlVerdict) {
         if let Ok(mut cell) = self.cell(tests).lock() {
-            *cell = Some(passed);
+            *cell = Some(verdict);
         }
     }
 
@@ -836,9 +849,12 @@ impl<'a> Worker<'a> {
             failed.settled = true;
             failed
         };
-        match *known {
-            Some(true) => return Ok(attempt),
-            Some(false) => return Ok(failed("an earlier control run of these tests failed")),
+        match &*known {
+            Some(ControlVerdict::Passed) => return Ok(attempt),
+            Some(ControlVerdict::Failed) => {
+                return Ok(failed("an earlier control run of these tests failed"));
+            }
+            Some(ControlVerdict::TimedOut(reason)) => return Ok(failed(reason)),
             None => {}
         }
         if self
@@ -852,25 +868,31 @@ impl<'a> Worker<'a> {
         // The result belongs to the set that ran. When the control run left
         // out a test that another worker marked meanwhile, the cell of this
         // set stays open.
-        let mut remember = |passed: bool| {
+        let mut remember = |verdict: ControlVerdict| {
             if sorted_tests(&ran) == sorted_tests(&tests) {
-                *known = Some(passed);
+                *known = Some(verdict);
             } else if !ran.is_empty() {
-                memo.store(&ran, passed);
+                memo.store(&ran, verdict);
             }
         };
         match outcome {
             ControlOutcome::Passed => {
-                remember(true);
+                remember(ControlVerdict::Passed);
                 Ok(attempt)
             }
             ControlOutcome::Failed(fault) => {
-                remember(false);
+                remember(ControlVerdict::Failed);
                 Ok(failed(&fault.detail))
             }
-            // A fault or a timeout of the companion decides nothing, so the
-            // retry stays.
-            ControlOutcome::Fault(message) | ControlOutcome::TimedOut(message) => Ok(Attempt {
+            // A timeout is stored and settles the mutant: a retry or a later
+            // mutant with the same tests would wait as long again.
+            ControlOutcome::TimedOut(detail) => {
+                let reason = format!("the control run timed out ({detail})");
+                remember(ControlVerdict::TimedOut(reason.clone()));
+                Ok(failed(&reason))
+            }
+            // A fault of the companion decides nothing, so the retry stays.
+            ControlOutcome::Fault(message) => Ok(Attempt {
                 settled: false,
                 ..failed(&message)
             }),
@@ -1882,14 +1904,14 @@ fn self_check(
     let error = match outcome {
         Err(error) => error,
         Ok(ControlOutcome::Passed) => {
-            runner.memo.store(&job.tests, true);
+            runner.memo.store(&job.tests, ControlVerdict::Passed);
             if let Some(passed) = worker.link.take() {
                 return Ok((passed, Vec::new()));
             }
             stopped
         }
         Ok(ControlOutcome::Failed(fault)) if !fault.failed_tests.is_empty() => {
-            runner.memo.store(&job.tests, false);
+            runner.memo.store(&job.tests, ControlVerdict::Failed);
             if let Some(kept) = worker.link.take() {
                 return Ok((kept, fault.failed_tests));
             }
