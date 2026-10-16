@@ -1285,4 +1285,47 @@ export default {
             "{report}"
         );
     }
+
+    /// Parameterized tests: `it.each` with distinct and with equal names,
+    /// and `describe.each` with distinct and with equal suite names. Each
+    /// case is its own test id. The self-check selects these ids through the
+    /// mutant run path and must count each case once, so the run continues.
+    #[test]
+    fn parameterized_tests_pass_the_self_check_and_kill_mutants() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package, "");
+        fs::write(
+            root.join("test/math.test.ts"),
+            "import { describe, expect, it, test } from \"vitest\";\nimport { add, isPositive } from \"../src/math\";\n\nit.each([\n  [1, 1, 2],\n  [2, 3, 5],\n])(\"adds %i and %i\", (a, b, sum) => {\n  expect(add(a, b)).toBe(sum);\n});\n\nit.each([\n  [1, 2],\n  [2, 3],\n])(\"adds one\", (a, b) => {\n  expect(add(a, 1)).toBe(b);\n});\n\ndescribe.each([1, 2])(\"sign of %i\", (n) => {\n  test(\"is positive\", () => {\n    expect(isPositive(n)).toBe(true);\n  });\n});\n\ndescribe.each([3, 4])(\"sign\", (n) => {\n  test(\"is positive\", () => {\n    expect(isPositive(n)).toBe(true);\n  });\n});\n",
+        )
+        .expect("test file");
+        commit_all(&root, "parameterized tests");
+
+        let (output, report) = json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
+        assert_eq!(output.code, 0, "{}\n{report}", output.stderr);
+        assert_eq!(
+            report["baseline_failures"].as_array().map(Vec::len),
+            Some(0),
+            "{report}"
+        );
+        let mutants = report["mutants"].as_array().expect("mutants");
+        for function in ["add", "isPositive"] {
+            assert!(
+                mutants.iter().any(|mutant| mutant["function"] == function
+                    && mutant["status"] == "killed"
+                    && mutant["covering_tests"]
+                        .as_array()
+                        .is_some_and(|tests| tests.len() >= 2)),
+                "a {function} mutant is killed by its parameterized tests: {report}"
+            );
+        }
+        assert!(
+            mutants
+                .iter()
+                .all(|mutant| mutant["status"] != "runtime_error"),
+            "{report}"
+        );
+    }
 }

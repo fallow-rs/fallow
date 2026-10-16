@@ -1974,3 +1974,218 @@ fn a_zero_test_kill_after_the_time_budget_stays_pending_without_a_control_run() 
         "no control run starts after the deadline"
     );
 }
+
+#[test]
+fn a_timeout_of_the_self_check_is_reported_as_a_timeout_not_as_a_broken_run_path() {
+    type Control = fn(&RunRequest) -> Result<Response, LinkFault>;
+    let cases: Vec<(&str, Control)> = vec![
+        ("a timeout result with no executed test", |_| {
+            Ok(Response::Run(RunResult {
+                mutant_id: None,
+                status: RunStatus::Timeout,
+                killed_by: None,
+                duration_ms: Some(6000.0),
+                tests_executed: 0,
+                tests: Vec::new(),
+                unhandled_errors: Vec::new(),
+            }))
+        }),
+        ("a watchdog timeout", |_| Err(LinkFault::Timeout)),
+    ];
+    for (name, control) in cases {
+        let spawner = FakeSpawner::new(script(
+            |_| standard_dry(),
+            |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        ))
+        .with_control(move |_, run| control(run));
+        let error = run_schedule(&spawner, &plan(&["m1"]), &config(1)).unwrap_err();
+        let ScheduleError::RunPath { message, help } = &error else {
+            panic!("{name}: expected a run-path error, got {error:?}");
+        };
+        assert!(
+            message.starts_with("the self-check of vitest 5.0.4 timed out"),
+            "{name}: {message}"
+        );
+        assert!(!message.contains("executes no tests"), "{name}: {message}");
+        assert!(help.contains("--setup-timeout"), "{name}: {help}");
+        assert!(spawner.runs().is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn a_control_run_waits_at_least_the_setup_timeout() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    let mut config = config(1);
+    config.runner_timeout = Duration::from_secs(60);
+    run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
+    let controls = spawner.controls();
+    assert_eq!(
+        controls[0].1.timeout_ms, 60_000,
+        "the setup timeout, not the 5003 ms of the mutant job"
+    );
+}
+
+/// t1 hits m1. t2 and t3 hit m2 and m3.
+fn three_test_dry() -> DryRunResult {
+    let mut dry = standard_dry();
+    dry.tests.push(test("t3", 150.0, TestStatus::Pass));
+    dry.hits = BTreeMap::from([
+        (tid("t1"), vec!["m1".to_owned()]),
+        (tid("t2"), vec!["m2".to_owned(), "m3".to_owned()]),
+        (tid("t3"), vec!["m2".to_owned(), "m3".to_owned()]),
+    ]);
+    dry
+}
+
+/// A control run in which each test fails, except t1.
+fn only_t1_passes_in_control(run: &RunRequest) -> Response {
+    let tests: Vec<RunTest> = run
+        .test_ids
+        .iter()
+        .map(|test| RunTest {
+            test_id: test.clone(),
+            status: if *test == tid("t1") {
+                TestStatus::Pass
+            } else {
+                TestStatus::Fail
+            },
+        })
+        .collect();
+    let failed = tests.iter().any(|test| test.status == TestStatus::Fail);
+    Response::Run(RunResult {
+        mutant_id: None,
+        status: if failed {
+            RunStatus::Killed
+        } else {
+            RunStatus::Survived
+        },
+        killed_by: None,
+        duration_ms: Some(4.0),
+        tests_executed: tests.len(),
+        tests,
+        unhandled_errors: Vec::new(),
+    })
+}
+
+#[test]
+fn a_mutant_whose_covering_tests_all_fail_in_a_mid_run_control_is_no_coverage_without_a_retry() {
+    // The self-check of t1 passes. m2 breaks the module load, and its
+    // control run fails t2 and t3: m2 is `runtime_error`. m3 has only t2
+    // and t3, so it is `no_coverage`, the same as after a self-check drop,
+    // and it never runs.
+    let spawner = FakeSpawner::new(script(
+        |_| three_test_dry(),
+        |_, run| Ok(m1_killed_others_fail_at_load(run)),
+    ))
+    .with_control(|_, run| Ok(only_t1_passes_in_control(run)));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(status(&outcome, "m2"), MutantStatus::RuntimeError);
+    assert_eq!(status(&outcome, "m3"), MutantStatus::NoCoverage);
+    assert!(outcome.results["m3"].covering_tests.is_empty());
+    assert!(
+        outcome
+            .issues
+            .iter()
+            .all(|issue| issue.mutant_id.as_deref() != Some("m3")),
+        "{:?}",
+        outcome.issues
+    );
+    let ran: Vec<String> = spawner
+        .runs()
+        .into_iter()
+        .filter_map(|(_, run)| run.mutant_id)
+        .collect();
+    assert_eq!(
+        ran,
+        vec!["m1".to_owned(), "m2".to_owned()],
+        "no retry, no m3 run"
+    );
+    let failures: Vec<(Option<String>, Vec<String>)> = outcome
+        .baseline_failures
+        .iter()
+        .map(|failure| (failure.test_id.clone(), failure.mutant_ids.clone()))
+        .collect();
+    assert_eq!(
+        failures,
+        vec![
+            (Some(tid("t2")), vec!["m3".to_owned()]),
+            (Some(tid("t3")), vec!["m3".to_owned()]),
+        ]
+    );
+}
+
+fn load_kill_job() -> Job {
+    Job {
+        id: "m2".to_owned(),
+        tests: vec![tid("t1"), tid("t2")],
+        timeout_ms: 6000,
+        setup_ms: 0,
+        static_mutant: false,
+        cache_key: None,
+    }
+}
+
+fn memo_value(memo: &ControlMemo, tests: &[String]) -> Option<bool> {
+    *memo.cell(tests).lock().expect("cell")
+}
+
+#[test]
+fn a_load_kill_control_keys_the_memo_on_the_tests_that_are_not_marked_failed() {
+    // Another worker marked t2 as failed after m2 ran with t1 and t2.
+    let spawner = FakeSpawner::new(script(|_| standard_dry(), |_, run| Ok(load_failure(run))));
+    let config = config(1);
+    let memo = ControlMemo::default();
+    memo.mark_failed(&[tid("t2")]);
+    let dry_files = vec!["test/a.test.ts".to_owned()];
+    let mut worker = Worker::new(&spawner, &config, &dry_files, Duration::from_secs(5), &memo);
+    worker.link = Some(spawner.spawn().expect("link"));
+    worker.known_tests = [tid("t1"), tid("t2")].into_iter().collect();
+    let job = load_kill_job();
+    let attempt = Attempt::decided(MutantStatus::Killed, None, Some(4));
+    let confirmed = worker
+        .confirm_load_kill(&job, &job.tests, VITEST_CAPS, attempt)
+        .expect("confirm");
+    assert_eq!(confirmed.status, MutantStatus::Killed);
+    assert_eq!(spawner.controls()[0].1.test_ids, vec![tid("t1")]);
+    assert_eq!(memo_value(&memo, &[tid("t1")]), Some(true));
+    assert_eq!(
+        memo_value(&memo, &[tid("t1"), tid("t2")]),
+        None,
+        "the unfiltered set has no control result"
+    );
+
+    // When each test is marked failed, the mutant has no covering test.
+    memo.mark_failed(&[tid("t1")]);
+    let attempt = Attempt::decided(MutantStatus::Killed, None, Some(4));
+    let uncovered = worker
+        .confirm_load_kill(&job, &job.tests, VITEST_CAPS, attempt)
+        .expect("confirm");
+    assert_eq!(uncovered.status, MutantStatus::NoCoverage);
+    assert!(uncovered.settled);
+    assert_eq!(spawner.controls().len(), 1, "no control run without a test");
+}
+
+#[test]
+fn a_self_check_drop_inside_the_mutant_limit_gives_the_place_to_a_covered_pending_mutant() {
+    // The limit is one mutant: m2. Its only test t2 fails in the self-check,
+    // so m2 is `no_coverage`. The jobs are built again, and the pending m1
+    // takes the free place.
+    let spawner = FakeSpawner::new(script(
+        |_| split_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ))
+    .with_control(|_, run| Ok(t2_fails_in_control(run)));
+    let mut plan = plan(&["m2"]);
+    plan.pending = vec![ScheduledMutant {
+        id: "m1".to_owned(),
+        file: "src/a.ts".to_owned(),
+    }];
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m2"), MutantStatus::NoCoverage);
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(outcome.promoted, vec!["m1".to_owned()]);
+}

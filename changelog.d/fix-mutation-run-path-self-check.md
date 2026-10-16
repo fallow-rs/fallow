@@ -8,7 +8,8 @@
   covered mutant with no active mutant, through the same path as a mutant
   run. When that control run executes no tests, the run exits with code 2
   and `FALLOW_MUTATION_RUNNER_FAILED`. The message names the runner and its
-  version. The check costs one run.
+  version. When the control run times out, the message says so and names
+  `--setup-timeout`. The check costs one run.
 - **A `fallow mutation` test that fails without a mutant in a mutant run is a baseline failure.**
   A test can pass in the dry run of its whole file, but fail when a mutant
   run selects it alone, for example when it depends on another test of its

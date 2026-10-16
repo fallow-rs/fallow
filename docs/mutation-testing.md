@@ -407,7 +407,9 @@ killed and the score is a false 100%. Vitest 4.0 had this fault.
 
 A control run is a `run` request with `mutant_id: null`. The companion runs
 the requested tests through the run path of a mutant run, with no active
-mutant. The scheduler uses control runs in two places:
+mutant. A control run does not stop at the first failure, so it names each
+covering test that fails. Its timeout is the timeout of the mutant job, and
+at least `--setup-timeout`. The scheduler uses control runs in two places:
 
 1. The self-check. After the dry run and before the first mutant job, the
    first companion runs the tests of the first job as a control run.
@@ -428,11 +430,29 @@ mutant. The scheduler uses control runs in two places:
      (an error, or a requested test that did not run), the run stops with
      `FALLOW_MUTATION_RUNNER_FAILED`. The message says that the runner gives
      no trustworthy result in a mutant run.
+   - When the control run times out, the run stops with
+     `FALLOW_MUTATION_RUNNER_FAILED`. The message says that the self-check
+     timed out, and the help names `--setup-timeout` and a less loaded host.
+     A timeout is not reported as a broken run path.
+   - Each case of a parameterized test (`it.each`, `describe.each`,
+     `test.each`) and each `node:test` subtest is its own test id, so the
+     self-check counts it once.
    - The check needs no run when no job exists: no mutant is covered, or
      each covered mutant has a result from the cache. The check also needs
      no run when the time budget ended before it.
    - The check costs one run of the tests of one mutant. Its time is part of
      `timings.mutants_ms`.
+   - The check runs only the tests of the first job. A test outside that set
+     that depends on another test of its file can still kill a mutant. The
+     check does not examine that kill again. A later control run can list
+     such a test as a baseline failure after it killed a mutant earlier in
+     the run.
+   - With `--max-mutants`, a planned mutant whose covering tests the check
+     drops becomes `no_coverage`. The jobs are built again after the check,
+     so the next covered `pending` mutant takes the free place, the same as
+     for a dry-run baseline failure. A mutant that becomes `no_coverage`
+     during the mutant runs (see item 2) leaves its place free: the jobs
+     already exist.
 2. A kill with no executed test. A mutant run that executes no test and
    reports an error is `killed` only when the same tests pass in a control
    run.
@@ -443,12 +463,12 @@ mutant. The scheduler uses control runs in two places:
      its `errors[]` entry gives the reason. The mutant gets no retry.
    - A test that ran and failed in such a control run is a baseline
      failure for the rest of the run. Each later mutant run leaves it out,
-     and `mutant_ids` of the failure lists those mutants.
+     and `mutant_ids` of the failure lists those mutants. A later mutant
+     whose covering tests are all such failures is `no_coverage`, with no
+     retry, the same as after a drop by the self-check.
    - The scheduler stores the control result of each test set for the run.
      Each distinct test set gets at most one control run, and the test set
      of the self-check gets none. A fault of the companion is not stored.
-   - A control run does not stop at the first failure, so it names each
-     covering test that fails.
    - After the `--time-budget` deadline, a control run that has no stored
      result does not start, and the mutant is `pending`.
 
