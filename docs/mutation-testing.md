@@ -183,8 +183,8 @@ or relational mutant, so it adds little test-strength signal for its run time.
 | `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result. |
 
 The flag wins over the config key. The minimum applies to the score, in
-percent. A run with no executed mutant has no score. It exits `0` when it
-has no baseline failure, also when each mutant is `no_coverage`.
+percent. A run in which no mutant has a test result has no score. It exits
+`0` when it has no baseline failure, also when each mutant is `no_coverage`.
 
 A run in which baseline failures leave each mutant without a test result
 exits `2` with `FALLOW_MUTATION_BASELINE_FAILED`, the same code as a dry run
