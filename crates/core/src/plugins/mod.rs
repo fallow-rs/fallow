@@ -1771,6 +1771,24 @@ pub trait Plugin: Send + Sync {
         PluginResult::default()
     }
 
+    /// Parse a config file with the project root known.
+    ///
+    /// `root` is the package root that [`Plugin::resolve_config`] receives. In
+    /// a workspace run it is the workspace package directory. `project_root`
+    /// is the analysis root. A plugin that reads more files from paths that
+    /// the config names must keep each read inside `project_root`, because the
+    /// config comes from the analyzed repository. The default ignores
+    /// `project_root`.
+    fn resolve_config_in_project(
+        &self,
+        config_path: &Path,
+        source: &str,
+        root: &Path,
+        _project_root: &Path,
+    ) -> PluginResult {
+        self.resolve_config(config_path, source, root)
+    }
+
     /// Binaries whose `--config` / `-c` argument in a package script names a
     /// config file of this plugin.
     ///
@@ -1941,6 +1959,7 @@ macro_rules! define_plugin {
         $(, script_config_binaries: $script_binaries:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config($cp:ident, $src:ident, $root:ident) $body:block
+        $(, resolve_config_in_project($pcp:ident, $psrc:ident, $proot:ident, $pproj:ident) $pbody:block)?
         $(,)?
     ) => {
         pub struct $name;
@@ -1986,6 +2005,17 @@ macro_rules! define_plugin {
                 $root: &std::path::Path,
             ) -> PluginResult
             $body
+
+            $(
+                fn resolve_config_in_project(
+                    &self,
+                    $pcp: &std::path::Path,
+                    $psrc: &str,
+                    $proot: &std::path::Path,
+                    $pproj: &std::path::Path,
+                ) -> PluginResult
+                $pbody
+            )?
         }
     };
 

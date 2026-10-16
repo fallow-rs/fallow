@@ -2801,6 +2801,32 @@ pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
+/// Whether an existing `path` resolves inside `root`.
+///
+/// The check resolves `..` segments and symlinks, so a glob match such as
+/// `packages/a/../../x` or a symlink to a directory above the project does not
+/// pass. A path that does not exist does not pass.
+pub(crate) fn is_inside_root(path: &Path, root: &Path) -> bool {
+    let Ok(resolved) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    resolved.starts_with(root)
+}
+
+/// Whether the literal base of a glob `pattern`, resolved against `dir`, is
+/// inside `root`. The base is the part before the first glob character. An
+/// absolute `pattern` replaces `dir`.
+///
+/// Check this before the glob runs, so a pattern such as `../**` never walks
+/// the file system above the project. The base check is lexical. Filter each
+/// match with [`is_inside_root`] too, because a glob segment can match `..`
+/// or a symlink.
+pub(crate) fn glob_base_is_inside_root(dir: &Path, pattern: &str, root: &Path) -> bool {
+    let literal = &pattern[..pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len())];
+    lexical_normalize(&dir.join(path_from_config_string(literal))).starts_with(root)
+}
+
 /// Whether `specifier` is a bare package specifier: not empty, not relative or
 /// absolute, not protocol-prefixed, and free of characters that are invalid in
 /// an npm package name (backslashes, whitespace).

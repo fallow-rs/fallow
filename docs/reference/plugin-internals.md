@@ -53,6 +53,8 @@ declarative behavior belongs in the external plugin contract.
   useful configuration error without corrupting unrelated built-ins.
 - Generated schema and examples must move with external plugin fields.
 - Do not document volatile built-in plugin counts as architecture.
+- A plugin that reads a file at a path from a config keeps the read inside
+  the project root. See [Files read from config paths](#files-read-from-config-paths).
 
 ## An active plugin is not a bundled-app signal
 
@@ -337,6 +339,28 @@ root directories:
 The plugin reads the `rootDir` and the setup files of each inline project
 together (`extract_config_array_object_fields`), so one project does not use
 the root directory of another project.
+
+## Files read from config paths
+
+A config comes from the analyzed repository, so its paths are untrusted. A
+plugin that reads a file at a path from a config must not read outside the
+project root. The Jest `projects`, Vitest `test.projects` and Rstest
+`projects` expansion, and the script `--config` files, use two checks from
+`config_parser`:
+
+- `glob_base_is_inside_root` runs before a glob. It compares the literal base
+  of the pattern with the root, so a pattern such as `../**` or `/etc/*` does
+  not walk the file system above the project.
+- `is_inside_root` runs on each path before the plugin reads it. It
+  canonicalizes the path, so a `..` match of a `.*` glob segment and a symlink
+  to a directory above the project do not pass. A path that does not exist
+  does not pass.
+
+The boundary is the project root, not the `root` argument of
+`resolve_config`. In a workspace run, that argument is the workspace package
+directory, and a package config can name a sibling package. The registry
+calls `Plugin::resolve_config_in_project` with both roots. A plugin that reads
+config paths overrides it. The default calls `resolve_config`.
 
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that

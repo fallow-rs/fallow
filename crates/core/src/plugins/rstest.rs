@@ -395,7 +395,7 @@ impl ResolveContext<'_> {
     fn add_project_file(&mut self, file: &Path, runner_root: &Path, depth: usize) {
         if self.seen.iter().any(|seen| seen == file)
             || depth >= MAX_PROJECT_DEPTH
-            || !is_inside_root(file, self.root)
+            || !config_parser::is_inside_root(file, self.root)
         {
             return;
         }
@@ -433,7 +433,7 @@ impl ResolveContext<'_> {
 fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     if !pattern.contains(['*', '?', '[', '{']) {
         let path = config_parser::lexical_normalize(&join_path(dir, pattern));
-        return if is_inside_root(&path, root) {
+        return if config_parser::is_inside_root(&path, root) {
             vec![path]
         } else {
             Vec::new()
@@ -442,9 +442,7 @@ fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     let Some(full) = glob_in(dir, pattern) else {
         return Vec::new();
     };
-    let literal_prefix = &pattern[..pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len())];
-    let base = config_parser::lexical_normalize(&join_path(dir, literal_prefix));
-    if !base.starts_with(root) {
+    if !config_parser::glob_base_is_inside_root(dir, pattern, root) {
         return Vec::new();
     }
     let Ok(matches) = glob::glob(&full) else {
@@ -453,24 +451,13 @@ fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     matches
         .flatten()
         .take(MAX_PROJECT_GLOB_MATCHES)
-        .filter(|path| is_inside_root(path, root))
+        .filter(|path| config_parser::is_inside_root(path, root))
         .filter(|path| {
             !path
                 .components()
                 .any(|component| component.as_os_str() == "node_modules")
         })
         .collect()
-}
-
-/// Whether an existing `path` resolves inside `root`. The check resolves `..`
-/// segments and symlinks, so a glob match such as `packages/a/../../x` or a
-/// symlink to a directory above the project does not pass.
-fn is_inside_root(path: &Path, root: &Path) -> bool {
-    let Ok(resolved) = std::fs::canonicalize(path) else {
-        return false;
-    };
-    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    resolved.starts_with(root)
 }
 
 /// An absolute glob for a pattern relative to `dir`.

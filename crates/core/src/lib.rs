@@ -2470,6 +2470,7 @@ fn analyze_root_scripts(
     plugin_result.merge_into(deps.registry.resolve_script_config_files(
         &script_analysis.binary_config_files,
         &config.root,
+        &config.root,
         "",
     ));
 
@@ -2559,6 +2560,7 @@ fn analyze_one_workspace_scripts(
     let config_result = deps.registry.resolve_script_config_files(
         &ws_analysis.binary_config_files,
         &ws.root,
+        &config.root,
         &ws_prefix,
     );
 

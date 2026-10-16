@@ -3707,3 +3707,96 @@ fn registry_discovers_nuxt_root_config_module_extensions() {
         }));
     }
 }
+
+/// A script `--config` path that leaves the project root is not read. The same
+/// path inside the project root, outside the workspace package, is read.
+#[test]
+fn script_config_files_outside_the_project_root_are_not_read() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("project");
+    let package = project.join("packages/web");
+    std::fs::create_dir_all(&package).expect("create package");
+    std::fs::create_dir_all(project.join("shared")).expect("create shared");
+    std::fs::create_dir_all(temp.path().join("outside")).expect("create outside");
+    std::fs::write(
+        temp.path().join("outside/vitest.e2e.config.ts"),
+        "import outside from 'outside-dep'; export default {};",
+    )
+    .expect("write outside config");
+    std::fs::write(
+        project.join("shared/vitest.e2e.config.ts"),
+        "import inside from 'inside-dep'; export default {};",
+    )
+    .expect("write shared config");
+    let config_files = [
+        scripts::BinaryConfigFile {
+            binary: "vitest".to_string(),
+            path: "../../../outside/vitest.e2e.config.ts".to_string(),
+        },
+        scripts::BinaryConfigFile {
+            binary: "vitest".to_string(),
+            path: "../../shared/vitest.e2e.config.ts".to_string(),
+        },
+    ];
+
+    let result = PluginRegistry::default().resolve_script_config_files(
+        &config_files,
+        &package,
+        &project,
+        "packages/web",
+    );
+
+    assert!(
+        !result
+            .referenced_dependencies
+            .contains(&"outside-dep".to_string()),
+        "a config outside the project root must not be read, got: {:?}",
+        result.referenced_dependencies
+    );
+    assert!(
+        result
+            .referenced_dependencies
+            .contains(&"inside-dep".to_string()),
+        "a config inside the project root must be read, got: {:?}",
+        result.referenced_dependencies
+    );
+}
+
+/// A script `--config` path inside the project root that is a symlink to a
+/// file outside it is not read.
+#[cfg(unix)]
+#[test]
+fn script_config_file_symlink_outside_the_project_root_is_not_read() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(&project).expect("create project");
+    std::fs::write(
+        temp.path().join("vitest.e2e.config.ts"),
+        "import outside from 'outside-dep'; export default {};",
+    )
+    .expect("write outside config");
+    std::os::unix::fs::symlink(
+        temp.path().join("vitest.e2e.config.ts"),
+        project.join("vitest.e2e.config.ts"),
+    )
+    .expect("create symlink");
+    let config_files = [scripts::BinaryConfigFile {
+        binary: "vitest".to_string(),
+        path: "vitest.e2e.config.ts".to_string(),
+    }];
+
+    let result = PluginRegistry::default().resolve_script_config_files(
+        &config_files,
+        &project,
+        &project,
+        "",
+    );
+
+    assert!(
+        !result
+            .referenced_dependencies
+            .contains(&"outside-dep".to_string()),
+        "a symlink to a config outside the project root must not be read, got: {:?}",
+        result.referenced_dependencies
+    );
+}

@@ -908,7 +908,7 @@ impl PluginRegistry {
     /// with `--config` / `-c`.
     ///
     /// `package_root` is the directory of the `package.json` that holds the
-    /// scripts, and `ws_prefix` is its path relative to the project root
+    /// scripts, and `ws_prefix` is its path relative to `project_root`
     /// (empty for the root package). Each file is resolved into its own
     /// result, so a `test.include` in a script config adds entry patterns
     /// and does not replace the patterns of the plugin's default config.
@@ -918,6 +918,7 @@ impl PluginRegistry {
         &self,
         config_files: &[scripts::BinaryConfigFile],
         package_root: &Path,
+        project_root: &Path,
         ws_prefix: &str,
     ) -> AggregatedPluginResult {
         let mut aggregated = AggregatedPluginResult::default();
@@ -939,6 +940,9 @@ impl PluginRegistry {
                     continue;
                 }
                 let abs_path = package_root.join(config_file.path.trim_start_matches("./"));
+                if !super::config_parser::is_inside_root(&abs_path, project_root) {
+                    continue;
+                }
                 let Ok(source) = std::fs::read_to_string(&abs_path) else {
                     continue;
                 };
@@ -946,7 +950,12 @@ impl PluginRegistry {
                 file_result
                     .entry_point_roles
                     .insert(plugin.name().to_string(), plugin.entry_point_role());
-                let plugin_result = plugin.resolve_config(&abs_path, &source, package_root);
+                let plugin_result = plugin.resolve_config_in_project(
+                    &abs_path,
+                    &source,
+                    package_root,
+                    project_root,
+                );
                 if let Err(errors) = process_config_result(
                     plugin.name(),
                     plugin_result,
@@ -1004,6 +1013,7 @@ fn resolve_workspace_plugin_configs(
             matchers,
             relative_files: input.relative_files,
             root: input.root,
+            project_root: input.project_root,
             result,
             regex_errors,
             resolved_plugins: &mut resolved_ws_plugins,
@@ -1182,7 +1192,8 @@ fn load_workspace_filesystem_configs(input: &mut WorkspaceFsConfigInput<'_>) {
         let Ok(source) = std::fs::read_to_string(abs_path) else {
             continue;
         };
-        let plugin_result = plugin.resolve_config(abs_path, &source, input.root);
+        let plugin_result =
+            plugin.resolve_config_in_project(abs_path, &source, input.root, input.project_root);
         if plugin_result.is_empty() {
             continue;
         }
@@ -1217,6 +1228,7 @@ fn resolve_plugin_config_files(input: &mut PluginConfigResolutionInput<'_>) {
             matchers,
             relative_files: input.relative_files,
             root: input.root,
+            project_root: input.root,
             result: input.result,
             regex_errors: input.regex_errors,
             resolved_plugins: &mut resolved_plugins,
@@ -1246,6 +1258,7 @@ struct PluginMatchingFilesInput<'plugins, 'data, 'state> {
     matchers: &'data [globset::GlobMatcher],
     relative_files: &'data [(PathBuf, String)],
     root: &'data Path,
+    project_root: &'data Path,
     result: &'state mut AggregatedPluginResult,
     regex_errors: &'state mut Vec<PluginRegexValidationError>,
     resolved_plugins: &'state mut FxHashSet<&'plugins str>,
@@ -1269,7 +1282,12 @@ fn resolve_plugin_matching_files(input: &mut PluginMatchingFilesInput<'_, '_, '_
         let Ok(source) = std::fs::read_to_string(abs_path) else {
             continue;
         };
-        let plugin_result = input.plugin.resolve_config(abs_path, &source, input.root);
+        let plugin_result = input.plugin.resolve_config_in_project(
+            abs_path,
+            &source,
+            input.root,
+            input.project_root,
+        );
         if plugin_result.is_empty() {
             continue;
         }
