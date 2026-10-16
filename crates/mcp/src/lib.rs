@@ -11,7 +11,9 @@ use std::process::ExitCode;
 
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::{LevelFilter, Targets};
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::util::SubscriberInitExt as _;
 
 mod nearest;
 mod params;
@@ -91,13 +93,32 @@ pub fn run_stdio_server() -> ExitCode {
     }
 }
 
+/// The tracing filter from `RUST_LOG`: `target=level` and `level` directives.
+/// A directive that does not parse, such as a span or field filter, is
+/// skipped. An unset or empty variable logs errors only.
+fn rust_log_filter(rust_log: Option<&str>) -> Targets {
+    let readable: Vec<&str> = rust_log
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|directive| !directive.is_empty() && directive.parse::<Targets>().is_ok())
+        .collect();
+    if readable.is_empty() {
+        return Targets::new().with_default(LevelFilter::ERROR);
+    }
+    readable.join(",").parse().unwrap_or_default()
+}
+
 /// Serve the MCP tool router over stdin/stdout until the client disconnects.
 /// Split out of [`run_stdio_server`] so runtime construction stays synchronous.
 async fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
+    // The builder alone keeps INFO and above. The target filter decides.
     tracing_subscriber::fmt()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
         .with_writer(std::io::stderr)
-        .with_env_filter(EnvFilter::from_default_env())
         .with_ansi(false)
+        .finish()
+        .with(rust_log_filter(std::env::var("RUST_LOG").ok().as_deref()))
         .init();
 
     warm_session::install_from_env();

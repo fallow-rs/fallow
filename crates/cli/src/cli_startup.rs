@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 use clap::Parser;
 use fallow_engine::validate;
+use tracing_subscriber::filter::{LevelFilter, Targets};
 
 use crate::cli_format::{Format, FormatConfig, format_from_env, parse_format_arg, resolve_format};
 use crate::cli_telemetry::{TelemetryRun, record_run_epilogue};
@@ -19,31 +20,45 @@ use crate::{
 /// file or captured by an agent. Internal INFO-level tracing is therefore opt-in
 /// via `RUST_LOG`, while warnings remain visible. An explicitly empty `RUST_LOG`
 /// disables tracing entirely, which keeps the test harness deterministic.
-pub fn build_tracing_filter(rust_log: Option<&str>) -> tracing_subscriber::EnvFilter {
-    use tracing_subscriber::filter::LevelFilter;
-
-    let builder = tracing_subscriber::EnvFilter::builder();
+///
+/// The filter reads `target=level` and `level` directives. It skips a directive
+/// that it cannot read, such as a span or field filter, and keeps the others.
+pub fn build_tracing_filter(rust_log: Option<&str>) -> Targets {
     match rust_log.map(str::trim) {
-        Some("") => builder
-            .with_default_directive(LevelFilter::OFF.into())
-            .parse_lossy("off"),
-        Some(value) => builder
-            .with_default_directive(LevelFilter::OFF.into())
-            .parse_lossy(value),
-        None => builder
-            .with_default_directive(LevelFilter::WARN.into())
-            .parse_lossy(""),
+        Some(value) => parse_targets_lossy(value),
+        None => Targets::new().with_default(LevelFilter::WARN),
     }
+}
+
+/// Parse comma-separated `RUST_LOG` directives, without the ones that do not
+/// parse. No directive gives a filter that disables every target.
+pub fn parse_targets_lossy(value: &str) -> Targets {
+    let readable: Vec<&str> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|directive| !directive.is_empty() && directive.parse::<Targets>().is_ok())
+        .collect();
+    // An empty string parses to a filter that enables every target.
+    if readable.is_empty() {
+        return Targets::new();
+    }
+    readable.join(",").parse().unwrap_or_default()
 }
 
 /// Set up tracing for the CLI.
 pub fn setup_tracing() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+
     let rust_log = std::env::var("RUST_LOG").ok();
+    // The builder alone keeps INFO and above. The target filter decides.
     tracing_subscriber::fmt()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
         .with_writer(std::io::stderr)
-        .with_env_filter(build_tracing_filter(rust_log.as_deref()))
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::uptime())
+        .finish()
+        .with(build_tracing_filter(rust_log.as_deref()))
         .init();
 }
 

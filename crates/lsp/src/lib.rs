@@ -1501,10 +1501,19 @@ pub fn run_stdio_server() -> std::process::ExitCode {
 /// stream. Split out of [`run_stdio_server`] so runtime construction stays
 /// synchronous.
 async fn serve_stdio() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+
+    // The builder alone keeps INFO and above. The target filter decides.
     tracing_subscriber::fmt()
-        .with_env_filter("fallow=info")
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
         .with_writer(std::io::stderr)
         .with_ansi(false)
+        .finish()
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_target("fallow", tracing_subscriber::filter::LevelFilter::INFO),
+        )
         .init();
 
     let stdin = tokio::io::stdin();
