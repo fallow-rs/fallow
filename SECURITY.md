@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in fallow, please report it responsibly via [GitHub's private vulnerability reporting](https://github.com/fallow-rs/fallow/security/advisories/new) instead of opening a public issue.
+If you discover a security vulnerability in fallow, please report it responsibly via [GitHub's private vulnerability reporting](https://github.com/fallow-rs/fallow/security/advisories/new) instead of opening a public issue. If you cannot use GitHub, send the report by email to [security@fallow.tools](mailto:security@fallow.tools).
 
 You should receive a response within 48 hours. Please include:
 
