@@ -39,6 +39,18 @@ fn negative_import_meta_glob_entries_exclude_files() {
 }
 
 #[test]
+fn double_star_exclude_matches_from_the_common_base_of_the_positive_globs() {
+    // Vite matches `**/pages/kept.js` relative to `src/pages`, the common base
+    // of `./pages/*.js`. No path there ends in `pages/kept.js`, so Vite loads
+    // the file.
+    let unused = unused_files();
+    assert!(
+        !unused.contains(&"src/pages/kept.js".to_string()),
+        "`!**/pages/kept.js` excludes nothing below `src/pages`, found {unused:?}"
+    );
+}
+
+#[test]
 fn literal_brackets_and_braces_match_only_themselves() {
     let unused = unused_files();
     for used in ["src/[id]/view.js", "src/{group}/item.js"] {

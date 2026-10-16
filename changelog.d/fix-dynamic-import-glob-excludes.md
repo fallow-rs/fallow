@@ -5,7 +5,10 @@
   for every positive entry of the same call. Before, Fallow ignored these
   entries. The excluded files then counted as loaded, and Fallow did not
   report them as unused. Now Fallow applies each negative entry that starts
-  with `./`, `../` or `**`.
+  with `./`, `../` or `**`. Like Vite, Fallow matches a `**` entry from the
+  common base directory of the positive entries. For example,
+  `'!**/pages/a.js'` next to `'./pages/*.js'` excludes nothing, because the
+  match starts inside `pages`.
 - **The literal text of a dynamic import pattern now matches only itself.**
   Before, Fallow read glob characters in the static parts of a template
   literal, a string concatenation, or a `require.context` directory as glob

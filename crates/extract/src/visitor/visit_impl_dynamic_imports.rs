@@ -701,13 +701,93 @@ impl<'a> ModuleInfoExtractor {
 /// without its `!`. Vite reads a negative entry that starts with `./`, `../`
 /// or `**`. Other negative entries need the alias resolver of Vite, so they
 /// give no exclude, and the pattern keeps the files.
+///
+/// Vite matches a `**` entry relative to the common base directory of the
+/// positive entries, not relative to the importing file. Each `**` exclude
+/// therefore starts at that base. When the base is not known, the `**`
+/// entries give no exclude.
 fn import_meta_glob_excludes(entries: &[&str]) -> Vec<String> {
+    let double_star_base = common_glob_base(entries);
     entries
         .iter()
         .filter_map(|entry| entry.strip_prefix('!'))
-        .filter(|glob| glob.starts_with("./") || glob.starts_with("../") || glob.starts_with("**"))
-        .map(str::to_string)
+        .filter_map(|glob| {
+            if glob.starts_with("./") || glob.starts_with("../") {
+                return Some(glob.to_string());
+            }
+            if !glob.starts_with("**") {
+                return None;
+            }
+            match double_star_base.as_deref() {
+                Some("") => Some(glob.to_string()),
+                Some(base) => Some(format!("{base}/{glob}")),
+                None => None,
+            }
+        })
         .collect()
+}
+
+/// The common base directory of the positive `import.meta.glob` entries,
+/// relative to the importing file: `""` for the importing directory, or a
+/// path such as `./pages` or `../lib`. This follows `getCommonBase` of Vite.
+///
+/// Returns `None` when the base is not known from the entries alone: an entry
+/// that is not relative, an entry with a backslash escape, or entries that go
+/// up a different number of directories.
+fn common_glob_base(entries: &[&str]) -> Option<String> {
+    let mut bases = entries
+        .iter()
+        .filter(|entry| !entry.starts_with('!'))
+        .map(|entry| relative_glob_base(entry));
+    let (ups, mut common) = bases.next()??;
+    for base in bases {
+        let (base_ups, segments) = base?;
+        if base_ups != ups {
+            return None;
+        }
+        let shared = common
+            .iter()
+            .zip(&segments)
+            .take_while(|(left, right)| left == right)
+            .count();
+        common.truncate(shared);
+    }
+    if ups == 0 && common.is_empty() {
+        return Some(String::new());
+    }
+    let mut parts: Vec<&str> = if ups == 0 { vec!["."] } else { vec![".."; ups] };
+    parts.extend(common.iter().map(String::as_str));
+    Some(parts.join("/"))
+}
+
+/// The literal base directory of one relative glob, as the number of `..`
+/// steps and the directory names after them. The base ends before the first
+/// segment with a glob character. Like Vite, the base drops a last segment
+/// that has a `.`, because such a segment usually names a file.
+fn relative_glob_base(glob: &str) -> Option<(usize, Vec<String>)> {
+    if !(glob.starts_with("./") || glob.starts_with("../")) || glob.contains('\\') {
+        return None;
+    }
+    let mut ups = 0;
+    let mut segments: Vec<String> = Vec::new();
+    let literal = glob
+        .split('/')
+        .take_while(|segment| !segment.contains(['*', '?', '[', '{', '(']));
+    for segment in literal {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                if segments.pop().is_none() {
+                    ups += 1;
+                }
+            }
+            name => segments.push(name.to_string()),
+        }
+    }
+    if segments.last().is_some_and(|name| name.contains('.')) {
+        segments.pop();
+    }
+    Some((ups, segments))
 }
 
 /// Whether an `import.meta.glob` options argument sets `eager: true`, which

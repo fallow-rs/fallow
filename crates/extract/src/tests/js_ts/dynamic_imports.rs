@@ -168,6 +168,53 @@ fn import_meta_glob_negative_entries_become_excludes() {
     );
 }
 
+fn glob_excludes(source: &str) -> Vec<String> {
+    let info = parse_source(source);
+    info.dynamic_import_patterns
+        .first()
+        .map(|pattern| pattern.excludes.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn import_meta_glob_double_star_exclude_starts_at_the_common_base() {
+    assert_eq!(
+        glob_excludes("import.meta.glob(['./pages/*.js', '!**/pages/skip.js']);"),
+        vec!["./pages/**/pages/skip.js"]
+    );
+    assert_eq!(
+        glob_excludes("import.meta.glob(['./a/b/*.js', './a/c/**/*.js', '!**/x.js']);"),
+        vec!["./a/**/x.js"]
+    );
+    assert_eq!(
+        glob_excludes("import.meta.glob(['./a/b.js', './a/c.js', '!**/x.js']);"),
+        vec!["./a/**/x.js"]
+    );
+    assert_eq!(
+        glob_excludes("import.meta.glob(['../lib/*.js', '!**/x.js']);"),
+        vec!["../lib/**/x.js"]
+    );
+    assert_eq!(
+        glob_excludes("import.meta.glob(['./*.js', '!**/x.js', '!./y.js']);"),
+        vec!["**/x.js", "./y.js"]
+    );
+}
+
+#[test]
+fn import_meta_glob_double_star_exclude_drops_without_a_known_base() {
+    // The common base of `./a` and `../b` depends on the name of the importing
+    // directory, so the exclude has no known start and gives no exclude.
+    assert_eq!(
+        glob_excludes("import.meta.glob(['./a/*.js', '../b/*.js', '!**/x.js', '!./a/y.js']);"),
+        vec!["./a/y.js"]
+    );
+    // Only the resolver of Vite knows the base of an alias entry.
+    assert_eq!(
+        glob_excludes("import.meta.glob(['./a/*.js', '@/b/*.js', '!**/x.js']);"),
+        Vec::<String>::new()
+    );
+}
+
 #[test]
 fn template_literal_pattern_escapes_glob_metacharacters() {
     let info = parse_source("const m = import(`./[id]/${name}[x].js`);");
