@@ -86,31 +86,65 @@ const rebaseInProgress = (cwd) =>
   );
 
 /**
- * The head branch of pull request `pr`, read with `gh` in `cwd`. A pull
- * request from a fork has no branch on `origin`, so it is refused.
+ * The head branch of pull request `pr` from its `gh pr view` JSON, and the
+ * remote that holds it. A branch on the base repository has `headRemote`
+ * `null`. A fork branch has the URL of the fork, and the fork must allow
+ * maintainer edits, or the push of the rebase would fail.
  */
-const pullRequestBranch = (cwd, pr) => {
-  const view = run("gh", ["pr", "view", pr, "--json", "headRefName,isCrossRepository"], { cwd });
-  const { headRefName, isCrossRepository } = JSON.parse(view.stdout);
-  if (isCrossRepository) {
+export const pullRequestHead = (pr, view) => ({
+  branch: view.headRefName,
+  headRemote: view.isCrossRepository ? forkRemote(pr, view) : null,
+});
+
+/** The URL of the fork of pull request `pr`, which must allow maintainer edits. */
+const forkRemote = (pr, view) => {
+  if (!view.maintainerCanModify) {
     throw new Error(
-      `Pull request ${pr} comes from a fork. Rebase it in a checkout of the fork instead.`,
+      `Pull request ${pr} comes from a fork that does not allow maintainer edits. Ask the author to allow them, or rebase it in a checkout of the fork.`,
     );
   }
-  return headRefName;
+  return forkUrl(pr, view.headRepositoryOwner, view.headRepository);
 };
+
+/** A deleted fork has no owner or name in the `gh` JSON. */
+const forkUrl = (pr, owner, repository) => {
+  if (!owner || !repository) {
+    throw new Error(`Pull request ${pr} comes from a fork that gh did not name.`);
+  }
+  return `https://github.com/${owner.login}/${repository.name}.git`;
+};
+
+const PULL_REQUEST_FIELDS =
+  "headRefName,isCrossRepository,maintainerCanModify,headRepository,headRepositoryOwner";
+
+/** Read the head of pull request `pr` with `gh` in `cwd`. */
+const readPullRequestHead = (cwd, pr) =>
+  pullRequestHead(
+    pr,
+    JSON.parse(run("gh", ["pr", "view", pr, "--json", PULL_REQUEST_FIELDS], { cwd }).stdout),
+  );
 
 /**
  * Fetch `remote` in `cwd` and resolve the refs that the rebase and its
- * checks need. The fetch changes only remote-tracking refs, so the checkout
- * of `cwd` stays as it is.
+ * checks need. A branch on another remote (`headRemote`, a fork) is fetched
+ * by name, and its tip comes from `FETCH_HEAD`. The fetches change only
+ * remote-tracking refs and `FETCH_HEAD`, so the checkout of `cwd` stays as
+ * it is.
  */
-const fetchBranch = (cwd, { remote, branch, base }) => {
+const fetchBranch = (cwd, { remote, headRemote, branch, base }) => {
   git(cwd, ["fetch", "--quiet", remote]);
-  const oldTip = git(cwd, ["rev-parse", "--verify", `refs/remotes/${remote}/${branch}^{commit}`]);
+  const oldTip =
+    headRemote === remote
+      ? git(cwd, ["rev-parse", "--verify", `refs/remotes/${remote}/${branch}^{commit}`])
+      : fetchHeadTip(cwd, headRemote, branch);
   const baseTip = git(cwd, ["rev-parse", "--verify", `${base}^{commit}`]);
   const oldBase = git(cwd, ["merge-base", oldTip, baseTip]);
   return { oldTip, baseTip, oldBase };
+};
+
+const fetchHeadTip = (cwd, headRemote, branch) => {
+  git(cwd, ["fetch", "--quiet", headRemote, `refs/heads/${branch}`]);
+  return git(cwd, ["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
 };
 
 /**
@@ -445,11 +479,11 @@ export const checkRebase = (cwd, log, options, rebased, { ignored, checks, passe
  * code, or throws for a failed command.
  */
 export const shipBranch = (cwd, log, options, { resolveConflicts, check }) => {
-  const branch = options.branch ?? pullRequestBranch(cwd, options.pr);
-  const refs = fetchBranch(cwd, { ...options, branch });
+  const { branch, remote } = branchHead(cwd, options);
+  const refs = fetchBranch(cwd, { ...options, headRemote: remote, branch });
   const hooks = hookConfig(cwd);
   const worktree = addWorktree(cwd, refs.oldTip, { branch, hooks });
-  const target = { ...options, ...refs, branch, top: cwd, worktree, hooks };
+  const target = { ...options, ...refs, remote, branch, top: cwd, worktree, hooks };
   let pushing = false;
   try {
     const rebase = rebaseOnto(worktree, refs.baseTip, resolveConflicts(worktree), hooks);
@@ -459,7 +493,7 @@ export const shipBranch = (cwd, log, options, { resolveConflicts, check }) => {
       return 1;
     }
     const newTip = logRebased(worktree, log, { ...options, ...rebase, ...refs, branch });
-    const rebased = { ...refs, branch, newTip, worktree };
+    const rebased = { ...refs, branch, remote, newTip, worktree };
     const code = check(worktree, rebased);
     if (code !== 0) {
       log(keptWorktreeReport(target, { push: false }));
@@ -477,6 +511,19 @@ export const shipBranch = (cwd, log, options, { resolveConflicts, check }) => {
   return 0;
 };
 
+/**
+ * The branch to rebase and the remote that holds it. The base comes from
+ * `options.remote`. The branch and its push go to the remote that holds it,
+ * which is a fork for some pull requests.
+ */
+const branchHead = (cwd, options) => {
+  const head =
+    options.branch === null
+      ? readPullRequestHead(cwd, options.pr)
+      : { branch: options.branch, headRemote: null };
+  return { branch: head.branch, remote: options.headRemote ?? head.headRemote ?? options.remote };
+};
+
 const DEFAULT_REMOTE = "origin";
 const DEFAULT_BASE_BRANCH = "main";
 
@@ -492,6 +539,7 @@ const parseShipOptions = (argv) => {
       branch: { type: "string" },
       base: { type: "string" },
       remote: { type: "string", default: DEFAULT_REMOTE },
+      "head-remote": { type: "string" },
       push: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -511,6 +559,7 @@ const parseShipOptions = (argv) => {
     pr: values.pr ?? null,
     branch: values.branch ?? null,
     remote: values.remote,
+    headRemote: values["head-remote"],
     base: values.base ?? `${values.remote}/${DEFAULT_BASE_BRANCH}`,
     push: values.push,
   };

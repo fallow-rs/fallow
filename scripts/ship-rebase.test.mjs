@@ -11,7 +11,7 @@ import {
   keepBothSides,
   movedEntries,
 } from "./ship-rebase.mjs";
-import { pushSshEnv, shellCommand } from "./ship-git.mjs";
+import { pullRequestHead, pushSshEnv, shellCommand } from "./ship-git.mjs";
 import { createShipRepo } from "./ship-test-repo.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-rebase.mjs", import.meta.url));
@@ -830,13 +830,13 @@ const forkGh = (repo) => {
   mkdirSync(bin);
   writeFileSync(
     join(bin, "gh"),
-    `#!/bin/sh\necho '{"headRefName":"feat","isCrossRepository":true}'\n`,
+    `#!/bin/sh\necho '{"headRefName":"feat","isCrossRepository":true,"maintainerCanModify":false,"headRepository":{"name":"fallow"},"headRepositoryOwner":{"login":"someone"}}'\n`,
   );
   chmodSync(join(bin, "gh"), 0o755);
   return { PATH: `${bin}${delimiter}${process.env.PATH}` };
 };
 
-test("the script refuses a pull request from a fork", (t) => {
+test("the script refuses a fork pull request without maintainer edits", (t) => {
   const repo = forkRepo(t, {
     base: { "CHANGELOG.md": changelog() },
     onMain: () => {},
@@ -846,8 +846,85 @@ test("the script refuses a pull request from a fork", (t) => {
   const result = repo.runNode(SCRIPT, ["--pr", "12"], forkGh(repo));
 
   assert.equal(result.status, 2, result.output);
-  assert.match(result.output, /Pull request 12 comes from a fork/u);
+  assert.match(
+    result.output,
+    /Pull request 12 comes from a fork that does not allow maintainer edits/u,
+  );
   assert.equal(repo.git("branch", "--show-current"), "main");
+});
+
+/**
+ * Move `feat` from `origin` to a second bare repository, as a pull request
+ * from a fork has it. Returns the path of the fork.
+ */
+const moveBranchToFork = (repo) => {
+  const fork = join(repo.root, "fork.git");
+  repo.git("init", "--quiet", "--bare", fork);
+  repo.git("fetch", "--quiet", "origin");
+  repo.git("push", "--quiet", fork, "origin/feat:refs/heads/feat");
+  repo.git("push", "--quiet", "origin", "--delete", "feat");
+  return fork;
+};
+
+test("--head-remote rebases a fork branch and pushes it back to the fork", (t) => {
+  const repo = changelogConflictRepo(t);
+  const fork = moveBranchToFork(repo);
+
+  const result = shipRebase(repo, "--head-remote", fork, "--push");
+
+  assert.equal(result.status, 0, result.output);
+  const tip = newTipOf(result);
+  assert.equal(repo.git("--git-dir", fork, "rev-parse", "refs/heads/feat"), tip);
+  assert.equal(repo.git("rev-parse", `${tip}^`), repo.git("rev-parse", "origin/main"));
+  assert.equal(repo.git("ls-remote", "--heads", "origin", "feat"), "");
+});
+
+test("the cache version check finds a lost bump on a fork branch", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
+    onBranch: (r) => r.commit("fix: branch cache change", { "src/lib.rs": cacheSource(2) }),
+  });
+  const fork = moveBranchToFork(repo);
+  const before = repo.git("--git-dir", fork, "rev-parse", "refs/heads/feat");
+
+  const result = shipRebase(repo, "--head-remote", fork, "--push");
+
+  assert.equal(result.status, 1, result.output);
+  assert.match(
+    result.output,
+    /Version changes that the rebase lost:\n\s+src\/lib\.rs: GRAPH_CACHE_VERSION 1 -> 2/u,
+  );
+  assert.equal(repo.git("--git-dir", fork, "rev-parse", "refs/heads/feat"), before);
+  assert.doesNotMatch(result.output, /push --force-with-lease/u);
+});
+
+test("pullRequestHead reads the remote of a fork that allows maintainer edits", () => {
+  assert.deepEqual(pullRequestHead("7", { headRefName: "fix/a", isCrossRepository: false }), {
+    branch: "fix/a",
+    headRemote: null,
+  });
+  assert.deepEqual(
+    pullRequestHead("7", {
+      headRefName: "perf/b",
+      isCrossRepository: true,
+      maintainerCanModify: true,
+      headRepository: { name: "fallow" },
+      headRepositoryOwner: { login: "contributor" },
+    }),
+    { branch: "perf/b", headRemote: "https://github.com/contributor/fallow.git" },
+  );
+  assert.throws(
+    () =>
+      pullRequestHead("7", {
+        headRefName: "perf/b",
+        isCrossRepository: true,
+        maintainerCanModify: false,
+        headRepository: { name: "fallow" },
+        headRepositoryOwner: { login: "contributor" },
+      }),
+    /does not allow maintainer edits/u,
+  );
 });
 
 test("a stopped rebase in the caller checkout stays as it is", (t) => {

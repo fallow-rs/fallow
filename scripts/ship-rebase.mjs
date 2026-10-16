@@ -31,7 +31,11 @@ Options:
   --pr <number>     Read the head branch of this pull request with gh.
   --branch <name>   The branch name on the remote.
   --base <ref>      The ref to rebase onto (default: <remote>/main).
-  --remote <name>   The remote of the branch (default: origin).
+  --remote <name>   The remote of the base and the branch (default: origin).
+  --head-remote <remote>
+                    The remote or URL that holds the branch, when it is not
+                    --remote. With --pr, a pull request from a fork that
+                    allows maintainer edits sets it to the fork.
   --push            Push the result with a lease on the old branch tip
                     when all checks pass.
   -h, --help        Show this help.
@@ -421,7 +425,7 @@ const checkResult = (cwd, log, options, rebased) => {
         return others;
       }
       const alone = treeProblems.length === 0 && others.length === 0;
-      const target = { ...tips, remote: options.remote, base: options.base };
+      const target = { ...tips, remote: rebased.remote, base: options.base };
       return [movedProblem(changelog.moved, alone, target), ...others];
     },
     passed: [
