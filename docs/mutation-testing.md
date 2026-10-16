@@ -352,9 +352,17 @@ selects one. The default `auto` reads the project in this order:
 
 | Runner | Config value | Versions | Runtime of the companion |
 |---|---|---|---|
-| Vitest | `vitest` | 4 and 5 | `node`, then `bun` |
+| Vitest | `vitest` | 4.1 to 5 | `node`, then `bun` |
 | `node:test` | `node-test` | Node.js 22.18 to 26 | `node` |
 | `bun test` | `bun-test` | Bun 1.3 and later 1.x releases | `bun` |
+
+The companion refuses a runner version outside this range. The run exits
+with code 2 and `FALLOW_MUTATION_RUNNER_UNSUPPORTED`. The message names the
+installed version and the supported range.
+
+Vitest 4.0 is not supported. It reads the test-id filter of a test
+specification as a list of test lines. Each mutant run then fails with an
+error, and each mutant looks killed. Vitest 4.1 added the test-id filter.
 
 `borp` is a test runner that runs `node:test`. The script parser reads the
 test files of a `borp` command in the order of `borp` 1.0:

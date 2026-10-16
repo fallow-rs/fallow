@@ -49,7 +49,7 @@ export const MUTATION_RUNNER_PROTOCOL = deepFreeze({
     {
       name: "vitest",
       package: "vitest",
-      min_version: "4.0.0",
+      min_version: "4.1.0",
       max_version_exclusive: "6.0.0",
     },
     {

@@ -2,7 +2,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { RUNNERS } from "../generated-protocol.mjs";
-import { expectRequest, isPlainObject } from "../protocol.mjs";
+import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { escapeRegExp, realPath } from "../runtime/child.mjs";
 
 export { escapeRegExp, realPath };
@@ -48,6 +48,19 @@ const compareVersions = (left, right) => {
   }
   return 0;
 };
+
+/** Gives the manifest range of the runner `name` as `>=<min> <<max>`. */
+const supportedRange = (name) => {
+  const runner = RUNNERS.find((entry) => entry.name === name);
+  return runner === undefined ? "none" : `>=${runner.min_version} <${runner.max_version_exclusive}`;
+};
+
+/** Gives the `runner-version` error for `label`, with the supported range of `name`. */
+export const unsupportedVersion = (name, label) =>
+  new CompanionError(
+    "runner-version",
+    `${label} is not supported; the supported range is ${supportedRange(name)}`,
+  );
 
 /** True when `version` is in the manifest range of the runner `name`. */
 export const isSupportedVersion = (name, version) => {

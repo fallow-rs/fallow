@@ -19,6 +19,7 @@ import {
   runResult,
   toPosix,
   uniqueNames,
+  unsupportedVersion,
   validateDryRun,
   validateInit,
   validateRun,
@@ -46,7 +47,7 @@ const loadProjectVitest = async (root) => {
   const projectRequire = createRequire(join(root, "package.json"));
   const { version } = JSON.parse(readFileSync(resolvePackage(projectRequire, root), "utf8"));
   if (!isSupportedVersion(RUNNER_NAME, version)) {
-    throw new CompanionError("runner-version", `vitest ${version} is not supported`);
+    throw unsupportedVersion(RUNNER_NAME, `vitest ${version}`);
   }
   try {
     const node = await import(pathToFileURL(projectRequire.resolve("vitest/node")).href);

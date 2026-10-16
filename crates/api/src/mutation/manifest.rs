@@ -246,14 +246,18 @@ mod tests {
     }
 
     #[test]
-    fn the_embedded_manifest_validates_and_names_vitest_4_and_5() {
+    fn the_embedded_manifest_validates_and_names_vitest_4_1_and_5() {
         let manifest = manifest().expect("valid manifest");
         assert_eq!(manifest.wire_protocol_version, 1);
         let vitest = manifest.runner("vitest").expect("vitest runner");
-        assert!(vitest.contains("4.0.0"));
+        assert!(vitest.contains("4.1.0"));
         assert!(vitest.contains("5.0.4"));
         assert!(vitest.contains("v4.1.11"));
         assert!(!vitest.contains("3.2.4"));
+        // Vitest 4.0 reads the test-id filter of a test specification as test
+        // lines, so each run fails and each mutant looks killed.
+        assert!(!vitest.contains("4.0.0"));
+        assert!(!vitest.contains("4.0.18"));
         assert!(!vitest.contains("6.0.0"));
         assert!(!vitest.contains("not-a-version"));
         assert!(manifest.runner("jest").is_none());

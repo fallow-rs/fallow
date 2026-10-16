@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -108,6 +108,46 @@ test(
     }
   }),
 );
+
+// Vitest 4.0 reads the test-id filter of a test specification as test lines.
+// Each run then fails, so each mutant looks killed. The companion refuses
+// 4.0 before it loads Vitest, so a package.json alone is enough here.
+for (const version of ["4.0.0", "4.0.18"]) {
+  test(
+    `init with vitest ${version} gives runner-version with the supported range`,
+    withCompanion(async (companion) => {
+      const root = mkdtempSync(join(tmpdir(), "fallow-mutation-vitest40-"));
+      const runDir = mkdtempSync(join(tmpdir(), "fallow-mutation-run-"));
+      try {
+        mkdirSync(join(root, "node_modules/vitest"), { recursive: true });
+        writeFileSync(
+          join(root, "node_modules/vitest/package.json"),
+          JSON.stringify({ name: "vitest", version }),
+        );
+        const response = await companion.request({
+          v: 1,
+          id: 1,
+          type: "init",
+          root,
+          runner: "vitest",
+          config_path: null,
+          run_dir: runDir,
+          path_map: {},
+          options: { test_files: [], env: {} },
+        });
+        assert.equal(response.type, "error", JSON.stringify(response));
+        assert.equal(response.error.code, "runner-version");
+        assert.equal(
+          response.error.message,
+          `vitest ${version} is not supported; the supported range is >=4.1.0 <6.0.0`,
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(runDir, { recursive: true, force: true });
+      }
+    }),
+  );
+}
 
 test(
   "init with a runner name that has no adapter is a bad request",

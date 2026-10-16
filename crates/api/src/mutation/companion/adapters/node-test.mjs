@@ -11,7 +11,13 @@ import {
   initTestFiles,
   withTestIds,
 } from "./child-process.mjs";
-import { buildOverlay, errorMessage, isSupportedVersion, validateInit } from "./common.mjs";
+import {
+  buildOverlay,
+  errorMessage,
+  isSupportedVersion,
+  unsupportedVersion,
+  validateInit,
+} from "./common.mjs";
 
 const RUNNER_NAME = "node-test";
 const PRELOAD = new URL("../runtime/node-test-preload.mjs", import.meta.url).href;
@@ -45,7 +51,7 @@ const nodeVersion = () => {
   }
   const version = process.versions.node;
   if (!isSupportedVersion(RUNNER_NAME, version)) {
-    throw new CompanionError("runner-version", `node:test of Node.js ${version} is not supported`);
+    throw unsupportedVersion(RUNNER_NAME, `node:test of Node.js ${version}`);
   }
   return version;
 };

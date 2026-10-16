@@ -681,6 +681,20 @@ fn a_runner_version_outside_the_manifest_range_stops_the_run() {
 }
 
 #[test]
+fn a_runner_version_error_of_the_companion_is_a_runner_version_error() {
+    let message = "vitest 4.0.18 is not supported; the supported range is >=4.1.0 <6.0.0";
+    let spawner = FakeSpawner::new(move |_, _| {
+        Err(LinkFault::Remote(RemoteError {
+            code: "runner-version".to_owned(),
+            message: message.to_owned(),
+            retryable: false,
+        }))
+    });
+    let error = run_schedule(&spawner, &plan(&["m1"]), &config(1)).unwrap_err();
+    assert_eq!(error, ScheduleError::RunnerVersion(message.to_owned()));
+}
+
+#[test]
 fn an_init_error_response_stops_the_run_with_its_message() {
     let spawner = FakeSpawner::new(|_, _| {
         Err(LinkFault::Remote(RemoteError {

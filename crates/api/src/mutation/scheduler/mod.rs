@@ -1101,7 +1101,18 @@ fn setup_timeout_hint(fault: &LinkFault) -> &'static str {
     }
 }
 
+/// The companion error code for a runner version outside the manifest range.
+const RUNNER_VERSION_CODE: &str = "runner-version";
+
+/// Maps a setup fault to its schedule error. A `runner-version` error of the
+/// companion is a [`ScheduleError::RunnerVersion`], the same error as a
+/// version that the scheduler refuses after `ready`.
 fn setup_error(stage: &str, fault: &LinkFault) -> ScheduleError {
+    if let LinkFault::Remote(error) = fault
+        && error.code == RUNNER_VERSION_CODE
+    {
+        return ScheduleError::RunnerVersion(error.message.clone());
+    }
     ScheduleError::Setup {
         message: format!("the mutation companion {stage} failed: {fault}"),
         stderr_tail: fault.stderr_tail().map(str::to_owned),

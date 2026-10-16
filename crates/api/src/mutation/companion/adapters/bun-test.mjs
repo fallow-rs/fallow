@@ -12,7 +12,13 @@ import {
   initTestFiles,
   withTestIds,
 } from "./child-process.mjs";
-import { buildOverlay, hasRun, isSupportedVersion, validateInit } from "./common.mjs";
+import {
+  buildOverlay,
+  hasRun,
+  isSupportedVersion,
+  unsupportedVersion,
+  validateInit,
+} from "./common.mjs";
 
 const RUNNER_NAME = "bun-test";
 const PRELOAD = fileURLToPath(new URL("../runtime/bun-test-preload.mjs", import.meta.url));
@@ -42,7 +48,7 @@ const bunVersion = () => {
     );
   }
   if (!isSupportedVersion(RUNNER_NAME, version)) {
-    throw new CompanionError("runner-version", `bun test of Bun ${version} is not supported`);
+    throw unsupportedVersion(RUNNER_NAME, `bun test of Bun ${version}`);
   }
   return version;
 };
