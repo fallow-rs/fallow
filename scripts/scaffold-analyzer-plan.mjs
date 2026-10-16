@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
+import fs, { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,7 +13,7 @@ const usage = () => {
   console.error("Usage: npm run scaffold:analyzer -- <kebab-code> [--force]");
 };
 
-const parseArgs = (args) => {
+export const parseArgs = (args) => {
   const force = args.includes("--force");
   const values = args.filter((arg) => arg !== "--force");
 
@@ -32,15 +32,15 @@ const parseArgs = (args) => {
   return { ok: true, data: { code, force } };
 };
 
-const assertPlanPath = (targetPath) => {
-  const relative = path.relative(ANALYZER_PLAN_DIR, targetPath);
+export const assertPlanPath = (planDir, targetPath) => {
+  const relative = path.relative(planDir, targetPath);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("refusing to write outside .plans/analyzers");
   }
 };
 
-const assertWritablePlanPath = (targetPath) => {
-  const planDirRealPath = fs.realpathSync(ANALYZER_PLAN_DIR);
+export const assertWritablePlanPath = (planDir, targetPath) => {
+  const planDirRealPath = fs.realpathSync(planDir);
   const targetParentRealPath = fs.realpathSync(path.dirname(targetPath));
   if (targetParentRealPath !== planDirRealPath) {
     throw new Error("refusing to write outside .plans/analyzers");
@@ -63,7 +63,7 @@ const assertWritablePlanPath = (targetPath) => {
   }
 };
 
-const planTemplate = (code) => `# ${code}
+export const planTemplate = (code) => `# ${code}
 
 Status: draft
 
@@ -102,6 +102,27 @@ Status: draft
 - [ ] Real project smoke with \`--format json --quiet\`
 `;
 
+/** Writes the plan file for `code` into `planDir` and returns its path. */
+export const writePlan = ({ code, force, planDir }) => {
+  const targetPath = path.join(planDir, `${code}.md`);
+  assertPlanPath(planDir, targetPath);
+
+  fs.mkdirSync(planDir, { recursive: true });
+  assertWritablePlanPath(planDir, targetPath);
+  fs.writeFileSync(targetPath, planTemplate(code), {
+    encoding: "utf8",
+    flag: force ? "w" : "wx",
+  });
+  return targetPath;
+};
+
+export const errorMessage = (error) => {
+  if (error && error.code === "EEXIST") {
+    return "plan already exists, pass --force to overwrite it";
+  }
+  return error instanceof Error ? error.message : String(error);
+};
+
 const main = () => {
   const parsed = parseArgs(process.argv.slice(2));
   if (!parsed.ok) {
@@ -112,25 +133,25 @@ const main = () => {
   }
 
   const { code, force } = parsed.data;
-  const targetPath = path.join(ANALYZER_PLAN_DIR, `${code}.md`);
-  assertPlanPath(targetPath);
-
-  fs.mkdirSync(ANALYZER_PLAN_DIR, { recursive: true });
-  assertWritablePlanPath(targetPath);
-  fs.writeFileSync(targetPath, planTemplate(code), {
-    encoding: "utf8",
-    flag: force ? "w" : "wx",
-  });
+  const targetPath = writePlan({ code, force, planDir: ANALYZER_PLAN_DIR });
   console.log(path.relative(REPO_ROOT, targetPath));
 };
 
-try {
-  main();
-} catch (error) {
-  if (error && error.code === "EEXIST") {
-    console.error("plan already exists, pass --force to overwrite it");
-  } else {
-    console.error(error instanceof Error ? error.message : String(error));
+// `process.argv[1]` keeps symlinks while Node realpaths the ESM entry, so
+// compare real paths. An unresolvable value means this module was imported.
+const realPathOrNull = (value) => {
+  try {
+    return value === undefined ? null : realpathSync(value);
+  } catch {
+    return null;
   }
-  process.exitCode = 1;
+};
+
+if (realPathOrNull(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+  try {
+    main();
+  } catch (error) {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  }
 }

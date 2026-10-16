@@ -90,9 +90,9 @@ const writeStaged = (stagingRoot, path, content) => {
   writeFileSync(destination, content);
 };
 
-const ensureTrailingNewline = (text) => (text.endsWith("\n") ? text : `${text}\n`);
+export const ensureTrailingNewline = (text) => (text.endsWith("\n") ? text : `${text}\n`);
 
-const issueRegistry = (capabilitySchema) => {
+export const issueRegistry = (capabilitySchema) => {
   const parsed = JSON.parse(capabilitySchema);
   const issueTypes = (parsed.issue_types ?? []).toSorted((a, b) => {
     const leftIndex = Number.isInteger(a.registry_index)
@@ -171,7 +171,7 @@ const generateNapiTypes = (stagingRoot) => {
   });
 };
 
-const generateTypeAwareProtocol = (stagingRoot) => {
+export const generateTypeAwareProtocol = (stagingRoot) => {
   const manifest = JSON.parse(readFileSync(join(REPO_ROOT, TYPE_AWARE_MANIFEST_PATH), "utf8"));
   const requiredKeys = [
     "schema_version",
@@ -276,7 +276,7 @@ const MUTATION_RUNNER_MANIFEST_CHECKS = [
     manifest.runners.every(isValidMutationRunner),
 ];
 
-const assertMutationRunnerManifest = (manifest) => {
+export const assertMutationRunnerManifest = (manifest) => {
   if (!MUTATION_RUNNER_MANIFEST_CHECKS.every((check) => check(manifest))) {
     throw new Error("invalid mutation runner protocol manifest");
   }
@@ -316,7 +316,7 @@ const objectLiteral = (record, indent) => {
  * keeps: objects on several lines, and a list of scalars on one line when the
  * line fits.
  */
-const jsLiteral = (value, indent, linePrefix) => {
+export const jsLiteral = (value, indent, linePrefix) => {
   if (isScalar(value)) return JSON.stringify(value);
   if (!Array.isArray(value)) return objectLiteral(value, indent);
   return inlineList(value, linePrefix) ?? listLiteral(value, indent);
@@ -396,7 +396,7 @@ const validateStagedContracts = () => {
   checkContractSurfaceCoverage();
 };
 
-const parseArgs = (argv) => {
+export const parseArgs = (argv) => {
   const unknown = argv.filter((arg) => arg !== "--check" && arg !== "--help" && arg !== "-h");
   if (unknown.length > 0) {
     throw new Error(`unknown argument: ${unknown[0]}`);

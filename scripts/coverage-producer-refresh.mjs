@@ -154,7 +154,8 @@ const invokeFallow = (binary, root, coveragePath, coverageRoot) => {
   return JSON.parse(result.stdout);
 };
 
-const seedCensusUnit = (unit) =>
+/** Seed a census unit for a new row; an unattributed unit needs a written rationale. */
+export const seedCensusUnit = (unit) =>
   unit.coverage_source === "istanbul"
     ? {
         name: unit.name,
