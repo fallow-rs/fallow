@@ -465,12 +465,16 @@ fn schedule_error(
         ScheduleError::Setup { stderr_tail, .. } => {
             ("FALLOW_MUTATION_RUNNER_FAILED", stderr_tail.clone())
         }
+        ScheduleError::RunPath { .. } => ("FALLOW_MUTATION_RUNNER_FAILED", None),
         ScheduleError::UnknownHit(_) => ("FALLOW_MUTATION_PLAN_MISMATCH", None),
         ScheduleError::Baseline(_) => ("FALLOW_MUTATION_BASELINE_FAILED", None),
     };
     let mut help = Vec::new();
     if matches!(error, ScheduleError::RunnerVersion(_)) {
         help.push(runner_version_help(runner));
+    }
+    if let ScheduleError::RunPath { help: run_path, .. } = error {
+        help.push(run_path.clone());
     }
     if matches!(
         error,
@@ -944,6 +948,28 @@ mod tests {
             Duration::from_secs(120),
         );
         assert_eq!(other.help, None);
+    }
+
+    #[test]
+    fn a_failed_self_check_is_a_runner_failure_with_its_own_help() {
+        let error = schedule_error(
+            &ScheduleError::RunPath {
+                message: "vitest 5.0.4 executes no tests in a mutant run".to_owned(),
+                help: "report this with the runner name and version (vitest 5.0.4)".to_owned(),
+            },
+            vitest_range(),
+            Duration::from_secs(120),
+        );
+        assert_eq!(error.code.as_deref(), Some("FALLOW_MUTATION_RUNNER_FAILED"));
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(
+            error.message,
+            "vitest 5.0.4 executes no tests in a mutant run"
+        );
+        assert_eq!(
+            error.help.as_deref(),
+            Some("report this with the runner name and version (vitest 5.0.4)")
+        );
     }
 
     #[test]

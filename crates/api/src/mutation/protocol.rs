@@ -33,7 +33,9 @@ pub struct InitRequest {
 /// The body of a `run` request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunRequest {
-    pub mutant_id: String,
+    /// The mutant to activate. `None` sends `null`: a control run of the
+    /// tests with no active mutant.
+    pub mutant_id: Option<String>,
     pub test_ids: Vec<String>,
     pub timeout_ms: u64,
     pub bail: bool,
@@ -177,7 +179,9 @@ pub struct RunTest {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RunResult {
-    pub mutant_id: String,
+    /// The mutant of the request. `None` for a control run.
+    #[serde(default)]
+    pub mutant_id: Option<String>,
     pub status: RunStatus,
     #[serde(default)]
     pub killed_by: Option<String>,
@@ -352,7 +356,7 @@ mod tests {
         let Response::Run(result) = decode_response(RUN_RESULT, 1, 3, "run_result").unwrap() else {
             panic!("expected a run result");
         };
-        assert_eq!(result.mutant_id, "m1");
+        assert_eq!(result.mutant_id.as_deref(), Some("m1"));
         assert_eq!(result.status, RunStatus::Killed);
         assert_eq!(result.killed_by.as_deref(), Some("t::a"));
         assert_eq!(result.tests_executed, 1);
@@ -437,7 +441,7 @@ mod tests {
     #[test]
     fn a_request_line_carries_version_id_type_and_the_body() {
         let line = Request::Run(RunRequest {
-            mutant_id: "m1".to_owned(),
+            mutant_id: Some("m1".to_owned()),
             test_ids: vec!["t::a".to_owned()],
             timeout_ms: 6500,
             bail: true,
@@ -446,6 +450,17 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&line).unwrap(),
             serde_json::json!({"v":1,"id":3,"type":"run","mutant_id":"m1","test_ids":["t::a"],"timeout_ms":6500,"bail":true})
+        );
+        let control = Request::Run(RunRequest {
+            mutant_id: None,
+            test_ids: vec!["t::a".to_owned()],
+            timeout_ms: 6500,
+            bail: true,
+        })
+        .to_line(1, 4);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&control).unwrap(),
+            serde_json::json!({"v":1,"id":4,"type":"run","mutant_id":null,"test_ids":["t::a"],"timeout_ms":6500,"bail":true})
         );
         let shutdown = Request::Shutdown.to_line(1, 5);
         assert!(!shutdown.contains('\n'));

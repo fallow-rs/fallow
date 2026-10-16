@@ -222,6 +222,14 @@ for (const { packageName, version } of VITEST_MAJORS) {
       );
     });
 
+    test("a control run with a null mutant_id runs the original code through the run path", async () => {
+      const result = await run(null, [id("settles", FAULTS)]);
+      assert.equal(result.type, "run_result", JSON.stringify(result));
+      assert.equal(result.mutant_id, null);
+      assert.equal(result.status, "survived", JSON.stringify(result));
+      assert.equal(result.tests_executed, 1);
+    });
+
     test("the dry run reports an unhandled error of the original code", async () => {
       const result = await request({ type: "dry_run", test_files: [UNHANDLED] });
       assert.equal(result.type, "dry_run_result", JSON.stringify(result));

@@ -94,10 +94,15 @@ export const validateDryRun = (request) => {
   expectRequest(isOptional(request.test_files, isStringList), "test_files must be a list of paths");
 };
 
+/**
+ * Checks a `run` request. A `mutant_id` of null is a control run: the tests
+ * run with no active mutant, through the same path as a mutant run.
+ */
 export const validateRun = (request) => {
   expectRequest(
-    typeof request.mutant_id === "string" && request.mutant_id.length > 0,
-    "mutant_id must be a string",
+    request.mutant_id === null ||
+      (typeof request.mutant_id === "string" && request.mutant_id.length > 0),
+    "mutant_id must be a string or null",
   );
   expectRequest(isNonEmptyStringList(request.test_ids), "test_ids must be a non-empty list");
   expectRequest(isPositiveInteger(request.timeout_ms), "timeout_ms must be a positive integer");

@@ -5,6 +5,12 @@ use super::super::protocol::{DryTest, Reloaded, RemoteError, RunTest, UnhandledE
 use super::*;
 
 type Script = dyn Fn(usize, &Request) -> Result<Response, LinkFault> + Send + Sync;
+type ControlScript = dyn Fn(usize, &RunRequest) -> Result<Response, LinkFault> + Send + Sync;
+
+/// The answer of a passing control run: each requested test passes.
+fn passing_control(run: &RunRequest) -> Response {
+    run_result(run, RunStatus::Survived, None)
+}
 
 struct FakeLink {
     index: usize,
@@ -12,10 +18,22 @@ struct FakeLink {
     log: Arc<Mutex<Vec<(usize, Request)>>>,
     waits: Arc<Mutex<Vec<Duration>>>,
     respawn_dry_run: Option<Duration>,
+    control: Arc<ControlScript>,
+    controls: Arc<Mutex<Vec<(usize, RunRequest)>>>,
 }
 
 impl CompanionLink for FakeLink {
     fn request(&mut self, request: &Request, timeout: Duration) -> Result<Response, LinkFault> {
+        // A control run (no active mutant) goes to its own log and script, so
+        // the mutant-run assertions of each test stay about mutant runs.
+        if let Request::Run(run) = request
+            && run.mutant_id.is_none()
+        {
+            if let Ok(mut controls) = self.controls.lock() {
+                controls.push((self.index, run.clone()));
+            }
+            return (self.control)(self.index, run);
+        }
         if let Ok(mut log) = self.log.lock() {
             log.push((self.index, request.clone()));
         }
@@ -44,6 +62,9 @@ struct FakeSpawner {
     /// The time that the dry run of a respawned companion needs. A shorter
     /// timeout gives a watchdog timeout.
     respawn_dry_run: Option<Duration>,
+    /// The answer of each control run. The default passes each test.
+    control: Arc<ControlScript>,
+    controls: Arc<Mutex<Vec<(usize, RunRequest)>>>,
 }
 
 impl FakeSpawner {
@@ -57,7 +78,22 @@ impl FakeSpawner {
             waits: Arc::new(Mutex::new(Vec::new())),
             integrity: None,
             respawn_dry_run: None,
+            control: Arc::new(|_, run| Ok(passing_control(run))),
+            controls: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    fn with_control(
+        mut self,
+        control: impl Fn(usize, &RunRequest) -> Result<Response, LinkFault> + Send + Sync + 'static,
+    ) -> Self {
+        self.control = Arc::new(control);
+        self
+    }
+
+    /// The control runs, with the companion index of each.
+    fn controls(&self) -> Vec<(usize, RunRequest)> {
+        self.controls.lock().expect("controls").clone()
     }
 
     fn runs(&self) -> Vec<(usize, RunRequest)> {
@@ -95,6 +131,8 @@ impl CompanionSpawner for FakeSpawner {
             log: Arc::clone(&self.log),
             waits: Arc::clone(&self.waits),
             respawn_dry_run: self.respawn_dry_run,
+            control: Arc::clone(&self.control),
+            controls: Arc::clone(&self.controls),
         }))
     }
 }
@@ -254,7 +292,7 @@ fn status(outcome: &ScheduleOutcome, id: &str) -> MutantStatus {
 fn killed_survived_and_no_coverage_follow_the_dry_run_hits() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
-        |_, run| match run.mutant_id.as_str() {
+        |_, run| match run.mutant_id.as_deref().unwrap_or_default() {
             "m1" => Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
             _ => Ok(run_result(run, RunStatus::Survived, None)),
         },
@@ -312,7 +350,7 @@ fn the_watchdog_adds_the_setup_time_of_each_covering_file() {
             ]),
             ..standard_dry()
         },
-        |_, run| match run.mutant_id.as_str() {
+        |_, run| match run.mutant_id.as_deref().unwrap_or_default() {
             "m1" => Err(LinkFault::Timeout),
             _ => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
         },
@@ -438,7 +476,7 @@ fn fail_closed_a_survived_claim_without_full_evidence_is_a_runtime_error() {
         }),
         ("another mutant", |run| {
             let mut other = run.clone();
-            other.mutant_id = "m9".to_owned();
+            other.mutant_id = Some("m9".to_owned());
             run_result(&other, RunStatus::Survived, None)
         }),
         ("a kill with no evidence", |run| {
@@ -597,7 +635,7 @@ fn two_runtime_errors_stay_a_runtime_error_with_the_stderr_tail() {
 fn a_watchdog_timeout_is_timeout_and_the_next_mutant_gets_a_new_companion() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
-        |_, run| match run.mutant_id.as_str() {
+        |_, run| match run.mutant_id.as_deref().unwrap_or_default() {
             "m1" => Err(LinkFault::Timeout),
             _ => Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
         },
@@ -612,7 +650,8 @@ fn a_watchdog_timeout_is_timeout_and_the_next_mutant_gets_a_new_companion() {
     assert_eq!((runs[0].0, runs[1].0), (0, 1));
     assert_eq!(spawner.requests_of(1)[..3], ["init", "dry_run", "run"]);
     assert_eq!(
-        runs[2].1.mutant_id, "m1",
+        runs[2].1.mutant_id.as_deref(),
+        Some("m1"),
         "the retry runs the timed-out mutant"
     );
 }
@@ -853,7 +892,7 @@ fn static_mutants_run_last_with_a_reload_around_each_when_modules_stay_loaded() 
     let runs = spawner.runs();
     assert_eq!(
         runs.iter()
-            .map(|run| run.1.mutant_id.as_str())
+            .map(|run| run.1.mutant_id.as_deref().unwrap_or_default())
             .collect::<Vec<_>>(),
         vec!["m1", "m0"],
         "the static mutant runs last although it ranks first"
@@ -946,7 +985,7 @@ fn a_capped_run_gives_no_coverage_to_the_same_mutants_as_a_full_run() {
     let ran: Vec<String> = capped_spawner
         .runs()
         .into_iter()
-        .map(|(_, run)| run.mutant_id)
+        .filter_map(|(_, run)| run.mutant_id)
         .collect();
     assert_eq!(ran, vec!["m1".to_owned()], "a pending mutant never runs");
 }
@@ -972,7 +1011,7 @@ fn covered_pending_mutants_fill_the_limit_that_uncovered_planned_mutants_leave()
     let ran: Vec<String> = spawner
         .runs()
         .into_iter()
-        .map(|(_, run)| run.mutant_id)
+        .filter_map(|(_, run)| run.mutant_id)
         .collect();
     assert_eq!(ran, vec!["m1".to_owned()]);
     assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
@@ -1017,7 +1056,7 @@ fn concurrent_workers_run_each_mutant_once() {
     let mut ran: Vec<String> = spawner
         .runs()
         .into_iter()
-        .map(|run| run.1.mutant_id)
+        .filter_map(|run| run.1.mutant_id)
         .collect();
     ran.sort();
     let mut expected = ids.clone();
@@ -1129,7 +1168,7 @@ fn a_dry_run_hit_on_a_statically_unreached_mutant_runs_it_and_reports_the_miss()
     let runs: BTreeMap<String, Vec<String>> = spawner
         .runs()
         .into_iter()
-        .map(|(_, run)| (run.mutant_id, run.test_ids))
+        .filter_map(|(_, run)| Some((run.mutant_id?, run.test_ids)))
         .collect();
     assert_eq!(
         runs.get("m3"),
@@ -1271,9 +1310,11 @@ fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
     };
-    let spawner = FakeSpawner::new(script(dry, |_, run| match run.mutant_id.as_str() {
-        "m1" => Err(LinkFault::Timeout),
-        _ => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    let spawner = FakeSpawner::new(script(dry, |_, run| {
+        match run.mutant_id.as_deref().unwrap_or_default() {
+            "m1" => Err(LinkFault::Timeout),
+            _ => Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+        }
     }));
     let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
 
@@ -1282,7 +1323,7 @@ fn a_covering_test_that_fails_in_a_respawned_dry_run_is_a_baseline_failure() {
     let m2_runs: Vec<Vec<String>> = spawner
         .runs()
         .into_iter()
-        .filter(|(_, run)| run.mutant_id == "m2")
+        .filter(|(_, run)| run.mutant_id.as_deref() == Some("m2"))
         .map(|(_, run)| run.test_ids)
         .collect();
     assert_eq!(m2_runs, vec![vec![tid("t1")]], "m2 runs without t2");
@@ -1347,9 +1388,11 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
     };
-    let spawner = FakeSpawner::new(script(dry, |_, run| match run.mutant_id.as_str() {
-        "m3" => Err(LinkFault::Timeout),
-        _ => Ok(run_result(run, RunStatus::Survived, None)),
+    let spawner = FakeSpawner::new(script(dry, |_, run| {
+        match run.mutant_id.as_deref().unwrap_or_default() {
+            "m3" => Err(LinkFault::Timeout),
+            _ => Ok(run_result(run, RunStatus::Survived, None)),
+        }
     }));
     let mut config = config(1);
     config.cache = Some(Arc::new(FakeCache::default()) as Arc<dyn ResultLookup>);
@@ -1358,7 +1401,7 @@ fn a_survivor_without_a_dropped_covering_test_is_not_a_runtime_error() {
     let m2_runs: Vec<Vec<String>> = spawner
         .runs()
         .into_iter()
-        .filter(|(_, run)| run.mutant_id == "m2")
+        .filter(|(_, run)| run.mutant_id.as_deref() == Some("m2"))
         .map(|(_, run)| run.test_ids)
         .collect();
     assert!(
@@ -1412,9 +1455,11 @@ fn a_dropped_test_cannot_be_the_killer() {
         unloaded_paths: Vec::new(),
         file_setup_ms: BTreeMap::new(),
     };
-    let spawner = FakeSpawner::new(script(dry, |_, run| match run.mutant_id.as_str() {
-        "m3" => Err(LinkFault::Timeout),
-        _ => Ok(run_result(run, RunStatus::Killed, Some(&tid("t2")))),
+    let spawner = FakeSpawner::new(script(dry, |_, run| {
+        match run.mutant_id.as_deref().unwrap_or_default() {
+            "m3" => Err(LinkFault::Timeout),
+            _ => Ok(run_result(run, RunStatus::Killed, Some(&tid("t2")))),
+        }
     }));
     let outcome = run_schedule(&spawner, &plan(&["m3", "m2"]), &config(1)).expect("run");
     assert_eq!(status(&outcome, "m2"), MutantStatus::RuntimeError);
@@ -1511,7 +1556,7 @@ fn a_cache_hit_skips_the_mutant_run_and_a_miss_reports_its_key() {
     let ran: Vec<String> = spawner
         .runs()
         .into_iter()
-        .map(|(_, run)| run.mutant_id)
+        .filter_map(|(_, run)| run.mutant_id)
         .collect();
     assert_eq!(ran, vec!["m2".to_owned()], "the cached mutant does not run");
     let m1 = &outcome.results["m1"];
@@ -1590,4 +1635,256 @@ fn without_a_cache_each_covered_mutant_runs_and_no_key_is_reported() {
     assert_eq!(spawner.runs().len(), 2);
     assert!(outcome.cache_keys.is_empty());
     assert!(outcome.results.values().all(|result| !result.cached));
+}
+
+/// A run result with no executed test and an error outside each test: the
+/// shape of a mutant that throws at module load, and of a run path that
+/// executes no test.
+fn load_failure(run: &RunRequest) -> Response {
+    Response::Run(RunResult {
+        mutant_id: run.mutant_id.clone(),
+        status: RunStatus::Killed,
+        killed_by: None,
+        duration_ms: Some(4.0),
+        tests_executed: 0,
+        tests: Vec::new(),
+        unhandled_errors: vec![UnhandledError {
+            message: "createSpecification failed\n    at stack".to_owned(),
+            file: None,
+        }],
+    })
+}
+
+/// A control run in which the second requested test fails.
+fn failing_control(run: &RunRequest) -> Response {
+    let tests: Vec<RunTest> = run
+        .test_ids
+        .iter()
+        .enumerate()
+        .map(|(index, test)| RunTest {
+            test_id: test.clone(),
+            status: if index == 1 {
+                TestStatus::Fail
+            } else {
+                TestStatus::Pass
+            },
+        })
+        .collect();
+    Response::Run(RunResult {
+        mutant_id: None,
+        status: RunStatus::Killed,
+        killed_by: run.test_ids.get(1).cloned(),
+        duration_ms: Some(4.0),
+        tests_executed: tests.len(),
+        tests,
+        unhandled_errors: Vec::new(),
+    })
+}
+
+/// t1 hits m1, m2 and m3. t2 hits m2 and m3. So m1 runs t1, and m2 and m3
+/// run t1 and t2.
+fn shared_set_dry() -> DryRunResult {
+    DryRunResult {
+        hits: BTreeMap::from([
+            (
+                tid("t1"),
+                vec!["m1".to_owned(), "m2".to_owned(), "m3".to_owned()],
+            ),
+            (tid("t2"), vec!["m2".to_owned(), "m3".to_owned()]),
+        ]),
+        ..standard_dry()
+    }
+}
+
+fn sorted(mut tests: Vec<String>) -> Vec<String> {
+    tests.sort();
+    tests
+}
+
+/// m1 is killed by t1. Each other mutant breaks the module load.
+fn m1_killed_others_fail_at_load(run: &RunRequest) -> Response {
+    match run.mutant_id.as_deref().unwrap_or_default() {
+        "m1" => run_result(run, RunStatus::Killed, Some(&tid("t1"))),
+        _ => load_failure(run),
+    }
+}
+
+#[test]
+fn the_self_check_stops_a_run_whose_run_path_executes_no_tests() {
+    // The run path of the runner fails each run before a test starts, as
+    // Vitest 4.0 did. Each mutant run would look killed.
+    let spawner = FakeSpawner::new(script(|_| standard_dry(), |_, run| Ok(load_failure(run))))
+        .with_control(|_, run| Ok(load_failure(run)));
+    let error = run_schedule(&spawner, &plan(&["m1", "m2"]), &config(2)).unwrap_err();
+    let ScheduleError::RunPath { message, help } = &error else {
+        panic!("expected a run-path error, got {error:?}");
+    };
+    assert!(
+        message.starts_with("vitest 5.0.4 executes no tests in a mutant run"),
+        "{message}"
+    );
+    assert!(
+        message.contains("0 of 1 requested tests ran; first error: createSpecification failed"),
+        "{message}"
+    );
+    assert!(help.contains("report this at"), "{help}");
+    assert!(help.contains("(vitest 5.0.4)"), "{help}");
+    assert!(
+        spawner.runs().is_empty(),
+        "no mutant runs after the self-check fails"
+    );
+    let controls = spawner.controls();
+    assert_eq!(controls.len(), 1, "the self-check is one run");
+    assert_eq!(controls[0].0, 0, "the first companion runs the self-check");
+    assert_eq!(
+        controls[0].1.test_ids,
+        vec![tid("t1")],
+        "the tests of the first job"
+    );
+}
+
+#[test]
+fn the_self_check_stops_a_run_whose_covering_tests_fail_in_the_run_path() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ))
+    .with_control(|_, run| Ok(failing_control(run)));
+    // m2 is the first job, with two covering tests.
+    let error = run_schedule(&spawner, &plan(&["m2"]), &config(1)).unwrap_err();
+    let ScheduleError::RunPath { message, help } = &error else {
+        panic!("expected a run-path error, got {error:?}");
+    };
+    assert!(
+        message.starts_with("the tests do not pass in a mutant run of vitest 5.0.4"),
+        "{message}"
+    );
+    assert!(message.contains("did not pass"), "{message}");
+    assert!(help.contains("passes only after another test"), "{help}");
+    assert!(spawner.runs().is_empty());
+}
+
+#[test]
+fn a_passing_self_check_runs_the_tests_of_the_first_job_once_with_no_mutant() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Killed);
+    let controls = spawner.controls();
+    assert_eq!(controls.len(), 1, "{controls:?}");
+    let control = &controls[0].1;
+    assert_eq!(control.mutant_id, None);
+    assert_eq!(control.test_ids, vec![tid("t1")]);
+    assert!(control.bail);
+}
+
+#[test]
+fn the_self_check_needs_no_run_without_a_covered_mutant() {
+    let spawner = FakeSpawner::new(script(|_| standard_dry(), |_, run| Ok(load_failure(run))))
+        .with_control(|_, run| Ok(load_failure(run)));
+    let outcome = run_schedule(&spawner, &plan(&["m3"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m3"), MutantStatus::NoCoverage);
+    assert!(spawner.controls().is_empty());
+}
+
+#[test]
+fn a_mutant_that_throws_at_module_load_stays_killed_when_its_tests_pass_without_it() {
+    // m2 and m3 break the module load. Their tests (t1, t2) pass in a
+    // control run with no active mutant, so each kill stands.
+    let spawner = FakeSpawner::new(script(
+        |_| shared_set_dry(),
+        |_, run| Ok(m1_killed_others_fail_at_load(run)),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
+    for id in ["m2", "m3"] {
+        assert_eq!(status(&outcome, id), MutantStatus::Killed, "{id}");
+        assert_eq!(outcome.results[id].killed_by, None, "{id}");
+    }
+    let controls: Vec<Vec<String>> = spawner
+        .controls()
+        .into_iter()
+        .map(|(_, run)| sorted(run.test_ids))
+        .collect();
+    assert_eq!(
+        controls,
+        vec![vec![tid("t1")], vec![tid("t1"), tid("t2")]],
+        "the self-check, then one control run for the shared test set of m2 and m3"
+    );
+    assert!(
+        outcome.issues.iter().all(|issue| issue.mutant_id.is_none()),
+        "{:?}",
+        outcome.issues
+    );
+}
+
+#[test]
+fn a_zero_test_kill_whose_tests_fail_without_the_mutant_is_a_runtime_error() {
+    // The self-check of t1 passes. The test set of m2 and m3 (t1, t2) fails
+    // in its control run, so their zero-test kills are no evidence.
+    let spawner = FakeSpawner::new(script(
+        |_| shared_set_dry(),
+        |_, run| Ok(m1_killed_others_fail_at_load(run)),
+    ))
+    .with_control(|_, run| {
+        if run.test_ids.len() == 1 {
+            Ok(run_result(run, RunStatus::Survived, None))
+        } else {
+            Ok(failing_control(run))
+        }
+    });
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2", "m3"]), &config(1)).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    for id in ["m2", "m3"] {
+        assert_eq!(status(&outcome, id), MutantStatus::RuntimeError, "{id}");
+        let issue = outcome
+            .issues
+            .iter()
+            .find(|issue| issue.mutant_id.as_deref() == Some(id))
+            .expect("an issue");
+        assert_eq!(issue.code, "runtime-error");
+        assert!(
+            issue
+                .message
+                .contains("the same tests do not pass in a control run with no active mutant"),
+            "{}",
+            issue.message
+        );
+    }
+    let set_controls = spawner
+        .controls()
+        .iter()
+        .filter(|(_, run)| run.test_ids.len() == 2)
+        .count();
+    assert_eq!(
+        set_controls, 1,
+        "the memo gives each test set one control run"
+    );
+}
+
+#[test]
+fn a_zero_test_kill_after_the_time_budget_stays_pending_without_a_control_run() {
+    let spawner = FakeSpawner::new(script(
+        |_| shared_set_dry(),
+        |_, run| {
+            if run.mutant_id.as_deref() == Some("m2") {
+                std::thread::sleep(Duration::from_millis(400));
+            }
+            Ok(m1_killed_others_fail_at_load(run))
+        },
+    ));
+    let mut config = config(1);
+    config.deadline = Some(Instant::now() + Duration::from_millis(250));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config).expect("run");
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(status(&outcome, "m2"), MutantStatus::Pending);
+    assert!(
+        spawner
+            .controls()
+            .iter()
+            .all(|(_, run)| run.test_ids.len() == 1),
+        "no control run starts after the deadline"
+    );
 }

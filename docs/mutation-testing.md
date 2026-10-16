@@ -180,7 +180,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result. |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check). |
 
 The flag wins over the config key. The minimum applies to the score, in
 percent. A run in which no mutant has a test result has no score. It exits
@@ -392,6 +392,52 @@ mutant. Their results decide no mutant status.
 - A baseline failure makes the completion `partial` (`baseline-failure`).
 - A run in which baseline failures leave each mutant without a test
   result exits `2` (see Exit codes).
+
+## Run-path self-check
+
+The dry run selects whole test files. A mutant run selects the covering
+tests by id, so it uses another path of the runner API. When a runner
+release changes that path, each mutant run can fail with an error before a
+test starts. An error outside a test kills a mutant, so each mutant looks
+killed and the score is a false 100%. Vitest 4.0 had this fault.
+
+A control run is a `run` request with `mutant_id: null`. The companion runs
+the requested tests through the run path of a mutant run, with no active
+mutant. The scheduler uses control runs in two places:
+
+1. The self-check. After the dry run and before the first mutant job, the
+   first companion runs the tests of the first job as a control run.
+   - The control run passes when each requested test runs and passes, with
+     no error.
+   - Otherwise the run stops with exit code 2 and
+     `FALLOW_MUTATION_RUNNER_FAILED`. No mutant gets a status.
+   - When no test ran, the message says that the runner executes no tests
+     in a mutant run. The message names the runner and its version, and the
+     help asks you to report it.
+   - When a test failed, the message says that the tests do not pass in a
+     mutant run. A test that passes only after another test of its file
+     gives this error, and the help says so.
+   - The check needs no run when no job exists: no mutant is covered, or
+     each covered mutant has a result from the cache. The check also needs
+     no run when the time budget ended before it.
+   - The check costs one run of the tests of one mutant. Its time is part of
+     `timings.mutants_ms`.
+2. A kill with no executed test. A mutant run that executes no test and
+   reports an error is `killed` only when the same tests pass in a control
+   run.
+   - A mutant that throws when its module loads gives this result. Its
+     tests pass with no active mutant, so it stays `killed`, with no killer
+     test.
+   - When the control run does not pass, the mutant is `runtime_error`, and
+     its `errors[]` entry gives the reason.
+   - The scheduler stores the control result of each test set for the run.
+     Each distinct test set gets at most one control run, and the test set
+     of the self-check gets none. A fault of the companion is not stored.
+   - After the `--time-budget` deadline, a control run that has no stored
+     result does not start, and the mutant is `pending`.
+
+A control result is never a mutant result, so the result cache never stores
+it.
 
 ## Runners
 
@@ -608,6 +654,7 @@ the key. A change to them does not invalidate a stored result. Each cache entry 
 report repeats it in `cache.not_keyed`.
 
 - A `timeout`, `flaky`, `runtime_error` or `pending` result is never stored.
+  A control run (see Run-path self-check) is never stored.
   A timeout depends on the load of the machine. A survivor that the time
   budget left without a retry is not stored. A survivor of a run without a
   dropped covering test (see Baseline failures) is not stored, because the

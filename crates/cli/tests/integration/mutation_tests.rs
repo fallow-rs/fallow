@@ -1162,4 +1162,83 @@ export default {
             human.stderr
         );
     }
+
+    /// `adds after prepares` passes only after `prepares` ran in the same
+    /// file. The dry run runs the whole file, so it passes there. A mutant
+    /// run selects only the covering test of an `add` mutant, so that test
+    /// fails with no active mutant. The self-check finds this before the
+    /// first mutant job, and the run exits 2 instead of a false kill.
+    #[test]
+    fn a_covering_test_that_fails_in_the_run_path_stops_the_run_before_a_false_kill() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package, "");
+        fs::write(
+            root.join("test/math.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { add } from \"../src/math\";\n\nlet prepared = false;\n\ntest(\"prepares\", () => {\n  prepared = true;\n});\n\ntest(\"adds after prepares\", () => {\n  expect(prepared).toBe(true);\n  expect(add(2, 3)).toBe(5);\n});\n",
+        )
+        .expect("test file");
+        commit_all(&root, "an order-dependent test");
+
+        let (output, envelope) = json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
+        assert_eq!(output.code, 2, "{}", output.stdout);
+        assert_eq!(
+            envelope["code"], "FALLOW_MUTATION_RUNNER_FAILED",
+            "{envelope}"
+        );
+        let message = envelope["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("the tests do not pass in a mutant run of vitest 5."),
+            "{envelope}"
+        );
+        assert!(
+            envelope["help"]
+                .as_str()
+                .is_some_and(|help| help.contains("passes only after another test")),
+            "{envelope}"
+        );
+    }
+
+    /// A mutant of the guard throws when `src/math.ts` loads. The mutant run
+    /// executes no test and reports the load error. The same tests pass with
+    /// no active mutant, so the mutant stays `killed`, with no killer test.
+    #[test]
+    fn a_mutant_that_throws_at_module_load_stays_killed() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let guard = "\nif (LIMIT !== 10) {\n  throw new Error(\"bad limit\");\n}\n";
+        let (_project, root) = vitest_project(&package, guard);
+
+        let (output, report) = json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let guard_line = fs::read_to_string(root.join("src/math.ts"))
+            .expect("math.ts")
+            .lines()
+            .position(|line| line.starts_with("if (LIMIT"))
+            .expect("the guard line")
+            + 1;
+        let guard_mutants: Vec<&serde_json::Value> = report["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .filter(|mutant| mutant["line"] == guard_line)
+            .collect();
+        assert!(!guard_mutants.is_empty(), "{report}");
+        assert!(
+            guard_mutants
+                .iter()
+                .any(|mutant| mutant["status"] == "killed" && mutant["killed_by"].is_null()),
+            "{report}"
+        );
+        assert!(
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .all(|mutant| mutant["status"] != "runtime_error"),
+            "{report}"
+        );
+    }
 }
