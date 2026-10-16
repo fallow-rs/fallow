@@ -256,6 +256,19 @@ impl Edge {
                 .iter()
                 .any(|symbol| symbol.load_kind.runs_target_code())
     }
+
+    /// Whether a test that loads the target through this edge runs target
+    /// code. The build erases a type-only import before the test runs, so an
+    /// edge whose every symbol is type-only gives no test reach. Dead-code
+    /// reachability keeps [`Self::runs_target_code`].
+    #[must_use]
+    pub(crate) fn runs_target_code_in_tests(&self) -> bool {
+        self.symbols.is_empty()
+            || self
+                .symbols
+                .iter()
+                .any(|symbol| !symbol.is_type_only && symbol.load_kind.runs_target_code())
+    }
 }
 
 /// One package specifier that a module imports statically with a runtime value.

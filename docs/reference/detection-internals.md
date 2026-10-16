@@ -382,11 +382,24 @@ binding the file uses only in type positions (`desired_import_namespaces` in
 Coverage gaps, the static CRAP estimate, and the static test signal of
 runtime coverage read this predicate through `StaticTestCoverage`.
 
-File-level test reach (`is_test_reachable`) still follows type-only edges.
-A test with only an `import type` of a module makes that module
-test-reachable. The traversal keeps these edges because it has no notion of
-a file without runtime code. Without that notion, files that hold only
-types would become untested files.
+File-level test reach (`is_test_reachable`) does not follow an edge whose
+every symbol is type-only (`Edge::runs_target_code_in_tests`). The build
+erases `import type` before the test runs, so a test with only an
+`import type` of a module does not reach that module or its imports. The
+legacy pass, the profiled pass, and `test_entry_points_reaching` all use this
+predicate. Dead-code reachability keeps `Edge::runs_target_code`, so it still
+follows type-only edges.
+
+A plain `import` that the test uses only in type positions still gives file
+reach, because the edge symbol is not type-only. Only the export-level check
+above sees that case.
+
+Coverage gaps skip a module that declares only types
+(`declares_only_types` in `health/coverage_gaps.rs`): a declaration file, or
+a module with at least one export, only type-only exports and re-exports, and
+no function, CommonJS export, side-effect import, dynamic import, or
+`require()` call. Such a module is not a runtime file and is never an
+untested file. A module with no exports can run side effects, so it stays.
 
 ## Mock-aware test reachability
 

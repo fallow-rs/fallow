@@ -1,3 +1,5 @@
+import { format } from "./format";
+
 export function typed(): string {
-  return "typed";
+  return format("typed");
 }

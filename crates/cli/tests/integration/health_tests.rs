@@ -4645,8 +4645,31 @@ fn health_coverage_gaps_ignore_type_only_test_references() {
     );
 
     let json = parse_json(&output);
-    let coverage = &json["coverage_gaps"];
-    assert_eq!(coverage["summary"]["runtime_files"].as_u64(), Some(4));
+    assert_type_only_test_reach_gaps(&json["coverage_gaps"]);
+}
+
+/// The coverage gaps of the `type-only-test-reach` fixture.
+///
+/// `typed.ts` has only an `import type` from the test, so the test does not
+/// reach it and does not reach its value import `format.ts`. `shapes.ts`
+/// declares only types, so it is not a runtime file.
+fn assert_type_only_test_reach_gaps(coverage: &serde_json::Value) {
+    assert_eq!(coverage["summary"]["runtime_files"].as_u64(), Some(5));
+    assert_eq!(coverage["summary"]["covered_files"].as_u64(), Some(2));
+
+    let mut file_paths: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("coverage_gaps.files should be an array")
+        .iter()
+        .filter_map(|item| item["path"].as_str())
+        .map(|path| path.replace('\\', "/"))
+        .collect();
+    file_paths.sort_unstable();
+    assert_eq!(
+        file_paths,
+        ["src/entry.ts", "src/format.ts", "src/typed.ts"],
+        "an import type gives no file test reach, and a type-only file is never untested"
+    );
 
     let mut export_names: Vec<_> = coverage["exports"]
         .as_array()
@@ -4657,9 +4680,32 @@ fn health_coverage_gaps_ignore_type_only_test_references() {
     export_names.sort_unstable();
     assert_eq!(
         export_names,
-        ["renderEntry", "shaped", "typed"],
+        ["format", "renderEntry", "shaped", "typed"],
         "a test reference used only as a type does not cover the export"
     );
+}
+
+#[test]
+fn health_coverage_gaps_type_only_test_reach_is_stable_on_a_warm_cache() {
+    let dir = tempdir().expect("create temp dir");
+    copy_dir_recursive(&fixture_path("type-only-test-reach"), dir.path());
+    let args = ["--coverage-gaps", "--format", "json", "--quiet"];
+
+    let cold = run_fallow_in_root("health", dir.path(), &args);
+    let warm = run_fallow_in_root("health", dir.path(), &args);
+    assert!(
+        dir.path().join(".fallow").exists(),
+        "the cold run should write a cache"
+    );
+
+    for output in [&cold, &warm] {
+        assert_eq!(
+            output.code, 0,
+            "coverage gaps default to warn: {}",
+            output.stderr
+        );
+        assert_type_only_test_reach_gaps(&parse_json(output)["coverage_gaps"]);
+    }
 }
 
 #[test]
@@ -4697,15 +4743,21 @@ fn health_crap_estimation_ignores_type_only_test_references() {
     };
     let called = crap_for("src/called.ts", "called");
     let typed = crap_for("src/typed.ts", "typed");
+    let format = crap_for("src/format.ts", "format");
     let shaped = crap_for("src/shaped.ts", "shaped");
 
     assert_eq!(called["coverage_tier"], "high");
     assert_eq!(called["crap"].as_f64(), Some(1.0));
     assert_eq!(
-        typed["coverage_tier"], "partial",
-        "an import type must not give the direct test estimate: {typed:#?}"
+        typed["coverage_tier"], "none",
+        "an import type must not make the file test-reachable: {typed:#?}"
     );
-    assert_eq!(typed["crap"].as_f64(), Some(1.2));
+    assert_eq!(typed["crap"].as_f64(), Some(2.0));
+    assert_eq!(
+        format["coverage_tier"], "none",
+        "test reach must not pass on through an import type: {format:#?}"
+    );
+    assert_eq!(format["crap"].as_f64(), Some(2.0));
     assert_eq!(
         shaped["coverage_tier"], "partial",
         "a plain import used only as a type must not give the direct test estimate: {shaped:#?}"

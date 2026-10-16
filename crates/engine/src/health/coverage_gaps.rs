@@ -1,6 +1,7 @@
 use crate::{discover::FileId, source::ModuleInfo, suppress};
-use fallow_graph::graph::{ModuleGraph, ModuleNode};
+use fallow_graph::graph::{ModuleGraph, ModuleNode, is_declaration_file_path};
 use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
+use fallow_types::extract::ImportedName;
 
 use crate::module_graph::StaticTestCoverage;
 
@@ -45,6 +46,35 @@ fn module_is_coverage_suppressed(module: Option<&ModuleInfo>) -> bool {
             fallow_types::suppress::IssueKind::CoverageGaps,
         )
     })
+}
+
+/// Whether a module declares no runtime code, so no test can run it.
+///
+/// A declaration file qualifies. Other modules qualify when they export at
+/// least one name, every export and re-export is type-only, and they have no
+/// function, CommonJS export, side-effect import, dynamic import, or
+/// `require()` call. A module with no exports can run side effects, so it
+/// does not qualify.
+fn declares_only_types(node: &ModuleNode, module: &ModuleInfo) -> bool {
+    if is_declaration_file_path(&node.path) {
+        return true;
+    }
+    let exports_something = !node.exports.is_empty() || !node.re_exports.is_empty();
+    exports_something
+        && node.exports.iter().all(|export| export.is_type_only)
+        && node
+            .re_exports
+            .iter()
+            .all(|re_export| re_export.is_type_only)
+        && !module.has_cjs_exports
+        && module.complexity.is_empty()
+        && module.dynamic_imports.is_empty()
+        && module.dynamic_import_patterns.is_empty()
+        && module.require_calls.is_empty()
+        && module
+            .imports
+            .iter()
+            .all(|import| !matches!(import.imported_name, ImportedName::SideEffect))
 }
 
 /// Append untested value exports of one node (those with no test-reachable
@@ -126,6 +156,9 @@ fn scan_runtime_files(
 
         let module = module_by_id.get(&node.file_id).copied();
         if module_is_coverage_suppressed(module) {
+            continue;
+        }
+        if module.is_some_and(|module| declares_only_types(node, module)) {
             continue;
         }
 

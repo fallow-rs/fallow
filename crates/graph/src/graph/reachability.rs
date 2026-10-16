@@ -9,7 +9,7 @@ use crate::resolve::ResolvedReplacedModuleTarget;
 use fallow_types::discover::FileId;
 use fallow_types::extract::ModuleLoadMechanism;
 
-use super::{ModuleGraph, TestReachabilityIndex};
+use super::{Edge, ModuleGraph, TestReachabilityIndex};
 
 /// Upper bound on distinct replacement-mask profiles before profiled
 /// reachability falls back to the legacy coarse bitset pass.
@@ -270,7 +270,7 @@ impl ProfileWorklist {
             };
             for edge in &graph.edges[module.edge_range.clone()] {
                 let target_idx = edge.target.0 as usize;
-                if target_idx >= self.all_reachable.len() || !edge.runs_target_code() {
+                if target_idx >= self.all_reachable.len() || !edge.runs_target_code_in_tests() {
                     continue;
                 }
                 let Some(target_slot) = target_idx
@@ -326,6 +326,16 @@ impl ModuleGraph {
         entry_points: &FxHashSet<FileId>,
         total_capacity: usize,
     ) -> FixedBitSet {
+        self.collect_reachable_along(entry_points, total_capacity, Edge::runs_target_code)
+    }
+
+    /// BFS over the edges that `follows` accepts.
+    fn collect_reachable_along(
+        &self,
+        entry_points: &FxHashSet<FileId>,
+        total_capacity: usize,
+        follows: fn(&Edge) -> bool,
+    ) -> FixedBitSet {
         #[cfg(test)]
         tests::record_traversal();
 
@@ -348,7 +358,7 @@ impl ModuleGraph {
                 // An asset reference keeps its target in use through
                 // `has_reachable_importer`, but the target never runs, so its
                 // own imports stay out of reach.
-                if !edge.runs_target_code() {
+                if !follows(edge) {
                     continue;
                 }
                 let target_idx = edge.target.0 as usize;
@@ -381,7 +391,11 @@ impl ModuleGraph {
         match plan {
             TestReachabilityPlan::NoRoots => TestReachability::NoRoots,
             TestReachabilityPlan::Legacy { roots, capped } => TestReachability::Legacy {
-                reachable: self.collect_reachable(roots, total_capacity),
+                reachable: self.collect_reachable_along(
+                    roots,
+                    total_capacity,
+                    Edge::runs_target_code_in_tests,
+                ),
                 capped,
             },
             TestReachabilityPlan::Profiled { profiles } => {
@@ -1137,6 +1151,60 @@ mod tests {
                 !graph.is_any_test_reference_covered(export),
                 "masked: {masked}"
             );
+        }
+    }
+
+    /// File 0 is a test root and file 3 a runtime root. Both import file 1,
+    /// the test with `import type` when `type_only` is set. File 1 imports
+    /// file 2 by value. With `masked`, file 0 also mocks the unrelated file 4.
+    fn build_type_only_test_chain_graph(type_only: bool, masked: bool) -> ModuleGraph {
+        let edge = |source, target, is_type_only| ReachabilityEdge {
+            source,
+            target,
+            is_commonjs: false,
+            is_type_only,
+        };
+        let edges = [edge(0, 1, type_only), edge(1, 2, false), edge(3, 1, false)];
+        let replacements = if masked {
+            vec![ResolvedReplacedModuleTarget {
+                source_file: FileId(0),
+                target_file: FileId(4),
+            }]
+        } else {
+            Vec::new()
+        };
+        build_reachability_graph_with_edges(5, &edges, &[3], &[0], &replacements)
+    }
+
+    #[test]
+    fn type_only_test_import_gives_no_file_test_reach() {
+        for masked in [false, true] {
+            let graph = build_type_only_test_chain_graph(true, masked);
+            assert_eq!(graph.test_reachability_index.profile_count > 0, masked);
+            assert!(graph.modules[0].is_test_reachable(), "masked: {masked}");
+            assert!(!graph.modules[1].is_test_reachable(), "masked: {masked}");
+            assert!(!graph.modules[2].is_test_reachable(), "masked: {masked}");
+            assert!(
+                graph
+                    .test_entry_points_reaching(&[FileId(1), FileId(2)])
+                    .values()
+                    .all(Vec::is_empty),
+                "masked: {masked}"
+            );
+            // Dead-code reachability still follows the type-only edge.
+            assert!(graph.modules[1].is_reachable(), "masked: {masked}");
+            assert!(graph.modules[2].is_reachable(), "masked: {masked}");
+        }
+    }
+
+    #[test]
+    fn value_test_import_gives_file_test_reach() {
+        for masked in [false, true] {
+            let graph = build_type_only_test_chain_graph(false, masked);
+            assert!(graph.modules[1].is_test_reachable(), "masked: {masked}");
+            assert!(graph.modules[2].is_test_reachable(), "masked: {masked}");
+            let reaching = graph.test_entry_points_reaching(&[FileId(2)]);
+            assert_eq!(reaching[&FileId(2)], vec![FileId(0)], "masked: {masked}");
         }
     }
 

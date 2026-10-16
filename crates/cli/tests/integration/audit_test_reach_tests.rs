@@ -436,8 +436,8 @@ fn brief_classifies_the_mock_and_helper_shapes() {
     );
     assert_eq!(
         row(&reach, "src/typed.ts", "typed")["reach"],
-        "none",
-        "a type-only test import gives no reach: {reach}"
+        "none-file",
+        "a type-only test import gives no export reach and no file reach: {reach}"
     );
     assert_eq!(
         row(&reach, "src/i18n.ts", "initI18n")["reach"],
