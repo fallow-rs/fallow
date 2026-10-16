@@ -49,9 +49,11 @@ const CONTEXT_OVERSIZED_FILE_STATE: &str = "file_too_large";
 const CONTEXT_PARENT_UNAVAILABLE_STATE: &str = "parent_context_unavailable";
 const CONTEXT_CHANGED_DURING_READ_STATE: &str = "changed_during_read";
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-const UNIX_CONTEXT_OPEN_FLAGS: i32 = 0x0002_0800;
+// The flag values differ per architecture (aarch64 Linux uses 0x8000 for
+// O_NOFOLLOW, x86-64 uses 0x20000), so they must come from libc.
 #[cfg(any(
+    target_os = "linux",
+    target_os = "android",
     target_os = "macos",
     target_os = "ios",
     target_os = "freebsd",
@@ -59,7 +61,7 @@ const UNIX_CONTEXT_OPEN_FLAGS: i32 = 0x0002_0800;
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
-const UNIX_CONTEXT_OPEN_FLAGS: i32 = 0x0104;
+const UNIX_CONTEXT_OPEN_FLAGS: i32 = libc::O_NOFOLLOW | libc::O_NONBLOCK;
 
 #[cfg(windows)]
 const WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
