@@ -26,7 +26,7 @@ use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_
 use crate::mutation::companion::{COMPANION_FILES, install};
 use crate::mutation::discovery::discover_runtime;
 use crate::mutation::last_report::ignore_cache_dir;
-use crate::mutation::manifest::manifest;
+use crate::mutation::manifest::{RunnerRange, manifest};
 use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
 use crate::mutation::report::{
@@ -431,9 +431,34 @@ fn guard_worktree(allow_dirty: bool, start: Option<&WorktreeSnapshot>) -> Progra
     .with_help("commit or stash the changes, or pass --allow-dirty"))
 }
 
+/// The help of a runner version outside `range`. It names the supported
+/// range as an install step. When the minimum is not a `.0.0` release, it
+/// also says that a minor update inside the major version is enough.
+fn runner_version_help(range: &RunnerRange) -> String {
+    let RunnerRange {
+        package,
+        min_version,
+        max_version_exclusive,
+        ..
+    } = range;
+    let install =
+        format!("install {package} {min_version} or a later version below {max_version_exclusive}");
+    match min_version.split_once('.') {
+        Some((major, rest)) if rest != "0.0" => {
+            format!("{install}; a {package} {major}.x release from {min_version} is in the range")
+        }
+        _ => install,
+    }
+}
+
 /// Maps a schedule error to its public error. A setup watchdog fault names
-/// `--setup-timeout`, because a slow or busy host is the usual cause.
-fn schedule_error(error: &ScheduleError, setup_timeout: Duration) -> ProgrammaticError {
+/// `--setup-timeout`, because a slow or busy host is the usual cause. A
+/// runner version error names the supported range of `runner`.
+fn schedule_error(
+    error: &ScheduleError,
+    runner: &RunnerRange,
+    setup_timeout: Duration,
+) -> ProgrammaticError {
     let (code, stderr_tail) = match error {
         ScheduleError::Integrity(_) => ("FALLOW_MUTATION_COMPANION_INTEGRITY", None),
         ScheduleError::RunnerVersion(_) => ("FALLOW_MUTATION_RUNNER_UNSUPPORTED", None),
@@ -444,6 +469,9 @@ fn schedule_error(error: &ScheduleError, setup_timeout: Duration) -> Programmati
         ScheduleError::Baseline(_) => ("FALLOW_MUTATION_BASELINE_FAILED", None),
     };
     let mut help = Vec::new();
+    if matches!(error, ScheduleError::RunnerVersion(_)) {
+        help.push(runner_version_help(runner));
+    }
     if matches!(
         error,
         ScheduleError::Setup {
@@ -645,7 +673,7 @@ fn execute(
     };
     let setup_ms = millis(setup_started.elapsed());
     let mut outcome = run_schedule(&spawner, &schedule, &config)
-        .map_err(|error| schedule_error(&error, config.runner_timeout))?;
+        .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
         name: name.to_owned(),
         version: ready.runner_version.clone(),
@@ -835,6 +863,60 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
 mod tests {
     use super::*;
 
+    fn vitest_range() -> &'static RunnerRange {
+        manifest()
+            .expect("manifest")
+            .runner("vitest")
+            .expect("vitest range")
+    }
+
+    #[test]
+    fn a_runner_version_error_names_the_supported_range_as_the_install_step() {
+        let error = schedule_error(
+            &ScheduleError::RunnerVersion(
+                "vitest 4.0.18 is not supported; the supported range is >=4.1.0 <6.0.0".to_owned(),
+            ),
+            vitest_range(),
+            Duration::from_secs(120),
+        );
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_RUNNER_UNSUPPORTED")
+        );
+        assert_eq!(
+            error.help.as_deref(),
+            Some(
+                "install vitest 4.1.0 or a later version below 6.0.0; a vitest 4.x release from 4.1.0 is in the range"
+            )
+        );
+
+        let help: Vec<String> = manifest()
+            .expect("manifest")
+            .runners
+            .iter()
+            .map(runner_version_help)
+            .collect();
+        assert_eq!(
+            help,
+            [
+                "install vitest 4.1.0 or a later version below 6.0.0; a vitest 4.x release from 4.1.0 is in the range",
+                "install node 22.18.0 or a later version below 27.0.0; a node 22.x release from 22.18.0 is in the range",
+                "install bun 1.3.0 or a later version below 2.0.0; a bun 1.x release from 1.3.0 is in the range",
+            ]
+        );
+
+        let major_start = RunnerRange {
+            name: "vitest".to_owned(),
+            package: "vitest".to_owned(),
+            min_version: "5.0.0".to_owned(),
+            max_version_exclusive: "6.0.0".to_owned(),
+        };
+        assert_eq!(
+            runner_version_help(&major_start),
+            "install vitest 5.0.0 or a later version below 6.0.0"
+        );
+    }
+
     #[test]
     fn a_setup_watchdog_error_names_the_setup_timeout_flag() {
         let error = schedule_error(
@@ -843,6 +925,7 @@ mod tests {
                 stderr_tail: Some("vitest started\n".to_owned()),
                 timed_out: true,
             },
+            vitest_range(),
             Duration::from_secs(120),
         );
         let help = error.help.as_deref().unwrap_or_default();
@@ -856,6 +939,7 @@ mod tests {
                 stderr_tail: None,
                 timed_out: false,
             },
+            vitest_range(),
             Duration::from_secs(120),
         );
         assert_eq!(other.help, None);

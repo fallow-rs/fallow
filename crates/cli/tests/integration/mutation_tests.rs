@@ -612,6 +612,77 @@ fn typecheck_without_a_companion_exits_2_before_the_tests_run() {
     );
 }
 
+/// A git project with a test file and a `vitest` package of version
+/// 4.0.18. The companion reads the version before it loads Vitest, so the
+/// package needs no code.
+fn vitest_4_0_project() -> tempfile::TempDir {
+    let dir = untested_project();
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"mutation-fixture","private":true,"type":"module","devDependencies":{"vitest":"4.0.18"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("test/math.test.ts"),
+        "import { expect, test } from \"vitest\";\nimport { add } from \"../src/math\";\n\ntest(\"adds\", () => {\n  expect(add(2, 3)).toBe(5);\n});\n",
+    )
+    .expect("math.test.ts");
+    commit_all(root, "test");
+    fs::create_dir_all(root.join("node_modules/vitest")).expect("vitest");
+    fs::write(
+        root.join("node_modules/vitest/package.json"),
+        r#"{"name":"vitest","version":"4.0.18"}"#,
+    )
+    .expect("vitest package.json");
+    dir
+}
+
+/// A Vitest version outside the supported range exits 2 with
+/// `FALLOW_MUTATION_RUNNER_UNSUPPORTED`. The help names the supported range
+/// as the install step, in JSON and in the human `hint:` line.
+#[test]
+#[expect(
+    clippy::print_stderr,
+    reason = "a skipped test says why it did not run"
+)]
+fn an_unsupported_vitest_version_gives_the_supported_range_as_help() {
+    let has_node = std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !has_node {
+        eprintln!("skipped: the runner version test needs `node` on PATH");
+        return;
+    }
+    const HELP: &str = "install vitest 4.1.0 or a later version below 6.0.0; a vitest 4.x release from 4.1.0 is in the range";
+    let project = vitest_4_0_project();
+
+    let (output, value) = json_mutation(project.path(), &["--all"]);
+    assert_eq!(output.code, 2, "{}", output.stdout);
+    assert_eq!(
+        value["code"], "FALLOW_MUTATION_RUNNER_UNSUPPORTED",
+        "{value}"
+    );
+    assert!(
+        value["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("vitest 4.0.18"),
+        "{value}"
+    );
+    assert_eq!(value["help"], HELP, "{value}");
+
+    let human = mutation(project.path(), &["--all", "--quiet"]);
+    assert_eq!(human.code, 2, "{}", human.stderr);
+    assert!(
+        human.stderr.contains(&format!("\n  hint: {HELP}")),
+        "{}",
+        human.stderr
+    );
+}
+
 #[test]
 fn mutation_rejects_unsupported_formats_and_scope_conflicts() {
     let project = untested_project();

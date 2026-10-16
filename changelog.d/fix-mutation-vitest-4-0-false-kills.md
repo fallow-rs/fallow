@@ -6,5 +6,6 @@
   also for mutants that no test detects. The supported Vitest range is now
   `>=4.1.0 <6.0.0`. On Vitest 4.0 the run exits with code 2 and
   `FALLOW_MUTATION_RUNNER_UNSUPPORTED`. The message names the installed
-  version and the supported range. A runner version error of the companion
+  version and the supported range. The help tells you to install a version
+  in that range, and says that Vitest 4.1 is a minor update. A runner version error of the companion
   now also gives this code instead of `FALLOW_MUTATION_RUNNER_FAILED`.

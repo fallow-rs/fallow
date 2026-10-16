@@ -358,7 +358,14 @@ selects one. The default `auto` reads the project in this order:
 
 The companion refuses a runner version outside this range. The run exits
 with code 2 and `FALLOW_MUTATION_RUNNER_UNSUPPORTED`. The message names the
-installed version and the supported range.
+installed version and the supported range. The help gives the install step
+for the range. When the minimum version is not a `.0.0` release, the help
+also says that a release of that major version is enough. For Vitest, the
+help is:
+
+```text
+install vitest 4.1.0 or a later version below 6.0.0; a vitest 4.x release from 4.1.0 is in the range
+```
 
 Vitest 4.0 is not supported. It reads the test-id filter of a test
 specification as a list of test lines. Each mutant run then fails with an
