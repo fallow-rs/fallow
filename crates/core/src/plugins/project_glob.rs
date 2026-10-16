@@ -1,30 +1,33 @@
 //! Expansion of a glob from a plugin config, such as a `test.projects`
 //! entry, against the file system.
 //!
-//! The walk does not follow symlinks and does not enter `node_modules` or
-//! `.git`. A pnpm workspace links each dependency, and each workspace
-//! package, into `node_modules`, so a walk that follows these links reads
-//! the dependency store once for each workspace, and a workspace cycle has
-//! no end.
+//! The walk does not enter `node_modules`, `.git`, or a gitignored path.
+//! A pnpm workspace links each dependency, and each workspace package, into
+//! `node_modules`, so a walk that follows these links reads the dependency
+//! store once for each workspace, and a workspace cycle has no end. Source
+//! discovery does not analyze a gitignored file, so the walk skips the same
+//! paths, for example a local build output. The walk follows a directory
+//! symlink outside `node_modules`, and it stops at a symlink loop.
 
 use std::path::{Path, PathBuf};
 
 use globset::GlobBuilder;
-use ignore::WalkBuilder;
 
 /// Directory names that the walk never enters.
 const PRUNED_DIRS: &[&str] = &["node_modules", ".git"];
 
-/// The maximum number of directory entries that one expansion reads.
-const MAX_VISITED_ENTRIES: usize = 50_000;
+/// The maximum number of directories that one expansion reads.
+const MAX_VISITED_DIRS: usize = 50_000;
 
 /// The result of one glob expansion.
 #[derive(Debug, Default)]
 pub struct GlobExpansion {
     /// The files and directories that match, in path order.
     pub paths: Vec<PathBuf>,
-    /// The number of directory entries that the walk read.
+    /// The number of directories that the walk read.
     pub visited: usize,
+    /// Whether the walk stopped at the directory limit before its end.
+    pub truncated: bool,
 }
 
 /// Expand `pattern`, relative to `base`, against the file system.
@@ -36,7 +39,25 @@ pub struct GlobExpansion {
 /// A pattern without `**` limits the walk depth to its segment count.
 #[must_use]
 pub fn expand(base: &Path, pattern: &str) -> GlobExpansion {
-    expand_with_limit(base, pattern, MAX_VISITED_ENTRIES)
+    let expansion = expand_with_limit(base, pattern, MAX_VISITED_DIRS);
+    if expansion.truncated {
+        tracing::warn!(
+            "the glob '{pattern}' in {} reads more than {MAX_VISITED_DIRS} directories; \
+             the walk stopped and later matches are not used",
+            base.display()
+        );
+    }
+    expansion
+}
+
+/// Whether `path` has a `node_modules` component below `root`. A test
+/// project inside a dependency is not a project of the analyzed repository.
+#[must_use]
+pub fn is_in_node_modules(path: &Path, root: &Path) -> bool {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .any(|component| component.as_os_str() == "node_modules")
 }
 
 fn expand_with_limit(base: &Path, pattern: &str, max_visited: usize) -> GlobExpansion {
@@ -81,10 +102,9 @@ fn expand_with_limit(base: &Path, pattern: &str, max_visited: usize) -> GlobExpa
     let matcher = glob.compile_matcher();
     let max_depth = (!rest.contains(&"**")).then_some(rest.len());
 
-    let mut builder = WalkBuilder::new(&walk_root);
+    let mut builder = fallow_config::source_walk_builder(&walk_root);
     builder
-        .standard_filters(false)
-        .follow_links(false)
+        .follow_links(true)
         .max_depth(max_depth)
         .sort_by_file_name(std::cmp::Ord::cmp)
         .filter_entry(|entry| {
@@ -98,9 +118,12 @@ fn expand_with_limit(base: &Path, pattern: &str, max_visited: usize) -> GlobExpa
         if entry.depth() == 0 {
             continue;
         }
-        expansion.visited += 1;
-        if expansion.visited > max_visited {
-            break;
+        if entry.file_type().is_some_and(|kind| kind.is_dir()) {
+            expansion.visited += 1;
+            if expansion.visited > max_visited {
+                expansion.truncated = true;
+                break;
+            }
         }
         let Ok(relative) = entry.path().strip_prefix(&walk_root) else {
             continue;
@@ -208,38 +231,84 @@ mod tests {
         }
         let expansion = expand(root, "apps/**/vitest.config.ts");
         assert_eq!(relative(root, &expansion), vec!["apps/a/vitest.config.ts"]);
-        // Only `apps/a` and its config: the walk reads nothing in the two
-        // pruned directories.
-        assert_eq!(expansion.visited, 2);
+        // Only `apps/a`: the walk reads nothing in the two pruned directories.
+        assert_eq!(expansion.visited, 1);
+    }
+
+    /// A local build output is gitignored and can hold many thousands of
+    /// files. The walk must not read it, so a project after it still matches.
+    #[test]
+    fn walk_does_not_enter_gitignored_directories() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        std::fs::create_dir(root.join(".git")).expect("create git dir");
+        std::fs::write(root.join(".gitignore"), ".next/\n").expect("write gitignore");
+        for index in 0..20 {
+            touch(
+                root,
+                &format!("apps/a/.next/cache/{index}/vitest.e2e.config.ts"),
+            );
+        }
+        touch(root, "apps/b/vitest.e2e.config.ts");
+        let expansion = expand_with_limit(root, "apps/**/vitest.e2e.config.ts", 3);
+        assert!(!expansion.truncated);
+        assert_eq!(
+            relative(root, &expansion),
+            vec!["apps/b/vitest.e2e.config.ts"]
+        );
     }
 
     #[cfg(unix)]
     #[test]
-    fn walk_does_not_follow_directory_symlinks() {
+    fn walk_follows_directory_symlinks_and_stops_at_a_loop() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path();
-        touch(root, "store/dep/lib/vitest.config.ts");
-        touch(root, "apps/a/vitest.config.ts");
-        std::os::unix::fs::symlink("../../store", root.join("apps/a/linked"))
-            .expect("create symlink");
+        touch(root, "real/b/vitest.e2e.config.ts");
+        touch(root, "apps/a/vitest.e2e.config.ts");
+        std::os::unix::fs::symlink("../real/b", root.join("apps/b")).expect("create symlink");
         std::os::unix::fs::symlink("..", root.join("apps/a/cycle")).expect("create symlink");
-        let expansion = expand(root, "apps/**/vitest.config.ts");
-        assert_eq!(relative(root, &expansion), vec!["apps/a/vitest.config.ts"]);
-        assert_eq!(expansion.visited, 4);
+        let expected = vec!["apps/a/vitest.e2e.config.ts", "apps/b/vitest.e2e.config.ts"];
+        assert_eq!(
+            relative(root, &expand(root, "apps/*/vitest.e2e.config.ts")),
+            expected
+        );
+        assert_eq!(
+            relative(root, &expand(root, "apps/**/vitest.e2e.config.ts")),
+            expected
+        );
     }
 
     #[test]
-    fn walk_stops_at_the_visit_limit() {
+    fn walk_stops_at_the_directory_limit() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path();
         for index in 0..10 {
             touch(root, &format!("apps/a{index}/vitest.config.ts"));
         }
         let expansion = expand_with_limit(root, "apps/**/vitest.config.ts", 4);
+        assert!(expansion.truncated);
         assert_eq!(expansion.visited, 5);
         assert_eq!(
             relative(root, &expansion),
-            vec!["apps/a0/vitest.config.ts", "apps/a1/vitest.config.ts"]
+            vec![
+                "apps/a0/vitest.config.ts",
+                "apps/a1/vitest.config.ts",
+                "apps/a2/vitest.config.ts",
+                "apps/a3/vitest.config.ts",
+            ]
         );
+    }
+
+    #[test]
+    fn node_modules_component_is_checked_below_the_root() {
+        let root = Path::new("/work/node_modules/app");
+        assert!(!is_in_node_modules(
+            &root.join("apps/a/vitest.config.ts"),
+            root
+        ));
+        assert!(is_in_node_modules(
+            &root.join("node_modules/pkg/vitest.config.ts"),
+            root
+        ));
     }
 }

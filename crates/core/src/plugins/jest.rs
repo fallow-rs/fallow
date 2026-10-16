@@ -485,8 +485,8 @@ fn credit_inline_project_plugin_fields(
 /// still terminates promptly), and `MAX_EXPANDED_PROJECTS` limits the
 /// number of accepted child configs.
 ///
-/// The glob walk does not follow symlinks and does not enter `node_modules`
-/// or `.git`. The config comes from the analyzed repository, so a match outside
+/// The glob walk does not enter `node_modules`, `.git`, or a gitignored
+/// path. The config comes from the analyzed repository, so a match outside
 /// `project_root` is not read. The check also stops absolute entries,
 /// `..` segments, and symlinks that point out of the project.
 fn expand_project_entry(

@@ -424,8 +424,8 @@ impl ResolveContext<'_> {
 }
 
 /// The files and directories that one `projects` path names. A plain path
-/// gives itself. A glob gives its matches. The glob walk does not follow
-/// symlinks and does not enter `node_modules` or `.git`. A path or a
+/// gives itself. A glob gives its matches, without `node_modules`. The glob
+/// walk does not enter `node_modules`, `.git`, or a gitignored path. A path or a
 /// glob base outside `root` gives nothing, so a pattern such as `../**` never
 /// walks the file system above the project.
 fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
@@ -443,7 +443,10 @@ fn matching_paths(dir: &Path, pattern: &str, root: &Path) -> Vec<PathBuf> {
     super::project_glob::expand(dir, pattern)
         .paths
         .into_iter()
-        .filter(|path| config_parser::is_inside_root(path, root))
+        .filter(|path| {
+            config_parser::is_inside_root(path, root)
+                && !super::project_glob::is_in_node_modules(path, root)
+        })
         .collect()
 }
 
@@ -715,5 +718,14 @@ mod tests {
             .expect("create symlink");
         assert!(matching_paths(&root, "packages/*", &root).is_empty());
         assert!(matching_paths(&root, "packages/link", &root).is_empty());
+    }
+
+    #[test]
+    fn project_glob_with_a_node_modules_base_matches_nothing() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().join("app");
+        std::fs::create_dir_all(root.join("node_modules/pkg/a")).expect("create dir");
+        assert!(matching_paths(&root, "node_modules/pkg/*", &root).is_empty());
+        assert!(matching_paths(&root.join("node_modules/pkg"), "*", &root).is_empty());
     }
 }

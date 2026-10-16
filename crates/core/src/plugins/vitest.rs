@@ -840,13 +840,14 @@ fn add_vitest_project_config_files(
 }
 
 /// The files that one `test.projects` string entry names. A plain path gives
-/// itself. A glob gives the files that match it. The glob walk does not follow
-/// symlinks and does not enter `node_modules` or `.git`. A
+/// itself. A glob gives the files that match it, without `node_modules`. The
+/// glob walk does not enter `node_modules`, `.git`, or a gitignored path. A
 /// path outside `project_root` gives nothing, because the config comes from
 /// the analyzed repository.
 fn project_config_paths(entry: &str, config_dir: &Path, project_root: &Path) -> Vec<PathBuf> {
-    // A glob that starts with `**` walks the whole source tree on each run. Vitest configs name project directories, so
-    // such an entry is not followed.
+    // A glob that starts with `**` walks the whole source tree on each run.
+    // Vitest configs name project directories, so such an entry is not
+    // followed.
     let relative = entry.strip_prefix("./").unwrap_or(entry);
     if entry.contains('{') || relative.starts_with("**") {
         return Vec::new();
@@ -865,7 +866,11 @@ fn project_config_paths(entry: &str, config_dir: &Path, project_root: &Path) -> 
     super::project_glob::expand(config_dir, relative)
         .paths
         .into_iter()
-        .filter(|path| path.is_file() && config_parser::is_inside_root(path, project_root))
+        .filter(|path| {
+            path.is_file()
+                && config_parser::is_inside_root(path, project_root)
+                && !super::project_glob::is_in_node_modules(path, project_root)
+        })
         .map(|path| config_parser::lexical_normalize(&path))
         .take(MAX_PROJECT_GLOB_CONFIGS)
         .collect()
@@ -1589,6 +1594,22 @@ mod tests {
                 root.join("apps/a/vitest.e2e.config.ts"),
                 root.join("apps/b/vitest.e2e.config.ts"),
             ]
+        );
+    }
+
+    /// A project glob whose literal base is inside `node_modules` names a
+    /// dependency, not a project of the analyzed repository.
+    #[test]
+    fn project_glob_with_a_node_modules_base_gives_nothing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let config = root.join("node_modules/pkg/a/vitest.config.ts");
+        std::fs::create_dir_all(config.parent().expect("parent")).expect("create dir");
+        std::fs::write(&config, "").expect("write config");
+        assert!(project_config_paths("node_modules/pkg/*/vitest.config.ts", root, root).is_empty());
+        assert!(
+            project_config_paths("*/vitest.config.ts", &root.join("node_modules/pkg"), root)
+                .is_empty()
         );
     }
 
