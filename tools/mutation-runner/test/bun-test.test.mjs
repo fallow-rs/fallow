@@ -2,10 +2,15 @@ import { spawnSync } from "node:child_process";
 
 import { childRunnerSuite } from "./support/child-runner-suite.mjs";
 
-// The suite needs `bun` on PATH. Without it the suite is skipped.
+// The suite needs `bun` on PATH. Without it the suite is skipped, unless
+// `FALLOW_REQUIRE_BUN=1` is set. A CI job that installs Bun sets it, so that
+// a failed install fails the job and does not skip the suite.
 const bun = spawnSync("bun", ["--version"], { encoding: "utf8" });
 const bunVersion = bun.status === 0 ? bun.stdout.trim() : null;
 if (bunVersion === null) {
+  if (process.env.FALLOW_REQUIRE_BUN === "1") {
+    throw new Error("FALLOW_REQUIRE_BUN=1 is set, but bun is not on PATH");
+  }
   process.stderr.write("bun is not on PATH; the bun-test adapter suite is skipped\n");
 }
 

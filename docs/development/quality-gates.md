@@ -103,6 +103,12 @@ node --test tools/mutation-runner/test/*.test.mjs
 The `fallow-api` end-to-end mutation test also uses this install. Without it,
 the test prints a skip message and passes.
 
+The bun-test suite needs `bun` on PATH. Without it, the suite prints a skip
+message. Set `FALLOW_REQUIRE_BUN=1` to make the suite fail instead. The CI job
+`mutation-runner-floor` sets it. That job reads the lowest Node.js and Bun
+versions from `crates/api/mutation-runner-protocol.json`, installs those exact
+versions, and runs the companion tests.
+
 The coverage producer corpus pins four JavaScript coverage producers in a
 package of its own, so the root `npm ci` every contributor and every CI job
 runs stays untouched:

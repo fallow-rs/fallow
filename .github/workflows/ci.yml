@@ -55,6 +55,7 @@ jobs:
       skills: ${{ steps.filter.outputs.skills }}
       action-current: ${{ steps.filter.outputs.action-current }}
       viz: ${{ steps.filter.outputs.viz }}
+      mutation-runner: ${{ steps.filter.outputs.mutation-runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -322,6 +323,13 @@ jobs:
             viz:
               - 'viz-frontend/**'
               - 'crates/cli/viz-assets/**'
+            # `mutation-runner` gates the companion tests at the declared
+            # runtime floors. The floors live in the protocol file.
+            mutation-runner:
+              - 'tools/mutation-runner/**'
+              - 'crates/api/mutation-runner-protocol.json'
+              - '.github/workflows/ci.yml'
+              - 'scripts/workflow-policy.test.mjs'
 
   docker:
     name: Docker
@@ -889,6 +897,52 @@ jobs:
         run: node scripts/check-audit-schema-doc-sync.mjs
       - name: Agent adapter drift
         run: npm run check:agent-adapters
+
+  # The JS Lint job runs the companion tests on the current Node.js 22 and
+  # without Bun. This job runs them on the lowest Node.js and Bun versions
+  # that crates/api/mutation-runner-protocol.json declares, so that a range
+  # floor that no longer works fails here.
+  mutation-runner-floor:
+    name: Mutation runner floor versions
+    needs: changes
+    if: needs.changes.outputs.mutation-runner == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the runtime floors
+        id: floor
+        run: |
+          protocol=crates/api/mutation-runner-protocol.json
+          floor() { jq -er --arg name "$1" '.runners[] | select(.name == $name) | .min_version' "$protocol"; }
+          node=$(floor node-test)
+          bun=$(floor bun-test)
+          echo "node=$node" >> "$GITHUB_OUTPUT"
+          echo "bun=$bun" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.floor.outputs.node }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ steps.floor.outputs.bun }}
+          no-cache: true
+      - name: Check the runtime versions
+        env:
+          NODE_FLOOR: ${{ steps.floor.outputs.node }}
+          BUN_FLOOR: ${{ steps.floor.outputs.bun }}
+        run: |
+          test "$(node --version)" = "v$NODE_FLOOR"
+          test "$(bun --version)" = "$BUN_FLOOR"
+      - name: Install mutation runner dependencies
+        run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
+      - name: Mutation runner tests
+        env:
+          FALLOW_REQUIRE_BUN: '1'
+        run: node --test tools/mutation-runner/test/*.test.mjs
 
   npm-package:
     name: npm Package
@@ -1608,7 +1662,7 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, docker, check, check-lint, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend]
+    needs: [changes, docker, check, check-lint, drift, windows-rust, windows-drift, windows-type-aware, doc, typos, js-lint, npm-package, action-current, fallow-self-analyze, vscode, vscode-package-targets, vscode-target-host, zed, test-gitlab-ci, audit, deny, shear, zizmor, msrv, miri, skills-vendor, viz-frontend, mutation-runner-floor]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}

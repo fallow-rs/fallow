@@ -1098,6 +1098,31 @@ test("the release checks the release commit subject that concurrency exempts", (
   );
 });
 
+test("CI runs the mutation runner tests at the declared runtime floors", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const job = indentedBlock(workflow, "mutation-runner-floor", 2);
+  const protocol = JSON.parse(readFileSync("crates/api/mutation-runner-protocol.json", "utf8"));
+  const runners = new Set(protocol.runners.map((runner) => runner.name));
+
+  // The job reads each floor from the protocol, so a floor change needs no
+  // workflow change.
+  for (const runner of ["node-test", "bun-test"]) {
+    assert.ok(runners.has(runner), `the protocol must declare ${runner}`);
+    assert.match(job, new RegExp(`floor ${runner}\\)`, "u"));
+  }
+  assert.match(job, /node-version: \$\{\{ steps\.floor\.outputs\.node \}\}/u);
+  assert.match(job, /bun-version: \$\{\{ steps\.floor\.outputs\.bun \}\}/u);
+  assert.match(job, /test "\$\(node --version\)" = "v\$NODE_FLOOR"/u);
+  assert.match(job, /test "\$\(bun --version\)" = "\$BUN_FLOOR"/u);
+  // Without Bun the bun-test suite skips. The job must fail instead.
+  assert.match(
+    job,
+    /FALLOW_REQUIRE_BUN: '1'\n\s+run: node --test tools\/mutation-runner\/test\/\*\.test\.mjs/u,
+  );
+  assert.match(job, /persist-credentials: false/u);
+  assert.match(indentedBlock(workflow, "ci-ok", 2), /mutation-runner-floor/u);
+});
+
 test("mise.toml follows the tool versions that CI pins", () => {
   const mise = readFileSync("mise.toml", "utf8");
   const workflowDir = ".github/workflows";
@@ -1109,8 +1134,10 @@ test("mise.toml follows the tool versions that CI pins", () => {
 
   const nodeVersion = miseVersion("node");
   assert.ok(nodeVersion, "mise.toml must pin node");
+  // A version from an expression comes from another source of truth, such as
+  // the runtime floors of the mutation runner protocol.
   const ciNodeVersions = Array.from(
-    readWorkflow(join(workflowDir, "ci.yml")).matchAll(/node-version: ['"]?([^'"\s]+)/gu),
+    readWorkflow(join(workflowDir, "ci.yml")).matchAll(/node-version: ['"]?(?!\$\{\{)([^'"\s]+)/gu),
     (match) => match[1],
   );
   assert.ok(ciNodeVersions.length > 0, "ci.yml must set up node");
