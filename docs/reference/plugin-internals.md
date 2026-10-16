@@ -356,8 +356,8 @@ the script `--config` files use two checks from `config_parser`:
   to a directory above the project do not pass. A path that does not exist
   does not pass.
 
-The boundary is the project root, not the `root` argument of
-`resolve_config`. In a workspace run, that argument is the workspace package
+For Jest and Vitest, the boundary is the project root, not the `root`
+argument of `resolve_config`. In a workspace run, that argument is the workspace package
 directory, and a package config can name a sibling package. The registry
 calls `Plugin::resolve_config_in_project` with both roots. A plugin that reads
 config paths overrides it. The default calls `resolve_config`. The Jest and
