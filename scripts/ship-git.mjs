@@ -469,6 +469,9 @@ export const checkRebase = (cwd, log, options, rebased, { ignored, checks, passe
  *
  * - `resolveConflicts(worktree)` returns the resolver for the stops of the
  *   rebase (see `rebaseOnto`).
+ * - `afterRebase(worktree, refs)` runs after a complete rebase
+ *   and before the checks. It can add commits on top of the rebased branch.
+ *   `refs` holds `{ oldBase, oldTip, baseTip, hooks }`.
  * - `check(worktree, rebased)` runs the checks of the result and returns
  *   the exit code, for example with `checkRebase`. `rebased` holds
  *   `{ branch, oldBase, oldTip, baseTip, newTip, worktree }`.
@@ -478,7 +481,7 @@ export const checkRebase = (cwd, log, options, rebased, { ignored, checks, passe
  * worktree and print its path and the next commands. Returns the exit
  * code, or throws for a failed command.
  */
-export const shipBranch = (cwd, log, options, { resolveConflicts, check }) => {
+export const shipBranch = (cwd, log, options, { resolveConflicts, afterRebase, check }) => {
   const { branch, remote } = branchHead(cwd, options);
   const refs = fetchBranch(cwd, { ...options, headRemote: remote, branch });
   const hooks = hookConfig(cwd);
@@ -492,6 +495,7 @@ export const shipBranch = (cwd, log, options, { resolveConflicts, check }) => {
       log(keptWorktreeReport(target, { push: true }));
       return 1;
     }
+    afterRebase(worktree, { ...refs, hooks });
     const newTip = logRebased(worktree, log, { ...options, ...rebase, ...refs, branch });
     const rebased = { ...refs, branch, remote, newTip, worktree };
     const code = check(worktree, rebased);

@@ -29,6 +29,10 @@ fails a pull request that changes it.
 ## Check and release
 
 - `node scripts/changelog-fragments.mjs check` validates every fragment.
+- `node scripts/changelog-fragments.mjs migrate --base origin/main` moves the
+  entries that an older branch added to `[Unreleased]` into a fragment. It
+  stops on an entry of `main` that the branch changed, because that needs a
+  person.
 - `node scripts/changelog-fragments.mjs collect --dry-run` prints the
   `[Unreleased]` section that the fragments make.
 - The release runs `node scripts/changelog-fragments.mjs collect`. The command

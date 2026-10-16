@@ -6,7 +6,7 @@
 // into the [Unreleased] section of CHANGELOG.md.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs as parseOptions } from "node:util";
@@ -39,7 +39,12 @@ Commands:
                         leaves ${CHANGELOG} alone.
   collect [--dry-run]   Move every fragment into the [Unreleased] section of
                         ${CHANGELOG} and delete the fragment files. --dry-run
-                        prints the section and changes nothing.`;
+                        prints the section and changes nothing.
+  migrate --base <ref> [--name <name>]
+                        Move the entries that this branch added to the
+                        [Unreleased] section into ${FRAGMENT_DIR}/<name>.md and
+                        restore the section as it is at the fork point.
+                        <name> defaults to the branch name.`;
 
 const HEADING = /^### (?<name>.+?)\s*$/u;
 const FENCE = /^\s*(```|~~~)/u;
@@ -240,9 +245,102 @@ const collect = (root, dryRun, log) => {
   return 0;
 };
 
+const ENTRY_START = /^[-*] /u;
+
+/** The top-level list entries of a section body, each with its nested lines. */
+export const sectionEntries = (body) =>
+  body
+    .split("\n")
+    .reduce((entries, line) => {
+      if (ENTRY_START.test(line) || entries.length === 0) {
+        entries.push([line]);
+      } else {
+        entries.at(-1).push(line);
+      }
+      return entries;
+    }, [])
+    .map((lines) => lines.join("\n").trim())
+    .filter((entry) => entry !== "");
+
+const entriesOf = (body) =>
+  splitSections(body).sections.flatMap(({ name, body: text }) =>
+    sectionEntries(text).map((entry) => ({ name, entry })),
+  );
+
+/**
+ * The entries of `after` that `before` does not have, and the entries of
+ * `before` that `after` does not have. A reworded entry is in both lists.
+ */
+export const unreleasedDiff = (before, after) => {
+  const old = entriesOf(before).map(({ entry }) => entry);
+  const current = entriesOf(after);
+  const kept = new Set(current.map(({ entry }) => entry));
+  return {
+    added: current.filter(({ entry }) => !old.includes(entry)),
+    removed: old.filter((entry) => !kept.has(entry)),
+  };
+};
+
+const FRAGMENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+
+const fragmentName = (root, name) => {
+  const chosen =
+    name ?? git(root, ["rev-parse", "--abbrev-ref", "HEAD"]).trim().replaceAll("/", "-");
+  if (!FRAGMENT_NAME.test(chosen)) {
+    throw new Error(`"${chosen}" is not a valid fragment name; pass --name <name>`);
+  }
+  return chosen;
+};
+
+/**
+ * Move the entries that a branch from before changelog.d/ added to
+ * `[Unreleased]` into a fragment. An entry of the base branch that the branch
+ * changed or removed needs a person, so the command stops on it.
+ */
+const migrateForkPoint = (root, base) => {
+  if (base === undefined) {
+    throw new Error(`migrate needs --base <ref>\n\n${USAGE}`);
+  }
+  return git(root, ["merge-base", "HEAD", base]).trim();
+};
+
+const migrate = (root, options, log) => {
+  const forkPoint = migrateForkPoint(root, options.base);
+  const original = unreleasedSection(git(root, ["show", `${forkPoint}:${CHANGELOG}`])).body;
+  const path = join(root, CHANGELOG);
+  const changelog = readFileSync(path, "utf8");
+  const { start, end, body } = unreleasedSection(changelog);
+  const { added, removed } = unreleasedDiff(original, body);
+  assertNoProblems(
+    removed.map(
+      (entry) =>
+        `${CHANGELOG}: this branch changes or removes an entry of ${options.base}. Move it by hand: ${entry.split("\n")[0]}`,
+    ),
+  );
+  if (added.length === 0) {
+    log(`${CHANGELOG}: this branch adds no entry to the [Unreleased] section.`);
+    return 0;
+  }
+  const relative = `${FRAGMENT_DIR}/${fragmentName(root, options.name)}.md`;
+  const text = mergeUnreleased(
+    "",
+    added.map(({ name, entry }) => `### ${name}\n\n${entry}\n`),
+  );
+  assertNoProblems([
+    ...fragmentProblems(relative, text),
+    ...(existsSync(join(root, relative)) ? [`${relative} already exists`] : []),
+  ]);
+  mkdirSync(join(root, FRAGMENT_DIR), { recursive: true });
+  writeFileSync(join(root, relative), text);
+  writeFileSync(path, `${changelog.slice(0, start)}${original}${changelog.slice(end)}`);
+  log(`Moved ${added.length} entr${added.length === 1 ? "y" : "ies"} to ${relative}.`);
+  return 0;
+};
+
 const COMMAND_OPTIONS = {
   check: { base: { type: "string" } },
   collect: { "dry-run": { type: "boolean" } },
+  migrate: { base: { type: "string" }, name: { type: "string" } },
 };
 
 export const parseArgs = ([command, ...args]) => {
@@ -250,7 +348,7 @@ export const parseArgs = ([command, ...args]) => {
     throw new Error(USAGE);
   }
   const { values } = parseOptions({ args, options: COMMAND_OPTIONS[command], strict: true });
-  return { command, base: values.base, dryRun: values["dry-run"] === true };
+  return { command, base: values.base, name: values.name, dryRun: values["dry-run"] === true };
 };
 
 /** Run one command against the repository at `root`. Return the exit code. */
@@ -262,6 +360,9 @@ export const changelogFragments = (
   const options = parseArgs(argv);
   if (options.command === "collect") {
     return collect(root, options.dryRun, log);
+  }
+  if (options.command === "migrate") {
+    return migrate(root, options, log);
   }
   assertNoProblems([
     ...checkFragments(root),

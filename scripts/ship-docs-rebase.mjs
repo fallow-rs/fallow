@@ -108,6 +108,7 @@ const shipDocsRebase = (cwd, options, log = console.log) => {
   // gets into the manifest of the pushed commits.
   return shipBranch(cwd, log, options, {
     resolveConflicts: regenerateManifest,
+    afterRebase: () => {},
     // The generator check covers the manifest, so the tree check leaves it out.
     check: (worktree, rebased) =>
       checkRebase(worktree, log, options, rebased, {

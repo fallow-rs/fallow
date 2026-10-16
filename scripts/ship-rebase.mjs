@@ -11,10 +11,12 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runCliMain } from "./cli-main.mjs";
+import { contractSurfacePaths } from "./contract-surfaces.mjs";
 import {
   checkRebase,
   git,
   leasePushArgs,
+  run,
   shipBranch,
   shipMain,
   worktreeCommand,
@@ -24,8 +26,14 @@ const CHANGELOG = "CHANGELOG.md";
 
 const USAGE = `Usage: node scripts/ship-rebase.mjs (--pr <number> | --branch <name>) [options]
 
-Rebase a pull request branch on the base branch. Resolve CHANGELOG.md
-conflicts by keeping both sides. Stop on any other conflict.
+Rebase a pull request branch on the base branch. Resolve the conflicts
+that have one mechanical answer, and stop on any other conflict:
+  - CHANGELOG.md: keep both sides.
+  - A cache version constant (*CACHE_VERSION): take the base value. After
+    the rebase, a new commit sets each cache bump of the branch that the
+    rebase lost to the base value + 1.
+  - A generated contract file: take the base side. The script then stops
+    before the push and prints the regeneration steps.
 
 Options:
   --pr <number>     Read the head branch of this pull request with gh.
@@ -121,11 +129,7 @@ export const keepBothSides = (text) => {
   return { text: output.join(""), conflicts };
 };
 
-const resolveChangelogOnly = (cwd) => (paths) => {
-  const others = paths.filter((path) => path !== CHANGELOG);
-  if (others.length > 0) {
-    return { ok: false, reason: `Conflicts outside ${CHANGELOG}: ${others.join(", ")}` };
-  }
+const resolveChangelog = (cwd) => {
   const file = join(cwd, CHANGELOG);
   if (!existsSync(file)) {
     return { ok: false, reason: `${CHANGELOG} was deleted on one side.` };
@@ -142,6 +146,93 @@ const resolveChangelogOnly = (cwd) => (paths) => {
   }
   writeFileSync(file, text);
   git(cwd, ["add", "--", CHANGELOG]);
+  return { ok: true };
+};
+
+/** Generated contract files. A rebase takes the base side; a regeneration fixes them. */
+const GENERATED = new Set(contractSurfacePaths());
+
+const CACHE_DECL =
+  /^(?<head>\s*(?:pub(?:\([^)]*\))?\s+)?const\s+(?<name>[A-Z0-9_]*CACHE_VERSION)\s*:\s*(?:u8|u16|u32|u64|u128|usize)\s*=\s*)(?<value>\d+)(?<tail>\s*;.*)$/u;
+
+// REBASE_CONFIG sets merge.conflictStyle=merge, so a block has no base part.
+const CONFLICT_BLOCK = /^<{7}[^\n]*\n([\s\S]*?)^={7}\n([\s\S]*?)^>{7}[^\n]*\n?/gmu;
+
+/** The cache version names that one side of a block declares, or null. */
+const cacheDeclNames = (side) => {
+  const names = side
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => CACHE_DECL.exec(line)?.groups.name ?? null);
+  return names.length === 0 || names.includes(null) ? null : names.join(",");
+};
+
+/**
+ * Resolve each conflict block in which both sides declare the same cache
+ * version constants and nothing else: keep the base side. The bump of the
+ * branch comes back after the rebase as base value + 1 (`restoreCacheBumps`).
+ * Returns the resolved text, or null when a block is not such a block.
+ */
+export const takeBaseCacheVersions = (text) => {
+  let blocks = 0;
+  let others = 0;
+  const resolved = text.replace(CONFLICT_BLOCK, (block, ours, theirs) => {
+    blocks += 1;
+    const names = cacheDeclNames(ours);
+    if (names === null || names !== cacheDeclNames(theirs)) {
+      others += 1;
+      return block;
+    }
+    return ours;
+  });
+  return blocks > 0 && others === 0 ? resolved : null;
+};
+
+const cacheResolution = (cwd, path) => {
+  const file = join(cwd, path);
+  return path.endsWith(".rs") && existsSync(file)
+    ? takeBaseCacheVersions(readFileSync(file, "utf8"))
+    : null;
+};
+
+const resolvePath = (cwd, path, state) => {
+  if (path === CHANGELOG) {
+    return resolveChangelog(cwd);
+  }
+  if (GENERATED.has(path)) {
+    // During a rebase, "ours" is the base side.
+    git(cwd, ["checkout", "--ours", "--", path]);
+    git(cwd, ["add", "--", path]);
+    state.generated.add(path);
+    return { ok: true };
+  }
+  writeFileSync(join(cwd, path), cacheResolution(cwd, path));
+  git(cwd, ["add", "--", path]);
+  state.cacheFiles.add(path);
+  return { ok: true };
+};
+
+/**
+ * Resolve the conflicts that have one mechanical answer: CHANGELOG.md (keep
+ * both sides), generated contract files (take the base side) and cache
+ * version constants (take the base side). Stop on any other conflict.
+ */
+const resolveMechanical = (cwd, state) => (paths) => {
+  const others = paths.filter(
+    (path) => path !== CHANGELOG && !GENERATED.has(path) && cacheResolution(cwd, path) === null,
+  );
+  if (others.length > 0) {
+    return {
+      ok: false,
+      reason: `Conflicts outside ${CHANGELOG}, generated files and cache versions: ${others.join(", ")}`,
+    };
+  }
+  for (const path of paths) {
+    const result = resolvePath(cwd, path, state);
+    if (!result.ok) {
+      return result;
+    }
+  }
   return { ok: true };
 };
 
@@ -405,28 +496,112 @@ const logVersions = (log, base, changes) =>
       : `Version constants against ${base}:\n${changes.map(formatVersionChange).join("\n")}`,
   );
 
+const isCacheBump = ({ name, to }) => name.endsWith("CACHE_VERSION") && /^\d+$/u.test(to ?? "");
+
+/** Set `name` in `file` to its current value + 1. Returns false when it is absent. */
+const bumpConstant = (cwd, file, name) => {
+  const path = join(cwd, file);
+  if (!existsSync(path)) {
+    return false;
+  }
+  const lines = readFileSync(path, "utf8").split("\n");
+  const index = lines.findIndex((line) => CACHE_DECL.exec(line)?.groups.name === name);
+  if (index === -1) {
+    return false;
+  }
+  const { head, value, tail } = CACHE_DECL.exec(lines[index]).groups;
+  lines[index] = `${head}${Number(value) + 1}${tail}`;
+  writeFileSync(path, lines.join("\n"));
+  return true;
+};
+
+/**
+ * A cache bump of the branch that the rebase lost (the base side won a
+ * conflict, or the base made the same bump) gets the base value + 1 in a new
+ * commit. Two branches must never ship one cache version with two formats.
+ * Returns the bumped `{ file, name }` entries.
+ */
+const restoreCacheBumps = (cwd, { oldBase, oldTip, baseTip, hooks }) => {
+  const kept = new Set(
+    versionChanges(cwd, baseTip, "HEAD").map(({ file, name }) => `${file}\0${name}`),
+  );
+  const bumped = versionChanges(cwd, oldBase, oldTip)
+    .filter(isCacheBump)
+    .filter(({ file, name }) => !kept.has(`${file}\0${name}`))
+    .filter(({ file, name }) => bumpConstant(cwd, file, name));
+  if (bumped.length > 0) {
+    git(cwd, ["add", "--", ...new Set(bumped.map(({ file }) => file))]);
+    run(
+      "git",
+      [...hooks, "commit", "--quiet", "-m", "chore: bump cache versions above the base branch"],
+      {
+        cwd,
+      },
+    );
+  }
+  return bumped;
+};
+
+const regenerateSteps = ({ remote, branch, oldTip, worktree }) =>
+  [
+    `The temporary worktree ${worktree} holds the rebased branch. Regenerate there:`,
+    `  1. ${worktreeCommand(worktree, ["status"])} must be clean. Then, in that directory:`,
+    "     npm ci && pnpm --dir editors/vscode install && npm run generate:contracts",
+    "  2. Commit the regenerated files.",
+    "  3. Push the worktree HEAD with a lease on the old branch tip:",
+    `       ${worktreeCommand(worktree, leasePushArgs({ remote, branch, oldTip }))}`,
+    "  4. Remove the worktree with the command below.",
+  ].join("\n  ");
+
+/**
+ * Generated files that took the base side lack the change of the branch
+ * until a regeneration, so the run must not push them as they are.
+ */
+const generatedProblem = (paths, alone, target) =>
+  `${formatProblem("Generated files that took the base side and need a regeneration", paths)}\n  ${
+    alone ? regenerateSteps(target) : OTHER_PROBLEMS_FIRST
+  }`;
+
+/**
+ * The problems with recovery steps. Each set of steps ends with a push, so
+ * a problem prints its steps only when it is the only problem of the run.
+ */
+const recoveryProblems = (moved, generated, alone, target) =>
+  [
+    { items: moved, problem: movedProblem },
+    { items: generated, problem: generatedProblem },
+  ]
+    .filter(({ items }) => items.length > 0)
+    .map(({ items, problem }, _, active) => problem(items, alone && active.length === 1, target));
+
 /**
  * Run the checks of the rebase result in the temporary worktree `cwd`.
  * Print the report to `log` and return the exit code.
  */
-const checkResult = (cwd, log, options, rebased) => {
+const checkResult = (cwd, log, options, rebased, state) => {
   const { oldBase, oldTip, baseTip, newTip } = rebased;
   const versionsAfter = versionChanges(cwd, baseTip, newTip);
   logVersions(log, options.base, versionsAfter);
+  for (const { file, name } of state.bumped) {
+    log(`Cache version: ${file}: ${name} set to the base value + 1 in a new commit.`);
+  }
+  const generated = [...state.generated].toSorted();
   return checkRebase(cwd, log, options, rebased, {
-    ignored: [CHANGELOG],
+    ignored: [
+      CHANGELOG,
+      ...generated,
+      ...state.cacheFiles,
+      ...state.bumped.map(({ file }) => file),
+    ],
     checks: (tips, treeProblems) => {
       const changelog = checkChangelog(cwd, tips);
       const others = [
         ...changelog.problems,
         ...checkVersions(versionChanges(cwd, oldBase, oldTip), versionsAfter),
       ];
-      if (changelog.moved.length === 0) {
-        return others;
-      }
-      const alone = treeProblems.length === 0 && others.length === 0;
       const target = { ...tips, remote: rebased.remote, base: options.base };
-      return [movedProblem(changelog.moved, alone, target), ...others];
+      const alone = treeProblems.length === 0 && others.length === 0;
+      return [...recoveryProblems(changelog.moved, generated, alone, target), ...others];
     },
     passed: [
       "CHANGELOG check: the rebase kept the lines of the branch and removed no base line.",
@@ -439,11 +614,16 @@ const checkResult = (cwd, log, options, rebased) => {
  * Rebase the branch in a temporary worktree and run the checks. Print the
  * report to `log` and return the exit code.
  */
-const shipRebase = (cwd, options, log = console.log) =>
-  shipBranch(cwd, log, options, {
-    resolveConflicts: resolveChangelogOnly,
-    check: (worktree, rebased) => checkResult(worktree, log, options, rebased),
+const shipRebase = (cwd, options, log = console.log) => {
+  const state = { generated: new Set(), cacheFiles: new Set(), bumped: [] };
+  return shipBranch(cwd, log, options, {
+    resolveConflicts: (worktree) => resolveMechanical(worktree, state),
+    afterRebase: (worktree, refs) => {
+      state.bumped = restoreCacheBumps(worktree, refs);
+    },
+    check: (worktree, rebased) => checkResult(worktree, log, options, rebased, state),
   });
+};
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runCliMain(shipMain(USAGE, shipRebase));

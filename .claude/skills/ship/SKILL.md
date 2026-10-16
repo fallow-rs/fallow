@@ -50,9 +50,17 @@ still edits `CHANGELOG.md`. Move its entries to a fragment
 Use these scripts for each pull request, one at a time:
 
 1. Rebase the branch: `node scripts/ship-rebase.mjs --pr <number> --push`.
-   The script keeps both sides of a `CHANGELOG.md` conflict and stops on
-   any other conflict. Git rerere is off for the rebase. The script pushes
-   only when these checks pass:
+   The script resolves the conflicts that have one mechanical answer and
+   stops on any other conflict:
+   - `CHANGELOG.md`: it keeps both sides.
+   - A `*CACHE_VERSION` constant: it takes the value of `main`. After the
+     rebase, a new commit sets each cache bump of the branch that the
+     rebase lost to the value of `main` + 1.
+   - A generated contract file: it takes the side of `main`. Then it does
+     not push and prints the regeneration steps for the kept worktree.
+
+   Git rerere is off for the rebase. The script pushes only when these
+   checks pass:
    - Outside `CHANGELOG.md`, the result is the same as a merge of the
      branch into `main`. A rebase drops the changes that a merge commit of
      the branch made, so this check finds them. At a path where the merge
@@ -86,9 +94,9 @@ Use these scripts for each pull request, one at a time:
    - The rebase adds no second `###` subsection with the same name to the
      first release section.
    - Each version bump of the branch is still a change against `main`.
-     This covers each `*CACHE_VERSION` constant, for example
-     `GRAPH_CACHE_VERSION`, and each `*SCHEMA_VERSION` constant, for
-     example `CHECK_SCHEMA_VERSION`.
+     This covers each `*SCHEMA_VERSION` constant, for example
+     `CHECK_SCHEMA_VERSION`, and each `*CACHE_VERSION` constant that the
+     script could not bump again (a string value or a moved constant).
 2. Wait for CI. Set `--min-checks` to the check count of a recent complete
    run. Without this guard, a read right after the push can show no
    pending check. Set `--head` to the pushed tip, which the rebase script

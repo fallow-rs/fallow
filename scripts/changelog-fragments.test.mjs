@@ -247,12 +247,67 @@ test("check --base passes a fragment branch after a release on the base branch",
   assert.equal(result.output, "changelog.d: 1 fragment(s) are valid.");
 });
 
+test("migrate moves the entries of a branch to a fragment and restores [Unreleased]", (t) => {
+  const repo = createRepo(t);
+  const base = changelog("### Fixed", "", "- Old fix.", "");
+  repo.commit("chore: base", { "CHANGELOG.md": base });
+  repo.git("checkout", "--quiet", "-b", "fix/thing");
+  repo.commit("fix: entry in the changelog", {
+    "CHANGELOG.md": changelog(
+      "### Added",
+      "",
+      "- **New feature.**",
+      "  - Nested detail.",
+      "",
+      "### Fixed",
+      "",
+      "- Old fix.",
+      "",
+      "- **New fix.**",
+      "",
+    ),
+  });
+  repo.git("checkout", "--quiet", "main");
+  repo.commit("chore: release", { "CHANGELOG.md": changelog() });
+  repo.git("checkout", "--quiet", "fix/thing");
+
+  const result = run(repo, "migrate", "--base", "main");
+  assert.equal(result.output, "Moved 2 entries to changelog.d/fix-thing.md.");
+  assert.equal(repo.read("CHANGELOG.md"), base);
+  assert.equal(
+    repo.read("changelog.d/fix-thing.md"),
+    "### Added\n\n- **New feature.**\n  - Nested detail.\n\n### Fixed\n\n- **New fix.**\n",
+  );
+  assert.equal(run(repo, "check", "--base", "main").code, 0);
+  assert.equal(
+    run(repo, "migrate", "--base", "main").output,
+    "CHANGELOG.md: this branch adds no entry to the [Unreleased] section.",
+  );
+});
+
+test("migrate stops on an entry of the base branch that the branch reworded", (t) => {
+  const repo = createRepo(t);
+  repo.commit("chore: base", { "CHANGELOG.md": changelog("### Fixed", "", "- Old fix.", "") });
+  repo.git("checkout", "--quiet", "-b", "feat");
+  const reworded = changelog("### Fixed", "", "- Old fix, reworded.", "");
+  repo.commit("docs: reword", { "CHANGELOG.md": reworded });
+
+  assert.throws(
+    () => run(repo, "migrate", "--base", "main"),
+    /changes or removes an entry of main\. Move it by hand: - Old fix\.$/u,
+  );
+  assert.equal(repo.read("CHANGELOG.md"), reworded);
+  assert.deepEqual(fragmentNames(join(repo.work, "changelog.d")), []);
+});
+
 test("arguments belong to their command", () => {
   assert.deepEqual(parseArgs(["check", "--base", "origin/main"]), {
     command: "check",
     base: "origin/main",
+    name: undefined,
     dryRun: false,
   });
+  assert.throws(() => changelogFragments(["migrate"], tmpdir()), /migrate needs --base <ref>/u);
   assert.throws(() => parseArgs(["collect", "--base", "main"]), /Unknown option '--base'/u);
   assert.throws(() => parseArgs(["check", "--dry-run"]), /Unknown option '--dry-run'/u);
   assert.throws(() => parseArgs(["check", "--base"]), /argument missing/u);

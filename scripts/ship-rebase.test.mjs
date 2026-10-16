@@ -10,6 +10,7 @@ import {
   duplicateSubsections,
   keepBothSides,
   movedEntries,
+  takeBaseCacheVersions,
 } from "./ship-rebase.mjs";
 import { pullRequestHead, pushSshEnv, shellCommand } from "./ship-git.mjs";
 import { createShipRepo } from "./ship-test-repo.mjs";
@@ -33,6 +34,7 @@ const changelog = (...entries) =>
   ].join("\n");
 
 const cacheSource = (version) => `pub const GRAPH_CACHE_VERSION: u32 = ${version};\n`;
+const schemaSource = (version) => `pub const CHECK_SCHEMA_VERSION: u32 = ${version};\n`;
 
 // `main` and `feat` fork from one commit. `onMain` and `onBranch` each
 // return the commits of that side.
@@ -125,7 +127,10 @@ test("a conflict outside CHANGELOG.md stops the rebase", (t) => {
   const result = shipRebase(repo);
 
   assert.equal(result.status, 1, result.output);
-  assert.match(result.output, /STOP: feat: Conflicts outside CHANGELOG\.md: src\/value\.txt/u);
+  assert.match(
+    result.output,
+    /STOP: feat: Conflicts outside CHANGELOG\.md, generated files and cache versions: src\/value\.txt/u,
+  );
   const kept = keptWorktreeOf(result);
   assert.match(readFileSync(join(kept, "src/value.txt"), "utf8"), /^<{7} /mu);
   assert.equal(rebaseInProgressIn(repo, kept), true);
@@ -175,20 +180,100 @@ test("the CHANGELOG check finds a subsection that the resolution added two times
   );
 });
 
-test("the cache version check finds a bump that the base already made", (t) => {
+test("a cache bump that the base already made gets the base value + 1", (t) => {
   const repo = forkRepo(t, {
     base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
     onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
-    onBranch: (r) => r.commit("fix: branch cache change", { "src/lib.rs": cacheSource(2) }),
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", {
+        "src/lib.rs": cacheSource(2),
+        "src/other.txt": "other\n",
+      }),
+  });
+
+  const result = shipRebase(repo);
+
+  assert.equal(result.status, 0, result.output);
+  const tip = newTipOf(result);
+  assert.equal(fileAt(repo, tip, "src/lib.rs"), cacheSource(3).trimEnd());
+  assert.equal(
+    repo.git("log", "-1", "--format=%s", tip),
+    "chore: bump cache versions above the base branch",
+  );
+  assert.match(result.output, /src\/lib\.rs: GRAPH_CACHE_VERSION set to the base value \+ 1/u);
+});
+
+test("a conflict between two cache bumps takes the base value + 1", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) => {
+      r.commit("fix: first main cache change", { "src/lib.rs": cacheSource(2) });
+      r.commit("fix: second main cache change", { "src/lib.rs": cacheSource(3) });
+    },
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", {
+        "CHANGELOG.md": changelog("- Branch entry."),
+        "src/lib.rs": cacheSource(2),
+      }),
+  });
+
+  const result = shipRebase(repo);
+
+  assert.equal(result.status, 0, result.output);
+  assert.equal(fileAt(repo, newTipOf(result), "src/lib.rs"), cacheSource(4).trimEnd());
+  assert.match(result.output, /GRAPH_CACHE_VERSION 3 -> 4/u);
+});
+
+test("takeBaseCacheVersions keeps the base side of pure cache version blocks only", () => {
+  const block = (ours, theirs) => `<<<<<<< HEAD\n${ours}=======\n${theirs}>>>>>>> abc (feat)\n`;
+  assert.equal(
+    takeBaseCacheVersions(`// top\n${block(cacheSource(3), cacheSource(2))}// end\n`),
+    `// top\n${cacheSource(3)}// end\n`,
+  );
+  assert.equal(takeBaseCacheVersions(block(cacheSource(3), schemaSource(2))), null);
+  assert.equal(takeBaseCacheVersions(block("let a = 1;\n", "let a = 2;\n")), null);
+  assert.equal(takeBaseCacheVersions(cacheSource(1)), null, "no conflict block");
+});
+
+test("a conflict in a generated file takes the base side and asks for a regeneration", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "docs/output-schema.json": '{"v":1}\n' },
+    onMain: (r) => r.commit("feat: main schema", { "docs/output-schema.json": '{"v":2}\n' }),
+    onBranch: (r) =>
+      r.commit("feat: branch schema", {
+        "docs/output-schema.json": '{"v":3}\n',
+        "src/other.txt": "other\n",
+      }),
+  });
+
+  const result = shipRebase(repo, "--push");
+
+  assert.equal(result.status, 1, result.output);
+  assert.match(
+    result.output,
+    /Generated files that took the base side and need a regeneration:\n\s+docs\/output-schema\.json/u,
+  );
+  assert.match(result.output, /npm run generate:contracts/u);
+  const kept = keptWorktreeOf(result);
+  assert.equal(readFileSync(join(kept, "docs/output-schema.json"), "utf8"), '{"v":2}\n');
+  assert.equal(readFileSync(join(kept, "src/other.txt"), "utf8"), "other\n");
+  assert.notEqual(repo.git("rev-parse", "origin/feat"), repo.git("-C", kept, "rev-parse", "HEAD"));
+  assert.doesNotMatch(result.output, /Pushed/u);
+});
+
+test("a conflict with other lines next to a cache version stops the rebase", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
+    onMain: (r) =>
+      r.commit("fix: main cache change", { "src/lib.rs": `${cacheSource(2)}const A: u8 = 1;\n` }),
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", { "src/lib.rs": `${cacheSource(2)}const A: u8 = 2;\n` }),
   });
 
   const result = shipRebase(repo);
 
   assert.equal(result.status, 1, result.output);
-  assert.match(
-    result.output,
-    /Version changes that the rebase lost:\n\s+src\/lib\.rs: GRAPH_CACHE_VERSION 1 -> 2/u,
-  );
+  assert.match(result.output, /cache versions: src\/lib\.rs/u);
 });
 
 test("the cache version check reads constants of every unsigned integer type", (t) => {
@@ -197,16 +282,17 @@ test("the cache version check reads constants of every unsigned integer type", (
   const repo = forkRepo(t, {
     base: { "CHANGELOG.md": changelog(), "src/audit.rs": source(1) },
     onMain: (r) => r.commit("fix: main cache change", { "src/audit.rs": source(2) }),
-    onBranch: (r) => r.commit("fix: branch cache change", { "src/audit.rs": source(2) }),
+    onBranch: (r) =>
+      r.commit("fix: branch cache change", {
+        "src/audit.rs": source(2),
+        "src/other.txt": "other\n",
+      }),
   });
 
   const result = shipRebase(repo);
 
-  assert.equal(result.status, 1, result.output);
-  assert.match(
-    result.output,
-    /Version changes that the rebase lost:\n\s+src\/audit\.rs: AUDIT_BASE_SNAPSHOT_CACHE_VERSION 1 -> 2/u,
-  );
+  assert.equal(result.status, 0, result.output);
+  assert.equal(fileAt(repo, newTipOf(result), "src/audit.rs"), source(3).trimEnd());
 });
 
 // `feat` adds an entry, `main` adds another entry, and then `feat` merges
@@ -437,16 +523,16 @@ const assertNoRecoverySteps = (result) => {
 
 test("a moved entry with a lost version bump prints no push command", (t) => {
   const repo = forkRepo(t, {
-    base: { "CHANGELOG.md": changelog("- Old entry."), "src/cache.rs": cacheSource(1) },
+    base: { "CHANGELOG.md": changelog("- Old entry."), "src/check.rs": schemaSource(1) },
     onMain: (r) =>
       r.commit("chore: release 1.1.0", {
         "CHANGELOG.md": release(changelog("- Old entry.")),
-        "src/cache.rs": cacheSource(2),
+        "src/check.rs": schemaSource(2),
       }),
     onBranch: (r) =>
       r.commit("feat: branch change", {
         "CHANGELOG.md": changelog("- Old entry.", "- Branch entry."),
-        "src/cache.rs": cacheSource(2),
+        "src/check.rs": schemaSource(2),
       }),
   });
 
@@ -455,7 +541,7 @@ test("a moved entry with a lost version bump prints no push command", (t) => {
   assertNoRecoverySteps(result);
   assert.match(
     result.output,
-    /Version changes that the rebase lost:\n\s+src\/cache\.rs: GRAPH_CACHE_VERSION 1 -> 2/u,
+    /Version changes that the rebase lost:\n\s+src\/check\.rs: CHECK_SCHEMA_VERSION 1 -> 2/u,
   );
 });
 
@@ -577,11 +663,11 @@ test("changelogProblems reports each kind of line difference", () => {
 
 test("the rebase ignores a recorded rerere resolution", (t) => {
   const repo = forkRepo(t, {
-    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
-    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
+    base: { "CHANGELOG.md": changelog(), "src/value.txt": "base\n" },
+    onMain: (r) => r.commit("fix: main value", { "src/value.txt": "main\n" }),
     onBranch: (r) =>
-      r.commit("fix: branch cache change", {
-        "src/lib.rs": cacheSource(3),
+      r.commit("fix: branch value", {
+        "src/value.txt": "branch\n",
         "src/other.rs": "pub const OTHER: u32 = 1;\n",
       }),
   });
@@ -591,21 +677,21 @@ test("the rebase ignores a recorded rerere resolution", (t) => {
   // another pull request can do.
   repo.git("switch", "--quiet", "--detach", "origin/feat");
   assert.throws(() => repo.git("rebase", "origin/main"));
-  repo.write("src/lib.rs", cacheSource(2));
-  repo.git("add", "src/lib.rs");
+  repo.write("src/value.txt", "main\n");
+  repo.git("add", "src/value.txt");
   repo.git("-c", "core.editor=true", "rebase", "--continue");
   // Plain git now reuses the resolution without a conflict marker.
   repo.git("switch", "--quiet", "--detach", "origin/feat");
   assert.throws(() => repo.git("rebase", "origin/main"));
-  assert.equal(readFileSync(join(repo.work, "src/lib.rs"), "utf8"), cacheSource(2));
+  assert.equal(readFileSync(join(repo.work, "src/value.txt"), "utf8"), "main\n");
   repo.git("rebase", "--abort");
   repo.git("switch", "--quiet", "main");
 
   const result = shipRebase(repo);
 
   assert.equal(result.status, 1, result.output);
-  assert.match(result.output, /Conflicts outside CHANGELOG\.md: src\/lib\.rs/u);
-  assert.match(readFileSync(join(keptWorktreeOf(result), "src/lib.rs"), "utf8"), /^<{7} /mu);
+  assert.match(result.output, /cache versions: src\/value\.txt/u);
+  assert.match(readFileSync(join(keptWorktreeOf(result), "src/value.txt"), "utf8"), /^<{7} /mu);
 });
 
 test("--push updates the branch with a lease on the old tip", (t) => {
@@ -713,11 +799,11 @@ test("a conflict stop keeps the caller checkout and leaves the rebase in a kept 
 
 test("a failed check keeps the caller checkout and the rebased HEAD in a kept worktree", (t) => {
   const repo = forkRepo(t, {
-    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
-    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
+    base: { "CHANGELOG.md": changelog(), "src/check.rs": schemaSource(1) },
+    onMain: (r) => r.commit("feat: main schema change", { "src/check.rs": schemaSource(2) }),
     onBranch: (r) =>
-      r.commit("fix: branch cache change", {
-        "src/lib.rs": cacheSource(2),
+      r.commit("feat: branch schema change", {
+        "src/check.rs": schemaSource(2),
         "src/other.txt": "other\n",
       }),
   });
@@ -879,11 +965,11 @@ test("--head-remote rebases a fork branch and pushes it back to the fork", (t) =
   assert.equal(repo.git("ls-remote", "--heads", "origin", "feat"), "");
 });
 
-test("the cache version check finds a lost bump on a fork branch", (t) => {
+test("the version check finds a lost bump on a fork branch", (t) => {
   const repo = forkRepo(t, {
-    base: { "CHANGELOG.md": changelog(), "src/lib.rs": cacheSource(1) },
-    onMain: (r) => r.commit("fix: main cache change", { "src/lib.rs": cacheSource(2) }),
-    onBranch: (r) => r.commit("fix: branch cache change", { "src/lib.rs": cacheSource(2) }),
+    base: { "CHANGELOG.md": changelog(), "src/check.rs": schemaSource(1) },
+    onMain: (r) => r.commit("feat: main schema change", { "src/check.rs": schemaSource(2) }),
+    onBranch: (r) => r.commit("feat: branch schema change", { "src/check.rs": schemaSource(2) }),
   });
   const fork = moveBranchToFork(repo);
   const before = repo.git("--git-dir", fork, "rev-parse", "refs/heads/feat");
@@ -893,7 +979,7 @@ test("the cache version check finds a lost bump on a fork branch", (t) => {
   assert.equal(result.status, 1, result.output);
   assert.match(
     result.output,
-    /Version changes that the rebase lost:\n\s+src\/lib\.rs: GRAPH_CACHE_VERSION 1 -> 2/u,
+    /Version changes that the rebase lost:\n\s+src\/check\.rs: CHECK_SCHEMA_VERSION 1 -> 2/u,
   );
   assert.equal(repo.git("--git-dir", fork, "rev-parse", "refs/heads/feat"), before);
   assert.doesNotMatch(result.output, /push --force-with-lease/u);
