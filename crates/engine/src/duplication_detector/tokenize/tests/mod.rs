@@ -1,3 +1,4 @@
+mod atomic_invocations;
 mod basic_tokenization;
 mod css_canonicalization;
 mod edge_cases;

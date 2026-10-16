@@ -843,6 +843,76 @@ fn dupes_still_reports_repeated_callback_bodies_inside_calls() {
 }
 
 #[test]
+fn dupes_reports_methods_in_an_object_passed_to_a_call() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-define-component","private":true,"type":"module"}"#,
+    )
+    .unwrap();
+    let component = r"import { defineComponent } from 'vue';
+
+export default defineComponent({
+    name: 'cart-summary',
+
+    computed: {
+        visibleItems(): Item[] {
+            return this.items.filter((item) => item.active && !item.archived);
+        },
+
+        totalPrice(): number {
+            return this.visibleItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        },
+
+        formattedTotal(): string {
+            return new Intl.NumberFormat(this.locale, {
+                style: 'currency',
+                currency: this.currency,
+            }).format(this.totalPrice);
+        },
+
+        isEmpty(): boolean {
+            return this.visibleItems.length === 0;
+        },
+    },
+});
+";
+    std::fs::write(dir.path().join("src/cart-summary.ts"), component).unwrap();
+    std::fs::write(
+        dir.path().join("src/order-summary.ts"),
+        component.replace("cart-summary", "order-summary"),
+    )
+    .unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let groups = json["clone_groups"].as_array().unwrap();
+    assert_eq!(
+        groups.len(),
+        1,
+        "methods in a defineComponent object should be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    for instance in groups[0]["instances"].as_array().unwrap() {
+        assert!(
+            instance["start_line"].as_u64().unwrap() <= 7,
+            "clone should cover the computed block: {instance}"
+        );
+        assert!(
+            instance["end_line"].as_u64().unwrap() >= 25,
+            "clone should cover the computed block: {instance}"
+        );
+    }
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "test fixture; linear setup/assert, length is not a maintainability concern"
