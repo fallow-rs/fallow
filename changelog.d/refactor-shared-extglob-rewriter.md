@@ -21,8 +21,8 @@
   The glob matcher cannot repeat a group, so `+(ts|js)` becomes `{ts,js}*`.
   This can make a few more files entry points, for example `a.test.jsx` for
   `*.test.+(ts|js)`. A `+(..)` group at the end of a glob also matches a
-  longer extension, so `*.test.+(ts|js)` also matches `a.test.json` and
-  `a.test.js.map`. Before, Vitest, Rstest and Jasmine matched the group
+  longer extension, so `*.test.+(ts|js)` also matches `a.test.tsx`.
+  Before, Vitest, Rstest and Jasmine matched the group
   once only, which missed names that repeat the group. An exclude glob still
   matches a `+(..)` group once only, so an exclude never removes a file that
   the tool keeps.
