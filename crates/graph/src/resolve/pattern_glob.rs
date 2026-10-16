@@ -13,7 +13,9 @@
 //!   because `globset` cannot repeat a group.
 //! - `!(a|b)` becomes `*` in the include glob. One exclude glob per negated
 //!   group puts `{a,b}` at the position of that group. A path matches when the
-//!   include glob matches it and no exclude glob matches it.
+//!   include glob matches it and no exclude glob matches it. In an exclude
+//!   glob, `*` does not match `/`, so an exclude glob never removes a path
+//!   that picomatch matches through a different path segment.
 //!
 //! A negated group inside another group becomes `*` and excludes nothing.
 
@@ -32,10 +34,10 @@ impl PatternGlob {
     /// Compile `pattern`. Returns `None` when the pattern is not a valid glob.
     pub(super) fn new(pattern: &str) -> Option<Self> {
         let (include, negated_groups) = rewrite(pattern, None);
-        let include = build_glob(&include)?.compile_matcher();
+        let include = build_glob(&include, false)?.compile_matcher();
         let mut excludes = GlobSetBuilder::new();
         for group in 0..negated_groups {
-            excludes.add(build_glob(&rewrite(pattern, Some(group)).0)?);
+            excludes.add(build_glob(&rewrite(pattern, Some(group)).0, true)?);
         }
         Some(Self {
             include,
@@ -50,8 +52,28 @@ impl PatternGlob {
     }
 }
 
-fn build_glob(glob: &str) -> Option<globset::Glob> {
-    GlobBuilder::new(glob).empty_alternates(true).build().ok()
+/// Whether `pattern` contains a closed extglob group, such as `@(a|b)`.
+pub(super) fn has_extglob_group(pattern: &str) -> bool {
+    let mut rest = pattern;
+    while let Some((start, _)) = next_group(rest) {
+        let body_start = start + 2;
+        if group_body_len(&rest[body_start..]).is_some() {
+            return true;
+        }
+        rest = &rest[body_start..];
+    }
+    false
+}
+
+/// Build a glob. An exclude glob sets `literal_separator`, so that its `*`
+/// stays in one path segment. A narrower exclude glob is the safe direction:
+/// it can keep an extra file, but it cannot drop a file that Vite loads.
+fn build_glob(glob: &str, literal_separator: bool) -> Option<globset::Glob> {
+    GlobBuilder::new(glob)
+        .empty_alternates(true)
+        .literal_separator(literal_separator)
+        .build()
+        .ok()
 }
 
 /// Rewrite the extglob groups of `pattern` into `globset` syntax.
@@ -197,6 +219,24 @@ mod tests {
         assert!(matches(pattern, "public/alpha.js"));
         assert!(!matches(pattern, "internal/alpha.js"));
         assert!(!matches(pattern, "public/index.js"));
+    }
+
+    #[test]
+    fn negated_group_exclude_stays_in_one_segment() {
+        let pattern = "src/!(*legacy)/**/*.js";
+        assert!(matches(pattern, "src/new/legacy/x.js"));
+        assert!(!matches(pattern, "src/oldlegacy/x.js"));
+        assert!(matches("**/!(_*)/*.js", "_a/b/x.js"));
+        assert!(!matches("**/!(_*)/*.js", "a/_b/x.js"));
+    }
+
+    #[test]
+    fn detects_closed_extglob_groups() {
+        assert!(has_extglob_group("./locales/@(en|nl).js"));
+        assert!(has_extglob_group("a/!(b).js"));
+        assert!(!has_extglob_group("./locales/"));
+        assert!(!has_extglob_group("a/!(b.js"));
+        assert!(!has_extglob_group(r"a/\!(b).js"));
     }
 
     #[test]

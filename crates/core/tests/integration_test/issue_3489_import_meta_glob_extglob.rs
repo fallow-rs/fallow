@@ -51,4 +51,8 @@ fn exactly_one_extglob_credits_only_the_listed_alternatives() {
         unused.contains(&"src/locales/de.js".to_string()),
         "`@(en|nl)` does not match de.js, found {unused:?}"
     );
+    assert!(
+        unused.contains(&"src/locales/en.jsx".to_string()),
+        "`./locales/@(en|nl).js` does not match en.jsx, found {unused:?}"
+    );
 }

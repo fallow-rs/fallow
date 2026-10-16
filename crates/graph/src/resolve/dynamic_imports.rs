@@ -215,13 +215,15 @@ impl GlobMatcherCache {
             return value.clone();
         }
         let value = PatternGlob::new(glob_str).map(Arc::new);
-        if value.is_none() {
+        // Two threads can compile the same pattern at the same time. Only the
+        // thread that inserts the entry first gives the warning.
+        let first_insert = self.map.lock().map_or(true, |mut cache| {
+            cache.insert(glob_str.to_string(), value.clone()).is_none()
+        });
+        if value.is_none() && first_insert {
             tracing::warn!(
                 "Dynamic import pattern `{glob_str}` is not a valid glob and matches no files"
             );
-        }
-        if let Ok(mut cache) = self.map.lock() {
-            cache.insert(glob_str.to_string(), value.clone());
         }
         value
     }

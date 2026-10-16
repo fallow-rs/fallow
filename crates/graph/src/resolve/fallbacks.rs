@@ -1352,7 +1352,10 @@ fn resolve_workspace_self_reference(
 pub(super) fn make_glob_from_pattern(
     pattern: &fallow_types::extract::DynamicImportPattern,
 ) -> String {
-    if pattern.prefix.contains('*') || pattern.prefix.contains('{') {
+    if pattern.prefix.contains('*')
+        || pattern.prefix.contains('{')
+        || super::pattern_glob::has_extglob_group(&pattern.prefix)
+    {
         return pattern.prefix.clone();
     }
     pattern.suffix.as_ref().map_or_else(
@@ -2268,6 +2271,17 @@ mod tests {
             mechanism: ModuleLoadMechanism::EsModule,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*");
+    }
+
+    #[test]
+    fn make_glob_passthrough_extglob_group() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./locales/@(en|nl).js".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+            mechanism: ModuleLoadMechanism::EsModule,
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./locales/@(en|nl).js");
     }
 
     #[test]
