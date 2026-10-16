@@ -1,0 +1,7 @@
+{
+  "name": "playwright-test-subpath-import",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0",
+    "playwright": "^1.0.0"
+  }
+}

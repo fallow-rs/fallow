@@ -831,6 +831,32 @@ fn playwright_extend_of_imported_test_credits_pom_methods() {
 }
 
 #[test]
+fn playwright_test_subpath_import_credits_pom_methods() {
+    // The `playwright` package exports the test runner at `playwright/test`.
+    // A `mergeTests(...).extend<T>` chain and a raw `test.extend<T>` from that
+    // source must credit fixture methods the same as `@playwright/test`.
+    let root = fixture_path("playwright-test-subpath-import");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+    unused_class_members.sort();
+
+    assert_eq!(
+        unused_class_members,
+        vec![
+            "AdminPage.unusedAdminAction".to_string(),
+            "ReportsPage.unusedReportAction".to_string(),
+        ],
+        "only the genuinely unused POM methods should be reported"
+    );
+}
+
+#[test]
 fn playwright_wrapper_fixtures_credit_nested_fixture_methods() {
     let root = fixture_path("issue-1210-playwright-wrapper-fixtures");
     let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);

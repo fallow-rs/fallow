@@ -5269,6 +5269,60 @@ fn playwright_aliased_merge_tests_records_fixture_aliases() {
 }
 
 #[test]
+fn playwright_test_subpath_import_records_merge_and_extend_facts() {
+    // The `playwright` package exports the same test runner at
+    // `playwright/test`. The `mergeTests` and `test` imports from that
+    // source must behave as the `@playwright/test` imports.
+    let info = parse(
+        r"
+            import { mergeTests } from 'playwright/test';
+            import { appTest } from './app-fixture';
+            import { ReportsPage } from './reports-page';
+
+            export const test = mergeTests(appTest).extend<{ reports: ReportsPage }>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "test", "appTest"),
+        "mergeTests from playwright/test should alias the merged test, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "test", "reports", "ReportsPage"),
+        "mergeTests from playwright/test should define the fixtures of T, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_test_subpath_raw_test_base_records_definitions_without_alias() {
+    let info = parse(
+        r"
+            import { test as base } from 'playwright/test';
+            import { AdminPage } from './admin-page';
+
+            type MyFixtures = {
+                adminPage: AdminPage;
+            };
+
+            export const test = base.extend<MyFixtures>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "test", "adminPage", "AdminPage"),
+        "the playwright/test `test` base should define the fixtures of T, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        !has_playwright_fixture_alias_fact(&info, "test", "base"),
+        "the raw playwright/test `test` base must not emit an alias fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn playwright_wrapper_extend_records_fixture_alias() {
     let info = parse(
         r"

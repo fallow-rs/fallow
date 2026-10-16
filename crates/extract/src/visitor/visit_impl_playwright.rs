@@ -20,6 +20,11 @@ use super::visit_helpers::{
 };
 use crate::parse::MockApiReferenceSpans;
 
+/// The import sources of the Playwright test runner. The `playwright` package
+/// exports the same runner at `playwright/test` that `@playwright/test`
+/// re-exports.
+const PLAYWRIGHT_TEST_SOURCES: [&str; 2] = ["@playwright/test", "playwright/test"];
+
 /// What the innermost call of an `.extend(...)` chain extends.
 enum PlaywrightExtendRoot {
     /// An identifier, for example `base` in `base.extend({})`.
@@ -36,6 +41,14 @@ struct PlaywrightExtendChain<'b, 'a> {
 }
 
 impl ModuleInfoExtractor {
+    /// True when `local_name` is the named import `imported_name` from a
+    /// Playwright test runner source.
+    fn is_playwright_test_import(&self, local_name: &str, imported_name: &str) -> bool {
+        PLAYWRIGHT_TEST_SOURCES
+            .iter()
+            .any(|source| self.is_named_import_from(local_name, source, imported_name))
+    }
+
     fn collect_playwright_fixture_type_bindings(&self, ty: &TSType<'_>) -> Vec<(String, String)> {
         let mut bindings = Vec::new();
         collect_fixture_type_bindings_from_type(
@@ -103,11 +116,10 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// True when `name` holds a Playwright test: the `@playwright/test` `test`
+    /// True when `name` holds a Playwright test: the Playwright runner `test`
     /// import or a local const recorded in `playwright_local_tests`.
     pub(crate) fn is_playwright_test_name(&self, name: &str) -> bool {
-        self.is_named_import_from(name, "@playwright/test", "test")
-            || self.playwright_local_tests.contains(name)
+        self.is_playwright_test_import(name, "test") || self.playwright_local_tests.contains(name)
     }
 
     /// True when only analysis can prove that `name` holds a Playwright test:
@@ -151,7 +163,7 @@ impl ModuleInfoExtractor {
         let Expression::Identifier(callee) = &call.callee else {
             return None;
         };
-        if !self.is_named_import_from(callee.name.as_str(), "@playwright/test", "mergeTests") {
+        if !self.is_playwright_test_import(callee.name.as_str(), "mergeTests") {
             return None;
         }
         let mut base_names: Vec<String> = call
@@ -276,7 +288,7 @@ impl ModuleInfoExtractor {
             .map(|chain| chain.root)
         {
             Some(PlaywrightExtendRoot::Name(base_name)) => {
-                if !self.is_named_import_from(base_name.as_str(), "@playwright/test", "test") {
+                if !self.is_playwright_test_import(base_name.as_str(), "test") {
                     self.record_playwright_fixture_alias(test_name, &base_name);
                 }
                 return;
@@ -360,7 +372,7 @@ impl ModuleInfoExtractor {
             // `record_playwright_wrapper_aliases`); the #1210 cross-file
             // expansion then resolves the imported base to its fixture
             // definitions. The raw `test` base no-ops. Issue #1795.
-            if !self.is_named_import_from(base_name.as_str(), "@playwright/test", "test") {
+            if !self.is_playwright_test_import(base_name.as_str(), "test") {
                 self.record_playwright_fixture_alias(test_name, &base_name);
             }
             self.push_playwright_factory_type_bindings(test_name, Some(base_name), &calls);
