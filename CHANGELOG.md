@@ -101,6 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the arguments and destructure defaults of `defineProps` and the other
     Vue compiler macros, an expression that holds a Svelte rune call, and an exported declaration in
     the Astro frontmatter. The arguments of a rune still get mutants.
+    A Vue macro call such as `defineExpose()` also gets no `removed-call`
+    switch, because the switch hides the macro from the compiler and each
+    test of the component then fails.
   - The plan prunes the mutants in the default export of a tool config file,
     such as `vite.config.ts` or `.eslintrc.js`, with the reason
     `framework-config`. No test loads these files, so their mutants were

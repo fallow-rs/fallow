@@ -10,10 +10,11 @@
 //! switch in that code cannot reach the prelude, or the compiler refuses the
 //! switch. These positions give no mutant:
 //!
-//! - Vue `<script setup>`: the arguments of the compiler macros
-//!   (`defineProps`, `withDefaults` and the other `define*` macros), and the
-//!   destructure defaults of a declaration with a macro call. The compiler
-//!   moves them out of `setup()`.
+//! - Vue `<script setup>`: a compiler macro call and its arguments
+//!   (`defineProps`, `defineExpose`, `withDefaults` and the other `define*`
+//!   macros), and the destructure defaults of a declaration with a macro
+//!   call. The compiler moves them out of `setup()` or replaces the call, so
+//!   a switch around the call hides the macro.
 //! - Svelte: an expression that holds a rune call (`$state(...)`,
 //!   `$effect(...)` and the other runes). A rune must stay in its own
 //!   position. The rune arguments still give mutants.
@@ -227,10 +228,12 @@ impl Protected {
 }
 
 /// The Vue compiler macros. The compiler moves their arguments out of
-/// `setup()`.
-const VUE_MACROS: [&str; 6] = [
+/// `setup()`, or replaces the call. A switch around a macro call hides it
+/// from the compiler, so the call and its arguments give no mutant.
+const VUE_MACROS: [&str; 7] = [
     "defineProps",
     "defineEmits",
+    "defineExpose",
     "defineModel",
     "defineOptions",
     "defineSlots",

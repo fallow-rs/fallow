@@ -126,6 +126,32 @@ fn vue_setup_block_skips_compiler_macro_arguments() {
     );
 }
 
+/// The Vue compiler finds `defineExpose()` only as a plain call statement.
+/// A `removed-call` switch around it hides the macro, and the component
+/// throws `defineExpose is not defined` at run time.
+#[test]
+fn vue_setup_block_never_wraps_define_expose() {
+    let source = "<script setup lang=\"ts\">\nfunction start() { return 1 + 1 }\ndefineExpose<{ start: () => number }>({ start })\n</script>\n";
+    let span = body(source, "<script setup", "</script>");
+    let blocks = [block(span, SourceKind::Ts, ScriptRole::VueSetup)];
+    let result = run(source, &blocks, &MutationOptions::default());
+    let macro_start = source.find("defineExpose").expect("macro") as u32;
+    let wrapping: Vec<&str> = result
+        .mutants
+        .iter()
+        .filter(|mutant| mutant.span.1 > macro_start)
+        .map(|mutant| mutant.original.as_str())
+        .collect();
+    assert_eq!(wrapping, Vec::<&str>::new());
+    assert!(result.mutants.iter().any(|mutant| mutant.original == "+"));
+    let bodies = instrumented_bodies(&result.code, "<script setup", "</script>");
+    assert!(
+        bodies[0].contains("\ndefineExpose<{ start: () => number }>({ start })\n"),
+        "{}",
+        bodies[0]
+    );
+}
+
 #[test]
 fn vue_setup_block_skips_props_destructure_defaults() {
     let source = "<script setup lang=\"ts\">\nconst { size = 'md' } = defineProps<{ size?: string }>()\nconst label = size + '!'\n</script>\n";

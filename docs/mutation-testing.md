@@ -67,10 +67,12 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The framework compiler moves some code out of the block scope, where the
   prelude is not visible or where a switch is not valid. These positions give
   no mutant:
-  - the arguments of `defineProps`, `defineEmits`, `defineModel`,
-    `defineOptions`, `defineSlots` and `withDefaults` in a Vue
-    `<script setup>` block, and the destructure defaults of a declaration
-    such as `const { size = 1 } = defineProps()`;
+  - a call of `defineProps`, `defineEmits`, `defineExpose`, `defineModel`,
+    `defineOptions`, `defineSlots` or `withDefaults` in a Vue
+    `<script setup>` block, its arguments, and the destructure defaults of a
+    declaration such as `const { size = 1 } = defineProps()`. A
+    `removed-call` switch around `defineExpose()` hides the macro from the
+    compiler, and the component then throws `defineExpose is not defined`;
   - an expression that holds a Svelte rune call (`$state`, `$derived`,
     `$effect`, `$props`, `$bindable`, `$inspect`, `$host`). The rune
     arguments still get mutants;
