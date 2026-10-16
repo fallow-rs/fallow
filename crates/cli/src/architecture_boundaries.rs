@@ -1670,6 +1670,7 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         // The built-in plugin roster has one source, in fallow-core. The
         // engine mirrored it by hand once and the copy drifted.
         "fallow_core::plugins::registry::builtin_config_patterns",
+        "fallow_core::plugins::registry::builtin_always_used_patterns",
         "fallow_core::plugins::registry::builtin_plugin_names",
         "fallow_core::plugins::registry::is_external_plugin_active",
         // The `@types/X` naming rule has one source, in fallow-core, so the
