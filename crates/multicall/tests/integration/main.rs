@@ -5,4 +5,5 @@
 //! file in `tests/`.
 
 mod parity;
+mod release_features;
 mod server_dispatch;
