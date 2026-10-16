@@ -1163,39 +1163,83 @@ export default {
         );
     }
 
-    /// `adds after prepares` passes only after `prepares` ran in the same
-    /// file. The dry run runs the whole file, so it passes there. A mutant
-    /// run selects only the covering test of an `add` mutant, so that test
-    /// fails with no active mutant. The self-check finds this before the
-    /// first mutant job, and the run exits 2 instead of a false kill.
+    /// The test file of an order-dependent suite: `adds after prepares`
+    /// passes only after `prepares` ran in the same file.
+    const ORDER_DEPENDENT_TEST: &str = "import { expect, test } from \"vitest\";\nimport { add } from \"../src/math\";\n\nlet prepared = false;\n\ntest(\"prepares\", () => {\n  prepared = true;\n});\n\ntest(\"adds after prepares\", () => {\n  expect(prepared).toBe(true);\n  expect(add(2, 3)).toBe(5);\n});\n";
+
+    /// The dry run runs the whole file, so `adds after prepares` passes
+    /// there. A mutant run selects only the covering test of an `add`
+    /// mutant, so that test fails with no active mutant. The self-check
+    /// finds this before the first mutant job. The test becomes a baseline
+    /// failure and covers no mutant, and the run continues, so no `add`
+    /// mutant gets a false kill.
     #[test]
-    fn a_covering_test_that_fails_in_the_run_path_stops_the_run_before_a_false_kill() {
+    fn a_test_that_fails_in_the_self_check_is_a_baseline_failure_and_the_run_continues() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package, "");
+        fs::write(root.join("test/math.test.ts"), ORDER_DEPENDENT_TEST).expect("test file");
+        commit_all(&root, "an order-dependent test");
+
+        let (output, report) = json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let failures = report["baseline_failures"].as_array().expect("failures");
+        assert_eq!(failures.len(), 1, "{report}");
+        assert_eq!(
+            failures[0]["test_id"], "test/math.test.ts::adds after prepares",
+            "{report}"
+        );
+        assert!(
+            failures[0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("depend on another test of its file")),
+            "{report}"
+        );
+        let mutants = report["mutants"].as_array().expect("mutants");
+        let add: Vec<&serde_json::Value> = mutants
+            .iter()
+            .filter(|mutant| mutant["function"] == "add")
+            .collect();
+        assert!(!add.is_empty(), "{report}");
+        assert!(
+            add.iter().all(|mutant| mutant["status"] == "no_coverage"),
+            "{report}"
+        );
+        assert!(
+            mutants.iter().any(|mutant| mutant["status"] == "survived"),
+            "the static mutant runs with `prepares`: {report}"
+        );
+        assert_eq!(report["completion"]["status"], "partial", "{report}");
+    }
+
+    /// The same suite with only `add` in the module: the baseline failure
+    /// leaves each mutant without a test result, so the run measured nothing
+    /// and exits 2 with the baseline error.
+    #[test]
+    fn a_self_check_failure_that_leaves_no_test_result_exits_2_with_the_baseline_error() {
         let Some(package) = companion_package() else {
             return;
         };
         let (_project, root) = vitest_project(&package, "");
         fs::write(
-            root.join("test/math.test.ts"),
-            "import { expect, test } from \"vitest\";\nimport { add } from \"../src/math\";\n\nlet prepared = false;\n\ntest(\"prepares\", () => {\n  prepared = true;\n});\n\ntest(\"adds after prepares\", () => {\n  expect(prepared).toBe(true);\n  expect(add(2, 3)).toBe(5);\n});\n",
+            root.join("src/math.ts"),
+            "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
         )
-        .expect("test file");
+        .expect("math.ts");
+        fs::write(root.join("test/math.test.ts"), ORDER_DEPENDENT_TEST).expect("test file");
         commit_all(&root, "an order-dependent test");
 
         let (output, envelope) = json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
-        assert_eq!(output.code, 2, "{}", output.stdout);
+        assert_eq!(output.code, 2, "{}", output.stderr);
         assert_eq!(
-            envelope["code"], "FALLOW_MUTATION_RUNNER_FAILED",
+            envelope["code"], "FALLOW_MUTATION_BASELINE_FAILED",
             "{envelope}"
         );
         let message = envelope["message"].as_str().unwrap_or_default();
+        assert!(message.contains("adds after prepares"), "{envelope}");
         assert!(
-            message.contains("the tests do not pass in a mutant run of vitest 5."),
-            "{envelope}"
-        );
-        assert!(
-            envelope["help"]
-                .as_str()
-                .is_some_and(|help| help.contains("passes only after another test")),
+            message.contains("fails in a mutant run with no active mutant"),
             "{envelope}"
         );
     }

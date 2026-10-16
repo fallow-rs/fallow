@@ -378,6 +378,10 @@ slow or busy host can need more, because the dry run executes each test file.
 mutant. Their results decide no mutant status.
 
 - A test that fails in the first dry run never covers a mutant.
+- A test that fails in a control run (see Run-path self-check) is also a
+  baseline failure. Its message says that the test fails in a mutant run
+  with no active mutant but passed in the dry run of its whole file. A test
+  that depends on another test of its file gives this result.
 - Each restarted companion runs its own dry run. A covering test that does
   not pass there is a baseline failure of that companion, with the ids of the
   affected mutants in `mutant_ids`. The mutant runs with its other covering
@@ -409,14 +413,21 @@ mutant. The scheduler uses control runs in two places:
    first companion runs the tests of the first job as a control run.
    - The control run passes when each requested test runs and passes, with
      no error.
-   - Otherwise the run stops with exit code 2 and
-     `FALLOW_MUTATION_RUNNER_FAILED`. No mutant gets a status.
-   - When no test ran, the message says that the runner executes no tests
-     in a mutant run. The message names the runner and its version, and the
-     help asks you to report it.
-   - When a test failed, the message says that the tests do not pass in a
-     mutant run. A test that passes only after another test of its file
-     gives this error, and the help says so.
+   - When no test ran, the run path is broken. The run stops with exit
+     code 2 and `FALLOW_MUTATION_RUNNER_FAILED`, and no mutant gets a
+     status. The message says that the runner executes no tests in a mutant
+     run. It names the runner and its version, and the help asks you to
+     report it.
+   - When tests ran and some of them failed, the run continues. Each failed
+     test is a baseline failure, the same as a test that fails in the dry
+     run: it covers no mutant. A mutant with no covering test left is
+     `no_coverage`. When this leaves each mutant without a test result,
+     the run exits `2` with `FALLOW_MUTATION_BASELINE_FAILED` (see Exit
+     codes).
+   - When tests ran and none failed, but the result is still not a pass
+     (an error, or a requested test that did not run), the run stops with
+     `FALLOW_MUTATION_RUNNER_FAILED`. The message says that the runner gives
+     no trustworthy result in a mutant run.
    - The check needs no run when no job exists: no mutant is covered, or
      each covered mutant has a result from the cache. The check also needs
      no run when the time budget ended before it.
@@ -429,10 +440,15 @@ mutant. The scheduler uses control runs in two places:
      tests pass with no active mutant, so it stays `killed`, with no killer
      test.
    - When the control run does not pass, the mutant is `runtime_error`, and
-     its `errors[]` entry gives the reason.
+     its `errors[]` entry gives the reason. The mutant gets no retry.
+   - A test that ran and failed in such a control run is a baseline
+     failure for the rest of the run. Each later mutant run leaves it out,
+     and `mutant_ids` of the failure lists those mutants.
    - The scheduler stores the control result of each test set for the run.
      Each distinct test set gets at most one control run, and the test set
      of the self-check gets none. A fault of the companion is not stored.
+   - A control run does not stop at the first failure, so it names each
+     covering test that fails.
    - After the `--time-budget` deadline, a control run that has no stored
      result does not start, and the mutant is `pending`.
 
