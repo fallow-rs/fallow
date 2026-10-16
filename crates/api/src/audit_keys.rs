@@ -9,8 +9,9 @@ use fallow_types::envelope::AuditIntroduced;
 use fallow_types::identity::{IdentifiedFinding, IdentityPaths, dead_code_occurrence_keys};
 
 pub use crate::audit_complexity::{
-    ComplexityBaseline, ComplexityMetrics, classify_complexity_findings, complexity_baseline,
-    complexity_baseline_keys, complexity_ledger_keys, remap_complexity_baseline_for_renames,
+    ComplexityBaseline, ComplexityMetrics, classify_complexity_findings,
+    classify_complexity_findings_against_all, complexity_baseline, complexity_baseline_keys,
+    complexity_ledger_keys, remap_complexity_baseline_for_renames,
 };
 
 /// One dead-code finding classified for audit comparison.

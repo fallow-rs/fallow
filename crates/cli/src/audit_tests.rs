@@ -2378,6 +2378,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
                 },
             ],
         }],
+        inherited_health: Vec::new(),
     };
 
     let cached = cached_from_snapshot(&key, &snapshot).expect("snapshot should serialize");
@@ -2782,6 +2783,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         cycles: FxHashSet::default(),
         public_api: FxHashSet::default(),
         dupe_groups: Vec::new(),
+        inherited_health: Vec::new(),
     };
 
     save_cached_base_snapshot(&opts, &key, &snapshot);

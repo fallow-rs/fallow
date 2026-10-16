@@ -8471,3 +8471,153 @@ fn audit_brief_after_non_brief_run_reports_only_new_public_exports() {
         "only the new export is public API growth: {json}"
     );
 }
+
+/// A feature branch that merges `origin/main`. `main` adds the unused export
+/// `mainOnly` after the fork. The branch adds the unused export `featureOnly`
+/// in a commit that it did not push. With `tracks_upstream`, the branch
+/// tracks `origin/feature`. The merge of `origin/main` is left in progress.
+fn merge_of_main_in_progress(tracks_upstream: bool) -> TempDir {
+    let tmp = create_audit_fixture("merge-inherited");
+    let dir = tmp.path();
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(
+        dir,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+
+    git(dir, &["checkout", "-q", "-b", "feature"]);
+    fs::write(
+        dir.join("src/feature.ts"),
+        "export const featureUsed = 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './utils';\nimport { featureUsed } from './feature';\nused();\nfeatureUsed;\n",
+    )
+    .unwrap();
+    commit_all(dir, "feature: pushed work");
+    if tracks_upstream {
+        git(dir, &["remote", "add", "origin", "."]);
+        git(dir, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+        git(dir, &["config", "branch.feature.remote", "origin"]);
+        git(
+            dir,
+            &["config", "branch.feature.merge", "refs/heads/feature"],
+        );
+    }
+    fs::write(
+        dir.join("src/feature.ts"),
+        "export const featureUsed = 1;\nexport const featureOnly = 2;\n",
+    )
+    .unwrap();
+    commit_all(dir, "feature: unpushed work");
+
+    git(dir, &["checkout", "-q", "main"]);
+    fs::write(
+        dir.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unused = () => 0;\nexport const mainOnly = 3;\n",
+    )
+    .unwrap();
+    commit_all(dir, "main: later work");
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+    git(dir, &["checkout", "-q", "feature"]);
+    git(dir, &["merge", "--no-commit", "--no-ff", "origin/main"]);
+    tmp
+}
+
+/// Return the `introduced` flag of the unused export `name`.
+fn export_introduced(json: &serde_json::Value, name: &str) -> Option<bool> {
+    json["dead_code"]["unused_exports"]
+        .as_array()?
+        .iter()
+        .find(|item| item["export_name"] == name)?["introduced"]
+        .as_bool()
+}
+
+/// Assert that the export from `main` is inherited and the export of the
+/// branch is introduced.
+fn assert_only_the_branch_export_is_introduced(dir: &Path, expected_base: &str) {
+    let output = run_audit_string_env(dir, &[], &[("FALLOW_AUDIT_BASE", "")]);
+
+    let json = parse_json(&output);
+    assert_eq!(
+        json["base_description"].as_str(),
+        Some(expected_base),
+        "{}",
+        output.stdout
+    );
+    assert_eq!(
+        export_introduced(&json, "mainOnly"),
+        Some(false),
+        "an export that the merge brings in from main is inherited: {}",
+        output.stdout
+    );
+    assert_eq!(
+        export_introduced(&json, "featureOnly"),
+        Some(true),
+        "an export that only the branch adds stays introduced: {}",
+        output.stdout
+    );
+}
+
+/// Code that a merge brings in from the default branch is inherited, so the
+/// commit gate does not block the merge commit. Code that only the branch
+/// adds stays introduced.
+#[test]
+fn audit_treats_code_from_an_in_progress_merge_as_inherited() {
+    let dir = merge_of_main_in_progress(false);
+    assert_only_the_branch_export_is_introduced(dir.path(), "merge-base with origin/main");
+}
+
+#[test]
+fn audit_treats_code_from_an_in_progress_merge_as_inherited_with_an_upstream() {
+    let dir = merge_of_main_in_progress(true);
+    assert_only_the_branch_export_is_introduced(dir.path(), "merge-base with origin/feature");
+}
+
+/// The push after a merge commit audits the range from the upstream, so the
+/// code from the default branch stays inherited there too.
+#[test]
+fn audit_treats_code_from_a_committed_merge_as_inherited_with_an_upstream() {
+    let dir = merge_of_main_in_progress(true);
+    git(
+        dir.path(),
+        &["-c", "commit.gpgsign=false", "commit", "--no-edit", "-q"],
+    );
+    assert_only_the_branch_export_is_introduced(dir.path(), "merge-base with origin/feature");
+}
+
+/// Only code that the default branch already has is inherited. A merge of a
+/// local branch that the default branch does not contain keeps the code of
+/// that branch introduced.
+#[test]
+fn audit_keeps_code_from_a_merged_unreviewed_branch_introduced() {
+    let tmp = create_audit_fixture("merge-side");
+    let dir = tmp.path();
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(dir, &["checkout", "-q", "-b", "side"]);
+    fs::write(
+        dir.join("src/utils.ts"),
+        "export const used = () => 42;\nexport const unused = () => 0;\nexport const sideOnly = 4;\n",
+    )
+    .unwrap();
+    commit_all(dir, "side: unreviewed work");
+    git(dir, &["checkout", "-q", "-b", "feature", "main"]);
+    git(dir, &["merge", "--no-commit", "--no-ff", "side"]);
+
+    let output = run_audit_string_env(dir, &[], &[("FALLOW_AUDIT_BASE", "")]);
+
+    let json = parse_json(&output);
+    assert_eq!(
+        export_introduced(&json, "sideOnly"),
+        Some(true),
+        "code from a branch that main does not contain stays introduced: {}",
+        output.stdout
+    );
+}

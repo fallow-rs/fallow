@@ -75,6 +75,7 @@ fn resolve_audit_base_with_override(
         return Ok(ResolvedAuditBase {
             git_ref: explicit.to_string(),
             description: None,
+            inherited_refs: Vec::new(),
         });
     }
     if let Some(env_ref) = env_override {
@@ -82,6 +83,7 @@ fn resolve_audit_base_with_override(
         return Ok(ResolvedAuditBase {
             description: Some(format!("FALLOW_AUDIT_BASE={env_ref}")),
             git_ref: env_ref,
+            inherited_refs: Vec::new(),
         });
     }
     let detected =

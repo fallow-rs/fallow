@@ -188,6 +188,27 @@ pub fn classify_complexity_findings(
     introduced
 }
 
+/// Classify each head complexity finding against several bases, in report
+/// order. A finding is introduced only when it is introduced against every
+/// base, so a finding that one base already has is inherited.
+#[must_use]
+pub fn classify_complexity_findings_against_all<'a>(
+    findings: &[fallow_output::HealthFinding],
+    root: &Path,
+    bases: impl IntoIterator<Item = &'a ComplexityBaseline>,
+) -> Vec<bool> {
+    let mut introduced = vec![true; findings.len()];
+    for base in bases {
+        for (flag, against) in introduced
+            .iter_mut()
+            .zip(classify_complexity_findings(findings, root, base))
+        {
+            *flag &= against;
+        }
+    }
+    introduced
+}
+
 /// The ledger key of each complexity finding, in report order.
 ///
 /// A repeated identity key gets an occurrence suffix, so each finding counts
@@ -317,6 +338,26 @@ mod tests {
         // A category change to a newly exceeded metric that grew.
         assert_eq!(
             classify(vec![finding("f", 1, 20, 14)], &[finding("f", 1, 19, 16)]),
+            [true]
+        );
+    }
+
+    #[test]
+    fn a_finding_that_any_base_has_is_inherited() {
+        let primary = baseline(vec![]);
+        let merged = baseline(vec![finding("f", 1, 17, 16)]);
+        let head = [finding("f", 1, 17, 16), finding("g", 9, 17, 16)];
+        assert_eq!(
+            classify_complexity_findings_against_all(&head, &root(), [&primary, &merged]),
+            [false, true]
+        );
+        // A finding that grew against every base stays introduced.
+        assert_eq!(
+            classify_complexity_findings_against_all(
+                &[finding("f", 1, 18, 17)],
+                &root(),
+                [&baseline(vec![finding("f", 1, 17, 16)]), &merged]
+            ),
             [true]
         );
     }

@@ -103,6 +103,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
             base_ref: &resolved_base.git_ref,
             cache_dir: Some(&config.cache_dir),
             changed_files,
+            inherited_base_refs: &resolved_base.inherited_refs,
         },
     )?
     else {
@@ -1465,6 +1466,7 @@ mod tests {
             ResolvedAuditBase {
                 git_ref: "HEAD".to_string(),
                 description: None,
+                inherited_refs: Vec::new(),
             },
             project.path(),
             0,

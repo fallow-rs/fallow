@@ -1137,6 +1137,8 @@ Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#
 
 With `--gate new-only`, inherited error-severity findings can be present in the JSON output while the verdict remains `pass`; check the `attribution` object and per-finding `introduced` booleans.
 
+A merge of the default branch brings in code that the default branch already has. When the base is auto-detected, audit also compares with the merged default-branch commits: `MERGE_HEAD` of a merge in progress, and the merge-base with the default branch after a merge commit. A finding that one of these commits already has is inherited, so the gate does not block the merge commit or the push after it. Code from a merged branch that the default branch does not contain stays introduced. An explicit `--base` or `FALLOW_AUDIT_BASE` turns this off.
+
 A complexity finding matches its base finding by file path and function name. The line and the exceeded category do not affect the match, and a renamed file keeps its match. A complexity finding is introduced in these cases:
 
 - No base finding matches it.

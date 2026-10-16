@@ -55,6 +55,10 @@ pub struct AuditKeySnapshot {
     /// suppression-blind, so a threshold override or an ignore comment cannot
     /// move the head-versus-base comparison.
     pub branching: FxHashMap<String, fallow_types::extract::FileBranching>,
+    /// Complexity findings of the inherited bases (see
+    /// [`AuditKeySnapshot::absorb_inherited`]). A head finding is introduced
+    /// only when it is introduced against `health` and against each of these.
+    pub inherited_health: Vec<ComplexityBaseline>,
 }
 
 impl AuditKeySnapshot {
@@ -96,6 +100,39 @@ impl AuditKeySnapshot {
                 .collect();
         }
         snapshot
+    }
+
+    /// Treat the findings of an inherited base as inherited too.
+    ///
+    /// An inherited base is a commit of the default branch that the change
+    /// merged. A key set takes the union, so a key that either side has is not
+    /// introduced. Complexity findings keep one baseline per side, because
+    /// their match rule pairs each base finding with at most one head finding.
+    /// The clone locations, the branching totals and the type-aware identity
+    /// stay those of the primary base. When the type-aware identity or the
+    /// query gaps differ, the refined dead-code keys stay out. `inherited`
+    /// must already use head paths.
+    pub fn absorb_inherited(&mut self, inherited: Self) {
+        let inherited_syntactic = inherited
+            .syntactic_dead_code
+            .unwrap_or_else(|| inherited.dead_code.clone());
+        if let Some(syntactic) = self.syntactic_dead_code.as_mut() {
+            syntactic.extend(inherited_syntactic);
+        }
+        // Refined keys of another semantic identity do not compare with the
+        // keys of this side, so they could hide a real finding.
+        if self.type_aware_identity == inherited.type_aware_identity
+            && self.type_aware_gap_signature == inherited.type_aware_gap_signature
+        {
+            self.dead_code.extend(inherited.dead_code);
+        }
+        self.styling.extend(inherited.styling);
+        self.dupes.extend(inherited.dupes);
+        self.boundary_edges.extend(inherited.boundary_edges);
+        self.cycles.extend(inherited.cycles);
+        self.public_api.extend(inherited.public_api);
+        self.inherited_health.push(inherited.health);
+        self.inherited_health.extend(inherited.inherited_health);
     }
 
     /// Relocate the keys of renamed files onto their head paths.

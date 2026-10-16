@@ -11,9 +11,11 @@ use super::AuditOptions;
 /// that the typed audit also uses. Precedence: explicit `--changed-since` /
 /// `--base` flag, then the `FALLOW_AUDIT_BASE` env override, then
 /// auto-detection.
-pub fn resolve_base_ref(opts: &AuditOptions<'_>) -> Result<(String, Option<String>), ExitCode> {
+pub fn resolve_base_ref(
+    opts: &AuditOptions<'_>,
+) -> Result<fallow_engine::repo_refs::ResolvedAuditBase, ExitCode> {
     match fallow_api::audit_run::resolve_audit_base(opts.root, opts.changed_since) {
-        Ok(resolved) => Ok((resolved.git_ref, resolved.description)),
+        Ok(resolved) => Ok(resolved),
         Err(error) => Err(emit_error(&base_ref_error_message(&error), 2, opts.output)),
     }
 }

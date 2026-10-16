@@ -73,6 +73,10 @@ pub struct ResolvedAuditBase {
     pub git_ref: String,
     /// Human-readable source of the resolved ref.
     pub description: Option<String>,
+    /// Commits of the remote default branch that the change merged after
+    /// `git_ref`. A finding that one of them has is inherited, not
+    /// introduced. Only an auto-detected base has them.
+    pub inherited_refs: Vec<String>,
 }
 
 /// Temporary detached worktree for comparing audit results against a base ref.
@@ -1325,18 +1329,29 @@ pub fn resolve_base_analysis_root(
 /// A branch with no common ancestor with its base (a shallow clone, unrelated
 /// history) falls back to the remote-tracking tip rather than failing the
 /// detection outright.
+///
+/// The result also names the commits of the remote default branch that the
+/// change merged after the base, see [`merged_default_branch_refs`].
 #[must_use]
 pub fn auto_detect_audit_base_ref(root: &Path) -> Option<ResolvedAuditBase> {
+    let mut base = detect_audit_base_ref(root)?;
+    base.inherited_refs = merged_default_branch_refs(root, &base.git_ref);
+    Some(base)
+}
+
+fn detect_audit_base_ref(root: &Path) -> Option<ResolvedAuditBase> {
     if let Some(upstream) = git_upstream_ref(root) {
         if let Some(sha) = git_merge_base(root, &upstream, "HEAD") {
             return Some(ResolvedAuditBase {
                 git_ref: sha,
                 description: Some(format!("merge-base with {upstream}")),
+                inherited_refs: Vec::new(),
             });
         }
         return Some(ResolvedAuditBase {
             description: Some(format!("{upstream} (tip)")),
             git_ref: upstream,
+            inherited_refs: Vec::new(),
         });
     }
 
@@ -1345,11 +1360,13 @@ pub fn auto_detect_audit_base_ref(root: &Path) -> Option<ResolvedAuditBase> {
             return Some(ResolvedAuditBase {
                 git_ref: sha,
                 description: Some(format!("merge-base with {remote_ref}")),
+                inherited_refs: Vec::new(),
             });
         }
         return Some(ResolvedAuditBase {
             description: Some(format!("{remote_ref} (tip)")),
             git_ref: remote_ref,
+            inherited_refs: Vec::new(),
         });
     }
 
@@ -1358,11 +1375,59 @@ pub fn auto_detect_audit_base_ref(root: &Path) -> Option<ResolvedAuditBase> {
             return Some(ResolvedAuditBase {
                 git_ref: candidate.to_string(),
                 description: Some(format!("local {candidate}")),
+                inherited_refs: Vec::new(),
             });
         }
     }
 
     None
+}
+
+/// Commits of the remote default branch that the change merged after `base`.
+///
+/// A merge of the default branch into a feature branch brings in code that
+/// the default branch already has. Against a base on the feature branch,
+/// that code reads as new, so the commit gate blocks the merge commit and the
+/// push that follows it. The code of these commits is inherited instead:
+///
+/// - `MERGE_HEAD` of an in-progress merge, when the default branch contains it;
+/// - the merge-base of the default branch and `HEAD`, after a merge commit.
+///
+/// A commit that `base` already contains adds nothing, so it is left out.
+/// Without a remote default branch, the result is empty.
+#[must_use]
+pub fn merged_default_branch_refs(root: &Path, base: &str) -> Vec<String> {
+    let Some(default_ref) = detect_remote_default_ref(root) else {
+        return Vec::new();
+    };
+    let merge_head = run_git(root, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"])
+        .filter(|merge_head| git_is_ancestor(root, merge_head, &default_ref) == Some(true));
+    let merged_default = git_merge_base(root, &default_ref, "HEAD");
+    // A git error (a shallow history, a missing object) skips the commit, so
+    // the audit keeps the stricter single-base comparison.
+    let mut refs: Vec<String> = merge_head
+        .into_iter()
+        .chain(merged_default)
+        .filter(|commit| git_is_ancestor(root, commit, base) == Some(false))
+        .collect();
+    refs.dedup();
+    refs
+}
+
+/// Whether `ancestor` is `descendant` or one of its ancestors. `None` when
+/// git cannot tell, for example in a shallow history.
+fn git_is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> Option<bool> {
+    let status = git_command(root)
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
 }
 
 /// Short SHA for the current HEAD.
@@ -1950,6 +2015,92 @@ mod tests {
         assert_eq!(
             detected.description.as_deref(),
             Some("merge-base with origin/main")
+        );
+    }
+
+    /// A repo with `origin/main` one commit ahead of the fork point of the
+    /// branch `feature`. Returns the repo, the fork point and the tip of
+    /// `origin/main`.
+    fn repo_with_newer_main(root: &Path) -> (PathBuf, String, String) {
+        let repo = seeded_repo(root);
+        let fork_point = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["remote", "add", "origin", &repo.to_string_lossy()]);
+        commit_file(&repo, "main.txt", "main change\n");
+        let main_tip = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["update-ref", "refs/remotes/origin/main", "main"]);
+        git(&repo, &["checkout", "-b", "feature", &fork_point]);
+        commit_file(&repo, "feature.txt", "my change\n");
+        (repo, fork_point, main_tip)
+    }
+
+    #[test]
+    fn merged_default_branch_refs_is_empty_without_a_merge() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (repo, fork_point, _) = repo_with_newer_main(temp.path());
+
+        assert!(merged_default_branch_refs(&repo, &fork_point).is_empty());
+    }
+
+    #[test]
+    fn merged_default_branch_refs_names_the_merge_head_of_the_default_branch() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (repo, fork_point, main_tip) = repo_with_newer_main(temp.path());
+        git(&repo, &["merge", "--no-commit", "--no-ff", "origin/main"]);
+
+        assert_eq!(merged_default_branch_refs(&repo, &fork_point), [main_tip]);
+    }
+
+    #[test]
+    fn merged_default_branch_refs_names_the_merged_default_after_a_merge_commit() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (repo, fork_point, main_tip) = repo_with_newer_main(temp.path());
+        let pushed = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["merge", "--no-ff", "--no-edit", "origin/main"]);
+
+        assert_eq!(
+            merged_default_branch_refs(&repo, &pushed),
+            std::slice::from_ref(&main_tip)
+        );
+        // A base that already contains the merged commit gains nothing.
+        assert!(merged_default_branch_refs(&repo, &main_tip).is_empty());
+        assert_ne!(fork_point, main_tip);
+    }
+
+    #[test]
+    fn merged_default_branch_refs_names_the_new_default_after_a_rebase() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (repo, fork_point, main_tip) = repo_with_newer_main(temp.path());
+        git(&repo, &["rebase", "-q", "origin/main"]);
+
+        // The upstream still holds the pre-rebase branch, so the base is the
+        // old fork point. The new default commit that the rebase moved under
+        // the branch is inherited.
+        assert_eq!(merged_default_branch_refs(&repo, &fork_point), [main_tip]);
+    }
+
+    #[test]
+    fn merged_default_branch_refs_ignores_a_branch_that_the_default_branch_lacks() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (repo, fork_point, _) = repo_with_newer_main(temp.path());
+        git(&repo, &["checkout", "-b", "side", &fork_point]);
+        commit_file(&repo, "side.txt", "side change\n");
+        git(&repo, &["checkout", "feature"]);
+        let base = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["merge", "--no-commit", "--no-ff", "side"]);
+
+        assert!(merged_default_branch_refs(&repo, &base).is_empty());
+    }
+
+    #[test]
+    fn merged_default_branch_refs_skips_a_commit_that_git_cannot_place() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (repo, _, _) = repo_with_newer_main(temp.path());
+        git(&repo, &["merge", "--no-commit", "--no-ff", "origin/main"]);
+
+        // An unknown base makes the ancestry check fail: no ref is inherited.
+        assert!(
+            merged_default_branch_refs(&repo, "0000000000000000000000000000000000000000")
+                .is_empty()
         );
     }
 

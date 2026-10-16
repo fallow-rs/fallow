@@ -154,6 +154,7 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
                     .collect(),
             })
             .collect(),
+        inherited_health: Vec::new(),
     })
 }
 

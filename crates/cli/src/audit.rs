@@ -1240,7 +1240,11 @@ pub fn execute_audit_with_type_aware(
 ) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
 
-    let (base_ref, base_description) = resolve_base_ref(opts)?;
+    let fallow_engine::repo_refs::ResolvedAuditBase {
+        git_ref: base_ref,
+        description: base_description,
+        inherited_refs,
+    } = resolve_base_ref(opts)?;
 
     let mut changed_files = audit_changed_files(opts, &base_ref)?;
     if let Some(walkthrough_file) = opts.walkthrough_file
@@ -1267,6 +1271,7 @@ pub fn execute_audit_with_type_aware(
             base_ref: &base_ref,
             cache_dir: Some(opts.cache_dir),
             changed_files,
+            inherited_base_refs: &inherited_refs,
         },
     )?;
     let Some(run) = run else {
@@ -1691,6 +1696,7 @@ fn attribute_preloaded_run(
             base: fallow_api::audit_run::AuditBase {
                 snapshot: Some(base_snapshot),
                 skipped: false,
+                inherited: Vec::new(),
             },
             renames: &[],
             shared_diff: shared_diff(),

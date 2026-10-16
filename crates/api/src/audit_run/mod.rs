@@ -228,6 +228,9 @@ pub struct AuditRunInput<'a> {
     pub cache_dir: Option<&'a Path>,
     /// Changed files of the run, after any narrowing of the surface.
     pub changed_files: FxHashSet<PathBuf>,
+    /// Commits whose findings are inherited in addition to the base, see
+    /// [`fallow_engine::repo_refs::merged_default_branch_refs`].
+    pub inherited_base_refs: &'a [String],
 }
 
 /// The base snapshot that attribution compares with.
@@ -238,6 +241,9 @@ pub struct AuditBase {
     /// `true` when the head keys stand in for the base (no finding can have
     /// changed), so every finding is inherited.
     pub skipped: bool,
+    /// Snapshots of the inherited bases, with head paths. Attribution absorbs
+    /// them into `snapshot` after the rename remap of the primary base.
+    pub inherited: Vec<AuditKeySnapshot>,
 }
 
 /// Inputs of [`attribute`].
@@ -334,6 +340,7 @@ pub fn run<B: AuditBackend>(
         base_ref,
         cache_dir,
         changed_files,
+        inherited_base_refs,
     } = input;
     if changed_files.is_empty() {
         return Ok(None);
@@ -380,6 +387,7 @@ pub fn run<B: AuditBackend>(
         AuditBase {
             snapshot: Some(snapshot),
             skipped: false,
+            inherited: inherited_snapshots(backend, root, inherited_base_refs, &focus),
         }
     } else if let Some(fresh) = fresh_base {
         let snapshot = fresh?;
@@ -389,11 +397,13 @@ pub fn run<B: AuditBackend>(
         AuditBase {
             snapshot: Some(snapshot),
             skipped: false,
+            inherited: inherited_snapshots(backend, root, inherited_base_refs, &focus),
         }
     } else {
         AuditBase {
             snapshot: Some(AuditKeySnapshot::from_view(&analyses.view())),
             skipped: true,
+            inherited: Vec::new(),
         }
     };
 
@@ -441,10 +451,14 @@ pub fn attribute<A: AuditAnalyses>(
     let AuditBase {
         snapshot: mut base_snapshot,
         skipped,
+        inherited,
     } = base;
     // The head keys that stand in for a skipped base are head paths already.
     if !skipped && let Some(snapshot) = base_snapshot.as_mut() {
         snapshot.remap_for_renames(renames, root);
+        for inherited in inherited {
+            snapshot.absorb_inherited(inherited);
+        }
     }
     let degrade_reason = {
         let view = analyses.view();
@@ -549,6 +563,50 @@ fn diff_risk_of<A: AuditAnalyses>(
         base_clone_groups,
         head_clone_groups,
     })
+}
+
+/// Take the snapshot of each inherited base, with its keys on head paths.
+///
+/// An inherited base only lowers the introduced count, so a base that fails
+/// (no worktree, a failed analysis) is left out. The audit then keeps the
+/// stricter comparison with the primary base.
+fn inherited_snapshots<B: AuditBackend>(
+    backend: &B,
+    root: &Path,
+    refs: &[String],
+    focus: &FxHashSet<PathBuf>,
+) -> Vec<AuditKeySnapshot> {
+    refs.iter()
+        .filter_map(|inherited_ref| inherited_snapshot(backend, root, inherited_ref, focus).ok())
+        .collect()
+}
+
+fn inherited_snapshot<B: AuditBackend>(
+    backend: &B,
+    root: &Path,
+    inherited_ref: &str,
+    focus: &FxHashSet<PathBuf>,
+) -> Result<AuditKeySnapshot, B::Error> {
+    let cache_key = backend.base_cache_key(inherited_ref, focus)?;
+    if let Some(cached) = cache_key
+        .as_ref()
+        .and_then(|key| backend.load_cached_base(key))
+    {
+        return Ok(remapped(cached, root, inherited_ref));
+    }
+    let base_sha = cache_key
+        .as_ref()
+        .and_then(|key| backend.cached_base_sha(key));
+    let snapshot = base_snapshot(backend, root, inherited_ref, focus, base_sha)?;
+    if let Some(key) = cache_key.as_ref() {
+        backend.save_cached_base(key, &snapshot);
+    }
+    Ok(remapped(snapshot, root, inherited_ref))
+}
+
+fn remapped(mut snapshot: AuditKeySnapshot, root: &Path, base_ref: &str) -> AuditKeySnapshot {
+    snapshot.remap_for_renames(&renamed_files(root, base_ref), root);
+    snapshot
 }
 
 /// Analyze the base checkout and take its attribution keys.

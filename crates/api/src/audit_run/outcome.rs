@@ -6,9 +6,9 @@ use fallow_config::{AuditGate, RulesConfig, Severity};
 
 use super::{AuditAnalysesView, AuditKeySnapshot};
 use crate::audit_keys::{
-    AuditComparison, AuditDomainLedger, DeadCodeAuditLedger, classify_complexity_findings,
-    complexity_ledger_keys, dead_code_audit_ledger, dupe_group_key, preexisting_dupe_group_keys,
-    styling_finding_key,
+    AuditComparison, AuditDomainLedger, DeadCodeAuditLedger,
+    classify_complexity_findings_against_all, complexity_ledger_keys, dead_code_audit_ledger,
+    dupe_group_key, preexisting_dupe_group_keys, styling_finding_key,
 };
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 
@@ -95,7 +95,13 @@ pub fn compare(
             let keys = complexity_ledger_keys(findings, health.root);
             let introduced = base.map_or_else(
                 || vec![false; findings.len()],
-                |snapshot| classify_complexity_findings(findings, health.root, &snapshot.health),
+                |snapshot| {
+                    classify_complexity_findings_against_all(
+                        findings,
+                        health.root,
+                        std::iter::once(&snapshot.health).chain(&snapshot.inherited_health),
+                    )
+                },
             );
             AuditDomainLedger::from_classified(keys.into_iter().zip(introduced), base.is_some())
         });

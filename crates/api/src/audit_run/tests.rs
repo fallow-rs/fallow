@@ -922,6 +922,7 @@ fn a_reused_head_run_keeps_the_head_keys_as_the_base_snapshot() {
             base_ref: "HEAD",
             cache_dir: None,
             changed_files: changed,
+            inherited_base_refs: &[],
         },
     )
     .expect("the stub backend does not fail")
