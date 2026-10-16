@@ -1,4 +1,6 @@
 target/
+# Crash and timeout inputs from local fuzz runs
+fuzz/artifacts/
 # Public smoke conformance artifacts live under target/public-smoke-conformance/
 # Ignore everything in .cargo/ (credentials, local overrides) but track
 # the committed workspace config so target-specific rustflags (e.g.

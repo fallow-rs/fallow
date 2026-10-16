@@ -1,0 +1,7 @@
+<script setup lang="ts">
+import { ref } from 'vue';
+import Child from './Child.vue';
+const n = ref(0);
+</script>
+<template><Child :n="n" @click="n++" v-if="n > 0" /></template>
+<style scoped>.a { color: red; }</style>

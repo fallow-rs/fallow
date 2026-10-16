@@ -12,7 +12,13 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+fallow-config = { path = "../crates/config" }
 fallow-core = { path = "../crates/core" }
+dunce = "1"
+glob = "0.3"
+serde_json = "1"
+toml = "1.1"
 
 [[bin]]
 name = "fuzz_sfc"
@@ -33,3 +39,19 @@ path = "fuzz_targets/fuzz_css.rs"
 [[bin]]
 name = "fuzz_scripts"
 path = "fuzz_targets/fuzz_scripts.rs"
+
+[[bin]]
+name = "fuzz_extract"
+path = "fuzz_targets/fuzz_extract.rs"
+
+[[bin]]
+name = "fuzz_config_glob"
+path = "fuzz_targets/fuzz_config_glob.rs"
+
+[[bin]]
+name = "fuzz_workspace_manifests"
+path = "fuzz_targets/fuzz_workspace_manifests.rs"
+
+[[bin]]
+name = "fuzz_config_files"
+path = "fuzz_targets/fuzz_config_files.rs"

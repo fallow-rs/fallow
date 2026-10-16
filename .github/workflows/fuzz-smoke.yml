@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           set -u
-          targets=(fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts)
+          targets=(fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts fuzz_extract fuzz_config_glob fuzz_workspace_manifests fuzz_config_files)
           failed=0
           for target in "${targets[@]}"; do
             echo "::group::Fuzz ${target}"

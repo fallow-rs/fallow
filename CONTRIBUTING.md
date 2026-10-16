@@ -106,10 +106,23 @@ cargo +nightly fuzz list
 cargo +nightly fuzz run fuzz_sfc -- -max_total_time=30 -timeout=10
 ```
 
-Each target uses seed inputs from `fuzz/corpus/<target-name>/`. Pull requests
-and pushes that affect the parser pipeline run every target for 30 seconds.
-The scheduled workflow runs every target for five minutes each week and can
-also be started manually. Crashing inputs are retained as workflow artifacts.
+Each target uses seed inputs from `fuzz/corpus/<target-name>/`. Pushes to
+`main` that affect the parser pipeline run every target for 30 seconds. The
+scheduled workflow runs every target for five minutes each week and can also
+be started manually. Crashing inputs are retained as workflow artifacts.
+
+Most targets check that a parser does not panic or hang. `fuzz_config_glob`
+and `fuzz_config_files` also check a security property: when glob validation
+accepts a pattern, the pattern cannot name a path outside the project root.
+To add a target, add a `[[bin]]` entry to `fuzz/Cargo.toml`, add seed inputs
+to `fuzz/corpus/<target-name>/`, and add the name to the target list in
+`.github/workflows/fuzz-smoke.yml`. When you run a target locally, give a
+scratch directory as the first corpus argument, so that new inputs do not go
+into the committed seed corpus:
+
+```bash
+cargo +nightly fuzz run fuzz_extract /tmp/fuzz-extract fuzz/corpus/fuzz_extract
+```
 
 ### Running locally
 

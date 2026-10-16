@@ -1,0 +1,7 @@
+name = "toml-plugin"
+enablers = ["toml-framework"]
+entryPoints = ["src/**/*.page.ts"]
+
+[detection]
+type = "fileExists"
+pattern = "toml-framework.config.ts"

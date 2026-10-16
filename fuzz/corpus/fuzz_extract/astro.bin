@@ -1,0 +1,6 @@
+---
+import Layout from '../layouts/Layout.astro';
+const { title } = Astro.props;
+---
+<Layout title={title}><h1 class:list={['a', { b: true }]}>{title}</h1></Layout>
+<script>import './client';</script>

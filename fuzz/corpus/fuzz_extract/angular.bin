@@ -1,0 +1,3 @@
+import { Component, Input } from '@angular/core';
+@Component({ selector: 'app-root', template: `<div *ngIf="show">{{ title | uppercase }}</div><app-child [value]="title" (changed)="on($event)"></app-child>`, styles: ['.a { color: red; }'] })
+export class AppComponent { @Input() title = ''; show = true; on(e: unknown) {} }

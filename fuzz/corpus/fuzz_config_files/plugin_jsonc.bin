@@ -1,0 +1,6 @@
+// plugin with comments
+{
+  "name": "jsonc-plugin", /* inline */
+  "entryPoints": ["app/**/*.tsx",],
+  "detection": { "type": "all", "conditions": [ { "type": "fileExists", "pattern": "app.config.ts" } ] },
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@scope/pkg",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": { "cli": "./bin/cli.js" },
+  "exports": { ".": { "import": { "types": "./dist/a.d.ts", "default": "./dist/a.mjs" }, "require": "./dist/a.cjs" }, "./sub/*": "./dist/sub/*.js", "./package.json": "./package.json" },
+  "workspaces": ["packages/*"],
+  "dependencies": { "local": "file:../local", "linked": "link:./linked", "ws": "workspace:*" },
+  "devDependencies": { "typescript": "^5" },
+  "scripts": { "build": "tsc -p ." }
+}

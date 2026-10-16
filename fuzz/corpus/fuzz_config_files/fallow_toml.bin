@@ -1,0 +1,10 @@
+entry = ["src/index.ts"]
+ignorePatterns = ["generated/**"]
+
+[rules]
+unused-files = "error"
+
+[[overrides]]
+files = ["scripts/**"]
+[overrides.rules]
+unused-exports = "off"

@@ -1,0 +1,8 @@
+{
+  "name": "root",
+  "overrides": { "foo": "1.0.0", "bar": { ".": "2.0.0", "baz": "3.0.0" } },
+  "resolutions": { "**/left-pad": "1.3.0", "a/b": "1.0.0" },
+  "pnpm": { "overrides": { "x@1>y": "^2" } },
+  "workspaces": { "packages": ["packages/*"], "catalog": { "react": "^18" }, "catalogs": { "old": { "react": "^17" } } },
+  "dependencies": { "react": "catalog:", "vue": "catalog:old" }
+}
