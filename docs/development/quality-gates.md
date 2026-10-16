@@ -222,7 +222,12 @@ Focused integration checks:
   their `expected.json`. Runs in `verify:fast`.
 - `node --test scripts/workflow-policy.test.mjs` for workflow changes and for
   Rust files with Windows-only code: each such file must start a Windows CI
-  job. Runs in `verify:fast`.
+  job. Runs in `verify:fast`. It also checks each script that a workflow runs
+  with `node <path>.mjs`, directly or through an `npm run` or `pnpm` package
+  script. When the script has a main guard, its sibling `<name>.test.mjs` must
+  start it with `process.execPath` and check that its work began.
+  A guard that never matches makes the script exit with 0 and do nothing, and
+  only a start test finds this.
 - `npm run check:dupes-accuracy` for duplication changes: it re-runs the
   hand-written corpus in `tests/benchmark-corpus/` and exits non-zero below the
   committed floor in `results/accuracy-baseline.json`. Runs in `verify:full`.

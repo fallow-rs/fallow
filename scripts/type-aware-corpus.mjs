@@ -17,7 +17,7 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   checkerEvidenceRequest as createCheckerEvidenceRequest,
   digestSet,
@@ -2851,7 +2851,7 @@ export const main = async (argv = process.argv.slice(2)) => {
   return 0;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().then(
     (code) => {
       process.exitCode = code;

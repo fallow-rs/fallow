@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 export const FAST_BENCHMARKS = [
   {
@@ -271,6 +272,6 @@ export const main = (argv = process.argv.slice(2), env = process.env) => {
   printMatrix(selectFastTargets(changedFiles));
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

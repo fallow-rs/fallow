@@ -27,7 +27,7 @@
 
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { runCliMain } from "./cli-main.mjs";
 
@@ -381,6 +381,6 @@ export const main = (args = process.argv.slice(2)) => {
   return 0;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runCliMain(main);
 }

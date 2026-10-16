@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   allFastTargets,
@@ -178,4 +180,26 @@ test("changed files can be injected for local tests", () => {
   });
 
   assert.deepEqual(files, ["crates/output/src/lib.rs", "README.md"]);
+});
+
+test("a CI run of generate-benchmark-matrix.mjs prints the matrix for the changed files", () => {
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const result = spawnSync(process.execPath, [".github/scripts/generate-benchmark-matrix.mjs"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      BENCH_CHANGED_FILES: "crates/benchmarks/benches/component_cache.rs\n",
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    {
+      label: "cache component",
+      cache_key: "component-cache",
+      package: "fallow-benchmarks",
+      bench: "component_cache",
+    },
+  ]);
 });

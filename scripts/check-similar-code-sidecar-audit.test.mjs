@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -99,4 +101,37 @@ test("policy check uses the actual cargo dependency tree contract", () => {
   });
 
   assert.equal(policy.owner, "tools/similar-code-sidecar");
+});
+
+test("check-similar-code-sidecar-audit.mjs reads the cargo tree when Node starts it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fallow-sidecar-audit-start-"));
+  try {
+    // A fake cargo prints the fixture tree, so the run needs no network and no build.
+    writeFileSync(join(dir, "tree.txt"), `${TREE}\n`);
+    const fakeCargo = join(dir, "cargo");
+    writeFileSync(fakeCargo, `#!/bin/sh\ncat "${join(dir, "tree.txt")}"\n`);
+    chmodSync(fakeCargo, 0o755);
+
+    const result = spawnSync(process.execPath, ["scripts/check-similar-code-sidecar-audit.mjs"], {
+      cwd: resolve(import.meta.dirname, ".."),
+      encoding: "utf8",
+      env: { PATH: `${dir}${delimiter}${process.env.PATH ?? ""}` },
+    });
+
+    // The allowlist has a review date. After that date the run fails with a clear message.
+    const { review_by: reviewBy } = loadPolicy();
+    const today = new Date().toISOString().slice(0, 10);
+    if (today > reviewBy) {
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, new RegExp(`allowlist expired on ${reviewBy}`, "u"));
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(
+        result.stdout,
+        new RegExp(`^similar-code audit allowlist valid through ${reviewBy};`, "u"),
+      );
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
 });

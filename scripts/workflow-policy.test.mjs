@@ -2421,3 +2421,172 @@ ${block}`;
   assert.match(duplicate.stderr, /VSCE_PAT exists at both levels/u);
   assert.notEqual(run("azure", "oidc", [], []).status, 0);
 });
+
+const NODE_SCRIPT_COMMAND = /\bnode\s+(?:\.\/)?([\w./-]+\.mjs)\b/gu;
+// Each form gives the package directory in group 1 and the script name in
+// group 2. A bare `pnpm <name>` can also be a pnpm command, so only the
+// explicit forms must name a package script.
+const PACKAGE_SCRIPT_FORMS = [
+  { pattern: /\bnpm(?:\s+--prefix\s+([\w./-]+))?\s+run\s+([\w:-]+)/gu, explicit: true },
+  { pattern: /\bnpm(?:\s+--prefix\s+([\w./-]+))?\s+(test)\b/gu, explicit: true },
+  { pattern: /\bpnpm(?:\s+--dir\s+([\w./-]+))?\s+run\s+([\w:-]+)/gu, explicit: true },
+  { pattern: /\bpnpm(?:\s+--dir\s+([\w./-]+))?\s+(?!run\b)([\w:-]+)/gu, explicit: false },
+];
+const PREFIX_OPTION = /\s--prefix\s+([\w./-]+)/u;
+const CD_COMMAND = /(?:^|&&|;|\|\||\s)cd\s+([\w./-]+)\s*(?:&&|;|$)/u;
+const JOB_KEY = /^ {2}[\w-]+:\s*$/u;
+const STEP_START =
+  /^\s*-\s+(?:name|uses|run|id|if|shell|env|with|working-directory|timeout-minutes|continue-on-error):/u;
+const WORKING_DIRECTORY = /^\s*(?:-\s+)?working-directory:\s*["']?([\w./-]+)["']?\s*$/u;
+const NODE_START_CALL =
+  /\b(?:spawnSync|execFileSync|spawn|execFile)\s*\(\s*process\.execPath\s*,\s*\[([^\]]*)\]/gu;
+
+const workflowSources = () => {
+  const actionFiles = readdirSync(".github/actions", { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(".github/actions", entry.name, "action.yml"))
+    .filter(existsSync);
+  const workflowFiles = readdirSync(".github/workflows")
+    .filter((name) => /\.ya?ml$/u.test(name))
+    .map((name) => join(".github/workflows", name));
+  return [...workflowFiles, ...actionFiles].map(readWorkflow);
+};
+
+const chunk = (lines, isStart) =>
+  lines.reduce((chunks, line) => {
+    if (chunks.length === 0 || isStart(line)) chunks.push([]);
+    chunks.at(-1).push(line);
+    return chunks;
+  }, []);
+
+const directoryOf = (lines) =>
+  lines.map((line) => WORKING_DIRECTORY.exec(line)?.[1]).find((dir) => dir !== undefined);
+
+// A step runs in its own `working-directory`, or else in the
+// `defaults.run.working-directory` of its job.
+const commandSteps = (source) =>
+  chunk(source.split(/\r?\n/u), (line) => JOB_KEY.test(line)).flatMap((job) => {
+    const [header, ...steps] = chunk(job, (line) => STEP_START.test(line));
+    const jobDir = directoryOf(header) ?? ".";
+    return steps.map((lines) => ({ lines, dir: directoryOf(lines) ?? jobDir }));
+  });
+
+const packageScripts = (packageDir) => {
+  const manifest = join(packageDir, "package.json");
+  return existsSync(manifest) ? (JSON.parse(readFileSync(manifest, "utf8")).scripts ?? {}) : {};
+};
+
+const packageCommands = (line, lineDir) =>
+  PACKAGE_SCRIPT_FORMS.flatMap(({ pattern, explicit }) =>
+    Array.from(line.matchAll(pattern), (match) => ({
+      packageDir: match[1] ?? PREFIX_OPTION.exec(line.slice(match.index))?.[1] ?? lineDir,
+      name: match[2],
+      explicit,
+    })),
+  );
+
+// A package script can run other package scripts, so follow each one once.
+const followPackageScript = ({ packageDir, name, explicit }, state) => {
+  const body = packageScripts(packageDir)[name];
+  if (body === undefined) {
+    if (explicit) state.unknown.push(`${packageDir}: ${name}`);
+    return [];
+  }
+  const key = `${packageDir}:${name}`;
+  if (state.seen.has(key)) return [];
+  state.seen.add(key);
+  return commandScripts(body.split("\n"), packageDir, state);
+};
+
+const lineScripts = (line, lineDir, state) => [
+  ...Array.from(line.matchAll(NODE_SCRIPT_COMMAND), (match) => join(lineDir, match[1])),
+  ...packageCommands(line, lineDir).flatMap((command) => followPackageScript(command, state)),
+];
+
+// A shell keeps the directory of a `cd`, so a `cd <dir>` moves every later
+// command of the same step or package script.
+const commandScripts = (lines, startDir, state) => {
+  let dir = startDir;
+  return lines.flatMap((line) => {
+    const cd = CD_COMMAND.exec(line);
+    if (cd) dir = join(dir, cd[1]);
+    return lineScripts(line, dir, state);
+  });
+};
+
+const workflowRunScripts = () => {
+  const state = { seen: new Set(), unknown: [] };
+  const scripts = workflowSources().flatMap((source) =>
+    commandSteps(source).flatMap((step) => commandScripts(step.lines, step.dir, state)),
+  );
+  return {
+    scripts: [...new Set(scripts)]
+      .filter((script) => !script.endsWith(".test.mjs") && !script.includes("node_modules"))
+      .toSorted(),
+    unknown: [...new Set(state.unknown)].toSorted(),
+  };
+};
+
+// A main guard decides at run time if the module was started or imported.
+// When it decides wrong, the script does no work and exits with 0.
+const hasMainGuard = (source) =>
+  source.includes("process.argv[1]") && source.includes("import.meta.url");
+
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+// A start test starts the script itself: the argument list of a
+// `process.execPath` start call names the script, or names a constant whose
+// value names it. A spawn of another file plus a mention elsewhere is no proof.
+const hasStartTest = (script) => {
+  const testPath = script.replace(/\.mjs$/u, ".test.mjs");
+  if (!existsSync(testPath)) return false;
+  const source = readFileSync(testPath, "utf8");
+  const name = escapeRegExp(script.slice(script.lastIndexOf("/") + 1));
+  const namesScript = (text) => new RegExp(`["'\`/]${name}["'\`]`, "u").test(text);
+  const constantNamesScript = (identifier) =>
+    new RegExp(`\\b(?:const|let)\\s+${identifier}\\s*=[^;]*["'\`/]${name}["'\`]`, "u").test(source);
+  return Array.from(source.matchAll(NODE_START_CALL), (match) => match[1]).some(
+    (args) =>
+      namesScript(args) ||
+      Array.from(args.matchAll(/(?<![\w$.])[A-Za-z_$][\w$]*/gu), (id) => id[0]).some(
+        constantNamesScript,
+      ),
+  );
+};
+
+test("every guarded script that a workflow runs has a start test", () => {
+  const { scripts, unknown } = workflowRunScripts();
+  assert.deepEqual(unknown, [], "a workflow runs a package script that does not exist");
+  assert.ok(scripts.length > 0, "found no workflow script commands");
+  for (const script of scripts) {
+    assert.ok(existsSync(script), `${script} is run by a workflow but does not exist`);
+  }
+  const missing = scripts.filter(
+    (script) => hasMainGuard(readFileSync(script, "utf8")) && !hasStartTest(script),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    "A workflow runs these scripts, and each has a main guard but no start test. " +
+      "Add a sibling <name>.test.mjs that starts the script as a process and " +
+      "checks that its work began, so a guard that never matches cannot pass CI.",
+  );
+});
+
+// A file URL built from a string skips URL encoding, so the guard never
+// matches a path with a space or a `%`, and the script does no work.
+const STRING_FILE_URL_GUARD = /`file:\/\/\$\{process\.argv\[1\]\}`/u;
+
+test("no main guard builds a file URL from a string", () => {
+  const listed = runProcess("git", ["ls-files", "*.mjs"], { encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  const offenders = listed.stdout
+    .split("\n")
+    .filter((path) => path !== "" && existsSync(path))
+    .filter((path) => STRING_FILE_URL_GUARD.test(readFileSync(path, "utf8")));
+  assert.deepEqual(
+    offenders,
+    [],
+    "Use `pathToFileURL(process.argv[1]).href` or compare real paths in the main guard.",
+  );
+});

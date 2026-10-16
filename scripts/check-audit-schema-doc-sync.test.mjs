@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   checkAuditSchemaDoc,
@@ -204,4 +206,33 @@ test("audit documentation parity fails closed when canonical sources are absent"
 
   assert.equal(result.status, 2);
   assert.match(result.message, /could not read canonical schema versions/u);
+});
+
+test("a CI run of check-audit-schema-doc-sync.mjs reports parity with a named companion", () => {
+  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  const expected = expectedAuditSchemaVersions({
+    auditSource: readFileSync(join(repoRoot, "crates/output/src/root_envelopes.rs"), "utf8"),
+    checkSource: readFileSync(join(repoRoot, "crates/output/src/check.rs"), "utf8"),
+  });
+  const docsDir = mkdtempSync(join(tmpdir(), "fallow-audit-schema-start-"));
+  try {
+    mkdirSync(join(docsDir, "cli"));
+    writeFileSync(
+      join(docsDir, "cli", "audit.mdx"),
+      auditDocument({ audit: expected.audit, deadCode: expected.deadCode }),
+    );
+    const result = spawnSync(process.execPath, ["scripts/check-audit-schema-doc-sync.mjs"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, FALLOW_DOCS_DIR: docsDir },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      result.stdout,
+      `audit schema docs match source contracts: audit=${expected.audit}, dead_code=${expected.deadCode}\n`,
+    );
+  } finally {
+    rmSync(docsDir, { recursive: true, force: true });
+  }
 });

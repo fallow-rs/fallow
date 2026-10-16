@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -379,4 +381,26 @@ test("the corpus lives outside every formatter and linter directory list", () =>
     undefined,
     "the producers are installed under their own prefix, never by the root npm ci",
   );
+});
+
+// A missing binary stops the run after the manifest loads and before any
+// producer or fallow process starts.
+test("the script starts as CI runs it and stops on a missing fallow binary", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fallow-coverage-producers-"));
+  try {
+    const missing = join(dir, "fallow");
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/coverage-producer-conformance.mjs", "--fallow-bin", missing],
+      { cwd: REPO_ROOT, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } },
+    );
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      `fallow binary not found at ${missing}; run cargo build -p fallow-cli --bin fallow\n`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   auditEmittedVersions,
@@ -233,4 +235,16 @@ test("a commented-out version inside a real envelope is left alone", () => {
   const rewritten = rewriteEmittedVersions(source, "3.22.0");
   assert.ok(rewritten.includes('// "version": "4.17.21"'), "the commented pin survives verbatim");
   assert.ok(rewritten.includes('"version": "3.22.0"'), "the live value is rewritten");
+});
+
+test("the package script rejects a bad version before it reads a surface", () => {
+  // A bad value stops the run in argument parsing, so the test writes no file.
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/sync-emitted-versions.mjs", "--check", "--version", "not-a-version"],
+    { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8" },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "--version expects a semantic version, got: not-a-version\n");
 });

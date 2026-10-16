@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { validateKnowledgeArchitecture } from "./check-knowledge-architecture.mjs";
@@ -365,4 +365,15 @@ test("requires generated path setup docs to contain the path and command", () =>
   const errors = validateKnowledgeArchitecture(fixture);
   assert.ok(errors.some((error) => error.includes("does not document generated path command")));
   assert.ok(errors.some((error) => error.includes("does not document generated path: benchmarks")));
+});
+
+test("the script starts as CI runs it and checks the repository", () => {
+  const repoRoot = resolve(import.meta.dirname, "..");
+  const result = spawnSync(process.execPath, ["scripts/check-knowledge-architecture.mjs"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "" },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "Knowledge architecture is consistent.\n");
 });

@@ -331,3 +331,19 @@ test("mirrors every released skill, not only fallow", () => {
   assert.equal(existsSync(join(repoRoot, ".agents", "skills", "_artifacts")), false);
   assert.deepEqual(generateAgentAdapters({ check: true, repoRoot }), []);
 });
+
+// An unknown argument stops the script before it reads or writes any adapter.
+test("the script starts as CI runs it and rejects an unknown argument", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/generate-agent-adapters.mjs", "--check", "--no-such-flag"],
+    {
+      cwd: join(import.meta.dirname, ".."),
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "" },
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "generate-agent-adapters: unknown argument: --no-such-flag\n");
+});

@@ -6,12 +6,13 @@
 // Run: node --test .github/scripts/verify-pack-contents.test.mjs
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { verifyTarball } from "./verify-pack-contents.mjs";
 
@@ -291,5 +292,21 @@ test("does not require signatures on the fallow wrapper or NAPI packages", () =>
   } finally {
     wrapper.cleanup();
     napi.cleanup();
+  }
+});
+
+test("the release workflow command verifies a tarball", () => {
+  const files = ["fallow", "fallow.sig"];
+  const { tgz, cleanup } = makeTarball({ files, present: files });
+  try {
+    const script = fileURLToPath(new URL("./verify-pack-contents.mjs", import.meta.url));
+    const result = spawnSync(process.execPath, [script, tgz], {
+      cwd: fileURLToPath(new URL("../..", import.meta.url)),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "OK @fallow-cli/test-platform@9.9.9: 2 declared file(s) present\n");
+  } finally {
+    cleanup();
   }
 });

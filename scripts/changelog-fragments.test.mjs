@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   changelogFragments,
@@ -313,4 +314,14 @@ test("arguments belong to their command", () => {
   assert.throws(() => parseArgs(["check", "--base"]), /argument missing/u);
   assert.throws(() => parseArgs(["toString"]), /Usage:/u);
   assert.throws(() => parseArgs([]), /Usage:/u);
+});
+
+test("the CI command checks the fragments of this repository", () => {
+  // The check reads changelog.d only. Without --base it does not need git history.
+  const result = spawnSync(process.execPath, ["scripts/changelog-fragments.mjs", "check"], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^changelog\.d: \d+ fragment\(s\) are valid\.\n$/u);
 });

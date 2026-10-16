@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 import { runCliMain } from "./cli-main.mjs";
+import { pathToFileURL } from "node:url";
 
 const PROTOCOL_CRATES = new Set(["fallow-cli", "fallow-lsp", "fallow-mcp", "fallow-node"]);
 const FOUNDATION_CRATES = new Set([
@@ -195,6 +196,6 @@ export const main = (args = process.argv.slice(2)) => {
   return 1;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runCliMain(main);
 }

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   assertChangelogRelease,
@@ -451,4 +453,20 @@ test("the entry point reads both surfaces from disk and names what it verified",
   );
 
   rmSync(root, { recursive: true, force: true });
+});
+
+test("node scripts/verify-release-metadata.mjs runs main and checks the changelog", () => {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  // No release has tag v0.0.0, so the run fails after it reads CHANGELOG.md.
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/verify-release-metadata.mjs", "--tag", "v0.0.0"],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(result.stdout, "");
+  assert.match(
+    result.stderr,
+    /^CHANGELOG\.md must hold exactly one "## \[0\.0\.0\]" section, found 0$/mu,
+  );
 });

@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 
 import { cargoFallowBin } from "./cargo-target.mjs";
 import { runCliMain } from "./cli-main.mjs";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_MANIFEST = "scripts/public-smoke-projects.json";
 const DEFAULT_OUT_DIR = "target/public-smoke-conformance";
@@ -336,6 +337,6 @@ export const main = (argv = process.argv.slice(2)) => {
   return status.exitCode;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runCliMain(main);
 }

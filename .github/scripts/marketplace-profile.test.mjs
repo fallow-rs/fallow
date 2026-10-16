@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   lookupMarketplaceProfile,
   resolveMarketplaceProfile,
@@ -166,4 +168,28 @@ test("Marketplace rejects a personal account or different app before any profile
     });
     assert.equal(requests, 1);
   }
+});
+
+test("a CI run of marketplace-profile.mjs checks the configuration before its arguments", () => {
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  // Synthetic IDs pass validation. The extra argument stops the run before any Azure call.
+  const result = spawnSync(
+    process.execPath,
+    [".github/scripts/marketplace-profile.mjs", "--validate-config", "--extra"],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_ACTIONS: "true",
+        GITHUB_REF: "refs/heads/main",
+        AZURE_CLIENT_ID: profileId,
+        AZURE_TENANT_ID: profileId,
+      },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "Unsupported Marketplace identity verification arguments\n");
 });

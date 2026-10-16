@@ -138,9 +138,13 @@ if (isDirectInvocation) {
     args.length === 0 || (args.length === 1 && args[0] === "--release-env"),
     "usage: node scripts/signing-key-parity.mjs [--release-env]",
   );
+  // With --release-env an absent variable must fail like an empty one, not
+  // skip the release check.
   checkRepositorySigningKeyParity({
     releasePublicKey:
-      args[0] === "--release-env" ? process.env.ED25519_BINARY_SIGNING_PUBLIC_KEY : undefined,
+      args[0] === "--release-env"
+        ? (process.env.ED25519_BINARY_SIGNING_PUBLIC_KEY ?? "")
+        : undefined,
   });
   console.log("Signing public-key parity verified.");
 }

@@ -296,3 +296,17 @@ test("ignore-scripts cannot bypass the lint script guard", () => {
     rmSync(outer, { recursive: true, force: true });
   }
 });
+
+test("the package script reports a dependency that is not installed", () => {
+  const dependency = "fallow-start-test-missing-dependency";
+  const result = spawnSync(process.execPath, ["scripts/assert-local-resolution.mjs", dependency], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.match(
+    result.stderr,
+    new RegExp(`^${dependency} is not installed anywhere Node can reach from `, "u"),
+  );
+});
