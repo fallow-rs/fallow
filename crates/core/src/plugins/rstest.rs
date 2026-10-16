@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn include_and_exclude_accept_every_extglob_form() {
         let result = resolve(
-            "/project/rstest.config.ts",
+            "rstest.config.ts",
             "export default defineConfig({\n\
                include: [\n\
                  'neg/**/!(*.skip).test.ts',\n\
