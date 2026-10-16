@@ -18,7 +18,8 @@ use std::process::Command;
 
 /// The features of `regex-automata` in the normal and build graph of `package`.
 fn regex_automata_features(package: &str) -> String {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
+    let crate_dir = std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    let manifest = Path::new(&crate_dir).join("../../Cargo.toml");
     let output = Command::new(env!("CARGO"))
         .arg("tree")
         .arg("--manifest-path")
