@@ -62,6 +62,21 @@ pub fn builtin_config_patterns_of(plugin_names: &[String]) -> Vec<&'static str> 
     patterns
 }
 
+/// The always-used globs of the active built-in plugins, sorted and without
+/// duplicates. Some plugins list their config file here instead of in
+/// `config_patterns`, for example `.vitepress/config.ts`.
+#[must_use]
+pub fn builtin_always_used_patterns_of(plugin_names: &[String]) -> Vec<&'static str> {
+    let mut patterns: Vec<&'static str> = builtin::create_builtin_plugins()
+        .iter()
+        .filter(|plugin| plugin_names.iter().any(|name| name == plugin.name()))
+        .flat_map(|plugin| plugin.always_used().iter().copied())
+        .collect();
+    patterns.sort_unstable();
+    patterns.dedup();
+    patterns
+}
+
 pub use helpers::ConfigCandidateIndex;
 pub use helpers::is_external_plugin_active;
 use helpers::{

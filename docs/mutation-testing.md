@@ -153,11 +153,12 @@ or relational mutant, so it adds little test-strength signal for its run time.
   config is an export that an active plugin marks as used, for example
   `export const revalidate = 60` in a Next.js page. It is also the default
   export of a tool config file, which is a file that the `config_patterns`
-  of an active plugin match (`vite.config.ts`, `eslint.config.js`,
-  `.eslintrc.js`). Only a glob whose file name holds `config`, `.conf.` or an
+  or the `always_used` globs of an active plugin match (`vite.config.ts`,
+  `eslint.config.js`, `.eslintrc.js`, `docs/.vitepress/config.ts`). Some
+  plugins list their config file only as always used. Only a glob whose file name holds `config`, `.conf.` or an
   `rc` suffix counts, because some plugins also list application files as
   config, for example `codegen*.ts`, `src/module.ts` or `app/routes.ts`.
-  The config globs of external plugins count too. In a tool config file, a
+  The config and always-used globs of external plugins count too. In a tool config file, a
   top-level `module.exports = ...` statement counts as the default export. A mutant inside a function in such an export is not
   pruned, so an inline Vite plugin keeps its mutants. The rule lives in
   `framework_config_exports` (`crates/engine/src/mutation/mod.rs`) and

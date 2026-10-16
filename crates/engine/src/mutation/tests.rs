@@ -240,6 +240,29 @@ fn pruned_count(plan: &MutationPlan, file: &str) -> usize {
         .count()
 }
 
+/// The VitePress plugin lists its config file as always used, not as a
+/// config glob. The file is still a tool config file.
+#[test]
+fn an_always_used_config_file_of_a_plugin_is_pruned() {
+    let root = fixture("mutation-plan-always-used-config");
+    let plan = plan_mutations_for_session(
+        &session(&root),
+        &MutationPlanRequest::new(MutationScope::All),
+    )
+    .expect("plan");
+    assert_eq!(
+        function_dispositions(&plan, "docs/.vitepress/config.ts"),
+        BTreeMap::from([(
+            "<top-level>".to_owned(),
+            MutantDisposition::Pruned(PruneReason::FrameworkConfig)
+        )]),
+    );
+    assert_eq!(
+        function_dispositions(&plan, "src/math.ts"),
+        BTreeMap::from([("add".to_owned(), PLANNED)]),
+    );
+}
+
 #[test]
 fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
     let root = fixture("mutation-plan-tool-config");

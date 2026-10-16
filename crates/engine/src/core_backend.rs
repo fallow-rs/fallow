@@ -456,6 +456,22 @@ impl BackendAggregatedPluginResult {
         patterns
     }
 
+    /// The always-used globs of the active built-in plugins, sorted and
+    /// without duplicates. A plugin can list its config file here instead
+    /// of in its config globs.
+    pub fn always_used_patterns(&self) -> Vec<String> {
+        let mut patterns: Vec<String> =
+            fallow_core::plugins::registry::builtin_always_used_patterns_of(
+                &self.inner.active_plugins,
+            )
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        patterns.sort_unstable();
+        patterns.dedup();
+        patterns
+    }
+
     /// The setup files that the plugins found in tool configs, such as
     /// Vitest `setupFiles`, absolute or relative to the root.
     pub fn setup_files(&self) -> Vec<PathBuf> {

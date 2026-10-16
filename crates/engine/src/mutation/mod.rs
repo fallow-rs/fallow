@@ -532,10 +532,20 @@ fn framework_config_exports(
         .external_plugins
         .iter()
         .filter(|plugin| active.contains(&plugin.name))
-        .flat_map(|plugin| plugin.config_patterns.iter().cloned());
+        .flat_map(|plugin| {
+            plugin
+                .config_patterns
+                .iter()
+                .chain(&plugin.always_used)
+                .cloned()
+        });
+    // Some plugins list their config file as always used, not as a config
+    // glob. The tool config name filter keeps the other always-used files
+    // out.
     let patterns: Vec<String> = backend
         .config_patterns()
         .into_iter()
+        .chain(backend.always_used_patterns())
         .chain(external)
         .collect();
     let config_files = config_file_globs(&patterns);

@@ -1,0 +1,9 @@
+{
+  "name": "mutation-plan-always-used-config",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitepress": "^1.6.0",
+    "vitest": "^3.2.4"
+  }
+}
