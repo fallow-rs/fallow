@@ -5,8 +5,16 @@
   can name an absolute path, a path with `..` segments, or a glob. Fallow
   followed such an entry to a config file outside the project root and read
   that file. A symlink in the project root to a directory above it had the
-  same effect. Fallow now resolves each match and reads it only when it is
-  inside the project root. A glob whose literal base is outside the project
-  root does not run. An in-root entry such as `<rootDir>/../packages/*` still
-  works, also from the config of a workspace package. A script `--config` path
-  that is a symlink to a file outside the project root is also not read.
+  same effect. A Vitest inline project with an `extends` path outside the
+  project root also made Fallow read that file. Fallow now resolves each
+  match and reads it only when it is inside the project root. A glob whose
+  literal base is outside the project root does not run. An in-root entry
+  such as `<rootDir>/../packages/*` still works, also from the config of a
+  workspace package. A script `--config` path that is a symlink to a file
+  outside the project root is also not read.
+
+### Fixed
+
+- **A Jest `projects` glob works when the project path has a `[`.** Fallow
+  read the `[` in the directory path as glob syntax, so the glob matched no
+  project. The directory part of the pattern is now escaped.

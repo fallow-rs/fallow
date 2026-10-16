@@ -344,9 +344,9 @@ the root directory of another project.
 
 A config comes from the analyzed repository, so its paths are untrusted. A
 plugin that reads a file at a path from a config must not read outside the
-project root. The Jest `projects`, Vitest `test.projects` and Rstest
-`projects` expansion, and the script `--config` files, use two checks from
-`config_parser`:
+project root. The Jest `projects` expansion, the Vitest `test.projects`
+expansion and inline project `extends`, the Rstest `projects` expansion, and
+the script `--config` files use two checks from `config_parser`:
 
 - `glob_base_is_inside_root` runs before a glob. It compares the literal base
   of the pattern with the root, so a pattern such as `../**` or `/etc/*` does
@@ -360,7 +360,10 @@ The boundary is the project root, not the `root` argument of
 `resolve_config`. In a workspace run, that argument is the workspace package
 directory, and a package config can name a sibling package. The registry
 calls `Plugin::resolve_config_in_project` with both roots. A plugin that reads
-config paths overrides it. The default calls `resolve_config`.
+config paths overrides it. The default calls `resolve_config`. The Jest and
+Vitest plugins override it. The Rstest plugin does not, so its boundary is the
+`root` argument. In a workspace run, Rstest therefore does not follow a
+sibling package. This is stricter than the project root.
 
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that

@@ -495,13 +495,20 @@ fn expand_project_entry(
     root: &Path,
     project_root: &Path,
 ) -> Vec<PathBuf> {
-    let resolved = resolve_project_pattern(entry, root_dir, config_path, root);
-    let pattern_str = resolved.to_string_lossy();
+    let (base, pattern) = resolve_project_pattern(entry, root_dir, config_path, root);
     let mut configs = Vec::new();
 
-    if !config_parser::glob_base_is_inside_root(root, &pattern_str, project_root) {
+    if !config_parser::glob_base_is_inside_root(base, pattern, project_root) {
         return configs;
     }
+    let pattern_str = if Path::new(pattern).is_absolute() {
+        pattern.to_string()
+    } else {
+        format!(
+            "{}/{pattern}",
+            glob::Pattern::escape(&base.to_string_lossy())
+        )
+    };
     let Ok(matches) = glob::glob(&pattern_str) else {
         return configs;
     };
@@ -571,25 +578,24 @@ fn is_recognised_config_path(path: &Path) -> bool {
     name == PACKAGE_JSON_FILENAME && package_json_has_jest_key(path)
 }
 
-/// Substitute `<rootDir>` and resolve relative paths against the config file.
+/// Split a `projects` entry into the directory that it resolves against and
+/// the glob pattern relative to that directory. An absolute entry keeps its
+/// own path as the pattern.
 ///
 /// Jest replaces `<rootDir>` in a string `projects` entry with the `rootDir`
-/// option of the config ([`jest_root_dir`]).
-fn resolve_project_pattern(
-    entry: &str,
-    root_dir: &Path,
-    config_path: &Path,
-    root: &Path,
-) -> PathBuf {
+/// option of the config ([`jest_root_dir`]). Other relative entries resolve
+/// against the config directory. The directory stays apart from the pattern,
+/// so a glob character in its path is not read as glob syntax.
+fn resolve_project_pattern<'a>(
+    entry: &'a str,
+    root_dir: &'a Path,
+    config_path: &'a Path,
+    root: &'a Path,
+) -> (&'a Path, &'a str) {
     if let Some(rest) = entry.strip_prefix("<rootDir>") {
-        let trimmed = rest.trim_start_matches(['/', '\\']);
-        return root_dir.join(trimmed);
+        return (root_dir, rest.trim_start_matches(['/', '\\']));
     }
-    let path = Path::new(entry);
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    config_path.parent().unwrap_or(root).join(entry)
+    (config_path.parent().unwrap_or(root), entry)
 }
 
 /// The directory that Jest substitutes for `<rootDir>`. Jest resolves the
@@ -1739,7 +1745,7 @@ mod tests {
         .unwrap();
         std::fs::create_dir_all(&root).unwrap();
 
-        let absolute = format!("{}/*", outside.display());
+        let absolute = format!("{}/*", outside.display()).replace('\\', "/");
         let parent_source = format!(
             r#"module.exports = {{ projects: ["../outside/*", "{absolute}", ".*/outside/*", "<rootDir>/../outside/a"] }};"#
         );
@@ -1829,6 +1835,28 @@ mod tests {
                 .referenced_dependencies
                 .contains(&"ts-jest".to_string()),
             "a sibling inside the project root must be followed, got: {:?}",
+            result.referenced_dependencies,
+        );
+    }
+
+    /// A glob character in the path of the project root is not glob syntax.
+    #[test]
+    fn resolve_config_projects_root_path_with_glob_characters_is_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("work{team}[1]");
+        write_preset_config(&root.join("packages/a"), "ts-jest");
+
+        let parent_source = r#"module.exports = { projects: ["<rootDir>/packages/*"] };"#;
+        let parent_path = root.join("jest.config.js");
+        std::fs::write(&parent_path, parent_source).unwrap();
+
+        let result = JestPlugin.resolve_config(&parent_path, parent_source, &root);
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"ts-jest".to_string()),
+            "got: {:?}",
             result.referenced_dependencies,
         );
     }
