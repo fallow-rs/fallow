@@ -551,7 +551,8 @@ pub struct MutationPlanParams {
     /// Plan only these files or directories, relative to the root.
     pub paths: Option<Vec<String>>,
 
-    /// Maximum number of mutants to plan; the others become `pending`.
+    /// Maximum number of mutants to plan; the rest are `pending`. A run fills
+    /// the limit with covered mutants, so it can also run a `pending` one.
     pub max_mutants: Option<usize>,
 
     /// Kebab-case operator names, for example `relational-operator`.
