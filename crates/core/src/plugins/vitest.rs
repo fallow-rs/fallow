@@ -11,7 +11,7 @@ use oxc_ast::ast::{Expression, ObjectExpression};
 
 use super::config_parser;
 use super::test_alias;
-use super::{Plugin, PluginResult};
+use super::{PathRule, Plugin, PluginResult};
 
 pub struct VitestPlugin;
 
@@ -196,7 +196,7 @@ fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &
     if !root_includes.is_empty() {
         result.replace_entry_patterns = true;
     }
-    result.extend_entry_patterns(root_includes);
+    push_vitest_include_entries(result, &root_includes);
 
     let project_includes = config_parser::extract_config_array_nested_string_or_array(
         source,
@@ -204,7 +204,18 @@ fn apply_vitest_includes(result: &mut PluginResult, source: &str, config_path: &
         &["test", "projects"],
         &["test", "include"],
     );
-    result.extend_entry_patterns(project_includes);
+    push_vitest_include_entries(result, &project_includes);
+}
+
+/// Register each Vitest `test.include` glob as an entry pattern. The extglob
+/// groups of the glob go through the shared rewrite, so a group such as
+/// `@(test|spec)` matches the files that Vitest runs.
+fn push_vitest_include_entries(result: &mut PluginResult, includes: &[String]) {
+    result.entry_patterns.extend(
+        includes
+            .iter()
+            .map(|include| PathRule::from_extglob(&vitest_extglob(include))),
+    );
 }
 
 /// The Vitest default `test.include`, `**/*.{test,spec}.?(c|m)[jt]s?(x)`, as
@@ -1025,6 +1036,30 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         )
+    }
+
+    #[test]
+    fn include_entry_patterns_accept_every_extglob_form() {
+        let result = resolve(
+            "export default defineConfig({ test: {
+                include: [
+                    'at/**/*.@(test|spec).ts',
+                    './neg/**/!(*.skip).spec.ts',
+                    'plain/*.(unit|e2e).ts',
+                ],
+                projects: [{ test: { include: ['proj/*.?(c)test.js'] } }],
+            } });",
+        );
+        let matches = |path: &str| super::super::entry_rules_match(&result, path);
+        assert!(matches("at/a/x.test.ts"));
+        assert!(matches("at/b.spec.ts"));
+        assert!(!matches("at/b.ts"));
+        assert!(matches("neg/a/b.spec.ts"));
+        assert!(!matches("neg/a/b.skip.spec.ts"));
+        assert!(matches("plain/a.unit.ts"));
+        assert!(!matches("plain/a.int.ts"));
+        assert!(matches("proj/a.test.js"));
+        assert!(matches("proj/a.ctest.js"));
     }
 
     #[test]

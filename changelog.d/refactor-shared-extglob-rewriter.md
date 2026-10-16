@@ -13,10 +13,16 @@
     are entry points. The match still ignores case.
   - Vitest, Rstest and Jasmine: `!(..)` and `*(..)` now match. A Vitest plain
     `(a|b)` group still matches one of its alternatives.
+  - Vitest: before, a `test.include` glob with any group made no file an
+    entry point, so Fallow reported every test file as unused. Now the
+    `test.include` globs of the config and of each project use the shared
+    rewrite.
 - **A `+(..)` group in an include glob now matches one or more repetitions.**
   The glob matcher cannot repeat a group, so `+(ts|js)` becomes `{ts,js}*`.
   This can make a few more files entry points, for example `a.test.jsx` for
-  `*.test.+(ts|js)`. Before, Vitest, Rstest and Jasmine matched the group
+  `*.test.+(ts|js)`. A `+(..)` group at the end of a glob also matches a
+  longer extension, so `*.test.+(ts|js)` also matches `a.test.json` and
+  `a.test.js.map`. Before, Vitest, Rstest and Jasmine matched the group
   once only, which missed names that repeat the group. An exclude glob still
   matches a `+(..)` group once only, so an exclude never removes a file that
   the tool keeps.
