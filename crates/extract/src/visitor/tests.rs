@@ -5513,6 +5513,39 @@ fn playwright_extend_of_imported_base_records_conditional_definitions() {
 }
 
 #[test]
+fn playwright_same_file_chain_on_imported_base_records_conditional_definitions() {
+    // `bTest` holds a Playwright test only when the imported `appTest` does,
+    // so an extend of `bTest` in the same file also waits for analysis.
+    let info = parse(
+        r"
+            import { appTest } from './app-fixture';
+            import { BPage } from './b-page';
+            import { CPage } from './c-page';
+
+            const plainTest = appTest.extend({});
+            export const bTest = appTest.extend<{ b: BPage }>({});
+            export const cTest = bTest.extend<{ c: CPage }>({});
+            export const dTest = plainTest.extend<{ c: CPage }>({});
+            export const makeCTest = () => bTest.extend<{ c: CPage }>({});
+        ",
+    );
+
+    for (test_name, base_name) in [
+        ("cTest", "bTest"),
+        ("dTest", "plainTest"),
+        ("makeCTest", "bTest"),
+    ] {
+        assert!(
+            has_playwright_conditional_fixture_definition_fact(
+                &info, test_name, base_name, "c", "CPage"
+            ),
+            "{test_name} should define c: CPage when {base_name} is a Playwright test, found: {:?}",
+            info.semantic_facts
+        );
+    }
+}
+
+#[test]
 fn playwright_extend_of_local_unknown_base_records_no_conditional_definitions() {
     let info = parse(
         r"

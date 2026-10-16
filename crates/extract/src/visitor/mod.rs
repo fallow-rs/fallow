@@ -982,6 +982,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// `.extend(...)` of another such const. The type argument of an
     /// `.extend<T>(...)` on one of these consts defines fixtures (issue #3462).
     playwright_local_tests: FxHashSet<String>,
+    /// Local consts made by `.extend(...)` on a base that only analysis can
+    /// prove: an import, or another const in this set. An `.extend<T>(...)`
+    /// on one of them records conditional fixture definitions.
+    playwright_conditional_tests: FxHashSet<String>,
     source_returning_helpers: FxHashMap<String, SourceReturningHelper>,
     /// File-level string directives (`"use client"`, `"use server"`) captured
     /// from `Program::directives`. Consumed by the security `client-server-leak`
@@ -2544,7 +2548,7 @@ impl ModuleInfoExtractor {
         for entry in pending_calls {
             match entry.base_name {
                 Some(base) if !self.is_playwright_test_name(&base) => {
-                    if !self.is_named_or_default_import(&base) {
+                    if !self.is_conditional_playwright_base(&base) {
                         continue;
                     }
                     conditional_bindings

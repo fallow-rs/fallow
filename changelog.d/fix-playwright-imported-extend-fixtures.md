@@ -7,8 +7,8 @@
   methods that tests call through the `b` fixture then reported as unused
   class members. Now Fallow keeps these fixtures and applies them when
   `appTest` resolves to a Playwright test. This also covers a base made by an
-  untyped `base.extend({})`, a re-exported base, a chain of such files, and a
-  helper that returns the `.extend<T>(...)` call. An `.extend<T>(...)` on an
+  untyped `base.extend({})`, a re-exported base, a chain in one file or across
+  files, and a helper that returns the `.extend<T>(...)` call. An `.extend<T>(...)` on an
   imported value that is not a Playwright test still credits nothing. The
   extraction and graph cache versions change, so the first run after the
   upgrade parses the project again.

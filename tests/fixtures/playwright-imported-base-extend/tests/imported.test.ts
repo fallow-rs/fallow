@@ -1,4 +1,5 @@
 import { bTest } from "../src/b-fixture";
+import { gTest } from "../src/chain-fixture";
 import { cTest } from "../src/c-fixture";
 import { dTest } from "../src/d-fixture";
 import { eTest } from "../src/e-fixture";
@@ -23,4 +24,9 @@ eTest("opens e", async ({ e }) => {
 
 makeHelperTest()("opens helper", async ({ helper }) => {
   helper.openHelper();
+});
+
+gTest("opens f and g", async ({ f, g }) => {
+  f.openF();
+  g.openG();
 });

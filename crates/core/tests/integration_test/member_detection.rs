@@ -798,8 +798,9 @@ fn playwright_chained_merge_tests_extend_credits_pom_methods() {
 fn playwright_extend_of_imported_test_credits_pom_methods() {
     // `bTest = appTest.extend<{ b: BPage }>({})` where `appTest` is imported:
     // a typed base, an untyped `base.extend({})` base, a two-file chain, a
-    // re-exported base, and a helper that returns the extend. An imported
-    // non-Playwright `framework.extend<T>()` must credit nothing.
+    // same-file chain, a re-exported base, and a helper that returns the
+    // extend. An imported non-Playwright `framework.extend<T>()` must credit
+    // nothing.
     let root = fixture_path("playwright-imported-base-extend");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -819,6 +820,8 @@ fn playwright_extend_of_imported_test_credits_pom_methods() {
             "CPage.unusedCAction".to_string(),
             "DPage.unusedDAction".to_string(),
             "EPage.unusedEAction".to_string(),
+            "FPage.unusedFAction".to_string(),
+            "GPage.unusedGAction".to_string(),
             "HelperPage.unusedHelperAction".to_string(),
             "OtherPage.openOther".to_string(),
             "OtherPage.unusedOtherAction".to_string(),

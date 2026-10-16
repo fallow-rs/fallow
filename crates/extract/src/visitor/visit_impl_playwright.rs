@@ -110,16 +110,18 @@ impl ModuleInfoExtractor {
             || self.playwright_local_tests.contains(name)
     }
 
-    /// True when `name` is a named or default import. Another file can define
-    /// it as a Playwright test, which only analysis can prove.
-    pub(crate) fn is_named_or_default_import(&self, name: &str) -> bool {
-        self.imports.iter().any(|import| {
-            import.local_name == name
-                && matches!(
-                    import.imported_name,
-                    ImportedName::Named(_) | ImportedName::Default
-                )
-        })
+    /// True when only analysis can prove that `name` holds a Playwright test:
+    /// a named or default import, which another file can define, or a local
+    /// const that extends such a name.
+    pub(crate) fn is_conditional_playwright_base(&self, name: &str) -> bool {
+        self.playwright_conditional_tests.contains(name)
+            || self.imports.iter().any(|import| {
+                import.local_name == name
+                    && matches!(
+                        import.imported_name,
+                        ImportedName::Named(_) | ImportedName::Default
+                    )
+            })
     }
 
     /// Record a fixture definition that analysis applies only when the
@@ -217,8 +219,10 @@ impl ModuleInfoExtractor {
             // fixtures of `T` only when analysis resolves `appTest` to a
             // Playwright test. An unrelated imported `extend` stays inert.
             if let PlaywrightExtendRoot::Name(base_name) = &chain.root
-                && self.is_named_or_default_import(base_name)
+                && self.is_conditional_playwright_base(base_name)
             {
+                self.playwright_conditional_tests
+                    .insert(test_name.to_string());
                 for (fixture_name, type_name) in
                     self.collect_playwright_extend_type_bindings(&chain.calls)
                 {
