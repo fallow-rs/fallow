@@ -322,7 +322,7 @@ pub struct FallowConfig {
     #[schemars(schema_with = "extends_schema")]
     pub extends: Vec<String>,
 
-    /// An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `["src/main.ts"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files.
+    /// An array of project-root-relative glob patterns whose matching files are seeded as manual entry points, on top of the framework and package.json entries fallow discovers automatically, so their transitive imports are not reported as unused. Set it (e.g. `["src/main.ts"]`) when a file is a real runtime root that no plugin or manifest declares; patterns are validated at load and matched against discovered files. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub entry: Vec<String>,
 
@@ -461,7 +461,7 @@ pub struct FallowConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_packs: Vec<String>,
 
-    /// An array of project-root-relative glob patterns for files loaded at runtime by a mechanism the static graph cannot see (dynamic path resolution, config-driven loading); matching files are seeded as entry points so they and their imports stay reachable. Empty by default; set it (e.g. `["plugins/**/*.ts", "locales/**/*.json"]`) for plugin or locale trees pulled in dynamically.
+    /// An array of project-root-relative glob patterns for files loaded at runtime by a mechanism the static graph cannot see (dynamic path resolution, config-driven loading); matching files are seeded as entry points so they and their imports stay reachable. Empty by default; set it (e.g. `["plugins/**/*.ts", "locales/**/*.json"]`) for plugin or locale trees pulled in dynamically. A single `*` stays within one path segment; use `**` to match across directories.
     #[serde(default)]
     pub dynamically_loaded: Vec<String>,
 

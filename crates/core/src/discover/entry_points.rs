@@ -633,6 +633,16 @@ fn relative_paths_for(files: &[DiscoveredFile], root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Compile a user `entry` or `dynamicallyLoaded` glob.
+///
+/// A single `*` stays within one path segment and only `**` crosses
+/// directories, as in gitignore, picomatch, and the plugin entry patterns.
+fn compile_user_entry_glob(pattern: &str) -> Result<globset::Glob, globset::Error> {
+    globset::GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+}
+
 /// Push entries for files matching the user-configured manual entry glob patterns.
 #[expect(
     clippy::expect_used,
@@ -647,7 +657,8 @@ fn push_manual_entry_matches(
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in &config.entry_patterns {
         builder.add(
-            globset::Glob::new(pattern).expect("entry pattern was validated at config load time"),
+            compile_user_entry_glob(pattern)
+                .expect("entry pattern was validated at config load time"),
         );
     }
     let Ok(glob_set) = builder.build() else {
@@ -1590,7 +1601,7 @@ pub fn discover_dynamically_loaded_entry_points(
     let mut builder = globset::GlobSetBuilder::new();
     for pattern in &config.dynamically_loaded {
         builder.add(
-            globset::Glob::new(pattern)
+            compile_user_entry_glob(pattern)
                 .expect("dynamicallyLoaded pattern was validated at config load time"),
         );
     }

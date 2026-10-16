@@ -624,6 +624,8 @@ mod issue_3208_lib_output_source;
 mod issue_3311_css_module_global_classes;
 #[path = "integration_test/issue_3324_nested_package.rs"]
 mod issue_3324_nested_package;
+#[path = "integration_test/issue_3490_entry_glob_star_segment.rs"]
+mod issue_3490_entry_glob_star_segment;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]
