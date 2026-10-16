@@ -22,8 +22,9 @@ use crate::{
     ExportedObjectInstancePropertyFact, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact,
     FactoryFnWholeObjectFact, FactoryReturnObjectPropertyAccessFact, ImportInfo, ImportedName,
     InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    PlaywrightFixtureDefinitionFact, QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo,
-    SemanticFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
+    PlaywrightFixtureDefinitionFact, PlaywrightTestBindingFact, QualifiedClassMemberAccessFact,
+    ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
+    TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -2536,20 +2537,34 @@ impl ModuleInfoExtractor {
         }
 
         let mut factory_bindings: FxHashMap<String, Vec<(String, String)>> = FxHashMap::default();
+        // Helper bindings on an imported base, keyed by helper name. Each entry
+        // is `(base, fixture, type)` and becomes a conditional fact.
+        let mut conditional_bindings: FxHashMap<String, Vec<(String, String, String)>> =
+            FxHashMap::default();
         for entry in pending_calls {
-            let base_is_test = entry
-                .base_name
-                .as_deref()
-                .is_none_or(|base| self.is_playwright_test_name(base));
-            if !base_is_test {
-                continue;
+            match entry.base_name {
+                Some(base) if !self.is_playwright_test_name(&base) => {
+                    if !self.is_named_or_default_import(&base) {
+                        continue;
+                    }
+                    conditional_bindings
+                        .entry(entry.test_name)
+                        .or_default()
+                        .extend(entry.type_bindings.into_iter().map(
+                            |(fixture_name, type_name)| (base.clone(), fixture_name, type_name),
+                        ));
+                }
+                _ => factory_bindings
+                    .entry(entry.test_name)
+                    .or_default()
+                    .extend(entry.type_bindings),
             }
-            factory_bindings
-                .entry(entry.test_name)
-                .or_default()
-                .extend(entry.type_bindings);
         }
         for bindings in factory_bindings.values_mut() {
+            bindings.sort();
+            bindings.dedup();
+        }
+        for bindings in conditional_bindings.values_mut() {
             bindings.sort();
             bindings.dedup();
         }
@@ -2573,10 +2588,26 @@ impl ModuleInfoExtractor {
                 {
                     factory_bindings.insert(caller.clone(), bindings);
                     changed = true;
+                } else if !conditional_bindings.contains_key(caller)
+                    && let Some(bindings) = conditional_bindings.get(callee).cloned()
+                {
+                    conditional_bindings.insert(caller.clone(), bindings);
+                    changed = true;
                 }
             }
             if !changed {
                 break;
+            }
+        }
+
+        for (test_name, bindings) in conditional_bindings {
+            for (base_name, fixture_name, type_name) in bindings {
+                self.record_playwright_conditional_fixture_definition_fact(
+                    test_name.clone(),
+                    base_name,
+                    fixture_name,
+                    type_name,
+                );
             }
         }
 
@@ -2589,6 +2620,20 @@ impl ModuleInfoExtractor {
                 );
             }
         }
+    }
+
+    /// Mark each local name proven to hold a Playwright test. An untyped
+    /// `base.extend({...})` emits no definition, so without this fact another
+    /// file could not prove that an import of it is a Playwright test.
+    fn record_playwright_test_binding_facts(&mut self) {
+        let mut names: Vec<String> = std::mem::take(&mut self.playwright_local_tests)
+            .into_iter()
+            .collect();
+        names.sort_unstable();
+        self.semantic_facts
+            .extend(names.into_iter().map(|test_name| {
+                SemanticFact::PlaywrightTestBinding(PlaywrightTestBindingFact { test_name })
+            }));
     }
 
     fn resolve_factory_call_candidates(&mut self) {
@@ -3601,6 +3646,7 @@ impl ModuleInfoExtractor {
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();
         self.resolve_playwright_factory_call_definitions();
+        self.record_playwright_test_binding_facts();
         self.resolve_structural_class_calls();
         // Before `resolve_bound_member_accesses` so the re-emitted accesses reach
         // the same typed-property expansion as unambiguous ones.

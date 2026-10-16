@@ -795,6 +795,39 @@ fn playwright_chained_merge_tests_extend_credits_pom_methods() {
 }
 
 #[test]
+fn playwright_extend_of_imported_test_credits_pom_methods() {
+    // `bTest = appTest.extend<{ b: BPage }>({})` where `appTest` is imported:
+    // a typed base, an untyped `base.extend({})` base, a two-file chain, a
+    // re-exported base, and a helper that returns the extend. An imported
+    // non-Playwright `framework.extend<T>()` must credit nothing.
+    let root = fixture_path("playwright-imported-base-extend");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+    unused_class_members.sort();
+
+    assert_eq!(
+        unused_class_members,
+        vec![
+            "AppPage.unusedAppAction".to_string(),
+            "BPage.unusedBAction".to_string(),
+            "CPage.unusedCAction".to_string(),
+            "DPage.unusedDAction".to_string(),
+            "EPage.unusedEAction".to_string(),
+            "HelperPage.unusedHelperAction".to_string(),
+            "OtherPage.openOther".to_string(),
+            "OtherPage.unusedOtherAction".to_string(),
+        ],
+        "only the genuinely unused POM methods should be reported"
+    );
+}
+
+#[test]
 fn playwright_wrapper_fixtures_credit_nested_fixture_methods() {
     let root = fixture_path("issue-1210-playwright-wrapper-fixtures");
     let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);

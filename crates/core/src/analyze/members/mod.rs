@@ -14,9 +14,11 @@ use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
     FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
     FactoryReturnObjectPropertyAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
+    FluentChainNewMemberAccessFact, InstanceExportBindingFact,
+    PlaywrightConditionalFixtureDefinitionFact, PlaywrightFixtureAliasFact,
     PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    SemanticFactView, TypedPropertyMemberAccessFact, ordinary_whole_object_uses,
+    PlaywrightTestBindingFact, SemanticFactView, TypedPropertyMemberAccessFact,
+    ordinary_whole_object_uses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -595,6 +597,18 @@ fn playwright_fixture_definitions(
 ) -> Vec<PlaywrightFixtureDefinitionFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
     view.playwright_fixture_definitions()
+}
+
+fn playwright_conditional_fixture_definitions(
+    resolved: &ResolvedModule,
+) -> Vec<PlaywrightConditionalFixtureDefinitionFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    view.playwright_conditional_fixture_definitions()
+}
+
+fn playwright_test_bindings(resolved: &ResolvedModule) -> Vec<PlaywrightTestBindingFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    view.playwright_test_bindings()
 }
 
 fn playwright_fixture_aliases(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureAliasFact> {

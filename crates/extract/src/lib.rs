@@ -76,12 +76,13 @@ pub use fallow_types::extract::{
     FactoryReturnObjectShapeExport, FlagPatterns, FluentChainMemberAccessFact,
     FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
     LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ModuleLoadMechanism,
-    ParseResult, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
-    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, PublicSignatureTypeReference,
-    QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo, RequiredTypeMemberFact,
-    SemanticFact, SourceParseDegradation, SourceReadFailure, StringEnumMemberValueFact,
-    TypeAliasSurfaceTargetFact, TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
-    VitestModuleMockAction, VitestModuleMockOperationFact, compute_line_offsets,
+    ParseResult, PlaywrightConditionalFixtureDefinitionFact, PlaywrightFixtureAliasFact,
+    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+    PlaywrightTestBindingFact, PublicSignatureTypeReference, QualifiedClassMemberAccessFact,
+    ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact, SourceParseDegradation,
+    SourceReadFailure, StringEnumMemberValueFact, TypeAliasSurfaceTargetFact, TypeMemberTypeEntry,
+    TypedPropertyMemberAccessFact, VisibilityTag, VitestModuleMockAction,
+    VitestModuleMockOperationFact, compute_line_offsets,
 };
 
 pub use astro::{

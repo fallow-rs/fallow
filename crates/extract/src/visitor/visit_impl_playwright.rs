@@ -3,8 +3,9 @@ use oxc_ast::ast::{
 };
 
 use crate::{
-    DynamicImportInfo, PlaywrightFixtureAliasFact, PlaywrightFixtureTypeFact, SemanticFact,
-    VitestModuleMockAction, VitestModuleMockOperationFact,
+    DynamicImportInfo, ImportedName, PlaywrightConditionalFixtureDefinitionFact,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureTypeFact, SemanticFact, VitestModuleMockAction,
+    VitestModuleMockOperationFact,
 };
 
 use super::super::{
@@ -109,6 +110,38 @@ impl ModuleInfoExtractor {
             || self.playwright_local_tests.contains(name)
     }
 
+    /// True when `name` is a named or default import. Another file can define
+    /// it as a Playwright test, which only analysis can prove.
+    pub(crate) fn is_named_or_default_import(&self, name: &str) -> bool {
+        self.imports.iter().any(|import| {
+            import.local_name == name
+                && matches!(
+                    import.imported_name,
+                    ImportedName::Named(_) | ImportedName::Default
+                )
+        })
+    }
+
+    /// Record a fixture definition that analysis applies only when the
+    /// imported `base_name` resolves to a Playwright test.
+    pub(crate) fn record_playwright_conditional_fixture_definition_fact(
+        &mut self,
+        test_name: String,
+        base_name: String,
+        fixture_name: String,
+        type_name: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::PlaywrightConditionalFixtureDefinition(
+                Box::new(PlaywrightConditionalFixtureDefinitionFact {
+                    test_name,
+                    base_name,
+                    fixture_name,
+                    type_name,
+                }),
+            ));
+    }
+
     /// The base test names of a call to the imported `mergeTests`, or `None`
     /// when the call is not one. The import gate (it also accepts
     /// `mergeTests as merge`) keeps a user-local `mergeTests` function inert.
@@ -180,6 +213,23 @@ impl ModuleInfoExtractor {
             PlaywrightExtendRoot::Merge(_) => true,
         };
         if !receiver_is_test {
+            // `appTest.extend<T>()` on an imported `appTest` defines the
+            // fixtures of `T` only when analysis resolves `appTest` to a
+            // Playwright test. An unrelated imported `extend` stays inert.
+            if let PlaywrightExtendRoot::Name(base_name) = &chain.root
+                && self.is_named_or_default_import(base_name)
+            {
+                for (fixture_name, type_name) in
+                    self.collect_playwright_extend_type_bindings(&chain.calls)
+                {
+                    self.record_playwright_conditional_fixture_definition_fact(
+                        test_name.to_string(),
+                        base_name.clone(),
+                        fixture_name,
+                        type_name,
+                    );
+                }
+            }
             return;
         }
         self.playwright_local_tests.insert(test_name.to_string());

@@ -2442,6 +2442,13 @@ pub enum SemanticFact {
     ProvenFactoryReturnObjectPropertyAccess(FactoryReturnObjectPropertyAccessFact),
     /// Caller-owned callback origins for a source-proven returned property.
     CallbackFactoryPropertyAccess(Box<CallbackFactoryPropertyAccessFact>),
+    /// A Playwright fixture definition from `<base>.extend<T>()` where `base`
+    /// is imported. Analysis applies it only when `base` resolves to a
+    /// Playwright test. Appended because bitcode encodes enum variants by ordinal.
+    PlaywrightConditionalFixtureDefinition(Box<PlaywrightConditionalFixtureDefinitionFact>),
+    /// A local name that the extractor proved holds a Playwright test.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    PlaywrightTestBinding(PlaywrightTestBindingFact),
 }
 
 /// Deferred class provenance owned by the module declaring an object factory.
@@ -2846,6 +2853,32 @@ impl<'a> SemanticFactView<'a> {
     pub fn playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
         playwright_fixture_alias_facts(self.semantic_facts)
             .cloned()
+            .collect()
+    }
+
+    /// Collect conditional Playwright fixture-definition facts.
+    pub fn playwright_conditional_fixture_definitions(
+        self,
+    ) -> Vec<PlaywrightConditionalFixtureDefinitionFact> {
+        self.semantic_facts
+            .iter()
+            .filter_map(|fact| match fact {
+                SemanticFact::PlaywrightConditionalFixtureDefinition(access) => {
+                    Some(access.as_ref().clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Collect the names of proven Playwright test bindings.
+    pub fn playwright_test_bindings(self) -> Vec<PlaywrightTestBindingFact> {
+        self.semantic_facts
+            .iter()
+            .filter_map(|fact| match fact {
+                SemanticFact::PlaywrightTestBinding(binding) => Some(binding.clone()),
+                _ => None,
+            })
             .collect()
     }
 
@@ -3330,6 +3363,31 @@ pub struct PlaywrightFixtureDefinitionFact {
     pub fixture_name: String,
     /// Local type symbol used as the fixture target.
     pub type_name: String,
+}
+
+/// A Playwright fixture definition from `<base>.extend<T>()` where `base` is
+/// an imported name. The extractor cannot prove that `base` holds a Playwright
+/// test, so analysis applies the definition only when `base` resolves to one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightConditionalFixtureDefinitionFact {
+    /// Local test function or wrapper receiving the fixture definition.
+    pub test_name: String,
+    /// Imported local name that `.extend<T>()` is called on.
+    pub base_name: String,
+    /// Fixture name or dotted fixture path declared by the fixture type.
+    pub fixture_name: String,
+    /// Local type symbol used as the fixture target.
+    pub type_name: String,
+}
+
+/// A local name that holds a Playwright test: the result of an `.extend()` on
+/// the `@playwright/test` `test` import or of a `mergeTests(...)` call.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightTestBindingFact {
+    /// Local name of the Playwright test.
+    pub test_name: String,
 }
 
 /// A Playwright fixture wrapper alias declared by `mergeTests` or `.extend`.

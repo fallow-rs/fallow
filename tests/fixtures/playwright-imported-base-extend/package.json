@@ -1,0 +1,6 @@
+{
+  "name": "playwright-imported-base-extend",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

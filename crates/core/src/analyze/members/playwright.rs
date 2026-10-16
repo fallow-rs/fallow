@@ -22,7 +22,41 @@ fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<S
     for access in &alias_facts {
         names.insert(access.test_name.clone());
     }
+    for access in playwright_conditional_fixture_definitions(resolved) {
+        names.insert(access.test_name);
+    }
+    for binding in playwright_test_bindings(resolved) {
+        names.insert(binding.test_name);
+    }
     names
+}
+
+/// The test keys of `base_name` in one module, with each export key expanded
+/// to its re-export origins.
+fn playwright_base_test_keys(
+    graph: &ModuleGraph,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    local_playwright_test_names: &FxHashSet<String>,
+    file_id: FileId,
+    base_name: &str,
+) -> Vec<PlaywrightTestKey> {
+    let mut keys = Vec::new();
+    for base_key in playwright_test_keys_for_local(
+        local_to_export_keys,
+        local_playwright_test_names,
+        file_id,
+        base_name,
+    ) {
+        match base_key {
+            PlaywrightTestKey::Export(export_key) => {
+                for key in export_key_with_origins(graph, &export_key) {
+                    push_playwright_test_key(&mut keys, PlaywrightTestKey::Export(key));
+                }
+            }
+            PlaywrightTestKey::Local { .. } => push_playwright_test_key(&mut keys, base_key),
+        }
+    }
+    keys
 }
 
 fn playwright_test_keys_for_local(
@@ -168,6 +202,9 @@ fn build_playwright_fixture_targets(
         instance_bindings_by_class: &instance_bindings_by_class,
     };
 
+    let mut known_tests: FxHashSet<PlaywrightTestKey> = FxHashSet::default();
+    let mut conditional_defs: Vec<PlaywrightConditionalDef> = Vec::new();
+
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
         let local_playwright_test_names = collect_playwright_local_test_names(resolved);
@@ -176,6 +213,13 @@ fn build_playwright_fixture_targets(
             resolved,
             &local_playwright_test_names,
             &mut targets_by_test,
+            &mut known_tests,
+        );
+        collect_playwright_conditional_defs(
+            &def_context,
+            resolved,
+            &local_playwright_test_names,
+            &mut conditional_defs,
         );
         collect_playwright_fixture_aliases(
             graph,
@@ -186,6 +230,13 @@ fn build_playwright_fixture_targets(
         );
     }
 
+    apply_playwright_conditional_defs(
+        &def_context,
+        conditional_defs,
+        &aliases_by_test,
+        known_tests,
+        &mut targets_by_test,
+    );
     expand_playwright_fixture_aliases(&mut targets_by_test, &aliases_by_test);
     targets_by_test
         .into_iter()
@@ -204,48 +255,171 @@ struct PlaywrightFixtureDefContext<'a, 'b> {
     instance_bindings_by_class: &'a FxHashMap<ExportKey, &'a [(String, String)]>,
 }
 
-/// Collect fixture-definition facts for one module, recording each fixture's
-/// POM type export keys under its owning test key.
+/// The export keys of the class that a fixture type names in one module.
+fn playwright_fixture_type_keys(
+    context: &PlaywrightFixtureDefContext<'_, '_>,
+    local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
+    type_name: &str,
+) -> Vec<ExportKey> {
+    match local_to_export_keys.get(type_name) {
+        Some(keys) => keys.clone(),
+        None => playwright_indexed_access_targets(
+            context.graph,
+            context.indexes,
+            context.instance_bindings_by_class,
+            local_to_export_keys,
+            type_name,
+        ),
+    }
+}
+
+/// Record the POM type export keys of one fixture under each test key.
+fn push_playwright_fixture_def_targets(
+    context: &PlaywrightFixtureDefContext<'_, '_>,
+    targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
+    test_keys: &[PlaywrightTestKey],
+    fixture_name: &str,
+    target_keys: &[ExportKey],
+) {
+    for test_key in test_keys {
+        let fixture_targets = targets_by_test.entry(test_key.clone()).or_default();
+        for target_key in target_keys {
+            push_playwright_fixture_target(
+                context.graph,
+                context.type_targets,
+                fixture_targets,
+                fixture_name,
+                target_key,
+            );
+        }
+    }
+}
+
+/// Collect fixture-definition and test-binding facts for one module. Each
+/// fixture's POM type export keys go under its owning test key, and each
+/// owning test key is a known Playwright test.
 fn collect_playwright_fixture_def_targets(
     context: &PlaywrightFixtureDefContext<'_, '_>,
     resolved: &ResolvedModule,
     local_playwright_test_names: &FxHashSet<String>,
     targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
+    known_tests: &mut FxHashSet<PlaywrightTestKey>,
 ) {
     let local_to_export_keys = context.indexes.local_keys(resolved.file_id);
-    let definition_facts = playwright_fixture_definitions(resolved);
-    for access in definition_facts {
-        let test_keys = playwright_test_keys_for_local(
+    let test_keys_for = |name: &str| {
+        playwright_test_keys_for_local(
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
-            access.test_name.as_str(),
+            name,
+        )
+    };
+    for binding in playwright_test_bindings(resolved) {
+        known_tests.extend(test_keys_for(binding.test_name.as_str()));
+    }
+    for access in playwright_fixture_definitions(resolved) {
+        let test_keys = test_keys_for(access.test_name.as_str());
+        known_tests.extend(test_keys.iter().cloned());
+        let target_keys =
+            playwright_fixture_type_keys(context, local_to_export_keys, access.type_name.as_str());
+        push_playwright_fixture_def_targets(
+            context,
+            targets_by_test,
+            &test_keys,
+            access.fixture_name.as_str(),
+            &target_keys,
         );
-        let target_keys = match local_to_export_keys.get(access.type_name.as_str()) {
-            Some(keys) => keys.clone(),
-            None => playwright_indexed_access_targets(
-                context.graph,
-                context.indexes,
-                context.instance_bindings_by_class,
-                local_to_export_keys,
-                access.type_name.as_str(),
-            ),
-        };
+    }
+}
+
+/// A fixture definition that applies only when one of `base_keys` is a known
+/// Playwright test.
+struct PlaywrightConditionalDef {
+    test_keys: Vec<PlaywrightTestKey>,
+    base_keys: Vec<PlaywrightTestKey>,
+    fixture_name: String,
+    target_keys: Vec<ExportKey>,
+}
+
+/// Collect the conditional fixture-definition facts of one module.
+fn collect_playwright_conditional_defs(
+    context: &PlaywrightFixtureDefContext<'_, '_>,
+    resolved: &ResolvedModule,
+    local_playwright_test_names: &FxHashSet<String>,
+    conditional_defs: &mut Vec<PlaywrightConditionalDef>,
+) {
+    let local_to_export_keys = context.indexes.local_keys(resolved.file_id);
+    for access in playwright_conditional_fixture_definitions(resolved) {
+        let target_keys =
+            playwright_fixture_type_keys(context, local_to_export_keys, access.type_name.as_str());
         if target_keys.is_empty() {
             continue;
         }
+        let base_keys = playwright_base_test_keys(
+            context.graph,
+            local_to_export_keys,
+            local_playwright_test_names,
+            resolved.file_id,
+            access.base_name.as_str(),
+        );
+        if base_keys.is_empty() {
+            continue;
+        }
+        conditional_defs.push(PlaywrightConditionalDef {
+            test_keys: playwright_test_keys_for_local(
+                local_to_export_keys,
+                local_playwright_test_names,
+                resolved.file_id,
+                access.test_name.as_str(),
+            ),
+            base_keys,
+            fixture_name: access.fixture_name,
+            target_keys,
+        });
+    }
+}
 
-        for test_key in test_keys {
-            let fixture_targets = targets_by_test.entry(test_key).or_default();
-            for target_key in &target_keys {
-                push_playwright_fixture_target(
-                    context.graph,
-                    context.type_targets,
-                    fixture_targets,
-                    access.fixture_name.as_str(),
-                    target_key,
-                );
+/// Apply each conditional definition whose base is a known Playwright test.
+///
+/// A test is known when the extractor proved it (a definition or a test
+/// binding fact), when it aliases a known test, or when an applied
+/// conditional definition owns it. The loop repeats until no test becomes
+/// known, so `cTest = bTest.extend<C>()` on `bTest = appTest.extend<B>()`
+/// resolves across files in any module order.
+fn apply_playwright_conditional_defs(
+    context: &PlaywrightFixtureDefContext<'_, '_>,
+    mut pending: Vec<PlaywrightConditionalDef>,
+    aliases_by_test: &FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
+    mut known_tests: FxHashSet<PlaywrightTestKey>,
+    targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
+) {
+    while !pending.is_empty() {
+        let mut changed = false;
+        for (alias_key, base_keys) in aliases_by_test {
+            if !known_tests.contains(alias_key)
+                && base_keys.iter().any(|key| known_tests.contains(key))
+            {
+                known_tests.insert(alias_key.clone());
+                changed = true;
             }
+        }
+        let (ready, waiting): (Vec<_>, Vec<_>) = pending
+            .into_iter()
+            .partition(|def| def.base_keys.iter().any(|key| known_tests.contains(key)));
+        pending = waiting;
+        for def in ready {
+            changed = true;
+            known_tests.extend(def.test_keys.iter().cloned());
+            push_playwright_fixture_def_targets(
+                context,
+                targets_by_test,
+                &def.test_keys,
+                def.fixture_name.as_str(),
+                &def.target_keys,
+            );
+        }
+        if !changed {
+            break;
         }
     }
 }
@@ -267,7 +441,8 @@ fn collect_playwright_fixture_aliases(
             resolved.file_id,
             access.test_name.as_str(),
         );
-        let base_keys = playwright_test_keys_for_local(
+        let base_keys = playwright_base_test_keys(
+            graph,
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
@@ -277,16 +452,7 @@ fn collect_playwright_fixture_aliases(
         for test_key in test_keys {
             let aliases = aliases_by_test.entry(test_key).or_default();
             for base_key in &base_keys {
-                match base_key {
-                    PlaywrightTestKey::Export(export_key) => {
-                        for key in export_key_with_origins(graph, export_key) {
-                            push_playwright_test_key(aliases, PlaywrightTestKey::Export(key));
-                        }
-                    }
-                    PlaywrightTestKey::Local { .. } => {
-                        push_playwright_test_key(aliases, base_key.clone());
-                    }
-                }
+                push_playwright_test_key(aliases, base_key.clone());
             }
         }
     }

@@ -146,6 +146,34 @@ fn has_any_playwright_fixture_definition_fact(info: &crate::ModuleInfo) -> bool 
         .any(|fact| matches!(fact, SemanticFact::PlaywrightFixtureDefinition(_)))
 }
 
+fn has_playwright_conditional_fixture_definition_fact(
+    info: &crate::ModuleInfo,
+    test_name: &str,
+    base_name: &str,
+    fixture_name: &str,
+    type_name: &str,
+) -> bool {
+    info.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::PlaywrightConditionalFixtureDefinition(access)
+                if access.test_name == test_name
+                    && access.base_name == base_name
+                    && access.fixture_name == fixture_name
+                    && access.type_name == type_name
+        )
+    })
+}
+
+fn has_playwright_test_binding_fact(info: &crate::ModuleInfo, test_name: &str) -> bool {
+    info.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::PlaywrightTestBinding(binding) if binding.test_name == test_name
+        )
+    })
+}
+
 fn has_playwright_fixture_alias_fact(
     info: &crate::ModuleInfo,
     test_name: &str,
@@ -5445,6 +5473,90 @@ fn non_playwright_chained_merge_tests_extend_records_nothing() {
     assert!(
         !has_any_playwright_fixture_definition_fact(&info),
         "a local mergeTests chain should not emit Playwright definitions, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_extend_of_imported_base_records_conditional_definitions() {
+    // `appTest` comes from another file. The extractor cannot prove that it is
+    // a Playwright test, so the definitions of `T` wait for analysis.
+    let info = parse(
+        r"
+            import { appTest } from './app-fixture';
+            import { BPage } from './b-page';
+
+            export const bTest = appTest.extend<{ b: BPage }>({});
+            export const makeBTest = () => appTest.extend<{ b: BPage }>({});
+        ",
+    );
+
+    for test_name in ["bTest", "makeBTest"] {
+        assert!(
+            has_playwright_conditional_fixture_definition_fact(
+                &info, test_name, "appTest", "b", "BPage"
+            ),
+            "{test_name} should define b: BPage when appTest is a Playwright test, found: {:?}",
+            info.semantic_facts
+        );
+        assert!(
+            has_playwright_fixture_alias_fact(&info, test_name, "appTest"),
+            "{test_name} should alias appTest, found: {:?}",
+            info.semantic_facts
+        );
+    }
+    assert!(
+        !has_any_playwright_fixture_definition_fact(&info),
+        "an imported base must not emit unconditional definitions, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_extend_of_local_unknown_base_records_no_conditional_definitions() {
+    let info = parse(
+        r"
+            import { BPage } from './b-page';
+
+            const framework = { extend: <T>(fixtures: unknown) => fixtures };
+            export const bTest = framework.extend<{ b: BPage }>({});
+        ",
+    );
+
+    assert!(
+        !info.semantic_facts.iter().any(|fact| matches!(
+            fact,
+            SemanticFact::PlaywrightConditionalFixtureDefinition(_)
+        )),
+        "a local non-Playwright base cannot become a Playwright test, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_untyped_extend_records_test_binding() {
+    // `base.extend({...})` without a type argument emits no definition, so a
+    // binding fact tells analysis that `appTest` holds a Playwright test.
+    let info = parse(
+        r"
+            import { test as base, mergeTests } from '@playwright/test';
+            import { otherTest } from './other-fixture';
+
+            export const appTest = base.extend({});
+            export const mergedTest = mergeTests(otherTest);
+        ",
+    );
+
+    for test_name in ["appTest", "mergedTest"] {
+        assert!(
+            has_playwright_test_binding_fact(&info, test_name),
+            "{test_name} should be marked as a Playwright test, found: {:?}",
+            info.semantic_facts
+        );
+    }
+    assert!(
+        !has_playwright_test_binding_fact(&info, "otherTest"),
+        "an imported name is not proven in this file, found: {:?}",
         info.semantic_facts
     );
 }
