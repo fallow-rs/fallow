@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     RUST_BACKTRACE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git build-essential pkg-config python3 \
+      ca-certificates git build-essential pkg-config python3 jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js runs the type-aware sidecar and the mutation runner tests.
@@ -44,5 +44,5 @@ RUN cargo test --locked --workspace --lib --bins --tests --examples --no-run
 ENV CARGO_NET_OFFLINE=true
 
 # Run the unit tests as a smoke check. A failure does not stop the build.
-RUN (timeout 1800 cargo test --locked --workspace --lib \
+RUN (timeout 1800 cargo test --locked --workspace --lib --no-fail-fast \
       || echo "WARNING: fallow unit tests reported failures")

@@ -1547,6 +1547,11 @@ fn removal_on_repo_without_caches_reports_zero() {
 fn removal_surfaces_filesystem_errors() {
     use std::os::unix::fs::PermissionsExt as _;
 
+    if rustix::process::geteuid().as_raw() == 0 {
+        // A read-only directory does not stop root from unlinking its
+        // entries; the scenario cannot be reproduced.
+        return;
+    }
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-remove-eacces");
     let cache_path = reusable_audit_worktree_path(&repo);

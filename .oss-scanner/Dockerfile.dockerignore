@@ -1,0 +1,5 @@
+# BuildKit reads this file in place of the root .dockerignore when it builds
+# .oss-scanner/Dockerfile. The root file excludes npm/fallow/skills/, which the
+# CLI embeds and its tests need, so this build uses its own short list.
+target/
+**/node_modules/
