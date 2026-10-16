@@ -253,9 +253,8 @@ const VITEST_CONFIG_NAMES: &[&str] = &[
     "vitest.config.cjs",
 ];
 
-/// Limits for the expansion of a glob entry in `test.projects`: the number of
-/// matches inspected, and the number of project config files read.
-const MAX_PROJECT_GLOB_MATCHES: usize = 1_000;
+/// The maximum number of project config files that one glob entry in
+/// `test.projects` reads.
 const MAX_PROJECT_GLOB_CONFIGS: usize = 64;
 
 /// The facts outside the config file that change how the plugin reads the
@@ -841,12 +840,12 @@ fn add_vitest_project_config_files(
 }
 
 /// The files that one `test.projects` string entry names. A plain path gives
-/// itself. A glob gives the files that match it, without `node_modules`. A
+/// itself. A glob gives the files that match it. The glob walk does not follow
+/// symlinks and does not enter `node_modules` or `.git`. A
 /// path outside `project_root` gives nothing, because the config comes from
 /// the analyzed repository.
 fn project_config_paths(entry: &str, config_dir: &Path, project_root: &Path) -> Vec<PathBuf> {
-    // A glob that starts with `**` walks the whole tree, `node_modules`
-    // included, on each run. Vitest configs name project directories, so
+    // A glob that starts with `**` walks the whole source tree on each run. Vitest configs name project directories, so
     // such an entry is not followed.
     let relative = entry.strip_prefix("./").unwrap_or(entry);
     if entry.contains('{') || relative.starts_with("**") {
@@ -863,27 +862,10 @@ fn project_config_paths(entry: &str, config_dir: &Path, project_root: &Path) -> 
     if !config_parser::glob_base_is_inside_root(config_dir, relative, project_root) {
         return Vec::new();
     }
-    let Some(dir) = config_dir.to_str() else {
-        return Vec::new();
-    };
-    let pattern = format!(
-        "{}/{}",
-        glob::Pattern::escape(dir),
-        fallow_config::glob_validation::disk_glob_pattern(relative)
-    );
-    let Ok(matches) = glob::glob(&pattern) else {
-        return Vec::new();
-    };
-    matches
-        .flatten()
-        .take(MAX_PROJECT_GLOB_MATCHES)
-        .filter(|path| {
-            path.is_file()
-                && config_parser::is_inside_root(path, project_root)
-                && !path
-                    .components()
-                    .any(|component| component.as_os_str() == "node_modules")
-        })
+    super::project_glob::expand(config_dir, relative)
+        .paths
+        .into_iter()
+        .filter(|path| path.is_file() && config_parser::is_inside_root(path, project_root))
         .map(|path| config_parser::lexical_normalize(&path))
         .take(MAX_PROJECT_GLOB_CONFIGS)
         .collect()
@@ -1563,6 +1545,50 @@ mod tests {
         assert_eq!(
             dirs,
             vec![config_dir.join("runtime/r1"), config_dir.join("runtime/r2")]
+        );
+    }
+
+    /// A pnpm workspace links each dependency, and each workspace package,
+    /// into `node_modules`. Workspace packages that depend on each other
+    /// make a symlink cycle. A project glob with a `**` after its base must
+    /// not walk through these links.
+    #[cfg(unix)]
+    #[test]
+    fn project_glob_does_not_walk_node_modules_symlinks() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        for app in ["a", "b"] {
+            let dir = root.join("apps").join(app);
+            std::fs::create_dir_all(dir.join("node_modules")).expect("create dir");
+            std::fs::write(
+                dir.join("vitest.e2e.config.ts"),
+                "export default defineConfig({ test: {} });",
+            )
+            .expect("write project config");
+            // Three links back to the workspaces: each walk level that
+            // follows them multiplies the number of paths by three.
+            for (index, target) in ["../../a", "../../b", "../.."].iter().enumerate() {
+                std::os::unix::fs::symlink(target, dir.join(format!("node_modules/l{index}")))
+                    .expect("create symlink");
+            }
+        }
+        let source = "export default defineConfig({ test: { projects: ['apps/**/vitest.e2e.config.ts'] } });";
+        let config = root.join("vitest.config.ts");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let walk_root = root.clone();
+        std::thread::spawn(move || {
+            let result = VitestPlugin.resolve_config(&config, source, &walk_root);
+            let _ = sender.send(result.setup_files);
+        });
+        let setup_files = receiver
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the project glob walked into the node_modules symlinks");
+        assert_eq!(
+            setup_files,
+            vec![
+                root.join("apps/a/vitest.e2e.config.ts"),
+                root.join("apps/b/vitest.e2e.config.ts"),
+            ]
         );
     }
 

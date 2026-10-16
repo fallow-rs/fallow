@@ -485,7 +485,8 @@ fn credit_inline_project_plugin_fields(
 /// still terminates promptly), and `MAX_EXPANDED_PROJECTS` limits the
 /// number of accepted child configs.
 ///
-/// The config comes from the analyzed repository, so a match outside
+/// The glob walk does not follow symlinks and does not enter `node_modules`
+/// or `.git`. The config comes from the analyzed repository, so a match outside
 /// `project_root` is not read. The check also stops absolute entries,
 /// `..` segments, and symlinks that point out of the project.
 fn expand_project_entry(
@@ -501,20 +502,8 @@ fn expand_project_entry(
     if !config_parser::glob_base_is_inside_root(base, pattern, project_root) {
         return configs;
     }
-    let pattern = fallow_config::glob_validation::disk_glob_pattern(pattern);
-    let pattern_str = if Path::new(pattern.as_ref()).is_absolute() {
-        pattern.into_owned()
-    } else {
-        format!(
-            "{}/{pattern}",
-            glob::Pattern::escape(&base.to_string_lossy())
-        )
-    };
-    let Ok(matches) = glob::glob(&pattern_str) else {
-        return configs;
-    };
     let mut iterations = 0_usize;
-    for matched in matches.flatten() {
+    for matched in super::project_glob::expand(base, pattern).paths {
         iterations += 1;
         if iterations > MAX_GLOB_ITERATIONS || configs.len() >= MAX_EXPANDED_PROJECTS {
             break;

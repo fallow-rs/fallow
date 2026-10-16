@@ -151,6 +151,7 @@ jobs:
               - 'crates/core/src/plugins/mise.rs'
               - 'crates/core/src/plugins/osls.rs'
               - 'crates/core/src/plugins/playwright.rs'
+              - 'crates/core/src/plugins/project_glob.rs'
               - 'crates/core/src/plugins/release_it.rs'
               - 'crates/core/src/plugins/serverless_framework.rs'
               - 'crates/core/src/plugins/storybook.rs'

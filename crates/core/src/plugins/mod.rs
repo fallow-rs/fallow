@@ -2081,6 +2081,7 @@ mod manifest;
 pub mod manifest_entries;
 mod mise;
 mod osls;
+mod project_glob;
 mod railway;
 pub mod registry;
 mod rstest;
