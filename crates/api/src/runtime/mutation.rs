@@ -806,6 +806,7 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         unretried: outcome.is_some_and(|outcome| !outcome.unretried.is_empty()),
         unloaded_paths: outcome.map_or(&[], |outcome| outcome.unloaded_paths.as_slice()),
         typecheck_failed: typecheck.issue.is_some(),
+        promoted: outcome.map_or(&[], |outcome| outcome.promoted.as_slice()),
     });
     let mut errors = run_issues(outcome, &changed_paths, check_error);
     errors.extend(typecheck.issue);

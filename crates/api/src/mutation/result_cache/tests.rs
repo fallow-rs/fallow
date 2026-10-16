@@ -304,6 +304,7 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
             .iter()
             .map(|&(id, key)| (id.to_owned(), key.to_owned()))
             .collect::<FxHashMap<_, _>>(),
+        promoted: Vec::new(),
     }
 }
 

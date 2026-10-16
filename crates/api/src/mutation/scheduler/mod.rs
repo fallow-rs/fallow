@@ -47,9 +47,11 @@ pub struct SchedulePlan {
     /// A dry-run hit on one is a static map miss: the scheduler runs it like
     /// a planned mutant and reports the miss (architecture section 11).
     pub unreached: Vec<ScheduledMutant>,
-    /// The mutants after the `--max-mutants` limit, in rank order. They
-    /// never run, but a pending mutant that no passing dry-run test hits
-    /// gets `no_coverage`, so the coverage does not depend on the limit.
+    /// The mutants after the `--max-mutants` limit, in rank order. A pending
+    /// mutant that no passing dry-run test hits gets `no_coverage`, so the
+    /// coverage does not depend on the limit. A planned mutant with no
+    /// covering test does not use the limit: the first covered pending
+    /// mutants in rank order run in its place.
     pub pending: Vec<ScheduledMutant>,
     /// Each mutant id of the plan. A hit outside this set stops the run.
     pub known_ids: FxHashSet<String>,
@@ -180,6 +182,9 @@ pub struct ScheduleOutcome {
     pub workers: usize,
     /// The cache key of each mutant that ran. Empty without a cache.
     pub cache_keys: FxHashMap<String, String>,
+    /// The pending mutants that took the place of an uncovered planned
+    /// mutant inside the `--max-mutants` limit, in rank order.
+    pub promoted: Vec<String>,
 }
 
 impl ScheduleOutcome {
@@ -195,6 +200,7 @@ impl ScheduleOutcome {
             timings: ScheduleTimings::default(),
             workers: 0,
             cache_keys: FxHashMap::default(),
+            promoted: Vec::new(),
         }
     }
 }
@@ -800,8 +806,60 @@ struct JobContext<'a> {
     cache: Option<&'a dyn ResultLookup>,
 }
 
+/// The issue of a mutant that the dry run hit, while the static map reaches
+/// no test of its file.
+fn static_map_miss_issue(mutant: &ScheduledMutant) -> ScheduleIssue {
+    ScheduleIssue {
+        code: "static-map-miss",
+        message: format!(
+            "the dry run hit this mutant in `{}`, but the static map reaches no test of that file; the module graph misses a test that loads it",
+            mutant.file
+        ),
+        mutant_id: Some(mutant.id.clone()),
+        stderr_tail: None,
+    }
+}
+
+/// The stored result of `mutant` under `key`, with its covering `tests`.
+fn cached_outcome(
+    cache: Option<&dyn ResultLookup>,
+    key: Option<&String>,
+    mutant: &ScheduledMutant,
+    tests: &[String],
+    static_mutant: bool,
+) -> Option<MutantOutcome> {
+    let hit = cache?.get(&mutant.id, key?)?;
+    let mut covering_tests = tests.to_vec();
+    covering_tests.sort_unstable();
+    Some(MutantOutcome {
+        status: hit.status,
+        killed_by: hit.killed_by,
+        covering_tests,
+        static_mutant,
+        duration_ms: hit.duration_ms,
+        // The cache stores a survivor only after its retry.
+        retried: hit.status == MutantStatus::Survived,
+        cached: true,
+    })
+}
+
+/// Where a mutant of [`build_jobs`] comes from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JobSource {
+    /// Inside the `--max-mutants` limit.
+    Planned,
+    /// After the limit. It runs only to fill the place of an uncovered
+    /// planned mutant.
+    Pending,
+    /// Statically `no_coverage`. It runs only on a dry-run hit, outside the
+    /// limit.
+    Unreached,
+}
+
 /// Builds the job of each covered mutant. A mutant with a cached result gets
-/// that result and no job.
+/// that result and no job. The `--max-mutants` limit counts the covered
+/// mutants only: an uncovered planned mutant leaves its place to the next
+/// covered pending mutant in rank order.
 fn build_jobs(
     plan: &SchedulePlan,
     facts: &DryRunFacts,
@@ -816,9 +874,27 @@ fn build_jobs(
     let caps = ready.capabilities;
     let mut regular = Vec::new();
     let mut statics = Vec::new();
-    let planned = plan.mutants.iter().map(|mutant| (mutant, false));
-    let unreached = plan.unreached.iter().map(|mutant| (mutant, true));
-    for (mutant, map_miss) in planned.chain(unreached) {
+    // Without pending mutants the limit cut nothing, so each planned mutant
+    // is inside it. With pending mutants the limit is the planned count.
+    let limit = plan.mutants.len();
+    let mut covered = 0;
+    let planned = plan
+        .mutants
+        .iter()
+        .map(|mutant| (mutant, JobSource::Planned));
+    let pending = plan
+        .pending
+        .iter()
+        .map(|mutant| (mutant, JobSource::Pending));
+    let unreached = plan
+        .unreached
+        .iter()
+        .map(|mutant| (mutant, JobSource::Unreached));
+    for (mutant, source) in planned.chain(pending).chain(unreached) {
+        if source == JobSource::Pending && covered >= limit {
+            continue;
+        }
+        let map_miss = source == JobSource::Unreached;
         let static_mutant = facts.static_ids.contains(&mutant.id);
         let hit = static_mutant || facts.covering.contains_key(&mutant.id);
         if map_miss && !hit {
@@ -838,16 +914,16 @@ fn build_jobs(
             );
             continue;
         }
+        match source {
+            JobSource::Planned => covered += 1,
+            JobSource::Pending => {
+                covered += 1;
+                outcome.promoted.push(mutant.id.clone());
+            }
+            JobSource::Unreached => {}
+        }
         if map_miss {
-            outcome.issues.push(ScheduleIssue {
-                code: "static-map-miss",
-                message: format!(
-                    "the dry run hit this mutant in `{}`, but the static map reaches no test of that file; the module graph misses a test that loads it",
-                    mutant.file
-                ),
-                mutant_id: Some(mutant.id.clone()),
-                stderr_tail: None,
-            });
+            outcome.issues.push(static_map_miss_issue(mutant));
         }
         let mut tests: Vec<(f64, String)> = tests
             .into_iter()
@@ -870,24 +946,10 @@ fn build_jobs(
             test_files.dedup();
             cache.key(ready, mutant, &tests, &test_files)
         });
-        if let (Some(cache), Some(key)) = (cache, &cache_key)
-            && let Some(hit) = cache.get(&mutant.id, key)
+        if let Some(cached) =
+            cached_outcome(cache, cache_key.as_ref(), mutant, &tests, static_mutant)
         {
-            let mut covering_tests = tests;
-            covering_tests.sort_unstable();
-            outcome.results.insert(
-                mutant.id.clone(),
-                MutantOutcome {
-                    status: hit.status,
-                    killed_by: hit.killed_by,
-                    covering_tests,
-                    static_mutant,
-                    duration_ms: hit.duration_ms,
-                    // The cache stores a survivor only after its retry.
-                    retried: hit.status == MutantStatus::Survived,
-                    cached: true,
-                },
-            );
+            outcome.results.insert(mutant.id.clone(), cached);
             continue;
         }
         let job = Job {

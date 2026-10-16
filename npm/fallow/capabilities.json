@@ -1209,7 +1209,7 @@
           "name": "--max-mutants",
           "type": "string",
           "required": false,
-          "description": "Run at most N mutants, in rank order. The others are `pending`"
+          "description": "Run at most N covered mutants, in rank order. Uncovered mutants do not count. The others are `pending`"
         },
         {
           "name": "--time-budget",

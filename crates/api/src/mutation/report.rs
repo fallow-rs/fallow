@@ -128,8 +128,10 @@ pub fn plan_files(plan: &MutationPlan) -> Vec<MutationPlanFile> {
 /// The result of each plan mutant: the plan disposition, or the scheduler
 /// outcome of a planned mutant. A planned mutant with no outcome is
 /// `pending`. A pending mutant that the dry run never covered is
-/// `no_coverage`. A statically `no_coverage` mutant with an outcome is a static
-/// map miss, and the outcome of the dry-run map wins. Each `no_coverage`
+/// `no_coverage`. A pending mutant that took the place of an uncovered
+/// planned mutant has the outcome of its run. A statically `no_coverage`
+/// mutant with an outcome is a static map miss, and the outcome of the
+/// dry-run map wins. Each `no_coverage`
 /// result gets the test reach of its plan mutant.
 pub fn mutant_results(plan: &MutationPlan, outcome: Option<&ScheduleOutcome>) -> Vec<MutantResult> {
     plan.mutants
@@ -164,29 +166,23 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
             status: MutantStatus::Pruned,
             ..base
         },
-        (MutantDisposition::Planned | MutantDisposition::NoCoverage, Some(result)) => {
-            MutantResult {
-                status: result.status,
-                killed_by: result.killed_by.clone(),
-                covering_tests: result.covering_tests.clone(),
-                static_mutant: result.static_mutant,
-                duration_ms: result.duration_ms,
-                retried: result.retried,
-                cached: result.cached,
-                ..base
-            }
-        }
+        (
+            MutantDisposition::Planned | MutantDisposition::Pending | MutantDisposition::NoCoverage,
+            Some(result),
+        ) => MutantResult {
+            status: result.status,
+            killed_by: result.killed_by.clone(),
+            covering_tests: result.covering_tests.clone(),
+            static_mutant: result.static_mutant,
+            duration_ms: result.duration_ms,
+            retried: result.retried,
+            cached: result.cached,
+            ..base
+        },
         (MutantDisposition::NoCoverage, None) => MutantResult {
             status: MutantStatus::NoCoverage,
             ..base
         },
-        (MutantDisposition::Pending, Some(result)) if result.status == MutantStatus::NoCoverage => {
-            MutantResult {
-                status: MutantStatus::NoCoverage,
-                static_mutant: result.static_mutant,
-                ..base
-            }
-        }
         (MutantDisposition::Planned | MutantDisposition::Pending, _) => base,
     }
 }
@@ -253,6 +249,9 @@ pub struct CompletionFacts<'a> {
     pub unloaded_paths: &'a [String],
     /// The type check of the survivors failed.
     pub typecheck_failed: bool,
+    /// The pending mutants that the scheduler ran in the place of an
+    /// uncovered planned mutant.
+    pub promoted: &'a [String],
 }
 
 /// The completion: `partial` when a planned mutant has no final status or a
@@ -266,25 +265,29 @@ pub fn completion(facts: &CompletionFacts<'_>) -> MutationCompletion {
     {
         reasons.push(MutationIncompleteReason::RuntimeError);
     }
-    if facts.plan.counts.pending > 0 {
+    let promoted: FxHashSet<&str> = facts.promoted.iter().map(String::as_str).collect();
+    let mut limit_pending = false;
+    let mut budget_pending = false;
+    for (mutant, result) in facts.plan.mutants.iter().zip(facts.results) {
+        if result.status != MutantStatus::Pending {
+            continue;
+        }
+        if is_scheduled(mutant, &promoted) {
+            budget_pending = true;
+        } else if mutant.disposition == MutantDisposition::Pending {
+            limit_pending = true;
+        }
+    }
+    if limit_pending {
         reasons.push(MutationIncompleteReason::MutantLimit);
     }
-    let budget_pending = facts
-        .plan
-        .mutants
-        .iter()
-        .zip(facts.results)
-        .any(|(mutant, result)| {
-            mutant.disposition == MutantDisposition::Planned
-                && result.status == MutantStatus::Pending
-        });
     if budget_pending || facts.unretried {
         reasons.push(MutationIncompleteReason::TimeBudget);
     }
     if !facts.plan.skipped_files.is_empty() {
         reasons.push(MutationIncompleteReason::SkippedFiles);
     }
-    if has_unloaded_reached_file(facts.plan, facts.unloaded_paths) {
+    if has_unloaded_reached_file(facts.plan, facts.unloaded_paths, &promoted) {
         reasons.push(MutationIncompleteReason::UnloadedFiles);
     }
     if !facts.baseline_failures.is_empty() {
@@ -302,11 +305,26 @@ pub fn completion(facts: &CompletionFacts<'_>) -> MutationCompletion {
     MutationCompletion::from_reasons(reasons)
 }
 
-/// True when the runner did not load a file that has a planned mutant and a
+/// True when the scheduler gave `mutant` a place inside the `--max-mutants`
+/// limit: a planned mutant, or a pending mutant in the place of an uncovered
+/// planned mutant.
+fn is_scheduled(mutant: &PlannedMutant, promoted: &FxHashSet<&str>) -> bool {
+    match mutant.disposition {
+        MutantDisposition::Planned => true,
+        MutantDisposition::Pending => promoted.contains(mutant.mutant.id.as_str()),
+        MutantDisposition::NoCoverage | MutantDisposition::Pruned(_) => false,
+    }
+}
+
+/// True when the runner did not load a file that has a scheduled mutant and a
 /// static test file. The static map says that a dry-run test loads such a
 /// file, so its `no_coverage` mutants are a load fault (`protocol.md`
 /// section 6), not a fact. A file that no static test reaches stays a fact.
-fn has_unloaded_reached_file(plan: &MutationPlan, unloaded_paths: &[String]) -> bool {
+fn has_unloaded_reached_file(
+    plan: &MutationPlan,
+    unloaded_paths: &[String],
+    promoted: &FxHashSet<&str>,
+) -> bool {
     if unloaded_paths.is_empty() {
         return false;
     }
@@ -314,9 +332,10 @@ fn has_unloaded_reached_file(plan: &MutationPlan, unloaded_paths: &[String]) -> 
     plan.files.iter().any(|file| {
         unloaded.contains(file.path.as_str())
             && !file.static_test_files.is_empty()
-            && plan.mutants.iter().any(|mutant| {
-                mutant.file == file.path && mutant.disposition == MutantDisposition::Planned
-            })
+            && plan
+                .mutants
+                .iter()
+                .any(|mutant| mutant.file == file.path && is_scheduled(mutant, promoted))
     })
 }
 
@@ -464,6 +483,7 @@ mod tests {
             timings: ScheduleTimings::default(),
             workers: 1,
             cache_keys: FxHashMap::default(),
+            promoted: Vec::new(),
         }
     }
 
@@ -496,6 +516,54 @@ mod tests {
         );
         let summary = summary(&results);
         assert_eq!(summary.coverage, Some(2.0 / 3.0));
+    }
+
+    #[test]
+    fn a_promoted_pending_mutant_reports_its_run_and_the_limit_cuts_nothing() {
+        let plan = plan(
+            vec![
+                planned("m1", Some(1), MutantDisposition::Planned, None),
+                planned("m2", Some(2), MutantDisposition::Pending, None),
+                planned("m3", Some(3), MutantDisposition::Pending, None),
+            ],
+            2,
+        );
+        let reasons = |m2: MutantStatus| {
+            let mut outcome = outcome(&[
+                ("m1", MutantStatus::NoCoverage),
+                ("m2", m2),
+                ("m3", MutantStatus::NoCoverage),
+            ]);
+            outcome.promoted = vec!["m2".to_owned()];
+            let results = mutant_results(&plan, Some(&outcome));
+            let statuses: Vec<MutantStatus> = results.iter().map(|result| result.status).collect();
+            assert_eq!(
+                statuses,
+                vec![MutantStatus::NoCoverage, m2, MutantStatus::NoCoverage]
+            );
+            completion(&CompletionFacts {
+                plan: &plan,
+                results: &results,
+                baseline_failures: &[],
+                worktree_changed: false,
+                worktree_unchecked: false,
+                unretried: false,
+                unloaded_paths: &[],
+                typecheck_failed: false,
+                promoted: &outcome.promoted,
+            })
+            .reasons
+        };
+        assert_eq!(
+            reasons(MutantStatus::Killed),
+            Vec::<MutationIncompleteReason>::new(),
+            "each covered mutant ran, so the limit cut nothing"
+        );
+        assert_eq!(
+            reasons(MutantStatus::Pending),
+            vec![MutationIncompleteReason::TimeBudget],
+            "a promoted mutant that did not run before the deadline is a time budget miss"
+        );
     }
 
     #[test]
@@ -634,6 +702,7 @@ mod tests {
             unretried: false,
             unloaded_paths: &[],
             typecheck_failed: false,
+            promoted: &[],
         });
         assert_eq!(
             completion.reasons,
@@ -718,6 +787,7 @@ mod tests {
                 unretried: false,
                 unloaded_paths: &[],
                 typecheck_failed: false,
+                promoted: &[],
             })
             .reasons,
             Vec::<MutationIncompleteReason>::new()
@@ -751,6 +821,7 @@ mod tests {
             unretried: false,
             unloaded_paths: &[],
             typecheck_failed: false,
+            promoted: &[],
         });
         assert_eq!(
             completion.reasons,
@@ -781,6 +852,7 @@ mod tests {
             unretried: true,
             unloaded_paths: &[],
             typecheck_failed: false,
+            promoted: &[],
         });
         assert_eq!(
             completion.reasons,
@@ -814,6 +886,7 @@ mod tests {
                 unretried: false,
                 unloaded_paths: unloaded,
                 typecheck_failed: false,
+                promoted: &[],
             })
             .reasons
         };

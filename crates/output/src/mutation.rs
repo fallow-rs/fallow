@@ -176,7 +176,7 @@ pub enum MutationCompletionStatus {
 pub enum MutationIncompleteReason {
     /// At least one mutant has the status `runtime_error`.
     RuntimeError,
-    /// The mutant limit left mutants `pending`.
+    /// The mutant limit left covered mutants `pending`.
     MutantLimit,
     /// The time budget ended before each mutant ran.
     TimeBudget,
@@ -752,7 +752,9 @@ pub struct MutationVerdictJoin {
 pub enum MutationPlanDisposition {
     /// A run executes the mutant.
     Planned,
-    /// The mutant is after the mutant limit.
+    /// The mutant is after the mutant limit. The plan limit comes before
+    /// the coverage is known: a run executes a pending mutant in the place
+    /// of a planned mutant that no test covers.
     Pending,
     /// No test file reaches the file of the mutant.
     NoCoverage,

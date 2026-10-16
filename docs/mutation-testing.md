@@ -185,6 +185,29 @@ The flag wins over the config key. The minimum applies to the score, in
 percent. A run with no executed mutant has no score and exits `0`, also when
 each mutant is `no_coverage`.
 
+## Mutant limit
+
+`--max-mutants N` limits the run to the covered mutants. The plan applies
+the limit in rank order before the dry run, so the plan cannot know the
+coverage. The scheduler corrects this after the dry run:
+
+- A planned mutant that a dry-run test covers keeps its place.
+- A planned mutant that no dry-run test covers is `no_coverage` and does not
+  use the limit.
+- Each free place goes to the next covered `pending` mutant in rank order.
+  That mutant runs and gets a normal status.
+- The run executes `min(N, covered mutants)` mutants. The covered mutants
+  after the filled limit stay `pending`.
+- A statically `no_coverage` mutant that the dry run hits (a static map
+  miss) runs outside the limit.
+- The completion has `mutant-limit` only when a covered mutant stays
+  `pending`. When the limit leaves only `no_coverage` mutants, the limit cut
+  nothing.
+
+`--plan` runs no dry run, so its `planned` and `pending` dispositions are a
+view before the coverage is known. A run can execute a mutant that the plan
+shows as `pending`.
+
 ## Score and coverage
 
 - `summary.score` covers the executed mutants only:

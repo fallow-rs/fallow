@@ -70,7 +70,9 @@ pub struct MutationRunOptions {
     /// Only an explicit caller option can set this, never project config,
     /// because the run has no sandbox copy.
     pub allow_side_effects: bool,
-    /// The maximum number of mutants to run. The others become `pending`.
+    /// The maximum number of covered mutants to run, in rank order. A
+    /// mutant that no dry-run test covers is `no_coverage` and does not
+    /// count. The others become `pending`.
     pub max_mutants: Option<usize>,
     /// Run in a dirty git worktree, or outside a git worktree. The run still
     /// compares the worktree after the run.

@@ -924,6 +924,40 @@ fn a_capped_run_gives_no_coverage_to_the_same_mutants_as_a_full_run() {
 }
 
 #[test]
+fn covered_pending_mutants_fill_the_limit_that_uncovered_planned_mutants_leave() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+    ));
+    // The limit is one mutant. The planned mutant has no dry-run hit, so the
+    // first covered pending mutant in rank order takes its place.
+    let mut plan = plan(&["m3", "m4"]);
+    plan.mutants.truncate(1);
+    plan.pending = ["m4", "m1", "m2"]
+        .iter()
+        .map(|id| ScheduledMutant {
+            id: (*id).to_owned(),
+            file: "src/a.ts".to_owned(),
+        })
+        .collect();
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    let ran: Vec<String> = spawner
+        .runs()
+        .into_iter()
+        .map(|(_, run)| run.mutant_id)
+        .collect();
+    assert_eq!(ran, vec!["m1".to_owned()]);
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+    assert_eq!(status(&outcome, "m3"), MutantStatus::NoCoverage);
+    assert_eq!(status(&outcome, "m4"), MutantStatus::NoCoverage);
+    assert!(
+        !outcome.results.contains_key("m2"),
+        "a covered pending mutant after the filled limit stays pending"
+    );
+    assert_eq!(outcome.promoted, vec!["m1".to_owned()]);
+}
+
+#[test]
 fn without_a_dry_run_each_pending_mutant_is_no_coverage() {
     let spawner = FakeSpawner::new(|_, _| Err(LinkFault::Protocol("unexpected".to_owned())));
     let mut plan = plan(&["m1"]);

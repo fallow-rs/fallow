@@ -33030,7 +33030,7 @@
         {
           "type": "string",
           "const": "mutant-limit",
-          "description": "The mutant limit left mutants `pending`."
+          "description": "The mutant limit left covered mutants `pending`."
         },
         {
           "type": "string",
@@ -33664,7 +33664,7 @@
         {
           "type": "string",
           "const": "pending",
-          "description": "The mutant is after the mutant limit."
+          "description": "The mutant is after the mutant limit. The plan limit comes before\nthe coverage is known: a run executes a pending mutant in the place\nof a planned mutant that no test covers."
         },
         {
           "type": "string",

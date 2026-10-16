@@ -60,7 +60,8 @@ pub struct MutationArgs {
     /// Build the plan only: select, map and rank mutants. Runs no code.
     #[arg(long)]
     pub plan: bool,
-    /// Run at most N mutants, in rank order. The others are `pending`.
+    /// Run at most N covered mutants, in rank order. Uncovered mutants do not
+    /// count. The others are `pending`.
     #[arg(long, value_name = "N")]
     pub max_mutants: Option<usize>,
     /// Stop starting mutants after this time, for example `90s`, `10m` or `1h`.
