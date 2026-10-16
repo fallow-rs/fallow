@@ -5266,6 +5266,103 @@ fn non_playwright_merge_tests_does_not_record_fixture_aliases() {
 }
 
 #[test]
+fn playwright_chained_merge_tests_extend_records_aliases_and_definitions() {
+    // Issue #3462: the receiver of `.extend` is the `mergeTests(...)` call.
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { appTest } from './app-fixture';
+            import { ReportsPage } from './reports-page';
+
+            export const test = mergeTests(appTest).extend<{ reports: ReportsPage }>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "test", "appTest"),
+        "chained mergeTests(...).extend should alias the merged test, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "test", "reports", "ReportsPage"),
+        "chained mergeTests(...).extend<T> should define the fixtures of T, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_extend_of_local_merged_test_records_definitions() {
+    // Issue #3462: `.extend<T>` on a local const that holds a merged test.
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { appTest } from './app-fixture';
+            import { SettingsPage } from './settings-page';
+
+            const mergedTest = mergeTests(appTest);
+            export const test = mergedTest.extend<{ settings: SettingsPage }>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "test", "settings", "SettingsPage"),
+        "extend<T> of a local merged test should define the fixtures of T, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_helper_returning_chained_merge_tests_extend_records_definitions() {
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { appTest } from './app-fixture';
+            import { AuditPage } from './audit-page';
+
+            export const auditTest = () =>
+                mergeTests(appTest).extend<{ audit: AuditPage }>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "auditTest", "appTest"),
+        "helper returning mergeTests(...).extend should alias the merged test, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "auditTest", "audit", "AuditPage"),
+        "helper returning mergeTests(...).extend<T> should define the fixtures of T, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn non_playwright_chained_merge_tests_extend_records_nothing() {
+    let info = parse(
+        r"
+            import { appTest } from './app-fixture';
+            import { BillingPage } from './billing-page';
+
+            const mergeTests = (value: unknown) => ({ extend: <T>(fixtures: unknown) => value });
+
+            export const test = mergeTests(appTest).extend<{ billing: BillingPage }>({});
+            export const helper = () => mergeTests(appTest).extend<{ billing: BillingPage }>({});
+        ",
+    );
+
+    assert!(
+        !has_any_playwright_fixture_alias_fact(&info),
+        "a local mergeTests chain should not emit Playwright aliases, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        !has_any_playwright_fixture_definition_fact(&info),
+        "a local mergeTests chain should not emit Playwright definitions, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn playwright_helper_returning_merge_tests_records_arg_base_aliases() {
     // Issue #1795: a helper returning `mergeTests(a(), b())` aliases the wrapped
     // factory calls' bare identifier callees, so cross-file expansion inherits

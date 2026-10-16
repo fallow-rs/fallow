@@ -1357,6 +1357,23 @@ pub(super) fn playwright_extend_base_name(call: &CallExpression<'_>) -> Option<S
     Some(base.name.to_string())
 }
 
+/// The call that a chained `<call>.extend(...)` call extends, for example the
+/// `mergeTests(...)` call in `mergeTests(testA).extend({})` (issue #3462).
+pub(super) fn playwright_extend_call_receiver<'b, 'a>(
+    call: &'b CallExpression<'a>,
+) -> Option<&'b CallExpression<'a>> {
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    if member.property.name != "extend" {
+        return None;
+    }
+    let Expression::CallExpression(receiver) = &member.object else {
+        return None;
+    };
+    Some(receiver)
+}
+
 pub(super) fn collect_fixture_type_bindings_from_type(
     ty: &TSType<'_>,
     path_prefix: &str,

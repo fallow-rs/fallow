@@ -1,0 +1,3 @@
+{
+  "entry": ["tests/**/*.test.ts"]
+}

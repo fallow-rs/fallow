@@ -764,6 +764,34 @@ fn playwright_fixture_getter_chain_credits_nested_fixture_methods() {
 }
 
 #[test]
+fn playwright_chained_merge_tests_extend_credits_pom_methods() {
+    // Issue #3462: `mergeTests(appTest).extend(...)` with the `mergeTests` call
+    // as the direct receiver of `.extend`, an aliased `merge(...).extend<T>`, a
+    // helper that returns the chain, and `.extend<T>` on a local merged const.
+    let root = fixture_path("issue-3462-playwright-mergetests-chained-extend");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let mut unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+    unused_class_members.sort();
+
+    assert_eq!(
+        unused_class_members,
+        vec![
+            "AuditPage.unusedAuditAction".to_string(),
+            "DashboardPage.legacyAction".to_string(),
+            "ReportsPage.unusedReportAction".to_string(),
+            "SettingsPage.unusedSettingsAction".to_string(),
+        ],
+        "only the genuinely unused POM methods should be reported"
+    );
+}
+
+#[test]
 fn playwright_wrapper_fixtures_credit_nested_fixture_methods() {
     let root = fixture_path("issue-1210-playwright-wrapper-fixtures");
     let config = create_config_with_ignore_decorators(root, vec!["@step".to_string()]);

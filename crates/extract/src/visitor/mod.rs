@@ -504,7 +504,9 @@ enum TypedPropertyExpansion {
 #[derive(Debug, Clone)]
 pub(crate) struct PendingPlaywrightFactory {
     test_name: String,
-    base_name: String,
+    /// The identifier that the helper extends. `None` when the receiver is a
+    /// `mergeTests(...)` call, which is always a Playwright test.
+    base_name: Option<String>,
     type_bindings: Vec<(String, String)>,
 }
 
@@ -974,6 +976,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// inherits these bindings through `pending_playwright_factory_aliases`, even
     /// when the wrapping `.extend({})` carries no type argument of its own.
     playwright_local_fixture_defs: FxHashMap<String, Vec<(String, String)>>,
+    /// Local consts that hold a Playwright test: `base.extend(...)` on the
+    /// `@playwright/test` `test` import, a `mergeTests(...)` result, or an
+    /// `.extend(...)` of another such const. The type argument of an
+    /// `.extend<T>(...)` on one of these consts defines fixtures (issue #3462).
+    playwright_local_tests: FxHashSet<String>,
     source_returning_helpers: FxHashMap<String, SourceReturningHelper>,
     /// File-level string directives (`"use client"`, `"use server"`) captured
     /// from `Program::directives`. Consumed by the security `client-server-leak`
@@ -2530,15 +2537,11 @@ impl ModuleInfoExtractor {
 
         let mut factory_bindings: FxHashMap<String, Vec<(String, String)>> = FxHashMap::default();
         for entry in pending_calls {
-            let base_local_resolves = self.imports.iter().any(|import| {
-                import.source == "@playwright/test"
-                    && import.local_name == entry.base_name
-                    && matches!(
-                        &import.imported_name,
-                        ImportedName::Named(name) if name == "test"
-                    )
-            });
-            if !base_local_resolves {
+            let base_is_test = entry
+                .base_name
+                .as_deref()
+                .is_none_or(|base| self.is_playwright_test_name(base));
+            if !base_is_test {
                 continue;
             }
             factory_bindings

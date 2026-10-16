@@ -1,0 +1,6 @@
+{
+  "name": "issue-3462-playwright-mergetests-chained-extend",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}
