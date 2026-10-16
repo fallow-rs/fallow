@@ -12,7 +12,13 @@ import {
   movedEntries,
   takeBaseCacheVersions,
 } from "./ship-rebase.mjs";
-import { pullRequestHead, pushSshEnv, shellCommand } from "./ship-git.mjs";
+import {
+  diffHunks,
+  ownHunkProblems,
+  pullRequestHead,
+  pushSshEnv,
+  shellCommand,
+} from "./ship-git.mjs";
 import { createShipRepo } from "./ship-test-repo.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-rebase.mjs", import.meta.url));
@@ -1162,4 +1168,193 @@ test("pushSshEnv keeps the push connection open unless the user set an SSH comma
   assert.match(keepalive.GIT_SSH_COMMAND, /ServerAliveInterval=\d+/u);
   assert.deepEqual(pushSshEnv({ GIT_SSH_COMMAND: "ssh -i key" }, ""), {});
   assert.deepEqual(pushSshEnv({}, "ssh -o ProxyCommand=x"), {});
+});
+
+const lines = (...values) => `${values.join("\n")}\n`;
+const NINE = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+const nineWith = (changes) => lines(...NINE.map((line, index) => changes[index + 1] ?? line));
+
+// `parent` forks from `main`, and `feat` stacks on `parent`. Then `main`
+// gets the squash of `parent`, and `onMain` adds more commits. Returns the
+// repository and the old tip of `parent`.
+const stackedRepo = (t, { base, onParent, onChild, onMain = () => {} }) => {
+  const repo = createShipRepo("ship-rebase-stack-");
+  t.after(repo.cleanup);
+  repo.commit("chore: start", base);
+  repo.git("push", "--quiet", "origin", "main");
+  repo.git("switch", "--quiet", "-c", "parent");
+  onParent(repo);
+  const parentTip = repo.git("rev-parse", "HEAD");
+  repo.git("switch", "--quiet", "-c", "feat");
+  onChild(repo);
+  repo.git("push", "--quiet", "origin", "feat");
+  repo.git("switch", "--quiet", "main");
+  repo.git("merge", "--quiet", "--squash", "parent");
+  repo.git("commit", "--quiet", "-m", "feat: parent (#1)");
+  onMain(repo);
+  repo.git("push", "--quiet", "origin", "main");
+  return { repo, parentTip };
+};
+
+test("--upstream rebases only the own commits of a stacked branch after a squash merge", (t) => {
+  const { repo, parentTip } = stackedRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/a.txt": "a\n", "src/b.txt": nineWith({}) },
+    onParent: (r) => {
+      r.commit("feat: parent one", { "src/a.txt": "a1\n" });
+      r.commit("feat: parent two", {
+        "src/a.txt": "a2\n",
+        "CHANGELOG.md": changelog("- Parent entry."),
+      });
+    },
+    onChild: (r) =>
+      r.commit("feat: child", {
+        "src/b.txt": nineWith({ 3: "three" }),
+        "CHANGELOG.md": changelog("- Parent entry.", "- Child entry."),
+      }),
+    // A change next to the hunk of the branch changes only its context.
+    onMain: (r) => r.commit("fix: main", { "src/b.txt": nineWith({ 5: "five" }) }),
+  });
+
+  const plain = shipRebase(repo);
+  assert.equal(plain.status, 1, plain.output);
+  assert.match(plain.output, /STOP: feat: Conflicts outside .*src\/a\.txt/u);
+
+  const result = shipRebase(repo, "--upstream", parentTip);
+
+  assert.equal(result.status, 0, result.output);
+  const tip = newTipOf(result);
+  assert.equal(repo.git("rev-parse", `${tip}^`), repo.git("rev-parse", "origin/main"));
+  assert.equal(fileAt(repo, tip, "src/b.txt"), nineWith({ 3: "three", 5: "five" }).trimEnd());
+  assert.equal(
+    fileAt(repo, tip, "CHANGELOG.md"),
+    changelog("- Parent entry.", "- Child entry.").trimEnd(),
+  );
+  assert.match(result.output, /: 1 commits, new tip/u);
+  assert.match(result.output, new RegExp(`a merge of the commits after ${parentTip} into`, "u"));
+  assert.match(result.output, /Hunk check: the result has the same hunks/u);
+});
+
+test("--upstream sets a cache bump of a stacked branch to the base value + 1", (t) => {
+  const source = (version, extra) => `${cacheSource(version)}\nfn a() {}\n\nfn b() {}\n${extra}`;
+  const { repo, parentTip } = stackedRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/lib.rs": source(1, "") },
+    onParent: (r) => r.commit("feat: parent", { "src/lib.rs": source(2, "") }),
+    onChild: (r) => r.commit("feat: child", { "src/lib.rs": source(3, "\nfn child_test() {}\n") }),
+    onMain: (r) => r.commit("feat: other", { "src/lib.rs": source(5, "") }),
+  });
+
+  const result = shipRebase(repo, "--upstream", parentTip);
+
+  assert.equal(result.status, 0, result.output);
+  assert.equal(
+    fileAt(repo, newTipOf(result), "src/lib.rs"),
+    source(6, "\nfn child_test() {}\n").trimEnd(),
+  );
+  assert.match(result.output, /GRAPH_CACHE_VERSION set to the base value \+ 1/u);
+  assert.match(result.output, /Hunk check: the result has the same hunks/u);
+});
+
+test("--upstream finds a hunk that the rebase of a stacked branch lost", (t) => {
+  const { repo, parentTip } = stackedRepo(t, {
+    base: { "CHANGELOG.md": changelog(), "src/a.txt": "a\n", "src/c.txt": "c\n" },
+    onParent: (r) => r.commit("feat: parent", { "src/a.txt": "a1\n" }),
+    onChild: (r) => {
+      r.commit("feat: child", { "src/a.txt": "a2\n" });
+      r.git("switch", "--quiet", "-c", "side");
+      r.commit("feat: side", { "src/side.txt": "side\n" });
+      r.git("switch", "--quiet", "feat");
+      // A change in the merge commit itself. A rebase drops it.
+      r.git("merge", "--quiet", "--no-ff", "--no-commit", "side");
+      r.write("src/c.txt", "c in the merge\n");
+      r.git("add", "--all");
+      r.git("commit", "--quiet", "-m", "merge side");
+    },
+  });
+
+  const result = shipRebase(repo, "--upstream", parentTip, "--push");
+
+  assert.equal(result.status, 1, result.output);
+  assert.match(
+    result.output,
+    /Hunks of the branch that the rebase lost or changed:\n\s+src\/c\.txt:\n\s+-c\n\s+\+c in the merge/u,
+  );
+  assert.match(result.output, new RegExp(`git range-diff ${parentTip}\\.\\.`, "u"));
+  assert.doesNotMatch(result.output, /Pushed/u);
+});
+
+test("ownHunkProblems finds a hunk that a whole-file resolution dropped", (t) => {
+  const { repo, parentTip } = stackedRepo(t, {
+    base: { "src/a.txt": nineWith({}) },
+    onParent: (r) => r.commit("feat: parent", { "src/a.txt": nineWith({ 1: "p" }) }),
+    onChild: (r) =>
+      r.commit("feat: child", { "src/a.txt": nineWith({ 1: "child", 9: "child test" }) }),
+    onMain: (r) => r.commit("fix: main", { "src/a.txt": nineWith({ 1: "main" }) }),
+  });
+  const oldTip = repo.git("rev-parse", "feat");
+  const baseTip = repo.git("rev-parse", "main");
+  const rebaseByHand = (resolveConflict) => {
+    repo.git("switch", "--quiet", "--detach", oldTip);
+    assert.throws(() => repo.git("rebase", "--quiet", "--onto", baseTip, parentTip));
+    resolveConflict();
+    repo.git("add", "--all");
+    repo.git("-c", "core.editor=true", "rebase", "--continue");
+    return repo.git("rev-parse", "HEAD");
+  };
+  const range = { upstream: parentTip, oldTip, baseTip };
+
+  // The base side of the whole file also drops the hunk at line 9, which
+  // did not conflict.
+  const dropped = rebaseByHand(() => repo.git("checkout", "--ours", "src/a.txt"));
+  const [problem, ...others] = ownHunkProblems(repo.work, { ...range, newTip: dropped });
+  assert.deepEqual(others, []);
+  assert.match(problem, /lost or changed:\n\s+src\/a\.txt:\n\s+-p\n\s+\+child\n/u);
+  assert.match(problem, /\n\s+src\/a\.txt:\n\s+-9\n\s+\+child test\n/u);
+
+  // A resolution of the conflict changes only the hunk at line 1.
+  const resolved = rebaseByHand(() =>
+    repo.write("src/a.txt", nineWith({ 1: "child", 9: "child test" })),
+  );
+  const [changed] = ownHunkProblems(repo.work, { ...range, newTip: resolved });
+  assert.match(changed, /lost or changed:\n\s+src\/a\.txt:\n\s+-p\n\s+\+child\n/u);
+  assert.match(changed, /does not have:\n\s+src\/a\.txt:\n\s+-main\n\s+\+child\n/u);
+  assert.doesNotMatch(changed, /child test/u);
+});
+
+test("diffHunks keys hunks by path and ignores their line numbers", () => {
+  const diff = [
+    "diff --git a/src/a b.txt b/src/a b.txt",
+    "index 1..2 100644",
+    "--- a/src/a b.txt",
+    "+++ b/src/a b.txt",
+    "@@ -1 +1 @@",
+    "-one",
+    "+two",
+    "@@ -9 +9 @@",
+    "--- dashes",
+    "+++ more",
+    "diff --git a/run.sh b/run.sh",
+    "old mode 100644",
+    "new mode 100755",
+  ].join("\n");
+
+  assert.deepEqual(
+    [...diffHunks(diff)],
+    [
+      ["src/a b.txt", ["-one\n+two", "--- dashes\n+++ more"]],
+      ["run.sh", ["old mode 100644", "new mode 100755"]],
+    ],
+  );
+});
+
+test("--upstream must be an ancestor of the branch", (t) => {
+  const repo = forkRepo(t, {
+    base: { "CHANGELOG.md": changelog() },
+    onMain: (r) => r.commit("fix: main", { "src/main.txt": "main\n" }),
+    onBranch: (r) => r.commit("fix: branch", { "src/branch.txt": "branch\n" }),
+  });
+
+  const result = shipRebase(repo, "--upstream", "origin/main");
+
+  assert.equal(result.status, 2, result.output);
+  assert.match(result.output, /--upstream origin\/main is not an ancestor of feat\./u);
 });

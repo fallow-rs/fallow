@@ -44,6 +44,11 @@ Options:
                     The remote or URL that holds the branch, when it is not
                     --remote. With --pr, a pull request from a fork that
                     allows maintainer edits sets it to the fork.
+  --upstream <commit>
+                    The old tip of the parent branch of a stacked branch.
+                    Use it after the parent pull request merged with a
+                    squash. The script then rebases only the commits after
+                    this commit (git rebase --onto <base> <commit>).
   --push            Push the result with a lease on the old branch tip
                     when all checks pass.
   -h, --help        Show this help.
@@ -79,6 +84,19 @@ After the rebase, the script runs these checks:
   - Each cache version or schema version constant that the branch changed
     still changes.
 The merge comparison needs Git 2.38 or later.
+
+With --upstream, the checks compare only the commits after that commit:
+  - The tree check merges the branch into the base with that commit as the
+    merge base, because the base already holds the squash of the parent.
+  - The hunk check compares the hunks of <commit>..<old tip> with the hunks
+    of <base>..<new tip>, without context lines. A hunk that the rebase lost
+    or changed fails the check, also when the merge has the same result.
+    The check leaves out CHANGELOG.md, the generated files that took the
+    base side, and the cache version lines. A failure prints the
+    git range-diff command that compares the commits.
+  - The CHANGELOG check and the version checks use that commit as the old
+    base of the branch.
+The merge comparison with --upstream needs Git 2.40 or later.
 
 Exit codes: 0 when the rebase and the checks pass, 1 when the rebase stops
 or a check fails, 2 for invalid input or a failed command.`;
@@ -496,6 +514,9 @@ const logVersions = (log, base, changes) =>
       : `Version constants against ${base}:\n${changes.map(formatVersionChange).join("\n")}`,
   );
 
+/** True for a `-` or `+` diff line that declares a cache version constant. */
+const isCacheVersionDiffLine = (line) => /^[-+]/u.test(line) && CACHE_DECL.test(line.slice(1));
+
 const isCacheBump = ({ name, to }) => name.endsWith("CACHE_VERSION") && /^\d+$/u.test(to ?? "");
 
 /** Set `name` in `file` to its current value + 1. Returns false when it is absent. */
@@ -593,6 +614,9 @@ const checkResult = (cwd, log, options, rebased, state) => {
       ...state.cacheFiles,
       ...state.bumped.map(({ file }) => file),
     ],
+    // A cache version line takes the base value + 1, so only that line of
+    // a cache file can differ from the branch.
+    hunks: { ignored: [CHANGELOG, ...generated], dropLine: isCacheVersionDiffLine },
     checks: (tips, treeProblems) => {
       const changelog = checkChangelog(cwd, tips);
       const others = [
