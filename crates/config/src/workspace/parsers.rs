@@ -209,7 +209,11 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
         );
     }
 
-    let full_pattern = root.join(expanded_pattern).to_string_lossy().to_string();
+    let disk_pattern = crate::glob_validation::disk_glob_pattern(expanded_pattern);
+    let full_pattern = root
+        .join(disk_pattern.as_ref())
+        .to_string_lossy()
+        .to_string();
     match glob::glob(&full_pattern) {
         Ok(paths) => {
             let mut results = Vec::new();

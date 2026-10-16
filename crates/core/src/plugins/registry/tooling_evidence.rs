@@ -380,8 +380,9 @@ fn first_file_match(root: &Path, pattern: &str) -> Option<PathBuf> {
                 return path.is_file().then_some(path);
             }
             let full = format!(
-                "{}/{expanded}",
-                glob::Pattern::escape(&root.to_string_lossy())
+                "{}/{}",
+                glob::Pattern::escape(&root.to_string_lossy()),
+                fallow_config::glob_validation::disk_glob_pattern(&expanded)
             );
             glob::glob(&full)
                 .ok()?

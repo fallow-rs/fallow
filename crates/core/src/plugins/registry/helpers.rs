@@ -807,7 +807,11 @@ pub fn check_plugin_detection(
                     }
                 }
             }
-            let full_pattern = root.join(pattern).to_string_lossy().to_string();
+            let disk_pattern = fallow_config::glob_validation::disk_glob_pattern(pattern);
+            let full_pattern = root
+                .join(disk_pattern.as_ref())
+                .to_string_lossy()
+                .to_string();
             glob::glob(&full_pattern).is_ok_and(|mut g| g.next().is_some())
         }
         PluginDetection::All { conditions } => conditions
@@ -875,5 +879,32 @@ mod tests {
         );
         // A pattern present in no indexed directory yields nothing.
         assert!(match_pattern_in_index(root, "missing.json", &index).is_empty());
+    }
+
+    #[test]
+    fn file_exists_detection_never_matches_outside_root() {
+        let base = tempfile::tempdir().expect("create temp dir");
+        let root = base.path().join("project");
+        std::fs::create_dir_all(root.join(".config")).expect("create project dirs");
+        std::fs::write(base.path().join("outside-marker.json"), "{}").expect("write marker");
+
+        // `.*` names hidden directories. The `glob` crate also lets it match
+        // `..`, so this pattern found the marker in the parent directory.
+        for pattern in [".*/outside-marker.json", "..*/outside-marker.json"] {
+            let detection = PluginDetection::FileExists {
+                pattern: pattern.to_string(),
+            };
+            assert!(
+                !check_plugin_detection(&detection, &[], &root, &[]),
+                "{pattern} matched a file outside the project root"
+            );
+        }
+
+        std::fs::write(root.join(".config").join("outside-marker.json"), "{}")
+            .expect("write marker inside root");
+        let detection = PluginDetection::FileExists {
+            pattern: ".*/outside-marker.json".to_string(),
+        };
+        assert!(check_plugin_detection(&detection, &[], &root, &[]));
     }
 }

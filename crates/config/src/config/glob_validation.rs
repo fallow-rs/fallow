@@ -17,6 +17,7 @@
 //!
 //! See issue #463 for the threat model.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::path::{Component, Path};
 
@@ -403,6 +404,36 @@ pub fn validate_user_path(path: &str, field: &'static str) -> Result<(), GlobVal
     Ok(())
 }
 
+/// Rewrites a validated, root-relative glob for expansion on disk with the
+/// `glob` crate.
+///
+/// The `glob` crate also tests the special entries `.` and `..` against a path
+/// segment that starts with a literal `.`. Thus `.*/x` expands to `../x`, and
+/// a pattern that passed validation can name a file outside the root. A `[.]`
+/// class matches the same directory entries as a leading `.`, but the crate
+/// never tests the special entries against it. Segments without a wildcard
+/// stay unchanged, so a literal `.` or `.git` segment keeps its meaning.
+#[must_use]
+pub fn disk_glob_pattern(pattern: &str) -> Cow<'_, str> {
+    let needs_rewrite = |segment: &str| {
+        let body = segment.trim_end_matches(['/', '\\']);
+        body.starts_with('.') && body.contains(['*', '?', '['])
+    };
+    if !pattern.split_inclusive(['/', '\\']).any(needs_rewrite) {
+        return Cow::Borrowed(pattern);
+    }
+    let mut rewritten = String::with_capacity(pattern.len() + 4);
+    for segment in pattern.split_inclusive(['/', '\\']) {
+        if needs_rewrite(segment) {
+            rewritten.push_str("[.]");
+            rewritten.push_str(&segment[1..]);
+        } else {
+            rewritten.push_str(segment);
+        }
+    }
+    Cow::Owned(rewritten)
+}
+
 /// Whether `key` is written as an exact, project-relative workspace root:
 /// non-empty, relative, `/`-separated, with no empty, `.` or `..` segment.
 #[must_use]
@@ -453,6 +484,47 @@ pub fn validate_user_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disk_glob_pattern_rewrites_only_leading_dot_wildcard_segments() {
+        assert_eq!(disk_glob_pattern(".*/x"), "[.]*/x");
+        assert_eq!(disk_glob_pattern("a/..*/b"), "a/[.].*/b");
+        assert_eq!(disk_glob_pattern("a\\.?\\b"), "a\\[.]?\\b");
+        assert_eq!(disk_glob_pattern("src/.[a-z]*"), "src/[.][a-z]*");
+        for unchanged in ["./src/*.ts", ".git/config", "src/**/*.ts", "a.*", "**/.env"] {
+            assert!(matches!(disk_glob_pattern(unchanged), Cow::Borrowed(p) if p == unchanged));
+        }
+    }
+
+    #[test]
+    fn disk_glob_pattern_never_expands_outside_root() {
+        let base = tempfile::tempdir().expect("create temp dir");
+        let root = base.path().join("root");
+        std::fs::create_dir_all(root.join(".hidden")).expect("create root dirs");
+        std::fs::write(base.path().join("secret"), "").expect("write secret");
+        std::fs::write(root.join(".hidden").join("secret"), "").expect("write inside");
+
+        for pattern in [".*/secret", "..*/secret", ".?/secret", ".[.]/secret"] {
+            validate_user_path(pattern, "test").expect("pattern passes validation");
+            let full = root.join(disk_glob_pattern(pattern).as_ref());
+            let matches: Vec<_> = glob::glob(&full.to_string_lossy())
+                .expect("valid glob")
+                .filter_map(Result::ok)
+                .collect();
+            assert!(
+                matches.iter().all(|path| !path
+                    .components()
+                    .any(|c| matches!(c, Component::ParentDir | Component::CurDir))),
+                "{pattern} expanded outside the root: {matches:?}"
+            );
+        }
+        let full = root.join(disk_glob_pattern(".*/secret").as_ref());
+        let matches: Vec<_> = glob::glob(&full.to_string_lossy())
+            .expect("valid glob")
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(matches, vec![root.join(".hidden").join("secret")]);
+    }
 
     #[test]
     fn relative_glob_accepted() {
