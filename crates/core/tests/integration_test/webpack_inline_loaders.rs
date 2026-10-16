@@ -404,6 +404,34 @@ fn webpack_inline_loader_re_export_credits_the_whole_resource() {
     );
 }
 
+/// A raw-loader resource never runs, so a re-export in it forwards nothing,
+/// whichever form the re-export takes.
+#[test]
+fn webpack_raw_loader_resource_re_export_does_not_credit_its_source() {
+    for forward in [
+        "export { local as default };",
+        "export default local;",
+        "export { local };",
+    ] {
+        let tmp = tempfile::tempdir().expect("create temp dir");
+        let root = tmp.path();
+        write_loader_re_export_project(root);
+        std::fs::write(
+            root.join("src/sandbox/reex.js"),
+            format!("import {{ local }} from './local.js';\n{forward}\nexport const extra = 2;\n"),
+        )
+        .expect("write reex.js");
+        let config = create_config(root.to_path_buf());
+        let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+        let local_unused = results
+            .unused_files
+            .iter()
+            .any(|file| file.file.path.ends_with("src/sandbox/local.js"));
+        assert!(local_unused, "{forward}: {:?}", results.unused_files);
+    }
+}
+
 /// Write a project whose entry loads resources through loaders that run the
 /// resource in another thread. Each resource imports the entry back, so each
 /// loader edge closes a cycle. The entry also loads a package file through a

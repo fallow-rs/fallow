@@ -611,9 +611,16 @@ impl ModuleGraph {
     }
 
     /// Flatten every module's re-export edges into a single tuple list.
+    ///
+    /// A module that only asset references load (a `raw-loader!` resource)
+    /// never runs, so its re-exports forward nothing. The edge that loads it
+    /// already credits its own exports, and its sources stay out of reach,
+    /// the same as its imports.
     fn collect_re_export_tuples(&self) -> Vec<ReExportTuple> {
+        let asset_only = self.asset_only_modules();
         self.modules
             .iter()
+            .filter(|m| !asset_only.contains(m.file_id.0 as usize))
             .flat_map(|m| {
                 m.re_exports.iter().map(move |re| ReExportTuple {
                     barrel: m.file_id,
@@ -624,6 +631,32 @@ impl ModuleGraph {
                 })
             })
             .collect()
+    }
+
+    /// The modules that are not entry points and that only edges which do not
+    /// run their target load.
+    fn asset_only_modules(&self) -> FixedBitSet {
+        let total = self.modules.len();
+        let mut asset_loaded = FixedBitSet::with_capacity(total);
+        let mut run_loaded = FixedBitSet::with_capacity(total);
+        for edge in &self.edges {
+            let target = edge.target.0 as usize;
+            if target >= total {
+                continue;
+            }
+            if edge.runs_target_code() {
+                run_loaded.insert(target);
+            } else {
+                asset_loaded.insert(target);
+            }
+        }
+        asset_loaded.difference_with(&run_loaded);
+        for module in &self.modules {
+            if module.is_entry_point() {
+                asset_loaded.set(module.file_id.0 as usize, false);
+            }
+        }
+        asset_loaded
     }
 
     /// Compute the transitive closure of `export *` source files whose every

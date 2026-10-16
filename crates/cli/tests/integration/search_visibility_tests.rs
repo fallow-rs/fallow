@@ -613,8 +613,10 @@ fn audit_brief_reads_declaration_ranges_from_a_vue_script_block() {
 /// A project where files import `formatDate` (or the default export `Widget`)
 /// and export the binding again. `fwd-named.ts` and `fwd-alias.ts` only
 /// forward it with `export { .. }`. `fwd-default.ts` forwards it with
-/// `export default Thing`. `fwd-and-use.ts` forwards it and also uses it.
-/// `use-alias.ts` imports the forwarded name under another local name.
+/// `export default Thing` and `fwd-assign.ts` with `export = Thing`.
+/// `fwd-and-use.ts` forwards it and also uses it. `use-alias.ts` imports the
+/// forwarded name under another local name. `use-assign.ts` reads a member of
+/// the `export =` forward through `import .. = require(..)`.
 fn write_forwarding_probe(root: &Path) {
     fs::create_dir_all(root.join("src")).expect("create source directory");
     let files: &[(&str, &str)] = &[
@@ -624,7 +626,7 @@ fn write_forwarding_probe(root: &Path) {
         ),
         (
             "src/index.ts",
-            "import { formatDate } from './fwd-named';\nimport Widget from './fwd-default';\nimport { today } from './fwd-and-use';\nimport './use-alias';\nconsole.log(formatDate(new Date()), Widget(), today());\n",
+            "import { formatDate } from './fwd-named';\nimport Widget from './fwd-default';\nimport { today } from './fwd-and-use';\nimport './use-alias';\nimport './use-assign';\nconsole.log(formatDate(new Date()), Widget(), today());\n",
         ),
         (
             "src/lib.ts",
@@ -637,6 +639,14 @@ fn write_forwarding_probe(root: &Path) {
         (
             "src/fwd-default.ts",
             "import Thing from './lib';\nexport default Thing;\n",
+        ),
+        (
+            "src/fwd-assign.ts",
+            "import Thing from './lib';\nexport = Thing;\n",
+        ),
+        (
+            "src/use-assign.ts",
+            "import Assigned = require('./fwd-assign');\nconsole.log(Assigned.name);\n",
         ),
         (
             "src/fwd-alias.ts",
@@ -693,20 +703,20 @@ fn import_then_export_forwarders_are_pass_through() {
 }
 
 #[test]
-fn export_default_forwarder_stays_a_consumer() {
+fn export_default_and_export_assignment_forwarders_are_pass_through() {
     let dir = tempfile::tempdir().expect("temporary project");
     let root = dir.path();
     write_forwarding_probe(root);
 
-    // The graph does not credit the importers of `export default Thing` to
-    // the origin export, so the forwarding file is the only signal.
+    // `export default Thing` and `export = Thing` forward the import the same
+    // way as `export { Thing as default }`, so the graph credits the
+    // importers of the forwarder to the origin export (issue #3392).
     let trace_default = trace(root, "src/lib.ts:default");
     let references = &trace_default["direct_references"];
-    let forwarder = reference(references, "src/fwd-default.ts");
-    assert_ne!(forwarder["reason"], "pass-through", "{forwarder}");
-    assert_eq!(forwarder["search_visibility"], "missed", "{forwarder}");
-    assert_eq!(forwarder["reason"], "default-import", "{forwarder}");
-    assert_eq!(forwarder["search_as"], "Thing", "{forwarder}");
+    assert_pass_through(reference(references, "src/fwd-default.ts"));
+    assert_pass_through(reference(references, "src/fwd-assign.ts"));
+    reference(references, "src/index.ts");
+    reference(references, "src/use-assign.ts");
 }
 
 #[test]
@@ -738,7 +748,10 @@ fn impact_closure_counts_import_then_export_forwarders_as_found() {
     for forwarder in ["src/fwd-named.ts", "src/fwd-alias.ts"] {
         assert_pass_through(gap(forwarder));
     }
-    assert_eq!(gap("src/fwd-default.ts")["search_visibility"], "missed");
+    for forwarder in ["src/fwd-default.ts", "src/fwd-assign.ts"] {
+        assert_pass_through(gap(forwarder));
+    }
+    gap("src/use-assign.ts");
     assert_eq!(gap("src/fwd-and-use.ts")["search_visibility"], "renamed");
 }
 

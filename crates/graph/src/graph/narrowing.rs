@@ -403,6 +403,22 @@ pub(super) fn create_synthetic_exports_for_star_re_exports_at_site(
     }
 }
 
+/// Whether the module object of `module` is its forwarded default export, as
+/// with `import x from './y'; export = x`.
+///
+/// A member read on a require binding of such a module (`import m =
+/// require('./x'); m.run()`) reads a member of that default export, so the
+/// read credits `default` too (issue #3392). A file that mixes CommonJS
+/// exports with an ES `default` re-export also matches. That extra credit can
+/// only hide a finding, never add one.
+fn forwards_default_as_module_object(module: &ModuleNode) -> bool {
+    module.has_cjs_exports()
+        && module
+            .re_exports
+            .iter()
+            .any(|re_export| re_export.exported_name == "default")
+}
+
 /// Handle namespace import narrowing for `import * as ns from './x'`.
 ///
 /// If member accesses can be determined, only those exports are marked as used.
@@ -415,7 +431,10 @@ fn narrow_namespace_references(
     ctx: &mut AttachContext<'_>,
 ) {
     let source_mod = ctx.module_by_id.get(&site.from_file);
-    let accessed_members = extract_accessed_members(source_mod, sym_local_name);
+    let mut accessed_members = extract_accessed_members(source_mod, sym_local_name);
+    if !accessed_members.is_empty() && forwards_default_as_module_object(module) {
+        accessed_members.push("default".to_string());
+    }
 
     let is_whole_object = source_mod.is_some_and(|module| {
         module

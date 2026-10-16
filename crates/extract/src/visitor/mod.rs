@@ -356,6 +356,25 @@ struct PendingLocalExportSpecifier {
     span: Span,
 }
 
+/// The parts of a named or default import that a re-export of it needs.
+struct ForwardableImport {
+    source: String,
+    imported_name: String,
+    is_type_only: bool,
+}
+
+/// A whole-module forward of one binding: `export default x` or `export = x`.
+/// When `x` is a named or default import, the statement forwards the import,
+/// exactly as `export { x as default }` does, so it resolves to a re-export.
+#[derive(Debug, Clone)]
+enum PendingBindingForward {
+    /// `export default x`. The default `ExportInfo` is already recorded and is
+    /// replaced by the re-export when `x` is an import.
+    ExportDefault { local_name: String },
+    /// `export = x`. TypeScript reads the binding as the default export.
+    ExportAssignment { local_name: String, span: Span },
+}
+
 #[derive(Debug, Clone)]
 struct PendingComputedEnumKeyUse {
     fact: ComputedEnumKeyUseFact,
@@ -766,6 +785,7 @@ pub(crate) struct ModuleInfoExtractor {
     binding_target_prefix_index: Option<FxHashMap<String, Vec<String>>>,
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
+    pending_binding_forwards: Vec<PendingBindingForward>,
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
     /// Parameter types declared by module-local function type aliases, used to
     /// recover contextual types for unannotated arrow/function expressions.
@@ -2208,6 +2228,11 @@ impl ModuleInfoExtractor {
         for specifier in &mut self.pending_local_export_specifiers {
             specifier.span = remap(specifier.span);
         }
+        for forward in &mut self.pending_binding_forwards {
+            if let PendingBindingForward::ExportAssignment { span, .. } = forward {
+                *span = remap(*span);
+            }
+        }
         for class in self.local_class_exports.values_mut() {
             for member in &mut class.members {
                 member.span = remap(member.span);
@@ -2255,43 +2280,59 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// The named or default import that a top-level `local_name` binds, unless
+    /// a local declaration of the same name owns the binding.
+    fn forwardable_import(&self, local_name: &str) -> Option<ForwardableImport> {
+        if self.local_declaration_names.contains(local_name) {
+            return None;
+        }
+        self.imports.iter().find_map(|import| {
+            if import.local_name != local_name {
+                return None;
+            }
+            let imported_name = match &import.imported_name {
+                ImportedName::Named(name) => name.clone(),
+                ImportedName::Default => "default".to_string(),
+                ImportedName::Namespace | ImportedName::SideEffect => return None,
+            };
+            Some(ForwardableImport {
+                source: import.source.clone(),
+                imported_name,
+                is_type_only: import.is_type_only,
+            })
+        })
+    }
+
+    /// Record a re-export of `import` under `exported_name`.
+    ///
+    /// The unresolvable literal lives in the matching import statement, not in
+    /// the export statement, so a cross-statement source anchor would smear
+    /// suppression coverage across unrelated lines. Both extra spans stay
+    /// empty and consumers fall back to the export span.
+    fn push_import_forward(
+        &mut self,
+        import: ForwardableImport,
+        exported_name: String,
+        is_type_only: bool,
+        span: Span,
+    ) {
+        self.re_exports.push(ReExportInfo {
+            source: import.source,
+            imported_name: import.imported_name,
+            exported_name,
+            is_type_only: is_type_only || import.is_type_only,
+            span,
+            statement_span: Span::new(0, 0),
+            source_span: Span::new(0, 0),
+        });
+    }
+
     pub(crate) fn resolve_pending_local_export_specifiers(&mut self) {
+        self.resolve_pending_binding_forwards();
         let pending = std::mem::take(&mut self.pending_local_export_specifiers);
         for spec in pending {
-            let matching_import = if self.local_declaration_names.contains(&spec.local_name) {
-                None
-            } else {
-                self.imports.iter().find(|import| {
-                    import.local_name == spec.local_name
-                        && matches!(
-                            import.imported_name,
-                            ImportedName::Named(_) | ImportedName::Default
-                        )
-                })
-            };
-
-            if let Some(import) = matching_import {
-                let imported_name = match &import.imported_name {
-                    ImportedName::Named(name) => name.clone(),
-                    ImportedName::Default => "default".to_string(),
-                    ImportedName::Namespace | ImportedName::SideEffect => {
-                        unreachable!("filtered by matches! guard above")
-                    }
-                };
-                // The unresolvable literal lives in the matching import
-                // statement, not in this `export { x }` statement, so a
-                // cross-statement source anchor would smear suppression
-                // coverage across unrelated lines. Both extra spans stay
-                // empty and consumers fall back to the specifier span.
-                self.re_exports.push(ReExportInfo {
-                    source: import.source.clone(),
-                    imported_name,
-                    exported_name: spec.exported_name,
-                    is_type_only: spec.is_type_only || import.is_type_only,
-                    span: spec.span,
-                    statement_span: Span::new(0, 0),
-                    source_span: Span::new(0, 0),
-                });
+            if let Some(import) = self.forwardable_import(&spec.local_name) {
+                self.push_import_forward(import, spec.exported_name, spec.is_type_only, spec.span);
             } else {
                 self.exports.push(ExportInfo {
                     name: ExportName::Named(spec.exported_name),
@@ -2306,6 +2347,47 @@ impl ModuleInfoExtractor {
                     deprecated: false,
                     deprecated_reason: None,
                 });
+            }
+        }
+    }
+
+    /// Turn `export default x` and `export = x` of an imported binding into a
+    /// re-export of `default`, the same record that `export { x as default }`
+    /// makes. The graph then credits the importers of this file to the
+    /// original export (issue #3392).
+    ///
+    /// `export = x` also flags the file as carrying CommonJS exports: the
+    /// whole module object is `x`, so a member read on a require binding of
+    /// this file reads a member of the forwarded default export.
+    fn resolve_pending_binding_forwards(&mut self) {
+        let pending = std::mem::take(&mut self.pending_binding_forwards);
+        for forward in pending {
+            match forward {
+                PendingBindingForward::ExportDefault { local_name } => {
+                    let Some(import) = self.forwardable_import(&local_name) else {
+                        continue;
+                    };
+                    let Some(index) = self.exports.iter().position(|export| {
+                        matches!(export.name, ExportName::Default)
+                            && export.local_name.as_deref() == Some(local_name.as_str())
+                    }) else {
+                        continue;
+                    };
+                    let export = self.exports.remove(index);
+                    self.push_import_forward(
+                        import,
+                        "default".to_string(),
+                        export.is_type_only,
+                        export.span,
+                    );
+                }
+                PendingBindingForward::ExportAssignment { local_name, span } => {
+                    let Some(import) = self.forwardable_import(&local_name) else {
+                        continue;
+                    };
+                    self.has_cjs_exports = true;
+                    self.push_import_forward(import, "default".to_string(), false, span);
+                }
             }
         }
     }

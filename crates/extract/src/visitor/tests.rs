@@ -10661,6 +10661,73 @@ fn default_export_then_import_is_re_export_of_default() {
 }
 
 #[test]
+fn export_default_of_default_import_is_re_export_of_default() {
+    let info = parse("import Thing from './a';\nexport default Thing;");
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 0);
+    assert_eq!(info.re_exports[0].source, "./a");
+    assert_eq!(info.re_exports[0].imported_name, "default");
+    assert_eq!(info.re_exports[0].exported_name, "default");
+    assert!(!info.re_exports[0].is_type_only);
+    assert!(!info.has_cjs_exports);
+}
+
+#[test]
+fn export_default_before_named_import_is_re_export_of_default() {
+    let info = parse("export default Thing;\nimport { Thing } from './a';");
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 0);
+    assert_eq!(info.re_exports[0].imported_name, "Thing");
+    assert_eq!(info.re_exports[0].exported_name, "default");
+}
+
+#[test]
+fn export_default_of_type_import_is_type_only_re_export() {
+    let info = parse("import type { Shape } from './a';\nexport default Shape;");
+    assert_eq!(info.re_exports.len(), 1);
+    assert!(info.re_exports[0].is_type_only);
+}
+
+#[test]
+fn export_default_of_local_or_namespace_binding_stays_local() {
+    for source in [
+        "function Thing() {}\nexport default Thing;",
+        "import * as ns from './a';\nexport default ns;",
+        "export default Unbound;",
+    ] {
+        let info = parse(source);
+        assert_eq!(info.re_exports.len(), 0, "{source}");
+        assert_eq!(info.exports.len(), 1, "{source}");
+        assert_eq!(info.exports[0].name, ExportName::Default, "{source}");
+    }
+}
+
+#[test]
+fn export_assignment_of_import_is_re_export_of_default() {
+    let info = parse("import Thing from './a';\nexport = Thing;");
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 0);
+    assert_eq!(info.re_exports[0].source, "./a");
+    assert_eq!(info.re_exports[0].imported_name, "default");
+    assert_eq!(info.re_exports[0].exported_name, "default");
+    assert!(info.has_cjs_exports);
+}
+
+#[test]
+fn export_assignment_of_local_binding_records_nothing() {
+    let info = parse("const Thing = 1;\nexport = Thing;");
+    assert_eq!(info.re_exports.len(), 0);
+    assert!(!info.has_cjs_exports);
+}
+
+#[test]
+fn export_assignment_inside_ambient_module_is_not_a_file_forward() {
+    let info = parse("import Thing from './a';\ndeclare module 'pkg' {\n  export = Thing;\n}");
+    assert_eq!(info.re_exports.len(), 0);
+    assert!(!info.has_cjs_exports);
+}
+
+#[test]
 fn mixed_export_splits_into_local_and_re_export() {
     let info = parse("import { X } from './a';\nconst Y = 1;\nexport { X, Y };");
     assert_eq!(info.re_exports.len(), 1);
@@ -13941,13 +14008,16 @@ export const other = (() => { const make = (kind: string) => kind; return make("
 
 #[test]
 fn imported_identifier_default_export_preserves_binding_identity() {
+    // `export default make` forwards the import, so the default export is a
+    // re-export that names the original binding (issue #3392).
     let info = parse(r#"import { defineProof as make } from "@gdp-ts/core"; export default make;"#);
-    let export = info
-        .exports
+    let re_export = info
+        .re_exports
         .iter()
-        .find(|export| export.name == ExportName::Default)
+        .find(|re_export| re_export.exported_name == "default")
         .unwrap();
-    assert_eq!(export.local_name.as_deref(), Some("make"));
+    assert_eq!(re_export.source, "@gdp-ts/core");
+    assert_eq!(re_export.imported_name, "defineProof");
 }
 
 #[test]

@@ -53,7 +53,7 @@ impl<'g> SourceCache<'g> {
 
     /// Whether `file_id` only exports its import binding `local` again and
     /// has no other use of it. The file is parsed once, and only when its text
-    /// can list `local` in an `export { .. }`.
+    /// can export `local` again.
     fn only_forwards(&mut self, file_id: FileId, local: &str) -> bool {
         if !self.forwarded.contains_key(&file_id)
             && !self
@@ -351,14 +351,14 @@ enum Binding<'g> {
     ReExport,
 }
 
-/// Whether `source` can list `local` in an `export { .. }` statement.
+/// Whether `source` can export `local` again: in an `export { .. }` list, or
+/// as the whole expression of `export default` or `export =`.
 ///
-/// [`forwarded_import_bindings`] marks a binding as exported only for a
-/// specifier of an `export { .. }` list. A `false` here proves that no such
-/// list names `local`, so the parse cannot return it. The scan answers `true`
-/// for any text that it cannot read with certainty: an escaped identifier, a
-/// comment after `export`, or a comment, string or non-ASCII character inside
-/// the braces.
+/// [`forwarded_import_bindings`] marks a binding as exported only in these
+/// positions. A `false` here proves that no such position names `local`, so
+/// the parse cannot return it. The scan answers `true` for any text that it
+/// cannot read with certainty: an escaped identifier, a comment after
+/// `export`, or a comment, string or non-ASCII character inside the braces.
 fn may_export_binding(source: &str, local: &str) -> bool {
     if source.contains("\\u") {
         return true;
@@ -383,6 +383,13 @@ fn may_export_binding(source: &str, local: &str) -> bool {
             rest = trim_script_whitespace(after_type);
         }
         if rest.starts_with('/') {
+            return true;
+        }
+        let forwarded_expression = strip_keyword(rest, "default")
+            .or_else(|| rest.strip_prefix('=').map(trim_script_whitespace));
+        if forwarded_expression.is_some_and(|expression| {
+            expression.starts_with('/') || identifier_prefix(expression) == local
+        }) {
             return true;
         }
         let Some(list) = rest.strip_prefix('{') else {
@@ -413,12 +420,11 @@ fn trim_script_whitespace(text: &str) -> &str {
 }
 
 /// The import bindings of a source file that the file only exports again
-/// with a top-level `export { .. }` (`import { a } from './x'; export { a }`)
-/// and does not use in any other place.
+/// with a top-level `export { .. }` (`import { a } from './x'; export { a }`),
+/// `export default a` or `export = a`, and does not use in any other place.
 ///
-/// `export default b` and `export = b` are normal uses: the module graph does
-/// not credit the importers of such a file to the origin export, so the file
-/// is the only signal and must stay a consumer.
+/// The module graph credits the importers of each of these forms to the
+/// origin export (issue #3392), so the file is not the only signal.
 ///
 /// Only plain script files are read. A Vue, Svelte, Astro or MDX file can use
 /// a binding in its template, so it has no such bindings. A file that does not
@@ -464,6 +470,8 @@ fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
         .iter()
         .filter_map(|statement| match statement {
             Statement::ExportNamedDeclaration(export) => Some(export.span.start),
+            Statement::ExportDefaultDeclaration(export) => Some(export.span.start),
+            Statement::TSExportAssignment(export) => Some(export.span.start),
             _ => None,
         })
         .collect();
@@ -484,8 +492,9 @@ fn forwarded_import_bindings(path: &Path, source: &str) -> FxHashSet<String> {
 /// and all other positions.
 struct BindingUses<'s> {
     imports: FxHashSet<&'s str>,
-    /// The start offsets of the top-level `export { .. }` statements. An
-    /// `export { .. }` in a TS namespace or an ambient module is a normal use.
+    /// The start offsets of the top-level `export { .. }`, `export default`
+    /// and `export =` statements. An export in a TS namespace or an ambient
+    /// module is a normal use.
     top_level_exports: FxHashSet<u32>,
     exported: FxHashSet<&'s str>,
     used: FxHashSet<&'s str>,
@@ -514,6 +523,29 @@ impl<'a> oxc_ast_visit::Visit<'a> for BindingUses<'_> {
         for specifier in &it.specifiers {
             self.record(specifier.local.name().as_str(), exported);
         }
+    }
+
+    fn visit_export_default_declaration(
+        &mut self,
+        it: &oxc_ast::ast::ExportDefaultDeclaration<'a>,
+    ) {
+        if let oxc_ast::ast::ExportDefaultDeclarationKind::Identifier(identifier) = &it.declaration
+            && self.top_level_exports.contains(&it.span.start)
+        {
+            self.record(identifier.name.as_str(), true);
+            return;
+        }
+        oxc_ast_visit::walk::walk_export_default_declaration(self, it);
+    }
+
+    fn visit_ts_export_assignment(&mut self, it: &oxc_ast::ast::TSExportAssignment<'a>) {
+        if let oxc_ast::ast::Expression::Identifier(identifier) = &it.expression
+            && self.top_level_exports.contains(&it.span.start)
+        {
+            self.record(identifier.name.as_str(), true);
+            return;
+        }
+        oxc_ast_visit::walk::walk_ts_export_assignment(self, it);
     }
 }
 
@@ -905,6 +937,9 @@ mod tests {
             "\u{feff}export { a };\nimport { a } from './x';\n",
             "import { a } from './x';\nexport type\u{a0}{ a };\n",
             "import { a } from './x';\nexport {\u{a0}a\u{a0}};\n",
+            "import { a } from './x';\nexport default a;\n",
+            "import { a } from './x';\nexport =\na;\n",
+            "import { a } from './x';\nexport default /* note */ a;\n",
         ] {
             assert!(may_export_binding(source, "a"), "{source}");
         }
@@ -916,8 +951,9 @@ mod tests {
             "import { a } from './x';\nexport const b = a;\n",
             "import { a } from './x';\nexport { b };\nconsole.log(a);\n",
             "import { a } from './x';\nexports.a = a;\nreexport { a };\n",
-            "import { a } from './x';\nexport default a;\n",
             "import { ab } from './x';\nexport { ab };\n",
+            "import { ab } from './x';\nexport default ab;\n",
+            "import { a } from './x';\nexport = ab;\n",
         ] {
             assert!(!may_export_binding(source, "a"), "{source}");
         }
@@ -943,6 +979,19 @@ mod tests {
             ),
             ["T"]
         );
+        // The module graph credits the importers of `export default b` and
+        // `export = c` to the origin export, the same as `export { .. }`.
+        assert_eq!(
+            forwarded("a.ts", "import b from './x';\nexport default b;\n"),
+            ["b"]
+        );
+        assert_eq!(
+            forwarded(
+                "a.ts",
+                "import b = require('./x');\nimport c from './y';\nexport = c;\n"
+            ),
+            ["c"]
+        );
     }
 
     #[test]
@@ -967,17 +1016,21 @@ mod tests {
             empty
         );
         assert_eq!(forwarded("a.ts", "import { a } from './x';\n"), empty);
-        // The module graph does not credit the importers of `export default b`
-        // or `export = c` to the origin export, so such a file stays a
-        // consumer.
         assert_eq!(
-            forwarded("a.ts", "import b from './x';\nexport default b;\n"),
+            forwarded(
+                "a.ts",
+                "import b from './x';\nexport default b;\nconsole.log(b);\n"
+            ),
+            empty
+        );
+        assert_eq!(
+            forwarded("a.ts", "import b from './x';\nexport default (b);\n"),
             empty
         );
         assert_eq!(
             forwarded(
                 "a.ts",
-                "import b = require('./x');\nimport c from './y';\nexport = c;\n"
+                "import b from './x';\ndeclare module 'm' {\n  export = b;\n}\n"
             ),
             empty
         );
