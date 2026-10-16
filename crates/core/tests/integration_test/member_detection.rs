@@ -767,7 +767,8 @@ fn playwright_fixture_getter_chain_credits_nested_fixture_methods() {
 fn playwright_chained_merge_tests_extend_credits_pom_methods() {
     // Issue #3462: `mergeTests(appTest).extend(...)` with the `mergeTests` call
     // as the direct receiver of `.extend`, an aliased `merge(...).extend<T>`, a
-    // helper that returns the chain, and `.extend<T>` on a local merged const.
+    // helper that returns the chain, `.extend<T>` on a local merged const, and
+    // a chain of two `.extend<T>` calls on one `mergeTests(...)` call.
     let root = fixture_path("issue-3462-playwright-mergetests-chained-extend");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -783,7 +784,9 @@ fn playwright_chained_merge_tests_extend_credits_pom_methods() {
         unused_class_members,
         vec![
             "AuditPage.unusedAuditAction".to_string(),
+            "ChartPage.unusedChartAction".to_string(),
             "DashboardPage.legacyAction".to_string(),
+            "ExportPage.unusedExportAction".to_string(),
             "ReportsPage.unusedReportAction".to_string(),
             "SettingsPage.unusedSettingsAction".to_string(),
         ],

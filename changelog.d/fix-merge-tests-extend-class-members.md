@@ -8,7 +8,9 @@
   page-object methods that tests call through them reported as unused class
   members. Now the chained form works the same as the form with an
   intermediate variable. This also covers an aliased `mergeTests` import and a
-  helper that returns the chain. An `.extend<T>(...)` on a local const that
+  helper that returns the chain. A chain of more than one `.extend<T>(...)`
+  call, for example `base.extend<A>({}).extend<B>({})`, defines the fixtures
+  of each type argument. An `.extend<T>(...)` on a local const that
   holds a merged or extended Playwright test now also defines the fixtures of
   `T`. The extraction and graph cache versions change, so the first run after
   the upgrade parses the project again. Thanks to @vethman for the report.

@@ -5337,6 +5337,93 @@ fn playwright_helper_returning_chained_merge_tests_extend_records_definitions() 
 }
 
 #[test]
+fn playwright_multi_level_extend_chain_records_every_definition() {
+    // Issue #3462: each `.extend<T>` in a chain defines the fixtures of `T`.
+    let info = parse(
+        r"
+            import { mergeTests, test as base } from '@playwright/test';
+            import { appTest } from './app-fixture';
+            import { ChartPage } from './chart-page';
+            import { ExportPage } from './export-page';
+            import { GridPage } from './grid-page';
+            import { HelpPage } from './help-page';
+
+            export const mergedChain = mergeTests(appTest)
+                .extend<{ chart: ChartPage }>({})
+                .extend<{ exporter: ExportPage }>({});
+            export const baseChain = base.extend<{ grid: GridPage }>({}).extend<{ help: HelpPage }>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "mergedChain", "appTest"),
+        "a multi-level mergeTests chain should alias the merged test, found: {:?}",
+        info.semantic_facts
+    );
+    for (test_name, fixture_name, type_name) in [
+        ("mergedChain", "chart", "ChartPage"),
+        ("mergedChain", "exporter", "ExportPage"),
+        ("baseChain", "grid", "GridPage"),
+        ("baseChain", "help", "HelpPage"),
+    ] {
+        assert!(
+            has_playwright_fixture_definition_fact(&info, test_name, fixture_name, type_name),
+            "{test_name} should define {fixture_name}: {type_name}, found: {:?}",
+            info.semantic_facts
+        );
+    }
+}
+
+#[test]
+fn playwright_helper_returning_multi_level_extend_chain_records_definitions() {
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { appTest } from './app-fixture';
+            import { ChartPage } from './chart-page';
+            import { ExportPage } from './export-page';
+
+            export const chainTest = () =>
+                mergeTests(appTest)
+                    .extend<{ chart: ChartPage }>({})
+                    .extend<{ exporter: ExportPage }>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "chainTest", "appTest"),
+        "a helper returning a multi-level chain should alias the merged test, found: {:?}",
+        info.semantic_facts
+    );
+    for (fixture_name, type_name) in [("chart", "ChartPage"), ("exporter", "ExportPage")] {
+        assert!(
+            has_playwright_fixture_definition_fact(&info, "chainTest", fixture_name, type_name),
+            "chainTest should define {fixture_name}: {type_name}, found: {:?}",
+            info.semantic_facts
+        );
+    }
+}
+
+#[test]
+fn non_playwright_multi_level_extend_chain_records_no_definitions() {
+    let info = parse(
+        r"
+            import { extend } from './framework';
+            import { ChartPage } from './chart-page';
+            import { ExportPage } from './export-page';
+
+            export const test = extend.extend<{ chart: ChartPage }>({}).extend<{ exporter: ExportPage }>({});
+        ",
+    );
+
+    assert!(
+        !has_any_playwright_fixture_definition_fact(&info),
+        "a non-Playwright extend chain should not emit definitions, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn non_playwright_chained_merge_tests_extend_records_nothing() {
     let info = parse(
         r"
