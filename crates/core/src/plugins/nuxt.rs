@@ -76,17 +76,24 @@ const KNOWN_CONTENT_LAYERS: &[&str] = &["docus"];
 /// When registered in `modules:`, its config file is credited as an entry point.
 const CONTENT_MODULE: &str = "@nuxt/content";
 
+/// Convention entry points. Nuxt scans `plugins/`, `middleware/` and `modules/`
+/// one level deep: a direct child file, or the `index` file of a direct child
+/// directory. Other files in a nested directory are ordinary modules, so they
+/// must be imported to count as used. A local module registers the files in its
+/// `runtime/` directory through `resolver.resolve()` strings, which fallow does
+/// not follow, so those files stay entry points.
 const ENTRY_PATTERNS: &[&str] = &[
     "pages/**/*.{vue,ts,tsx,js,jsx}",
     "layouts/**/*.{vue,ts,tsx,js,jsx}",
-    "middleware/**/*.{ts,js}",
+    "middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "server/api/**/*.{ts,js}",
     "server/routes/**/*.{ts,js}",
     "server/middleware/**/*.{ts,js}",
     "server/plugins/**/*.{ts,js}",
     "server/utils/**/*.{ts,js}",
     "plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "shared/utils/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
@@ -94,26 +101,32 @@ const ENTRY_PATTERNS: &[&str] = &[
     "components/**/*.{vue,ts,tsx,js,jsx}",
     "components/global/**/*.{vue,ts,tsx,js,jsx}",
     "components/**/*.global.{vue,ts,tsx,js,jsx}",
-    "modules/**/*.{ts,js}",
+    "modules/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "modules/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/pages/**/*.{vue,ts,tsx,js,jsx}",
     "app/layouts/**/*.{vue,ts,tsx,js,jsx}",
-    "app/middleware/**/*.{ts,js}",
+    "app/middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "app/plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/components/**/*.{vue,ts,tsx,js,jsx}",
     "app/components/global/**/*.{vue,ts,tsx,js,jsx}",
     "app/components/**/*.global.{vue,ts,tsx,js,jsx}",
-    "app/modules/**/*.{ts,js}",
+    "app/modules/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/modules/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
 ];
 
 const SRC_DIR_ENTRY_PATTERNS: &[&str] = &[
     "pages/**/*.{vue,ts,tsx,js,jsx}",
     "layouts/**/*.{vue,ts,tsx,js,jsx}",
-    "middleware/**/*.{ts,js}",
+    "middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "utils/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "components/**/*.{vue,ts,tsx,js,jsx}",
@@ -198,25 +211,30 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 ];
 
 const USED_EXPORTS_SERVER_API: &[&str] = &["default", "defineEventHandler"];
-const USED_EXPORTS_MIDDLEWARE: &[&str] = &["default"];
 const USED_EXPORTS_DEFAULT: &[&str] = &["default"];
 
 const DEFAULT_EXPORT_ENTRY_PATTERNS: &[&str] = &[
     "pages/**/*.{vue,ts,tsx,js,jsx}",
     "layouts/**/*.{vue,ts,tsx,js,jsx}",
     "components/**/*.{vue,ts,tsx,js,jsx}",
-    "modules/**/*.{ts,js}",
+    "modules/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "modules/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/pages/**/*.{vue,ts,tsx,js,jsx}",
     "app/layouts/**/*.{vue,ts,tsx,js,jsx}",
     "app/components/**/*.{vue,ts,tsx,js,jsx}",
-    "app/modules/**/*.{ts,js}",
+    "app/modules/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/modules/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "app/plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "app/plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "server/routes/**/*.{ts,js}",
-    "middleware/**/*.{ts,js}",
-    "app/middleware/**/*.{ts,js}",
+    "middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "app/middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "server/middleware/**/*.{ts,js}",
     "server/plugins/**/*.{ts,js}",
     "app.vue",
@@ -231,9 +249,13 @@ const SRC_DIR_DEFAULT_EXPORT_PATTERNS: &[&str] = &[
     "pages/**/*.{vue,ts,tsx,js,jsx}",
     "layouts/**/*.{vue,ts,tsx,js,jsx}",
     "components/**/*.{vue,ts,tsx,js,jsx}",
-    "modules/**/*.{ts,js}",
+    "modules/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "modules/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
     "plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-    "plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+    "middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
 ];
 
 /// Virtual module prefixes provided by Nuxt at build time.
@@ -320,10 +342,8 @@ impl Plugin for NuxtPlugin {
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
-        let mut exports = Vec::with_capacity(DEFAULT_EXPORT_ENTRY_PATTERNS.len() + 3);
+        let mut exports = Vec::with_capacity(DEFAULT_EXPORT_ENTRY_PATTERNS.len() + 1);
         exports.push(("server/api/**/*.{ts,js}", USED_EXPORTS_SERVER_API));
-        exports.push(("middleware/**/*.{ts,js}", USED_EXPORTS_MIDDLEWARE));
-        exports.push(("app/middleware/**/*.{ts,js}", USED_EXPORTS_MIDDLEWARE));
         exports.extend(
             DEFAULT_EXPORT_ENTRY_PATTERNS
                 .iter()
@@ -606,9 +626,6 @@ fn add_local_layer_support(
         prefix_with_src_dir(prefix, "server/api/**/*.{ts,js}"),
         USED_EXPORTS_SERVER_API.iter().copied(),
     );
-    for middleware in ["middleware/**/*.{ts,js}", "app/middleware/**/*.{ts,js}"] {
-        add_default_used_export(result, prefix_with_src_dir(prefix, middleware));
-    }
     add_prefixed_default_used_exports(result, prefix, DEFAULT_EXPORT_ENTRY_PATTERNS);
 
     if let Some(name) = layer_name(root, layer, auto_registered) {
@@ -972,10 +989,6 @@ fn add_src_dir_support(result: &mut PluginResult, src_dir: &Path) {
     );
     extend_prefixed_patterns(&mut result.always_used_files, src_dir, SRC_DIR_ALWAYS_USED);
     add_prefixed_default_used_exports(result, src_dir, SRC_DIR_DEFAULT_EXPORT_PATTERNS);
-    add_default_used_export(
-        result,
-        prefix_with_src_dir(src_dir, "middleware/**/*.{ts,js}"),
-    );
     add_prefixed_default_used_exports(result, src_dir, SRC_DIR_ALWAYS_USED);
 }
 
@@ -2135,8 +2148,12 @@ mod tests {
             "layouts/**/*.{vue,ts,tsx,js,jsx}",
             "components/**/*.{vue,ts,tsx,js,jsx}",
             "plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-            "plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-            "modules/**/*.{ts,js}",
+            "plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+            "middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+            "middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+            "modules/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+            "modules/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+            "modules/*/runtime/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}",
             "server/routes/**/*.{ts,js}",
             "server/plugins/**/*.{ts,js}",
             "app/components/**/*.{vue,ts,tsx,js,jsx}",
@@ -2837,9 +2854,10 @@ mod tests {
             "src/feature-components/**/*.{vue,ts,tsx,js,jsx}"
         ));
         for expected in [
-            "src/middleware/**/*.{ts,js}",
+            "src/middleware/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+            "src/middleware/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
             "src/plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
-            "src/plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
+            "src/plugins/*/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
             "src/components/**/*.{vue,ts,tsx,js,jsx}",
         ] {
             assert!(
@@ -2956,13 +2974,74 @@ mod tests {
         );
     }
 
+    fn entry_covers(path: &str) -> bool {
+        NuxtPlugin.entry_patterns().iter().any(|pattern| {
+            super::super::entry_rule_glob(pattern)
+                .expect("entry pattern compiles")
+                .compile_matcher()
+                .is_match(path)
+        })
+    }
+
     #[test]
-    fn entry_patterns_keep_nested_plugin_index_only() {
-        let plugin = NuxtPlugin;
-        let patterns = plugin.entry_patterns();
-        assert!(patterns.contains(&"plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"));
-        assert!(patterns.contains(&"plugins/**/index.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"));
-        assert!(!patterns.contains(&"plugins/**/*.{ts,js}"));
+    fn entry_patterns_match_nuxt_plugin_scan_depth() {
+        for credited in [
+            "plugins/bar.ts",
+            "plugins/0.setup.client.mjs",
+            "plugins/foo/index.ts",
+            "app/plugins/bar.ts",
+            "app/plugins/foo/index.tsx",
+        ] {
+            assert!(entry_covers(credited), "{credited} is a Nuxt plugin");
+        }
+        for nested in [
+            "plugins/foo/helper.ts",
+            "plugins/foo/deep/index.ts",
+            "app/plugins/foo/helper.ts",
+            "app/plugins/foo/deep/index.ts",
+        ] {
+            assert!(!entry_covers(nested), "Nuxt does not scan {nested}");
+        }
+    }
+
+    #[test]
+    fn entry_patterns_match_nuxt_middleware_scan_depth() {
+        for credited in [
+            "middleware/auth.ts",
+            "middleware/1.redirect.global.mjs",
+            "middleware/admin/index.ts",
+            "app/middleware/auth.js",
+            "app/middleware/admin/index.ts",
+        ] {
+            assert!(entry_covers(credited), "{credited} is a Nuxt middleware");
+        }
+        for nested in [
+            "middleware/admin/guard.ts",
+            "middleware/admin/deep/index.ts",
+            "app/middleware/admin/guard.ts",
+        ] {
+            assert!(!entry_covers(nested), "Nuxt does not scan {nested}");
+        }
+    }
+
+    #[test]
+    fn entry_patterns_match_nuxt_module_scan_depth() {
+        for credited in [
+            "modules/local.ts",
+            "modules/kit/index.ts",
+            "modules/kit/runtime/plugin.client.ts",
+            "modules/kit/runtime/components/Widget.vue",
+            "app/modules/kit/index.ts",
+        ] {
+            assert!(entry_covers(credited), "{credited} is a Nuxt module file");
+        }
+        for nested in [
+            "modules/kit/internal/helper.ts",
+            "modules/kit/deep/index.ts",
+            "app/modules/kit/helper.ts",
+        ] {
+            assert!(!entry_covers(nested), "Nuxt does not scan {nested}");
+        }
     }
 
     #[test]

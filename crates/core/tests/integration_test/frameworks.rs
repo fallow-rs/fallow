@@ -1306,6 +1306,58 @@ fn nuxt_default_scan_keeps_nested_plugin_index_but_not_nested_helpers() {
 }
 
 #[test]
+fn nuxt_convention_dirs_credit_only_the_files_nuxt_scans() {
+    let root = fixture_path("nuxt-convention-dir-depth");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&f.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    for expected_unused in [
+        "plugins/foo/helper.ts",
+        "plugins/foo/deep/index.ts",
+        "middleware/admin/guard.ts",
+        "modules/kit/internal/helper.ts",
+        "layers/base/plugins/nested/helper.ts",
+        "layers/base/middleware/nested/guard.ts",
+    ] {
+        assert!(
+            unused.contains(&expected_unused.to_string()),
+            "{expected_unused} is not a Nuxt convention file, so it is unused: {unused:?}"
+        );
+    }
+
+    for expected_used in [
+        "plugins/bar.ts",
+        "plugins/foo/index.ts",
+        "plugins/foo/explicit.ts",
+        "middleware/auth.ts",
+        "middleware/admin/index.ts",
+        "modules/local.ts",
+        "modules/kit/index.ts",
+        "modules/kit/runtime/plugin.ts",
+        "layers/base/plugins/layer.ts",
+        "layers/base/middleware/layer-auth.ts",
+    ] {
+        assert!(
+            !unused.contains(&expected_used.to_string()),
+            "{expected_used} is scanned or registered by Nuxt: {unused:?}"
+        );
+    }
+}
+
+#[test]
 fn nuxt_content_config_is_credited_when_module_registered() {
     let root = fixture_path("nuxt-content-config");
     let config = create_config(root);

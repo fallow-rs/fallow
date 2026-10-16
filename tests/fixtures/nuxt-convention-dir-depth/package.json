@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-convention-dir-depth",
+  "private": true,
+  "dependencies": {
+    "nuxt": "4.6.2"
+  }
+}
