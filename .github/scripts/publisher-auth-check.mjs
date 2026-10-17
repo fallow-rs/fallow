@@ -122,7 +122,7 @@ const verifyNpmIdentity = async (name, env, send, now) => {
     });
     stage = "trusted exchange";
     const authority = await requestJson(
-      `${NPM_REGISTRY}/-/npm/v1/oidc/token/exchange/package/${name.replace("/", "%2f")}`,
+      `${NPM_REGISTRY}/-/npm/v1/oidc/token/exchange/package/${name.replaceAll("/", "%2f")}`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${identity}`, Accept: "application/json" },

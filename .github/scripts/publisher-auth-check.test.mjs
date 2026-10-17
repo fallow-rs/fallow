@@ -358,7 +358,7 @@ test("npm uses official escapedName wire paths and continues after refusal throu
     calls.filter((call) => call.startsWith("https://registry.npmjs.org/")),
     NPM_PACKAGES.map(
       (name) =>
-        `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${name.replace("/", "%2f")}`,
+        `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${name.replaceAll("/", "%2f")}`,
     ),
   );
   assert.ok(calls.includes("https://crates.io/api/v1/trusted_publishing/tokens"));

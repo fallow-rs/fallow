@@ -4,6 +4,8 @@ paths-ignore:
   - tests/fixtures
   - tests/semantic-clone-corpus
   - tests/coverage-producer-corpus
+  - tests/benchmark-corpus
+  - tools/mutation-runner/test/fixtures
   - benchmarks
   - fuzz/corpus
   - examples
