@@ -193,6 +193,17 @@ impl DelimitedScanState {
     }
 }
 
+/// Whether the `<` at `start` opens markup. The HTML tokenizer treats a `<`
+/// that is not followed by an ASCII letter, `/`, `!`, or `?` as text, so
+/// `a < b` in template text does not start a tag.
+pub(super) fn is_html_tag_start(source: &str, start: usize) -> bool {
+    let bytes = source.as_bytes();
+    bytes.get(start) == Some(&b'<')
+        && bytes
+            .get(start + 1)
+            .is_some_and(|next| next.is_ascii_alphabetic() || matches!(next, b'/' | b'!' | b'?'))
+}
+
 pub(super) fn scan_html_tag(source: &str, start: usize) -> Option<(&str, usize)> {
     debug_assert_eq!(source.as_bytes().get(start), Some(&b'<'));
 

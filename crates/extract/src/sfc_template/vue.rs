@@ -5,7 +5,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::template_usage::TemplateUsage;
 
 use super::scanners::{
-    scan_bracket_section, scan_curly_section, scan_html_tag, scan_paren_section,
+    is_html_tag_start, scan_bracket_section, scan_curly_section, scan_html_tag, scan_paren_section,
 };
 use super::shared::{
     HTML_COMMENT_RE, ParsedAttr, ParsedTag, kebab_to_camel_case, merge_component_tag_usage,
@@ -324,7 +324,15 @@ fn find_template_body_end(source: &str, body_start: usize) -> Option<usize> {
             index += 1;
             continue;
         }
-        if bytes[index] == b'<'
+        // Skip a `{{ }}` interpolation as a unit, so a `<` inside the
+        // expression (`{{ 1 < 2 }}`) cannot consume a later `</template>`.
+        if bytes[index..].starts_with(b"{{")
+            && let Some((_, next_index)) = scan_curly_section(source, index, 2, 2)
+        {
+            index = next_index;
+            continue;
+        }
+        if is_html_tag_start(source, index)
             && let Some((tag, next_index)) = scan_html_tag(source, index)
         {
             let trimmed = tag.trim();
@@ -411,7 +419,7 @@ fn scan_template_body(
             continue;
         }
 
-        if bytes[index] == b'<' {
+        if is_html_tag_start(body, index) {
             let Some((tag, next_index)) = scan_html_tag(body, index) else {
                 break;
             };
@@ -863,6 +871,34 @@ mod tests {
             usage.used_bindings.contains("Content"),
             "component after a nested slot template must still be credited"
         );
+    }
+
+    #[test]
+    fn less_than_in_nested_template_interpolation_keeps_root_body() {
+        // Issue #3543: a `<` inside an interpolation of a nested `<template>`
+        // must not read as a tag start. Before the fix, the root body was lost
+        // and every template reference was dropped.
+        let usage = collect_template_usage(
+            "<script setup>import { LABEL } from './labels';\nconst W = { a: 1 }</script>\n<template>\n  <p>{{ LABEL }}</p>\n  <template v-if=\"W\">{{ 1 < 2 }}</template>\n</template>",
+            &imported(&["LABEL"]),
+        );
+
+        assert!(usage.used_bindings.contains("LABEL"));
+    }
+
+    #[test]
+    fn less_than_in_nested_template_attribute_and_text_keeps_root_body() {
+        // A `<` in a quoted attribute value or as plain text (`a < b`) is not
+        // a tag start, so the nested `</template>` still closes its open tag.
+        let usage = collect_template_usage(
+            "<template><template v-if=\"count < max\">a < b</template><Header /><p>{{ LABEL }}</p></template>",
+            &imported(&["LABEL", "Header", "count", "max"]),
+        );
+
+        assert!(usage.used_bindings.contains("LABEL"));
+        assert!(usage.used_bindings.contains("Header"));
+        assert!(usage.used_bindings.contains("count"));
+        assert!(usage.used_bindings.contains("max"));
     }
 
     #[test]
