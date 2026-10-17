@@ -686,7 +686,7 @@ test("release publication waits for the aggregate verification gate", () => {
   ]) {
     assert.match(
       job,
-      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-root-approved\]/,
+      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep\]/,
       registry,
     );
     assert.match(job, /permissions:\n\s+contents: read/, registry);
@@ -719,7 +719,7 @@ test("release publication waits for the aggregate verification gate", () => {
       /echo "::warning::[^\n]*\$\{remaining\[\*\]\}[^\n]*"\n\s+sleep "\$delay"/u,
       registry,
     );
-    assert.match(job, /timeout-minutes: 45/u, registry);
+    assert.match(job, /^ {4}timeout-minutes: 360$/mu, registry);
   }
 
   assert.match(
@@ -765,6 +765,16 @@ test("release stages the fallow npm root for maintainer approval", () => {
   assert.match(security, /exactly one `npm stage publish` call/u);
 });
 
+const WAIT_STEP = "Wait until fallow@version is public with the staged bytes";
+
+/** Returns the shell body of the public root wait step of a job. */
+const waitStepBody = (job) => {
+  const start = job.indexOf(`- name: ${WAIT_STEP}`);
+  if (start === -1) return null;
+  const step = job.slice(start).split(/\n {6}- |\n\n/u)[0];
+  return /run: \|\n([\s\S]*)$/u.exec(step)?.[1].trimEnd() ?? null;
+};
+
 test("release publishes no VSIX before the approved fallow root is public", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const npmPublish = indentedBlock(workflow, "npm-publish", 2);
@@ -787,13 +797,32 @@ test("release publishes no VSIX before the approved fallow root is public", () =
   assert.match(gate, /rerun the failed jobs of this run/u);
   assert.match(gate, /^\s+timeout-minutes: 360$/mu);
   assert.match(gate, /WAIT_MINUTES: '3[0-5][0-9]'/u);
+  const releaseReady = indentedBlock(workflow, "release-ready", 2);
+  assert.match(releaseReady, /needs: \[[^\]]*\bnpm-root-approved\b[^\]]*\]/u);
+  const gateWait = waitStepBody(gate);
+  assert.ok(gateWait, "npm-root-approved must run the public root wait");
   for (const publisher of [marketplace, openVsx]) {
-    assert.match(
-      publisher,
-      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-root-approved\]/u,
-    );
+    // The publishers start in the same wave as npm-publish, so one review of
+    // the release environment covers every publication job. Each publisher
+    // then waits for the approved root itself, before it uploads anything.
+    assert.match(publisher, /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep\]/u);
+    assert.doesNotMatch(publisher, /needs: \[[^\]]*\b(?:npm-publish|npm-root-approved)\b/u);
+    assert.equal(waitStepBody(publisher), gateWait, "publishers reuse the exact wait logic");
+    const steps = publisher.split(/^ {6}- /mu).slice(1);
+    const waitIndex = steps.findIndex((step) => step.startsWith(`name: ${WAIT_STEP}`));
+    assert.ok(waitIndex > 0, "a publisher must wait for the approved root");
+    for (const [index, step] of steps.entries()) {
+      if (index >= waitIndex) break;
+      assert.doesNotMatch(step, /secrets\.|_PAT|azure\/login|actions\/checkout|npm ci/u, step);
+    }
+    const digest = steps.slice(0, waitIndex).join("");
+    assert.match(digest, /name: npm-tarballs/u);
+    assert.match(digest, /sha256sum "\$NPM_TARBALLS\/20-cli-root\/fallow-\$\{VERSION\}\.tgz"/u);
+    assert.match(digest, /EXPECTED_SHA256=\$digest" >> "\$GITHUB_ENV"/u);
+    assert.match(steps[waitIndex], /WAIT_MINUTES: '3[0-4][0-9]'/u);
   }
   assert.match(security, /Publish no VSIX before the approved `fallow` root is public/u);
+  assert.match(security, /same wave as\s+`npm-publish`/u);
   assert.match(procedure, /Wait for the approved fallow root/u);
   assert.match(procedure, /Do this right after\s+`release-ready` without other work in between/u);
 });

@@ -20,11 +20,11 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
 | `npm-prep` | Install, assemble, and pack npm artifacts | Read only |
 | `npm-publish` | Publish downloaded tarballs and stage the `fallow` root | npm OIDC, stage-only for `fallow` |
-| `npm-root-approved` | Wait until the maintainer-approved `fallow` root is public with the staged bytes | Read only |
+| `npm-root-approved` | Wait until the maintainer-approved `fallow` root is public with the staged bytes, for `release-ready` | Read only |
 | `vscode-prep` | Build seven VSIX targets plus their inventory and checksums | Read only |
 | `vscode-host-smoke` | Run the exact prepared x64 target VSIX on Linux, Windows, and macOS with matching release binaries | Read only |
-| `vscode-publish-marketplace` | Publish the closed VSIX set to Visual Studio Marketplace | VSCE PAT or Marketplace OIDC |
-| `vscode-publish-open-vsx` | Publish the closed VSIX set to Open VSX | OVSX PAT or Open VSX OIDC |
+| `vscode-publish-marketplace` | Wait for the approved `fallow` root, then publish the closed VSIX set to Visual Studio Marketplace | VSCE PAT or Marketplace OIDC |
+| `vscode-publish-open-vsx` | Wait for the approved `fallow` root, then publish the closed VSIX set to Open VSX | OVSX PAT or Open VSX OIDC |
 | `vscode-public-verify` | Verify exact public target payloads from both registries | Read only |
 
 Preparation jobs may execute dependency code because they have no publication
@@ -243,12 +243,19 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 - Publish no VSIX before the approved `fallow` root is public. The VS Code
   extension downloads its binary from the GitHub Release of its own version and
   purges an installed binary of another version, and that release is created
-  after the approval. Both VSIX publishers and `release-ready` need
-  `npm-root-approved`, which polls the public registry without credentials,
-  downloads the public tarball, and requires its sha256 to equal the digest
-  `npm-publish` recorded for the tarball it staged. Other bytes under the
-  released version fail the run. The wait is bounded below GitHub's job limit
-  and names its recovery: approve, then rerun the failed jobs of the same run.
+  after the approval. Both VSIX publishers start in the same wave as
+  `npm-publish` and `publish-crates`, so one review of the `release`
+  environment covers every publication job. Their first steps use no
+  credential. They download the `npm-tarballs` artifact and record the sha256
+  of the `20-cli-root` tarball, the file that `npm-publish` stages. Then they
+  poll the public registry without credentials, download the public tarball,
+  and require its sha256 to equal that digest before any upload. Other bytes
+  under the released version fail the job. `release-ready` needs
+  `npm-root-approved`, which runs the same wait step with the digest that
+  `npm-publish` recorded. A policy test keeps the three wait steps equal. Each
+  wait is bounded below GitHub's job limit and names its recovery: approve,
+  then rerun the failed jobs of the same run. When `npm-publish` fails, the
+  publishers keep waiting, so cancel the run and then rerun its failed jobs.
 - Keep `publish-crates` and the direct npm publishes ahead of the approval.
   They do not depend on the GitHub Release, and gating them would only extend
   the time between the VSIX publication and the release.

@@ -1709,12 +1709,12 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           REGISTRY="${NPM_REGISTRY_URL:-https://registry.npmjs.org}"
           if [ -z "$EXPECTED_SHA256" ]; then
-            echo "::error::npm-publish did not record the sha256 of the staged fallow tarball"
+            echo "::error::The sha256 of the staged fallow tarball is missing"
             exit 1
           fi
-          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (stage ${STAGE_ID:-unknown}, sha256 ${EXPECTED_SHA256})"
+          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
           {
-            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. The VSIX publishers start when the public tarball matches."
+            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
           } >> "$GITHUB_STEP_SUMMARY"
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           body=""
@@ -1723,7 +1723,7 @@ jobs:
               break
             fi
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::fallow@${VERSION} did not become public within ${WAIT_MINUTES} minutes. Approve the stage on npm, then rerun the failed jobs of this run: the wait passes at once and the VSIX publishers follow."
+              echo "::error::fallow@${VERSION} did not become public within ${WAIT_MINUTES} minutes. Approve the stage on npm, then rerun the failed jobs of this run: the wait passes at once."
               exit 1
             fi
             sleep "$POLL_SECONDS"
@@ -2001,14 +2001,93 @@ jobs:
   vscode-publish-marketplace:
     name: Publish VS Code Marketplace targets
     if: ${{ !inputs.auth_check }}
-    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-root-approved]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep]
     environment: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 45
+    timeout-minutes: 360
     permissions:
       contents: read
       id-token: write
     steps:
+      # The publisher starts in the same wave as npm-publish and
+      # publish-crates, so one review of the release environment covers every
+      # publication job. It uploads nothing before the maintainer-approved
+      # fallow root is public with the bytes that this run staged. The steps
+      # below use no credential.
+      - name: Download npm tarballs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm-tarballs
+
+      - name: Record the sha256 of the staged fallow root
+        shell: bash
+        env:
+          NPM_TARBALLS: ${{ runner.temp }}/npm-tarballs
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          # npm-publish stages this exact file and records the same digest.
+          digest=$(sha256sum "$NPM_TARBALLS/20-cli-root/fallow-${VERSION}.tgz" | cut -d' ' -f1)
+          echo "EXPECTED_SHA256=$digest" >> "$GITHUB_ENV"
+
+      - name: Wait until fallow@version is public with the staged bytes
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        env:
+          # The job limit is 360 minutes. The rest is for the publication.
+          WAIT_MINUTES: '300'
+          POLL_SECONDS: '30'
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          REGISTRY="${NPM_REGISTRY_URL:-https://registry.npmjs.org}"
+          if [ -z "$EXPECTED_SHA256" ]; then
+            echo "::error::The sha256 of the staged fallow tarball is missing"
+            exit 1
+          fi
+          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
+          {
+            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
+          } >> "$GITHUB_STEP_SUMMARY"
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          body=""
+          while :; do
+            if body=$(curl -fsS -H 'Cache-Control: no-cache' "${REGISTRY}/fallow/${VERSION}" 2>/dev/null); then
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::fallow@${VERSION} did not become public within ${WAIT_MINUTES} minutes. Approve the stage on npm, then rerun the failed jobs of this run: the wait passes at once."
+              exit 1
+            fi
+            sleep "$POLL_SECONDS"
+          done
+          public_version=$(jq -r '.version // empty' <<<"$body")
+          tarball_url=$(jq -r '.dist.tarball // empty' <<<"$body")
+          if [ "$public_version" != "$VERSION" ]; then
+            echo "::error::Registry answered with version '${public_version}' for fallow@${VERSION}"
+            exit 1
+          fi
+          case "$tarball_url" in
+            "${REGISTRY}/"*) ;;
+            *)
+              echo "::error::Refusing tarball URL outside the registry: ${tarball_url}"
+              exit 1
+              ;;
+          esac
+          # The registry redirects tarball downloads to its CDN; that is why -L
+          # is needed after the host check above. Nothing here carries a
+          # credential, and the digest comparison below fails closed on any
+          # substituted content.
+          curl -fsSL "$tarball_url" -o fallow-public.tgz
+          actual_sha256=$(sha256sum fallow-public.tgz | cut -d' ' -f1)
+          if [ "$actual_sha256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::Public fallow@${VERSION} has sha256 ${actual_sha256}, but this run staged ${EXPECTED_SHA256}. Someone published other bytes under this version; do not tag this release."
+            exit 1
+          fi
+          publisher=$(jq -r '[._npmUser.name // "unknown", (._npmUser.approver.name // empty)] | join(", approved by ")' <<<"$body")
+          echo "fallow@${VERSION} is public with the staged bytes (published by ${publisher})"
+          echo "- \`fallow@${VERSION}\` is public with sha256 \`${actual_sha256}\`, published by ${publisher}." >> "$GITHUB_STEP_SUMMARY"
       - name: Checkout reviewed Marketplace publisher graph
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2164,14 +2243,93 @@ jobs:
   vscode-publish-open-vsx:
     name: Publish Open VSX targets
     if: ${{ !inputs.auth_check }}
-    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-root-approved]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep]
     environment: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 45
+    timeout-minutes: 360
     permissions:
       contents: read
       id-token: write
     steps:
+      # The publisher starts in the same wave as npm-publish and
+      # publish-crates, so one review of the release environment covers every
+      # publication job. It uploads nothing before the maintainer-approved
+      # fallow root is public with the bytes that this run staged. The steps
+      # below use no credential.
+      - name: Download npm tarballs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm-tarballs
+
+      - name: Record the sha256 of the staged fallow root
+        shell: bash
+        env:
+          NPM_TARBALLS: ${{ runner.temp }}/npm-tarballs
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          # npm-publish stages this exact file and records the same digest.
+          digest=$(sha256sum "$NPM_TARBALLS/20-cli-root/fallow-${VERSION}.tgz" | cut -d' ' -f1)
+          echo "EXPECTED_SHA256=$digest" >> "$GITHUB_ENV"
+
+      - name: Wait until fallow@version is public with the staged bytes
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        env:
+          # The job limit is 360 minutes. The rest is for the publication.
+          WAIT_MINUTES: '300'
+          POLL_SECONDS: '30'
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          REGISTRY="${NPM_REGISTRY_URL:-https://registry.npmjs.org}"
+          if [ -z "$EXPECTED_SHA256" ]; then
+            echo "::error::The sha256 of the staged fallow tarball is missing"
+            exit 1
+          fi
+          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
+          {
+            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
+          } >> "$GITHUB_STEP_SUMMARY"
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          body=""
+          while :; do
+            if body=$(curl -fsS -H 'Cache-Control: no-cache' "${REGISTRY}/fallow/${VERSION}" 2>/dev/null); then
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::fallow@${VERSION} did not become public within ${WAIT_MINUTES} minutes. Approve the stage on npm, then rerun the failed jobs of this run: the wait passes at once."
+              exit 1
+            fi
+            sleep "$POLL_SECONDS"
+          done
+          public_version=$(jq -r '.version // empty' <<<"$body")
+          tarball_url=$(jq -r '.dist.tarball // empty' <<<"$body")
+          if [ "$public_version" != "$VERSION" ]; then
+            echo "::error::Registry answered with version '${public_version}' for fallow@${VERSION}"
+            exit 1
+          fi
+          case "$tarball_url" in
+            "${REGISTRY}/"*) ;;
+            *)
+              echo "::error::Refusing tarball URL outside the registry: ${tarball_url}"
+              exit 1
+              ;;
+          esac
+          # The registry redirects tarball downloads to its CDN; that is why -L
+          # is needed after the host check above. Nothing here carries a
+          # credential, and the digest comparison below fails closed on any
+          # substituted content.
+          curl -fsSL "$tarball_url" -o fallow-public.tgz
+          actual_sha256=$(sha256sum fallow-public.tgz | cut -d' ' -f1)
+          if [ "$actual_sha256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::Public fallow@${VERSION} has sha256 ${actual_sha256}, but this run staged ${EXPECTED_SHA256}. Someone published other bytes under this version; do not tag this release."
+            exit 1
+          fi
+          publisher=$(jq -r '[._npmUser.name // "unknown", (._npmUser.approver.name // empty)] | join(", approved by ")' <<<"$body")
+          echo "fallow@${VERSION} is public with the staged bytes (published by ${publisher})"
+          echo "- \`fallow@${VERSION}\` is public with sha256 \`${actual_sha256}\`, published by ${publisher}." >> "$GITHUB_STEP_SUMMARY"
       - name: Checkout reviewed Open VSX publisher graph
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

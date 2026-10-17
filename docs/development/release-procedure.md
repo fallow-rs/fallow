@@ -381,10 +381,14 @@ invariants in this file.
     the exception: the workflow stages it and step 11 approves it. The VS Code release is
     published by separate Marketplace and Open VSX jobs. A credential-free
     public verifier checks every exact target before the final release gate.
-11. The run pauses once, in `Wait for the approved fallow root`, and the
-    maintainer approval is what lets it continue. Monitor the run until the
-    `Publish to npm` job has completed successfully; the crates publish in
-    parallel and the wait job is then running.
+11. The run pauses once, for the npm approval, and the maintainer approval is
+    what lets it continue. One review of the `release` environment starts
+    `Publish to npm`, `Publish Rust crates`, and both VSIX publishers
+    together. Monitor the run until the `Publish to npm` job has completed
+    successfully; the crates publish in parallel. The job
+    `Wait for the approved fallow root` and the first step of each VSIX
+    publisher are then running. If `Publish to npm` fails, the VSIX
+    publishers keep waiting. Cancel the run, then rerun its failed jobs.
 
     The workflow stages the `fallow` npm root instead of publishing it. Its
     trusted publisher grants stage publish only, so the version becomes
@@ -420,9 +424,10 @@ invariants in this file.
     recovery is a rerun of the `Publish to npm` job, which skips every package
     that already landed. The version tag remains available for the recovered run.
 
-    After the approval the wait job downloads the public tarball, requires its
-    sha256 to equal the digest `Publish to npm` recorded, and releases both VSIX
-    publishers; a public tarball with other bytes fails the run instead. The
+    After the approval the wait job and each VSIX publisher download the public
+    tarball and require its sha256 to equal the digest of the staged tarball.
+    Only then does a VSIX publisher upload; a public tarball with other bytes
+    fails the run instead. The
     wait gives up after a bounded time with the recovery in its message:
     approve, then rerun the failed jobs of the same run. Monitor the run through
     `status=completed` and `conclusion=success`; a successful watch command
