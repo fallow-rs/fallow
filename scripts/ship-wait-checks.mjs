@@ -78,6 +78,8 @@ Options:
   --min-checks <count>    The count of checks that must exist (default: 1).
                           Use the check count of a recent complete run.
   --required              Wait for the required checks only (--pr only).
+                          When the repository reports no required checks,
+                          wait for all checks.
   --head <sha>            Wait until the pull request head is this full
                           40-character SHA (--pr only). Right after a push,
                           GitHub can still report the checks of the old head.
@@ -740,9 +742,26 @@ const readHeadRollup = (args, { head, readRun, names }) => {
   return parseGhPrRollup(view, { readRun, names });
 };
 
+/**
+ * A repository without required checks makes `gh pr checks --required` report
+ * none forever. Then wait for all checks, and say so once.
+ */
+const allChecksFallback = ({ pr, log }) => {
+  let announced = false;
+  return (read) => {
+    const all = read();
+    if (all.ok && all.checks.length > 0 && !announced) {
+      announced = true;
+      log(`PR ${pr} reports no required checks, so the wait covers all checks.`);
+    }
+    return all;
+  };
+};
+
 /** Read current-head states; `gh pr checks --required` selects names only. */
-const ghChecksReader = ({ pr, repo, required, head = null }) => {
+const ghChecksReader = ({ pr, repo, required, head = null, log = console.log }) => {
   const readRun = ghRunMetadataReader();
+  const fallback = allChecksFallback({ pr, log });
   return () => {
     const args = ["pr", "view", pr, "--json", "statusCheckRollup,headRefOid"];
     if (repo !== null) {
@@ -765,7 +784,7 @@ const ghChecksReader = ({ pr, repo, required, head = null }) => {
         return { ok: false, error: "gh printed invalid required-check selection" };
       }
       if (selected.checks.length === 0) {
-        return selected;
+        return fallback(() => readHeadRollup(args, { head, readRun, names: null }));
       }
     }
     const names = selected === null ? null : new Set(selected.checks.map(({ name }) => name));

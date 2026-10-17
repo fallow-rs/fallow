@@ -470,7 +470,10 @@ const runWithFakeGh = ({ selected, rollups, runs = workflowRuns() }, args = []) 
         "const args = process.argv.slice(2);",
         "calls.push(args);",
         "fs.writeFileSync(callsPath, JSON.stringify(calls));",
-        'if (args[0] === "pr" && args[1] === "checks") {',
+        'if (args[0] === "pr" && args[1] === "checks" && typeof responses.selected === "string") {',
+        "  process.stderr.write(responses.selected);",
+        "  process.exit(1);",
+        '} else if (args[0] === "pr" && args[1] === "checks") {',
         "  process.stdout.write(JSON.stringify(responses.selected));",
         '} else if (args.some((arg) => arg.includes("statusCheckRollup"))) {',
         '  const index = calls.filter((call) => call.some((arg) => arg.includes("statusCheckRollup"))).length - 1;',
@@ -1062,6 +1065,43 @@ test("required pending and missing selected checks cannot pass by omission", fak
     );
   }
 });
+
+test(
+  "--required falls back to all checks when the repository has no required checks",
+  fakeGhOptions,
+  () => {
+    const result = runWithFakeGh(
+      {
+        selected: "no required checks reported on the 'chore/example' branch",
+        rollups: [
+          {
+            statusCheckRollup: [
+              checkRun("CI", "COMPLETED", "SUCCESS"),
+              checkRun("Commit messages", "IN_PROGRESS", null),
+            ],
+          },
+          {
+            statusCheckRollup: [
+              checkRun("CI", "COMPLETED", "SUCCESS"),
+              checkRun("Commit messages", "COMPLETED", "SUCCESS"),
+            ],
+          },
+        ],
+      },
+      ["--required", "--min-checks", "2"],
+    );
+
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /no required checks[^\n]*all checks/iu);
+    assert.equal(
+      result.stdout.match(/no required checks/giu)?.length,
+      1,
+      "the fallback is printed once",
+    );
+    assert.match(result.stdout, /all checks passed/u);
+    assert.equal(rollupReads(result.calls).length, 2, "the wait covers the pending check");
+  },
+);
 
 test(
   "the CLI fails closed when the current-head rollup has invalid JSON or shape",
