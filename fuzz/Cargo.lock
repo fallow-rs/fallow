@@ -346,9 +346,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -615,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.33.1"
+version = "3.34.0"
 dependencies = [
  "deser-value",
  "deser-yaml",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.33.1"
+version = "3.34.0"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.33.1"
+version = "3.34.0"
 dependencies = [
  "bitcode",
  "cssparser",
@@ -721,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.33.1"
+version = "3.34.0"
 dependencies = [
  "dashmap",
  "dunce",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.33.1"
+version = "3.34.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.33.1"
+version = "3.34.0"
 dependencies = [
  "bitcode",
  "oxc_span",
@@ -2123,9 +2123,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.37"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -2147,9 +2147,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.10"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -3019,9 +3019,9 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xxhash-rust"
-version = "0.8.15"
+version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
+checksum = "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7"
 
 [[package]]
 name = "yoke"

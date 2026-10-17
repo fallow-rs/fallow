@@ -1,0 +1,5 @@
+# This lockfile is analysis input for fallow tests. Fallow reads it as data
+# and never installs or runs these packages.
+[[PackageOverrides]]
+ignore = true
+reason = "Test fixture lockfile: analysis input, not a fallow dependency."

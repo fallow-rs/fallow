@@ -1,0 +1,4 @@
+[[IgnoredVulns]]
+id = "GHSA-hp3w-g68c-fv3c"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "sprintf-js has no patched release; it is a transitive build-tool dependency."

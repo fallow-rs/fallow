@@ -1,0 +1,62 @@
+# The pinned @huggingface/transformers 4.2.0 brings these packages. A newer
+# runtime can change the corpus embeddings, so it needs a corpus rerun first.
+
+[[IgnoredVulns]]
+id = "GHSA-7q85-xj36-vmfc"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-8238-w5pm-2374"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-c6fg-446q-cg94"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-j5f4-cc29-5x44"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-p634-w6r4-rjp2"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-rcw4-f5rp-g42v"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-vwc7-r8mq-g2x9"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-xcpc-8h2w-3j85"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-f88m-g3jw-g9cj"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-rgj7-g3m4-5g8c"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-wq5f-xc86-pv6w"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."
+
+[[IgnoredVulns]]
+id = "GHSA-hp3w-g68c-fv3c"
+ignoreUntil = 2027-01-15T00:00:00Z
+reason = "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release."

@@ -1,0 +1,12 @@
+# These paths hold analysis input, test corpora and generated output, not
+# fallow source. Some fixtures contain deliberate bad code.
+paths-ignore:
+  - tests/fixtures
+  - tests/semantic-clone-corpus
+  - tests/coverage-producer-corpus
+  - benchmarks
+  - fuzz/corpus
+  - examples
+  - apps/review-electron/fixtures
+  - '**/node_modules'
+  - '**/dist'

@@ -29,6 +29,9 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
+          # GITHUB_TOKEN cannot read branch protection rules. SCORECARD_TOKEN
+          # is a fine-grained token with read access to Administration only.
+          repo_token: ${{ secrets.SCORECARD_TOKEN || github.token }}
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
