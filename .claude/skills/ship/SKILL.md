@@ -11,7 +11,9 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    `node scripts/ship-rebase.mjs --pr <number> --push`, also for one pull
    request. Do not rebase by hand. The script compares the result with a
    merge and checks each version constant. A failed manual
-   `rebase --continue` leaves commits on a detached HEAD.
+   `rebase --continue` leaves commits on a detached HEAD. For a stacked
+   branch after a squash merge of its parent, add `--upstream` (see
+   "Serial merge of many pull requests").
 2. Re-run the required checks from `docs/development/quality-gates.md`.
 3. Verify that public contracts and generated files are pushed. Merge each
    companion change into the default branch of its repository (for example
@@ -101,6 +103,36 @@ Use these scripts for each pull request, one at a time:
      This covers each `*SCHEMA_VERSION` constant, for example
      `CHECK_SCHEMA_VERSION`, and each `*CACHE_VERSION` constant that the
      script could not bump again (a string value or a moved constant).
+
+   A stacked branch still holds the original commits of its parent branch.
+   After a squash merge of the parent, a plain rebase replays those commits
+   on the squash, and they conflict. Do not run `git rebase --onto` by
+   hand: a manual resolution with `git checkout --ours` on a whole file
+   drops each hunk of the branch in that file, also a hunk without a
+   conflict. Give the old tip of the parent branch to the script instead:
+
+   ```bash
+   node scripts/ship-rebase.mjs --pr <number> --upstream <old parent tip> --push
+   ```
+
+   The old parent tip is the last commit of the parent branch in the
+   history of the stacked branch. The script then runs
+   `git rebase --onto <base> <old parent tip>` and replays only the own
+   commits of the branch. The checks change in this way:
+   - The tree check merges the branch into `main` with the old parent tip
+     as the merge base, because `main` already holds the squash of the
+     parent.
+   - The hunk check compares the hunks of `<old parent tip>..<old tip>`
+     with the hunks of `main..<new tip>`, without context lines. A lost
+     or changed hunk fails the check, also when the merge comparison
+     passes. The check leaves out `CHANGELOG.md`, the generated files that
+     took the side of `main`, and the cache version lines. A failure
+     prints the `git range-diff` command that compares the commits.
+   - The `CHANGELOG.md` check and the version checks use the old parent
+     tip as the old base. The cache version handling is the same: a lost
+     cache bump gets the value of `main` + 1.
+
+   The option needs Git 2.40 or later.
 2. Wait for CI. Set `--min-checks` to the check count of a recent complete
    run. Without this guard, a read right after the push can show no
    pending check. Set `--head` to the pushed tip, which the rebase script

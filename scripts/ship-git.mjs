@@ -131,15 +131,45 @@ const readPullRequestHead = (cwd, pr) =>
  * remote-tracking refs and `FETCH_HEAD`, so the checkout of `cwd` stays as
  * it is.
  */
-const fetchBranch = (cwd, { remote, headRemote, branch, base }) => {
+const fetchBranch = (cwd, { remote, headRemote, branch, base, upstream = null }) => {
   git(cwd, ["fetch", "--quiet", remote]);
   const oldTip =
     headRemote === remote
       ? git(cwd, ["rev-parse", "--verify", `refs/remotes/${remote}/${branch}^{commit}`])
       : fetchHeadTip(cwd, headRemote, branch);
   const baseTip = git(cwd, ["rev-parse", "--verify", `${base}^{commit}`]);
-  const oldBase = git(cwd, ["merge-base", oldTip, baseTip]);
-  return { oldTip, baseTip, oldBase };
+  if (upstream === null) {
+    return { oldTip, baseTip, oldBase: git(cwd, ["merge-base", oldTip, baseTip]), upstream };
+  }
+  const parentTip = resolveUpstream(cwd, upstream, { branch, oldTip });
+  return { oldTip, baseTip, oldBase: parentTip, upstream: parentTip };
+};
+
+/**
+ * The commit of `--upstream`: the old tip of the parent branch of a stacked
+ * branch. The commits after it are the own commits of the branch, so it must
+ * be an ancestor of the branch tip and not the tip itself.
+ */
+const resolveUpstream = (cwd, upstream, { branch, oldTip }) => {
+  const resolved = run("git", ["rev-parse", "--verify", "--quiet", `${upstream}^{commit}`], {
+    cwd,
+    allowFailure: true,
+  });
+  if (resolved.status !== 0) {
+    throw new Error(`--upstream ${upstream} is not a commit.`);
+  }
+  const commit = resolved.stdout.trim();
+  const ancestor = run("git", ["merge-base", "--is-ancestor", commit, oldTip], {
+    cwd,
+    allowFailure: true,
+  });
+  if (ancestor.status !== 0) {
+    throw new Error(`--upstream ${upstream} is not an ancestor of ${branch}.`);
+  }
+  if (commit === oldTip) {
+    throw new Error(`${branch} has no commits after --upstream ${upstream}.`);
+  }
+  return commit;
 };
 
 const fetchHeadTip = (cwd, headRemote, branch) => {
@@ -213,7 +243,9 @@ const continueRebase = (cwd, hooks) => {
 };
 
 /**
- * Rebase the detached HEAD in `cwd` onto `onto` with rerere turned off.
+ * Rebase the commits of the detached HEAD in `cwd` after `upstream` onto
+ * `onto`, with rerere turned off. For a branch that is not stacked,
+ * `upstream` is `onto`.
  *
  * At each stop, `resolveConflicts(paths)` gets the unmerged paths. It returns
  * `{ ok: true }` after it staged a resolution, or `{ ok: false, reason }` to
@@ -223,12 +255,13 @@ const continueRebase = (cwd, hooks) => {
  * stops and the count of commits that became empty after a resolution, or
  * `{ ok: false, reason, paths }`.
  */
-const rebaseOnto = (cwd, onto, resolveConflicts, hooks) => {
-  const commitCount = Number(git(cwd, ["rev-list", "--count", `${onto}..HEAD`]));
-  let result = run("git", [...hooks, ...REBASE_CONFIG, "rebase", ...REBASE_FLAGS, onto], {
-    cwd,
-    allowFailure: true,
-  });
+const rebaseOnto = (cwd, { onto, upstream }, resolveConflicts, hooks) => {
+  const commitCount = Number(git(cwd, ["rev-list", "--count", `${upstream}..HEAD`]));
+  let result = run(
+    "git",
+    [...hooks, ...REBASE_CONFIG, "rebase", ...REBASE_FLAGS, "--onto", onto, upstream],
+    { cwd, allowFailure: true },
+  );
   let skipped = 0;
   for (let stop = 0; stop <= commitCount; stop += 1) {
     if (!rebaseInProgress(cwd)) {
@@ -271,12 +304,30 @@ const nulSeparated = (text) => text.split("\0").filter((path) => path !== "");
  * These paths are then only logged. When the branch has merge commits, they
  * stay problems that a person must compare by hand.
  *
+ * For a stacked branch, the base already holds the squash of the parent
+ * branch, so the merge uses `upstream` as its merge base. The merge then
+ * applies only the own commits of the branch, as the rebase does.
+ *
  * Returns `[]` when the trees are the same, or a list with one problem.
  */
-const checkRebaseTree = (cwd, log, { oldBase, oldTip, baseTip, newTip, base, ignored }) => {
+const checkRebaseTree = (
+  cwd,
+  log,
+  { oldBase, oldTip, baseTip, newTip, upstream, base, ignored },
+) => {
+  const mergeBase = upstream === null ? [] : [`--merge-base=${upstream}`];
   const merge = run(
     "git",
-    ["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", baseTip, oldTip],
+    [
+      "merge-tree",
+      "--write-tree",
+      "--name-only",
+      "--no-messages",
+      "-z",
+      ...mergeBase,
+      baseTip,
+      oldTip,
+    ],
     { cwd, allowFailure: true },
   );
   if (merge.status !== 0 && merge.status !== MERGE_TREE_CONFLICT_EXIT) {
@@ -312,6 +363,162 @@ const checkRebaseTree = (cwd, log, { oldBase, oldTip, baseTip, newTip, base, ign
   return [
     `Paths where the rebase result differs from a merge of the branch into ${base}:\n${lines.join("\n")}`,
   ];
+};
+
+// Diff lines outside a hunk that still describe a change of the file.
+const FILE_CHANGE_LINE = /^(?:old mode|new mode|new file mode|deleted file mode|Binary files) /u;
+
+/**
+ * The hunks of a `git diff -U0` output, keyed by path. A hunk is the text of
+ * its `-` and `+` lines, without the `@@` header, so a hunk that moved to
+ * another line number stays the same hunk. A mode change and a binary
+ * change count as a hunk too.
+ */
+export const diffHunks = (diff) => {
+  const hunks = new Map();
+  let path = null;
+  let current = null;
+  const add = (text) => {
+    hunks.set(path, [...(hunks.get(path) ?? []), text]);
+  };
+  const flush = () => {
+    if (current !== null && current.length > 0) {
+      add(current.join("\n"));
+    }
+    current = null;
+  };
+  for (const line of diff.split("\n")) {
+    if (line.startsWith(DIFF_HEADER)) {
+      flush();
+      path = headerPath(line);
+    } else if (line.startsWith("@@")) {
+      flush();
+      current = [];
+    } else if (current !== null && /^[-+\\]/u.test(line)) {
+      current.push(line);
+    } else if (current === null && FILE_CHANGE_LINE.test(line)) {
+      add(line);
+    }
+  }
+  flush();
+  return hunks;
+};
+
+const DIFF_HEADER = "diff --git ";
+
+/**
+ * The path of a `diff --git a/<path> b/<path>` line. Without rename
+ * detection, both paths are the same, so the line is `a/`, the path, ` b/`
+ * and the path again.
+ */
+const headerPath = (line) => {
+  const paths = line.slice(DIFF_HEADER.length);
+  return paths.slice("a/".length, "a/".length + (paths.length - "a/ b/".length) / 2);
+};
+
+/** The items of `left` that `right` does not hold, with multiplicity. */
+const missingFrom = (left, right) => {
+  const remaining = [...right];
+  return left.filter((item) => {
+    const index = remaining.indexOf(item);
+    if (index === -1) {
+      return true;
+    }
+    remaining.splice(index, 1);
+    return false;
+  });
+};
+
+const HUNK_PREVIEW_LINES = 6;
+
+const formatHunk = (path, hunk) => {
+  const lines = hunk.split("\n");
+  const shown = lines.slice(0, HUNK_PREVIEW_LINES).map((line) => `        ${line}`);
+  if (lines.length > HUNK_PREVIEW_LINES) {
+    shown.push(`        (${lines.length - HUNK_PREVIEW_LINES} more lines)`);
+  }
+  return `    ${path}:\n${shown.join("\n")}`;
+};
+
+/**
+ * The `-U0` hunks of `from..to` outside `ignored`. The lines that
+ * `dropLine` accepts are removed from each hunk, and a hunk without lines
+ * is removed.
+ */
+const rangeHunks = (cwd, from, to, { ignored, dropLine }) => {
+  const exclusions = ignored.map((path) => `:(exclude,top)${path}`);
+  const diff = git(cwd, [
+    "-c",
+    "core.quotePath=false",
+    "diff",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-renames",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "-U0",
+    from,
+    to,
+    "--",
+    ...exclusions,
+  ]);
+  const hunks = diffHunks(diff);
+  for (const [path, list] of hunks) {
+    const kept = list
+      .map((hunk) =>
+        hunk
+          .split("\n")
+          .filter((line) => !dropLine(line))
+          .join("\n"),
+      )
+      .filter((hunk) => /^[-+]/mu.test(hunk));
+    hunks.set(path, kept);
+  }
+  return hunks;
+};
+
+/**
+ * Compare the own commits of a stacked branch before the rebase
+ * (`upstream..oldTip`) with the result (`baseTip..newTip`), hunk by hunk.
+ * Each hunk of the branch must be in the result, and the result must have
+ * no other hunk. The comparison uses no context lines, because a change of
+ * the base next to a hunk changes its context but not the hunk. A
+ * `git range-diff` shows such a context change as a difference, so it is
+ * only the command to read a failure.
+ *
+ * Returns `[]` when the hunks are the same, or a list of problems.
+ */
+export const ownHunkProblems = (
+  cwd,
+  { upstream, oldTip, baseTip, newTip, ignored = [], dropLine = () => false },
+) => {
+  const before = rangeHunks(cwd, upstream, oldTip, { ignored, dropLine });
+  const after = rangeHunks(cwd, baseTip, newTip, { ignored, dropLine });
+  const paths = [...new Set([...before.keys(), ...after.keys()])].toSorted();
+  const differences = (left, right) =>
+    paths.flatMap((path) =>
+      missingFrom(left.get(path) ?? [], right.get(path) ?? []).map((hunk) =>
+        formatHunk(path, hunk),
+      ),
+    );
+  const lost = differences(before, after);
+  const added = differences(after, before);
+  const problems = [
+    ["Hunks of the branch that the rebase lost or changed", lost],
+    ["Hunks of the result that the branch does not have", added],
+  ]
+    .filter(([, hunks]) => hunks.length > 0)
+    .map(([label, hunks]) => `${label}:\n${hunks.join("\n")}`);
+  if (problems.length === 0) {
+    return [];
+  }
+  const rangeDiff = shellCommand([
+    "git",
+    "range-diff",
+    `${upstream}..${oldTip}`,
+    `${baseTip}..${newTip}`,
+  ]);
+  return [`${problems.join("\n  ")}\n  Compare the commits with: ${rangeDiff}`];
 };
 
 /** Print the result of a complete rebase and return the new tip. */
@@ -443,9 +650,22 @@ const pushIfAsked = (cwd, log, { push, remote, branch, base, oldTip, newTip, top
  * `treeProblems` is the result of the tree check. Print each problem and
  * return 1 when there is one. Otherwise print the `passed` lines and
  * return 0. The tree check leaves out the paths in `ignored`.
+ *
+ * For a stacked branch (`rebased.upstream`), the hunk check
+ * (`ownHunkProblems`) also runs. It leaves out the paths in `hunks.ignored`
+ * and the hunk lines that `hunks.dropLine` accepts.
  */
-export const checkRebase = (cwd, log, options, rebased, { ignored, checks, passed }) => {
-  const treeProblems = checkRebaseTree(cwd, log, { ...rebased, base: options.base, ignored });
+export const checkRebase = (
+  cwd,
+  log,
+  options,
+  rebased,
+  { ignored, hunks = { ignored }, checks, passed },
+) => {
+  const treeProblems = [
+    ...checkRebaseTree(cwd, log, { ...rebased, base: options.base, ignored }),
+    ...(rebased.upstream === null ? [] : ownHunkProblems(cwd, { ...rebased, ...hunks })),
+  ];
   const problems = [...treeProblems, ...checks(rebased, treeProblems)];
   if (problems.length > 0) {
     log(`CHECK FAILED: ${rebased.branch}`);
@@ -454,9 +674,14 @@ export const checkRebase = (cwd, log, options, rebased, { ignored, checks, passe
     }
     return 1;
   }
+  const merged =
+    rebased.upstream === null ? "a merge" : `a merge of the commits after ${rebased.upstream}`;
   log(
-    `Tree check: outside ${ignored.join(", ")}, the result matches a merge into ${options.base}.`,
+    `Tree check: outside ${ignored.join(", ")}, the result matches ${merged} into ${options.base}.`,
   );
+  if (rebased.upstream !== null) {
+    log("Hunk check: the result has the same hunks as the own commits of the branch.");
+  }
   for (const line of passed) {
     log(line);
   }
@@ -471,10 +696,13 @@ export const checkRebase = (cwd, log, options, rebased, { ignored, checks, passe
  *   rebase (see `rebaseOnto`).
  * - `afterRebase(worktree, refs)` runs after a complete rebase
  *   and before the checks. It can add commits on top of the rebased branch.
- *   `refs` holds `{ oldBase, oldTip, baseTip, hooks }`.
+ *   `refs` holds `{ oldBase, oldTip, baseTip, upstream, hooks }`. For a
+ *   stacked branch, `upstream` and `oldBase` are the old tip of the parent
+ *   branch (`--upstream`). Otherwise `upstream` is null and `oldBase` is the
+ *   merge base of the branch and the base.
  * - `check(worktree, rebased)` runs the checks of the result and returns
  *   the exit code, for example with `checkRebase`. `rebased` holds
- *   `{ branch, oldBase, oldTip, baseTip, newTip, worktree }`.
+ *   `{ branch, oldBase, oldTip, baseTip, upstream, newTip, worktree }`.
  *
  * When the checks pass, push when `options.push` is set and remove the
  * worktree. After a stop, a failed check or a failed command, keep the
@@ -489,7 +717,8 @@ export const shipBranch = (cwd, log, options, { resolveConflicts, afterRebase, c
   const target = { ...options, ...refs, remote, branch, top: cwd, worktree, hooks };
   let pushing = false;
   try {
-    const rebase = rebaseOnto(worktree, refs.baseTip, resolveConflicts(worktree), hooks);
+    const range = { onto: refs.baseTip, upstream: refs.upstream ?? refs.baseTip };
+    const rebase = rebaseOnto(worktree, range, resolveConflicts(worktree), hooks);
     if (!rebase.ok) {
       log(`STOP: ${branch}: ${rebase.reason}`);
       log(keptWorktreeReport(target, { push: true }));
@@ -544,6 +773,7 @@ const parseShipOptions = (argv) => {
       base: { type: "string" },
       remote: { type: "string", default: DEFAULT_REMOTE },
       "head-remote": { type: "string" },
+      upstream: { type: "string" },
       push: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -564,6 +794,7 @@ const parseShipOptions = (argv) => {
     branch: values.branch ?? null,
     remote: values.remote,
     headRemote: values["head-remote"],
+    upstream: values.upstream ?? null,
     base: values.base ?? `${values.remote}/${DEFAULT_BASE_BRANCH}`,
     push: values.push,
   };
