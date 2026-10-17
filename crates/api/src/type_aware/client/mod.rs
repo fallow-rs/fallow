@@ -39,6 +39,10 @@ use reconcile::apply_dead_code_response;
 use reconcile::semantic_only_candidate_stays_hidden;
 
 const EVIDENCE_LIMIT: usize = 40;
+/// A type-coupling result is one project-wide report, not one symbol, so it
+/// carries more evidence than [`EVIDENCE_LIMIT`]. The sidecar rejects a larger
+/// value. The bound keeps the response well below the semantic byte limit.
+const TYPE_COUPLING_EVIDENCE_LIMIT: usize = 10_000;
 const MAX_SEMANTIC_QUERIES: usize = 25_000;
 const MAX_PRIVATE_LEAK_CANDIDATES: usize = 25_000;
 
@@ -79,6 +83,7 @@ enum SemanticQuery {
         id: usize,
         entry_points: Vec<String>,
         include_cycles: bool,
+        evidence_limit: usize,
     },
 }
 
@@ -1128,6 +1133,7 @@ pub fn type_coupling(
             id: 0,
             entry_points,
             include_cycles: true,
+            evidence_limit: TYPE_COUPLING_EVIDENCE_LIMIT,
         },
     )?;
     let result = response.results.first().ok_or_else(|| {
@@ -2564,6 +2570,7 @@ mod tests {
                     id: 4,
                     entry_points: vec!["src/config.ts".to_string()],
                     include_cycles: true,
+                    evidence_limit: TYPE_COUPLING_EVIDENCE_LIMIT,
                 },
             ],
         }
@@ -3446,6 +3453,25 @@ mod tests {
             batch.queries.last(),
             Some(SemanticQuery::TypeCoupling { .. })
         ));
+    }
+
+    #[test]
+    fn type_coupling_query_requests_the_project_report_evidence_limit() {
+        let directory = tempdir().expect("temporary directory");
+        let root = directory.path();
+        let batch = build_dead_code_queries(
+            root,
+            &AnalysisResults::default(),
+            &[root.join("src/index.ts")],
+            false,
+            false,
+            true,
+        )
+        .expect("type-coupling query batch");
+
+        let wire = serde_json::to_value(&batch.queries).expect("serialize queries");
+        assert_eq!(wire[0]["operation"], "type-coupling");
+        assert_eq!(wire[0]["evidence_limit"], 10_000);
     }
 
     #[test]

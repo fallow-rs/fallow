@@ -14,6 +14,9 @@ zero-based UTF-8 byte column, and optional owner. Results keep their semantic
 assertion separate from `complete`, `partial`, or `unavailable` status. Evidence
 and every operation-specific array are deterministic and bounded, with totals,
 omissions, reason codes, actions, and truncation reported explicitly.
+The request `evidence_limit` is at most 40. A `type-coupling` query can set its
+own `evidence_limit` of at most 10,000, because its result is one report for
+the whole project.
 
 Structural diagnostics,
 unknown identities, missing projects, unsupported syntax, dynamic behavior,

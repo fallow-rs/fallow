@@ -1891,7 +1891,7 @@ const analyzeGraphSemanticQuery = (root, query, graphStates, evidenceLimit) => {
     return analyzeApiSurface(root, query, graphStates, evidenceLimit);
   }
   return analyzeTypeCoupling(
-    { root, query, states: graphStates, evidenceLimit },
+    { root, query, states: graphStates, evidenceLimit: query.evidenceLimit ?? evidenceLimit },
     {
       boundedResult,
       discoverEntryPoints,

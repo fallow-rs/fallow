@@ -110,6 +110,11 @@ score:
 fallow health --type-aware --type-coupling --format json --quiet
 ```
 
+A type-coupling result is one report for the whole project, so it can carry up
+to 10,000 evidence items. Symbol, impact, and API-surface results keep the
+limit of 40 items. Above the limit, the report is `partial` with the
+`evidence-limit` reason, and `--type-aware-require complete` fails the run.
+
 Preview and apply class-member cleanup only when Fallow has complete
 closed-world evidence and an exact declaration guard:
 

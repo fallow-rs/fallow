@@ -77,6 +77,7 @@ pub(super) fn build_dead_code_queries(
                 .map(|path| path.to_string_lossy().replace('\\', "/"))
                 .collect(),
             include_cycles: true,
+            evidence_limit: TYPE_COUPLING_EVIDENCE_LIMIT,
         });
         targets.insert(id, QueryTarget::TypeCoupling);
     }

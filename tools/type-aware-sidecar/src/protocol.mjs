@@ -56,7 +56,13 @@ const API_SURFACE_QUERY_KEYS = new Set([
   "include_cycles",
   "private_leak_candidates",
 ]);
-const TYPE_COUPLING_QUERY_KEYS = new Set(["id", "operation", "entry_points", "include_cycles"]);
+const TYPE_COUPLING_QUERY_KEYS = new Set([
+  "id",
+  "operation",
+  "entry_points",
+  "include_cycles",
+  "evidence_limit",
+]);
 const PRIVATE_LEAK_CANDIDATE_KEYS = new Set(["id", "path", "export_name", "type_name"]);
 const SYMBOL_KEYS = new Set([
   "path",
@@ -77,6 +83,10 @@ const MAX_QUERIES = 25_000;
 const MAX_GRAPH_QUERIES = 256;
 const MAX_PRIVATE_LEAK_CANDIDATES = 25_000;
 const MAX_EVIDENCE_PER_RESULT = 40;
+// A type-coupling result is one project-wide report, so it can carry more
+// evidence than a per-symbol result. This bound keeps the response well below
+// the native client's semantic response byte limit.
+const MAX_TYPE_COUPLING_EVIDENCE = 10_000;
 const MAX_STRING_CHARS = 4_096;
 
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -257,13 +267,31 @@ const parseFrameworkContracts = (value, field) =>
 const parseIncludeCycles = (value, field) =>
   value === undefined ? false : requireBoolean(value, field);
 
+const parseTypeCouplingEvidenceLimit = (value, field) => {
+  const limit = requireInteger(value, field, 1);
+  if (limit > MAX_TYPE_COUPLING_EVIDENCE) {
+    throw new Error(`${field} exceeds the ${MAX_TYPE_COUPLING_EVIDENCE} item limit`);
+  }
+  return limit;
+};
+
 const parseGraphQuery = (value, field, root, query) => {
   const graphQuery = {
     ...query,
     entryPoints: parseEntryPoints(value.entry_points, `${field}.entry_points`, root),
     includeCycles: parseIncludeCycles(value.include_cycles, `${field}.include_cycles`),
   };
-  if (query.operation !== "api-surface") return graphQuery;
+  if (query.operation === "type-coupling") {
+    return value.evidence_limit === undefined
+      ? graphQuery
+      : {
+          ...graphQuery,
+          evidenceLimit: parseTypeCouplingEvidenceLimit(
+            value.evidence_limit,
+            `${field}.evidence_limit`,
+          ),
+        };
+  }
   return {
     ...graphQuery,
     privateLeakCandidates: parsePrivateLeakCandidates(
