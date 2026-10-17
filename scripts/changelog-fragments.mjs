@@ -204,16 +204,28 @@ const checkFragments = (root) => {
 const unreleasedAt = (root, ref) =>
   unreleasedSection(git(root, ["show", `${ref}:${CHANGELOG}`])).body.trim();
 
+const VERSION_HEADING = /^## \[\d+\.\d+\.\d+\]/gmu;
+
+const versionHeadings = (changelog) => new Set(changelog.match(VERSION_HEADING) ?? []);
+
 /**
  * A pull request that edits `[Unreleased]` brings back the conflicts that the
  * fragments remove, so the check compares the section with the fork point of
  * the branch. A release on the base branch after the fork is not a change of
- * the branch.
+ * the branch. A release branch empties `[Unreleased]` into a new version
+ * section, which the release metadata gate requires, so that is not a change
+ * either.
  */
 const checkUnreleasedUnchanged = (root, base) => {
   const forkPoint = git(root, ["merge-base", "HEAD", base]).trim();
-  const current = unreleasedSection(readFileSync(join(root, CHANGELOG), "utf8")).body.trim();
+  const changelog = readFileSync(join(root, CHANGELOG), "utf8");
+  const current = unreleasedSection(changelog).body.trim();
   if (current === unreleasedAt(root, forkPoint)) {
+    return [];
+  }
+  const forkHeadings = versionHeadings(git(root, ["show", `${forkPoint}:${CHANGELOG}`]));
+  const addsVersion = [...versionHeadings(changelog)].some((heading) => !forkHeadings.has(heading));
+  if (current === "" && addsVersion) {
     return [];
   }
   return [

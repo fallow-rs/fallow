@@ -221,6 +221,47 @@ test("check --base fails a branch that edits [Unreleased]", (t) => {
   );
 });
 
+test("check --base passes a release branch that moves [Unreleased] into a new version", (t) => {
+  const repo = createRepo(t);
+  repo.commit("chore: base", {
+    "CHANGELOG.md": changelog("### Fixed", "", "- Old fix.", ""),
+    "changelog.d/feat.md": "### Added\n\n- **New.**\n",
+  });
+  repo.git("checkout", "--quiet", "-b", "chore/release-v1.1.0");
+  repo.commit("chore: release v1.1.0", {
+    "CHANGELOG.md": changelog(
+      "## [1.1.0] - 2026-02-01",
+      "",
+      "### Added",
+      "",
+      "- **New.**",
+      "",
+      "### Fixed",
+      "",
+      "- Old fix.",
+      "",
+    ),
+  });
+  repo.git("rm", "--quiet", "changelog.d/feat.md");
+  repo.commit("chore: remove the collected fragment", {});
+
+  assert.equal(run(repo, "check", "--base", "main").code, 0);
+});
+
+test("check --base fails a branch that empties [Unreleased] without a new version", (t) => {
+  const repo = createRepo(t);
+  repo.commit("chore: base", {
+    "CHANGELOG.md": changelog("### Fixed", "", "- Old fix.", ""),
+  });
+  repo.git("checkout", "--quiet", "-b", "feat");
+  repo.commit("chore: drop the entries", { "CHANGELOG.md": changelog() });
+
+  assert.throws(
+    () => run(repo, "check", "--base", "main"),
+    /this branch changes the \[Unreleased\] section/u,
+  );
+});
+
 test("check --base reads a changelog larger than the default process buffer", (t) => {
   const repo = createRepo(t);
   const history = `${"- Old entry.\n".repeat(120_000)}\n`;
