@@ -216,8 +216,12 @@ fn collect_workspaces_and_diagnostics(
     extra_patterns: &[String],
 ) -> Result<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>), WorkspaceLoadError> {
     let mut diagnostics = Vec::new();
-    let manifest_declares_workspaces = !collect_workspace_patterns(root, &[])?.is_empty();
-    let patterns = collect_workspace_patterns(root, extra_patterns)?;
+    let manifest_declares_workspaces = !collect_declared_patterns(root, &[])?.is_empty();
+    let patterns = split_outside_root_patterns(
+        root,
+        collect_declared_patterns(root, extra_patterns)?,
+        &mut diagnostics,
+    );
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut manifest_cache = ManifestCache::default();
 
@@ -364,8 +368,8 @@ pub fn find_undeclared_workspaces_with_ignores(
     declared: &[WorkspaceInfo],
     ignore_patterns: &crate::IgnorePatternSet,
 ) -> Vec<WorkspaceDiagnostic> {
-    let patterns = collect_workspace_patterns(root, &[]).unwrap_or_default();
-    if patterns.is_empty() {
+    let declares_workspaces = collect_declared_patterns(root, &[]).is_ok_and(|p| !p.is_empty());
+    if !declares_workspaces {
         return Vec::new();
     }
 
@@ -480,19 +484,48 @@ fn check_undeclared(
     ));
 }
 
+/// A workspace glob and the file that declares it.
+///
+/// `source` is the declaring manifest, or the project root for an entry of the
+/// fallow config `workspaces.patterns`.
+struct DeclaredPattern {
+    pattern: String,
+    source: PathBuf,
+}
+
 /// Collect glob patterns from `package.json` `workspaces`, `pnpm-workspace.yaml`,
 /// and Deno `deno.json` / `deno.jsonc` `workspace`, then the `workspaces.patterns`
 /// of the fallow config in `extra_patterns`.
+///
+/// An entry that can name a directory outside the project root is left out.
+/// Use [`collect_declared_patterns`] and [`split_outside_root_patterns`] to
+/// report those entries.
 fn collect_workspace_patterns(
     root: &Path,
     extra_patterns: &[String],
 ) -> Result<Vec<String>, WorkspaceLoadError> {
+    let declared = collect_declared_patterns(root, extra_patterns)?;
+    Ok(split_outside_root_patterns(root, declared, &mut Vec::new()))
+}
+
+/// Collect every declared workspace glob with its source, in declaration
+/// order. A fallow config pattern that a manifest also declares is kept once.
+fn collect_declared_patterns(
+    root: &Path,
+    extra_patterns: &[String],
+) -> Result<Vec<DeclaredPattern>, WorkspaceLoadError> {
     let mut patterns = Vec::new();
+    let mut push_all = |source: &Path, entries: Vec<String>| {
+        patterns.extend(entries.into_iter().map(|pattern| DeclaredPattern {
+            pattern,
+            source: source.to_path_buf(),
+        }));
+    };
 
     let pkg_path = root.join("package.json");
     if pkg_path.exists() {
         match PackageJson::load(&pkg_path) {
-            Ok(pkg) => patterns.extend(pkg.workspace_patterns()),
+            Ok(pkg) => push_all(&pkg_path, pkg.workspace_patterns()),
             Err(error) => {
                 return Err(WorkspaceLoadError::MalformedRootPackageJson {
                     path: pkg_path,
@@ -506,22 +539,52 @@ fn collect_workspace_patterns(
     if pnpm_workspace.exists()
         && let Ok(content) = std::fs::read_to_string(&pnpm_workspace)
     {
-        patterns.extend(parse_pnpm_workspace_yaml(&content));
+        push_all(&pnpm_workspace, parse_pnpm_workspace_yaml(&content));
     }
 
-    if let Some((_path, deno_patterns)) = load_root_deno_workspace_patterns(root)
+    if let Some((deno_path, deno_patterns)) = load_root_deno_workspace_patterns(root)
         .map_err(|(path, error)| WorkspaceLoadError::MalformedRootDenoConfig { path, error })?
     {
-        patterns.extend(deno_patterns);
+        push_all(&deno_path, deno_patterns);
     }
 
     for pattern in extra_patterns {
-        if !patterns.contains(pattern) {
-            patterns.push(pattern.clone());
+        if !patterns.iter().any(|declared| declared.pattern == *pattern) {
+            patterns.push(DeclaredPattern {
+                pattern: pattern.clone(),
+                source: root.to_path_buf(),
+            });
         }
     }
 
     Ok(patterns)
+}
+
+/// Keep the patterns that stay inside the project root, and report each
+/// positive entry that is absolute or has a `..` segment.
+///
+/// The skip happens before any glob reads the disk, so discovery never lists a
+/// directory outside the root. npm, pnpm and yarn accept a `../` entry, so the
+/// entry gets a diagnostic, not a load error. A negated entry only filters the
+/// matches of the positive entries and reads no directory, so it is kept.
+fn split_outside_root_patterns(
+    root: &Path,
+    declared: Vec<DeclaredPattern>,
+    diagnostics: &mut Vec<WorkspaceDiagnostic>,
+) -> Vec<String> {
+    let mut patterns = Vec::with_capacity(declared.len());
+    for DeclaredPattern { pattern, source } in declared {
+        if !pattern.starts_with('!') && crate::glob_validation::escapes_project_root(&pattern) {
+            diagnostics.push(WorkspaceDiagnostic::new(
+                root,
+                source,
+                WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot { pattern },
+            ));
+            continue;
+        }
+        patterns.push(pattern);
+    }
+    patterns
 }
 
 /// Memoized [`load_member_package_manifest`] outcomes for one discovery run.
@@ -2460,6 +2523,124 @@ mod tests {
             patterns,
             ["pkgs/*", "pkgs/a*"],
             "distinct patterns are distinct diagnostics: {diagnostics:?}"
+        );
+    }
+
+    /// A workspace entry that is absolute or has a `..` segment can name
+    /// directories outside the project root. Discovery skips it before any
+    /// disk walk and reports the entry and the file that declares it, never a
+    /// path outside the root. The in-root entry still finds its package.
+    #[test]
+    fn workspace_entries_outside_the_root_are_skipped_before_the_walk() {
+        let sandbox = tempfile::tempdir().expect("create temp dir");
+        let outside = sandbox.path().join("outside");
+        std::fs::create_dir_all(outside.join("no-manifest")).unwrap();
+        std::fs::create_dir_all(outside.join("pkg-out")).unwrap();
+        std::fs::write(
+            outside.join("pkg-out/package.json"),
+            r#"{"name":"pkg-out"}"#,
+        )
+        .unwrap();
+        let root = sandbox.path().join("repo");
+        std::fs::create_dir_all(root.join("packages/pkg-in")).unwrap();
+        std::fs::write(
+            root.join("packages/pkg-in/package.json"),
+            r#"{"name":"pkg-in"}"#,
+        )
+        .unwrap();
+        let absolute = format!("{}/*", outside.display()).replace('\\', "/");
+        std::fs::write(
+            root.join("package.json"),
+            serde_json::json!({
+                "name": "root",
+                "private": true,
+                "workspaces": ["packages/*", "../outside/*", absolute],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - packages/*\n  - ../outside/**\n",
+        )
+        .unwrap();
+
+        let (workspaces, diagnostics) =
+            discover_workspaces_with_diagnostics(&root, &crate::IgnorePatternSet::empty())
+                .expect("root package.json is valid");
+
+        let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+        assert_eq!(names, ["pkg-in"], "only the in-root package is a workspace");
+
+        let canonical_root = dunce::canonicalize(&root).unwrap();
+        for diagnostic in &diagnostics {
+            let path =
+                dunce::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone());
+            assert!(
+                path.starts_with(&canonical_root),
+                "no diagnostic names a path outside the root: {diagnostic:?}"
+            );
+            assert!(
+                !diagnostic.message.contains("no-manifest")
+                    && !diagnostic.message.contains("pkg-out"),
+                "no message names an outside directory: {diagnostic:?}"
+            );
+        }
+
+        let mut skipped: Vec<(String, String)> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.kind.id() == "workspace-glob-outside-root")
+            .map(|diagnostic| {
+                (
+                    fallow_types::path_util::display_relative(&root, &diagnostic.path),
+                    diagnostic.message.clone(),
+                )
+            })
+            .collect();
+        skipped.sort();
+        let files: Vec<&str> = skipped.iter().map(|(file, _)| file.as_str()).collect();
+        assert_eq!(
+            files,
+            ["package.json", "package.json", "pnpm-workspace.yaml"],
+            "one diagnostic per skipped entry, anchored at its file: {diagnostics:?}"
+        );
+        assert!(
+            skipped
+                .iter()
+                .any(|(_, message)| message.contains("'../outside/*'")),
+            "the message names the entry: {skipped:?}"
+        );
+    }
+
+    /// A fallow config `workspaces.patterns` entry has no manifest, so its
+    /// diagnostic is anchored at the root and its message names the setting.
+    #[test]
+    fn configured_pattern_outside_the_root_names_the_config_setting() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(dir.path().join("package.json"), r#"{"name":"root"}"#).unwrap();
+
+        let (_, diagnostics) = discover_workspaces_with_diagnostics_and_patterns(
+            dir.path(),
+            &crate::IgnorePatternSet::empty(),
+            &["../shared/*".to_owned()],
+        )
+        .expect("root package.json is valid");
+
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("expected one diagnostic: {diagnostics:?}");
+        };
+        assert_eq!(diagnostic.path, dir.path());
+        assert_eq!(
+            diagnostic.kind,
+            WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot {
+                pattern: "../shared/*".to_owned()
+            }
+        );
+        assert!(
+            diagnostic
+                .message
+                .contains("fallow config `workspaces.patterns`"),
+            "{diagnostic:?}"
         );
     }
 }

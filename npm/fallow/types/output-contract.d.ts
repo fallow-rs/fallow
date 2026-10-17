@@ -572,6 +572,12 @@ pattern: string
 kind: "glob-matched-no-package-json"
 } | {
 /**
+ * The workspace entry, as written in the file.
+ */
+pattern: string
+kind: "workspace-glob-outside-root"
+} | {
+/**
  * JSONC parse error text.
  */
 error: string
@@ -3372,7 +3378,8 @@ _meta?: (Meta | null)
  *
  * - workspace discovery, at config load: `undeclared-workspace`,
  *   `malformed-package-json`, `glob-matched-no-package-json`,
- *   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
+ *   `workspace-glob-outside-root`, `malformed-tsconfig`,
+ *   `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
  *   `excluded-by-default-ignore`, `source-read-failure`,
@@ -16643,7 +16650,8 @@ _meta?: (Meta | null)
  *
  * - workspace discovery, at config load: `undeclared-workspace`,
  *   `malformed-package-json`, `glob-matched-no-package-json`,
- *   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
+ *   `workspace-glob-outside-root`, `malformed-tsconfig`,
+ *   `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
  *   `excluded-by-default-ignore`, `source-read-failure`,

@@ -189,6 +189,17 @@ fn has_traversal_segment(pattern: &str) -> bool {
             .any(|c| matches!(c, Component::ParentDir))
 }
 
+/// Whether `pattern` is an absolute path or has a `..` segment, so that it can
+/// name a path outside the project root.
+///
+/// This is the same test that config glob validation applies. Workspace
+/// discovery uses it to skip such an entry of `package.json` `workspaces` or
+/// `pnpm-workspace.yaml` `packages` before it reads the disk.
+#[must_use]
+pub fn escapes_project_root(pattern: &str) -> bool {
+    is_absolute_pattern(pattern) || has_traversal_segment(pattern)
+}
+
 /// Compile a glob that matches project-root-relative file paths.
 ///
 /// A single `*` stays within one path segment, and only `**` crosses

@@ -63,6 +63,20 @@ pub enum WorkspaceDiagnosticKind {
         /// The glob pattern that matched the directory.
         pattern: String,
     },
+    /// A workspace entry is an absolute path or has a `..` segment, so it can
+    /// name directories outside the project root. Fallow skips the entry
+    /// before it reads the disk and analyzes no package from it. `path` is
+    /// the file that declares the entry (`package.json`,
+    /// `pnpm-workspace.yaml`, `deno.json` or `deno.jsonc`), or the project
+    /// root for an entry of the fallow config `workspaces.patterns`. The
+    /// diagnostic never names a directory outside the root.
+    ///
+    /// npm, pnpm and yarn accept such an entry, so fallow does not exit with
+    /// an error on it. The project root is the security boundary of a run.
+    WorkspaceGlobOutsideRoot {
+        /// The workspace entry, as written in the file.
+        pattern: String,
+    },
     /// The root `tsconfig.json`, or a config in its `extends` chain, exists
     /// but failed to parse. `path` names the file that failed. Fallow ignores
     /// the project references, path aliases and compiler options of that file.
@@ -550,6 +564,7 @@ impl WorkspaceDiagnosticKind {
             Self::UndeclaredWorkspace => "undeclared-workspace",
             Self::MalformedPackageJson { .. } => "malformed-package-json",
             Self::GlobMatchedNoPackageJson { .. } => "glob-matched-no-package-json",
+            Self::WorkspaceGlobOutsideRoot { .. } => "workspace-glob-outside-root",
             Self::MalformedTsconfig { .. } => "malformed-tsconfig",
             Self::TsconfigReferenceDirMissing => "tsconfig-reference-dir-missing",
             Self::MalformedPnpmWorkspaceYaml { .. } => "malformed-pnpm-workspace-yaml",
@@ -646,6 +661,7 @@ impl WorkspaceDiagnosticKind {
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
+            | Self::WorkspaceGlobOutsideRoot { .. }
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -772,6 +788,7 @@ impl WorkspaceDiagnosticKind {
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
+            | Self::WorkspaceGlobOutsideRoot { .. }
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -834,6 +851,7 @@ impl WorkspaceDiagnosticKind {
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
+            | Self::WorkspaceGlobOutsideRoot { .. }
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::SkippedLargeFile { .. }
@@ -893,6 +911,7 @@ impl WorkspaceDiagnosticKind {
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
+            | Self::WorkspaceGlobOutsideRoot { .. }
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -946,6 +965,7 @@ impl WorkspaceDiagnosticKind {
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
+            | Self::WorkspaceGlobOutsideRoot { .. }
             | Self::MalformedTsconfig { .. }
             | Self::TsconfigReferenceDirMissing
             | Self::MalformedPnpmWorkspaceYaml { .. }
@@ -1179,6 +1199,11 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
                 pattern: canonical_glob_pattern(pattern),
             }
         }
+        WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot { pattern } => {
+            WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot {
+                pattern: canonical_glob_pattern(pattern),
+            }
+        }
         other => other,
     }
 }
@@ -1373,6 +1398,19 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             "Glob '{pattern}' matched '{display}' but no package.json is present. \
              Add a package.json, narrow the pattern, or add '{display}' to ignorePatterns."
         ),
+        WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot { pattern } => {
+            let source = if display.is_empty() {
+                "the fallow config `workspaces.patterns`".to_owned()
+            } else {
+                format!("'{display}'")
+            };
+            format!(
+                "Skipped workspace entry '{pattern}' in {source}: it is an absolute path \
+                 or has a '..' segment, so it can match directories outside the project root. \
+                 Fallow analyzes no package from it. Move the package inside the project root, \
+                 or run fallow with --root set to a directory that holds both."
+            )
+        }
         WorkspaceDiagnosticKind::MalformedTsconfig { error } => format!(
             "tsconfig at '{display}' failed to parse ({error}); \
              its project references, path aliases and compiler options are ignored. \

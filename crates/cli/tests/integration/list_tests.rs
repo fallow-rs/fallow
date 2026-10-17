@@ -1778,3 +1778,67 @@ fn workspace_selection_finds_a_workspace_declared_by_config_patterns() {
         output.stderr
     );
 }
+
+/// A workspace entry outside the project root is skipped before the walk.
+/// Every envelope reports one `workspace-glob-outside-root` entry anchored at
+/// the declaring file, and no envelope or stderr line names an outside path.
+#[test]
+fn workspace_entries_outside_the_root_report_the_entry_and_not_the_directory() {
+    let sandbox = tempfile::tempdir().expect("create temp dir");
+    fs::create_dir_all(sandbox.path().join("outside/secret-dir")).expect("create outside dir");
+    let root = sandbox.path().join("repo");
+    fs::create_dir_all(root.join("packages/pkg-in/src")).expect("create package dir");
+    fs::create_dir_all(root.join("src")).expect("create source dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"outside-root","private":true,"workspaces":["packages/*","../outside/*"]}"#,
+    )
+    .expect("write root manifest");
+    fs::write(
+        root.join("packages/pkg-in/package.json"),
+        r#"{"name":"pkg-in"}"#,
+    )
+    .expect("write package manifest");
+    fs::write(
+        root.join("packages/pkg-in/src/index.ts"),
+        "export const a = 1;\n",
+    )
+    .expect("write package source");
+    fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+
+    for args in [
+        ["list", "--workspaces", "--format", "json"].as_slice(),
+        ["dead-code", "--format", "json"].as_slice(),
+    ] {
+        let output = run_fallow_combined_in_root(&root, args);
+        assert!(output.code <= 1, "stderr: {}", output.stderr);
+        assert!(
+            !output.stdout.contains("secret-dir") && !output.stderr.contains("secret-dir"),
+            "`fallow {args:?}` must not name a directory outside the root: {}{}",
+            output.stdout,
+            output.stderr
+        );
+
+        let json = parse_json(&output);
+        let skipped: Vec<(String, String)> = json["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|entry| entry["kind"] == "workspace-glob-outside-root")
+                    .map(|entry| {
+                        (
+                            entry["path"].as_str().unwrap_or_default().to_owned(),
+                            entry["pattern"].as_str().unwrap_or_default().to_owned(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            skipped,
+            [("package.json".to_owned(), "../outside/*".to_owned())],
+            "`fallow {args:?}` reports the skipped entry once: {json}"
+        );
+    }
+}
