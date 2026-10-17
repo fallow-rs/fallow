@@ -1,0 +1,13 @@
+{
+  "name": "issue-3525-oxlint-mts",
+  "private": true,
+  "scripts": {
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "eslint-plugin-override-only": "1.0.0",
+    "eslint-plugin-top-level": "1.0.0",
+    "eslint-plugin-unused-control": "1.0.0",
+    "oxlint": "1.0.0"
+  }
+}

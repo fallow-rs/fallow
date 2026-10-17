@@ -17,7 +17,13 @@ use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["oxlint"];
 
-const CONFIG_PATTERNS: &[&str] = &[".oxlintrc.json", "oxlint.json", "oxlint.config.ts"];
+/// Oxlint discovers `.oxlintrc.json`, `.oxlintrc.jsonc`, `oxlint.config.ts`
+/// and `oxlint.config.mts` on its own. `oxlint.json` stays for older setups.
+const CONFIG_PATTERNS: &[&str] = &[
+    ".oxlintrc.{json,jsonc}",
+    "oxlint.json",
+    "oxlint.config.{ts,mts}",
+];
 
 const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 

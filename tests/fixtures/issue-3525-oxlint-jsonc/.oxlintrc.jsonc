@@ -1,0 +1,11 @@
+// Oxlint discovers this file name on its own.
+{
+  /* Block comments are valid too. */
+  "jsPlugins": ["eslint-plugin-top-level"],
+  "overrides": [
+    {
+      "files": ["*.ts"],
+      "jsPlugins": ["eslint-plugin-override-only", "./plugins/local-plugin.js"],
+    },
+  ],
+}
