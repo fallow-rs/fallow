@@ -1826,14 +1826,15 @@ fn read_discovered_source(
     }
 }
 
-/// Parse a coverage map, retrying once with unplaceable coordinates clamped.
+/// Parse a coverage map, retrying once with negative values clamped.
 ///
 /// A producer can emit a negative coordinate for a position it could not
 /// place: `v8-to-istanbul`, which is what c8 and nyc write, records
-/// `column: -1` on the implicit else of a bare `if`. Positions are unsigned,
-/// so one such coordinate rejects the entire map, and it always lands in
-/// `branchMap`, which nothing here reads. The retry costs a second parse and
-/// only runs after the strict one has already failed.
+/// `column: -1` on the implicit else of a bare `if`. Vitest `coverage-v8`
+/// (through ast-v8-to-istanbul) records a negative hit count for that same
+/// implicit else in `b`. Positions and counts are unsigned, so one such value
+/// rejects the entire map. The retry costs a second parse and only runs after
+/// the strict one has already failed.
 fn parse_coverage_map_tolerantly(
     json: &str,
 ) -> Result<std::collections::BTreeMap<String, oxc_coverage_instrument::FileCoverage>, String> {
@@ -1842,7 +1843,9 @@ fn parse_coverage_map_tolerantly(
         Err(strict_error) => {
             let mut value: serde_json::Value =
                 serde_json::from_str(json).map_err(|_| strict_error.to_string())?;
-            if !clamp_negative_positions(&mut value) {
+            let positions = clamp_negative_positions(&mut value);
+            let counts = clamp_negative_counts(&mut value);
+            if !positions && !counts {
                 return Err(strict_error.to_string());
             }
             serde_json::from_value(value).map_err(|_| strict_error.to_string())
@@ -1871,6 +1874,48 @@ fn clamp_negative_positions(value: &mut serde_json::Value) -> bool {
         }
         serde_json::Value::Array(items) => items.iter_mut().fold(false, |clamped, item| {
             clamped | clamp_negative_positions(item)
+        }),
+        _ => false,
+    }
+}
+
+/// The hit-count sections of an Istanbul file record.
+const COVERAGE_COUNT_KEYS: [&str; 4] = ["s", "f", "b", "b_T"];
+
+/// Clamp every negative hit count in the map to zero, reporting whether
+/// anything changed. A negative count is a miss: the coverage test here is
+/// `count > 0`, so zero gives the same answer the signed value would.
+fn clamp_negative_counts(value: &mut serde_json::Value) -> bool {
+    let serde_json::Value::Object(files) = value else {
+        return false;
+    };
+    let mut clamped = false;
+    for file in files.values_mut() {
+        let serde_json::Value::Object(sections) = file else {
+            continue;
+        };
+        for key in COVERAGE_COUNT_KEYS {
+            if let Some(counts) = sections.get_mut(key) {
+                clamped |= clamp_negative_numbers(counts);
+            }
+        }
+    }
+    clamped
+}
+
+/// Clamp every negative number in the tree to zero, reporting whether
+/// anything changed.
+fn clamp_negative_numbers(value: &mut serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Number(number) if number.as_f64().is_some_and(|n| n < 0.0) => {
+            *value = serde_json::Value::from(0);
+            true
+        }
+        serde_json::Value::Object(entries) => entries.values_mut().fold(false, |clamped, child| {
+            clamped | clamp_negative_numbers(child)
+        }),
+        serde_json::Value::Array(items) => items.iter_mut().fold(false, |clamped, item| {
+            clamped | clamp_negative_numbers(item)
         }),
         _ => false,
     }
@@ -6458,6 +6503,107 @@ mod tests {
         let file_coverage = coverage.get(&canonical_source).unwrap();
 
         assert_eq!(file_coverage.lookup("pick", 1, 16), Some(100.0));
+    }
+
+    /// Vitest `coverage-v8` (through ast-v8-to-istanbul) records a negative
+    /// hit count for the implicit else of an `if`, for example `[5, -1]`.
+    /// Counts are unsigned, so the strict parse rejected the whole map over a
+    /// value in `b`, which nothing here reads (issue #3564).
+    #[test]
+    fn a_negative_branch_count_does_not_cost_the_whole_map() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/a.js");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &source_path,
+            "export function f(a) {\n  if (a) {\n    return 1;\n  }\n  return 2;\n}\n",
+        )
+        .unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        let source = source_path.to_string_lossy().into_owned();
+        let branch_loc = serde_json::json!({
+            "start": { "line": 2, "column": 2 },
+            "end": { "line": 4, "column": 3 }
+        });
+        std::fs::write(
+            &coverage_path,
+            serde_json::to_string(&serde_json::json!({
+                source.clone(): {
+                    "path": source,
+                    "statementMap": {
+                        "0": branch_loc,
+                        "1": { "start": { "line": 3, "column": 4 }, "end": { "line": 3, "column": 13 } },
+                        "2": { "start": { "line": 5, "column": 2 }, "end": { "line": 5, "column": 11 } }
+                    },
+                    "fnMap": {
+                        "0": {
+                            "name": "f",
+                            "line": 1,
+                            "decl": { "start": { "line": 1, "column": 16 }, "end": { "line": 1, "column": 17 } },
+                            "loc": { "start": { "line": 1, "column": 20 }, "end": { "line": 6, "column": 1 } }
+                        }
+                    },
+                    "branchMap": {
+                        "0": {
+                            "type": "if",
+                            "line": 2,
+                            "loc": branch_loc,
+                            "locations": [branch_loc, branch_loc]
+                        }
+                    },
+                    "s": { "0": 5, "1": 5, "2": 0 },
+                    "f": { "0": 5 },
+                    "b": { "0": [5, -1] },
+                    "b_T": { "0": [5, -5] }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        let pct = file_coverage.lookup("f", 1, 16).unwrap();
+        assert!((pct - 200.0 / 3.0).abs() < 1e-9, "got {pct}");
+    }
+
+    /// A negative statement or function count is a miss, the same answer the
+    /// `> 0` coverage test gives for it, rather than a reason to reject the map.
+    #[test]
+    fn a_negative_statement_count_reads_as_a_miss() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/a.js");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "// geometry fixture\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture_with_statements(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "f",
+                    "line": 1,
+                    "decl": { "start": { "line": 1, "column": 16 }, "end": { "line": 1, "column": 17 } },
+                    "loc": { "start": { "line": 1, "column": 20 }, "end": { "line": 6, "column": 1 } }
+                }
+            }),
+            &serde_json::json!({ "0": -2 }),
+            &serde_json::json!({
+                "0": { "start": { "line": 2, "column": 2 }, "end": { "line": 2, "column": 11 } },
+                "1": { "start": { "line": 3, "column": 2 }, "end": { "line": 3, "column": 11 } }
+            }),
+            &serde_json::json!({ "0": 3, "1": -1 }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None, false).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("f", 1, 16), Some(50.0));
     }
 
     /// Raw V8 coverage and `oxc-coverage-instrument` record an accessor as

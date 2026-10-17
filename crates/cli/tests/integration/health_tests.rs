@@ -11496,3 +11496,95 @@ fn health_coverage_gaps_skip_type_only_namespace_exports() {
         "a namespace with a value member stays a coverage gap: {export_names:?}"
     );
 }
+
+/// Vitest `coverage-v8` writes a negative hit count for the implicit else of
+/// an `if`. The map must still load, and an auto-detected map that fails to
+/// load must not print a note that says it was used (issue #3564).
+#[test]
+fn health_accepts_a_negative_branch_count_and_reports_an_unreadable_auto_map() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"repro","version":"1.0.0","type":"module","main":"src/a.js"}"#,
+    );
+    let source_path = dir.path().join("src/a.js");
+    write_file(
+        &source_path,
+        "export function f(a) {\n  if (a) {\n    return 1;\n  }\n  return 2;\n}\n",
+    );
+    let source = source_path.to_string_lossy().into_owned();
+    let branch_loc = serde_json::json!({
+        "start": { "line": 2, "column": 2 },
+        "end": { "line": 4, "column": 3 }
+    });
+    let map = serde_json::json!({
+        source.clone(): {
+            "path": source,
+            "statementMap": {
+                "0": branch_loc,
+                "1": { "start": { "line": 3, "column": 4 }, "end": { "line": 3, "column": 13 } },
+                "2": { "start": { "line": 5, "column": 2 }, "end": { "line": 5, "column": 11 } }
+            },
+            "fnMap": {
+                "0": {
+                    "name": "f",
+                    "line": 1,
+                    "decl": { "start": { "line": 1, "column": 16 }, "end": { "line": 1, "column": 17 } },
+                    "loc": { "start": { "line": 1, "column": 20 }, "end": { "line": 6, "column": 1 } }
+                }
+            },
+            "branchMap": {
+                "0": { "type": "if", "line": 2, "loc": branch_loc, "locations": [branch_loc, branch_loc] }
+            },
+            "s": { "0": 5, "1": 5, "2": 0 },
+            "f": { "0": 5 },
+            "b": { "0": [5, -1] }
+        }
+    });
+    let coverage_path = dir.path().join("coverage/coverage-final.json");
+    write_file(&coverage_path, &map.to_string());
+
+    let explicit = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--coverage",
+            "coverage/coverage-final.json",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(explicit.code, 0, "stderr: {}", explicit.stderr);
+    assert_eq!(
+        parse_json(&explicit)["summary"]["coverage_model"],
+        "istanbul"
+    );
+
+    let auto = run_fallow_in_root("health", dir.path(), &["--format", "json"]);
+    assert_eq!(auto.code, 0, "stderr: {}", auto.stderr);
+    assert_eq!(parse_json(&auto)["summary"]["coverage_model"], "istanbul");
+    assert!(
+        auto.stderr.contains("note: using auto-detected coverage"),
+        "stderr: {}",
+        auto.stderr
+    );
+
+    write_file(&coverage_path, r#"{"broken": "#);
+    let unreadable = run_fallow_in_root("health", dir.path(), &["--format", "json"]);
+    assert_eq!(unreadable.code, 0, "stderr: {}", unreadable.stderr);
+    assert_eq!(
+        parse_json(&unreadable)["summary"]["coverage_model"],
+        "static_estimated"
+    );
+    assert!(
+        !unreadable
+            .stderr
+            .contains("note: using auto-detected coverage")
+            && unreadable
+                .stderr
+                .contains("note: ignored auto-detected coverage"),
+        "stderr: {}",
+        unreadable.stderr
+    );
+}
