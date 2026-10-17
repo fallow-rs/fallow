@@ -621,7 +621,14 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(similarCodeConformance, /verify-binary\.mjs/);
   assert.match(similarCodeConformance, /release_binary_max_bytes/);
   assert.match(similarCodeConformance, /check-similar-code-sidecar-audit\.mjs/);
-  assert.match(similarCodeConformance, /cargo audit[\s\S]*--ignore RUSTSEC-2024-0436/u);
+  const sidecarAudit = /cargo audit \\\n((?:\s+--[^\n]+\n)+)/u.exec(similarCodeConformance);
+  assert.ok(sidecarAudit, "similar-code conformance must run cargo audit");
+  assert.match(sidecarAudit[1], /--file tools\/similar-code-sidecar\/Cargo\.lock/u);
+  assert.match(sidecarAudit[1], /--deny unmaintained/u);
+  assert.deepEqual(
+    [...sidecarAudit[1].matchAll(/--ignore (\S+)/gu)].map((match) => match[1]),
+    ["RUSTSEC-2024-0436", "RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"],
+  );
   assert.match(
     similarCodeConformance,
     /cargo deny[\s\S]*tools\/similar-code-sidecar\/Cargo\.toml[\s\S]*check licenses/u,

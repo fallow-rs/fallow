@@ -46,6 +46,114 @@
           "observation": "The latest release and current official main manifest still depend on paste."
         }
       }
+    },
+    {
+      "id": "RUSTSEC-2026-0367",
+      "package": "zip",
+      "version": "8.6.0",
+      "kind": "vulnerability",
+      "summary": "SUID and SGID bits stay set during ZIP extraction.",
+      "reason": "Not reachable in the sidecar. Candle 0.11.0 calls zip only through ZipArchive::new plus entry reads in npy.rs and pickle.rs, and ZipWriter for npz output. Candle never calls ZipArchive::extract or ZipStreamReader::extract. The sidecar loads only model.safetensors through VarBuilder::from_mmaped_safetensors, plus tokenizer.json and config.json, all with verified SHA-256 digests. The sidecar never loads npy, npz, or PyTorch pickle files, so it never opens a ZIP archive.",
+      "removal_condition": "Remove this allowlist entry as soon as a released candle-core version compatible with the production JinaBERT implementation depends on zip 9.0.0 or later. Re-run F32 conformance, the release platform matrix, cargo audit, license checks, and the release binary size gate before accepting that update.",
+      "approved_chains": [
+        "candle-core 0.11.0 -> zip 8.6.0",
+        "candle-nn 0.11.0 -> candle-core 0.11.0 -> zip 8.6.0",
+        "candle-transformers 0.11.0 -> candle-core 0.11.0 -> zip 8.6.0"
+      ],
+      "upstream_evidence": {
+        "checked_on": "2026-10-17",
+        "candle_release": {
+          "version": "0.11.0",
+          "release_revision": "31f35b147389700ed2a178ee66a91c3cc25cc80d",
+          "main_revision": "12bb5d1f6350f4ea9827d9086f213feec1f0af6a",
+          "release_checksum": "5ecb245093b0f791b89d3420c3df9c6d49c60ab63ba54db896bf8a3baf486706",
+          "zip_requirement": "8.6.0",
+          "crates_io_source": "https://crates.io/api/v1/crates/candle-core",
+          "release_source": "https://github.com/huggingface/candle/blob/31f35b147389700ed2a178ee66a91c3cc25cc80d/Cargo.toml",
+          "main_source": "https://github.com/huggingface/candle/blob/12bb5d1f6350f4ea9827d9086f213feec1f0af6a/Cargo.toml",
+          "observation": "The latest crates.io release 0.11.0 and current official main both require zip 8.6.0 with default features off. That requirement cannot select zip 9."
+        },
+        "zip_upstream": {
+          "latest_release": "9.0.4",
+          "released_on": "2026-10-16",
+          "fixed_in": ">=9.0.0",
+          "release_checksum": "a954114b47a54df49f83d2722814e86b23d4bb1b54a1b90fb7d92b41619ddc22",
+          "crates_io_source": "https://crates.io/api/v1/crates/zip",
+          "observation": "zip 9.0.0 and later fix the advisory. No released Candle version accepts zip 9."
+        }
+      }
+    },
+    {
+      "id": "RUSTSEC-2026-0368",
+      "package": "zip",
+      "version": "8.6.0",
+      "kind": "vulnerability",
+      "summary": "ZipArchive::extract creates symbolic links with targets outside the destination.",
+      "reason": "Not reachable in the sidecar. Candle 0.11.0 calls zip only through ZipArchive::new plus entry reads in npy.rs and pickle.rs, and ZipWriter for npz output. Candle never calls ZipArchive::extract or ZipStreamReader::extract. The sidecar loads only model.safetensors through VarBuilder::from_mmaped_safetensors, plus tokenizer.json and config.json, all with verified SHA-256 digests. The sidecar never loads npy, npz, or PyTorch pickle files, so it never opens a ZIP archive.",
+      "removal_condition": "Remove this allowlist entry as soon as a released candle-core version compatible with the production JinaBERT implementation depends on zip 9.0.0 or later. Re-run F32 conformance, the release platform matrix, cargo audit, license checks, and the release binary size gate before accepting that update.",
+      "approved_chains": [
+        "candle-core 0.11.0 -> zip 8.6.0",
+        "candle-nn 0.11.0 -> candle-core 0.11.0 -> zip 8.6.0",
+        "candle-transformers 0.11.0 -> candle-core 0.11.0 -> zip 8.6.0"
+      ],
+      "upstream_evidence": {
+        "checked_on": "2026-10-17",
+        "candle_release": {
+          "version": "0.11.0",
+          "release_revision": "31f35b147389700ed2a178ee66a91c3cc25cc80d",
+          "main_revision": "12bb5d1f6350f4ea9827d9086f213feec1f0af6a",
+          "release_checksum": "5ecb245093b0f791b89d3420c3df9c6d49c60ab63ba54db896bf8a3baf486706",
+          "zip_requirement": "8.6.0",
+          "crates_io_source": "https://crates.io/api/v1/crates/candle-core",
+          "release_source": "https://github.com/huggingface/candle/blob/31f35b147389700ed2a178ee66a91c3cc25cc80d/Cargo.toml",
+          "main_source": "https://github.com/huggingface/candle/blob/12bb5d1f6350f4ea9827d9086f213feec1f0af6a/Cargo.toml",
+          "observation": "The latest crates.io release 0.11.0 and current official main both require zip 8.6.0 with default features off. That requirement cannot select zip 9."
+        },
+        "zip_upstream": {
+          "latest_release": "9.0.4",
+          "released_on": "2026-10-16",
+          "fixed_in": ">=9.0.0",
+          "release_checksum": "a954114b47a54df49f83d2722814e86b23d4bb1b54a1b90fb7d92b41619ddc22",
+          "crates_io_source": "https://crates.io/api/v1/crates/zip",
+          "observation": "zip 9.0.0 and later fix the advisory. No released Candle version accepts zip 9."
+        }
+      }
+    },
+    {
+      "id": "RUSTSEC-2026-0369",
+      "package": "zip",
+      "version": "8.6.0",
+      "kind": "vulnerability",
+      "summary": "ZipStreamReader::extract and ZipArchive::extract apply Unix permissions through symbolic links.",
+      "reason": "Not reachable in the sidecar. Candle 0.11.0 calls zip only through ZipArchive::new plus entry reads in npy.rs and pickle.rs, and ZipWriter for npz output. Candle never calls ZipArchive::extract or ZipStreamReader::extract. The sidecar loads only model.safetensors through VarBuilder::from_mmaped_safetensors, plus tokenizer.json and config.json, all with verified SHA-256 digests. The sidecar never loads npy, npz, or PyTorch pickle files, so it never opens a ZIP archive.",
+      "removal_condition": "Remove this allowlist entry as soon as a released candle-core version compatible with the production JinaBERT implementation depends on zip 9.0.0 or later. Re-run F32 conformance, the release platform matrix, cargo audit, license checks, and the release binary size gate before accepting that update.",
+      "approved_chains": [
+        "candle-core 0.11.0 -> zip 8.6.0",
+        "candle-nn 0.11.0 -> candle-core 0.11.0 -> zip 8.6.0",
+        "candle-transformers 0.11.0 -> candle-core 0.11.0 -> zip 8.6.0"
+      ],
+      "upstream_evidence": {
+        "checked_on": "2026-10-17",
+        "candle_release": {
+          "version": "0.11.0",
+          "release_revision": "31f35b147389700ed2a178ee66a91c3cc25cc80d",
+          "main_revision": "12bb5d1f6350f4ea9827d9086f213feec1f0af6a",
+          "release_checksum": "5ecb245093b0f791b89d3420c3df9c6d49c60ab63ba54db896bf8a3baf486706",
+          "zip_requirement": "8.6.0",
+          "crates_io_source": "https://crates.io/api/v1/crates/candle-core",
+          "release_source": "https://github.com/huggingface/candle/blob/31f35b147389700ed2a178ee66a91c3cc25cc80d/Cargo.toml",
+          "main_source": "https://github.com/huggingface/candle/blob/12bb5d1f6350f4ea9827d9086f213feec1f0af6a/Cargo.toml",
+          "observation": "The latest crates.io release 0.11.0 and current official main both require zip 8.6.0 with default features off. That requirement cannot select zip 9."
+        },
+        "zip_upstream": {
+          "latest_release": "9.0.4",
+          "released_on": "2026-10-16",
+          "fixed_in": ">=9.0.0",
+          "release_checksum": "a954114b47a54df49f83d2722814e86b23d4bb1b54a1b90fb7d92b41619ddc22",
+          "crates_io_source": "https://crates.io/api/v1/crates/zip",
+          "observation": "zip 9.0.0 and later fix the advisory. No released Candle version accepts zip 9."
+        }
+      }
     }
   ]
 }

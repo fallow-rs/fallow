@@ -1365,6 +1365,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has the advisories RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348
   and RUSTSEC-2026-0349.
 
+- **The similar-code sidecar still links zip 8.6.0, but its advisories do not
+  apply.** zip 8.6.0 has the advisories RUSTSEC-2026-0367, RUSTSEC-2026-0368
+  and RUSTSEC-2026-0369. All three affect only the extraction of a ZIP archive
+  to disk. Candle requires zip 8.6.0 and reads archive entries only, and the
+  sidecar loads only safetensors model files. Thus the sidecar never extracts a
+  ZIP archive. The release audit accepts the three advisories until the next
+  candle-core release moves to zip 9.
+
 ## [3.33.1] - 2026-10-09
 
 ### Fixed
