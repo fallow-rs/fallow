@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.34.0] - 2026-10-17
+
 ### Added
 
 - **`fallow mutation` measures how well the tests detect code changes.** The
@@ -342,6 +344,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A single `*` in `entry` and `dynamicallyLoaded` globs no longer matches `/`.**
+  The pattern `src/plugins/*/index.js` also matched nested files such as
+  `src/plugins/alpha/components/button/index.js`. Each nested match became an
+  entry point, so fallow did not report it as an unused file. A single `*` now
+  stays within one path segment and only `**` crosses directories, as in
+  picomatch. If your config used a
+  single `*` to match nested files, change it to `**`. Thanks
+  [@jleifeld](https://github.com/jleifeld) for the report.
+  (Closes [#3490](https://github.com/fallow-rs/fallow/issues/3490))
+
+- **A single `*` now stays within one path segment in every config path
+  glob.** If your config uses a single `*` to match nested files, change it
+  to `**`. For example, change `src/generated/*` to `src/generated/**`, and
+  `*.test.ts` to `**/*.test.ts`. For each pattern that now matches fewer
+  files, fallow prints a warning on stderr. The warning names the config
+  field, the pattern, the count of files that only the old rule matched, and
+  the rewrite. `--quiet` hides the warning, and the JSON output does not
+  change. The `entry` and `dynamicallyLoaded` fields already use this rule.
+  It now also applies to `ignorePatterns`, `ignoreFindings`,
+  `overrides[].files`, `ignoreExports[].file`,
+  `ignoreCatalogReferences[].consumer`, `duplicates.ignore`,
+  `similarCode.ignore`, `health.ignore`, `health.thresholdOverrides[].files`,
+  the `boundaries` zone and coverage globs, the rule-pack file globs, and the
+  `framework[]` fields `usedExports[].pattern`, `manifestEntries[].manifests`
+  and `detection.pattern`. Only `**` crosses directories, as in picomatch.
+  Before this change, `ignorePatterns: ["src/generated/*"]` also ignored the
+  files in the subfolders of `src/generated`, and `"files": ["*.test.ts"]` in
+  `overrides` matched test files at any depth. A narrower glob can show new
+  findings. A line that you copy from `.gitignore` can match fewer files in
+  `ignorePatterns`. Fallow matches the glob against each file path, not
+  against each directory. Thus `src/generated/*` in `.gitignore` ignores the
+  subfolders of `src/generated`, but in `ignorePatterns` it does not. Globs
+  that match package names or import specifiers, such as
+  `ignoreDependencies` and `ignoreUnresolvedImports`, do not change.
+
 - **Runs with a restored cache are faster.** A fresh checkout moves the
   timestamps of every source file, so each run of a CI job that restores its
   cache rewrote every cache entry. A cache entry whose content did not change
@@ -394,6 +431,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline stays valid. Re-save the baseline to record the new names. A file
   move no longer moves an `<arrow>` bucket, the same as an `<anonymous>`
   bucket.
+
+- **Storybook, Vitest, Rstest, Jasmine and Playwright globs now accept every
+  extglob group.** One shared rewrite now reads the groups `@(..)`, `?(..)`,
+  `+(..)`, `*(..)` and `!(..)` for these plugins and for `import.meta.glob`.
+  Before, each plugin had its own rewrite with its own gaps. The changes per
+  plugin are:
+  - Storybook: before, only `@(..)` matched. A `stories` glob such as
+    `../src/**/!(*.dev).stories.@(js|ts)` matched no file. Now every group
+    matches, and `!(*.dev)` excludes the files that match `*.dev`.
+  - Playwright: before, a `testMatch` glob with a group made every script
+    below `testDir` an entry point. Now only the files that the glob matches
+    are entry points. The match still ignores case.
+  - Vitest, Rstest and Jasmine: `!(..)` and `*(..)` now match. A Vitest plain
+    `(a|b)` group still matches one of its alternatives.
+  - Vitest: before, a `test.include` glob with any group made no file an
+    entry point, so Fallow reported every test file as unused. Now the
+    `test.include` globs of the config and of each project use the shared
+    rewrite.
+- **A `+(..)` group in an include glob now matches one or more repetitions.**
+  The glob matcher cannot repeat a group, so `+(ts|js)` becomes `{ts,js}*`.
+  This can make a few more files entry points, for example `a.test.jsx` for
+  `*.test.+(ts|js)`. A `+(..)` group at the end of a glob also matches a
+  longer extension, so `*.test.+(ts|js)` also matches `a.test.tsx`.
+  Before, Vitest, Rstest and Jasmine matched the group
+  once only, which missed names that repeat the group. An exclude glob still
+  matches a `+(..)` group once only, so an exclude never removes a file that
+  the tool keeps.
 
 ### Fixed
 
@@ -953,7 +1017,297 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project with another config extension lost the Nuxt entry points and
   modules.
 
+- **A `.then()` callback on a dynamic `import()` credits the exports that it
+  reads.** Before, Fallow ignored the callback param in shapes such as
+  `import('./x').then((m) => m.start())`, `.then((m) => { m.start(); })` and
+  `.then(function (m) { m.start(); })`. The exports read on `m` then reported
+  as unused, and so did the types that only those exports use. Now each
+  member that the callback reads on the param is credited. When the callback
+  hands the param to other code, for example `.then((m) => register(m))`,
+  every export of the target module is credited. The shapes
+  `.then((m) => m.start)` and `.then(({ start }) => start())` already worked.
+  The extraction and graph cache versions change, so the first run after the
+  upgrade parses the project again.
+
+- **`fallow mutation` no longer breaks Vue components that call `defineExpose`.**
+  The `removed-call` operator wrapped the `defineExpose()` statement of a
+  `<script setup>` block in a mutant switch. The Vue compiler then did not
+  find the macro, the component threw `defineExpose is not defined`, and each
+  test of the component failed in the dry run. A Vue macro call and its
+  arguments now give no mutant.
+
+- **`fallow mutation` prunes the config object of each plugin config file.**
+  Some plugins list their config file as always used, not as a config glob,
+  for example `.vitepress/config.ts`, `remix.config.js` and `nitro.config.ts`.
+  The mutants in the default export of such a file were `no_coverage`, because
+  no test loads a config file, and they lowered the coverage. They now get the
+  prune reason `framework-config`, the same as `vite.config.ts`.
+
+- **A chained `mergeTests(...).extend(...)` Playwright test credits the
+  fixture class members that tests use.** Before, Fallow read the receiver of
+  `.extend(...)` only when it was an identifier. In
+  `export const test = mergeTests(appTest).extend({})`, the merged fixtures
+  and the fixtures of an `.extend<T>(...)` type argument were lost, so the
+  page-object methods that tests call through them reported as unused class
+  members. Now the chained form works the same as the form with an
+  intermediate variable. This also covers an aliased `mergeTests` import and a
+  helper that returns the chain. A chain of more than one `.extend<T>(...)`
+  call, for example `base.extend<A>({}).extend<B>({})`, defines the fixtures
+  of each type argument. An `.extend<T>(...)` on a local const that
+  holds a merged or extended Playwright test now also defines the fixtures of
+  `T`. The extraction and graph cache versions change, so the first run after
+  the upgrade parses the project again. Thanks to @vethman for the report.
+  (Closes [#3462](https://github.com/fallow-rs/fallow/issues/3462))
+
+- **An `.extend<T>(...)` on an imported Playwright test credits the fixture
+  class members that tests use.** Before, in
+  `export const bTest = appTest.extend<{ b: BPage }>({})` with `appTest`
+  imported from another file, Fallow dropped the fixtures of `T`. The `BPage`
+  methods that tests call through the `b` fixture then reported as unused
+  class members. Now Fallow keeps these fixtures and applies them when
+  `appTest` resolves to a Playwright test. This also covers a base made by an
+  untyped `base.extend({})`, a re-exported base, a chain in one file or across
+  files, and a helper that returns the `.extend<T>(...)` call. An `.extend<T>(...)` on an
+  imported value that is not a Playwright test still credits nothing. The
+  extraction and graph cache versions change, so the first run after the
+  upgrade parses the project again.
+
+- **`fallow audit` no longer blocks a merge of the default branch.** When a
+  branch merged the default branch, the new-only gate compared only with a
+  base on the branch. Every finding that the merge brought in from the default
+  branch was then `introduced`, so the commit gate blocked the merge commit and
+  the push after it. With an auto-detected base, audit now also compares with
+  the merged default-branch commits: `MERGE_HEAD` of a merge in progress, and
+  the merge-base with the default branch after a merge commit. A finding that
+  one of these commits has is inherited. Code from a merged branch that the
+  default branch does not contain stays introduced. An explicit `--base` or
+  `FALLOW_AUDIT_BASE` keeps the old single-base comparison.
+  The diff-risk rules still read the diff against the primary base, so with
+  their default `warn` severity such a merge gives `warn`, not `fail`.
+
+- **`fallow mutation` no longer reports each mutant as killed on Vitest 4.0.**
+  Vitest 4.0 reads the test-id filter of a test specification as a list of
+  test lines. Each mutant run failed with an error, so the score was 100%
+  also for mutants that no test detects. The supported Vitest range is now
+  `>=4.1.0 <6.0.0`. On Vitest 4.0 the run exits with code 2 and
+  `FALLOW_MUTATION_RUNNER_UNSUPPORTED`. The message names the installed
+  version and the supported range. The help tells you to install a version
+  in that range, and says that Vitest 4.1 is a minor update. A runner version error of the companion
+  now also gives this code instead of `FALLOW_MUTATION_RUNNER_FAILED`.
+
+- **`fallow audit` no longer follows a symlinked context file on Linux arm64.**
+  The reusable audit cache hashes context files such as lockfiles. It opens
+  them with a flag that refuses symlinks. On Linux arm64 the code used the
+  x86-64 value of that flag, so the open followed a symlink and hashed the
+  target, also a target outside the project. The flag values now come from
+  the platform headers.
+
+- **An `import type` in a test no longer makes a file test-reachable.** The
+  build erases a type-only import before the test runs, so the test does not
+  run the file or the modules that the file imports. Test reach now skips an
+  import edge when every symbol on it is type-only. Coverage gaps and the CRAP
+  estimate report these files as untested. A file that declares only types has
+  no runtime code, so coverage gaps do not count it as a runtime file and
+  never report it as untested. Dead-code reachability does not change.
+  (Closes [#3400](https://github.com/fallow-rs/fallow/issues/3400))
+
+- **`import.meta.glob` patterns with extglob groups now match files.** Vite
+  matches these patterns with picomatch, but fallow read a group such as
+  `!(*.spec)` as literal text. A pattern such as `./**/!(*.spec).{j,t}s` then
+  matched no file, and fallow reported each file that the pattern loads as
+  unused. Fallow now supports the groups `@(..)`, `?(..)`, `+(..)`, `*(..)` and
+  `!(..)`. A negated group excludes the files that match its alternatives. A
+  dynamic import pattern that is not a valid glob now gives a warning.
+  Thanks [@jleifeld](https://github.com/jleifeld) for the report.
+  (Closes [#3489](https://github.com/fallow-rs/fallow/issues/3489))
+
+- **`fallow mutation` now runs Vitest tests under `NODE_ENV=test`.** The
+  Vitest adapter sets `TEST=true`, `VITEST=true` and `NODE_ENV=test`, as the
+  `vitest` command does. Before, Vite set `NODE_ENV=development`, so code that
+  validates its environment unless `NODE_ENV` is `test` gave baseline
+  failures. A `NODE_ENV` value of the environment stays. The mutation result
+  cache has a new format version, so results of an earlier run are not reused.
+
+- **`unused-store-member` now resolves imported and later-declared `ReturnType` store aliases.** A helper can read a Pinia store through a parameter typed `CounterStore`, where `type CounterStore = ReturnType<typeof useCounterStore>`. Fallow now credits the member when another file declares and exports the alias, and when the same file declares the alias after the helper. Before this fix, Fallow reported these members as unused. The extraction cache version changes, so the first run after the upgrade parses all files again.
+  (Closes [#3357](https://github.com/fallow-rs/fallow/issues/3357))
+
+- **`fallow dupes` reports clones inside an object that a call receives.**
+  Before, a copied block in an object literal argument was not reported when
+  the call had no callback argument. Examples are the `props`, computed
+  properties, and methods in `defineComponent({ ... })` or in a wrapper with
+  the same shape. Fallow treated the full call as repeated call syntax and
+  filtered the clone. Now fallow reports the clone when the call holds a
+  function at any depth, such as an object method or an arrow function in a
+  nested object. Fallow also reports the clone when it starts inside an object
+  or array literal argument, because then it does not hold the callee. A
+  copied `props` block with only data is an example. A repeated call whose
+  clone also covers the callee and the argument list is still filtered.
+  A method chain is not filtered when an earlier call in the chain has a
+  callback, for example `xs.map((x) => x.id).filter(Boolean)`. Before, fallow
+  filtered the full chain when the last call had no callback, so you can see
+  new clone groups in chained code. The duplication cache version changes, so
+  the first `fallow dupes` run after the upgrade tokenizes the project again.
+  Thanks [@jleifeld](https://github.com/jleifeld) for the report.
+  (Closes [#3491](https://github.com/fallow-rs/fallow/issues/3491))
+
+- **`export default x` and `export = x` of an imported binding now forward the
+  import.** Before, Fallow recorded these statements as a new local export.
+  The importers of the forwarding file were then not credited to the original
+  export, so `--trace` and `--impact-closure` did not list them, and search
+  visibility kept the forwarding file as the only consumer. Now both forms
+  make the same re-export of `default` as `export { x as default }`. The
+  forwarding file is `pass-through`, and the importers show in the trace. For
+  `export = x`, the module object is `x`. A member read on the file, such as
+  `m.run()` on an `import m = require(..)` binding, `import { run }` or
+  `const { run } = require(..)`, also credits the forwarded default export.
+  An `export = x` statement never shows as an unused export, the same as
+  `module.exports = x`, so `fallow fix` does not change it. An unused
+  `export default x` forward now shows with `is_re_export: true` and the
+  re-export note, the same as `export { x as default }`, and `fallow fix`
+  does not remove it. The
+  extraction and graph cache versions change, so the first run after the
+  upgrade parses the project again.
+  (Closes [#3392](https://github.com/fallow-rs/fallow/issues/3392))
+- **A re-export inside a webpack asset loader resource no longer keeps its
+  source in use.** A `raw-loader!` resource never runs. Its imports already
+  stayed out of reach, but a re-export in it, such as
+  `export { local as default }`, still credited the source file, so that
+  file did not show as unused. Now a module that only asset loader edges load
+  forwards nothing through its re-exports.
+
+- **`fallow mutation --max-mutants N` now runs up to N covered mutants.** The plan applies the limit before the dry run knows the coverage. On a large project, all N best-ranked mutants could have no covering test, so the run executed no mutant and showed no score. Now an uncovered planned mutant is `no_coverage` and does not use the limit. The next covered `pending` mutant in rank order runs in its place. The `mutant-limit` completion reason now appears only when a covered mutant stays `pending`.
+
+- **`fallow mutation` keeps a survivor in the score when its retry times
+  out.** A survivor ran all its tests with the mutant active. Host load can
+  make the retry time out, and that timeout is no proof that the tests
+  detect the mutant. A survivor with a timed-out retry is now `survived`,
+  not `flaky`. A survivor with a killed retry is still `flaky`.
+- **`fallow mutation` exits with code 2 when baseline failures stop each
+  mutant run.** A run in which no mutant got a test result (`killed`,
+  `timeout`, `survived` or `flaky`) because of baseline failures measured
+  nothing, but it exited with code 0. It now exits with code 2 and
+  `FALLOW_MUTATION_BASELINE_FAILED`. The error names the first failure and
+  the first line of its message. With `--format json`, stdout gets the
+  error envelope. The run still saves the report to `last-report.json` and
+  to the `-o` file, and `help` gives the paths. A run with a `pending`
+  mutant, or with only `no_coverage` mutants and no baseline failure, still
+  exits with code 0.
+- **The human `fallow mutation` report shows the message of the first
+  baseline failure.** A `Message` line under the baseline failure line shows
+  the first line of the message, for example `Invalid environment
+  variables`. Before, the message was only in the `--format json` output
+  when the failure had a test id.
+
+- **A Playwright `test` or `mergeTests` import from `playwright/test` credits
+  the fixture class members that tests use.** The `playwright` package
+  exports the same test runner at `playwright/test` that `@playwright/test`
+  re-exports. Before, Fallow read Playwright fixtures only from the
+  `@playwright/test` source. A fixture test made with `test.extend<T>(...)` or
+  `mergeTests(...).extend<T>(...)` from `playwright/test` lost its fixtures,
+  so the page-object methods that tests call through them reported as unused
+  class members. Now both sources work the same. The extraction and graph
+  cache versions change, so the first run after the upgrade parses the
+  project again.
+- **A project that depends only on `playwright` and has a Playwright config
+  activates the Playwright plugin.** Before, only `@playwright/test` activated
+  it, so the spec files of such a project reported as unused files. The
+  `playwright` package alone still does not activate the plugin without a
+  `playwright.config.ts` or `playwright.config.js` file, because Vitest and
+  Rstest browser modes use it without the test runner.
+
+- **Negative `import.meta.glob` entries now exclude files.** Vite reads an
+  array entry such as `'!./pages/skip.js'` or `'!**/*.test.ts'` as an exclude
+  for every positive entry of the same call. Before, Fallow ignored these
+  entries. The excluded files then counted as loaded, and Fallow did not
+  report them as unused. Now Fallow applies each negative entry that starts
+  with `./`, `../` or `**`. Like Vite, Fallow matches a `**` entry from the
+  common base directory of the positive entries. For example,
+  `'!**/pages/a.js'` next to `'./pages/*.js'` excludes nothing, because the
+  match starts inside `pages`.
+- **The literal text of a dynamic import pattern now matches only itself.**
+  Before, Fallow read glob characters in the static parts of a template
+  literal, a string concatenation, or a `require.context` directory as glob
+  syntax. For example, ``import(`./[id]/${name}.js`)`` matched `./i/view.js`
+  and not `./[id]/view.js`, and `import('./{group}/' + name)` matched no file.
+  Now the characters `*`, `?`, `[`, `]`, `{`, `}` and `(` in these parts match
+  only themselves. The extraction and graph cache versions change, so the
+  first run after the upgrade parses the project again.
+
+- **A Jest `projects` glob works when the project path has a `[`.** Fallow
+  read the `[` in the directory path as glob syntax, so the glob matched no
+  project. The directory part of the pattern is now escaped.
+
+- **`fallow mutation` now needs Bun 1.4.0 or later for `bun test`.** On Bun
+  1.3.x the adapter got no test results for a run with `--bail`, and it
+  reported each thrown error as an assertion failure. The supported Bun range
+  is now `>=1.4.0 <2.0.0`. On Bun 1.3.x the run exits with code 2 and
+  `FALLOW_MUTATION_RUNNER_UNSUPPORTED`. The message names the installed
+  version and the supported range, and the help gives the install step.
+
+- **`fallow mutation` stops a run when the mutant run path of the runner executes no tests.**
+  The dry run selects whole test files, and a mutant run selects tests by id
+  through another path of the runner API. When that path failed before a
+  test started, each mutant looked killed, and the score was a false 100%.
+  Before the first mutant job, a self-check now runs the tests of one
+  covered mutant with no active mutant, through the same path as a mutant
+  run. When that control run executes no tests, the run exits with code 2
+  and `FALLOW_MUTATION_RUNNER_FAILED`. The message names the runner and its
+  version. When the control run times out, the message says so and names
+  `--setup-timeout`. The check costs one run.
+- **A `fallow mutation` test that fails without a mutant in a mutant run is a baseline failure.**
+  A test can pass in the dry run of its whole file, but fail when a mutant
+  run selects it alone, for example when it depends on another test of its
+  file. When the self-check or a later control run finds such a test, the
+  test goes into `baseline_failures` and covers no mutant. The run
+  continues, so the test gives no false kill.
+- **A `fallow mutation` kill with no executed test needs a passing control run.**
+  A mutant run that executes no test and reports an error is `killed` only
+  when the same tests pass with no active mutant. A mutant that throws when
+  its module loads stays `killed`. Otherwise the mutant is `runtime_error`.
+  Each distinct test set gets at most one control run in a run, and the
+  result cache never stores a control result.
+
+- **Nuxt nested plugin, middleware and module files are now reported when
+  unused.** Nuxt scans `plugins/`, `middleware/` and `modules/` one level
+  deep: a direct child file, or the `index` file of a direct child directory.
+  Before, Fallow made every file in these directories an entry point at any
+  depth. An unused helper such as `plugins/foo/helper.ts` or
+  `middleware/admin/guard.ts` was then not reported. Now these files must be
+  imported to count as used. `plugins/bar.ts`, `plugins/foo/index.ts`, the
+  `plugins` list of `nuxt.config`, `srcDir` and local layers keep their
+  credit. The files in `modules/<name>/runtime/` stay entry points, because a
+  module registers them through `resolver.resolve()` strings. Middleware and
+  module files with the `tsx`, `jsx`, `mts`, `cts`, `mjs` and `cjs`
+  extensions are now entry points too, as Nuxt scans them.
+
+- **Dynamic import patterns that start with `../` now find their files.**
+  Before this fix, `import.meta.glob('../components/*.js')`,
+  `require.context('../widgets')`, a template literal such as
+  ``import(`../locales/${locale}.js`)`` and a `'../views/' + name`
+  concatenation matched no file. Fallow then reported each target as an
+  unused file. Fallow now resolves each leading `../` step from the
+  directory of the importing file, as Vite and webpack do. A negative
+  `import.meta.glob` entry such as `'!../components/skip.js'` now also
+  removes its file. A pattern that goes above the project root still matches
+  no file.
+
 ### Performance
+
+- **Plugin detection no longer walks `node_modules` for a Vitest, Jest or
+  Rstest project glob.** Since 3.33.1, the Vitest plugin expands each glob
+  entry in `test.projects` on disk. A glob with `**` after its base, for
+  example `apps/**/vitest.config.ts`, followed each symlink in the
+  `node_modules` of each workspace. In a pnpm monorepo, the walk then read the
+  full dependency store once for each workspace, and plugin detection took
+  minutes. The walk now does not enter `node_modules`, `.git`, or a
+  gitignored path, such as a local build output. It still follows a symlinked
+  project directory inside the project root, and it stops at a symlink loop.
+  It does not enter a symlink that points out of the project root. A limit on
+  the number of read files and directories bounds each glob, and fallow shows
+  a warning when a glob reaches it. The Jest `projects` and Rstest
+  `projects` globs use the same walk.
+  Thanks [@wouterkroes](https://github.com/wouterkroes) for the report.
+  (Closes [#3532](https://github.com/fallow-rs/fallow/issues/3532))
 
 - **Import resolution is fast again in monorepos whose packages extend a root
   tsconfig that references them.** Since 3.20.0, a package `tsconfig.json`
@@ -969,7 +1323,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an absolute `references` path, the configs after it can come in another
   order. If two of them declare `paths`, `baseUrl` or `rootDirs`, the other
   one can then apply. The graph cache version changes, so the first run after
-  an upgrade rebuilds the graph.
+  an upgrade rebuilds the graph. Thanks [@thymikee](https://github.com/thymikee)
+  for the report and for the patch in
+  [#3504](https://github.com/fallow-rs/fallow/pull/3504).
+  (Closes [#3503](https://github.com/fallow-rs/fallow/issues/3503))
+
+- **Every run compiles its globs and regular expressions faster.** The
+  logging filter pulled in a regular-expression feature that built a full
+  automaton for each small pattern. Each glob compile cost about three times
+  as much, and Fallow compiles hundreds of them in a run. A dead-code run now
+  takes about 5 to 7 percent fewer instructions on a mid-size project, and
+  the binary is smaller. `RUST_LOG` still reads `target=level` and `level`
+  directives. It skips span and field directives, which it read before.
+
+### Security
+
+- **A glob segment such as `.*` no longer matches the parent directory.** The
+  `glob` crate tests the `..` entry against a path segment that starts with a
+  literal `.`. Thus a plugin `fileExists` pattern such as `.*/marker.json`
+  passed glob validation, but it also found `marker.json` in the parent of the
+  project root. The same applied to the seeded entry check of
+  `fallow plugin-check`, to tooling config detection, and to `package.json`
+  and `pnpm-workspace.yaml` workspace globs. Fallow now rewrites a leading `.`
+  in such a segment to `[.]` before it expands the glob on disk. The pattern
+  still matches hidden files and directories inside the project root.
+
+- **Jest and Vitest `projects` entries no longer read files outside the
+  project root.** A Jest `projects` entry or a Vitest `test.projects` entry
+  can name an absolute path, a path with `..` segments, or a glob. Fallow
+  followed such an entry to a config file outside the project root and read
+  that file. A symlink in the project root to a directory above it had the
+  same effect. A Vitest inline project with an `extends` path outside the
+  project root also made Fallow read that file. Fallow now resolves each
+  match and reads it only when it is inside the project root. A glob whose
+  literal base is outside the project root does not run. An in-root entry
+  such as `<rootDir>/../packages/*` still works, also from the config of a
+  workspace package. A script `--config` path that is a symlink to a file
+  outside the project root is also not read.
+
+- **Fallow and the similar-code sidecar link rustls 0.23.46.** Version 0.23.45
+  has the advisories RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348
+  and RUSTSEC-2026-0349.
 
 ## [3.33.1] - 2026-10-09
 
@@ -14590,7 +14984,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.33.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.34.0...HEAD
+[3.34.0]: https://github.com/fallow-rs/fallow/compare/v3.33.1...v3.34.0
 [3.33.1]: https://github.com/fallow-rs/fallow/compare/v3.33.0...v3.33.1
 [3.33.0]: https://github.com/fallow-rs/fallow/compare/v3.32.0...v3.33.0
 [3.32.0]: https://github.com/fallow-rs/fallow/compare/v3.31.0...v3.32.0

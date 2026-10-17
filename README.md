@@ -87,6 +87,7 @@ fallow runs in four places. All four read the same config file and use the same 
 | What is copied? | [Code duplication](https://fallow.tools/docs/analysis/duplication/) in JS, TS, CSS, and Vue, Svelte, and Astro components | `fallow dupes` |
 | Does the UI follow the design system? | [Styling drift](https://fallow.tools/docs/analysis/css-analysis/) in CSS and CSS-in-JS | `fallow health --css` |
 | What does nothing use? | [Unused files, exports, types, class and enum members, and dependencies](https://fallow.tools/docs/analysis/dead-code/), with an [auto-fix](https://fallow.tools/docs/analysis/auto-fix/) and a dry-run preview | `fallow dead-code`, `fallow fix` |
+| Do the tests detect a code change? | [Mutation testing](docs/mutation-testing.md): small changes in the source that no test detects (opt-in, runs the project tests) | `fallow mutation` |
 | Which code paths are risky? | Security candidates, ranked by reachability from entry points (opt-in) | `fallow security` |
 | Which functions do the same job? | Functions with the same intent and different syntax (opt-in, uses a local model that you download once) | `fallow similar-code` |
 | Where are the feature flags? | Feature-flag patterns across the codebase | `fallow flags` |
@@ -183,7 +184,7 @@ GitLab CI:
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.33.1/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.34.0/ci/gitlab-ci.yml'
 
 fallow:
   extends: .fallow
