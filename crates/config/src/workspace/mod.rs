@@ -561,7 +561,7 @@ fn collect_declared_patterns(
 }
 
 /// Keep the patterns that stay inside the project root, and report each
-/// positive entry that is absolute or has a `..` segment.
+/// positive entry that is absolute or whose `..` segments lead above the root.
 ///
 /// The skip happens before any glob reads the disk, so discovery never lists a
 /// directory outside the root. npm, pnpm and yarn accept a `../` entry, so the
@@ -575,11 +575,19 @@ fn split_outside_root_patterns(
     let mut patterns = Vec::with_capacity(declared.len());
     for DeclaredPattern { pattern, source } in declared {
         if !pattern.starts_with('!') && crate::glob_validation::escapes_project_root(&pattern) {
-            diagnostics.push(WorkspaceDiagnostic::new(
+            let anchored_at_root = source == root;
+            let diagnostic = WorkspaceDiagnostic::new(
                 root,
                 source,
                 WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot { pattern },
-            ));
+            );
+            // The JSON envelopes strip only a `root + separator` prefix, so a
+            // path equal to the root would stay absolute there.
+            diagnostics.push(if anchored_at_root {
+                diagnostic.into_root_relative(root)
+            } else {
+                diagnostic
+            });
             continue;
         }
         patterns.push(pattern);
@@ -2526,7 +2534,8 @@ mod tests {
         );
     }
 
-    /// A workspace entry that is absolute or has a `..` segment can name
+    /// A workspace entry that is absolute or whose `..` segments lead above the
+    /// root can name
     /// directories outside the project root. Discovery skips it before any
     /// disk walk and reports the entry and the file that declares it, never a
     /// path outside the root. The in-root entry still finds its package.
@@ -2612,6 +2621,48 @@ mod tests {
         );
     }
 
+    /// A Deno workspace entry gets the same skip. A `..` that stays inside the
+    /// root and a negated outside entry read no outside directory, so they get
+    /// no diagnostic, and the in-root package is still found.
+    #[test]
+    fn deno_entries_and_in_root_dot_dot_segments_follow_the_root_boundary() {
+        let sandbox = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(sandbox.path().join("outside/no-manifest")).unwrap();
+        let root = sandbox.path().join("repo");
+        std::fs::create_dir_all(root.join("packages/pkg-in")).unwrap();
+        std::fs::write(
+            root.join("packages/pkg-in/deno.json"),
+            r#"{"name":"@x/pkg-in"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deno.json"),
+            r#"{"workspace":["packages/../packages/*","../outside/*","!../outside/no-manifest"]}"#,
+        )
+        .unwrap();
+
+        let (workspaces, diagnostics) =
+            discover_workspaces_with_diagnostics(&root, &crate::IgnorePatternSet::empty())
+                .expect("root deno.json is valid");
+
+        let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["@x/pkg-in"],
+            "the in-root `..` entry still finds its package"
+        );
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("expected one diagnostic: {diagnostics:?}");
+        };
+        assert_eq!(diagnostic.path, root.join("deno.json"));
+        assert_eq!(
+            diagnostic.kind,
+            WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot {
+                pattern: "../outside/*".to_owned()
+            }
+        );
+    }
+
     /// A fallow config `workspaces.patterns` entry has no manifest, so its
     /// diagnostic is anchored at the root and its message names the setting.
     #[test]
@@ -2629,7 +2680,7 @@ mod tests {
         let [diagnostic] = diagnostics.as_slice() else {
             panic!("expected one diagnostic: {diagnostics:?}");
         };
-        assert_eq!(diagnostic.path, dir.path());
+        assert_eq!(diagnostic.path, Path::new("."));
         assert_eq!(
             diagnostic.kind,
             WorkspaceDiagnosticKind::WorkspaceGlobOutsideRoot {

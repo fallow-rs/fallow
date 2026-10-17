@@ -63,8 +63,8 @@ pub enum WorkspaceDiagnosticKind {
         /// The glob pattern that matched the directory.
         pattern: String,
     },
-    /// A workspace entry is an absolute path or has a `..` segment, so it can
-    /// name directories outside the project root. Fallow skips the entry
+    /// A workspace entry is an absolute path or has `..` segments that lead
+    /// above the project root, so it can name directories outside the root. Fallow skips the entry
     /// before it reads the disk and analyzes no package from it. `path` is
     /// the file that declares the entry (`package.json`,
     /// `pnpm-workspace.yaml`, `deno.json` or `deno.jsonc`), or the project
@@ -1406,7 +1406,8 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             };
             format!(
                 "Skipped workspace entry '{pattern}' in {source}: it is an absolute path \
-                 or has a '..' segment, so it can match directories outside the project root. \
+                 or its '..' segments lead above the project root, so it can match directories \
+                 outside the root. \
                  Fallow analyzes no package from it. Move the package inside the project root, \
                  or run fallow with --root set to a directory that holds both."
             )

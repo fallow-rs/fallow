@@ -189,15 +189,34 @@ fn has_traversal_segment(pattern: &str) -> bool {
             .any(|c| matches!(c, Component::ParentDir))
 }
 
-/// Whether `pattern` is an absolute path or has a `..` segment, so that it can
-/// name a path outside the project root.
+/// Whether `pattern` is an absolute path, or has `..` segments that can lead
+/// above the directory it starts from.
 ///
-/// This is the same test that config glob validation applies. Workspace
-/// discovery uses it to skip such an entry of `package.json` `workspaces` or
-/// `pnpm-workspace.yaml` `packages` before it reads the disk.
+/// Workspace discovery uses this test to skip an entry of `package.json`
+/// `workspaces` or `pnpm-workspace.yaml` `packages` before it reads the disk.
+/// The test is lexical. A `..` after a named or single-wildcard segment goes
+/// back one level, so `packages/../libs/*` stays inside the root. A `**`
+/// segment can match zero directories, so it counts as no level, and
+/// `**/../x` can escape.
+///
+/// Config glob validation is stricter: it rejects every `..` segment.
 #[must_use]
 pub fn escapes_project_root(pattern: &str) -> bool {
-    is_absolute_pattern(pattern) || has_traversal_segment(pattern)
+    if is_absolute_pattern(pattern) {
+        return true;
+    }
+    let mut depth: usize = 0;
+    for segment in pattern.split(['/', '\\']) {
+        match segment {
+            "" | "." | "**" => {}
+            ".." => match depth.checked_sub(1) {
+                Some(up) => depth = up,
+                None => return true,
+            },
+            _ => depth += 1,
+        }
+    }
+    false
 }
 
 /// Compile a glob that matches project-root-relative file paths.
@@ -535,6 +554,31 @@ mod tests {
             .filter_map(Result::ok)
             .collect();
         assert_eq!(matches, vec![root.join(".hidden").join("secret")]);
+    }
+
+    #[test]
+    fn escapes_project_root_follows_the_dot_dot_segments() {
+        for pattern in [
+            "../*",
+            "../../x",
+            "packages/../../x",
+            "**/../x",
+            "..\\x",
+            "/abs/*",
+            "C:/abs",
+        ] {
+            assert!(escapes_project_root(pattern), "{pattern}");
+        }
+        for pattern in [
+            "packages/*",
+            "./packages/*",
+            "packages/../libs/*",
+            "*/..",
+            "a/**",
+            "..x/*",
+        ] {
+            assert!(!escapes_project_root(pattern), "{pattern}");
+        }
     }
 
     #[test]

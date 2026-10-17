@@ -1842,3 +1842,49 @@ fn workspace_entries_outside_the_root_report_the_entry_and_not_the_directory() {
         );
     }
 }
+
+/// A `workspaces.patterns` entry outside the root is anchored at the root.
+/// Every envelope must emit `"."` there, not the absolute root path.
+#[test]
+fn configured_workspace_entry_outside_the_root_is_anchored_at_dot() {
+    let sandbox = tempfile::tempdir().expect("create temp dir");
+    fs::create_dir_all(sandbox.path().join("cfg/secret-dir")).expect("create outside dir");
+    let root = sandbox.path().join("repo");
+    fs::create_dir_all(root.join("src")).expect("create source dir");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"cfg-root","private":true}"#,
+    )
+    .expect("write root manifest");
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"patterns":["../cfg/*"]}}"#,
+    )
+    .expect("write config");
+    fs::write(root.join("src/index.ts"), "export const value = 1;\n").expect("write source");
+
+    for args in [
+        ["dead-code", "--format", "json", "--quiet"].as_slice(),
+        ["--format", "json", "--quiet"].as_slice(),
+        ["list", "--workspaces", "--format", "json", "--quiet"].as_slice(),
+    ] {
+        let output = run_fallow_combined_in_root(&root, args);
+        assert!(output.code <= 1, "stderr: {}", output.stderr);
+        let json = parse_json(&output);
+        let paths: Vec<String> = json["workspace_diagnostics"]
+            .as_array()
+            .map(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .filter(|entry| entry["kind"] == "workspace-glob-outside-root")
+                    .map(|entry| entry["path"].as_str().unwrap_or_default().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(paths, ["."], "`fallow {args:?}`: {json}");
+        assert!(
+            !output.stdout.contains("secret-dir"),
+            "`fallow {args:?}`: {json}"
+        );
+    }
+}

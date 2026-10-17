@@ -12823,7 +12823,7 @@
             "kind",
             "pattern"
           ],
-          "description": "A workspace entry is an absolute path or has a `..` segment, so it can\nname directories outside the project root. Fallow skips the entry\nbefore it reads the disk and analyzes no package from it. `path` is\nthe file that declares the entry (`package.json`,\n`pnpm-workspace.yaml`, `deno.json` or `deno.jsonc`), or the project\nroot for an entry of the fallow config `workspaces.patterns`. The\ndiagnostic never names a directory outside the root.\n\nnpm, pnpm and yarn accept such an entry, so fallow does not exit with\nan error on it. The project root is the security boundary of a run."
+          "description": "A workspace entry is an absolute path or has `..` segments that lead\nabove the project root, so it can name directories outside the root. Fallow skips the entry\nbefore it reads the disk and analyzes no package from it. `path` is\nthe file that declares the entry (`package.json`,\n`pnpm-workspace.yaml`, `deno.json` or `deno.jsonc`), or the project\nroot for an entry of the fallow config `workspaces.patterns`. The\ndiagnostic never names a directory outside the root.\n\nnpm, pnpm and yarn accept such an entry, so fallow does not exit with\nan error on it. The project root is the security boundary of a run."
         },
         {
           "type": "object",
