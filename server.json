@@ -7,14 +7,14 @@
     "url": "https://github.com/fallow-rs/fallow",
     "source": "github"
   },
-  "version": "3.34.0",
+  "version": "3.34.1",
   "websiteUrl": "https://fallow.tools/docs/integrations/mcp/",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "fallow",
-      "version": "3.34.0",
+      "version": "3.34.1",
       "transport": {
         "type": "stdio"
       },

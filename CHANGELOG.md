@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.34.1] - 2026-10-18
+
+### Fixed
+
+- **The Oxlint plugin now reads `.oxlintrc.jsonc` and `oxlint.config.mts`.**
+  Oxlint finds these config files on its own, but fallow did not read them.
+  Packages in their `jsPlugins` lists, at the top level and in `overrides`,
+  showed as unused dependencies, and `oxlint.config.mts` showed as an unused
+  file. Fallow now reads every config file name that Oxlint finds. Comments
+  and trailing commas in `.oxlintrc.jsonc` parse correctly. Thanks
+  [@gwynnnplaine](https://github.com/gwynnnplaine) for the report and the
+  analysis. (Closes [#3525](https://github.com/fallow-rs/fallow/issues/3525))
+
+- **A coverage map with a negative hit count now loads.** Vitest `coverage-v8`
+  can write a negative branch count, for example `[5, -1]`, for the implicit
+  else of an `if`. Fallow rejected the whole map: `fallow health` and
+  `fallow audit` stopped with exit 2 when `--coverage` or `FALLOW_COVERAGE`
+  named the map. Fallow now reads a negative count in `s`, `f`, `b` or `b_T`
+  as 0, which is a miss. An auto-detected map that fails to load now gives a
+  note that says Fallow ignored it, and not a note that says Fallow used it.
+  Thanks [@norvalbv](https://github.com/norvalbv) for the report and the
+  reproduction. (Closes [#3564](https://github.com/fallow-rs/fallow/issues/3564))
+
+- **A `<` inside a nested Vue `<template>` no longer hides the references of
+  the template.** A `<` in an interpolation of a nested template, such as
+  `<template v-if="W">{{ 1 < 2 }}</template>`, made fallow read the `<` as the
+  start of a tag. Each name that the template used was then lost, and a named
+  import that only the template used was reported as an unused export.
+
+  Fallow now skips `{{ }}` interpolations when it looks for the closing
+  `</template>`. A `<` that is not followed by a letter, `/`, `!` or `?` is
+  read as text, as in HTML. The cache versions change, so a warm cache does
+  not keep the old result. Thanks [@BrocksiNet](https://github.com/BrocksiNet)
+  for the report and the minimal reproduction.
+  (Closes [#3543](https://github.com/fallow-rs/fallow/issues/3543))
+
+- **`fallow health --type-aware --type-coupling` no longer fails
+  `--type-aware-require complete` on projects with more than 40 coupling
+  edges.** The coupling report is one report for the whole project. It now
+  carries up to 10,000 evidence items, so a complete analysis is reported as
+  `complete`. Symbol, impact, and API-surface results keep the limit of 40
+  items. Above the new limit, the report stays `partial` with the
+  `evidence-limit` reason. Thanks [@samaluk](https://github.com/samaluk) for
+  the report and the experiment.
+  (Closes [#3563](https://github.com/fallow-rs/fallow/issues/3563))
+
+### Security
+
+- **Workspace globs no longer read directories outside the project root.**
+  An entry such as `../*` or an absolute path in `package.json` `workspaces`,
+  `pnpm-workspace.yaml` `packages`, `deno.json` `workspace`, or the
+  `workspaces.patterns` config listed directories outside the root. Fallow
+  added no package from them, but a directory without a `package.json` got a
+  `glob-matched-no-package-json` diagnostic with its outside path. Fallow now
+  skips such an entry before it reads the disk. A new
+  `workspace-glob-outside-root` diagnostic names the entry and the file that
+  declares it. The run does not exit with an error, because npm, pnpm, and
+  yarn accept a `../` workspace entry. A `..` that stays inside the root,
+  as in `packages/../libs/*`, still works. The findings do not change.
+
 ## [3.34.0] - 2026-10-17
 
 ### Added
@@ -14993,6 +15053,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
 [unreleased]: https://github.com/fallow-rs/fallow/compare/v3.34.0...HEAD
+[3.34.1]: https://github.com/fallow-rs/fallow/compare/v3.34.0...v3.34.1
 [3.34.0]: https://github.com/fallow-rs/fallow/compare/v3.33.1...v3.34.0
 [3.33.1]: https://github.com/fallow-rs/fallow/compare/v3.33.0...v3.33.1
 [3.33.0]: https://github.com/fallow-rs/fallow/compare/v3.32.0...v3.33.0
