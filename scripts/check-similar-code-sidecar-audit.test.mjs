@@ -17,7 +17,8 @@ const POLICY_PATH = resolve(
   "../tools/similar-code-sidecar/audit-allowlist.json",
 );
 const loadPolicy = () => JSON.parse(readFileSync(POLICY_PATH, "utf8"));
-const RELEASE_WORKFLOW_PATH = resolve(import.meta.dirname, "../.github/workflows/release.yml");
+const WORKFLOWS_DIR = resolve(import.meta.dirname, "../.github/workflows");
+const RELEASE_WORKFLOWS = ["release.yml", "release-validation.yml"];
 const ZIP_ADVISORY_IDS = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"];
 const zipAdvisory = (policy, id) => policy.advisories.find((advisory) => advisory.id === id);
 
@@ -151,14 +152,29 @@ test("temporary zip allowlist requires a reason, removal condition, chains, and 
   assert.throws(() => validatePolicy(loadPolicy(), "2026-12-01"), /expired/u);
 });
 
-test("release audit ignores exactly the advisories that the allowlist owns", () => {
-  const workflow = readFileSync(RELEASE_WORKFLOW_PATH, "utf8");
-  const audit = /cargo audit \\\n((?:\s+--[^\n]+\n)+)/u.exec(workflow);
-  assert.ok(audit, "release workflow must run cargo audit for the similar-code sidecar");
-  assert.match(audit[1], /--file tools\/similar-code-sidecar\/Cargo\.lock/u);
-  const ignored = [...audit[1].matchAll(/--ignore (\S+)/gu)].map((match) => match[1]);
+/** Returns the flag lines of every multi-line `cargo audit` call in a workflow. */
+const cargoAuditCalls = (workflow) =>
+  [...workflow.matchAll(/cargo audit \\\n((?:\s+--[^\n]+\n)+)/gu)].map((match) => match[1]);
 
-  assert.deepEqual(ignored, ACCEPTED_ADVISORY_IDS);
+test("release audit ignores exactly the advisories that the allowlist owns", () => {
+  const sidecarAudits = RELEASE_WORKFLOWS.flatMap((file) =>
+    cargoAuditCalls(readFileSync(resolve(WORKFLOWS_DIR, file), "utf8"))
+      .filter((flags) => flags.includes("tools/similar-code-sidecar/Cargo.lock"))
+      .map((flags) => ({ file, flags })),
+  );
+  // Release validation runs before the dispatch and inside release.yml, so
+  // a new upstream advisory fails before any version or tag exists.
+  assert.deepEqual(
+    sidecarAudits.map(({ file }) => file),
+    ["release-validation.yml"],
+    "release validation must own the one similar-code sidecar audit",
+  );
+  for (const { file, flags } of sidecarAudits) {
+    assert.match(flags, /--file tools\/similar-code-sidecar\/Cargo\.lock/u, file);
+    assert.match(flags, /--deny unmaintained/u, file);
+    const ignored = [...flags.matchAll(/--ignore (\S+)/gu)].map((match) => match[1]);
+    assert.deepEqual(ignored, ACCEPTED_ADVISORY_IDS, file);
+  }
   assert.deepEqual(
     loadPolicy().advisories.map(({ id }) => id),
     ACCEPTED_ADVISORY_IDS,

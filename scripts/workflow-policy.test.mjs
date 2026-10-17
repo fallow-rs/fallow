@@ -620,9 +620,20 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(similarCodeConformance, /fallow-similar-code-linux-x64-gnu/);
   assert.match(similarCodeConformance, /verify-binary\.mjs/);
   assert.match(similarCodeConformance, /release_binary_max_bytes/);
-  assert.match(similarCodeConformance, /check-similar-code-sidecar-audit\.mjs/);
-  const sidecarAudit = /cargo audit \\\n((?:\s+--[^\n]+\n)+)/u.exec(similarCodeConformance);
-  assert.ok(sidecarAudit, "similar-code conformance must run cargo audit");
+  // The dependency audit lives in release validation, which `validate` calls.
+  assert.match(validate, /uses: \.\/\.github\/workflows\/release-validation\.yml/u);
+  assert.doesNotMatch(similarCodeConformance, /cargo audit|cargo deny|cargo-audit|cargo-deny/u);
+  const sidecarAuditJob = indentedBlock(
+    readWorkflow(".github/workflows/release-validation.yml"),
+    "similar-code-audit",
+    2,
+  );
+  assert.match(sidecarAuditJob, /permissions:\n\s+contents: read/u);
+  assert.match(sidecarAuditJob, /persist-credentials: false/u);
+  assert.doesNotMatch(sidecarAuditJob, /id-token: write|contents: write|secrets\./u);
+  assert.match(sidecarAuditJob, /check-similar-code-sidecar-audit\.mjs/);
+  const sidecarAudit = /cargo audit \\\n((?:\s+--[^\n]+\n)+)/u.exec(sidecarAuditJob);
+  assert.ok(sidecarAudit, "release validation must run cargo audit for the sidecar");
   assert.match(sidecarAudit[1], /--file tools\/similar-code-sidecar\/Cargo\.lock/u);
   assert.match(sidecarAudit[1], /--deny unmaintained/u);
   assert.deepEqual(
@@ -630,7 +641,7 @@ test("release publication waits for the aggregate verification gate", () => {
     ["RUSTSEC-2024-0436", "RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"],
   );
   assert.match(
-    similarCodeConformance,
+    sidecarAuditJob,
     /cargo deny[\s\S]*tools\/similar-code-sidecar\/Cargo\.toml[\s\S]*check licenses/u,
   );
   assert.match(similarCodeConformance, /semantic-clone-candle-conformance\.mjs/);

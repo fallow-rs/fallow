@@ -13,7 +13,7 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `pgo-profile` | Build an instrumented binary, train the PGO profile on pinned public fixtures, and upload only the profile | Read only |
 | `build` | Build unsigned binaries, archives, and NAPI addons | Read only |
 | `sign` | Sign downloaded raw binaries and stage npm binary payloads on fresh runners | Artifact signing only |
-| `validate` | Reusable release validation | Read only |
+| `validate` | Reusable release validation, including the similar-code sidecar dependency audit | Read only |
 | `release-verified` | Join build, signing, validation, and `similar-code-conformance` | None |
 | `release-assets` | Flatten and store the complete GitHub asset bundle, including all VSIX targets | Read only |
 | `release-ready` | Join publication jobs and prove the tag is still absent | Read only |
@@ -294,6 +294,12 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 - Make `release-verified` wait for `similar-code-conformance`, which validates
   the exact Linux x64 sidecar artifact against the committed F32 Candle
   baseline before any publication job can start.
+- Keep the similar-code sidecar dependency audit in `release-validation.yml`.
+  Its `cargo audit` call ignores exactly the advisory IDs in
+  `tools/similar-code-sidecar/audit-allowlist.json`. The pre-flight
+  validation dispatch runs it before a version bump, and `validate` runs it
+  again before `release-verified`, so a new upstream advisory stops the
+  release before any publication job.
 - Require repository release immutability before publication. Verify it in the
   maintainer pre-flight, not in the workflow: reading
   `repos/{owner}/{repo}/immutable-releases` needs the Administration read

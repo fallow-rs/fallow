@@ -288,6 +288,48 @@ jobs:
       - name: Format
         run: cargo fmt --check --manifest-path editors/zed/Cargo.toml
 
+  # The similar-code sidecar keeps a temporary, expiring advisory allowlist.
+  # Run its audit here, so a new upstream advisory fails the validation
+  # dispatch before a version bump, and release.yml (which calls this
+  # workflow) fails before any publication job starts.
+  similar-code-audit:
+    name: Similar-code sidecar dependency audit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-audit
+
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-deny
+
+      - name: Verify temporary dependency audit ownership
+        run: |
+          set -euo pipefail
+          node scripts/check-similar-code-sidecar-audit.mjs
+          cargo audit \
+            --file tools/similar-code-sidecar/Cargo.lock \
+            --deny unmaintained \
+            --ignore RUSTSEC-2024-0436 \
+            --ignore RUSTSEC-2026-0367 \
+            --ignore RUSTSEC-2026-0368 \
+            --ignore RUSTSEC-2026-0369
+          cargo deny \
+            --manifest-path tools/similar-code-sidecar/Cargo.toml \
+            check licenses
+
   heavy-runner:
     name: Select drift runner
     if: >-

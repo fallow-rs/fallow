@@ -95,7 +95,8 @@ automatically:
   `zip` 9.0.0 or later.
 
 `scripts/check-similar-code-sidecar-audit.mjs` checks each entry and its
-reverse dependency edges. The `cargo audit` step in the release workflow
-ignores exactly these advisory IDs. After you remove an entry, rerun
-conformance, the platform build matrix, the audit, license checks, and the
-release binary size gate.
+reverse dependency edges. The `cargo audit` step in the release validation
+workflow ignores exactly these advisory IDs. That workflow runs before the
+release dispatch and again inside the release workflow. After you remove an
+entry, rerun conformance, the platform build matrix, the audit, license
+checks, and the release binary size gate.

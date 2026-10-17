@@ -106,6 +106,8 @@ invariants in this file.
    mutating versions unless the user explicitly requested it.
 5. Dispatch the reusable release-validation workflow against `main` and require
    a completed successful result before changing versions or creating a tag.
+   It includes the similar-code sidecar dependency audit, so a new upstream
+   advisory fails here and not after the release dispatch.
 
 ## Prepare
 
