@@ -274,8 +274,15 @@ invariants in this file.
     rerun that failed check after the companion update. No failed check is
     waived. Require all companion-repository checks from step 9 to pass.
 
-    Wait for all release-required push workflows on the actual release SHA:
-    `node scripts/verify-release-ci.mjs --sha "$RELEASE_COMMIT"`.
+    Wait for all release-required workflows on the actual release SHA:
+    `node scripts/verify-release-ci.mjs --sha "$RELEASE_COMMIT" --dispatch-missing`.
+    Path filters can skip some workflows on a release commit, for example the
+    benchmarks, fuzz, cross-architecture, ecosystem, and protocol parity
+    workflows. With `--dispatch-missing`, the script starts each workflow
+    that has no run once with `gh workflow run <file> --ref main`, and then
+    waits for it. It refuses to start runs when `main` on GitHub is not the
+    release commit. Locally, the token comes from `gh auth token` and the
+    repository from the `origin` remote.
     While `origin/main` is still that SHA and the version tag remains absent,
     dispatch the release workflow from `main` with the planned tag:
 
@@ -340,7 +347,8 @@ invariants in this file.
     - A missing run: a path filter did not match the release commit, or the
       run did not start. When the workflow has a `workflow_dispatch`
       trigger, and `origin/main` is still the release commit, start it with
-      `gh workflow run <file> --ref main`. Then dispatch the release again.
+      `gh workflow run <file> --ref main`, or run the local gate with
+      `--dispatch-missing`. Then dispatch the release again.
       `ci.yml` and `commitlint.yml` have no `workflow_dispatch` trigger. For
       these, prepare a new signed release commit on a branch and use the
       protected pull request and squash-merge flow above. The error line

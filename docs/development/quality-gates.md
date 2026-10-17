@@ -370,6 +370,13 @@ publishes. The script reads the workflow runs for the release SHA and:
 - waits while a run is queued or in progress, and polls every 60 s for up to
   150 min (`--timeout-minutes`).
 
+Path filters can skip a required workflow on a release commit. Run the gate
+locally with `--dispatch-missing` before the release dispatch. After the grace
+period, the script starts each missing workflow once with
+`gh workflow run <file> --ref main` and waits for it. It starts runs only while
+`main` on GitHub is the release commit. Outside GitHub Actions, the token
+defaults to `gh auth token` and `--repo` defaults to the `origin` remote.
+
 The release procedure tells you how to fix a missing or failed run.
 
 ### CI metrics

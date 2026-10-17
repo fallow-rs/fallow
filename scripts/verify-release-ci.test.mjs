@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +12,8 @@ import {
   errorLines,
   evaluateRuns,
   parseArguments,
+  parseRemoteRepo,
+  resolveDefaults,
   verifyReleaseCi,
 } from "./verify-release-ci.mjs";
 
@@ -208,6 +211,173 @@ test("verifyReleaseCi times out while a run stays queued", async (t) => {
   assert.ok(lines.some((line) => line.startsWith("::error::Timed out after 3 min")));
 });
 
+// Local defaults: a maintainer runs the gate from a checkout with gh logged in.
+
+test("parseRemoteRepo reads owner/name from GitHub remote URLs", () => {
+  for (const url of [
+    "git@github.com:fallow-rs/fallow.git",
+    "https://github.com/fallow-rs/fallow.git",
+    "https://github.com/fallow-rs/fallow",
+    "ssh://git@github.com/fallow-rs/fallow.git",
+  ]) {
+    assert.equal(parseRemoteRepo(url), "fallow-rs/fallow", url);
+  }
+  assert.equal(parseRemoteRepo("https://gitlab.com/fallow-rs/fallow.git"), null);
+  assert.equal(parseRemoteRepo(""), null);
+});
+
+const fakeRun = (replies) => {
+  const calls = [];
+  const exec = (command, args) => {
+    calls.push([command, ...args].join(" "));
+    return replies[[command, ...args].join(" ")] ?? { status: 1, stdout: "" };
+  };
+  return { exec, calls };
+};
+
+test("resolveDefaults reads the gh token and the origin remote when run locally", () => {
+  const { exec, calls } = fakeRun({
+    "gh auth token": { status: 0, stdout: "gho_local\n" },
+    "git remote get-url origin": { status: 0, stdout: "git@github.com:fallow-rs/fallow.git\n" },
+  });
+  assert.deepEqual(resolveDefaults({ env: {}, run: exec }), {
+    token: "gho_local",
+    repo: "fallow-rs/fallow",
+  });
+  assert.deepEqual(calls, ["gh auth token", "git remote get-url origin"]);
+});
+
+test("resolveDefaults prefers the environment over gh and git", () => {
+  const { exec, calls } = fakeRun({});
+  assert.deepEqual(
+    resolveDefaults({ env: { GH_TOKEN: "env", GITHUB_REPOSITORY: "o/r" }, run: exec }),
+    {
+      token: "env",
+      repo: "o/r",
+    },
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("resolveDefaults in GitHub Actions never calls gh or git", () => {
+  const { exec, calls } = fakeRun({
+    "gh auth token": { status: 0, stdout: "gho_local\n" },
+    "git remote get-url origin": { status: 0, stdout: "git@github.com:o/r.git\n" },
+  });
+  assert.deepEqual(resolveDefaults({ env: { GITHUB_ACTIONS: "true" }, run: exec }), {
+    token: undefined,
+    repo: undefined,
+  });
+  assert.deepEqual(calls, []);
+});
+
+test("parseArguments reads --dispatch-missing and uses the default repo", () => {
+  const options = parseArguments(["--sha", SHA, "--dispatch-missing"], { repo: "o/r" });
+  assert.equal(options.dispatchMissing, true);
+  assert.equal(options.repo, "o/r");
+  assert.equal(parseArguments(["--sha", SHA], { repo: "o/r" }).dispatchMissing, false);
+  assert.equal(parseArguments(["--sha", SHA, "--repo", "x/y"], { repo: "o/r" }).repo, "x/y");
+});
+
+/** Runs the gate against a scripted list of run lists, one per poll. */
+const runGate = async (t, responses, { dispatchMissing = true, mainSha = SHA, required } = {}) => {
+  t.mock.method(globalThis, "fetch", async () => {
+    const workflowRuns = responses.length > 1 ? responses.shift() : responses[0];
+    return {
+      ok: true,
+      json: async () => ({ total_count: workflowRuns.length, workflow_runs: workflowRuns }),
+    };
+  });
+  let clock = 0;
+  const dispatched = [];
+  const lines = [];
+  const code = await verifyReleaseCi(
+    {
+      sha: SHA,
+      repo: "o/r",
+      timeoutMinutes: 30,
+      pollSeconds: 60,
+      missingGraceMinutes: 2,
+      dispatchMissing,
+    },
+    {
+      token: "t",
+      required,
+      now: () => clock,
+      wait: async (ms) => {
+        clock += ms;
+      },
+      log: (line) => lines.push(line),
+      readMainSha: async () => mainSha,
+      dispatch: (workflow) => {
+        dispatched.push(workflow.file);
+        return { ok: true };
+      },
+    },
+  );
+  return { code, dispatched, lines };
+};
+
+test("--dispatch-missing starts each missing workflow once and then waits for it", async (t) => {
+  const required = [
+    { name: "CI", file: "ci.yml", dispatchable: false },
+    { name: "Benchmarks", file: "bench.yml" },
+  ];
+  const ci = run("ci.yml", { id: 1 });
+  const { code, dispatched, lines } = await runGate(
+    t,
+    [[ci], [ci], [ci], [ci], [ci, run("bench.yml", { id: 2, event: "workflow_dispatch" })]],
+    { required },
+  );
+  assert.equal(code, 0, lines.join("\n"));
+  assert.deepEqual(dispatched, ["bench.yml"]);
+  assert.ok(lines.some((line) => line.includes("gh workflow run bench.yml --ref main")));
+});
+
+test("--dispatch-missing refuses to start runs when main is not the release commit", async (t) => {
+  const required = [{ name: "Benchmarks", file: "bench.yml" }];
+  const { code, dispatched, lines } = await runGate(t, [[]], {
+    required,
+    mainSha: "b".repeat(40),
+  });
+  assert.equal(code, 1);
+  assert.deepEqual(dispatched, []);
+  assert.ok(
+    lines.some((line) => /main is at b{12}/u.test(line)),
+    lines.join("\n"),
+  );
+});
+
+test("--dispatch-missing does not start runs when a missing workflow cannot be dispatched", async (t) => {
+  const required = [
+    { name: "CI", file: "ci.yml", dispatchable: false },
+    { name: "Benchmarks", file: "bench.yml" },
+  ];
+  const { code, dispatched, lines } = await runGate(t, [[]], { required });
+  assert.equal(code, 1);
+  assert.deepEqual(dispatched, []);
+  assert.ok(lines.some((line) => line.includes("Missing CI run::CI (ci.yml)")));
+});
+
+test("--dispatch-missing starts nothing while another run failed", async (t) => {
+  const required = [
+    { name: "CI", file: "ci.yml" },
+    { name: "Benchmarks", file: "bench.yml" },
+  ];
+  const { code, dispatched } = await runGate(t, [[run("ci.yml", { conclusion: "failure" })]], {
+    required,
+  });
+  assert.equal(code, 1);
+  assert.deepEqual(dispatched, []);
+});
+
+test("without --dispatch-missing a missing run still fails the gate", async (t) => {
+  const required = [{ name: "Benchmarks", file: "bench.yml" }];
+  const { code, dispatched } = await runGate(t, [[]], { required, dispatchMissing: false });
+  assert.equal(code, 1);
+  assert.deepEqual(dispatched, []);
+});
+
 // Policy checks on the real workflow files. The release gate is the only
 // barrier between a red release commit and a published release, so these
 // tests fail when an edit weakens it.
@@ -358,17 +528,42 @@ test("release CI gate exception rejects unsafe diagnostic and normal jobs", () =
   assertReleaseJobsGated(jobs);
 });
 
-test("node scripts/verify-release-ci.mjs runs main and rejects a run without a token", () => {
-  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const env = { ...process.env };
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+const runScriptWithoutToken = (extraEnv, path = process.env.PATH) => {
+  const env = { ...process.env, ...extraEnv, PATH: path };
   delete env.GITHUB_TOKEN;
   delete env.GH_TOKEN;
+  if (extraEnv.GITHUB_ACTIONS === undefined) delete env.GITHUB_ACTIONS;
   // The token check comes first, so this run cannot reach the GitHub API.
-  const result = spawnSync(
+  return spawnSync(
     process.execPath,
     ["scripts/verify-release-ci.mjs", "--sha", SHA, "--timeout-minutes", "150"],
-    { cwd: repoRoot, encoding: "utf8", env },
+    { cwd: REPO_ROOT, encoding: "utf8", env },
   );
+};
+
+test("node scripts/verify-release-ci.mjs in GitHub Actions rejects a run without a token", () => {
+  const result = runScriptWithoutToken({ GITHUB_ACTIONS: "true" });
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stdout, "::error::set GITHUB_TOKEN or GH_TOKEN\n");
 });
+
+test(
+  "node scripts/verify-release-ci.mjs locally asks for gh auth login when gh has no token",
+  { skip: process.platform === "win32" },
+  () => {
+    const bin = mkdtempSync(join(tmpdir(), "verify-release-ci-"));
+    try {
+      writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      const result = runScriptWithoutToken({}, `${bin}${delimiter}${process.env.PATH}`);
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(
+        result.stdout,
+        "::error::set GITHUB_TOKEN or GH_TOKEN, or log in with gh auth login\n",
+      );
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  },
+);
