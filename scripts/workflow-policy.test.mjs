@@ -827,6 +827,29 @@ test("release publishes no VSIX before the approved fallow root is public", () =
   assert.match(procedure, /Do this right after\s+`release-ready` without other work in between/u);
 });
 
+test("release procedure dispatches the identity checks only when an input changed", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
+  const flat = procedure.replace(/\s+/gu, " ");
+
+  // A waiting auth_check run holds this group, so the publication dispatch queues behind it.
+  assert.match(workflow, /^concurrency:\n {2}group: release\n {2}cancel-in-progress: false$/mu);
+  assert.match(flat, /Dispatch the identity checks only when/u);
+  for (const trigger of [
+    /a publisher binding/u,
+    /a trusted-publisher configuration/u,
+    /an environment secret or variable/u,
+    /a release credential/u,
+    /authentication failure/u,
+  ]) {
+    assert.match(flat, trigger);
+  }
+  assert.match(flat, /auth_check=true/u);
+  assert.match(flat, /verify-marketplace-identity\.yml/u);
+  assert.match(flat, /holds the `release` concurrency group/u);
+  assert.match(flat, /approve or cancel it before the publication dispatch/u);
+});
+
 test("release credential jobs run in the main-only release environment", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const procedure = readFileSync("docs/development/release-procedure.md", "utf8");

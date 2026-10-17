@@ -101,6 +101,30 @@ invariants in this file.
    organization directory reconnection or end-user login change is a release
    prerequisite for the prepared Entra workflow.
 
+   Dispatch the identity checks only when one of these changed since the
+   previous release:
+
+   - a publisher binding, for example publisher membership or a profile role;
+   - a trusted-publisher configuration on npm, crates.io, Marketplace, or
+     Open VSX;
+   - an environment secret or variable of the `release` environment;
+   - a release credential, for example a PAT rotation or a signing-key
+     transfer.
+
+   Also dispatch them when the previous release run had an authentication
+   failure. Otherwise, skip both checks. The identity checks are the
+   `release.yml` run with `auth_check=true`, `tag=auth-check`, and
+   `pgo=false`, and the `verify-marketplace-identity.yml` run:
+
+   ```bash
+   gh workflow run release.yml --ref main \
+     -f auth_check=true -f tag=auth-check -f pgo=false
+   ```
+
+   A waiting `auth_check` run holds the `release` concurrency group. A release
+   dispatch then waits behind it and does not start. Thus, approve or cancel it
+   before the publication dispatch.
+
 4. Derive the semantic-version bump from every commit since the prior release
    unless the user supplied an explicit bump. Confirm a major bump before
    mutating versions unless the user explicitly requested it.
