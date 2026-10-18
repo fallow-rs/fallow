@@ -413,6 +413,14 @@ fn component_contract_text_less_than_keeps_later_invocations() {
             "View.svelte",
             "<script>import Button from './Button.svelte';</script><p>{a<b}<Button size=\"lg\" /></p>",
         ),
+        (
+            "View.svelte",
+            "<script>import Button from './Button.svelte';</script>{#if a<b}<Button size=\"lg\" />{/if}",
+        ),
+        (
+            "main.gts",
+            "import Button from './Button';<template>{{!-- don't render <Card /> --}}<p>{{if (lt a b) 'x'}}</p><Button @size=\"lg\" />{{! won't }}</template>",
+        ),
     ] {
         let info = parse_at_path(path, source);
         let facts = info.component_contracts.as_deref().expect("contracts");
@@ -440,6 +448,19 @@ fn component_contract_text_less_than_keeps_later_invocations() {
             .invocations
             .iter()
             .any(|caller| caller.target == ComponentReference::Selector("app-button".into())),
+        "{facts:?}"
+    );
+}
+
+#[test]
+fn component_contract_glimmer_arg_tag_keeps_attribute_escapes() {
+    let source = "import Card from './Card';import Child from 'external-renderer';<template><@slot @renderer={{Card}} /><Child /></template>";
+    let info = parse_at_path("main.gts", source);
+    let facts = info.component_contracts.as_deref().unwrap();
+    assert!(
+        facts.escapes.iter().any(
+            |target| matches!(target, ComponentReference::Import { local, .. } if local == "Card")
+        ),
         "{facts:?}"
     );
 }

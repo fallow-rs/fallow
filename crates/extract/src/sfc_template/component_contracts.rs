@@ -24,7 +24,7 @@ pub fn collect(
             break;
         };
         let start = cursor + relative;
-        if let Some(next) = skip_non_tag(source, start, interpolation) {
+        if let Some(next) = skip_non_tag(source, start, interpolation, framework) {
             cursor = next;
             continue;
         }
@@ -110,9 +110,25 @@ pub fn collect(
 /// expression, a comment, or a `<` that HTML reads as text. A text expression
 /// is skipped as a unit, so a `<` inside it (`{{ a<b }}`, `{a<b}`) cannot hide
 /// a later tag.
-fn skip_non_tag(source: &str, start: usize, interpolation: Option<usize>) -> Option<usize> {
+fn skip_non_tag(
+    source: &str,
+    start: usize,
+    interpolation: Option<usize>,
+    framework: ComponentFramework,
+) -> Option<usize> {
     if source.as_bytes()[start] == b'{' {
         let len = interpolation?;
+        // A Handlebars comment is prose, so the expression scanner must not
+        // read an apostrophe or `//` in it as code.
+        for (open, close) in [("{{!--", "--}}"), ("{{!", "}}")] {
+            if len == 2 && source[start..].starts_with(open) {
+                return Some(
+                    source[start + open.len()..]
+                        .find(close)
+                        .map_or(start + 1, |end| start + open.len() + end + close.len()),
+                );
+            }
+        }
         return Some(
             source[start..]
                 .starts_with(&"{{"[..len])
@@ -128,7 +144,10 @@ fn skip_non_tag(source: &str, start: usize, interpolation: Option<usize>) -> Opt
                 .map_or(source.len(), |end| start + 4 + end + 3),
         );
     }
-    (!is_html_tag_start(source, start)).then_some(start + 1)
+    // Glimmer also opens tags with `<@arg>` and named blocks with `<:name>`.
+    let glimmer_tag = framework == ComponentFramework::Ember
+        && matches!(source.as_bytes().get(start + 1), Some(b'@' | b':'));
+    (!glimmer_tag && !is_html_tag_start(source, start)).then_some(start + 1)
 }
 
 /// The brace count that opens a text expression in this framework's markup.
