@@ -1,6 +1,6 @@
 //! Caller facts from the shared quote-aware markup scanner.
 
-use super::scanners::scan_html_tag;
+use super::scanners::{is_html_tag_start, scan_curly_section, scan_html_tag};
 use super::shared::{ParsedAttr, kebab_to_camel_case, parse_tag_attrs};
 use fallow_types::extract::{
     ComponentContractFacts, ComponentFramework, ComponentInvocation, ComponentReference, ImportInfo,
@@ -15,16 +15,17 @@ pub fn collect(
     aliases: &[fallow_types::extract::ComponentAliasBinding],
 ) -> ComponentContractFacts {
     let mut facts = ComponentContractFacts::default();
+    let interpolation = interpolation_brace_len(framework);
     let mut cursor = 0;
     while cursor < source.len() {
-        let Some(relative) = source[cursor..].find('<') else {
+        let Some(relative) = source[cursor..]
+            .find(|character| character == '<' || (character == '{' && interpolation.is_some()))
+        else {
             break;
         };
         let start = cursor + relative;
-        if source[start..].starts_with("<!--") {
-            cursor = source[start + 4..]
-                .find("-->")
-                .map_or(source.len(), |end| start + 4 + end + 3);
+        if let Some(next) = skip_non_tag(source, start, interpolation) {
+            cursor = next;
             continue;
         }
         let Some((tag, end)) = scan_html_tag(source, start) else {
@@ -103,6 +104,43 @@ pub fn collect(
         });
     }
     facts
+}
+
+/// The cursor after the text at `start` when it is not a tag to read: a text
+/// expression, a comment, or a `<` that HTML reads as text. A text expression
+/// is skipped as a unit, so a `<` inside it (`{{ a<b }}`, `{a<b}`) cannot hide
+/// a later tag.
+fn skip_non_tag(source: &str, start: usize, interpolation: Option<usize>) -> Option<usize> {
+    if source.as_bytes()[start] == b'{' {
+        let len = interpolation?;
+        return Some(
+            source[start..]
+                .starts_with(&"{{"[..len])
+                .then(|| scan_curly_section(source, start, len, len))
+                .flatten()
+                .map_or(start + 1, |(_, end)| end),
+        );
+    }
+    if source[start..].starts_with("<!--") {
+        return Some(
+            source[start + 4..]
+                .find("-->")
+                .map_or(source.len(), |end| start + 4 + end + 3),
+        );
+    }
+    (!is_html_tag_start(source, start)).then_some(start + 1)
+}
+
+/// The brace count that opens a text expression in this framework's markup.
+/// Astro is absent because its `{ }` expressions can hold markup.
+fn interpolation_brace_len(framework: ComponentFramework) -> Option<usize> {
+    match framework {
+        ComponentFramework::Vue | ComponentFramework::Angular | ComponentFramework::Ember => {
+            Some(2)
+        }
+        ComponentFramework::Svelte => Some(1),
+        _ => None,
+    }
 }
 
 fn collect_attribute_escapes(

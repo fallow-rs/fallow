@@ -393,3 +393,53 @@ fn template_alias_target_is_retained() {
         "{facts:?}"
     );
 }
+
+#[test]
+fn component_contract_text_less_than_keeps_later_invocations() {
+    for (path, source) in [
+        (
+            "View.vue",
+            "<script setup>import Button from './Button.vue';</script><template><p>{{ a < b }}<Button size=\"lg\" /></p></template>",
+        ),
+        (
+            "View.vue",
+            "<script setup>import Button from './Button.vue';</script><template><p>{{ a<b }}<Button size=\"lg\" /></p></template>",
+        ),
+        (
+            "View.svelte",
+            "<script>import Button from './Button.svelte';</script><p>{a < b}<Button size=\"lg\" /></p>",
+        ),
+        (
+            "View.svelte",
+            "<script>import Button from './Button.svelte';</script><p>{a<b}<Button size=\"lg\" /></p>",
+        ),
+    ] {
+        let info = parse_at_path(path, source);
+        let facts = info.component_contracts.as_deref().expect("contracts");
+        let caller = facts
+            .invocations
+            .iter()
+            .find(|caller| {
+                matches!(&caller.target, ComponentReference::Import { local, .. } if local == "Button")
+            })
+            .unwrap_or_else(|| panic!("Button invocation in {source}: {facts:?}"));
+        assert_eq!(caller.supplied, ["size"], "{source}");
+        assert!(
+            facts.incomplete_frameworks.is_empty(),
+            "{source}: {facts:?}"
+        );
+    }
+
+    let info = parse_at_path(
+        "view.component.html",
+        "<p>{{ a<b }}<app-button size=\"lg\"></app-button></p>",
+    );
+    let facts = info.component_contracts.as_deref().expect("contracts");
+    assert!(
+        facts
+            .invocations
+            .iter()
+            .any(|caller| caller.target == ComponentReference::Selector("app-button".into())),
+        "{facts:?}"
+    );
+}
