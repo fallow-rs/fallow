@@ -1212,13 +1212,20 @@ pub(crate) fn extract_from_source<T>(
         .extension()
         .is_some_and(|ext| ext == "json" || ext == "jsonc");
     if is_json {
-        let wrapped = format!("({source})");
+        let wrapped = wrap_json_as_expression(source);
         let parsed = Parser::new(&alloc, &wrapped, SourceType::mjs()).parse();
         return extractor(&parsed.program);
     }
 
     let parsed = Parser::new(&alloc, source, source_type).parse();
     extractor(&parsed.program)
+}
+
+/// Wrap JSON or JSONC source in parentheses so Oxc parses it as one JavaScript
+/// expression. The newline ends a trailing `//` comment, so the comment cannot
+/// hide the closing parenthesis.
+pub(crate) fn wrap_json_as_expression(source: &str) -> String {
+    format!("({source}\n)")
 }
 
 /// The local names that `import` declarations bind to the default export of
@@ -4060,6 +4067,14 @@ mod tests {
     fn jsonc_file_parsed_correctly() {
         let source = r#"{"key": "value"}"#;
         let path = PathBuf::from("tsconfig.jsonc");
+        let val = extract_config_string(source, &path, &["key"]);
+        assert_eq!(val, Some("value".to_string()));
+    }
+
+    #[test]
+    fn jsonc_file_ending_in_line_comment_parsed_correctly() {
+        let source = "{\"key\": \"value\"}\n// trailing comment, no final newline";
+        let path = PathBuf::from(".oxlintrc.jsonc");
         let val = extract_config_string(source, &path, &["key"]);
         assert_eq!(val, Some("value".to_string()));
     }

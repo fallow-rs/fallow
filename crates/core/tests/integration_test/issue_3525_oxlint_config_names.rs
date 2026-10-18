@@ -52,3 +52,13 @@ fn oxlintrc_jsonc_credits_top_level_and_override_js_plugins() {
 fn oxlint_config_mts_credits_top_level_and_override_js_plugins() {
     assert_oxlint_config_credits_js_plugins("issue-3525-oxlint-mts", "oxlint.config.mts");
 }
+
+/// A JSONC file can end with a `//` line comment and no final newline. The
+/// comment must not hide the end of the config object.
+#[test]
+fn oxlintrc_jsonc_with_trailing_line_comment_credits_js_plugins() {
+    assert_oxlint_config_credits_js_plugins(
+        "issue-3525-oxlint-jsonc-no-final-newline",
+        ".oxlintrc.jsonc",
+    );
+}

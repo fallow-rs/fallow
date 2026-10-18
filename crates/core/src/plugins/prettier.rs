@@ -107,7 +107,7 @@ define_plugin! {
             return result;
         }
         let (parse_source, parse_path_buf) = if is_json {
-            (format!("({source})"), config_path.with_extension("js"))
+            (config_parser::wrap_json_as_expression(source), config_path.with_extension("js"))
         } else {
             (source.to_string(), config_path.to_path_buf())
         };

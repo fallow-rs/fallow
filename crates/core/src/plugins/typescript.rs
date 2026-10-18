@@ -74,7 +74,10 @@ impl Plugin for TypeScriptPlugin {
 
         let is_json = config_path.extension().is_some_and(|ext| ext == "json");
         let (parse_source, parse_path_buf) = if is_json {
-            (format!("({source})"), config_path.with_extension("js"))
+            (
+                config_parser::wrap_json_as_expression(source),
+                config_path.with_extension("js"),
+            )
         } else {
             (source.to_string(), config_path.to_path_buf())
         };
@@ -568,6 +571,22 @@ mod tests {
     #[test]
     fn resolve_config_extends_package() {
         let source = r#"{"extends": "@tsconfig/node18/tsconfig.json"}"#;
+        let plugin = TypeScriptPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("tsconfig.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@tsconfig/node18".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_extends_package_with_trailing_line_comment() {
+        let source = "{\"extends\": \"@tsconfig/node18/tsconfig.json\"}\n// no final newline";
         let plugin = TypeScriptPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("tsconfig.json"),

@@ -191,9 +191,15 @@ fn extract_jest_config(
         let Some(jest_str) = extract_package_json_jest_value(source) else {
             return;
         };
-        (format!("({jest_str})"), config_path.with_extension("js"))
+        (
+            config_parser::wrap_json_as_expression(&jest_str),
+            config_path.with_extension("js"),
+        )
     } else if config_path.extension().is_some_and(|ext| ext == "json") {
-        (format!("({source})"), config_path.with_extension("js"))
+        (
+            config_parser::wrap_json_as_expression(source),
+            config_path.with_extension("js"),
+        )
     } else {
         (source.to_string(), config_path.to_path_buf())
     };
