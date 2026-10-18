@@ -3,3 +3,9 @@
 [[PackageOverrides]]
 ignore = true
 reason = "Test fixture lockfile: analysis input, not a fallow dependency."
+
+# OpenSSF Scorecard still reported this ID with the override above, so it is
+# also listed by ID.
+[[IgnoredVulns]]
+id = "GHSA-37ch-88jc-xwx2"
+reason = "Test fixture lockfile: analysis input, not a fallow dependency."
