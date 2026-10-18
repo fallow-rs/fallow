@@ -20,6 +20,7 @@
   <a href="https://app.codspeed.io/fallow-rs/fallow?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed"></a>
   <a href="https://socket.dev/npm/package/fallow"><img src="https://img.shields.io/badge/socket-report-6e56cf" alt="Socket"></a>
   <a href="https://github.com/fallow-rs/fallow/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://www.bestpractices.dev/projects/15640"><img src="https://www.bestpractices.dev/projects/15640/baseline" alt="OpenSSF Baseline"></a>
 </p>
 
 <p align="center">
