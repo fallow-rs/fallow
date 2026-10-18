@@ -1381,6 +1381,11 @@ jobs:
           # schema to npm consumers. Refs #440.
           diff schema.json npm/fallow/schema.json
 
+      - name: Bundle LICENSE into fallow package
+        run: |
+          cp LICENSE npm/fallow/LICENSE
+          diff LICENSE npm/fallow/LICENSE
+
       - name: Pack tarballs
         run: |
           # Publish order matters: platform packages before their meta package,
