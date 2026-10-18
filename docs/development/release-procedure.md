@@ -262,11 +262,15 @@ invariants in this file.
     Verify squash merging is enabled with
     `gh api repos/fallow-rs/fallow --jq '.allow_squash_merge'` and require `true`.
     Set `RELEASE_PR` to the ready release pull request and `REVIEWED_HEAD` to
-    its exact reviewed head SHA. Set `VERSION` to the prepared version:
+    its exact reviewed head SHA. Set `VERSION` to the prepared version, and
+    set `MIN_CHECKS` to the check count of a recent release pull request.
+    Right after the push, `gh pr checks --watch` can see no check yet and
+    return at once, so wait with the count guard:
 
     ```bash
     set -euo pipefail
-    gh pr checks "$RELEASE_PR" --required --watch
+    node scripts/ship-wait-checks.mjs --pr "$RELEASE_PR" \
+      --head "$REVIEWED_HEAD" --min-checks "$MIN_CHECKS"
     gh pr merge "$RELEASE_PR" --squash --match-head-commit "$REVIEWED_HEAD" \
       --subject "chore: release v${VERSION}"
     test "$(gh pr view "$RELEASE_PR" --json state --jq '.state')" = MERGED
