@@ -44,6 +44,10 @@
         "section": "community"
       },
       {
+        "path": "GOVERNANCE.md",
+        "section": "community"
+      },
+      {
         "path": "ROADMAP.md",
         "section": "roadmap"
       },
@@ -99,6 +103,10 @@
       },
       {
         "path": "docs/analyzer-authoring.md",
+        "section": "architecture"
+      },
+      {
+        "path": "docs/architecture.md",
         "section": "architecture"
       },
       {
