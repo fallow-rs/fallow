@@ -7,8 +7,8 @@ Inspect the repository before you change it. Record what you find, because the l
 | Tool area | Signals |
 |---|---|
 | Package manager | `packageManager` in `package.json`; the lockfile: `pnpm-lock.yaml`, `yarn.lock`, `bun.lock` or `bun.lockb`, `package-lock.json` |
-| Formatter | `.oxfmtrc.json`, `.prettierrc*`, `prettier.config.*`, `biome.json`, `biome.jsonc`, a `format` script in `package.json` |
-| Linter | `.oxlintrc.json`, `eslint.config.*`, `.eslintrc*`, `biome.json`, a `lint` script in `package.json` |
+| Formatter | `.oxfmtrc.json`, `.oxfmtrc.jsonc`, `oxfmt.config.*`, `.prettierrc*`, `prettier.config.*`, `biome.json`, `biome.jsonc`, a `format` script in `package.json` |
+| Linter | `.oxlintrc.json`, `.oxlintrc.jsonc`, `oxlint.config.{ts,mts}`, `eslint.config.*`, `.eslintrc*`, `biome.json`, a `lint` script in `package.json` |
 | TypeScript | `tsconfig.json`, `tsconfig.*.json`, a `typecheck` script, `typescript` in `devDependencies` |
 | CI | `.github/workflows/*.yml`, `.gitlab-ci.yml`, other CI config files |
 | Existing analysis | `knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`, a `knip` field in `package.json`; `.jscpd.json`; `.dependency-cruiser.*` |
