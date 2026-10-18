@@ -30,6 +30,8 @@ for contributors and maintainers of the open-source codebase.
 
 ## Architecture and extension points
 
+- [Architecture overview](architecture.md): pipeline, external interfaces, and
+  trust boundaries.
 - [Architecture invariants](architecture-invariants.md): crate boundaries,
   dependency direction, and ownership rules.
 - [Analyzer authoring](analyzer-authoring.md): adding and registering analyzers.
