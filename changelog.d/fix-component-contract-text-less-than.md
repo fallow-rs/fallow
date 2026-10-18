@@ -7,5 +7,7 @@
   `< b }}<Button size="lg" />` as one tag, and the `Button` invocation was
   lost. The scan now reads a `<` as a tag start only when a letter, `/`, `!`
   or `?` follows it. It also skips text expressions as a unit: `{{ }}` in
-  Vue, Angular and Ember, and `{ }` in Svelte. The cache versions change, so
-  a warm cache does not keep the old result.
+  Vue, Angular and Ember, and `{ }` in Svelte. A Handlebars comment, such as
+  `{{!-- don't --}}`, is skipped as plain text, so an apostrophe in it cannot
+  hide a later tag. The cache versions change, so a warm cache does not keep
+  the old result.
