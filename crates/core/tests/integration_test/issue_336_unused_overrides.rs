@@ -812,7 +812,7 @@ const NPM_CONFLICT_FIXTURE: &str = "npm-lock-merge-conflict-overrides";
 const NPM_OURS: &str = r#"    "node_modules/express": {
       "version": "4.21.2",
       "dependencies": {
-        "path-to-regexp": "0.1.12"
+        "path-to-regexp": "0.1.13"
       }
     },
 "#;
