@@ -76,7 +76,7 @@ const SCRIPT = resolve(import.meta.dirname, "check-osv-ignores.mjs");
 
 // The fake osv-scanner prints one report for every lockfile, so the start
 // test needs neither the network nor a real scanner.
-const runInFixtureRepo = (toml) => {
+const runInFixtureRepo = (toml, scanner = `cat "$REPORT"\nexit 1`) => {
   const root = mkdtempSync(join(tmpdir(), "check-osv-ignores-test-"));
   try {
     const bin = join(root, "bin");
@@ -86,7 +86,7 @@ const runInFixtureRepo = (toml) => {
     writeFileSync(join(root, "report.json"), JSON.stringify(REPORT));
     writeFileSync(
       join(bin, "osv-scanner"),
-      `#!/bin/sh\ncat "${join(root, "report.json")}"\nexit 1\n`,
+      `#!/bin/sh\nREPORT="${join(root, "report.json")}"\n${scanner}\n`,
     );
     chmodSync(join(bin, "osv-scanner"), 0o755);
     writeFileSync(join(repo, "app", "osv-scanner.toml"), toml);
@@ -128,5 +128,29 @@ test(
     const result = runInFixtureRepo('[[IgnoredVulns]]\nid = "CVE-2026-1"\nreason = "x"\n');
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /All IgnoredVulns entries match an advisory/u);
+  },
+);
+
+test(
+  "the script reports every ignore as stale for a lockfile without packages",
+  { skip: process.platform === "win32" && "the fake scanner is a shell script" },
+  () => {
+    const result = runInFixtureRepo(
+      TOML,
+      'echo "No package sources found, --help for usage information." >&2\nexit 128',
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /GHSA-aaaa-aaaa-aaaa matches no advisory/u);
+    assert.match(result.stderr, /RUSTSEC-2026-0001 matches no advisory/u);
+  },
+);
+
+test(
+  "the script fails loudly when the scanner fails",
+  { skip: process.platform === "win32" && "the fake scanner is a shell script" },
+  () => {
+    const result = runInFixtureRepo(TOML, 'echo "network error" >&2\nexit 127');
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /osv-scanner failed on .*\(exit 127\)/u);
   },
 );

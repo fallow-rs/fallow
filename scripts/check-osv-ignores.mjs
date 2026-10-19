@@ -22,6 +22,9 @@ export const LOCKFILE_NAMES = [
 
 // osv-scanner exits 0 when it finds no advisory and 1 when it finds one.
 const SCAN_OK_EXIT_CODES = new Set([0, 1]);
+// It exits 128 for a lockfile with no packages. No package has no advisory.
+const NO_PACKAGES_EXIT_CODE = 128;
+const NO_PACKAGES_MESSAGE = "No package sources found";
 
 /** Return the `id` of each `[[IgnoredVulns]]` entry in an osv-scanner.toml. */
 export const parseIgnoredIds = (toml) =>
@@ -59,6 +62,9 @@ const scanLockfile = (lockfile, emptyConfig) => {
     { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
   );
   if (run.error) throw new Error(`osv-scanner did not start: ${run.error.message}`);
+  if (run.status === NO_PACKAGES_EXIT_CODE && run.stderr.includes(NO_PACKAGES_MESSAGE)) {
+    return { results: [] };
+  }
   if (!SCAN_OK_EXIT_CODES.has(run.status)) {
     throw new Error(`osv-scanner failed on ${lockfile} (exit ${run.status}):\n${run.stderr}`);
   }
