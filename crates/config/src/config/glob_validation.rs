@@ -469,22 +469,33 @@ pub fn disk_glob_pattern(pattern: &str) -> Cow<'_, str> {
 /// Use this function for each on-disk expansion of a config or repository
 /// glob. It escapes the root, so a `[`, `*` or `?` in the root path matches
 /// literally. It rewrites the pattern with [`disk_glob_pattern`], so no match
-/// is in the parent of the root. A leading separator in the pattern does not
-/// make it absolute: the expansion stays below the root. Returns `None` when
-/// the pattern is not valid glob syntax.
+/// is in the parent of the root. Returns `None` for an absolute pattern or a
+/// pattern with a Windows drive prefix, because such a pattern names a path
+/// outside the root, and for a pattern that is not valid glob syntax.
 #[must_use]
 #[expect(
     clippy::disallowed_methods,
     reason = "the one wrapper that calls glob::glob, after the root escape and the dot rewrite"
 )]
 pub fn expand_disk_glob(root: &Path, pattern: &str) -> Option<glob::Paths> {
-    let relative = pattern.trim_start_matches(['/', '\\']);
-    let full = format!(
-        "{}/{}",
-        glob::Pattern::escape(&root.to_string_lossy()),
-        disk_glob_pattern(relative)
-    );
+    if is_absolute_pattern(pattern) {
+        return None;
+    }
+    let full = format!("{}/{}", escaped_root(root), disk_glob_pattern(pattern));
     glob::glob(&full).ok()
+}
+
+/// Escapes the glob characters of `root` after its Windows path prefix. The
+/// `glob` crate reads a prefix such as `\\?\C:` as a prefix only when it is
+/// not escaped, and `std::fs::canonicalize` returns that form on Windows.
+fn escaped_root(root: &Path) -> String {
+    let text = root.to_string_lossy();
+    let prefix = match root.components().next() {
+        Some(Component::Prefix(prefix)) => prefix.as_os_str().to_string_lossy().into_owned(),
+        _ => String::new(),
+    };
+    let rest = text.strip_prefix(prefix.as_str()).unwrap_or(&text);
+    format!("{prefix}{}", glob::Pattern::escape(rest))
 }
 
 /// Whether `key` is written as an exact, project-relative workspace root:
@@ -578,21 +589,27 @@ mod tests {
             vec![root.join(".hidden").join("secret")]
         );
         let outside = base.path().join("secret");
-        assert!(expand(&outside.to_string_lossy()).is_empty());
+        assert!(expand_disk_glob(&root, &outside.to_string_lossy()).is_none());
+        assert!(expand_disk_glob(&root, "/secret").is_none());
+        assert!(expand_disk_glob(&root, "C:secret").is_none());
     }
 
     #[test]
     fn expand_disk_glob_matches_a_root_with_glob_characters() {
         let base = tempfile::tempdir().expect("create temp dir");
-        let root = base.path().join("app [1]*");
+        let root = base.path().join("app [1]");
         std::fs::create_dir_all(root.join("src")).expect("create root dirs");
         std::fs::write(root.join("src").join("a.ts"), "").expect("write file");
 
-        let matches: Vec<_> = expand_disk_glob(&root, "src/*.ts")
-            .expect("valid glob")
-            .filter_map(Result::ok)
-            .collect();
-        assert_eq!(matches, vec![root.join("src").join("a.ts")]);
+        // `canonicalize` gives a verbatim `\\?\` root on Windows.
+        let canonical = std::fs::canonicalize(&root).expect("canonicalize root");
+        for root in [&root, &canonical] {
+            let matches: Vec<_> = expand_disk_glob(root, "src/*.ts")
+                .expect("valid glob")
+                .filter_map(Result::ok)
+                .collect();
+            assert_eq!(matches, vec![root.join("src").join("a.ts")]);
+        }
     }
 
     #[test]
