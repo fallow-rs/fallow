@@ -74,7 +74,12 @@ jobs:
           set -euo pipefail
 
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            npm run commitlint -- --from "$PR_BASE_SHA" --to HEAD --verbose
+            # The merge ref's first parent can be newer than the event base.
+            from="$PR_BASE_SHA"
+            if git rev-parse -q --verify 'HEAD^2' >/dev/null; then
+              from='HEAD^1'
+            fi
+            npm run commitlint -- --from "$from" --to HEAD --verbose
           elif [ -z "${BEFORE_SHA:-}" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
             npm run commitlint -- --last --verbose
           else

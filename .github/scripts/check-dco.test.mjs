@@ -111,6 +111,36 @@ test("the script exits 0 when every commit has a sign-off", () => {
   });
 });
 
+// A pull_request run checks out the merge ref. Its first parent is the base
+// branch tip when GitHub made the ref, which can be newer than BASE_SHA from
+// the event. Commits that landed on the base branch after BASE_SHA are not
+// commits of the pull request.
+test("the script ignores base branch commits that are newer than BASE_SHA", () => {
+  withRepo((dir, base) => {
+    git(dir, ["switch", "-q", "-c", "feature"]);
+    git(dir, ["commit", "-q", "--allow-empty", "-s", "-m", "fix: signed"]);
+    git(dir, ["switch", "-q", "main"]);
+    git(dir, ["commit", "-q", "--allow-empty", "-m", "refactor: squash without sign-off"]);
+    git(dir, ["merge", "-q", "--no-ff", "--no-edit", "feature"]);
+    const run = runScript(dir, base);
+    assert.equal(run.status, 0, run.stderr);
+  });
+});
+
+test("the script still checks the pull request commits of a merge ref", () => {
+  withRepo((dir, base) => {
+    git(dir, ["switch", "-q", "-c", "feature"]);
+    git(dir, ["commit", "-q", "--allow-empty", "-m", "fix: unsigned"]);
+    const unsigned = git(dir, ["rev-parse", "HEAD"]);
+    git(dir, ["switch", "-q", "main"]);
+    git(dir, ["commit", "-q", "--allow-empty", "-s", "-m", "chore: newer base"]);
+    git(dir, ["merge", "-q", "--no-ff", "--no-edit", "feature"]);
+    const run = runScript(dir, base);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, new RegExp(unsigned, "u"));
+  });
+});
+
 test("the script exits 2 without BASE_SHA", () => {
   const env = { ...process.env };
   delete env.BASE_SHA;

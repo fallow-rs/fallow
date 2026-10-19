@@ -88,13 +88,20 @@ const main = () => {
     console.error("BASE_SHA is not set.");
     return 2;
   }
+  // A pull_request run checks out the merge ref. Its first parent is the base
+  // tip that GitHub merged into, which can be newer than BASE_SHA from the
+  // event. Base commits after BASE_SHA are not commits of the pull request.
+  const mergeRef = spawnSync("git", ["rev-parse", "-q", "--verify", "HEAD^2"], {
+    stdio: "ignore",
+  });
+  const lower = mergeRef.status === 0 ? "HEAD^1" : base;
   const output = execFileSync(
     "git",
     [
       "log",
       "--no-merges",
       `--format=%H${FIELD_SEPARATOR}%ae${FIELD_SEPARATOR}%B${RECORD_SEPARATOR}`,
-      `${base}..HEAD`,
+      `${lower}..HEAD`,
     ],
     { encoding: "utf8" },
   );
