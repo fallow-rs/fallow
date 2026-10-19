@@ -913,6 +913,26 @@ fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
         function_dispositions(&default, "src/cache.ts"),
         BTreeMap::from([("evict".to_owned(), PLANNED)])
     );
+    for (file, function) in [
+        ("src/cjs.cjs", "cjsSave"),
+        ("src/lazy.ts", "lazySave"),
+        ("src/mongo.ts", "addRecord"),
+        ("src/remove.ts", "removeRecord"),
+        ("src/prisma.ts", "runAll"),
+        ("src/prisma.ts", "clearAll"),
+        ("src/typed.ts", "insertRow"),
+    ] {
+        assert_eq!(
+            function_dispositions(&default, file).get(function),
+            Some(&pruned),
+            "{file} {function}"
+        );
+        assert_eq!(
+            function_dispositions(&allowed, file).get(function),
+            Some(&PLANNED),
+            "{file} {function} with --allow-side-effects"
+        );
+    }
     assert_eq!(
         function_dispositions(&allowed, "src/save.ts"),
         BTreeMap::from([("clamp".to_owned(), PLANNED), ("save".to_owned(), PLANNED)])

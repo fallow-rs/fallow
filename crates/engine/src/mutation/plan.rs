@@ -60,30 +60,45 @@ pub(super) const RESPONSE_SHAPING_ROWS: [&str; 5] = [
 /// The security catalogue matches only injection shapes, so a parameterized
 /// write matches no catalogue row. These names count as a database sink
 /// only in a module that reaches a database client package.
-const DATABASE_WRITE_METHODS: [&str; 18] = [
+const DATABASE_WRITE_METHODS: [&str; 33] = [
+    "$executeRaw",
+    "$executeRawUnsafe",
+    "$transaction",
     "batch",
     "bulkCreate",
+    "bulkWrite",
     "create",
     "createMany",
+    "del",
     "delete",
     "deleteFrom",
     "deleteMany",
+    "deleteOne",
     "destroy",
+    "findByIdAndDelete",
+    "findByIdAndUpdate",
+    "findOneAndDelete",
+    "findOneAndReplace",
+    "findOneAndUpdate",
     "insert",
     "insertInto",
+    "insertMany",
+    "insertOne",
     "remove",
+    "replaceOne",
     "save",
     "transaction",
     "truncate",
     "update",
     "updateMany",
+    "updateOne",
     "updateTable",
     "upsert",
 ];
 
 /// Import sources of database clients, ORMs and query builders. A subpath
 /// such as `drizzle-orm/libsql` matches its package.
-const DATABASE_PACKAGES: [&str; 18] = [
+const DATABASE_PACKAGES: [&str; 19] = [
     "@libsql/client",
     "@neondatabase/serverless",
     "@planetscale/database",
@@ -93,6 +108,7 @@ const DATABASE_PACKAGES: [&str; 18] = [
     "drizzle-orm",
     "knex",
     "kysely",
+    "libsql",
     "mongodb",
     "mongoose",
     "mysql",
@@ -132,6 +148,8 @@ struct Context<'a> {
     /// The test-reachable files that only type tests reach. No runner test
     /// covers them.
     type_test_only: FxHashSet<FileId>,
+    /// The files that load a database client package.
+    database_files: FxHashSet<FileId>,
 }
 
 /// The result for one file.
@@ -177,6 +195,7 @@ pub(super) fn build(
         },
         test_entries: FxHashMap::default(),
         type_test_only: FxHashSet::default(),
+        database_files: database_files(graph),
     };
     let (candidates, unmatched_paths) = select_files(&context);
     let reachable: Vec<FileId> = candidates
@@ -492,7 +511,7 @@ impl<'a> FileFacts<'a> {
                 .filter(|site| is_side_effect_sink(module, site))
                 .map(|site| site.span_start)
                 .collect();
-            if has_database_reach(context, candidate.file_id, module) {
+            if has_database_reach(context, candidate.file_id) {
                 starts.extend(database_write_starts(source, candidate.layout));
             }
             starts.retain(|&start| in_script(start));
@@ -771,51 +790,67 @@ fn is_side_effect_sink(module: &ModuleInfo, site: &SinkSite) -> bool {
         })
 }
 
-/// Whether the module imports a database client package, or imports a
-/// project module that imports one. One hop covers the common layout where
-/// a `db` module creates the client and the other modules import it.
-fn has_database_reach(context: &Context<'_>, file_id: FileId, module: &ModuleInfo) -> bool {
-    imports_database(module)
-        || context.graph.edges_for(file_id).iter().any(|target| {
-            context
-                .modules
-                .get(target)
-                .is_some_and(|module| imports_database(module))
-        })
+/// Whether the module loads a database client package, or loads a project
+/// module that loads one. One hop covers the common layout where a `db`
+/// module creates the client and the other modules import it. A type-only
+/// import counts too: a function that takes the client as a parameter often
+/// imports only its type.
+fn has_database_reach(context: &Context<'_>, file_id: FileId) -> bool {
+    context.database_files.contains(&file_id)
+        || context
+            .graph
+            .edges_for(file_id)
+            .iter()
+            .any(|target| context.database_files.contains(target))
 }
 
-fn imports_database(module: &ModuleInfo) -> bool {
-    module
-        .imports
+/// The files that load a database client package with an ES import, a
+/// `require()` call or an `import()` call. The graph keeps these facts after
+/// the release of the module payload, which drains `require_calls` and
+/// `dynamic_imports`.
+fn database_files(graph: &ModuleGraph) -> FxHashSet<FileId> {
+    graph
+        .package_usage
         .iter()
-        .map(|import| import.source.as_str())
-        .chain(module.re_exports.iter().map(|re| re.source.as_str()))
-        .any(|source| {
+        .filter(|(package, _)| {
             DATABASE_PACKAGES
                 .iter()
-                .any(|package| fallow_security::import_source_matches(source, package))
+                .any(|database| fallow_security::import_source_matches(package, database))
         })
+        .flat_map(|(_, users)| users.iter().copied())
+        .collect()
 }
 
-/// The start offsets of the calls whose callee is a static member with a
-/// database write method name. The parse reads all calls, also calls with
-/// only literal arguments, which the security capture does not record.
+/// The start offsets of the calls and tagged templates whose callee is a
+/// static member with a database write method name, such as
+/// ``prisma.$executeRaw`DELETE ...` ``. The parse reads all calls, also calls
+/// with only literal arguments, which the security capture does not record.
 fn database_write_starts(source: &str, layout: Layout) -> Vec<u32> {
-    use oxc_ast::ast::{CallExpression, Expression};
+    use oxc_ast::ast::{CallExpression, Expression, TaggedTemplateExpression};
     use oxc_ast_visit::Visit;
+
+    fn is_write(callee: &Expression<'_>) -> bool {
+        matches!(callee, Expression::StaticMemberExpression(member)
+            if DATABASE_WRITE_METHODS.contains(&member.property.name.as_str())
+                && !matches!(&member.object, Expression::Identifier(receiver)
+                    if RUNTIME_RECEIVERS.contains(&receiver.name.as_str())))
+    }
 
     #[derive(Default)]
     struct Writes(Vec<u32>);
     impl<'a> Visit<'a> for Writes {
         fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-            if let Expression::StaticMemberExpression(member) = &it.callee
-                && DATABASE_WRITE_METHODS.contains(&member.property.name.as_str())
-                && !matches!(&member.object, Expression::Identifier(receiver)
-                    if RUNTIME_RECEIVERS.contains(&receiver.name.as_str()))
-            {
+            if is_write(&it.callee) {
                 self.0.push(it.span.start);
             }
             oxc_ast_visit::walk::walk_call_expression(self, it);
+        }
+
+        fn visit_tagged_template_expression(&mut self, it: &TaggedTemplateExpression<'a>) {
+            if is_write(&it.tag) {
+                self.0.push(it.span.start);
+            }
+            oxc_ast_visit::walk::walk_tagged_template_expression(self, it);
         }
     }
 

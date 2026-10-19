@@ -5,8 +5,11 @@
   "main": "src/index.ts",
   "dependencies": {
     "@libsql/client": "^0.15.0",
+    "@prisma/client": "^6.0.0",
     "drizzle-orm": "^0.44.0",
-    "kysely": "^0.28.0"
+    "knex": "^3.1.0",
+    "kysely": "^0.28.0",
+    "mongodb": "^6.0.0"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

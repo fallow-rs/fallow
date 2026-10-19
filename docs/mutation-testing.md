@@ -208,10 +208,14 @@ or relational mutant, so it adds little test-strength signal for its run time.
   matches injection shapes only. A database write call with safe arguments,
   such as `db.insert(table)`, `db.insertInto("person")` or
   `prisma.user.create(...)`, is a sink too. The call must be a member call
-  with a write method name (`insert`, `update`, `delete`, `create`, `upsert`,
-  `save`, `transaction` and similar). The module must import a database
-  client package (`drizzle-orm`, `@prisma/client`, `kysely`, `pg`, `mongodb`
-  and similar), or import a project module that imports one. The check
+  or a tagged template with a write method name (`insert`, `insertOne`,
+  `update`, `delete`, `del`, `create`, `upsert`, `save`, `$transaction`,
+  `$executeRaw` and similar). The module must load a database client package
+  (`drizzle-orm`, `@prisma/client`, `kysely`, `knex`, `pg`, `mongodb` and
+  similar), or load a project module that loads one. An ES import, a
+  `require()` call and an `import()` call with a literal source each count.
+  A type-only import counts too, because a function that takes the client
+  as a parameter often imports only its type. The check
   follows one import only. A client that a module reaches through two or more
   project imports does not count, and a package that is not in the list does
   not count. In a module with database reach, `map.delete(key)` is also a sink:
