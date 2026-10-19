@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAnalysisArgs,
   buildCleanAnalysisSummary,
+  countCheckIssues,
   countDuplicationGroups,
   describeAnalysisFailure,
   parseUnexpectedArgument,
@@ -176,9 +177,7 @@ describe("buildAnalysisArgs", () => {
     });
 
     expect(args).not.toContain("--dupes-near");
-    expect(skipped).toEqual([
-      { flag: "--dupes-near", requires: "3.15.0", cliVersion: "3.14.0" },
-    ]);
+    expect(skipped).toEqual([{ flag: "--dupes-near", requires: "3.15.0", cliVersion: "3.14.0" }]);
   });
 
   it("forwards --dupes-no-ignore-imports when the user opts out (false) on a new CLI", () => {
@@ -416,6 +415,36 @@ describe("buildCleanAnalysisSummary", () => {
       "Fallow: analysis completed, but no dead-code summary was available.",
     );
     expect(summary.outputLines).toContain("- Dead code: summary unavailable.");
+  });
+});
+
+describe("countCheckIssues", () => {
+  it("returns zero without a check result", () => {
+    expect(countCheckIssues(null)).toBe(0);
+  });
+
+  it("counts arrays that an older CLI omits as zero", () => {
+    const check = {
+      ...emptyCheck(),
+      unused_files: [{}],
+      unused_exports: [{}, {}],
+      private_type_leaks: undefined,
+      unused_optional_dependencies: undefined,
+    } as unknown as FallowCheckResult;
+
+    expect(countCheckIssues(check)).toBe(3);
+  });
+
+  it("does not count advisory arrays", () => {
+    const check = {
+      ...emptyCheck(),
+      unused_types: [{}],
+      prop_drilling_chains: [{}],
+      thin_wrappers: [{}],
+      duplicate_prop_shapes: [{}],
+    } as unknown as FallowCheckResult;
+
+    expect(countCheckIssues(check)).toBe(1);
   });
 });
 

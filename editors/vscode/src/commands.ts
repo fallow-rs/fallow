@@ -33,8 +33,10 @@ import {
 import {
   buildAnalysisArgs,
   countCheckIssues,
+  countFindings,
   describeAnalysisFailure,
   planDegradation,
+  type CheckFindingKey,
 } from "./analysis-utils.js";
 import {
   AnalysisBackoffBlockedError,
@@ -75,6 +77,7 @@ import type {
   FallowFixResult,
   FixAction,
   HealthOutput,
+  IssueTypeConfig,
   SecurityOutput,
   WorkspacesOutput,
 } from "./types.js";
@@ -492,121 +495,118 @@ const showAnalysisPausedMessage = (failures: number, cause: string | null): void
     });
 };
 
+/** Each check result array and the issue-type toggle that keeps it. */
+const ISSUE_TYPE_FILTERS: ReadonlyArray<readonly [CheckFindingKey, keyof IssueTypeConfig]> = [
+  ["unused_files", "unused-files"],
+  ["unused_exports", "unused-exports"],
+  ["unused_types", "unused-types"],
+  ["private_type_leaks", "private-type-leaks"],
+  ["unused_dependencies", "unused-dependencies"],
+  ["unused_dev_dependencies", "unused-dev-dependencies"],
+  ["unused_optional_dependencies", "unused-optional-dependencies"],
+  ["unused_enum_members", "unused-enum-members"],
+  ["unused_class_members", "unused-class-members"],
+  ["unused_store_members", "unused-store-members"],
+  ["unused_server_actions", "unused-server-actions"],
+  ["unused_load_data_keys", "unused-load-data-keys"],
+  ["unused_component_props", "unused-component-props"],
+  ["absent_component_props", "absent-component-props"],
+  ["unused_component_emits", "unused-component-emits"],
+  ["unused_component_inputs", "unused-component-inputs"],
+  ["unused_component_outputs", "unused-component-outputs"],
+  ["unused_svelte_events", "unused-svelte-events"],
+  ["unused_effect_layers", "unused-effect-layers"],
+  ["unused_tagged_errors", "unused-tagged-errors"],
+  ["unproduced_catch_tags", "unproduced-catch-tags"],
+  ["unrendered_components", "unrendered-components"],
+  ["unprovided_injects", "unprovided-injects"],
+  ["invalid_client_exports", "invalid-client-export"],
+  ["mixed_client_server_barrels", "mixed-client-server-barrel"],
+  ["misplaced_directives", "misplaced-directive"],
+  ["route_collisions", "route-collision"],
+  ["dynamic_segment_name_conflicts", "dynamic-segment-name-conflict"],
+  ["unresolved_imports", "unresolved-imports"],
+  ["unlisted_dependencies", "unlisted-dependencies"],
+  ["duplicate_exports", "duplicate-exports"],
+  ["type_only_dependencies", "type-only-dependencies"],
+  ["test_only_dependencies", "test-only-dependencies"],
+  ["dev_dependencies_in_production", "dev-dependencies-in-production"],
+  ["circular_dependencies", "circular-dependencies"],
+  ["re_export_cycles", "re-export-cycle"],
+  ["package_cycles", "package-cycle"],
+  ["boundary_violations", "boundary-violation"],
+  ["boundary_coverage_violations", "boundary-violation"],
+  ["boundary_call_violations", "boundary-violation"],
+  ["policy_violations", "policy-violation"],
+  ["stale_suppressions", "stale-suppressions"],
+  ["unused_catalog_entries", "unused-catalog-entries"],
+  ["empty_catalog_groups", "empty-catalog-groups"],
+  ["unresolved_catalog_references", "unresolved-catalog-references"],
+  ["unused_dependency_overrides", "unused-dependency-overrides"],
+  ["misconfigured_dependency_overrides", "misconfigured-dependency-overrides"],
+  ["prop_drilling_chains", "prop-drilling"],
+  ["thin_wrappers", "thin-wrapper"],
+  ["duplicate_prop_shapes", "duplicate-prop-shape"],
+];
+
+const summarizeCheckResult = (
+  result: FallowCheckResult,
+  totalIssues: number,
+): FallowCheckResult["summary"] => {
+  const count = (...keys: CheckFindingKey[]): number => countFindings(result, keys);
+  return {
+    total_issues: totalIssues,
+    unused_files: count("unused_files"),
+    unused_exports: count("unused_exports"),
+    unused_types: count("unused_types"),
+    private_type_leaks: count("private_type_leaks"),
+    // The extension has no deprecated-export surface in v1, and
+    // countCheckIssues does not count these findings.
+    deprecated_exports_in_use: 0,
+    unused_dependencies: count(
+      "unused_dependencies",
+      "unused_dev_dependencies",
+      "unused_optional_dependencies",
+    ),
+    unused_enum_members: count("unused_enum_members"),
+    unused_class_members: count("unused_class_members"),
+    absent_component_props: count("absent_component_props"),
+    unresolved_imports: count("unresolved_imports"),
+    unlisted_dependencies: count("unlisted_dependencies"),
+    duplicate_exports: count("duplicate_exports"),
+    type_only_dependencies: count("type_only_dependencies"),
+    test_only_dependencies: count("test_only_dependencies"),
+    dev_dependencies_in_production: count("dev_dependencies_in_production"),
+    circular_dependencies: count("circular_dependencies"),
+    re_export_cycles: count("re_export_cycles"),
+    package_cycles: count("package_cycles"),
+    boundary_violations: count("boundary_violations"),
+    boundary_coverage_violations: count("boundary_coverage_violations"),
+    boundary_call_violations: count("boundary_call_violations"),
+    policy_violations: count("policy_violations"),
+    stale_suppressions: count("stale_suppressions"),
+    unused_catalog_entries: count("unused_catalog_entries"),
+    empty_catalog_groups: count("empty_catalog_groups"),
+    unresolved_catalog_references: count("unresolved_catalog_references"),
+    unused_dependency_overrides: count("unused_dependency_overrides"),
+    misconfigured_dependency_overrides: count("misconfigured_dependency_overrides"),
+  };
+};
+
 /** Filter check results based on the user's issueTypes configuration. */
 const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
   const types = getIssueTypes();
   const filtered: FallowCheckResult = {
     ...result,
-    unused_files: types["unused-files"] ? result.unused_files : [],
-    unused_exports: types["unused-exports"] ? result.unused_exports : [],
-    unused_types: types["unused-types"] ? result.unused_types : [],
-    private_type_leaks: types["private-type-leaks"] ? result.private_type_leaks : [],
-    unused_dependencies: types["unused-dependencies"] ? result.unused_dependencies : [],
-    unused_dev_dependencies: types["unused-dev-dependencies"] ? result.unused_dev_dependencies : [],
-    unused_optional_dependencies: types["unused-optional-dependencies"]
-      ? result.unused_optional_dependencies
-      : [],
-    unused_enum_members: types["unused-enum-members"] ? result.unused_enum_members : [],
-    unused_class_members: types["unused-class-members"] ? result.unused_class_members : [],
-    unused_store_members: types["unused-store-members"] ? result.unused_store_members : [],
-    unused_server_actions: types["unused-server-actions"] ? result.unused_server_actions : [],
-    unused_load_data_keys: types["unused-load-data-keys"] ? result.unused_load_data_keys : [],
-    unused_component_props: types["unused-component-props"] ? result.unused_component_props : [],
-    absent_component_props: types["absent-component-props"] ? result.absent_component_props : [],
-    unused_component_emits: types["unused-component-emits"] ? result.unused_component_emits : [],
-    unused_component_inputs: types["unused-component-inputs"] ? result.unused_component_inputs : [],
-    unused_component_outputs: types["unused-component-outputs"]
-      ? result.unused_component_outputs
-      : [],
-    unused_svelte_events: types["unused-svelte-events"] ? result.unused_svelte_events : [],
-    unused_effect_layers: types["unused-effect-layers"] ? result.unused_effect_layers : [],
-    unused_tagged_errors: types["unused-tagged-errors"] ? result.unused_tagged_errors : [],
-    unproduced_catch_tags: types["unproduced-catch-tags"] ? result.unproduced_catch_tags : [],
-    unrendered_components: types["unrendered-components"] ? result.unrendered_components : [],
-    unprovided_injects: types["unprovided-injects"] ? result.unprovided_injects : [],
-    invalid_client_exports: types["invalid-client-export"] ? result.invalid_client_exports : [],
-    mixed_client_server_barrels: types["mixed-client-server-barrel"]
-      ? result.mixed_client_server_barrels
-      : [],
-    misplaced_directives: types["misplaced-directive"] ? result.misplaced_directives : [],
-    route_collisions: types["route-collision"] ? result.route_collisions : [],
-    dynamic_segment_name_conflicts: types["dynamic-segment-name-conflict"]
-      ? result.dynamic_segment_name_conflicts
-      : [],
-    unresolved_imports: types["unresolved-imports"] ? result.unresolved_imports : [],
-    unlisted_dependencies: types["unlisted-dependencies"] ? result.unlisted_dependencies : [],
-    duplicate_exports: types["duplicate-exports"] ? result.duplicate_exports : [],
-    type_only_dependencies: types["type-only-dependencies"] ? result.type_only_dependencies : [],
-    test_only_dependencies: types["test-only-dependencies"] ? result.test_only_dependencies : [],
-    dev_dependencies_in_production: types["dev-dependencies-in-production"]
-      ? result.dev_dependencies_in_production
-      : [],
-    circular_dependencies: types["circular-dependencies"] ? result.circular_dependencies : [],
-    re_export_cycles: types["re-export-cycle"] ? result.re_export_cycles : [],
-    package_cycles: types["package-cycle"] ? result.package_cycles : [],
-    boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
-    boundary_coverage_violations: types["boundary-violation"]
-      ? result.boundary_coverage_violations
-      : [],
-    boundary_call_violations: types["boundary-violation"] ? result.boundary_call_violations : [],
-    policy_violations: types["policy-violation"] ? result.policy_violations : [],
-    stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
-    unused_catalog_entries: types["unused-catalog-entries"] ? result.unused_catalog_entries : [],
-    empty_catalog_groups: types["empty-catalog-groups"] ? result.empty_catalog_groups : [],
-    unresolved_catalog_references: types["unresolved-catalog-references"]
-      ? result.unresolved_catalog_references
-      : [],
-    unused_dependency_overrides: types["unused-dependency-overrides"]
-      ? result.unused_dependency_overrides
-      : [],
-    misconfigured_dependency_overrides: types["misconfigured-dependency-overrides"]
-      ? result.misconfigured_dependency_overrides
-      : [],
-    prop_drilling_chains: types["prop-drilling"] ? result.prop_drilling_chains : [],
-    thin_wrappers: types["thin-wrapper"] ? result.thin_wrappers : [],
-    duplicate_prop_shapes: types["duplicate-prop-shape"] ? result.duplicate_prop_shapes : [],
+    ...Object.fromEntries(
+      ISSUE_TYPE_FILTERS.map(([key, type]) => [key, types[type] ? result[key] : []]),
+    ),
   };
   const totalIssues = countCheckIssues(filtered);
-  const summary = {
-    total_issues: totalIssues,
-    unused_files: filtered.unused_files.length,
-    unused_exports: filtered.unused_exports.length,
-    unused_types: filtered.unused_types.length,
-    private_type_leaks: filtered.private_type_leaks?.length ?? 0,
-    // The extension has no deprecated-export surface in v1, and
-    // countCheckIssues does not count these findings.
-    deprecated_exports_in_use: 0,
-    unused_dependencies:
-      filtered.unused_dependencies.length +
-      filtered.unused_dev_dependencies.length +
-      (filtered.unused_optional_dependencies?.length ?? 0),
-    unused_enum_members: filtered.unused_enum_members.length,
-    unused_class_members: filtered.unused_class_members.length,
-    absent_component_props: filtered.absent_component_props?.length ?? 0,
-    unresolved_imports: filtered.unresolved_imports.length,
-    unlisted_dependencies: filtered.unlisted_dependencies.length,
-    duplicate_exports: filtered.duplicate_exports.length,
-    type_only_dependencies: filtered.type_only_dependencies?.length ?? 0,
-    test_only_dependencies: filtered.test_only_dependencies?.length ?? 0,
-    dev_dependencies_in_production: filtered.dev_dependencies_in_production?.length ?? 0,
-    circular_dependencies: filtered.circular_dependencies?.length ?? 0,
-    re_export_cycles: filtered.re_export_cycles?.length ?? 0,
-    package_cycles: filtered.package_cycles?.length ?? 0,
-    boundary_violations: filtered.boundary_violations?.length ?? 0,
-    boundary_coverage_violations: filtered.boundary_coverage_violations?.length ?? 0,
-    boundary_call_violations: filtered.boundary_call_violations?.length ?? 0,
-    policy_violations: filtered.policy_violations?.length ?? 0,
-    stale_suppressions: filtered.stale_suppressions?.length ?? 0,
-    unused_catalog_entries: filtered.unused_catalog_entries?.length ?? 0,
-    empty_catalog_groups: filtered.empty_catalog_groups?.length ?? 0,
-    unresolved_catalog_references: filtered.unresolved_catalog_references?.length ?? 0,
-    unused_dependency_overrides: filtered.unused_dependency_overrides?.length ?? 0,
-    misconfigured_dependency_overrides: filtered.misconfigured_dependency_overrides?.length ?? 0,
-  };
   return {
     ...filtered,
     total_issues: totalIssues,
-    summary,
+    summary: summarizeCheckResult(filtered, totalIssues),
   };
 };
 

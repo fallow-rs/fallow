@@ -289,64 +289,110 @@ export const planDegradation = (
   };
 };
 
-export const countCheckIssues = (result: FallowCheckResult | null): number => {
-  if (!result) {
-    return 0;
-  }
+/** Keys of the check result arrays that hold findings. */
+export type CheckFindingKey = {
+  [K in keyof FallowCheckResult]-?: NonNullable<FallowCheckResult[K]> extends ReadonlyArray<unknown>
+    ? K
+    : never;
+}[keyof FallowCheckResult];
 
-  return (
-    result.unused_files.length +
-    result.unused_exports.length +
-    result.unused_types.length +
-    (result.private_type_leaks?.length ?? 0) +
-    result.unused_dependencies.length +
-    result.unused_dev_dependencies.length +
-    (result.unused_optional_dependencies?.length ?? 0) +
-    result.unused_enum_members.length +
-    result.unused_class_members.length +
-    (result.unused_store_members?.length ?? 0) +
-    (result.unused_server_actions?.length ?? 0) +
-    (result.unused_load_data_keys?.length ?? 0) +
-    (result.unused_component_props?.length ?? 0) +
-    (result.absent_component_props?.length ?? 0) +
-    (result.unused_component_emits?.length ?? 0) +
-    (result.unused_component_inputs?.length ?? 0) +
-    (result.unused_component_outputs?.length ?? 0) +
-    (result.unused_svelte_events?.length ?? 0) +
-    (result.unused_effect_layers?.length ?? 0) +
-    (result.unused_tagged_errors?.length ?? 0) +
-    (result.unproduced_catch_tags?.length ?? 0) +
-    (result.unrendered_components?.length ?? 0) +
-    (result.unprovided_injects?.length ?? 0) +
-    (result.invalid_client_exports?.length ?? 0) +
-    (result.mixed_client_server_barrels?.length ?? 0) +
-    (result.misplaced_directives?.length ?? 0) +
-    (result.route_collisions?.length ?? 0) +
-    (result.dynamic_segment_name_conflicts?.length ?? 0) +
-    result.unresolved_imports.length +
-    result.unlisted_dependencies.length +
-    result.duplicate_exports.length +
-    (result.type_only_dependencies?.length ?? 0) +
-    (result.test_only_dependencies?.length ?? 0) +
-    (result.dev_dependencies_in_production?.length ?? 0) +
-    (result.circular_dependencies?.length ?? 0) +
-    (result.re_export_cycles?.length ?? 0) +
-    (result.package_cycles?.length ?? 0) +
-    (result.boundary_violations?.length ?? 0) +
-    (result.boundary_coverage_violations?.length ?? 0) +
-    (result.boundary_call_violations?.length ?? 0) +
-    (result.policy_violations?.length ?? 0) +
-    (result.stale_suppressions?.length ?? 0) +
-    (result.unused_catalog_entries?.length ?? 0) +
-    // empty_catalog_groups has no per-type toggle (it is not in IssueTypeConfig),
-    // so it is always counted; omitting it under-reported total_issues and the
-    // status-bar count.
-    (result.empty_catalog_groups?.length ?? 0) +
-    (result.unresolved_catalog_references?.length ?? 0) +
-    (result.unused_dependency_overrides?.length ?? 0) +
-    (result.misconfigured_dependency_overrides?.length ?? 0)
+/**
+ * Arrays that every supported CLI release emits. A result without one of these
+ * arrays is malformed, so the count reads them without a fallback.
+ */
+const CORE_FINDING_KEYS = [
+  "unused_files",
+  "unused_exports",
+  "unused_types",
+  "unused_dependencies",
+  "unused_dev_dependencies",
+  "unused_enum_members",
+  "unused_class_members",
+  "unresolved_imports",
+  "unlisted_dependencies",
+  "duplicate_exports",
+] as const satisfies ReadonlyArray<CheckFindingKey>;
+
+type CoreFindingKey = (typeof CORE_FINDING_KEYS)[number];
+
+const CORE_FINDING_KEY_SET: ReadonlySet<CheckFindingKey> = new Set(CORE_FINDING_KEYS);
+
+const isCoreFindingKey = (key: CheckFindingKey): key is CoreFindingKey =>
+  CORE_FINDING_KEY_SET.has(key);
+
+/**
+ * Arrays that `countCheckIssues` adds to the total. Advisory arrays such as
+ * `prop_drilling_chains`, `thin_wrappers` and `duplicate_prop_shapes` are not
+ * in this list.
+ */
+const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
+  "unused_files",
+  "unused_exports",
+  "unused_types",
+  "private_type_leaks",
+  "unused_dependencies",
+  "unused_dev_dependencies",
+  "unused_optional_dependencies",
+  "unused_enum_members",
+  "unused_class_members",
+  "unused_store_members",
+  "unused_server_actions",
+  "unused_load_data_keys",
+  "unused_component_props",
+  "absent_component_props",
+  "unused_component_emits",
+  "unused_component_inputs",
+  "unused_component_outputs",
+  "unused_svelte_events",
+  "unused_effect_layers",
+  "unused_tagged_errors",
+  "unproduced_catch_tags",
+  "unrendered_components",
+  "unprovided_injects",
+  "invalid_client_exports",
+  "mixed_client_server_barrels",
+  "misplaced_directives",
+  "route_collisions",
+  "dynamic_segment_name_conflicts",
+  "unresolved_imports",
+  "unlisted_dependencies",
+  "duplicate_exports",
+  "type_only_dependencies",
+  "test_only_dependencies",
+  "dev_dependencies_in_production",
+  "circular_dependencies",
+  "re_export_cycles",
+  "package_cycles",
+  "boundary_violations",
+  "boundary_coverage_violations",
+  "boundary_call_violations",
+  "policy_violations",
+  "stale_suppressions",
+  "unused_catalog_entries",
+  // Omitting empty_catalog_groups under-reported total_issues and the
+  // status-bar count.
+  "empty_catalog_groups",
+  "unresolved_catalog_references",
+  "unused_dependency_overrides",
+  "misconfigured_dependency_overrides",
+];
+
+/**
+ * Count the findings in the given arrays of a check result. Older CLI releases
+ * omit some arrays, and these count as zero.
+ */
+export const countFindings = (
+  result: FallowCheckResult,
+  keys: ReadonlyArray<CheckFindingKey>,
+): number =>
+  keys.reduce(
+    (total, key) =>
+      total + (isCoreFindingKey(key) ? result[key].length : (result[key]?.length ?? 0)),
+    0,
   );
-};
+
+export const countCheckIssues = (result: FallowCheckResult | null): number =>
+  result ? countFindings(result, COUNTED_FINDING_KEYS) : 0;
 
 export const countDiagnosticErrorIssues = (result: FallowCheckResult | null): number => {
   if (!result) {

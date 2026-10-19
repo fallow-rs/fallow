@@ -625,6 +625,219 @@ describe("runAnalysis retry backoff", () => {
     }
   });
 
+  describe("issue-type filtering", () => {
+    // Each issue-type toggle and the check result arrays that it controls.
+    const TOGGLED_ARRAYS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+      ["unused-files", ["unused_files"]],
+      ["unused-exports", ["unused_exports"]],
+      ["unused-types", ["unused_types"]],
+      ["private-type-leaks", ["private_type_leaks"]],
+      ["unused-dependencies", ["unused_dependencies"]],
+      ["unused-dev-dependencies", ["unused_dev_dependencies"]],
+      ["unused-optional-dependencies", ["unused_optional_dependencies"]],
+      ["unused-enum-members", ["unused_enum_members"]],
+      ["unused-class-members", ["unused_class_members"]],
+      ["unused-store-members", ["unused_store_members"]],
+      ["unused-server-actions", ["unused_server_actions"]],
+      ["unused-load-data-keys", ["unused_load_data_keys"]],
+      ["unused-component-props", ["unused_component_props"]],
+      ["absent-component-props", ["absent_component_props"]],
+      ["unused-component-emits", ["unused_component_emits"]],
+      ["unused-component-inputs", ["unused_component_inputs"]],
+      ["unused-component-outputs", ["unused_component_outputs"]],
+      ["unused-svelte-events", ["unused_svelte_events"]],
+      ["unused-effect-layers", ["unused_effect_layers"]],
+      ["unused-tagged-errors", ["unused_tagged_errors"]],
+      ["unproduced-catch-tags", ["unproduced_catch_tags"]],
+      ["unrendered-components", ["unrendered_components"]],
+      ["unprovided-injects", ["unprovided_injects"]],
+      ["invalid-client-export", ["invalid_client_exports"]],
+      ["mixed-client-server-barrel", ["mixed_client_server_barrels"]],
+      ["misplaced-directive", ["misplaced_directives"]],
+      ["route-collision", ["route_collisions"]],
+      ["dynamic-segment-name-conflict", ["dynamic_segment_name_conflicts"]],
+      ["unresolved-imports", ["unresolved_imports"]],
+      ["unlisted-dependencies", ["unlisted_dependencies"]],
+      ["duplicate-exports", ["duplicate_exports"]],
+      ["type-only-dependencies", ["type_only_dependencies"]],
+      ["test-only-dependencies", ["test_only_dependencies"]],
+      ["dev-dependencies-in-production", ["dev_dependencies_in_production"]],
+      ["circular-dependencies", ["circular_dependencies"]],
+      ["re-export-cycle", ["re_export_cycles"]],
+      ["package-cycle", ["package_cycles"]],
+      [
+        "boundary-violation",
+        ["boundary_violations", "boundary_coverage_violations", "boundary_call_violations"],
+      ],
+      ["policy-violation", ["policy_violations"]],
+      ["stale-suppressions", ["stale_suppressions"]],
+      ["unused-catalog-entries", ["unused_catalog_entries"]],
+      ["empty-catalog-groups", ["empty_catalog_groups"]],
+      ["unresolved-catalog-references", ["unresolved_catalog_references"]],
+      ["unused-dependency-overrides", ["unused_dependency_overrides"]],
+      ["misconfigured-dependency-overrides", ["misconfigured_dependency_overrides"]],
+      ["prop-drilling", ["prop_drilling_chains"]],
+      ["thin-wrapper", ["thin_wrappers"]],
+      ["duplicate-prop-shape", ["duplicate_prop_shapes"]],
+    ];
+    // Advisory arrays stay in the result but do not add to total_issues.
+    const UNCOUNTED_ARRAYS = new Set([
+      "prop_drilling_chains",
+      "thin_wrappers",
+      "duplicate_prop_shapes",
+    ]);
+    const ARRAY_KEYS = TOGGLED_ARRAYS.flatMap(([, keys]) => keys);
+    // A different length for each array shows which array a count comes from.
+    const sizeOf = (key: string): number => ARRAY_KEYS.indexOf(key) + 1;
+    const countedSize = (keys: ReadonlyArray<string>): number =>
+      keys.filter((key) => !UNCOUNTED_ARRAYS.has(key)).reduce((sum, key) => sum + sizeOf(key), 0);
+    const fullCheck = {
+      ...emptyCheck,
+      deprecated_exports_in_use: [{ untouched: true }],
+      ...Object.fromEntries(
+        ARRAY_KEYS.map((key) => [
+          key,
+          Array.from({ length: sizeOf(key) }, (_, index) => ({ key, index })),
+        ]),
+      ),
+    };
+
+    const withAnalysisOutput = async (check: object, run: () => Promise<void>): Promise<void> => {
+      const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-issue-types-"));
+      const script = join(dir, "fallow-cli.js");
+      const output = JSON.stringify({ check });
+      try {
+        await writeFile(
+          script,
+          `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(output)});\n`,
+          "utf8",
+        );
+        await chmod(script, 0o755);
+        mockPathBinary = script;
+        setWorkspaceRoot(dir);
+        await run();
+      } finally {
+        setWorkspaceRoot(null);
+        await rm(dir, { recursive: true, force: true });
+      }
+    };
+
+    const analyze = async (): Promise<FallowCheckResult | null> =>
+      (await runAnalysis(workspaceContext, undefined, { backoff: new AnalysisFailureBackoff() }))
+        .check;
+
+    it("keeps every array and recounts the summary when all toggles are on", async () => {
+      await withAnalysisOutput(fullCheck, async () => {
+        mockIssueTypes = Object.fromEntries(TOGGLED_ARRAYS.map(([type]) => [type, true]));
+        const check = await analyze();
+        const total = countedSize(ARRAY_KEYS);
+
+        expect(check).toEqual({
+          ...fullCheck,
+          total_issues: total,
+          summary: {
+            total_issues: total,
+            unused_files: sizeOf("unused_files"),
+            unused_exports: sizeOf("unused_exports"),
+            unused_types: sizeOf("unused_types"),
+            private_type_leaks: sizeOf("private_type_leaks"),
+            deprecated_exports_in_use: 0,
+            unused_dependencies:
+              sizeOf("unused_dependencies") +
+              sizeOf("unused_dev_dependencies") +
+              sizeOf("unused_optional_dependencies"),
+            unused_enum_members: sizeOf("unused_enum_members"),
+            unused_class_members: sizeOf("unused_class_members"),
+            absent_component_props: sizeOf("absent_component_props"),
+            unresolved_imports: sizeOf("unresolved_imports"),
+            unlisted_dependencies: sizeOf("unlisted_dependencies"),
+            duplicate_exports: sizeOf("duplicate_exports"),
+            type_only_dependencies: sizeOf("type_only_dependencies"),
+            test_only_dependencies: sizeOf("test_only_dependencies"),
+            dev_dependencies_in_production: sizeOf("dev_dependencies_in_production"),
+            circular_dependencies: sizeOf("circular_dependencies"),
+            re_export_cycles: sizeOf("re_export_cycles"),
+            package_cycles: sizeOf("package_cycles"),
+            boundary_violations: sizeOf("boundary_violations"),
+            boundary_coverage_violations: sizeOf("boundary_coverage_violations"),
+            boundary_call_violations: sizeOf("boundary_call_violations"),
+            policy_violations: sizeOf("policy_violations"),
+            stale_suppressions: sizeOf("stale_suppressions"),
+            unused_catalog_entries: sizeOf("unused_catalog_entries"),
+            empty_catalog_groups: sizeOf("empty_catalog_groups"),
+            unresolved_catalog_references: sizeOf("unresolved_catalog_references"),
+            unused_dependency_overrides: sizeOf("unused_dependency_overrides"),
+            misconfigured_dependency_overrides: sizeOf("misconfigured_dependency_overrides"),
+          },
+        });
+        expect(Object.keys(check?.summary ?? {})).toEqual([
+          "total_issues",
+          "unused_files",
+          "unused_exports",
+          "unused_types",
+          "private_type_leaks",
+          "deprecated_exports_in_use",
+          "unused_dependencies",
+          "unused_enum_members",
+          "unused_class_members",
+          "absent_component_props",
+          "unresolved_imports",
+          "unlisted_dependencies",
+          "duplicate_exports",
+          "type_only_dependencies",
+          "test_only_dependencies",
+          "dev_dependencies_in_production",
+          "circular_dependencies",
+          "re_export_cycles",
+          "package_cycles",
+          "boundary_violations",
+          "boundary_coverage_violations",
+          "boundary_call_violations",
+          "policy_violations",
+          "stale_suppressions",
+          "unused_catalog_entries",
+          "empty_catalog_groups",
+          "unresolved_catalog_references",
+          "unused_dependency_overrides",
+          "misconfigured_dependency_overrides",
+        ]);
+      });
+    });
+
+    it("keeps only the arrays of the one enabled toggle", { timeout: 60_000 }, async () => {
+      await withAnalysisOutput(fullCheck, async () => {
+        for (const [type, keys] of TOGGLED_ARRAYS) {
+          mockIssueTypes = { [type]: true };
+          const check = (await analyze()) as unknown as Record<string, unknown> | null;
+          const kept = ARRAY_KEYS.filter(
+            (key) => (check?.[key] as ReadonlyArray<unknown> | undefined)?.length,
+          );
+
+          expect({ type, kept, total: check?.total_issues }).toEqual({
+            type,
+            kept: keys,
+            total: countedSize(keys),
+          });
+          expect(check?.deprecated_exports_in_use).toEqual([{ untouched: true }]);
+        }
+      });
+    });
+
+    it("adds filtered arrays that an older CLI omits after the arrays it emits", async () => {
+      await withAnalysisOutput(emptyCheck, async () => {
+        mockIssueTypes = { "unused-store-members": true };
+        const check = await analyze();
+        const omitted = ARRAY_KEYS.filter((key) => !(key in emptyCheck));
+
+        expect(Object.keys(check ?? {})).toEqual([...Object.keys(emptyCheck), ...omitted]);
+        expect(check?.unused_store_members).toBeUndefined();
+        expect("unused_store_members" in (check ?? {})).toBe(true);
+        expect(check?.unused_server_actions).toEqual([]);
+        expect(check?.total_issues).toBe(0);
+      });
+    });
+  });
+
   it("runs analysis with the default max-file-size ceiling", async () => {
     const originalLimit = process.env.FALLOW_MAX_FILE_SIZE;
     const dir = await mkdtemp(join(tmpdir(), "fallow-vscode-analysis-env-"));
