@@ -770,11 +770,12 @@ fn render_worsened_row(row: &WorsenedRow<'_>, output: OutputFormat, mode: AuditW
             )
         }
         OutputFormat::Markdown => format!(
-            "| `{}:{}` | `{}` | {attribution} | {} |",
-            row.path,
-            row.line,
-            row.name,
-            fallow_output::describe_worsened_metrics(row.metrics)
+            "| {} | {} | {attribution} | {} |",
+            fallow_output::markdown_table_code_span(&format!("{}:{}", row.path, row.line)),
+            fallow_output::markdown_table_code_span(row.name),
+            fallow_output::markdown_table_text(&fallow_output::describe_worsened_metrics(
+                row.metrics
+            ))
         ),
         _ => {
             let note = if row.worsened {

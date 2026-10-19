@@ -482,3 +482,47 @@ fn growth_that_a_merge_brings_in_from_main_is_not_worsened() {
     assert_eq!(json["attribution"]["complexity_worsened"], 0);
     assert_eq!(json["verdict"], "pass", "{json:#}");
 }
+
+/// A path with a pipe must stay inside its Markdown table cell. Windows does
+/// not allow `|` in a file name, so this test runs on Unix only.
+#[cfg(unix)]
+#[test]
+fn markdown_row_escapes_a_pipe_in_the_path() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "audit-worsened", "private": true}"#,
+    )
+    .unwrap();
+    fs::write(dir.join(".fallowrc.json"), CONFIG).unwrap();
+    fs::write(dir.join("src/a|b.js"), hotspot("work", 20, 2)).unwrap();
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["config", "core.autocrlf", "false"]);
+    commit_all(dir, "baseline");
+    git(dir, &["checkout", "-b", "head"]);
+    fs::write(dir.join("src/a|b.js"), hotspot("work", 20, 40)).unwrap();
+    commit_all(dir, "grow");
+    let root = dir.to_str().unwrap();
+    let markdown = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root,
+        "--base",
+        "main",
+        "--no-cache",
+        "--no-css",
+        "--skip",
+        "dupes",
+        "--format",
+        "markdown",
+    ]);
+    let row = markdown
+        .stdout
+        .lines()
+        .find(|line| line.contains("worsened | lines"))
+        .unwrap_or_else(|| panic!("no worsened row: {}", markdown.stdout));
+    assert!(row.contains(r"src/a\|b.js:"), "{row}");
+    assert_eq!(row.matches(" | ").count(), 3, "{row}");
+}
