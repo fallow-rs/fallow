@@ -278,6 +278,7 @@ jobs:
               - 'Dockerfile.dev'
               - '.dockerignore'
               - 'examples/docker/**'
+              - 'tools/corepack/**'
               - '.github/dependabot.yml'
               - '.github/workflows/ci.yml'
             miri:
