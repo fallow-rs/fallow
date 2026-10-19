@@ -118,6 +118,19 @@ Each of its 7971 regex mutants compiled with `new RegExp`. Most literals give
 one mutant. Locale data with many patterns gives many: date-fns has 6723 regex
 mutants, 6555 of them in its locale files.
 
+A `case` label of a `switch` gives no `string-literal` or `boolean-literal`
+mutant when the mutant is equivalent. The rule needs all of these conditions:
+
+- the switch has a `default` clause;
+- each label is a string, number, boolean or `null` literal;
+- the clause body and the `default` body have the same source text;
+- both bodies end in `return`, `throw`, or a `break` or `continue` without
+  a label;
+- no other label has the original value or the mutated value.
+
+The original label and the mutated label then select the same body for each
+input. Mutants in the clause body do not change.
+
 No absolute-value operator (`x` to `-x`) is planned. Without types, it applies
 to each operand of an arithmetic or relational expression. The same corpus has
 114119 mutants, and the operator adds 6473 mutants (5.7 %), 24 % of them on

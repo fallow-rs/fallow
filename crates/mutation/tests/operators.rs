@@ -6,6 +6,7 @@ use common::{expected, pairs, run};
 use fallow_mutation::{Operator, SourceKind};
 
 const JS: SourceKind = SourceKind::Js;
+const TS: SourceKind = SourceKind::Ts;
 
 #[test]
 fn arithmetic_operator_swaps_and_skips_string_concatenation() {
@@ -336,6 +337,76 @@ fn string_literal_empties_and_fills() {
             "{source}"
         );
     }
+}
+
+/// A case label whose clause runs the same exiting body as `default` selects
+/// that body for every input, before and after the literal mutation.
+#[test]
+fn string_literal_skips_a_case_label_equivalent_to_default() {
+    let tail = "default: return amount; } }";
+    let head = "function f(frequency, amount) { switch (frequency) { ";
+    let skipped = [
+        "case \"monthly\": return amount; case \"yearly\": return amount * 12; ",
+        "case \"monthly\": throw amount; case \"yearly\": return 1; default: throw amount; } } //",
+        "case \"weekly\": case \"monthly\": return amount; ",
+        "case \"monthly\": return amount; case 1: return 0; case null: return 0; ",
+    ];
+    for clauses in skipped {
+        let source = format!("{head}{clauses}{tail}");
+        let result = run(&source, TS);
+        assert!(
+            !pairs(&result, Operator::StringLiteral)
+                .contains(&("\"monthly\"".to_owned(), "\"\"".to_owned())),
+            "{source}"
+        );
+    }
+    let kept = [
+        format!(
+            "{head}case \"monthly\": return amount; case \"yearly\": return amount * 12; }} }}"
+        ),
+        format!("{head}case \"monthly\": return 0; {tail}"),
+        format!("{head}case \"monthly\": case \"weekly\": return amount; {tail}"),
+        format!("{head}case \"monthly\": log(); {tail}"),
+        format!("{head}case \"monthly\": return amount; case \"\": return amount * 2; {tail}"),
+        format!("{head}case \"monthly\": return amount; case \"monthly\": return 0; {tail}"),
+        format!("{head}case \"monthly\": return amount; case g(): return 0; {tail}"),
+        format!("{head}case \"monthly\": if (amount) return amount; {tail}"),
+    ];
+    for source in &kept {
+        let result = run(source, TS);
+        assert!(
+            pairs(&result, Operator::StringLiteral)
+                .contains(&("\"monthly\"".to_owned(), "\"\"".to_owned())),
+            "{source}"
+        );
+    }
+    let result = run(
+        &format!(
+            "{head}case \"monthly\": return amount; case \"yearly\": return amount * 12; {tail}"
+        ),
+        TS,
+    );
+    assert!(
+        pairs(&result, Operator::StringLiteral)
+            .contains(&("\"yearly\"".to_owned(), "\"\"".to_owned()))
+    );
+}
+
+#[test]
+fn boolean_literal_skips_a_case_label_equivalent_to_default() {
+    let skipped = run(
+        "function f(v) { switch (v) { case true: return 1; case 0: return 2; default: return 1; } }",
+        TS,
+    );
+    assert_eq!(pairs(&skipped, Operator::BooleanLiteral), expected(&[]));
+    let kept = run(
+        "function f(v) { switch (v) { case true: return 1; case false: return 2; default: return 1; } }",
+        TS,
+    );
+    assert_eq!(
+        pairs(&kept, Operator::BooleanLiteral),
+        expected(&[("false", "true"), ("true", "false")]),
+    );
 }
 
 #[test]

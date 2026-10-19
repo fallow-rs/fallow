@@ -4,7 +4,8 @@
 //! site holds the candidate mutants for that expression. The walk skips the
 //! positions where a mutant is invalid or useless: type positions, enum
 //! members, decorators, module syntax, directives, assignment targets,
-//! property keys and the arguments of logging calls.
+//! property keys, the arguments of logging calls, and a `case` label whose
+//! literal mutant is equivalent because its body is the `default` body.
 //!
 //! The logging rule is broad: a `console.*` or `debug(...)` call gives no
 //! mutant at all. This covers each expression in its arguments (strings,
@@ -20,12 +21,12 @@ use oxc_ast::ast::{
     ExpressionStatement, ForStatement, ForStatementLeft, Function, IfStatement, ImportDeclaration,
     ImportExpression, JSXAttributeValue, LogicalExpression, MemberExpression, MethodDefinition,
     MethodDefinitionKind, ObjectProperty, Program, PropertyDefinition, PropertyKey, RegExpLiteral,
-    ReturnStatement, SimpleAssignmentTarget, StringLiteral, TSEnumDeclaration, TSExportAssignment,
-    TSExternalModuleDeclaration, TSGlobalDeclaration, TSImportEqualsDeclaration,
-    TSInterfaceDeclaration, TSNamespaceDeclaration, TSNamespaceExportDeclaration, TSType,
-    TSTypeAliasDeclaration, TSTypeAnnotation, TSTypeParameterDeclaration,
-    TSTypeParameterInstantiation, TaggedTemplateExpression, UnaryExpression, UpdateExpression,
-    VariableDeclaration, VariableDeclarator, WhileStatement,
+    ReturnStatement, SimpleAssignmentTarget, Statement, StringLiteral, SwitchCase, SwitchStatement,
+    TSEnumDeclaration, TSExportAssignment, TSExternalModuleDeclaration, TSGlobalDeclaration,
+    TSImportEqualsDeclaration, TSInterfaceDeclaration, TSNamespaceDeclaration,
+    TSNamespaceExportDeclaration, TSType, TSTypeAliasDeclaration, TSTypeAnnotation,
+    TSTypeParameterDeclaration, TSTypeParameterInstantiation, TaggedTemplateExpression,
+    UnaryExpression, UpdateExpression, VariableDeclaration, VariableDeclarator, WhileStatement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::{GetSpan, Span};
@@ -85,6 +86,7 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         logical_operands: BTreeSet::new(),
         relational_operands: BTreeSet::new(),
         expression_starts: BTreeSet::new(),
+        equivalent_labels: BTreeSet::new(),
     };
     collector.visit_program(program);
     let mut sites: Vec<Site> = collector.sites.into_values().collect();
@@ -117,6 +119,10 @@ struct Collector<'s> {
     /// At these positions a leading `function`, `class` or `{` changes the
     /// parse, as at the start of a statement.
     expression_starts: BTreeSet<u32>,
+    /// String and boolean case labels whose literal mutant is equivalent:
+    /// the clause runs the same body as `default`. See
+    /// `equivalent_case_labels`.
+    equivalent_labels: BTreeSet<(u32, u32)>,
 }
 
 const fn pair(span: Span) -> (u32, u32) {
@@ -128,6 +134,101 @@ fn is_function_like(expression: &Expression<'_>) -> bool {
         expression.without_parentheses(),
         Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
     )
+}
+
+/// The value of a literal case label, compared with JS strict equality.
+#[derive(PartialEq)]
+enum LabelValue<'a> {
+    String(&'a str),
+    Boolean(bool),
+    /// A number or `null`. No string or boolean mutant can take its value.
+    Other,
+}
+
+fn label_value<'a>(test: &Expression<'a>) -> Option<LabelValue<'a>> {
+    match test {
+        Expression::StringLiteral(it) => Some(LabelValue::String(it.value.as_str())),
+        Expression::BooleanLiteral(it) => Some(LabelValue::Boolean(it.value)),
+        Expression::NumericLiteral(_) | Expression::NullLiteral(_) => Some(LabelValue::Other),
+        _ => None,
+    }
+}
+
+/// The value that the `string-literal` or `boolean-literal` mutant gives.
+fn mutated_value(value: &LabelValue<'_>) -> Option<LabelValue<'static>> {
+    match value {
+        LabelValue::String("") => Some(LabelValue::String("fallow")),
+        LabelValue::String(_) => Some(LabelValue::String("")),
+        LabelValue::Boolean(flag) => Some(LabelValue::Boolean(!flag)),
+        LabelValue::Other => None,
+    }
+}
+
+/// True when the statement always leaves the clause, so control never falls
+/// through into the next clause.
+fn is_exit(statement: &Statement<'_>) -> bool {
+    match statement {
+        Statement::ReturnStatement(_) | Statement::ThrowStatement(_) => true,
+        Statement::BreakStatement(it) => it.label.is_none(),
+        Statement::ContinueStatement(it) => it.label.is_none(),
+        _ => false,
+    }
+}
+
+/// The source text of a clause body that ends in an exit.
+fn exiting_body<'s>(source: &'s str, case: &SwitchCase<'_>) -> Option<&'s str> {
+    let first = case.consequent.first()?;
+    let last = case.consequent.last()?;
+    if !is_exit(last) {
+        return None;
+    }
+    source.get(first.span().start as usize..last.span().end as usize)
+}
+
+/// The spans of the case labels whose literal mutant cannot change the
+/// result (#3639). For such a label, the original and the mutated switch
+/// both run the `default` body for each input that the label matched, and
+/// the mutated value selects no other clause. The rule needs all of these:
+///
+/// - every label is a string, number, boolean or `null` literal, so a label
+///   has no side effect and the evaluation order does not matter;
+/// - the clause body and the `default` body are the same text and both end
+///   in an unconditional exit, so neither falls through;
+/// - no other label has the original or the mutated value.
+fn equivalent_case_labels(source: &str, switch: &SwitchStatement<'_>) -> Vec<(u32, u32)> {
+    let Some(default_body) = switch
+        .cases
+        .iter()
+        .find(|case| case.test.is_none())
+        .and_then(|case| exiting_body(source, case))
+    else {
+        return Vec::new();
+    };
+    let mut labels = Vec::with_capacity(switch.cases.len());
+    for case in &switch.cases {
+        let Some(test) = &case.test else { continue };
+        let Some(value) = label_value(test) else {
+            return Vec::new();
+        };
+        labels.push((case, test.span(), value));
+    }
+    labels
+        .iter()
+        .enumerate()
+        .filter(|(index, (case, _, value))| {
+            let Some(mutated) = mutated_value(value) else {
+                return false;
+            };
+            exiting_body(source, case) == Some(default_body)
+                && labels
+                    .iter()
+                    .enumerate()
+                    .all(|(other, (_, _, other_value))| {
+                        other == *index || (other_value != value && *other_value != mutated)
+                    })
+        })
+        .map(|(_, (_, span, _))| pair(*span))
+        .collect()
 }
 
 fn key_name(key: &PropertyKey<'_>) -> Option<String> {
@@ -852,7 +953,16 @@ impl<'a> Visit<'a> for Collector<'_> {
         walk::walk_call_expression(self, it);
     }
 
+    fn visit_switch_statement(&mut self, it: &SwitchStatement<'a>) {
+        let labels = equivalent_case_labels(self.source, it);
+        self.equivalent_labels.extend(labels);
+        walk::walk_switch_statement(self, it);
+    }
+
     fn visit_boolean_literal(&mut self, it: &BooleanLiteral) {
+        if self.equivalent_labels.contains(&pair(it.span)) {
+            return;
+        }
         let replacement = if it.value { "false" } else { "true" };
         self.add(
             it.span,
@@ -863,6 +973,9 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_string_literal(&mut self, it: &StringLiteral<'a>) {
+        if self.equivalent_labels.contains(&pair(it.span)) {
+            return;
+        }
         let quote = self.text(it.span.start, it.span.start + 1).to_owned();
         if quote != "\"" && quote != "'" {
             return;
