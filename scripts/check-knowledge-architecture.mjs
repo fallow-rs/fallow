@@ -200,70 +200,90 @@ const entryPointRoutes = (sourcePath, content) => {
   return routes;
 };
 
-export const validateKnowledgeArchitecture = ({
-  root = ROOT,
-  visibleFiles = trackedFiles(root),
-} = {}) => {
-  const errors = [];
-  const currentVisibleFiles = visibleFiles
-    .map(toPosix)
-    .filter((path) => existsSync(join(root, path)));
-  const visible = new Set(currentVisibleFiles);
-  const manifest = readJson(root, MANIFEST_PATH);
+const REQUIRED_EXTERNAL_FIELDS = [
+  "repository",
+  "role",
+  "direction",
+  "revisionSource",
+  "allowedRoot",
+];
+const VALID_DIRECTIONS = new Set(["canonical-contract-to-public-consumer", "public-to-consumer"]);
+const VALID_PROCESSOR_KINDS = new Set(["generator", "validator", "none"]);
+const SHELL_CONTROL_PATTERN = /^(?:&&|\|\||[;|])$/u;
 
+const readText = (root, path) => readFileSync(join(root, path), "utf8");
+
+const isExecutableCommand = (command) =>
+  Array.isArray(command) &&
+  command.length > 0 &&
+  !command.some((part) => typeof part !== "string" || part.trim() === "");
+
+const checkDocument = (context, path, checkSourcePaths = true) => {
+  addDocumentChecks({
+    ...context,
+    content: readText(context.root, path),
+    path,
+    checkSourcePaths,
+  });
+};
+
+const addClassificationChecks = ({ errors, label, classified, tracked }) => {
+  if (unique(classified).length !== classified.length) {
+    errors.push(`knowledge manifest contains duplicate ${label} paths`);
+  }
+  for (const path of tracked.filter((candidate) => !classified.includes(candidate))) {
+    errors.push(`${label} is not classified: ${path}`);
+  }
+  for (const path of classified.filter((candidate) => !tracked.includes(candidate))) {
+    errors.push(`classified ${label} is not tracked: ${path}`);
+  }
+};
+
+const checkManifestHeader = (context) => {
+  const { errors, manifest } = context;
   if (manifest.schemaVersion !== 2) {
     errors.push(`unsupported knowledge manifest schema: ${manifest.schemaVersion}`);
   }
   if (manifest.trustBoundary?.automatedPrivateToPublic !== false) {
     errors.push("trust boundary must forbid automated private-to-public publication");
   }
+  addPathChecks({ ...context, path: MANIFEST_PATH, kind: "knowledge manifest" });
+};
 
-  addPathChecks({
-    errors,
-    root,
-    visible,
-    path: MANIFEST_PATH,
-    kind: "knowledge manifest",
-  });
+const checkEntryPointRoutes = ({ errors, manifest }, entryPoint, discoveredRoutes) => {
+  const forbiddenPrefixes = manifest.trustBoundary?.forbiddenRoutePrefixes ?? [];
+  for (const route of entryPoint.routes ?? []) {
+    if (isAbsolute(route) || route.startsWith("../")) {
+      errors.push(`${entryPoint.path} has a non-repository route: ${route}`);
+      continue;
+    }
+    if (forbiddenPrefixes.some((prefix) => route.startsWith(prefix))) {
+      errors.push(`${entryPoint.path} routes across the private boundary: ${route}`);
+    }
+    if (!discoveredRoutes.has(route)) {
+      errors.push(`${entryPoint.path} does not route to ${route}`);
+    }
+  }
+};
 
-  for (const entryPoint of manifest.entryPoints ?? []) {
+const checkEntryPoints = (context) => {
+  for (const entryPoint of context.manifest.entryPoints ?? []) {
     addPathChecks({
-      errors,
-      root,
-      visible,
+      ...context,
       path: entryPoint.path,
       kind: `${entryPoint.client} entry point`,
     });
-    if (!existsSync(join(root, entryPoint.path))) {
+    if (!existsSync(join(context.root, entryPoint.path))) {
       continue;
     }
-    const content = readFileSync(join(root, entryPoint.path), "utf8");
-    addDocumentChecks({ content, errors, manifest, path: entryPoint.path, root, visible });
-    const discoveredRoutes = entryPointRoutes(entryPoint.path, content);
-    for (const route of entryPoint.routes ?? []) {
-      if (isAbsolute(route) || route.startsWith("../")) {
-        errors.push(`${entryPoint.path} has a non-repository route: ${route}`);
-        continue;
-      }
-      if (
-        (manifest.trustBoundary?.forbiddenRoutePrefixes ?? []).some((prefix) =>
-          route.startsWith(prefix),
-        )
-      ) {
-        errors.push(`${entryPoint.path} routes across the private boundary: ${route}`);
-      }
-      if (!discoveredRoutes.has(route)) {
-        errors.push(`${entryPoint.path} does not route to ${route}`);
-      }
-    }
+    const content = readText(context.root, entryPoint.path);
+    addDocumentChecks({ ...context, content, path: entryPoint.path });
+    checkEntryPointRoutes(context, entryPoint, entryPointRoutes(entryPoint.path, content));
   }
+};
 
-  const docs = manifest.maintainerDocs?.documents ?? [];
-  const docPaths = docs.map(({ path }) => path);
-  if (unique(docPaths).length !== docPaths.length) {
-    errors.push("knowledge manifest contains duplicate maintainer document paths");
-  }
-
+const checkMaintainerDocClassification = (context, docPaths) => {
+  const { currentVisibleFiles, errors, manifest } = context;
   const ignoredPrefixes =
     manifest.maintainerDocs?.ignoredWorktreePrefixes?.map(({ path }) => path) ?? [];
   const trackedDocs = currentVisibleFiles
@@ -274,312 +294,297 @@ export const validateKnowledgeArchitecture = ({
         !ignoredPrefixes.some((prefix) => path.startsWith(prefix)),
     )
     .toSorted();
-  const uncoveredDocs = trackedDocs.filter((path) => !docPaths.includes(path));
-  const phantomDocs = docPaths.filter((path) => !trackedDocs.includes(path));
-  for (const path of uncoveredDocs) {
-    errors.push(`maintainer document is not classified: ${path}`);
-  }
-  for (const path of phantomDocs) {
-    errors.push(`classified maintainer document is not tracked: ${path}`);
-  }
+  addClassificationChecks({
+    errors,
+    label: "maintainer document",
+    classified: docPaths,
+    tracked: trackedDocs,
+  });
+};
 
+const checkRootDocuments = (context) => {
+  const { currentVisibleFiles, errors, manifest, root } = context;
   const entryPointPaths = new Set((manifest.entryPoints ?? []).map(({ path }) => path));
   const rootDocs = manifest.maintainerDocs?.rootDocuments ?? [];
-  const rootDocPaths = rootDocs.map(({ path }) => path);
-  if (unique(rootDocPaths).length !== rootDocPaths.length) {
-    errors.push("knowledge manifest contains duplicate root document paths");
-  }
   const trackedRootDocs = currentVisibleFiles
     .filter((path) => path.endsWith(".md") && !path.includes("/") && !entryPointPaths.has(path))
     .toSorted();
-  for (const rootDoc of trackedRootDocs.filter((candidate) => !rootDocPaths.includes(candidate))) {
-    errors.push(`root document is not classified: ${rootDoc}`);
-  }
-  for (const rootDoc of rootDocPaths.filter((candidate) => !trackedRootDocs.includes(candidate))) {
-    errors.push(`classified root document is not tracked: ${rootDoc}`);
-  }
-
+  addClassificationChecks({
+    errors,
+    label: "root document",
+    classified: rootDocs.map(({ path }) => path),
+    tracked: trackedRootDocs,
+  });
   for (const { path, section } of rootDocs) {
-    addPathChecks({ errors, root, visible, path, kind: "root document" });
+    addPathChecks({ ...context, path, kind: "root document" });
     if (existsSync(join(root, path)) && section !== "release-history") {
-      addDocumentChecks({
-        content: readFileSync(join(root, path), "utf8"),
-        errors,
-        manifest,
-        path,
-        root,
-        visible,
-      });
+      checkDocument(context, path, false);
     }
   }
+};
 
+const checkMaintainerDocuments = (context, docs) => {
   for (const { path } of docs) {
-    addPathChecks({ errors, root, visible, path, kind: "maintainer document" });
-    if (!existsSync(join(root, path))) {
-      continue;
+    addPathChecks({ ...context, path, kind: "maintainer document" });
+    if (existsSync(join(context.root, path))) {
+      checkDocument(context, path);
     }
-    const content = readFileSync(join(root, path), "utf8");
-    addDocumentChecks({
-      content,
-      errors,
-      manifest,
-      path,
-      root,
-      visible,
-      checkSourcePaths: true,
-    });
   }
+};
 
+const checkDocsIndex = ({ errors, manifest, root }, docPaths) => {
   const indexPath = manifest.maintainerDocs?.index;
   if (!docPaths.includes(indexPath)) {
     errors.push(`maintainer docs index is not classified: ${indexPath}`);
-  } else if (existsSync(join(root, indexPath))) {
-    const linked = new Set(
-      localMarkdownTargets(indexPath, readFileSync(join(root, indexPath), "utf8")),
-    );
-    for (const path of docPaths) {
-      if (path !== indexPath && !linked.has(path)) {
-        errors.push(`${indexPath} does not index ${path}`);
-      }
+    return;
+  }
+  if (!existsSync(join(root, indexPath))) {
+    return;
+  }
+  const linked = new Set(localMarkdownTargets(indexPath, readText(root, indexPath)));
+  for (const path of docPaths) {
+    if (path !== indexPath && !linked.has(path)) {
+      errors.push(`${indexPath} does not index ${path}`);
     }
   }
+};
 
+const checkIgnoredWorktreePrefixes = ({ currentVisibleFiles, errors, manifest }) => {
   for (const ignored of manifest.maintainerDocs?.ignoredWorktreePrefixes ?? []) {
     const leaked = currentVisibleFiles.find((path) => path.startsWith(ignored.path));
     if (leaked !== undefined) {
       errors.push(`${ignored.path} must remain ignored, but Git can see ${leaked}`);
     }
   }
+};
 
-  const nestedGuides = currentVisibleFiles.filter((path) => path.endsWith("/AGENTS.md"));
-  for (const path of nestedGuides) {
-    addDocumentChecks({
-      content: readFileSync(join(root, path), "utf8"),
-      errors,
-      manifest,
-      path,
-      root,
-      visible,
-      checkSourcePaths: true,
-    });
+const checkNestedGuides = (context) => {
+  for (const path of context.currentVisibleFiles.filter((candidate) =>
+    candidate.endsWith("/AGENTS.md"),
+  )) {
+    checkDocument(context, path);
   }
+};
 
+const isValidHostRule = (hostRule) =>
+  typeof hostRule.root === "string" &&
+  hostRule.root.trim() !== "" &&
+  hostRule.mode === "scoped-router";
+
+const isHostRulePath = (path) =>
+  (path.startsWith(".claude/rules/") || path.startsWith(".agents/rules/")) && path.endsWith(".md");
+
+const checkHostRuleTree = (context, hostRule, classifiedHostRules) => {
+  const prefix = `${hostRule.root.replace(/\/+$/u, "")}/`;
+  const rules = context.currentVisibleFiles
+    .filter((path) => path.startsWith(prefix) && path.endsWith(".md"))
+    .toSorted();
+  if (rules.length === 0) {
+    context.errors.push(`${hostRule.client} host rule tree is empty: ${hostRule.root}`);
+  }
+  for (const path of rules) {
+    classifiedHostRules.add(path);
+    checkDocument(context, path);
+  }
+};
+
+const checkHostRules = (context) => {
+  const { currentVisibleFiles, errors, manifest } = context;
   const hostRules = manifest.hostRules ?? [];
   if (hostRules.length === 0) {
     errors.push("knowledge manifest must classify host rule trees");
   }
   const classifiedHostRules = new Set();
   for (const hostRule of hostRules) {
-    if (
-      typeof hostRule.root !== "string" ||
-      hostRule.root.trim() === "" ||
-      hostRule.mode !== "scoped-router"
-    ) {
+    if (isValidHostRule(hostRule)) {
+      checkHostRuleTree(context, hostRule, classifiedHostRules);
+    } else {
       errors.push(`invalid ${hostRule.client ?? "<unknown>"} host rule contract`);
-      continue;
-    }
-    const prefix = `${hostRule.root.replace(/\/+$/u, "")}/`;
-    const rules = currentVisibleFiles
-      .filter((path) => path.startsWith(prefix) && path.endsWith(".md"))
-      .toSorted();
-    if (rules.length === 0) {
-      errors.push(`${hostRule.client} host rule tree is empty: ${hostRule.root}`);
-    }
-    for (const path of rules) {
-      classifiedHostRules.add(path);
-      addDocumentChecks({
-        content: readFileSync(join(root, path), "utf8"),
-        errors,
-        manifest,
-        path,
-        root,
-        visible,
-        checkSourcePaths: true,
-      });
     }
   }
-  for (const path of currentVisibleFiles.filter(
-    (candidate) =>
-      (candidate.startsWith(".claude/rules/") || candidate.startsWith(".agents/rules/")) &&
-      candidate.endsWith(".md"),
-  )) {
+  for (const path of currentVisibleFiles.filter(isHostRulePath)) {
     if (!classifiedHostRules.has(path)) {
       errors.push(`host rule is not classified: ${path}`);
     }
   }
+};
 
-  const canonicalRoot = manifest.skills?.canonicalRoot;
-  const canonical = skillNames(currentVisibleFiles, canonicalRoot);
+const checkCanonicalSkills = (context) => {
+  const canonicalRoot = context.manifest.skills?.canonicalRoot;
+  const canonical = skillNames(context.currentVisibleFiles, canonicalRoot);
   if (canonical.length === 0) {
-    errors.push(`canonical skill tree is empty: ${canonicalRoot}`);
+    context.errors.push(`canonical skill tree is empty: ${canonicalRoot}`);
   }
   for (const name of canonical) {
     const path = `${canonicalRoot}/${name}/SKILL.md`;
-    addPathChecks({
-      errors,
-      root,
-      visible,
-      path,
-      kind: "canonical skill",
-    });
-    addDocumentChecks({
-      content: readFileSync(join(root, path), "utf8"),
-      errors,
-      manifest,
-      path,
-      root,
-      visible,
-      checkSourcePaths: true,
-    });
+    addPathChecks({ ...context, path, kind: "canonical skill" });
+    checkDocument(context, path);
   }
+  return canonical;
+};
 
-  for (const adapter of manifest.skills?.adapterRoots ?? []) {
-    const adapters = skillNames(currentVisibleFiles, adapter.path);
-    if (adapter.mode === "generated" && adapters.join("\0") !== canonical.join("\0")) {
-      errors.push(
-        `${adapter.client} generated adapters do not match canonical skills: ` +
-          `canonical=[${canonical.join(", ")}], adapters=[${adapters.join(", ")}]`,
-      );
-    }
-    for (const name of adapters) {
-      const path = `${adapter.path}/${name}/SKILL.md`;
-      addPathChecks({
-        errors,
-        root,
-        visible,
-        path,
-        kind: `${adapter.client} skill adapter`,
-      });
-      if (
-        adapter.mode === "generated" &&
-        !readFileSync(join(root, path), "utf8").includes(GENERATED_MARKER)
-      ) {
-        errors.push(`${path} is missing the generated adapter marker`);
-      }
-      addDocumentChecks({
-        content: readFileSync(join(root, path), "utf8"),
-        errors,
-        manifest,
-        path,
-        root,
-        visible,
-        checkSourcePaths: true,
-      });
-    }
+const checkSkillAdapter = (context, adapter, canonical) => {
+  const { errors, root } = context;
+  const generated = adapter.mode === "generated";
+  const adapters = skillNames(context.currentVisibleFiles, adapter.path);
+  if (generated && adapters.join("\0") !== canonical.join("\0")) {
+    errors.push(
+      `${adapter.client} generated adapters do not match canonical skills: ` +
+        `canonical=[${canonical.join(", ")}], adapters=[${adapters.join(", ")}]`,
+    );
   }
+  for (const name of adapters) {
+    const path = `${adapter.path}/${name}/SKILL.md`;
+    addPathChecks({ ...context, path, kind: `${adapter.client} skill adapter` });
+    if (generated && !readText(root, path).includes(GENERATED_MARKER)) {
+      errors.push(`${path} is missing the generated adapter marker`);
+    }
+    checkDocument(context, path);
+  }
+};
 
+const checkSkills = (context) => {
+  const canonical = checkCanonicalSkills(context);
+  for (const adapter of context.manifest.skills?.adapterRoots ?? []) {
+    checkSkillAdapter(context, adapter, canonical);
+  }
   addPathChecks({
-    errors,
-    root,
-    visible,
-    path: manifest.skills?.generator,
+    ...context,
+    path: context.manifest.skills?.generator,
     kind: "agent adapter generator",
   });
+};
 
-  const generatedContracts = manifest.generatedPathContracts ?? [];
-  for (const contract of generatedContracts) {
-    if (!isSafeRelativePath(contract.path)) {
-      errors.push(`generated path contract is unsafe: ${contract.path ?? "<unknown>"}`);
-    }
-    if (!isSafeRelativePath(contract.setupDocument)) {
-      errors.push(
-        `generated path setup document is unsafe: ${contract.setupDocument ?? "<unknown>"}`,
-      );
-      continue;
-    }
-    addPathChecks({
-      errors,
-      root,
-      visible,
-      path: contract.setupDocument,
-      kind: "generated path setup document",
-    });
-    if (
-      !Array.isArray(contract.setupCommand) ||
-      contract.setupCommand.length === 0 ||
-      contract.setupCommand.some((part) => typeof part !== "string" || part.trim() === "")
-    ) {
-      errors.push(`generated path contract has no executable setupCommand: ${contract.path}`);
-      continue;
-    }
-    if (existsSync(join(root, contract.setupDocument))) {
-      const setupContent = readFileSync(join(root, contract.setupDocument), "utf8");
-      const command = contract.setupCommand.join(" ");
-      if (!setupContent.includes(command)) {
-        errors.push(
-          `${contract.setupDocument} does not document generated path command: ${command}`,
-        );
-      }
-      if (!setupContent.includes(contract.path)) {
-        errors.push(`${contract.setupDocument} does not document generated path: ${contract.path}`);
-      }
-    }
+const checkGeneratedSetupDocument = ({ errors, root }, contract) => {
+  if (!existsSync(join(root, contract.setupDocument))) {
+    return;
   }
+  const setupContent = readText(root, contract.setupDocument);
+  const command = contract.setupCommand.join(" ");
+  if (!setupContent.includes(command)) {
+    errors.push(`${contract.setupDocument} does not document generated path command: ${command}`);
+  }
+  if (!setupContent.includes(contract.path)) {
+    errors.push(`${contract.setupDocument} does not document generated path: ${contract.path}`);
+  }
+};
 
-  const requiredExternalFields = [
-    "repository",
-    "role",
-    "direction",
-    "revisionSource",
-    "allowedRoot",
-  ];
-  const validDirections = new Set(["canonical-contract-to-public-consumer", "public-to-consumer"]);
-  const validProcessorKinds = new Set(["generator", "validator", "none"]);
+const checkGeneratedContract = (context, contract) => {
+  const { errors } = context;
+  if (!isSafeRelativePath(contract.path)) {
+    errors.push(`generated path contract is unsafe: ${contract.path ?? "<unknown>"}`);
+  }
+  if (!isSafeRelativePath(contract.setupDocument)) {
+    errors.push(
+      `generated path setup document is unsafe: ${contract.setupDocument ?? "<unknown>"}`,
+    );
+    return;
+  }
+  addPathChecks({
+    ...context,
+    path: contract.setupDocument,
+    kind: "generated path setup document",
+  });
+  if (!isExecutableCommand(contract.setupCommand)) {
+    errors.push(`generated path contract has no executable setupCommand: ${contract.path}`);
+    return;
+  }
+  checkGeneratedSetupDocument(context, contract);
+};
+
+const checkGeneratedContracts = (context) => {
+  for (const contract of context.manifest.generatedPathContracts ?? []) {
+    checkGeneratedContract(context, contract);
+  }
+};
+
+const processorProblem = (processor) => {
+  if (
+    typeof processor !== "object" ||
+    processor === null ||
+    !VALID_PROCESSOR_KINDS.has(processor.kind)
+  ) {
+    return "has invalid processor";
+  }
+  if (processor.kind === "none") {
+    return null;
+  }
+  if (typeof processor.entrypoint !== "string" || processor.entrypoint.trim() === "") {
+    return "is missing processor entrypoint";
+  }
+  if (!isSafeRelativePath(processor.entrypoint)) {
+    return `has unsafe processor entrypoint: ${processor.entrypoint}`;
+  }
+  return null;
+};
+
+const checkCommandProblem = (checkCommand) => {
+  if (!isExecutableCommand(checkCommand)) {
+    return "has no executable checkCommand";
+  }
+  if (checkCommand.some((part) => SHELL_CONTROL_PATTERN.test(part))) {
+    return "checkCommand contains shell control";
+  }
+  return null;
+};
+
+const externalSourceProblems = (source) => {
+  const problems = REQUIRED_EXTERNAL_FIELDS.filter(
+    (field) => typeof source[field] !== "string" || source[field].trim() === "",
+  ).map((field) => `is missing ${field}`);
+  if (!VALID_DIRECTIONS.has(source.direction)) {
+    problems.push(`has invalid direction: ${source.direction}`);
+  }
+  if (typeof source.allowedRoot === "string" && !isSafeRelativePath(source.allowedRoot)) {
+    problems.push(`has unsafe allowedRoot: ${source.allowedRoot}`);
+  }
+  problems.push(processorProblem(source.processor), checkCommandProblem(source.checkCommand));
+  return problems.filter((problem) => problem !== null);
+};
+
+const checkExternalSources = ({ errors, manifest }) => {
   const externalSources = manifest.externalSources ?? [];
   if (externalSources.length === 0) {
     errors.push("knowledge manifest must declare external source contracts");
   }
   for (const source of externalSources) {
-    for (const field of requiredExternalFields) {
-      if (typeof source[field] !== "string" || source[field].trim() === "") {
-        errors.push(`external source ${source.repository ?? "<unknown>"} is missing ${field}`);
-      }
-    }
-    if (!validDirections.has(source.direction)) {
-      errors.push(
-        `external source ${source.repository ?? "<unknown>"} has invalid direction: ${source.direction}`,
-      );
-    }
-    if (typeof source.allowedRoot === "string" && !isSafeRelativePath(source.allowedRoot)) {
-      errors.push(
-        `external source ${source.repository ?? "<unknown>"} has unsafe allowedRoot: ${source.allowedRoot}`,
-      );
-    }
-    if (
-      typeof source.processor !== "object" ||
-      source.processor === null ||
-      !validProcessorKinds.has(source.processor.kind)
-    ) {
-      errors.push(`external source ${source.repository ?? "<unknown>"} has invalid processor`);
-    } else if (
-      source.processor.kind !== "none" &&
-      (typeof source.processor.entrypoint !== "string" || source.processor.entrypoint.trim() === "")
-    ) {
-      errors.push(
-        `external source ${source.repository ?? "<unknown>"} is missing processor entrypoint`,
-      );
-    } else if (
-      source.processor.kind !== "none" &&
-      !isSafeRelativePath(source.processor.entrypoint)
-    ) {
-      errors.push(
-        `external source ${source.repository ?? "<unknown>"} has unsafe processor entrypoint: ${source.processor.entrypoint}`,
-      );
-    }
-    if (
-      !Array.isArray(source.checkCommand) ||
-      source.checkCommand.length === 0 ||
-      source.checkCommand.some((part) => typeof part !== "string" || part.trim() === "")
-    ) {
-      errors.push(
-        `external source ${source.repository ?? "<unknown>"} has no executable checkCommand`,
-      );
-    } else if (source.checkCommand.some((part) => /^(?:&&|\|\||[;|])$/u.test(part))) {
-      errors.push(
-        `external source ${source.repository ?? "<unknown>"} checkCommand contains shell control`,
-      );
+    const name = source.repository ?? "<unknown>";
+    for (const problem of externalSourceProblems(source)) {
+      errors.push(`external source ${name} ${problem}`);
     }
   }
+};
+
+export const validateKnowledgeArchitecture = ({
+  root = ROOT,
+  visibleFiles = trackedFiles(root),
+} = {}) => {
+  const errors = [];
+  const currentVisibleFiles = visibleFiles
+    .map(toPosix)
+    .filter((path) => existsSync(join(root, path)));
+  const context = {
+    currentVisibleFiles,
+    errors,
+    manifest: readJson(root, MANIFEST_PATH),
+    root,
+    visible: new Set(currentVisibleFiles),
+  };
+  const docs = context.manifest.maintainerDocs?.documents ?? [];
+  const docPaths = docs.map(({ path }) => path);
+
+  checkManifestHeader(context);
+  checkEntryPoints(context);
+  checkMaintainerDocClassification(context, docPaths);
+  checkRootDocuments(context);
+  checkMaintainerDocuments(context, docs);
+  checkDocsIndex(context, docPaths);
+  checkIgnoredWorktreePrefixes(context);
+  checkNestedGuides(context);
+  checkHostRules(context);
+  checkSkills(context);
+  checkGeneratedContracts(context);
+  checkExternalSources(context);
 
   return errors;
 };
