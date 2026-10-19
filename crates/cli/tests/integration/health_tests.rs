@@ -174,30 +174,6 @@ fn module_only_and_grouped_cyclomatic_populations_keep_separate_denominators() {
     );
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) {
-    std::fs::create_dir_all(dst).expect("create destination directory");
-    for entry in std::fs::read_dir(src).expect("read source directory") {
-        let entry = entry.expect("read source entry");
-        // A fixture's cache directory is not part of the fixture. Another test
-        // in this binary runs the real binary against the shared fixture as its
-        // root, which writes and renames cache files there, so copying that
-        // directory races the writer: the entry is read, the writer renames its
-        // temp file over the old one, and the copy fails with a not-found for a
-        // file the caller never asked for. The copy also wants a cold cache.
-        if entry.file_name() == ".fallow" {
-            continue;
-        }
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        let file_type = entry.file_type().expect("read source entry type");
-        if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path);
-        } else if !file_type.is_dir() {
-            std::fs::copy(&src_path, &dst_path).expect("copy file");
-        }
-    }
-}
-
 #[test]
 fn health_json_output_is_valid() {
     let output = run_fallow(
@@ -2453,7 +2429,7 @@ fn health_reports_angular_template_complexity() {
 #[test]
 fn health_component_rollup_survives_a_template_without_its_own_finding() {
     let dir = tempdir().unwrap();
-    copy_dir_recursive(&fixture_path("angular-component-rollup"), dir.path());
+    super::common::copy_fixture_tree(&fixture_path("angular-component-rollup"), dir.path());
     write_file(
         &dir.path().join(".fallowrc.json"),
         r#"{
@@ -2614,7 +2590,7 @@ fn health_emits_component_rollup_for_angular_component() {
 fn health_angular_template_carries_no_crap_dimension() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-template-complexity");
-    copy_dir_recursive(&fixture, dir.path());
+    super::common::copy_fixture_tree(&fixture, dir.path());
 
     write_file(
         &dir.path().join("package.json"),
@@ -2870,7 +2846,7 @@ fn health_reports_angular_inline_template_complexity() {
 fn health_inline_template_complexity_can_be_suppressed() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-inline-template-complexity");
-    copy_dir_recursive(&fixture, dir.path());
+    super::common::copy_fixture_tree(&fixture, dir.path());
 
     let component_path = dir.path().join("src/host-game.component.ts");
     let original = std::fs::read_to_string(&component_path).expect("read component");
@@ -2920,7 +2896,7 @@ fn health_inline_template_complexity_can_be_suppressed() {
 #[test]
 fn health_inline_template_hint_matches_the_json_action_on_a_tsx_component() {
     let dir = tempdir().unwrap();
-    copy_dir_recursive(
+    super::common::copy_fixture_tree(
         &fixture_path("angular-inline-template-complexity"),
         dir.path(),
     );
@@ -2971,7 +2947,7 @@ fn health_inline_template_hint_matches_the_json_action_on_a_tsx_component() {
 fn health_html_template_complexity_can_be_suppressed() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-template-complexity");
-    copy_dir_recursive(&fixture, dir.path());
+    super::common::copy_fixture_tree(&fixture, dir.path());
 
     let template_path = dir.path().join("src/permissions.component.html");
     let original = std::fs::read_to_string(&template_path).expect("read template");
@@ -4688,7 +4664,7 @@ fn assert_type_only_test_reach_gaps(coverage: &serde_json::Value) {
 #[test]
 fn health_coverage_gaps_type_only_test_reach_is_stable_on_a_warm_cache() {
     let dir = tempdir().expect("create temp dir");
-    copy_dir_recursive(&fixture_path("type-only-test-reach"), dir.path());
+    super::common::copy_fixture_tree(&fixture_path("type-only-test-reach"), dir.path());
     let args = ["--coverage-gaps", "--format", "json", "--quiet"];
 
     let cold = run_fallow_in_root("health", dir.path(), &args);
@@ -5214,7 +5190,7 @@ fn health_coverage_gaps_production_excludes_dead_test_helpers() {
 fn health_coverage_gaps_suppressed_file_excluded() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
-    copy_dir_recursive(&fixture_path("coverage-gaps"), root);
+    super::common::copy_fixture_tree(&fixture_path("coverage-gaps"), root);
 
     write_file(
         &root.join("src/setup-only.ts"),
@@ -5864,7 +5840,7 @@ fn health_group_by_non_monorepo_emits_single_json_error() {
 fn health_coverage_gaps_changed_since_scopes_results() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();
-    copy_dir_recursive(&fixture_path("coverage-gaps"), root);
+    super::common::copy_fixture_tree(&fixture_path("coverage-gaps"), root);
 
     git(root, &["init"]);
     git(root, &["config", "user.name", "Test User"]);
@@ -9209,7 +9185,7 @@ fn health_sfc_template_findings_recommend_a_markup_suppression_comment() {
 fn health_sfc_suppression_comment_works_on_the_reported_line() {
     for file in ["Widget.svelte", "Panel.vue", "Board.astro"] {
         let dir = tempdir().unwrap();
-        copy_dir_recursive(
+        super::common::copy_fixture_tree(
             &fixture_path("issue-2163-sfc-template-complexity"),
             dir.path(),
         );
@@ -9237,7 +9213,7 @@ fn health_sfc_suppression_comment_works_on_the_reported_line() {
 fn health_sfc_suppression_above_the_wrapper_element_still_fires() {
     for file in ["Widget.svelte", "Panel.vue", "Board.astro"] {
         let dir = tempdir().unwrap();
-        copy_dir_recursive(
+        super::common::copy_fixture_tree(
             &fixture_path("issue-2163-sfc-template-complexity"),
             dir.path(),
         );
@@ -9286,7 +9262,7 @@ fn issue_2163_override_config(max_crap: Option<&str>) -> String {
 }
 
 fn write_issue_2163_fixture(root: &Path, config: &str) {
-    copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
+    super::common::copy_fixture_tree(&fixture_path("issue-2163-sfc-template-complexity"), root);
     std::fs::remove_file(root.join("src/Panel.vue")).expect("drop vue sibling");
     std::fs::remove_file(root.join("src/Board.astro")).expect("drop astro sibling");
     write_file(
@@ -9627,7 +9603,7 @@ fn health_threshold_override_reports_no_match_on_a_full_run() {
 /// `maxCrap` on a template unit and is therefore inert (stale, empty
 /// `outstanding`) since template units left the CRAP dimension (issue #2235).
 fn write_two_override_fixture(root: &Path) {
-    copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
+    super::common::copy_fixture_tree(&fixture_path("issue-2163-sfc-template-complexity"), root);
     write_file(
         &root.join(".fallowrc.json"),
         r#"{
@@ -10154,7 +10130,7 @@ fn health_override_rows_do_not_collapse_across_same_named_units() {
 }
 
 fn widget_svelte_override_root(root: &Path) {
-    copy_dir_recursive(&fixture_path("issue-2163-sfc-template-complexity"), root);
+    super::common::copy_fixture_tree(&fixture_path("issue-2163-sfc-template-complexity"), root);
     write_file(
         &root.join(".fallowrc.json"),
         r#"{
@@ -10346,7 +10322,7 @@ fn health_unit_size_only_override_that_still_breaches_names_its_dimension() {
 fn health_component_scoped_override_reaches_the_rollup_and_is_disclosed() {
     let dir = tempdir().expect("create temp dir");
     let root = dir.path();
-    copy_dir_recursive(&fixture_path("angular-component-rollup"), root);
+    super::common::copy_fixture_tree(&fixture_path("angular-component-rollup"), root);
     write_file(
         &root.join(".fallowrc.json"),
         r#"{
@@ -10498,7 +10474,7 @@ fn health_svelte_snippet_units_match_the_file_split() {
 #[test]
 fn health_svelte_snippet_override_matches_the_exact_unit_name() {
     let dir = tempdir().expect("create temp dir");
-    copy_dir_recursive(&fixture_path(SNIPPET_FIXTURE), dir.path());
+    super::common::copy_fixture_tree(&fixture_path(SNIPPET_FIXTURE), dir.path());
     write_file(
         &dir.path().join(".fallowrc.json"),
         r#"{
@@ -10541,7 +10517,7 @@ fn health_svelte_snippet_override_matches_the_exact_unit_name() {
 #[test]
 fn health_svelte_snippet_suppression_hits_only_the_snippet() {
     let dir = tempdir().expect("create temp dir");
-    copy_dir_recursive(&fixture_path(SNIPPET_FIXTURE), dir.path());
+    super::common::copy_fixture_tree(&fixture_path(SNIPPET_FIXTURE), dir.path());
 
     let before = parse_json(&run_fallow_in_root("health", dir.path(), &SNIPPET_ARGS));
     let snippet = finding_for(&before, "Snip.svelte", "<snippet:rowBody>")

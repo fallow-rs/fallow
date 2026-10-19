@@ -2,7 +2,8 @@ use fallow_config::{PartialRulesConfig, Severity};
 use fallow_types::results::SuppressionOrigin;
 
 use super::common::{
-    create_config, create_config_with_overrides, create_config_with_rules, fixture_path,
+    copy_fixture_tree, create_config, create_config_with_overrides, create_config_with_rules,
+    fixture_path,
 };
 
 #[test]
@@ -508,19 +509,6 @@ fn stale_respects_per_file_override_off() {
         stale_for_file_level,
         "file-level.ts is not covered by the override; its unused-file marker should still be stale"
     );
-}
-
-fn copy_fixture_tree(src: &std::path::Path, dst: &std::path::Path) {
-    std::fs::create_dir_all(dst).expect("create dest dir");
-    for entry in std::fs::read_dir(src).expect("read fixture dir") {
-        let entry = entry.expect("dir entry");
-        let to = dst.join(entry.file_name());
-        if entry.file_type().expect("file type").is_dir() {
-            copy_fixture_tree(&entry.path(), &to);
-        } else {
-            std::fs::copy(entry.path(), &to).expect("copy file");
-        }
-    }
 }
 
 type FindingLocator = fn(&fallow_core::results::AnalysisResults) -> Vec<(std::path::PathBuf, u32)>;

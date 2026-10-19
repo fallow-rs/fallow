@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::common::{create_config, create_config_with_cache, fixture_path};
+use super::common::{copy_fixture_tree, create_config, create_config_with_cache, fixture_path};
 
 #[test]
 fn source_read_failure_preserves_sparse_file_ids() {
@@ -763,18 +763,4 @@ fn walk_files(dir: &std::path::Path) -> Vec<PathBuf> {
         }
     }
     found
-}
-
-fn copy_fixture_tree(src: &std::path::Path, dst: &std::path::Path) {
-    std::fs::create_dir_all(dst).expect("create dest dir");
-    for entry in std::fs::read_dir(src).expect("read fixture dir") {
-        let entry = entry.expect("dir entry");
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if entry.file_type().expect("file type").is_dir() {
-            copy_fixture_tree(&from, &to);
-        } else {
-            std::fs::copy(&from, &to).expect("copy file");
-        }
-    }
 }

@@ -375,3 +375,23 @@ pub fn create_config_with_ignore_decorators(
     }
     .resolve(root, OutputFormat::Human, 4, true, true, None)
 }
+
+/// Copy a fixture tree without its `.fallow` cache directory. CLI tests run the
+/// binary directly on shared fixtures and write cache files there in parallel
+/// (nextest runs test binaries at the same time), so a cache file can disappear
+/// between the listing and the copy. A copy also wants a cold cache.
+pub fn copy_fixture_tree(src: &std::path::Path, dst: &std::path::Path) {
+    std::fs::create_dir_all(dst).expect("create dest dir");
+    for entry in std::fs::read_dir(src).expect("read fixture dir") {
+        let entry = entry.expect("dir entry");
+        if entry.file_name() == ".fallow" {
+            continue;
+        }
+        let to = dst.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_fixture_tree(&entry.path(), &to);
+        } else {
+            std::fs::copy(entry.path(), &to).expect("copy file");
+        }
+    }
+}

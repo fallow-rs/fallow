@@ -15,23 +15,7 @@ use fallow_config::{FallowConfig, OutputFormat};
 use fallow_core::graph_cache::{GraphCacheManifest, GraphCacheMode};
 use fallow_types::discover::FileId;
 
-use super::common::{create_config_with_cache, fixture_path};
-
-/// Recursively copy a fixture tree into `dst` so the graph cache writes into a
-/// scratch directory and source mutation does not touch the checked-in fixture.
-fn copy_tree(src: &Path, dst: &Path) {
-    std::fs::create_dir_all(dst).expect("create dest dir");
-    for entry in std::fs::read_dir(src).expect("read fixture dir") {
-        let entry = entry.expect("dir entry");
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if entry.file_type().expect("file type").is_dir() {
-            copy_tree(&from, &to);
-        } else {
-            std::fs::copy(&from, &to).expect("copy file");
-        }
-    }
-}
+use super::common::{copy_fixture_tree, create_config_with_cache, fixture_path};
 
 /// Run the same fixture cold (clean cache) then warm (cache present) and assert
 /// the full results are byte-identical. The cold run persists `graph-cache.bin`;
@@ -39,7 +23,7 @@ fn copy_tree(src: &Path, dst: &Path) {
 fn assert_cold_warm_identical(fixture: &str) {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path(fixture), &root);
+    copy_fixture_tree(&fixture_path(fixture), &root);
 
     // Cache dir lives OUTSIDE the project root so it is not itself an analyzed
     // source tree; the graph cache writes `graph-cache.bin` here.
@@ -152,7 +136,7 @@ fn basic_project_cold_vs_warm_identical() {
 fn source_change_misses_cache_and_reflects_change() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("barrel-exports"), &root);
+    copy_fixture_tree(&fixture_path("barrel-exports"), &root);
     let cache_dir = temp.path().join("cache");
 
     let config = create_config_with_cache(root.clone(), cache_dir.clone());
@@ -298,7 +282,7 @@ fn unused_export_names(results: &fallow_types::results::AnalysisResults) -> Vec<
 fn file_deletion_misses_cache_and_reflects_change() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("basic-project"), &root);
+    copy_fixture_tree(&fixture_path("basic-project"), &root);
     let cache_dir = temp.path().join("cache");
 
     let config = create_config_with_cache(root.clone(), cache_dir.clone());
@@ -340,7 +324,7 @@ fn file_deletion_misses_cache_and_reflects_change() {
 fn file_rename_misses_cache_and_reflects_new_path() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("basic-project"), &root);
+    copy_fixture_tree(&fixture_path("basic-project"), &root);
     let cache_dir = temp.path().join("cache");
 
     let config = create_config_with_cache(root.clone(), cache_dir.clone());
@@ -396,7 +380,7 @@ fn file_rename_misses_cache_and_reflects_new_path() {
 fn production_mode_change_misses_cache_and_reflects_file_set() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("production-mode"), &root);
+    copy_fixture_tree(&fixture_path("production-mode"), &root);
     let cache_dir = temp.path().join("cache");
 
     let non_production = create_config_with_cache(root.clone(), cache_dir.clone());
@@ -443,7 +427,7 @@ fn production_mode_change_misses_cache_and_reflects_file_set() {
 fn ignore_pattern_change_misses_cache_and_reflects_file_set() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("basic-project"), &root);
+    copy_fixture_tree(&fixture_path("basic-project"), &root);
     let cache_dir = temp.path().join("cache");
 
     let without_ignore = create_config_with_cache(root.clone(), cache_dir.clone());
@@ -495,7 +479,7 @@ fn ignore_pattern_change_misses_cache_and_reflects_file_set() {
 fn resolve_condition_change_misses_cache_and_matches_cold_output() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("barrel-exports"), &root);
+    copy_fixture_tree(&fixture_path("barrel-exports"), &root);
     let cache_dir = temp.path().join("cache");
 
     let base = create_config_with_cache(root.clone(), cache_dir.clone());
@@ -536,7 +520,7 @@ fn resolve_condition_change_misses_cache_and_matches_cold_output() {
 fn warm_graph_cache_hit_skips_import_resolution() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("barrel-exports"), &root);
+    copy_fixture_tree(&fixture_path("barrel-exports"), &root);
     let cache_dir = temp.path().join("cache");
 
     let config = create_config_with_cache(root, cache_dir);
@@ -571,7 +555,7 @@ fn warm_graph_cache_hit_skips_import_resolution() {
 fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path(fixture), &root);
+    copy_fixture_tree(&fixture_path(fixture), &root);
     let cache_dir = temp.path().join("cache");
 
     let config = create_config_with_cache(root, cache_dir.clone());
@@ -702,7 +686,7 @@ fn benchmark_zod_cold_vs_warm_total_identical() {
 fn manifest_matches_only_on_identical_inputs() {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("project");
-    copy_tree(&fixture_path("namespace-imports"), &root);
+    copy_fixture_tree(&fixture_path("namespace-imports"), &root);
 
     let config = create_config_with_cache(root, temp.path().join("cache"));
     let files = fallow_core::discover::discover_files(&config);
@@ -759,7 +743,7 @@ fn a_graph_cache_from_another_root_never_reuses_original_checkout_paths() {
     .unwrap();
     let original_config = create_config_with_cache(original.clone(), cache.clone());
     fallow_core::analyze(&original_config).expect("prime original cache");
-    copy_tree(&original, &relocated);
+    copy_fixture_tree(&original, &relocated);
     let mut relocated_config = create_config_with_cache(relocated.clone(), cache);
     let warm = fallow_core::analyze(&relocated_config).expect("relocated warm analysis");
     relocated_config.no_cache = true;
