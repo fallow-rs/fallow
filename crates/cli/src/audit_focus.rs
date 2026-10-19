@@ -257,7 +257,7 @@ fn build_reason(
     }
     if facts.fan_in > 0 {
         parts.push(format!(
-            "high fan-in ({} importer{})",
+            "fan-in ({} importer{})",
             facts.fan_in,
             if facts.fan_in == 1 { "" } else { "s" }
         ));
@@ -615,6 +615,21 @@ mod tests {
         // taint -> also a security-sensitive risk zone (+2).
         assert_eq!(taint_unit.score.risk_zone, RISK_ZONE_WEIGHT);
         assert_eq!(taint_unit.label, FocusLabel::ReviewHere);
+    }
+
+    /// The reason states the importer count and does not rank it. A file with
+    /// one importer was shown as "high fan-in (1 importer)".
+    #[test]
+    fn fan_in_reason_states_the_count_without_a_rank() {
+        let gf = vec![facts("src/one.ts", 1, 1, false, false)];
+        let map = build_focus_map(&inputs(&gf, &[], &[], &[], &[]));
+        let unit = map
+            .review_here
+            .iter()
+            .chain(map.deprioritized.iter())
+            .next()
+            .unwrap();
+        assert_eq!(unit.reason, "fan-in (1 importer), fan-out 1");
     }
 
     #[test]

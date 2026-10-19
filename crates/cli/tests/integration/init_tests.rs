@@ -188,6 +188,33 @@ fn init_exits_nonzero_if_config_exists() {
     cleanup(&dir);
 }
 
+/// After `init` writes the config, the user sees the command for the first
+/// report. `--quiet` keeps that line out.
+#[test]
+fn init_names_the_first_report_as_next_step() {
+    let dir = init_temp_dir("next-step");
+    let output = run_fallow_raw(&["init", "--root", dir.to_str().unwrap()]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        output
+            .stderr
+            .contains("Next: run `fallow` for a first report"),
+        "init must name the first report, stderr: {}",
+        output.stderr
+    );
+    cleanup(&dir);
+
+    let dir = init_temp_dir("next-step-quiet");
+    let output = run_fallow_raw(&["init", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        !output.stderr.contains("Next:"),
+        "--quiet must drop the next step, stderr: {}",
+        output.stderr
+    );
+    cleanup(&dir);
+}
+
 /// Issue #1794: without a local `node_modules/fallow/schema.json`, `fallow
 /// init` writes the remote GitHub URL fallback.
 #[test]

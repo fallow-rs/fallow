@@ -56,7 +56,10 @@ pub fn setup_pointer_applicable(root: &Path) -> bool {
 /// One-line human setup hint for bare `fallow` output: the prose counterpart of
 /// the `setup` next-step (agents get the JSON form, humans get this line).
 /// Worded as an offer, not a deficiency: zero-config is a supported happy path.
-pub const SETUP_HINT: &str = "Setup: `fallow init --agents` writes an agent guide; `fallow hooks install --target agent` adds a commit gate (hide this hint: `fallow init --decline`).";
+/// It names `fallow agent install`, the one-pass agent setup, so that the
+/// skills and the MCP server are part of the offer, not only the guide and
+/// the gate.
+pub const SETUP_HINT: &str = "Setup: `fallow init` writes a config; `fallow agent install --dry-run` previews the agent guide, skills, MCP server, and commit gate (hide this hint: `fallow init --decline`).";
 
 /// Real-counter summary fragment shared by the next-step reason and the human
 /// one-liner. The output crate owns the `impact-report` command contract.

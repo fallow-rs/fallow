@@ -700,7 +700,7 @@ pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
             prune_baselines: false,
         });
     }
-    run_init_config(opts.root, opts.use_toml)
+    run_init_config(opts.root, opts.use_toml, opts.quiet)
 }
 
 /// `init --decline`: persist a deliberate "stay unconfigured" decision so the
@@ -729,7 +729,7 @@ fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
+fn run_init_config(root: &Path, use_toml: bool, quiet: bool) -> ExitCode {
     let existing_names = [
         ".fallowrc.json",
         ".fallowrc.jsonc",
@@ -766,9 +766,16 @@ fn run_init_config(root: &Path, use_toml: bool) -> ExitCode {
 
     print_detection_summary(&info);
     ensure_gitignore(root);
+    if !quiet {
+        eprintln!("{INIT_NEXT_STEP}");
+    }
 
     ExitCode::SUCCESS
 }
+
+/// The line `fallow init` prints after it writes the config. Without it, the
+/// first run ends with no pointer to the first report.
+const INIT_NEXT_STEP: &str = "Next: run `fallow` for a first report. Run `fallow agent install --dry-run` to see the setup for coding agents.";
 
 fn run_init_agents(root: &Path) -> ExitCode {
     let agents_path = root.join(AGENTS_GUIDE_FILENAME);

@@ -158,6 +158,27 @@ fallow audit --format json --quiet --base main
 
 Returns a pass/warn/fail verdict for issues introduced by the PR. Only analyzes files changed since the `main` branch.
 
+### Review a change and let fallow check the verdict
+```bash
+fallow audit --format json --quiet                                             # 1. gate the change
+fallow audit --walkthrough-guide --format json --quiet > .fallow/guide.json   # 2. read the guide
+fallow audit --walkthrough-file .fallow/judgment.json --format json --quiet   # 4. fallow checks the judgment
+```
+
+Step 3 is your review. Read `digest.decisions[]` and `change_anchors[]` in the guide, then write `.fallow/judgment.json`:
+
+```json
+{
+  "graph_snapshot_hash": "<copy from the guide>",
+  "judgments": [
+    { "signal_id": "sig:<from digest.decisions>", "framing": "Callers keep their imports.", "action": "fyi" },
+    { "change_anchor": "chg:<from change_anchors>", "framing": "unusedHelper has no caller.", "action": "address" }
+  ]
+}
+```
+
+Fallow validates the judgment against the live graph. It rejects an id that it did not emit. It refuses the whole file as `stale` when the hash no longer matches. Report only the `accepted` judgments. Keep both files under `.fallow/`, which git ignores: a new file elsewhere in the tree changes the hash. On `stale: true`, fetch the guide again.
+
 ### Find code duplication
 ```bash
 fallow dupes --format json --quiet

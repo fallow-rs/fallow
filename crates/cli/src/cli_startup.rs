@@ -45,16 +45,32 @@ pub fn parse_targets_lossy(value: &str) -> Targets {
     readable.join(",").parse().unwrap_or_default()
 }
 
+/// Decide whether tracing lines on stderr carry ANSI color codes.
+///
+/// The fmt layer colors by default, also when stderr is a file or a pipe. An
+/// agent or a log file then gets raw escape codes around each warning. Color
+/// stays on only for a terminal, and `NO_COLOR` with a value turns it off.
+#[must_use]
+pub fn tracing_uses_ansi(stderr_is_terminal: bool, no_color: Option<&OsStr>) -> bool {
+    stderr_is_terminal && no_color.is_none_or(OsStr::is_empty)
+}
+
 /// Set up tracing for the CLI.
 pub fn setup_tracing() {
+    use std::io::IsTerminal as _;
     use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
 
     let rust_log = std::env::var("RUST_LOG").ok();
+    let ansi = tracing_uses_ansi(
+        std::io::stderr().is_terminal(),
+        std::env::var_os("NO_COLOR").as_deref(),
+    );
     // The builder alone keeps INFO and above. The target filter decides.
     tracing_subscriber::fmt()
         .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
         .with_writer(std::io::stderr)
+        .with_ansi(ansi)
         .with_target(false)
         .with_timer(tracing_subscriber::fmt::time::uptime())
         .finish()
@@ -821,6 +837,16 @@ fn init_cli_diff_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tracing color follows the terminal, so a pipe or a log file gets
+    /// plain warnings.
+    #[test]
+    fn tracing_color_needs_a_terminal_and_no_no_color() {
+        assert!(tracing_uses_ansi(true, None));
+        assert!(tracing_uses_ansi(true, Some(OsStr::new(""))));
+        assert!(!tracing_uses_ansi(false, None));
+        assert!(!tracing_uses_ansi(true, Some(OsStr::new("1"))));
+    }
 
     /// The hint names every subcommand that loads and saves the global
     /// baseline.
