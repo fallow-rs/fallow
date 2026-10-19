@@ -566,6 +566,7 @@ test("release runs the test suite natively on arm64 Linux and Apple Silicon", ()
   assert.match(job, /permissions:\n\s+contents: read/);
   assert.doesNotMatch(job, /id-token: write|contents: write|secrets\./);
   assert.match(job, /cargo test --workspace --no-fail-fast --lib --bins --tests --examples/);
+  assert.match(job, /cd crates\/napi && npm test/);
 });
 
 test("NAPI builds preserve the maintained native loader", () => {
