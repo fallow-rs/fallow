@@ -195,11 +195,11 @@ fn init_names_the_first_report_as_next_step() {
     let dir = init_temp_dir("next-step");
     let output = run_fallow_raw(&["init", "--root", dir.to_str().unwrap()]);
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    // The test runs from another directory, so the command carries `--root`.
     assert!(
-        output
-            .stderr
-            .contains("Next: run `fallow` for a first report"),
-        "init must name the first report, stderr: {}",
+        output.stderr.contains("Next: run `fallow --root ")
+            && output.stderr.contains("` for a first report"),
+        "init must name the first report for its root, stderr: {}",
         output.stderr
     );
     cleanup(&dir);
@@ -211,6 +211,36 @@ fn init_names_the_first_report_as_next_step() {
         !output.stderr.contains("Next:"),
         "--quiet must drop the next step, stderr: {}",
         output.stderr
+    );
+    cleanup(&dir);
+}
+
+/// The bare-run setup hint on an unconfigured project offers the one-pass
+/// agent setup, not the older `hooks install --target agent` command.
+#[test]
+fn bare_run_setup_hint_offers_agent_install_dry_run() {
+    let dir = init_temp_dir("setup-hint");
+    fs::write(dir.join("index.ts"), "export const used = 1;\n").unwrap();
+    fs::write(dir.join("orphan.ts"), "export const orphan = 2;\n").unwrap();
+    let mut cmd = Command::new(crate::common::fallow_bin());
+    crate::common::scrub_analysis_env(&mut cmd);
+    for var in ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "FALLOW_SUGGESTIONS"] {
+        cmd.env_remove(var);
+    }
+    let output = cmd
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .args(["--root", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`fallow agent install --dry-run` previews"),
+        "the hint must offer the agent install dry run, stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("hooks install --target agent"),
+        "the hint must not name the old gate command, stderr: {stderr}"
     );
     cleanup(&dir);
 }

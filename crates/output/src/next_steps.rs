@@ -518,8 +518,8 @@ fn setup_pointer(offer_setup: bool) -> Option<NextStep> {
     }
     Some(next_step(
         "setup",
-        "fallow schema".to_string(),
-        "fallow has no config here; the manifest lists guided-setup commands (agent guide, commit gate) to offer the user",
+        "fallow agent install --dry-run".to_string(),
+        "fallow has no config here; offer the user `fallow init` for a config, and this dry run previews the agent guide, skills, MCP server, and commit gate",
     ))
 }
 

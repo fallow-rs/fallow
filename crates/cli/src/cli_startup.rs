@@ -50,8 +50,17 @@ pub fn parse_targets_lossy(value: &str) -> Targets {
 /// The fmt layer colors by default, also when stderr is a file or a pipe. An
 /// agent or a log file then gets raw escape codes around each warning. Color
 /// stays on only for a terminal, and `NO_COLOR` with a value turns it off.
+/// `CLICOLOR_FORCE` with a value other than `0` turns it on, as it does for
+/// the report output, so a forced-color pipe gets colored warnings too.
 #[must_use]
-pub fn tracing_uses_ansi(stderr_is_terminal: bool, no_color: Option<&OsStr>) -> bool {
+pub fn tracing_uses_ansi(
+    stderr_is_terminal: bool,
+    no_color: Option<&OsStr>,
+    clicolor_force: Option<&OsStr>,
+) -> bool {
+    if clicolor_force.is_some_and(|value| value != "0") {
+        return true;
+    }
     stderr_is_terminal && no_color.is_none_or(OsStr::is_empty)
 }
 
@@ -65,6 +74,7 @@ pub fn setup_tracing() {
     let ansi = tracing_uses_ansi(
         std::io::stderr().is_terminal(),
         std::env::var_os("NO_COLOR").as_deref(),
+        std::env::var_os("CLICOLOR_FORCE").as_deref(),
     );
     // The builder alone keeps INFO and above. The target filter decides.
     tracing_subscriber::fmt()
@@ -842,10 +852,18 @@ mod tests {
     /// plain warnings.
     #[test]
     fn tracing_color_needs_a_terminal_and_no_no_color() {
-        assert!(tracing_uses_ansi(true, None));
-        assert!(tracing_uses_ansi(true, Some(OsStr::new(""))));
-        assert!(!tracing_uses_ansi(false, None));
-        assert!(!tracing_uses_ansi(true, Some(OsStr::new("1"))));
+        assert!(tracing_uses_ansi(true, None, None));
+        assert!(tracing_uses_ansi(true, Some(OsStr::new("")), None));
+        assert!(!tracing_uses_ansi(false, None, None));
+        assert!(!tracing_uses_ansi(true, Some(OsStr::new("1")), None));
+        // CLICOLOR_FORCE wins, as it does for the report output.
+        assert!(tracing_uses_ansi(false, None, Some(OsStr::new("1"))));
+        assert!(tracing_uses_ansi(
+            true,
+            Some(OsStr::new("1")),
+            Some(OsStr::new("1"))
+        ));
+        assert!(!tracing_uses_ansi(false, None, Some(OsStr::new("0"))));
     }
 
     /// The hint names every subcommand that loads and saves the global

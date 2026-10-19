@@ -153,7 +153,7 @@ Every dead-code, health, and duplication finding in JSON responses includes a st
 
 `dead-code`, `health`, `dupes`, bare `fallow`, and `audit` JSON output may include a top-level `next_steps` array of read-only follow-up commands computed from the run's findings. Each entry is `{ id, command, reason }`. The `command` is runnable as-is (never a placeholder, never `fix` or any other mutating command); the stable kebab-case `id` (`setup`, `impact-report`, `trace-unused-export`, `trace-deprecated-export`, `trace-clone`, `complexity-breakdown`, `scope-workspaces`, `audit-changed`) maps to a verification step to run before acting, for example tracing an export before deleting it.
 
-A leading `setup` step (command: `fallow schema`) appears only on unconfigured, non-CI projects with findings and doubles as an onboarding trigger; it disappears after setup or `fallow init --decline`.
+A leading `setup` step (command: `fallow agent install --dry-run`) appears only on unconfigured, non-CI projects with findings and doubles as an onboarding trigger; it disappears after setup or `fallow init --decline`.
 
 An at-most-weekly `impact-report` step (command: `fallow impact`) carries the local value digest when impact tracking has non-zero results; it may appear in a clean run.
 

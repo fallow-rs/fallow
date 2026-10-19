@@ -14,14 +14,14 @@ const file = (over: Partial<WalkthroughFile>): WalkthroughFile => ({
 
 describe("deriveFileSignal", () => {
   it("parses fan-in and fan-out from the reason", () => {
-    const s = deriveFileSignal(file({ reason: "high fan-in (17 importers), fan-out 2" }));
+    const s = deriveFileSignal(file({ reason: "fan-in (17 importers), fan-out 2" }));
     expect(s.fanIn).toBe(17);
     expect(s.fanOut).toBe(2);
     expect(s.fanInTone).toBe("hub");
   });
 
   it("handles a single importer and isolated changes", () => {
-    expect(deriveFileSignal(file({ reason: "high fan-in (1 importer)" })).fanIn).toBe(1);
+    expect(deriveFileSignal(file({ reason: "fan-in (1 importer)" })).fanIn).toBe(1);
     const iso = deriveFileSignal(file({ reason: "isolated change, no blast beyond the diff" }));
     expect(iso.fanIn).toBe(0);
     expect(iso.isolated).toBe(true);

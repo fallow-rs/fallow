@@ -448,7 +448,7 @@ pub fn run_agent_install(
     }
 
     let mut next_actions = next_actions(&ctx, &harnesses, detected, mcp_command.as_ref(), &steps);
-    if let Some(apply) = apply_dry_run_action(opts, &root, &harnesses, detected, &steps) {
+    if let Some(apply) = apply_dry_run_action(opts, &root, &harnesses, &steps) {
         next_actions.insert(0, apply);
     }
     let report = Report {
@@ -511,14 +511,14 @@ pub fn run_agent_uninstall(
 
 /// After a dry run that plans writes, name the command that applies the plan.
 ///
-/// The command repeats every flag that changes the plan, so it writes the
-/// same steps that the dry run lists. A dry run with nothing to write gets no
-/// action.
+/// The command repeats every flag that changes the plan, also the harness set
+/// that detection found, so it writes the same steps that the dry run lists.
+/// An empty detected set stays implicit, because no flag selects "no harness".
+/// A dry run with nothing to write gets no action.
 fn apply_dry_run_action(
     opts: &AgentInstallOptions<'_>,
     root: &Path,
     harnesses: &[Harness],
-    detected: bool,
     steps: &[StepReport],
 ) -> Option<NextAction> {
     if !opts.dry_run || !steps.iter().any(|step| step.status == StepStatus::Written) {
@@ -526,7 +526,7 @@ fn apply_dry_run_action(
     }
     Some(NextAction {
         id: "agent-install-apply",
-        command: apply_command(opts, root, harnesses, detected),
+        command: apply_command(opts, root, harnesses),
         reason: "This was a dry run. The command writes the steps marked \"would write\"."
             .to_string(),
         mutating: true,
@@ -535,19 +535,14 @@ fn apply_dry_run_action(
 
 /// `fallow agent install` with the plan-changing flags of `opts`, without
 /// `--dry-run`.
-fn apply_command(
-    opts: &AgentInstallOptions<'_>,
-    root: &Path,
-    harnesses: &[Harness],
-    detected: bool,
-) -> String {
+fn apply_command(opts: &AgentInstallOptions<'_>, root: &Path, harnesses: &[Harness]) -> String {
     let mut words: Vec<String> = vec!["fallow".into(), "agent".into(), "install".into()];
-    // A detected set needs no `--harness`: detection picks it again.
-    if !detected {
-        for harness in harnesses {
-            words.push("--harness".into());
-            words.push(harness.as_str().into());
-        }
+    // Repeat a detected set too. Detection reads the session environment and
+    // `$HOME`, so a run from another shell can detect a different set and
+    // write a different plan.
+    for harness in harnesses {
+        words.push("--harness".into());
+        words.push(harness.as_str().into());
     }
     if opts.user {
         words.push("--user".into());

@@ -161,12 +161,13 @@ Returns a pass/warn/fail verdict for issues introduced by the PR. Only analyzes 
 
 ### Review a change and let fallow check the verdict
 ```bash
-fallow audit --format json --quiet                                             # 1. gate the change
-fallow audit --walkthrough-guide --format json --quiet > .fallow/guide.json   # 2. read the guide
-fallow audit --walkthrough-file .fallow/judgment.json --format json --quiet   # 4. fallow checks the judgment
+review="${TMPDIR:-/tmp}"
+fallow audit --format json --quiet                                                    # 1. gate the change
+fallow audit --walkthrough-guide --format json --quiet > "$review/fallow-guide.json"  # 2. read the guide
+fallow audit --walkthrough-file "$review/fallow-judgment.json" --format json --quiet  # 4. fallow checks the judgment
 ```
 
-Step 3 is your review. Read `digest.decisions[]` and `change_anchors[]` in the guide, then write `.fallow/judgment.json`:
+Step 3 is your review. Read `digest.decisions[]` and `change_anchors[]` in the guide, then write `fallow-judgment.json` in the same folder:
 
 ```json
 {
@@ -178,7 +179,7 @@ Step 3 is your review. Read `digest.decisions[]` and `change_anchors[]` in the g
 }
 ```
 
-Fallow validates the judgment against the live graph. It rejects an id that it did not emit. It refuses the whole file as `stale` when the hash no longer matches. Report only the `accepted` judgments. Keep both files under `.fallow/`, which git ignores: a new file elsewhere in the tree changes the hash. On `stale: true`, fetch the guide again.
+Fallow validates the judgment against the live graph. It rejects an id that it did not emit. It refuses the whole file as `stale` when the hash no longer matches. Report only the `accepted` judgments. Keep the guide outside the project: a new file in the tree changes the hash. Do not create `.fallow/` for it, because a folder that you create has no ignore file. On `stale: true`, fetch the guide again.
 
 ### Find code duplication
 ```bash
