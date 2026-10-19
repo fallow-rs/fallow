@@ -527,6 +527,17 @@ a speed improvement. Reservations estimate cost; they do not enforce billing.
 - Redact versions, durations, temporary roots, and other volatile data in
   snapshots.
 
+## Cargo feature unification
+
+`npm run check:cargo-features` compares the crate features of
+`cargo build -p fallow-cli` with those of `cargo build --workspace`. Cargo
+resolves features per build, so a feature that only another member enables
+makes cargo compile two variants of that crate and its dependents. After each
+edit, a switch between the two commands then compiles the fallow crates again.
+Fix a failure with the feature in `[workspace.dependencies]`, or with a
+feature-only dependency in `crates/cli/Cargo.toml`. The check runs in
+`verify:fast` and in the CI Clippy job.
+
 ## Hook parity
 
 Codex does not execute `.claude/settings.json` hooks. Mirror the repository

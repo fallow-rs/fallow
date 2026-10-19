@@ -62,6 +62,11 @@ const FAST_COMMANDS = [
     args: ["run", "generate:contracts:check"],
   },
   {
+    label: "Cargo feature unification",
+    command: "npm",
+    args: ["run", "check:cargo-features"],
+  },
+  {
     label: "Crate boundaries",
     command: "npm",
     args: ["run", "check:crate-boundaries"],
