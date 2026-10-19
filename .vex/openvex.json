@@ -72,58 +72,6 @@
     },
     {
       "vulnerability": {
-        "name": "GHSA-7q85-xj36-vmfc"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-8238-w5pm-2374"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-c6fg-446q-cg94"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-f88m-g3jw-g9cj"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
         "name": "GHSA-fx2h-pf6j-xcff"
       },
       "products": [
@@ -159,33 +107,7 @@
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "sprintf-js has no patched release; it is a transitive build-tool dependency. Source: apps/review-electron/osv-scanner.toml, tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-j5f4-cc29-5x44"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-p634-w6r4-rjp2"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
+      "impact_statement": "sprintf-js has no patched release; it is a transitive build-tool dependency. Source: apps/review-electron/osv-scanner.toml"
     },
     {
       "vulnerability": {
@@ -215,32 +137,6 @@
     },
     {
       "vulnerability": {
-        "name": "GHSA-rcw4-f5rp-g42v"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-rgj7-g3m4-5g8c"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
         "name": "GHSA-v6wh-96g9-6wx3"
       },
       "products": [
@@ -264,45 +160,6 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "Development dependency, not in the bundled extension; the parent package range blocks the patched version. Source: editors/vscode/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-vwc7-r8mq-g2x9"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-wq5f-xc86-pv6w"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
-    },
-    {
-      "vulnerability": {
-        "name": "GHSA-xcpc-8h2w-3j85"
-      },
-      "products": [
-        {
-          "@id": "pkg:github/fallow-rs/fallow"
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Research corpus runtime, pinned for reproducible embeddings; not part of a fallow release. Source: tests/semantic-clone-corpus/runtime/osv-scanner.toml"
     },
     {
       "vulnerability": {

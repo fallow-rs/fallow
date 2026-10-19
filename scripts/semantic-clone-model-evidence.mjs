@@ -104,11 +104,11 @@ const validateRuntimeProvenance = (loaded, options) => {
   if (!Number.isSafeInteger(runtimeLockData.lockfileVersion)) {
     fail("runtime lock must be an npm package lock");
   }
-  if (runtimeLockData.packages?.[""]?.dependencies?.["@huggingface/transformers"] !== "4.2.0") {
-    fail("runtime lock must declare @huggingface/transformers 4.2.0 at its root");
+  if (runtimeLockData.packages?.[""]?.dependencies?.["@huggingface/transformers"] !== "4.3.1") {
+    fail("runtime lock must declare @huggingface/transformers 4.3.1 at its root");
   }
   const lockedTransformers = runtimeLockData.packages?.[TRANSFORMERS_PACKAGE_PATH];
-  if (lockedTransformers?.version !== "4.2.0" || typeof lockedTransformers.integrity !== "string") {
+  if (lockedTransformers?.version !== "4.3.1" || typeof lockedTransformers.integrity !== "string") {
     fail("runtime lock must contain the exact Transformers package and integrity");
   }
 
