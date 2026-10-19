@@ -145,6 +145,13 @@ pub struct MutationConfig {
     /// checks no survivor. `--typecheck` turns the check on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub typecheck: Option<bool>,
+
+    /// The config file of the test runner, relative to the project root, for
+    /// example `vitest.integration.config.mjs`. The file must exist inside
+    /// the project root. Only the Vitest runner reads it. Unset uses the
+    /// default config discovery of the runner. `--runner-config` wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_config: Option<String>,
 }
 
 impl MutationConfig {
@@ -167,7 +174,8 @@ mod tests {
     fn every_key_parses_in_camel_case() {
         let config = parse(
             r#"{"runner":"vitest","operators":["arithmetic-operator","removed-call"],
-                "minScore":80,"concurrency":4,"typecheck":true}"#,
+                "minScore":80,"concurrency":4,"typecheck":true,
+                "runnerConfig":"vitest.integration.config.mjs"}"#,
         )
         .expect("valid config");
         assert_eq!(config.runner, MutationRunner::Vitest);
@@ -181,6 +189,10 @@ mod tests {
         assert_eq!(config.min_score, Some(80.0));
         assert_eq!(config.concurrency, Some(4));
         assert_eq!(config.typecheck, Some(true));
+        assert_eq!(
+            config.runner_config.as_deref(),
+            Some("vitest.integration.config.mjs")
+        );
     }
 
     #[test]

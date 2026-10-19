@@ -91,6 +91,12 @@ pub struct MutationRunOptions {
     /// The timeout of the companion `init` and the dry run. `None` uses
     /// 120 seconds.
     pub runner_timeout: Option<Duration>,
+    /// The config file of the test runner, for example a separate Vitest
+    /// config of the integration tests. A relative path is relative to the
+    /// project root. The file must exist inside the project root. `None`
+    /// uses the `mutation.runnerConfig` config key, else the default config
+    /// discovery of the runner. Only the Vitest runner reads a config file.
+    pub runner_config: Option<PathBuf>,
     /// The files that the caller writes after the run, for example the
     /// `--output-file` report. The worktree check leaves them out, so an old
     /// report does not make the worktree dirty. A relative path is relative

@@ -1274,6 +1274,12 @@
           "description": "Wait this long for each runner process to start, finish its dry run or reload, for example `5m` on a slow or busy host (default: `2m`)"
         },
         {
+          "name": "--runner-config",
+          "type": "string",
+          "required": false,
+          "description": "The config file of the test runner, for example `vitest.integration.config.mjs` (default: the `mutation.runnerConfig` key, else the runner's own discovery). The file must be inside the project root. Only Vitest reads it. This is not `--config`, which selects the Fallow config"
+        },
+        {
           "name": "--typecheck",
           "type": "bool",
           "required": false,

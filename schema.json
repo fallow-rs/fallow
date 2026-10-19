@@ -1143,6 +1143,13 @@
             "boolean",
             "null"
           ]
+        },
+        "runnerConfig": {
+          "description": "The config file of the test runner, relative to the project root, for\nexample `vitest.integration.config.mjs`. The file must exist inside\nthe project root. Only the Vitest runner reads it. Unset uses the\ndefault config discovery of the runner. `--runner-config` wins.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

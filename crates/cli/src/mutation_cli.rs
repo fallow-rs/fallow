@@ -98,6 +98,13 @@ pub struct MutationArgs {
     /// reload, for example `5m` on a slow or busy host (default: `2m`).
     #[arg(long, value_name = "DURATION")]
     pub setup_timeout: Option<String>,
+    /// The config file of the test runner, for example
+    /// `vitest.integration.config.mjs` (default: the
+    /// `mutation.runnerConfig` key, else the runner's own discovery). The file
+    /// must be inside the project root. Only Vitest reads it. This is not
+    /// `--config`, which selects the Fallow config.
+    #[arg(long, value_name = "PATH")]
+    pub runner_config: Option<PathBuf>,
     /// Type-check each survived mutant through the `--type-aware`
     /// companion. A survivor that does not type-check becomes
     /// `compile_error` and leaves the score.
@@ -249,6 +256,19 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         })?),
         None => None,
     };
+    let runner_config = match input.args.runner_config.as_deref() {
+        Some(raw) => Some(
+            crate::scope_path::resolve_scope_path(input.root, raw)
+                .map_err(|message| {
+                    input_error(
+                        format!("--runner-config: {message}"),
+                        "mutation.runnerConfig",
+                    )
+                })?
+                .absolute,
+        ),
+        None => None,
+    };
     if input.args.concurrency == Some(0) {
         return Err(input_error(
             "--concurrency must be at least 1",
@@ -280,6 +300,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         concurrency: input.args.concurrency.or(input.config.concurrency),
         time_budget,
         runner_timeout,
+        runner_config,
         output_paths: input
             .output_file
             .map(absolute_output_path)

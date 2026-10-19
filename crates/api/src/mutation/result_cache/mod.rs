@@ -10,7 +10,8 @@
 //! - the covering test ids;
 //! - the content of the covering test files, of the files that they reach
 //!   through static imports, and of the runner setup files, the runner
-//!   config modules at the root, and their reach;
+//!   config modules at the root, and their reach, and of the runner config
+//!   file that the run selects;
 //! - the lockfile;
 //! - the runner config files at the root, and the configs that the root
 //!   `tsconfig.json` extends.

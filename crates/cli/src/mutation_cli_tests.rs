@@ -1528,3 +1528,36 @@ fn skipped_files_get_one_line_with_the_count_of_each_reason() {
     let text = plain(&render_plan(&plan));
     assert!(!text.contains("mutation.runner"), "{text}");
 }
+
+#[test]
+fn the_runner_config_flag_resolves_inside_the_root() {
+    let project = tempfile::tempdir().expect("dir");
+    let root = dunce::canonicalize(project.path()).expect("root");
+    std::fs::write(
+        root.join("vitest.integration.config.mjs"),
+        "export default {};\n",
+    )
+    .expect("write");
+    let args = MutationArgs {
+        runner_config: Some(PathBuf::from("vitest.integration.config.mjs")),
+        ..MutationArgs::default()
+    };
+    let options = run_options(&input(&root, args, MutationConfig::default())).unwrap();
+    assert_eq!(
+        options.runner_config,
+        Some(root.join("vitest.integration.config.mjs"))
+    );
+
+    let missing = MutationArgs {
+        runner_config: Some(PathBuf::from("vitest.missing.config.mjs")),
+        ..MutationArgs::default()
+    };
+    let error = run_options(&input(&root, missing, MutationConfig::default())).unwrap_err();
+    assert_eq!(error.exit_code, 2);
+    assert_eq!(error.context.as_deref(), Some("mutation.runnerConfig"));
+    assert!(
+        error.message.starts_with("--runner-config: "),
+        "{}",
+        error.message
+    );
+}
