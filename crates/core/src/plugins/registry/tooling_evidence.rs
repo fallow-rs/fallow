@@ -379,13 +379,7 @@ fn first_file_match(root: &Path, pattern: &str) -> Option<PathBuf> {
                 let path = root.join(&expanded);
                 return path.is_file().then_some(path);
             }
-            let full = format!(
-                "{}/{}",
-                glob::Pattern::escape(&root.to_string_lossy()),
-                fallow_config::glob_validation::disk_glob_pattern(&expanded)
-            );
-            glob::glob(&full)
-                .ok()?
+            fallow_config::glob_validation::expand_disk_glob(root, &expanded)?
                 .filter_map(Result::ok)
                 .find(|path| path.is_file())
         })

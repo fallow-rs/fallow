@@ -64,7 +64,6 @@ fallow-license = { version = "3.34.1", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 clap = { workspace = true }
 dunce = { workspace = true }
-glob = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
 colored = { workspace = true }

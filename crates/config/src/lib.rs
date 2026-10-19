@@ -15,6 +15,7 @@
 //! to stay source-compatible.
 
 #![warn(missing_docs)]
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 #![cfg_attr(
     test,
     allow(

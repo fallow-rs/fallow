@@ -807,12 +807,8 @@ pub fn check_plugin_detection(
                     }
                 }
             }
-            let disk_pattern = fallow_config::glob_validation::disk_glob_pattern(pattern);
-            let full_pattern = root
-                .join(disk_pattern.as_ref())
-                .to_string_lossy()
-                .to_string();
-            glob::glob(&full_pattern).is_ok_and(|mut g| g.next().is_some())
+            fallow_config::glob_validation::expand_disk_glob(root, pattern)
+                .is_some_and(|mut paths| paths.next().is_some())
         }
         PluginDetection::All { conditions } => conditions
             .iter()
@@ -904,6 +900,19 @@ mod tests {
             .expect("write marker inside root");
         let detection = PluginDetection::FileExists {
             pattern: ".*/outside-marker.json".to_string(),
+        };
+        assert!(check_plugin_detection(&detection, &[], &root, &[]));
+    }
+
+    #[test]
+    fn file_exists_detection_works_under_a_root_with_glob_characters() {
+        let base = tempfile::tempdir().expect("create temp dir");
+        let root = base.path().join("app [1]");
+        std::fs::create_dir_all(root.join(".config")).expect("create project dirs");
+        std::fs::write(root.join(".config").join("tool.json"), "{}").expect("write config");
+
+        let detection = PluginDetection::FileExists {
+            pattern: ".config/*.json".to_string(),
         };
         assert!(check_plugin_detection(&detection, &[], &root, &[]));
     }

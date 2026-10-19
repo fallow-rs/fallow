@@ -209,13 +209,8 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
         );
     }
 
-    let disk_pattern = crate::glob_validation::disk_glob_pattern(expanded_pattern);
-    let full_pattern = root
-        .join(disk_pattern.as_ref())
-        .to_string_lossy()
-        .to_string();
-    match glob::glob(&full_pattern) {
-        Ok(paths) => {
+    match crate::glob_validation::expand_disk_glob(root, expanded_pattern) {
+        Some(paths) => {
             let mut results = Vec::new();
             for path in paths.filter_map(Result::ok) {
                 collect_globbed_workspace_dir(
@@ -232,8 +227,8 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
             }
             results
         }
-        Err(e) => {
-            tracing::warn!("invalid workspace glob pattern '{raw_pattern}': {e}");
+        None => {
+            tracing::warn!("invalid workspace glob pattern '{raw_pattern}'");
             Vec::new()
         }
     }
@@ -926,6 +921,18 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn expand_workspace_glob_star_under_a_root_with_glob_characters() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("app [1]");
+        std::fs::create_dir_all(root.join("packages/a")).unwrap();
+        std::fs::write(root.join("packages/a/package.json"), r#"{"name": "a"}"#).unwrap();
+
+        let canonical_root = dunce::canonicalize(&root).unwrap();
+        let results = expand_workspace_glob(&root, "packages/*", &canonical_root);
+        assert_eq!(results.len(), 1);
     }
 
     #[test]

@@ -464,6 +464,29 @@ pub fn disk_glob_pattern(pattern: &str) -> Cow<'_, str> {
     Cow::Owned(rewritten)
 }
 
+/// Expands a root-relative glob on disk with the `glob` crate.
+///
+/// Use this function for each on-disk expansion of a config or repository
+/// glob. It escapes the root, so a `[`, `*` or `?` in the root path matches
+/// literally. It rewrites the pattern with [`disk_glob_pattern`], so no match
+/// is in the parent of the root. A leading separator in the pattern does not
+/// make it absolute: the expansion stays below the root. Returns `None` when
+/// the pattern is not valid glob syntax.
+#[must_use]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one wrapper that calls glob::glob, after the root escape and the dot rewrite"
+)]
+pub fn expand_disk_glob(root: &Path, pattern: &str) -> Option<glob::Paths> {
+    let relative = pattern.trim_start_matches(['/', '\\']);
+    let full = format!(
+        "{}/{}",
+        glob::Pattern::escape(&root.to_string_lossy()),
+        disk_glob_pattern(relative)
+    );
+    glob::glob(&full).ok()
+}
+
 /// Whether `key` is written as an exact, project-relative workspace root:
 /// non-empty, relative, `/`-separated, with no empty, `.` or `..` segment.
 #[must_use]
@@ -527,20 +550,22 @@ mod tests {
     }
 
     #[test]
-    fn disk_glob_pattern_never_expands_outside_root() {
+    fn expand_disk_glob_never_expands_outside_root() {
         let base = tempfile::tempdir().expect("create temp dir");
         let root = base.path().join("root");
         std::fs::create_dir_all(root.join(".hidden")).expect("create root dirs");
         std::fs::write(base.path().join("secret"), "").expect("write secret");
         std::fs::write(root.join(".hidden").join("secret"), "").expect("write inside");
 
-        for pattern in [".*/secret", "..*/secret", ".?/secret", ".[.]/secret"] {
-            validate_user_path(pattern, "test").expect("pattern passes validation");
-            let full = root.join(disk_glob_pattern(pattern).as_ref());
-            let matches: Vec<_> = glob::glob(&full.to_string_lossy())
+        let expand = |pattern: &str| -> Vec<std::path::PathBuf> {
+            expand_disk_glob(&root, pattern)
                 .expect("valid glob")
                 .filter_map(Result::ok)
-                .collect();
+                .collect()
+        };
+        for pattern in [".*/secret", "..*/secret", ".?/secret", ".[.]/secret"] {
+            validate_user_path(pattern, "test").expect("pattern passes validation");
+            let matches = expand(pattern);
             assert!(
                 matches.iter().all(|path| !path
                     .components()
@@ -548,12 +573,26 @@ mod tests {
                 "{pattern} expanded outside the root: {matches:?}"
             );
         }
-        let full = root.join(disk_glob_pattern(".*/secret").as_ref());
-        let matches: Vec<_> = glob::glob(&full.to_string_lossy())
+        assert_eq!(
+            expand(".*/secret"),
+            vec![root.join(".hidden").join("secret")]
+        );
+        let outside = base.path().join("secret");
+        assert!(expand(&outside.to_string_lossy()).is_empty());
+    }
+
+    #[test]
+    fn expand_disk_glob_matches_a_root_with_glob_characters() {
+        let base = tempfile::tempdir().expect("create temp dir");
+        let root = base.path().join("app [1]*");
+        std::fs::create_dir_all(root.join("src")).expect("create root dirs");
+        std::fs::write(root.join("src").join("a.ts"), "").expect("write file");
+
+        let matches: Vec<_> = expand_disk_glob(&root, "src/*.ts")
             .expect("valid glob")
             .filter_map(Result::ok)
             .collect();
-        assert_eq!(matches, vec![root.join(".hidden").join("secret")]);
+        assert_eq!(matches, vec![root.join("src").join("a.ts")]);
     }
 
     #[test]

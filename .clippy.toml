@@ -8,8 +8,15 @@ disallowed-types = [
 # processes. Engine permits only narrowly expected, engine-owned Git wrappers.
 # CLI and MCP legitimately spawn worktrees, sidecars, and subprocesses outside
 # the analysis core, so they keep the workspace-level allow.
+#
+# The same list bans raw `glob::glob` expansion. The config crate denies it
+# too, and `expand_disk_glob` in that crate is the one allowed caller. The
+# CLI keeps the workspace-level allow, so a CLI call site must use the
+# wrapper by review.
 disallowed-methods = [
     { path = "std::process::Command::new", reason = "Analysis crates forbid process spawning except narrowly expected engine-owned Git wrappers; the deny is scoped by crate-root attributes" },
+    { path = "glob::glob", reason = "glob 0.3 matches `..` against a segment such as `.*`, and an unescaped root breaks on `[`; use fallow_config::glob_validation::expand_disk_glob" },
+    { path = "glob::glob_with", reason = "glob 0.3 matches `..` against a segment such as `.*`, and an unescaped root breaks on `[`; use fallow_config::glob_validation::expand_disk_glob" },
 ]
 
 # Maximum nesting depth before clippy::excessive_nesting fires.

@@ -615,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.34.0"
+version = "3.34.1"
 dependencies = [
  "deser-value",
  "deser-yaml",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.34.0"
+version = "3.34.1"
 dependencies = [
  "dunce",
  "fallow-config",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.34.0"
+version = "3.34.1"
 dependencies = [
  "bitcode",
  "cssparser",
@@ -713,7 +713,6 @@ dependencies = [
  "dunce",
  "fallow-config",
  "fallow-core",
- "glob",
  "libfuzzer-sys",
  "serde_json",
  "toml",
@@ -721,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.34.0"
+version = "3.34.1"
 dependencies = [
  "dashmap",
  "dunce",
@@ -741,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.34.0"
+version = "3.34.1"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -752,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.34.0"
+version = "3.34.1"
 dependencies = [
  "bitcode",
  "oxc_span",

@@ -8,16 +8,16 @@
 //!
 //! 1. The pattern cannot name a path outside the root under POSIX or Windows
 //!    path rules.
-//! 2. Expanding the pattern on disk with the `glob` crate, after the
-//!    `disk_glob_pattern` rewrite that plugin detection and workspace
-//!    discovery apply, returns only paths inside the root.
+//! 2. Expanding the pattern on disk with `expand_disk_glob`, the wrapper
+//!    that every on-disk glob expansion uses, returns only paths inside the
+//!    root.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use arbitrary::Arbitrary;
 use fallow_config::glob_validation::{
-    compile_user_glob, disk_glob_pattern, is_exact_workspace_root,
+    compile_user_glob, expand_disk_glob, is_exact_workspace_root,
     validate_user_finding_ignore_globs, validate_user_ignore_pattern_globs, validate_user_path,
 };
 use libfuzzer_sys::fuzz_target;
@@ -131,8 +131,7 @@ const MAX_EXPANDED_PATHS: usize = 64;
 
 fn assert_expansion_stays_inside(pattern: &str) {
     let fixture = fixture();
-    let full = fixture.root.join(disk_glob_pattern(pattern).as_ref());
-    let Ok(paths) = glob::glob(&full.to_string_lossy()) else {
+    let Some(paths) = expand_disk_glob(&fixture.root, pattern) else {
         return;
     };
     for path in paths.filter_map(Result::ok).take(MAX_EXPANDED_PATHS) {

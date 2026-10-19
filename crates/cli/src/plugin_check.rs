@@ -202,9 +202,8 @@ fn warning_value(warning: &CheckWarning) -> Value {
 fn entry_path_exists(root: &Path, entry: &str) -> bool {
     expand_braces(entry).iter().any(|pattern| {
         if pattern.contains(['*', '?', '[']) {
-            let disk_pattern = fallow_config::glob_validation::disk_glob_pattern(pattern);
-            let full = root.join(disk_pattern.as_ref());
-            glob::glob(&full.to_string_lossy()).is_ok_and(|mut paths| paths.next().is_some())
+            fallow_config::glob_validation::expand_disk_glob(root, pattern)
+                .is_some_and(|mut paths| paths.next().is_some())
         } else {
             root.join(pattern).exists()
         }

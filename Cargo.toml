@@ -198,6 +198,7 @@ deref_by_slicing = "warn"               # Use &* or as_slice() instead of [..]
 # so CLI and MCP can spawn worktrees, sidecars, and subprocesses off the core
 # analysis path. Core, extract, graph, and engine re-deny it at their crate
 # roots; engine-owned Git wrappers carry narrow expectations at their call sites.
+# The list also bans raw `glob::glob`; the config crate re-denies it as well.
 disallowed_methods = "allow"
 
 # Allow common pedantic false positives
