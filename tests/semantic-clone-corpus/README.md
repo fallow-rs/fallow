@@ -73,6 +73,17 @@ node scripts/semantic-clone-model-evidence.mjs \
 Runtime and memory observations can vary by machine. Similarities are rounded
 and must be reviewed before replacing the locked evidence.
 
+To review a runtime update, do these steps:
+
+1. Run the generator with the old lock and add
+   `--compare tests/semantic-clone-corpus/evidence/jina-v2-code-q8.json`. All
+   deltas must be zero. This proves that the machine gives the locked numbers.
+2. Run the generator with the new lock and the same `--compare` flag. Review
+   the deltas, the threshold crossings, and the case order on stderr.
+
+The `--compare` flag writes the review summary to stderr only. The JSON evidence
+on stdout does not change.
+
 ## Provenance
 
 The source fixtures are unmodified excerpts from

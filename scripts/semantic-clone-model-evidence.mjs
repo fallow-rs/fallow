@@ -26,31 +26,32 @@ const fail = (message) => {
 
 const sha256 = (contents) => createHash("sha256").update(contents).digest("hex");
 
+const VALUE_FLAGS = {
+  "--compare": { key: "compare", missing: "--compare requires an evidence path" },
+  "--manifest": { key: "manifest", missing: "--manifest requires a path" },
+  "--model-cache-state": {
+    key: "modelCacheState",
+    missing: "--model-cache-state requires cold, warm, or unknown",
+  },
+  "--runtime-lock": { key: "runtimeLock", missing: "--runtime-lock requires a path" },
+  "--transformers-module": {
+    key: "transformersModule",
+    missing: "--transformers-module requires a path",
+  },
+};
+
 const parseArgs = (argv) => {
   const options = {
+    compare: null,
     manifest: DEFAULT_MANIFEST,
     modelCacheState: "unknown",
     runtimeLock: null,
     transformersModule: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === "--manifest") {
-      options.manifest = argv[index + 1] ?? fail("--manifest requires a path");
-      index += 1;
-    } else if (argument === "--model-cache-state") {
-      options.modelCacheState =
-        argv[index + 1] ?? fail("--model-cache-state requires cold, warm, or unknown");
-      index += 1;
-    } else if (argument === "--runtime-lock") {
-      options.runtimeLock = argv[index + 1] ?? fail("--runtime-lock requires a path");
-      index += 1;
-    } else if (argument === "--transformers-module") {
-      options.transformersModule = argv[index + 1] ?? fail("--transformers-module requires a path");
-      index += 1;
-    } else {
-      fail(`unknown argument: ${argument}`);
-    }
+    const flag = VALUE_FLAGS[argv[index]] ?? fail(`unknown argument: ${argv[index]}`);
+    options[flag.key] = argv[index + 1] ?? fail(flag.missing);
+    index += 1;
   }
   if (options.transformersModule === null) {
     fail("--transformers-module is required; see the corpus README for isolated setup");
@@ -209,10 +210,159 @@ const generateEvidence = async (options) => {
   };
 };
 
+const rankCases = (cases) =>
+  cases
+    .toSorted(
+      (left, right) => right.similarity - left.similarity || left.id.localeCompare(right.id),
+    )
+    .map((testCase) => testCase.id);
+
+const compareProfile = (previous, current) => {
+  const previousCases = new Map(previous.cases.map((testCase) => [testCase.id, testCase]));
+  const currentIds = new Set(current.cases.map((testCase) => testCase.id));
+  const cases = current.cases
+    .filter((testCase) => previousCases.has(testCase.id))
+    .map((testCase) => {
+      const before = previousCases.get(testCase.id).similarity;
+      const after = testCase.similarity;
+      return {
+        id: testCase.id,
+        previous: before,
+        current: after,
+        delta: Number((after - before).toFixed(6)),
+        previous_selected: before >= previous.threshold,
+        current_selected: after >= current.threshold,
+      };
+    });
+  const sharedIds = new Set(cases.map((testCase) => testCase.id));
+  const previousOrder = rankCases(previous.cases.filter((testCase) => sharedIds.has(testCase.id)));
+  const currentOrder = rankCases(current.cases.filter((testCase) => sharedIds.has(testCase.id)));
+  return {
+    id: current.id,
+    previous_threshold: previous.threshold,
+    current_threshold: current.threshold,
+    cases,
+    max_abs_delta: cases.reduce((max, testCase) => Math.max(max, Math.abs(testCase.delta)), 0),
+    threshold_crossings: cases.filter(
+      (testCase) => testCase.previous_selected !== testCase.current_selected,
+    ),
+    previous_order: previousOrder,
+    current_order: currentOrder,
+    order_changed: previousOrder.some((id, index) => id !== currentOrder[index]),
+    added_cases: current.cases
+      .filter((testCase) => !previousCases.has(testCase.id))
+      .map((testCase) => testCase.id),
+    removed_cases: previous.cases
+      .filter((testCase) => !currentIds.has(testCase.id))
+      .map((testCase) => testCase.id),
+  };
+};
+
+/**
+ * Compares two model evidence documents profile by profile and case by case.
+ * Profiles and cases match by id. The result keeps the order of `current`.
+ */
+const compareEvidence = (previous, current) => {
+  const previousProfiles = new Map(previous.profiles.map((entry) => [entry.id, entry]));
+  const currentIds = new Set(current.profiles.map((entry) => entry.id));
+  return {
+    previous_runtime_version: previous.provider?.runtime_version ?? null,
+    current_runtime_version: current.provider?.runtime_version ?? null,
+    profiles: current.profiles
+      .filter((entry) => previousProfiles.has(entry.id))
+      .map((entry) => compareProfile(previousProfiles.get(entry.id), entry)),
+    added_profiles: current.profiles
+      .filter((entry) => !previousProfiles.has(entry.id))
+      .map((entry) => entry.id),
+    removed_profiles: previous.profiles
+      .filter((entry) => !currentIds.has(entry.id))
+      .map((entry) => entry.id),
+  };
+};
+
+const formatSimilarity = (value) => value.toFixed(6);
+
+const formatDelta = (value) => `${value >= 0 ? "+" : "-"}${Math.abs(value).toFixed(6)}`;
+
+const formatSelected = (selected) => (selected ? "selected" : "not selected");
+
+const formatCaseTable = (entry) => {
+  const width = Math.max(4, ...entry.cases.map((testCase) => testCase.id.length));
+  return [
+    `  ${"case".padEnd(width)}  previous  current   delta`,
+    ...entry.cases.map(
+      (testCase) =>
+        `  ${testCase.id.padEnd(width)}  ${formatSimilarity(testCase.previous)}  ${formatSimilarity(testCase.current)}  ${formatDelta(testCase.delta)}`,
+    ),
+  ];
+};
+
+const formatCrossings = (entry) => {
+  if (entry.threshold_crossings.length === 0) {
+    return ["  threshold crossings: none"];
+  }
+  return [
+    "  threshold crossings:",
+    ...entry.threshold_crossings.map(
+      (testCase) =>
+        `    ${testCase.id}: ${formatSelected(testCase.previous_selected)} -> ${formatSelected(testCase.current_selected)}`,
+    ),
+  ];
+};
+
+const formatOrder = (entry) => {
+  if (!entry.order_changed) {
+    return ["  case order: unchanged"];
+  }
+  return [
+    "  case order changed:",
+    `    previous: ${entry.previous_order.join(", ")}`,
+    `    current:  ${entry.current_order.join(", ")}`,
+  ];
+};
+
+const formatIdList = (label, ids) => (ids.length === 0 ? [] : [`${label}: ${ids.join(", ")}`]);
+
+const formatProfile = (entry) => [
+  "",
+  `Profile ${entry.id} (threshold ${entry.current_threshold})`,
+  ...(entry.previous_threshold === entry.current_threshold
+    ? []
+    : [`  threshold changed: ${entry.previous_threshold} -> ${entry.current_threshold}`]),
+  ...formatCaseTable(entry),
+  `  max absolute delta: ${formatSimilarity(entry.max_abs_delta)}`,
+  ...formatCrossings(entry),
+  ...formatOrder(entry),
+  ...formatIdList("  added cases", entry.added_cases),
+  ...formatIdList("  removed cases", entry.removed_cases),
+];
+
+/** Formats a `compareEvidence` result as a plain text review summary. */
+const formatComparison = (comparison) => {
+  const lines = [
+    `Model evidence comparison: runtime ${comparison.previous_runtime_version} -> ${comparison.current_runtime_version}`,
+    ...comparison.profiles.flatMap(formatProfile),
+  ];
+  for (const [label, ids] of [
+    ["Added profiles", comparison.added_profiles],
+    ["Removed profiles", comparison.removed_profiles],
+  ]) {
+    if (ids.length > 0) {
+      lines.push("", ...formatIdList(label, ids));
+    }
+  }
+  return `${lines.join("\n")}\n`;
+};
+
 const main = async () => {
   const options = parseArgs(process.argv.slice(2));
+  const previous =
+    options.compare === null ? null : JSON.parse(readFileSync(resolve(options.compare), "utf8"));
   const evidence = await generateEvidence(options);
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
+  if (previous !== null) {
+    process.stderr.write(formatComparison(compareEvidence(previous, evidence)));
+  }
 };
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -223,4 +373,4 @@ if (isMain) {
   });
 }
 
-export { parseArgs };
+export { compareEvidence, formatComparison, parseArgs };

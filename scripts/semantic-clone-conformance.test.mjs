@@ -229,6 +229,7 @@ test("model evidence requires locked runtime provenance", () => {
       "cold",
     ]),
     {
+      compare: null,
       manifest: MANIFEST,
       modelCacheState: "cold",
       runtimeLock: "/tmp/package-lock.json",
