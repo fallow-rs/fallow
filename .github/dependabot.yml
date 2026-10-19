@@ -138,8 +138,21 @@ updates:
       default-days: 7
     open-pull-requests-limit: 5
 
+  # The corepack version that Dockerfile and Dockerfile.dev install.
+  - package-ecosystem: npm
+    directory: /tools/corepack
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  # Covers Dockerfile and Dockerfile.dev. The tests/fixtures Dockerfiles are
+  # test inputs and stay out of scope.
   - package-ecosystem: docker
-    directory: /
+    directories:
+      - /
+      - /.oss-scanner
     schedule:
       interval: weekly
     cooldown:

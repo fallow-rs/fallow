@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS download
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS download
 
 ARG FALLOW_VERSION=3.34.1
 ARG TARGETARCH
@@ -31,14 +31,16 @@ RUN set -eux; \
   echo "${sha256}  /usr/local/bin/fallow" | sha256sum -c -; \
   chmod +x /usr/local/bin/fallow
 
-FROM node:26-bookworm-slim AS runtime
+FROM node:26-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS runtime
 
-ARG COREPACK_VERSION=0.35.0
+# tools/corepack/package-lock.json pins the corepack version and its hash.
+COPY tools/corepack/package.json tools/corepack/package-lock.json /opt/corepack/
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git \
-  && npm install -g "corepack@${COREPACK_VERSION}" \
-  && corepack enable \
+  && npm ci --prefix /opt/corepack --ignore-scripts --no-audit --no-fund \
+  && ln -sf /opt/corepack/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+  && corepack enable --install-directory /usr/local/bin \
   && npm cache clean --force \
   && rm -rf /var/lib/apt/lists/*
 
