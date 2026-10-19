@@ -609,6 +609,7 @@ test("release runs the shipped musl binaries in Alpine before publication", () =
   assert.match(job, /tests\/fixtures\/basic-project:\/smoke\/fixture:ro/u);
   assert.match(job, /"\$ALPINE_IMAGE" \\\n\s+sh \/smoke\/musl-smoke\.sh /u);
   assert.match(job, /jq -e 'type == "object"'/u);
+  assert.match(job, /for report in dead-code dead-code-multicall similar-code-status; do/u);
   assert.doesNotMatch(
     job,
     /FALLOW_SMOKE_SKIP_MULTICALL/u,
@@ -626,6 +627,11 @@ test("release runs the shipped musl binaries in Alpine before publication", () =
     /check_version "fallow-lsp" "fallow-lsp"/u,
     /check_version "fallow-multicall mcp-server" "fallow-mcp"/u,
     /check_version "fallow-multicall lsp-server" "fallow-lsp"/u,
+    /^stage fallow-similar-code$/mu,
+    /check_version "fallow-similar-code" "fallow-similar-code"/u,
+    /^check_similar_code_status$/mu,
+    /"\$work\/bin\/fallow-similar-code" status --json/u,
+    /"model_ready":false/u,
     /dead-code --format json --quiet/u,
     /"\$status" -ne 0 \] && \[ "\$status" -ne 1 \]/u,
   ]) {

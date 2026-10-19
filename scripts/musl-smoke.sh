@@ -8,8 +8,9 @@
 # Usage (inside the container):
 #   sh musl-smoke.sh <bin-dir> <platform> <fixture-dir> <out-dir>
 #
-#   <bin-dir>      Holds fallow-<platform>, fallow-lsp-<platform> and
-#                  fallow-mcp-<platform>, as the build job uploads them in
+#   <bin-dir>      Holds fallow-<platform>, fallow-lsp-<platform>,
+#                  fallow-mcp-<platform> and fallow-similar-code-<platform>,
+#                  as the build job uploads them in
 #                  unsigned-binaries-<platform> and as the GitHub release
 #                  ships them. It can be read-only.
 #   <platform>     The npm platform name, for example linux-x64-musl.
@@ -100,17 +101,39 @@ check_analysis() {
   echo "$label dead-code: exit $status, $(wc -c <"$out_dir/$report.json" | tr -d ' ') bytes of JSON"
 }
 
+# Run the similar-code provider status command against an empty cache. The
+# command needs no model and no network. It must start the provider and write
+# the status contract with model_ready false.
+check_similar_code_status() {
+  cache="$work/similar-code-cache"
+  mkdir "$cache"
+  report="$out_dir/similar-code-status.json"
+  if ! FALLOW_SIMILAR_CODE_CACHE_DIR="$cache" "$work/bin/fallow-similar-code" status --json \
+    >"$report" 2>"$work/similar-code-status.stderr"; then
+    cat "$work/similar-code-status.stderr" "$report" >&2
+    fail "fallow-similar-code status exited with an error"
+  fi
+  first=$(tr -d ' \t\r\n' <"$report" | cut -c1)
+  [ "$first" = "{" ] || fail "fallow-similar-code status output is not a JSON object"
+  grep -q '"model_ready":false' "$report" ||
+    fail "fallow-similar-code status must report model_ready false for an empty cache"
+  echo "fallow-similar-code status: $(wc -c <"$report" | tr -d ' ') bytes of JSON, model_ready false"
+}
+
 echo "musl-smoke: $platform on $(uname -m), $(head -n1 /etc/alpine-release 2>/dev/null | sed 's/^/Alpine /')"
 [ -d "$out_dir" ] || fail "missing output directory $out_dir"
 
 stage fallow
 stage fallow-lsp
 stage fallow-mcp
+stage fallow-similar-code
 
 check_version "fallow" "fallow" "$work/bin/fallow"
 check_analysis "fallow" "dead-code" "$work/bin/fallow"
 check_version "fallow-mcp" "fallow-mcp" "$work/bin/fallow-mcp"
 check_version "fallow-lsp" "fallow-lsp" "$work/bin/fallow-lsp"
+check_version "fallow-similar-code" "fallow-similar-code" "$work/bin/fallow-similar-code"
+check_similar_code_status
 
 # npm ships the multicall binary as `fallow`. The npm `fallow-lsp` and
 # `fallow-mcp` launchers start it with `lsp-server` and `mcp-server`.

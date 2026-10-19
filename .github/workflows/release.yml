@@ -919,7 +919,7 @@ jobs:
             "$ALPINE_IMAGE" \
             sh /smoke/musl-smoke.sh /smoke/bin "$FALLOW_NPM_DIR" /smoke/fixture /smoke/out
           # Alpine has no JSON parser, so parse each report on the runner.
-          for report in dead-code dead-code-multicall; do
+          for report in dead-code dead-code-multicall similar-code-status; do
             jq -e 'type == "object"' "$out/$report.json" >/dev/null
             echo "$report.json parses as a JSON object"
           done
