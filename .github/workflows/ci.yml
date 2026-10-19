@@ -9,15 +9,14 @@ on:
 # Deny all permissions by default, grant per-job as needed
 permissions: {}
 
-# Pull requests and ordinary pushes to main share one group per ref, so a
-# newer run cancels the older one. Main gets many merges a day, and only the
-# newest main commit needs a result. The release commit ("chore: release v")
-# and manual or scheduled runs get a group of their own and are never
-# cancelled: scripts/verify-release-ci.mjs reads the result for the release
-# commit before a release can start.
+# A newer run of a pull request cancels the older one. Every other run gets a
+# group of its own and is never cancelled. A cancelled main run turns the
+# README badge red, and Miri takes longer than the gap between most merges,
+# so a cancelling main group left no finished run on main.
+# scripts/verify-release-ci.mjs also needs a finished run on the release commit.
 concurrency:
-  group: "ci-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
-  cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always

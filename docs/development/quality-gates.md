@@ -259,12 +259,15 @@ shows only on `main` is fixed in the next commit on `main`. The release gate
 stops a release until `main` is green.
 
 Concurrency follows the same goal. On a pull request, a new push cancels the
-older run. On `main`, a new push also cancels the older push run of the same
-workflow, because `main` gets many merges a day and only the newest commit
-needs a result. The release commit, with a message that starts with
-`chore: release v`, and manual or scheduled runs get a concurrency group of
-their own. Nothing cancels them, so the release gate always gets a result for
-the release commit.
+older run. On `main`, a new push cancels the older push run of most
+workflows, because `main` gets many merges a day and only the newest commit
+needs a result. `CI` is the exception: each push run on `main` gets a group of
+its own and always finishes. The README badge shows the last `CI` run on
+`main`, and a cancelled run shows as failing. Miri takes longer than the gap
+between most merges, so a cancelling group left no finished `CI` run on `main`.
+The release commit, with a message that starts with `chore: release v`, and
+manual or scheduled runs get a concurrency group of their own. Nothing cancels
+them, so the release gate always gets a result for the release commit.
 
 On pull requests:
 

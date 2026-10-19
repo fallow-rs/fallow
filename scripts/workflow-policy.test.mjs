@@ -1248,6 +1248,28 @@ test("push runs of the release commit are never cancelled", async () => {
   }
 });
 
+test("every CI push run on main finishes so the README badge shows a result", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const concurrency = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "concurrency", 0);
+  const group = concurrency.match(/^  group: (.+)$/m)[1];
+  const cancel = concurrency.match(/^  cancel-in-progress: \$\{\{ (.+) \}\}$/m)[1];
+  const evaluate = (event_name, run_id) => {
+    const github = { event_name, ref: "refs/heads/main", run_id };
+    return {
+      group: group.replace(/\$\{\{ (.+?) \}\}/g, (_, expression) =>
+        runInNewContext(expression, { github }),
+      ),
+      cancel: runInNewContext(cancel, { github }),
+    };
+  };
+  assert.equal(evaluate("pull_request", 100).cancel, true);
+  assert.equal(evaluate("pull_request", 100).group, evaluate("pull_request", 101).group);
+  for (const event of ["push", "workflow_dispatch", "schedule"]) {
+    assert.equal(evaluate(event, 100).cancel, false);
+    assert.notEqual(evaluate(event, 100).group, evaluate(event, 101).group);
+  }
+});
+
 test("the release checks the release commit subject that concurrency exempts", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const context = indentedBlock(workflow, "release-context", 2);
