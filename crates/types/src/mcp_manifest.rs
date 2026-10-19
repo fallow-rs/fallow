@@ -1115,6 +1115,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         ),
     },
     CapabilityParityRow {
+        capability: "mutation testing with progress events",
+        api_runner: Some("run_mutation_with_progress"),
+        napi_export: None,
+        mcp_tool: None,
+        omission_note: Some(
+            "Rust api variant of run_mutation that sends MutationProgress phase events to a caller sink, for the progress lines of `fallow mutation`. It runs the project's own tests, so it has the same omissions as run_mutation: no napi export and no MCP run tool.",
+        ),
+    },
+    CapabilityParityRow {
         capability: "mutation plan",
         api_runner: None,
         napi_export: None,

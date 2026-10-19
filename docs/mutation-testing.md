@@ -905,6 +905,25 @@ reads files only. It runs no test.
   output formats (SARIF, CodeClimate, markdown, compact) do not show it.
 - The score uses the final statuses after the retries (see Retries).
 
+## Progress
+
+- A run with human output and no `--quiet` prints phase lines on stderr.
+  Each line starts with `fallow: mutation:` and ends with the run time, for
+  example `fallow: mutation: 8/20 mutants done (1m25s)`.
+- The phases are the runner setup, the baseline run, the mutant runs, the
+  retries of survivors and timeouts, and the final worktree check and
+  report. A run with no covered mutant and no test file prints only the
+  final phase.
+- The start of each phase prints at once. A mutant count prints at most
+  once in each interval and at the end of its phase. A phase that prints
+  nothing for one interval prints a line that says it continues. The
+  interval is 5 seconds on a terminal and 15 seconds in captured output.
+- `--format json` and `--quiet` print no progress lines. Stdout never gets
+  a progress line.
+- `fallow_api::run_mutation_with_progress` sends the same phases as
+  `fallow_api::MutationProgress` events to a caller of the programmatic
+  API.
+
 ## Human output
 
 - The output uses the section headers and colors of the other commands.

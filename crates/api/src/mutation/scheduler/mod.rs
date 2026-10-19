@@ -19,6 +19,7 @@ use super::protocol::{
     RunRequest, RunResult, RunStatus, TestStatus,
 };
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
+use super::{MutationProgress, MutationProgressSink};
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
 const WATCHDOG_GRACE_MS: u64 = 2000;
@@ -1385,9 +1386,22 @@ struct Phase<'a> {
     dry_files: &'a [String],
     dry_run_timeout: Duration,
     memo: &'a ControlMemo,
+    /// Receives the count of finished jobs after each job.
+    report: &'a (dyn Fn(usize) + Sync),
 }
 
 impl Phase<'_> {
+    /// Adds a finished job and reports the new count of finished jobs.
+    fn push(&self, job: Job, attempt: Attempt) {
+        let done = self.attempts.lock().ok().map(|mut attempts| {
+            attempts.push((job, attempt));
+            attempts.len()
+        });
+        if let Some(done) = done {
+            (self.report)(done);
+        }
+    }
+
     fn work(&self, primary: Option<Box<dyn CompanionLink>>, known: FxHashSet<String>) {
         let mut worker = Worker::new(
             self.spawner,
@@ -1411,18 +1425,11 @@ impl Phase<'_> {
                 .deadline
                 .is_some_and(|deadline| Instant::now() >= deadline)
             {
-                let attempt = Attempt::decided(MutantStatus::Pending, None, None);
-                if let Ok(mut attempts) = self.attempts.lock() {
-                    attempts.push((job, attempt));
-                }
+                self.push(job, Attempt::decided(MutantStatus::Pending, None, None));
                 continue;
             }
             match worker.run_with_retry(&job, self.caps) {
-                Ok(attempt) => {
-                    if let Ok(mut attempts) = self.attempts.lock() {
-                        attempts.push((job, attempt));
-                    }
-                }
+                Ok(attempt) => self.push(job, attempt),
                 Err(error) => {
                     self.stop.store(true, Ordering::SeqCst);
                     if let Ok(mut fatal) = self.fatal.lock() {
@@ -1446,21 +1453,28 @@ struct PhaseRunner<'a> {
     first_dry_run: Duration,
     /// The control results of the run.
     memo: &'a ControlMemo,
+    /// Receives the phase events of the run.
+    progress: MutationProgressSink<'a>,
 }
 
 /// A companion that already did its dry run, and the tests that passed in it.
 type WarmLink = (Box<dyn CompanionLink>, FxHashSet<String>);
 
 /// Runs `jobs` on up to `concurrency` workers. The first worker takes
-/// `primary`, a companion that already did its dry run.
+/// `primary`, a companion that already did its dry run. `event` makes the
+/// progress event of the phase from the finished and the total jobs.
 fn run_phase(
     runner: PhaseRunner<'_>,
     dry_files: &[String],
     jobs: Vec<Job>,
     deadline: Option<Instant>,
     primary: Option<WarmLink>,
+    event: fn(usize, usize) -> MutationProgress,
 ) -> Result<(Vec<(Job, Attempt)>, usize), ScheduleError> {
     let workers = runner.config.concurrency.max(1).min(jobs.len().max(1));
+    let total = jobs.len();
+    let report = |done: usize| (runner.progress)(event(done, total));
+    report(0);
     let phase = Phase {
         jobs: Mutex::new(jobs.into()),
         attempts: Mutex::new(Vec::new()),
@@ -1477,6 +1491,7 @@ fn run_phase(
             workers,
         ),
         memo: runner.memo,
+        report: &report,
     };
     let mut primary = primary;
     std::thread::scope(|scope| {
@@ -1762,7 +1777,14 @@ fn retry_suspects(
         .collect();
     retry_files.sort();
     retry_files.dedup();
-    let (retries, _) = run_phase(runner, &retry_files, suspects, runner.config.deadline, None)?;
+    let (retries, _) = run_phase(
+        runner,
+        &retry_files,
+        suspects,
+        runner.config.deadline,
+        None,
+        |done, total| MutationProgress::Retries { done, total },
+    )?;
     note_control_failures(outcome, facts, runner.memo);
     for (job, attempt) in retries {
         if attempt.status == MutantStatus::Pending {
@@ -1990,16 +2012,31 @@ fn checked_jobs(
     Ok((jobs, (link, known)))
 }
 
-/// Runs the plan: dry run, mutant runs, and retries of survivors and
-/// timeouts.
+/// [`run_schedule_with_progress`] with no progress events.
 ///
 /// # Errors
 ///
 /// Returns a [`ScheduleError`] when the run cannot give trustworthy results.
+#[cfg(test)]
 pub fn run_schedule(
     spawner: &dyn CompanionSpawner,
     plan: &SchedulePlan,
     config: &ScheduleConfig,
+) -> Result<ScheduleOutcome, ScheduleError> {
+    run_schedule_with_progress(spawner, plan, config, &|_| {})
+}
+
+/// Runs the plan: dry run, mutant runs, and retries of survivors and
+/// timeouts. `progress` receives the baseline, mutant and retry events.
+///
+/// # Errors
+///
+/// Returns a [`ScheduleError`] when the run cannot give trustworthy results.
+pub fn run_schedule_with_progress(
+    spawner: &dyn CompanionSpawner,
+    plan: &SchedulePlan,
+    config: &ScheduleConfig,
+    progress: MutationProgressSink<'_>,
 ) -> Result<ScheduleOutcome, ScheduleError> {
     let mut outcome = ScheduleOutcome::empty();
     let no_coverage_for_all = |outcome: &mut ScheduleOutcome| {
@@ -2030,6 +2067,7 @@ pub fn run_schedule(
         caps: ready.capabilities,
         first_dry_run: Duration::ZERO,
         memo: &memo,
+        progress,
     };
     outcome.ready = Some(ready.clone());
     outcome.timings.setup = started.elapsed();
@@ -2039,6 +2077,9 @@ pub fn run_schedule(
         return Ok(outcome);
     }
 
+    progress(MutationProgress::Baseline {
+        test_files: dry_files.len(),
+    });
     let dry_started = Instant::now();
     let dry = first_dry_run(&mut link, &dry_files, config.runner_timeout)?;
     outcome.timings.dry_run = dry_started.elapsed();
@@ -2065,6 +2106,7 @@ pub fn run_schedule(
         jobs,
         config.deadline,
         Some((link, known)),
+        |done, total| MutationProgress::Mutants { done, total },
     )?;
     outcome.workers = workers;
     outcome.timings.mutants = mutants_started.elapsed();

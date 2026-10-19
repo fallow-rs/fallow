@@ -327,6 +327,33 @@ fn killed_survived_and_no_coverage_follow_the_dry_run_hits() {
 }
 
 #[test]
+fn the_progress_sink_gets_the_baseline_mutant_and_retry_counts_in_run_order() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| match run.mutant_id.as_deref().unwrap_or_default() {
+            "m1" => Ok(run_result(run, RunStatus::Killed, Some(&tid("t1")))),
+            _ => Ok(run_result(run, RunStatus::Survived, None)),
+        },
+    ));
+    let events = Mutex::new(Vec::new());
+    let sink = |event: MutationProgress| events.lock().expect("events").push(event);
+    run_schedule_with_progress(&spawner, &plan(&["m1", "m2", "m3"]), &config(1), &sink)
+        .expect("run");
+    assert_eq!(
+        events.into_inner().expect("events"),
+        [
+            MutationProgress::Baseline { test_files: 1 },
+            MutationProgress::Mutants { done: 0, total: 2 },
+            MutationProgress::Mutants { done: 1, total: 2 },
+            MutationProgress::Mutants { done: 2, total: 2 },
+            MutationProgress::Retries { done: 0, total: 1 },
+            MutationProgress::Retries { done: 1, total: 1 },
+        ],
+        "m3 has no covering test, so it is not a mutant job"
+    );
+}
+
+#[test]
 fn covering_tests_run_fastest_first_with_the_stryker_timeout() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),

@@ -14,7 +14,8 @@ use clap::{Args, Subcommand};
 use fallow_api::mutation::{MAX_VERDICT_INPUT_BYTES, Operator, baseline_blocked_run_error};
 use fallow_api::{
     AnalysisOptions, MutationRunOptions, MutationRunScope, ProgrammaticError,
-    apply_mutation_verdicts, plan_mutation, run_mutation, validate_mutation_verdicts,
+    apply_mutation_verdicts, plan_mutation, run_mutation, run_mutation_with_progress,
+    validate_mutation_verdicts,
 };
 use fallow_config::{MutationConfig, OutputFormat};
 use fallow_output::{
@@ -26,6 +27,7 @@ use crate::json_style::JsonStyle;
 use crate::mutation_human::{
     CodeExcerpt, CodeLookup, RunReportOptions, render_inspect, render_plan, render_run,
 };
+use crate::mutation_progress::MutationProgressReporter;
 
 /// The exit code of a run with a score below the minimum.
 const MIN_SCORE_EXIT_CODE: u8 = 1;
@@ -474,6 +476,22 @@ pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
     }
 }
 
+/// Runs the mutation tests. Human output without `--quiet` shows the phase
+/// progress on stderr. JSON output shows none, the same as the analysis
+/// progress of the other commands.
+fn run_with_progress(
+    options: &MutationRunOptions,
+    input: &MutationCliInput<'_>,
+) -> Result<MutationReport, ProgrammaticError> {
+    if input.quiet || !matches!(input.output, OutputFormat::Human) {
+        return run_mutation(options);
+    }
+    let reporter = MutationProgressReporter::start();
+    let report = run_mutation_with_progress(options, &|event| reporter.report(event));
+    reporter.finish();
+    report
+}
+
 fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError> {
     let options = run_options(input)?;
     let min_score = min_score(input)?;
@@ -507,7 +525,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             "fallow: mutation testing runs the project tests against each mutant. Fallow does not write to project files. The report lists any path that the tests changed."
         );
     }
-    let mut report = run_mutation(&options)?;
+    let mut report = run_with_progress(&options, input)?;
     complete_file_digests(&mut report, input.root);
     // Before the verdicts: an equivalent verdict for a survivor does not make
     // the run one in which no mutant has a test result.

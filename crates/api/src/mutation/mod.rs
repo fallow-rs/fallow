@@ -58,6 +58,48 @@ impl Default for MutationRunScope {
     }
 }
 
+/// A phase event of a mutation run, for a caller that shows progress.
+///
+/// [`crate::run_mutation_with_progress`] sends the events in run order. A
+/// run with no covered mutant and no test file skips the runner phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MutationProgress {
+    /// The plan is ready. The runner setup starts: the runtime, the
+    /// companion install and the runner start.
+    Setup {
+        /// The planned mutants.
+        mutants: usize,
+    },
+    /// The baseline run starts: the test files run with no active mutant.
+    Baseline {
+        /// The test files of the baseline run.
+        test_files: usize,
+    },
+    /// The mutant runs. The first event has `done` 0, and each finished
+    /// mutant sends one event.
+    Mutants {
+        /// The mutants that finished.
+        done: usize,
+        /// The mutants that this phase runs. A cached result is not in it.
+        total: usize,
+    },
+    /// The retries of survivors and timeouts. The first event has `done` 0.
+    Retries {
+        /// The retries that finished.
+        done: usize,
+        /// The retries that this phase runs.
+        total: usize,
+    },
+    /// The tests stopped. The worktree check, the survivor type check and
+    /// the report start.
+    Finalize,
+}
+
+/// Receives the [`MutationProgress`] events of a run. The scheduler sends
+/// the mutant events from its worker threads.
+pub type MutationProgressSink<'a> = &'a (dyn Fn(MutationProgress) + Sync);
+
 /// Options of [`crate::run_mutation`] and [`crate::plan_mutation`].
 #[derive(Debug, Clone, Default)]
 pub struct MutationRunOptions {

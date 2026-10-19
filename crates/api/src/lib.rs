@@ -168,7 +168,8 @@ pub use markdown_output::{
     build_grouped_markdown, build_health_markdown, build_markdown, build_walkthrough_markdown,
 };
 pub use mutation::{
-    MutationRunOptions, MutationRunScope, apply_mutation_verdicts, validate_mutation_verdicts,
+    MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope,
+    apply_mutation_verdicts, validate_mutation_verdicts,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
@@ -197,9 +198,9 @@ pub use runtime::{
     review_similar_code, run_architecture, run_audit, run_boundary_violations,
     run_circular_dependencies, run_combined, run_complexity_with_runner, run_dead_code,
     run_dead_code_with_baseline, run_decision_surface, run_duplication, run_feature_flags,
-    run_health, run_health_with_runner, run_mutation, run_similar_code, run_trace_clone,
-    run_trace_dependency, run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
-    select_similar_code_candidate_snapshot, serialize_health_report_json,
+    run_health, run_health_with_runner, run_mutation, run_mutation_with_progress, run_similar_code,
+    run_trace_clone, run_trace_dependency, run_trace_error, run_trace_export, run_trace_file,
+    run_trace_import_path, select_similar_code_candidate_snapshot, serialize_health_report_json,
 };
 pub use runtime_json::{
     serialize_architecture_programmatic_json, serialize_audit_programmatic_json,

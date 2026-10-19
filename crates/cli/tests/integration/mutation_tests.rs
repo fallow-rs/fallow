@@ -201,6 +201,41 @@ fn a_dirty_worktree_exits_2_unless_allowed() {
     assert_eq!(value["worktree"]["dirty_at_start"][0], "src/math.ts");
 }
 
+/// The prefix of each phase progress line on stderr.
+const PROGRESS: &str = "fallow: mutation:";
+
+fn progress_lines(stderr: &str) -> Vec<&str> {
+    stderr
+        .lines()
+        .filter(|line| line.starts_with(PROGRESS))
+        .collect()
+}
+
+#[test]
+fn human_output_shows_phase_progress_and_quiet_or_json_output_shows_none() {
+    let project = untested_project();
+    let human = mutation(project.path(), &["--all"]);
+    assert_eq!(human.code, 0, "{}", human.stderr);
+    let lines = progress_lines(&human.stderr);
+    assert_eq!(lines.len(), 1, "{}", human.stderr);
+    assert!(
+        lines[0].starts_with("fallow: mutation: the tests stopped; worktree check and report ("),
+        "no test file exists, so only the final phase runs: {}",
+        human.stderr
+    );
+    assert!(!human.stdout.contains(PROGRESS), "{}", human.stdout);
+
+    let quiet = mutation(project.path(), &["--all", "--quiet"]);
+    assert_eq!(quiet.code, 0, "{}", quiet.stderr);
+    assert!(progress_lines(&quiet.stderr).is_empty(), "{}", quiet.stderr);
+
+    let json = mutation(project.path(), &["--all", "--format", "json"]);
+    assert_eq!(json.code, 0, "{}", json.stderr);
+    let value = parse_json(&json);
+    assert_eq!(value["no_test_files"], true, "{value}");
+    assert!(progress_lines(&json.stderr).is_empty(), "{}", json.stderr);
+}
+
 #[test]
 fn unreached_mutants_give_a_coverage_but_no_score_so_min_score_cannot_fail() {
     let project = untested_project();
@@ -1026,6 +1061,45 @@ export default {
             serde_json::json!([{ "reason": "unsupported-file", "count": survived }]),
             "{report}"
         );
+    }
+
+    #[test]
+    fn a_human_vitest_run_shows_each_phase_with_the_mutant_counts() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package, "");
+        let human = mutation(&root, &["src/math.ts", "--concurrency", "1"]);
+        assert_eq!(human.code, 0, "{}", human.stderr);
+        let lines = super::progress_lines(&human.stderr);
+        let position = |text: &str| {
+            lines
+                .iter()
+                .position(|line| line.contains(text))
+                .unwrap_or_else(|| panic!("no `{text}` line: {}", human.stderr))
+        };
+        let setup = position("runner setup for ");
+        let baseline = position("baseline run of 1 test file with no active mutant");
+        let first = position(" mutants done (");
+        let finalize = position("the tests stopped; worktree check and report");
+        assert!(
+            setup < baseline && baseline < first && first < finalize,
+            "{lines:#?}"
+        );
+        let counts: Vec<(usize, usize)> = lines
+            .iter()
+            .filter_map(|line| {
+                let text = line.strip_prefix("fallow: mutation: ")?;
+                let (count, rest) = text.split_once(' ')?;
+                rest.starts_with("mutants done").then_some(())?;
+                let (done, total) = count.split_once('/')?;
+                Some((done.parse().ok()?, total.parse().ok()?))
+            })
+            .collect();
+        let total = counts[0].1;
+        assert!(total > 0, "{lines:#?}");
+        assert_eq!(counts.first(), Some(&(0, total)), "{lines:#?}");
+        assert_eq!(counts.last(), Some(&(total, total)), "{lines:#?}");
     }
 
     #[test]

@@ -75,6 +75,7 @@ mod migrate;
 mod mutation_cli;
 mod mutation_human;
 mod mutation_inspect;
+mod mutation_progress;
 mod onboarding;
 #[cfg(test)]
 mod output_envelope;

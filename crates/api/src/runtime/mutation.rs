@@ -38,12 +38,14 @@ use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::runner_select::{Runner, select_runner};
 use crate::mutation::scheduler::{
     ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome, SchedulePlan,
-    ScheduledMutant, run_schedule,
+    ScheduledMutant, run_schedule_with_progress,
 };
 use crate::mutation::transport::ProcessSpawner;
 use crate::mutation::typecheck::typecheck_survivors;
 use crate::mutation::worktree::{Exclusions, WorktreeSnapshot, canonical_path, snapshot};
-use crate::mutation::{MutationRunOptions, MutationRunScope};
+use crate::mutation::{
+    MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope,
+};
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
@@ -677,6 +679,7 @@ fn execute(
     options: &MutationRunOptions,
     planned: &Planned,
     deadline: Option<Instant>,
+    progress: MutationProgressSink<'_>,
 ) -> ProgrammaticResult<Execution> {
     let plan = &planned.plan;
     let schedule = schedule_plan(plan);
@@ -692,6 +695,9 @@ fn execute(
             setup_ms: 0,
         });
     }
+    progress(MutationProgress::Setup {
+        mutants: schedule.mutants.len(),
+    });
     let setup_started = Instant::now();
     let manifest = manifest()
         .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?;
@@ -749,7 +755,7 @@ fn execute(
         session_token_env: manifest.session_token_env.clone(),
     };
     let setup_ms = millis(setup_started.elapsed());
-    let mut outcome = run_schedule(&spawner, &schedule, &config)
+    let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = outcome.ready.as_ref().map(|ready| MutationRunnerOutput {
         name: name.to_owned(),
@@ -838,6 +844,22 @@ fn guard_typecheck_companion(enabled: bool, root: &Path) -> ProgrammaticResult<(
 /// companion file that changed after install, or a test suite that fails
 /// with no active mutant outside each test file.
 pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<MutationReport> {
+    run_mutation_with_progress(options, &|_| {})
+}
+
+/// [`run_mutation`] that sends a [`MutationProgress`] event at the start of
+/// each run phase and after each finished mutant.
+///
+/// The events arrive on the calling thread and on the scheduler worker
+/// threads. A sink must return quickly, because a worker waits for it.
+///
+/// # Errors
+///
+/// Returns the same errors as [`run_mutation`].
+pub fn run_mutation_with_progress(
+    options: &MutationRunOptions,
+    progress: MutationProgressSink<'_>,
+) -> ProgrammaticResult<MutationReport> {
     let started = Instant::now();
     let deadline = options.time_budget.map(|budget| started + budget);
     let mut start_snapshot = None;
@@ -849,7 +871,8 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
     guard_cache_holds_no_planned_file(planned.resolved.root(), &planned.cache_dir, &planned.plan)?;
     guard_typecheck_companion(options.typecheck, planned.resolved.root())?;
     let plan_ms = millis(started.elapsed());
-    let execution = execute(options, &planned, deadline);
+    let execution = execute(options, &planned, deadline, progress);
+    progress(MutationProgress::Finalize);
     let worktree_end = settle_worktree(start_snapshot.as_ref(), |start| {
         take_worktree_snapshot(
             planned.resolved.root(),
