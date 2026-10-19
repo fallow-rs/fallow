@@ -327,7 +327,7 @@ npm run generate:contracts:check
 
 - **Conventional commits**: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
 - **Commit linting**: `npm run commitlint -- --last --verbose` uses the same rule set as CI
-- **Signed commits**: `git commit -S`
+- **Signed commits**: `git commit -S` (or `git commit -S -s` to add the sign-off too)
 - **Sign-off**: `git commit -s` (see [Developer Certificate of Origin](#developer-certificate-of-origin))
 - Pre-commit hooks run `cargo fmt` and `cargo clippy` automatically
 

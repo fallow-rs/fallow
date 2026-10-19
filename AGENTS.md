@@ -121,7 +121,7 @@ The complete ownership and synchronization model is documented in
 ## Git
 
 - Use conventional commit prefixes.
-- Sign commits with `git commit -S`.
+- Sign commits with `git commit -S -s`. The `-s` flag adds the DCO sign-off that CI requires.
 - Do not add AI attribution or `Co-Authored-By` trailers.
 - Before committing, verify `git status` and the exact staged paths.
 - Mirror the `hk.pkl` pre-commit and pre-push checks when hooks did
