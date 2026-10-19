@@ -2,7 +2,10 @@ name: CodeQL
 
 # Static analysis for the Rust crates, the JavaScript and TypeScript tools and
 # the workflows. It runs on GitHub-hosted runners, so it costs no paid minutes.
-# The Analyze checks are required on `main`, and findings show as code scanning alerts.
+# The Analyze checks are required on `main`, and findings show as code scanning
+# alerts. The Rust analysis takes about 20 minutes, so a pull request that
+# changes no Rust input skips its steps and the check passes at once. Pushes to
+# main and the schedule always analyze.
 on:
   pull_request:
   push:
@@ -21,8 +24,33 @@ concurrency:
 permissions: {}
 
 jobs:
+  changes:
+    name: Detect Rust changes
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - '.github/codeql/**'
+              - '.github/workflows/codeql.yml'
+
   analyze:
     name: Analyze (${{ matrix.language }})
+    needs: changes
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
@@ -33,17 +61,28 @@ jobs:
       fail-fast: false
       matrix:
         language: [rust, javascript-typescript, actions]
+    # A skipped job does not satisfy a required check, so the job always runs
+    # and only its steps skip.
+    env:
+      ANALYZE: ${{ matrix.language != 'rust' || github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true' }}
     steps:
+      - name: Skip the Rust analysis
+        if: env.ANALYZE != 'true'
+        run: echo "This pull request changes no Rust input, so the Rust analysis is skipped."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.ANALYZE == 'true'
         with:
           persist-credentials: false
 
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: env.ANALYZE == 'true'
         with:
           languages: ${{ matrix.language }}
           build-mode: none
           config-file: ./.github/codeql/codeql-config.yml
 
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: env.ANALYZE == 'true'
         with:
           category: /language:${{ matrix.language }}
