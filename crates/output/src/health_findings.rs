@@ -55,6 +55,18 @@ pub struct HealthFinding {
     /// value than in that base finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<bool>,
+    /// Audit-mode class of the finding against the base snapshot:
+    /// `introduced`, `worsened` or `inherited`. A worsened finding matches a
+    /// base finding, is not introduced, and has a higher value in at least one
+    /// measured metric. Absent outside an audit with a base snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<crate::AuditFindingAttribution>,
+    /// Audit-mode list of the measured metrics that are higher than in the
+    /// matched base finding, with the base value and the head value. Present
+    /// on a worsened finding, and on an introduced finding that matches a base
+    /// finding. Absent when no metric grew.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worsened_metrics: Vec<crate::WorsenedMetric>,
 }
 
 impl Deref for HealthFinding {
@@ -72,6 +84,8 @@ impl From<ComplexityViolation> for HealthFinding {
             violation,
             actions: Vec::new(),
             introduced: None,
+            attribution: None,
+            worsened_metrics: Vec::new(),
         }
     }
 }
@@ -92,6 +106,8 @@ impl HealthFinding {
             violation,
             actions,
             introduced,
+            attribution: None,
+            worsened_metrics: Vec::new(),
         }
     }
 
@@ -104,6 +120,8 @@ impl HealthFinding {
             violation,
             actions,
             introduced: None,
+            attribution: None,
+            worsened_metrics: Vec::new(),
         }
     }
 }

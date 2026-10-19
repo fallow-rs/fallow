@@ -2359,6 +2359,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
                 cyclomatic: 17,
                 cognitive: 16,
                 crap: Some(42.5),
+                line_count: 12,
             }],
         ))
         .collect(),
@@ -2744,6 +2745,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -2779,6 +2781,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
                 cyclomatic: 17,
                 cognitive: 16,
                 crap: Some(42.5),
+                line_count: 12,
             }],
         ))
         .collect(),
@@ -2838,6 +2841,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -2936,6 +2940,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3026,6 +3031,7 @@ fn audit_gate_all_skips_base_snapshot() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::All,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3136,6 +3142,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3247,6 +3254,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3283,6 +3291,10 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
 /// line. The new-only gate must classify that group as inherited, not
 /// introduced.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
     let helper = "export function eq(xs: string[], ys: string[]): boolean {\n  if (xs.length !== ys.length) {\n    return false;\n  }\n  for (let index = 0; index < xs.length; index += 1) {\n    if (xs[index] !== ys[index]) {\n      return false;\n    }\n  }\n  return true;\n}\n";
     let scaffolding = "export function selfTest(): boolean {\n  const alpha = ['alpha', 'beta', 'gamma'];\n  const beta = ['alpha', 'beta', 'gamma'];\n  const gamma = ['delta', 'epsilon', 'zeta'];\n  const first = eq(alpha, beta);\n  const second = eq(alpha, gamma);\n  const third = eq(beta, gamma);\n  const outcomes = [first, !second, !third];\n  const labels = ['same', 'differs', 'differs'];\n  const combined = outcomes.map((outcome, index) => `${labels[index]}:${outcome}`);\n  return combined.length === outcomes.length && outcomes.every((outcome) => outcome === true);\n}\n";
@@ -3353,6 +3365,7 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3534,6 +3547,7 @@ fn audit_new_only_still_gates_pasted_clone_as_introduced() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3659,6 +3673,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3765,6 +3780,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -3917,6 +3933,7 @@ export function App() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -4076,6 +4093,7 @@ export function App() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -4175,6 +4193,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -4269,6 +4288,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -4372,6 +4392,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::NewOnly,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -4422,6 +4443,10 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn audit_dupes_only_materializes_groups_touching_changed_files() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let root_path = tmp
@@ -4495,6 +4520,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::All,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,
@@ -4673,6 +4699,7 @@ fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
         coverage: None,
         coverage_root: None,
         gate: AuditGate::All,
+        worsened: fallow_config::AuditWorsened::Warn,
         include_entry_exports: false,
         show_cascade: false,
         fail_on_parse_error: false,

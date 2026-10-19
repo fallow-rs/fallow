@@ -338,8 +338,10 @@ Contract rules:
   and, say, `threads: 0`) reports the coverage error, which is also the order
   the CLI reports them in.
 - The `audit` typed route reads the `audit` config section with the CLI's
-  precedence: a `gate` or `css_deep` parameter wins, then `audit.gate`,
-  `audit.css` and `audit.cssDeep`, then the defaults. `css: false` turns
+  precedence: a `gate`, `worsened` or `css_deep` parameter wins, then
+  `audit.gate`, `audit.worsened`, `audit.css` and `audit.cssDeep`, then the
+  defaults. An invalid `worsened` value takes the CLI route, so the CLI
+  reports the error, as for `gate`. `css: false` turns
   styling off, as `--no-css` does, but `css: true` cannot override
   `audit.css: false`, because the CLI has no flag for that. `fallow_api::run_audit` resolves the
   section after it loads the config, so an unset `AuditOptions` field means

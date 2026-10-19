@@ -74,7 +74,8 @@ mod type_aware;
 pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
-    AuditSarifOutputInput, AuditSummary, AuditVerdict, attach_audit_diff_risk_attribution,
+    AuditSarifOutputInput, AuditSummary, AuditVerdict,
+    attach_audit_complexity_worsened_attribution, attach_audit_diff_risk_attribution,
     attach_audit_duplication_demotion_attribution, attach_audit_styling_attribution,
     attach_audit_wire_attribution, build_audit_codeclimate, build_audit_codeclimate_issues,
     build_audit_header_json, build_audit_header_map, build_audit_sarif,
@@ -117,7 +118,7 @@ pub use explain::{
     rule_severity_key, security_meta, serialize_explain_programmatic_json, unknown_explain_error,
 };
 pub use fallow_config::levenshtein::closest_match;
-pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
+pub use fallow_config::{AuditGate, AuditWorsened, HealthConfig, TypeAwareRequire};
 /// Engine-owned change scope of one run: a global changed-file set or the
 /// per-workspace Git baselines of `workspaces.changedSince`.
 pub use fallow_engine::change_scope::{
@@ -727,6 +728,9 @@ pub struct AuditOptions {
     /// Gate mode deciding which findings fail the audit; `None` defers to
     /// `audit.gate` in config, which defaults to `new-only`.
     pub gate: Option<fallow_config::AuditGate>,
+    /// How a worsened complexity finding affects the verdict; `None` defers
+    /// to `audit.worsened` in config, which defaults to `warn`.
+    pub worsened: Option<fallow_config::AuditWorsened>,
     /// Fail the gate when a changed function exceeds this CRAP score.
     pub max_crap: Option<f64>,
     /// Test coverage report path for coverage-aware findings.

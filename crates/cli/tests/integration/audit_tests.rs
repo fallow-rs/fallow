@@ -8377,7 +8377,7 @@ fn audit_cache_prune_reports_and_removes_aged_snapshot_files() {
     let root = fixture.path();
     let scan = TempDir::new().expect("scan root should be created");
     // The current `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` directory.
-    let snapshot_dir = root.join(".fallow/cache/audit-base-v13");
+    let snapshot_dir = root.join(".fallow/cache/audit-base-v14");
     fs::create_dir_all(&snapshot_dir).unwrap();
     let aged = snapshot_dir.join("00000000000000aa.bin");
     let fresh = snapshot_dir.join("00000000000000bb.bin");

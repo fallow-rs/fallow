@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use fallow_config::{AuditGate, RulesConfig, Severity};
+use fallow_config::{AuditGate, AuditWorsened, RulesConfig, Severity};
 
 use super::{AuditAnalysesView, AuditKeySnapshot};
 use crate::audit_keys::{
     AuditComparison, AuditDomainLedger, DeadCodeAuditLedger,
-    classify_complexity_findings_against_all, complexity_ledger_keys, dead_code_audit_ledger,
+    classify_complexity_attribution_against_all, complexity_ledger_keys, dead_code_audit_ledger,
     dupe_group_key, preexisting_dupe_group_keys, styling_finding_key,
 };
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
@@ -87,22 +87,28 @@ pub fn compare(
                 }
                 ledger
             });
+    let health_classes =
+        view.health
+            .as_ref()
+            .zip(base)
+            .map_or_else(Vec::new, |(health, snapshot)| {
+                classify_complexity_attribution_against_all(
+                    &health.report.findings,
+                    health.root,
+                    std::iter::once(&snapshot.health).chain(&snapshot.inherited_health),
+                )
+            });
     let health = view
         .health
         .as_ref()
         .map_or_else(AuditDomainLedger::default, |health| {
             let findings = &health.report.findings;
             let keys = complexity_ledger_keys(findings, health.root);
-            let introduced = base.map_or_else(
-                || vec![false; findings.len()],
-                |snapshot| {
-                    classify_complexity_findings_against_all(
-                        findings,
-                        health.root,
-                        std::iter::once(&snapshot.health).chain(&snapshot.inherited_health),
-                    )
-                },
-            );
+            let introduced = (0..findings.len()).map(|index| {
+                health_classes
+                    .get(index)
+                    .is_some_and(|class| class.introduced)
+            });
             AuditDomainLedger::from_classified(keys.into_iter().zip(introduced), base.is_some())
         });
     let dupes = AuditDomainLedger::compare(
@@ -127,6 +133,7 @@ pub fn compare(
     AuditComparison {
         dead_code,
         health,
+        health_classes,
         dupes,
         styling,
     }
@@ -196,6 +203,7 @@ pub fn styling_finding_gates(rules: &RulesConfig, code: &str) -> bool {
 #[must_use]
 pub fn outcome(
     gate: AuditGate,
+    worsened: AuditWorsened,
     view: &AuditAnalysesView<'_>,
     comparison: &AuditComparison,
     has_base: bool,
@@ -203,13 +211,55 @@ pub fn outcome(
     let summary = summary(view, comparison);
     (
         attribution(gate, comparison, has_base),
-        verdict(gate, view, comparison, &summary),
+        verdict(gate, worsened, view, comparison, &summary),
         summary,
     )
 }
 
+/// How each complexity finding takes part in the verdict: `(gates, warns)`.
+///
+/// Under `new-only`, an introduced finding gates. A worsened finding gates
+/// under `audit.worsened: error`, and gives at least `warn` under `warn`.
+fn complexity_verdict_flags(
+    gate: AuditGate,
+    worsened: AuditWorsened,
+    view: &AuditAnalysesView<'_>,
+    comparison: &AuditComparison,
+) -> (bool, bool) {
+    let new_only = matches!(gate, AuditGate::NewOnly);
+    let Some(health) = view.health.as_ref() else {
+        return (false, false);
+    };
+    let mut errors = false;
+    let mut warnings = false;
+    for (index, (finding, introduced)) in health
+        .report
+        .findings
+        .iter()
+        .zip(comparison.health.introduced())
+        .enumerate()
+    {
+        let is_worsened = comparison
+            .health_classes
+            .get(index)
+            .is_some_and(crate::audit_keys::ComplexityClass::is_worsened);
+        let counts = !new_only || introduced || (is_worsened && worsened == AuditWorsened::Error);
+        if counts {
+            if finding.blocks() {
+                errors = true;
+            } else {
+                warnings = true;
+            }
+        } else if is_worsened {
+            warnings = true;
+        }
+    }
+    (errors, warnings)
+}
+
 fn verdict(
     gate: AuditGate,
+    worsened: AuditWorsened,
     view: &AuditAnalysesView<'_>,
     comparison: &AuditComparison,
     summary: &AuditSummary,
@@ -233,21 +283,7 @@ fn verdict(
     // verdict and `warn` gives `warn`. The `new-only` gate reads only the
     // introduced findings.
     let (complexity_errors, complexity_warnings) =
-        view.health.as_ref().map_or((false, false), |health| {
-            health
-                .report
-                .findings
-                .iter()
-                .zip(comparison.health.introduced())
-                .filter(|(_, introduced)| !new_only || *introduced)
-                .fold((false, false), |(errors, warnings), (finding, _)| {
-                    if finding.blocks() {
-                        (true, warnings)
-                    } else {
-                        (errors, true)
-                    }
-                })
-        });
+        complexity_verdict_flags(gate, worsened, view, comparison);
     let styling_errors = view.health.as_ref().is_some_and(|health| {
         health
             .report

@@ -27,6 +27,7 @@ mod audit_routing;
 mod audit_test_reach;
 mod audit_walkthrough;
 mod audit_weakening;
+mod audit_worsened;
 mod baseline_staleness;
 mod check;
 mod ci_output;
@@ -132,6 +133,10 @@ pub use audit_walkthrough::{
     is_judgment_action,
 };
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
+pub use audit_worsened::{
+    AuditFindingAttribution, WorsenedMetric, WorsenedMetricKind, describe_worsened_metrics,
+    format_metric_value,
+};
 pub use baseline_staleness::{
     BaselineScopeReasons, BaselineStaleness, BaselineStalenessAdvisory, ScopeReason,
 };

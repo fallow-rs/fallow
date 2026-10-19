@@ -287,6 +287,38 @@ pub fn attach_audit_wire_attribution(value: &mut serde_json::Value) {
     attach_audit_styling_attribution(value);
     attach_audit_duplication_demotion_attribution(value);
     attach_audit_diff_risk_attribution(value);
+    attach_audit_complexity_worsened_attribution(value);
+}
+
+/// Add `attribution.complexity_worsened`, the number of serialized
+/// `complexity.findings[]` entries whose `attribution` is `worsened`.
+///
+/// A worsened finding is also counted in `complexity_inherited`, so the
+/// existing counts keep their meaning. Always inserted when an `attribution`
+/// object is present: an integer, `0` without a base snapshot or a
+/// complexity section. Wire-only, like the styling counts.
+pub fn attach_audit_complexity_worsened_attribution(value: &mut serde_json::Value) {
+    let worsened = value
+        .get("complexity")
+        .and_then(|complexity| complexity.get("findings"))
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, |items| {
+            items
+                .iter()
+                .filter(|item| {
+                    item.get("attribution").and_then(serde_json::Value::as_str) == Some("worsened")
+                })
+                .count()
+        });
+    if let Some(attribution) = value
+        .get_mut("attribution")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        attribution.insert(
+            "complexity_worsened".to_string(),
+            serde_json::json!(worsened),
+        );
+    }
 }
 
 /// Add `attribution.diff_risk_introduced`, the number of serialized

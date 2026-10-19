@@ -352,14 +352,47 @@ fn append_complexity_sarif_results(
         let (rule_id, message) = health_complexity_sarif_message(finding, report);
         let level = complexity_sarif_level(finding);
         let source_snippet = snippets.line(&finding.path, finding.line);
-        sarif_results.push(sarif_result_with_snippet(
+        let mut result = sarif_result_with_snippet(
             rule_id,
             level,
             &message,
             &uri,
             Some((finding.line, finding.col + 1)),
             source_snippet.as_deref(),
-        ));
+        );
+        set_audit_attribution_properties(&mut result, finding);
+        sarif_results.push(result);
+    }
+}
+
+/// Audit only: put the attribution class and the grown metrics of a
+/// complexity finding in the result property bag. The message and the
+/// fingerprints do not change.
+fn set_audit_attribution_properties(
+    result: &mut serde_json::Value,
+    finding: &crate::HealthFinding,
+) {
+    let Some(attribution) = finding.attribution else {
+        return;
+    };
+    let Some(object) = result.as_object_mut() else {
+        return;
+    };
+    let props = object
+        .entry("properties")
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(props) = props.as_object_mut() else {
+        return;
+    };
+    props.insert(
+        "attribution".to_string(),
+        serde_json::to_value(attribution).unwrap_or(serde_json::Value::Null),
+    );
+    if !finding.worsened_metrics.is_empty() {
+        props.insert(
+            "worsened_metrics".to_string(),
+            serde_json::to_value(&finding.worsened_metrics).unwrap_or(serde_json::Value::Null),
+        );
     }
 }
 

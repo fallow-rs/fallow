@@ -263,6 +263,9 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
 /// Valid gate values for the `audit` tool.
 pub const VALID_AUDIT_GATES: &[&str] = &["new-only", "all"];
 
+/// Valid `worsened` values for the `audit` tool.
+pub const VALID_AUDIT_WORSENED: &[&str] = &["warn", "error"];
+
 /// Build a structured validation error body matching the shape `run_tool` emits
 /// for CLI-level errors.
 pub fn validation_error_body(message: impl Into<String>) -> String {

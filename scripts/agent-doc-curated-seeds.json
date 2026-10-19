@@ -711,6 +711,12 @@
       "seed": "Emit the agent-contract WALKTHROUGH GUIDE: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file`"
     },
     {
+      "section": "flags:audit",
+      "row": "--worsened",
+      "column": "Description",
+      "seed": "How a worsened complexity finding affects the audit verdict"
+    },
+    {
       "section": "flags:config",
       "row": "--path",
       "column": "Description",

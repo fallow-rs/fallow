@@ -7,9 +7,9 @@ use std::process::ExitCode;
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::cli_agent::{AgentCli, run_agent_command};
 use crate::cli_args::{
-    AuditCacheCli, AuditGateArg, BaselinesCli, CiCli, CiProviderArg, CiTemplateCli, Cli, Command,
-    CoverageCli, EffortFilter, EmailModeArg, HealthSeverityCli, LicenseCli, RulePackCli,
-    SecuritySubcommand, TelemetryCli, TypeAwareCli, TypeAwareRequireArg,
+    AuditCacheCli, AuditGateArg, AuditWorsenedArg, BaselinesCli, CiCli, CiProviderArg,
+    CiTemplateCli, Cli, Command, CoverageCli, EffortFilter, EmailModeArg, HealthSeverityCli,
+    LicenseCli, RulePackCli, SecuritySubcommand, TelemetryCli, TypeAwareCli, TypeAwareRequireArg,
 };
 use crate::cli_hooks::run_hooks_command;
 use crate::cli_impact::{ImpactCrossRepoOpts, dispatch_impact};
@@ -1417,6 +1417,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         css_deep,
         no_css_deep,
         gate,
+        worsened,
         runtime_coverage,
         min_invocations_hot,
         gate_marker,
@@ -1462,6 +1463,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             css_deep,
             no_css_deep,
             gate,
+            worsened,
             runtime_coverage,
             min_invocations_hot,
             gate_marker,
@@ -2612,6 +2614,7 @@ struct AuditDispatchArgs {
     css_deep: bool,
     no_css_deep: bool,
     gate: Option<AuditGateArg>,
+    worsened: Option<AuditWorsenedArg>,
     runtime_coverage: Option<PathBuf>,
     min_invocations_hot: u64,
     gate_marker: Option<String>,
@@ -2898,6 +2901,7 @@ fn run_resolved_audit(
             coverage: inputs.coverage.as_deref(),
             coverage_root: inputs.coverage_root.as_deref(),
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
+            worsened: args.worsened.map_or(inputs.audit_cfg.worsened, Into::into),
             include_entry_exports: cli.include_entry_exports,
             show_cascade: cli.show_cascade,
             fail_on_parse_error: cli.fail_on_parse_error,
@@ -2978,6 +2982,7 @@ fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
         css_deep: false,
         no_css_deep: false,
         gate: None,
+        worsened: None,
         runtime_coverage: None,
         min_invocations_hot: 0,
         gate_marker: None,
@@ -3032,6 +3037,7 @@ fn decision_surface_audit_options<'a>(
         coverage: None,
         coverage_root: None,
         gate: inputs.audit_cfg.gate,
+        worsened: inputs.audit_cfg.worsened,
         include_entry_exports: cli.include_entry_exports,
         show_cascade: cli.show_cascade,
         fail_on_parse_error: false,

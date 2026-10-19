@@ -1232,6 +1232,14 @@ fn augment_audit_wire_definitions(definitions: &mut Map<String, Value>) -> Resul
     ] {
         properties.insert(name.to_string(), serde_json::json!({"type": "integer"}));
     }
+    // Optional: saved envelopes from older versions do not carry it.
+    properties.insert(
+        "complexity_worsened".to_string(),
+        serde_json::json!({
+            "type": "integer",
+            "description": "Complexity findings whose `attribution` is `worsened`: already in the base snapshot, with a higher measured value now. Also counted in `complexity_inherited`."
+        }),
+    );
     let required = attribution
         .get_mut("required")
         .and_then(Value::as_array_mut)

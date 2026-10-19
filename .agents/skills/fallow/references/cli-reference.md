@@ -1112,6 +1112,7 @@ Audits changed files for dead code, complexity, duplication, and styling. Return
 | `--css-deep` | `bool` | `false` | Enable deep CSS analysis for audit explicitly: project-wide styling reachability, narrowed back to changed anchors. Deep CSS is on by default; use this to override `audit.cssDeep = false` |
 | `--no-css-deep` | `bool` | `false` | Disable deep CSS analysis while keeping local styling analytics on |
 | `--gate` | `new-only\|all` | - | Which findings affect the verdict. `new-only` gates only introduced findings; `all` gates every finding in changed files and skips the extra base-snapshot attribution pass. |
+| `--worsened` | `warn\|error` | - | How a worsened complexity finding affects the verdict under `new-only`. A worsened finding was already in the base, and a measured value (cyclomatic, cognitive, CRAP or line count) is higher now. `warn` (default) gives at least a `warn` verdict; `error` counts it like an introduced finding. A grown exceeded metric stays introduced in both modes. |
 | `--runtime-coverage` | `string` | - | Runtime coverage input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Runs the `fallow-cov` sidecar inside the audit, so the `hot-path-touched` verdict shows next to the dead-code and complexity findings without a second `fallow health` run in CI. The verdict is informational and does not change the exit code. A single local capture is free. Continuous or multi-capture monitoring needs a license (see `fallow license`) |
 | `--min-invocations-hot` | `string` | `100` | Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set |
 | `--gate-marker` | `string` | - | Internal marker identifying a gate run (e.g. `pre-commit`), set by the generated git hook so Fallow Impact can record a containment event when the gate blocks then clears. Hidden; never changes the verdict, exit code, or output |
@@ -1145,6 +1146,11 @@ A complexity finding matches its base finding by file path and function name. Th
 - A metric that the head finding exceeds has a higher value than in the base finding.
 
 An unchanged or decreased metric keeps the finding inherited, also when the exceeded category changes (for example from `both` to `cyclomatic`). When one file has more than one finding with the same function name, each base finding matches at most one head finding. Head findings with unchanged metric values match first. The other findings then match in line order.
+
+A matched finding that is not introduced is `worsened` when a measured value is strictly higher than in the base finding: cyclomatic, cognitive, CRAP (only when both sides have a score), or the line count of the function. Each complexity finding carries `attribution` (`introduced`, `worsened` or `inherited`) and, when a value grew, `worsened_metrics` with the `metric`, the `base` value and the `head` value. An introduced finding whose exceeded metric grew also carries `worsened_metrics`. `attribution.complexity_worsened` counts the worsened findings; they are also in `complexity_inherited`. `--worsened` (config `audit.worsened`) decides their effect on the verdict:
+
+- `warn` (default): a worsened finding makes the verdict at least `warn`. The exit code stays 0.
+- `error`: a worsened finding counts like an introduced finding, so its `complexity-*` rule decides the verdict.
 
 ### JSON contract: which fields are severity-aware
 

@@ -6,7 +6,7 @@ use fallow_api::{
     AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput,
     DupesReportPayload,
 };
-use fallow_config::{AuditGate, OutputFormat, RulesConfig, Severity};
+use fallow_config::{AuditGate, AuditWorsened, OutputFormat, RulesConfig, Severity};
 use fallow_output::{
     AUDIT_SCHEMA_VERSION, AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput,
     PrDecisionConclusion,
@@ -454,6 +454,7 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
         && let Some(ref health) = result.health
     {
         print_audit_complexity_section(health, quiet, explain, show_headers);
+        print_audit_worsened_section(result, health, show_headers);
     }
 
     print_audit_styling_summary(result, show_headers);
@@ -661,6 +662,154 @@ fn print_audit_complexity_section(
             exit_reason: false,
         },
     );
+}
+
+/// One row for each complexity finding whose measured values grew against
+/// the matched base finding, with the base and head values. Prints nothing
+/// without a base snapshot or when no value grew. Compact and markdown get
+/// their own row shape.
+fn print_audit_worsened_section(
+    result: &AuditResult,
+    health: &crate::health::HealthResult,
+    show_headers: bool,
+) {
+    let lines = audit_worsened_lines(result, health);
+    if lines.is_empty() {
+        return;
+    }
+    match result.output {
+        OutputFormat::Markdown => {
+            outln!();
+            outln!("### Worse than base\n");
+            outln!("| File | Function | Attribution | Grown metrics |");
+            outln!("|:-----|:---------|:------------|:--------------|");
+        }
+        OutputFormat::Compact => {}
+        _ => print_audit_section_header(
+            show_headers,
+            "── Worse than base ────────────────────────────────",
+        ),
+    }
+    for line in lines {
+        outln!("{line}");
+    }
+}
+
+/// One complexity finding with grown metrics, for the worsened section.
+struct WorsenedRow<'a> {
+    path: String,
+    line: u32,
+    name: &'a str,
+    worsened: bool,
+    metrics: &'a [fallow_output::WorsenedMetric],
+}
+
+/// The rendered rows of [`print_audit_worsened_section`] in the output format
+/// of the run.
+fn audit_worsened_lines(result: &AuditResult, health: &crate::health::HealthResult) -> Vec<String> {
+    let root = &health.config.root;
+    health
+        .report
+        .findings
+        .iter()
+        .filter(|finding| !finding.worsened_metrics.is_empty())
+        .map(|finding| {
+            let row = WorsenedRow {
+                path: finding
+                    .path
+                    .strip_prefix(root)
+                    .unwrap_or(&finding.path)
+                    .display()
+                    .to_string()
+                    .replace('\\', "/"),
+                line: finding.line,
+                name: &finding.name,
+                worsened: finding.attribution
+                    == Some(fallow_output::AuditFindingAttribution::Worsened),
+                metrics: &finding.worsened_metrics,
+            };
+            render_worsened_row(&row, result.output, result.worsened)
+        })
+        .collect()
+}
+
+/// Compact token of a grown metric, the same spelling as its JSON value.
+const fn worsened_metric_token(metric: fallow_output::WorsenedMetricKind) -> &'static str {
+    match metric {
+        fallow_output::WorsenedMetricKind::Cyclomatic => "cyclomatic",
+        fallow_output::WorsenedMetricKind::Cognitive => "cognitive",
+        fallow_output::WorsenedMetricKind::Crap => "crap",
+        fallow_output::WorsenedMetricKind::LineCount => "line_count",
+    }
+}
+
+fn render_worsened_row(row: &WorsenedRow<'_>, output: OutputFormat, mode: AuditWorsened) -> String {
+    let attribution = if row.worsened {
+        "worsened"
+    } else {
+        "introduced"
+    };
+    match output {
+        OutputFormat::Compact => {
+            let metrics = row
+                .metrics
+                .iter()
+                .map(|metric| {
+                    format!(
+                        "{}={}->{}",
+                        worsened_metric_token(metric.metric),
+                        fallow_output::format_metric_value(metric.base),
+                        fallow_output::format_metric_value(metric.head),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "worse-than-base:{}:{}:{}:attribution={attribution},{metrics}",
+                row.path, row.line, row.name
+            )
+        }
+        OutputFormat::Markdown => format!(
+            "| `{}:{}` | `{}` | {attribution} | {} |",
+            row.path,
+            row.line,
+            row.name,
+            fallow_output::describe_worsened_metrics(row.metrics)
+        ),
+        _ => {
+            let note = if row.worsened {
+                worsened_class_label(mode)
+            } else {
+                "introduced: a metric that it exceeds grew"
+            };
+            format!(
+                "  {}:{} {}  {}  ({note})",
+                row.path,
+                row.line,
+                row.name,
+                fallow_output::describe_worsened_metrics(row.metrics)
+            )
+        }
+    }
+}
+
+/// The number of complexity findings whose attribution is `worsened`.
+fn audit_worsened_count(result: &AuditResult) -> usize {
+    result.comparison.as_ref().map_or(0, |comparison| {
+        comparison
+            .health_classes
+            .iter()
+            .filter(|class| class.is_worsened())
+            .count()
+    })
+}
+
+/// How a worsened finding takes part in the verdict, for human output.
+const fn worsened_class_label(mode: AuditWorsened) -> &'static str {
+    match mode {
+        AuditWorsened::Warn => "worsened: warn only, --worsened error gates it",
+        AuditWorsened::Error => "worsened: gated by --worsened error",
+    }
 }
 
 /// Styling section in the audit view: the graduated, agent-actionable styling
@@ -1088,9 +1237,30 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
 /// The dimmed note about inherited findings that the audit gate left out.
 fn print_audit_inherited_note(result: &AuditResult) {
     if !matches!(result.attribution.gate, AuditGate::All) {
-        let inherited = result.attribution.dead_code_inherited
+        let worsened = audit_worsened_count(result);
+        // Under `--worsened error` the worsened findings take part in the
+        // gate, so the note does not count them as excluded.
+        let gated_worsened = if result.worsened == AuditWorsened::Error {
+            worsened
+        } else {
+            0
+        };
+        let inherited = (result.attribution.dead_code_inherited
             + result.attribution.complexity_inherited
-            + result.attribution.duplication_inherited;
+            + result.attribution.duplication_inherited)
+            .saturating_sub(gated_worsened);
+        if worsened > 0 {
+            eprintln!(
+                "  {}",
+                format!(
+                    "{worsened} inherited complexity finding{} got worse since {} ({})",
+                    plural(worsened),
+                    short_base_ref(&result.base_ref),
+                    worsened_class_label(result.worsened),
+                )
+                .yellow()
+            );
+        }
         if inherited > 0 {
             eprintln!(
                 "  {}",
@@ -1490,6 +1660,7 @@ mod tests {
                 gate: AuditGate::NewOnly,
                 ..AuditAttribution::default()
             },
+            worsened: fallow_config::AuditWorsened::Warn,
             dupe_demotion_diff_source: None,
             base_snapshot: None,
             comparison: None,

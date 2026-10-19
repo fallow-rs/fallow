@@ -1874,6 +1874,17 @@ pub enum Command {
         #[arg(long, value_enum)]
         gate: Option<AuditGateArg>,
 
+        /// How a worsened complexity finding affects the audit verdict.
+        ///
+        /// A worsened finding was already in the base snapshot, and a measured
+        /// value (cyclomatic, cognitive, CRAP or line count) is higher now.
+        /// warn (default): the verdict is at least warn, the run does not
+        /// fail. error: a worsened finding counts like an introduced finding.
+        /// Overrides `audit.worsened` in config. Has no effect with
+        /// `--gate all`, which counts every finding.
+        #[arg(long, value_enum)]
+        worsened: Option<AuditWorsenedArg>,
+
         /// Runtime coverage input. Accepts a V8 directory, a single V8 JSON
         /// file, or an Istanbul coverage map JSON. Runs the `fallow-cov`
         /// sidecar inside the audit, so the `hot-path-touched` verdict shows
@@ -3168,6 +3179,24 @@ pub enum AuditGateArg {
     NewOnly,
     /// All findings in changed files affect the verdict.
     All,
+}
+
+/// CLI value of `--worsened`, mirroring `fallow_config::AuditWorsened`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum AuditWorsenedArg {
+    /// A worsened finding makes the verdict at least warn.
+    Warn,
+    /// A worsened finding counts like an introduced finding.
+    Error,
+}
+
+impl From<AuditWorsenedArg> for fallow_config::AuditWorsened {
+    fn from(value: AuditWorsenedArg) -> Self {
+        match value {
+            AuditWorsenedArg::Warn => Self::Warn,
+            AuditWorsenedArg::Error => Self::Error,
+        }
+    }
 }
 
 impl From<AuditGateArg> for fallow_config::AuditGate {

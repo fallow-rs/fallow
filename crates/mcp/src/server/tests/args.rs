@@ -2658,6 +2658,7 @@ fn audit_args_with_all_options() {
         type_aware_require: None,
         group_by: None,
         gate: Some("all".to_string()),
+        worsened: Some("error".to_string()),
         dead_code_baseline: None,
         health_baseline: None,
         health_baseline_mode: None,
@@ -2687,6 +2688,7 @@ fn audit_args_with_all_options() {
     assert!(args.contains(&"--threads".to_string()));
     assert!(args.contains(&"4".to_string()));
     assert!(args.windows(2).any(|w| w == ["--gate", "all"]));
+    assert!(args.windows(2).any(|w| w == ["--worsened", "error"]));
     assert!(args.contains(&"--explain-skipped".to_string()));
     assert!(
         args.windows(2)

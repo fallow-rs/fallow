@@ -123,6 +123,9 @@ styling_rows as $styling_rows |
 (if ($attr.duplication_demoted // 0) > 0 then
   "> \(plural($attr.duplication_demoted; "introduced clone group")) demoted to inherited (not written by this changeset)\n\n"
 else "" end) +
+(if ($attr.complexity_worsened // 0) > 0 then
+  "> \(plural($attr.complexity_worsened; "inherited complexity finding")) got worse than the base (status `worsened`)\n\n"
+else "" end) +
 (if ($dead_rows | length) > 0 then
   "### Dead Code\n\n" +
   "| Type | Location | Item | Status |\n|:-----|:---------|:-----|:-------|\n" +
@@ -136,7 +139,7 @@ else "" end) +
   "### Complexity\n\n" +
   "| File | Function | Status | Severity | Cyclomatic | Cognitive | Coverage | CRAP |\n|:-----|:---------|:-------|:---------|:-----------|:----------|:---------|:-----|\n" +
   ([$complex_findings[:15][] |
-    "| `\(.path):\(.line)` | `\(.name)` | \(introduced(.introduced)) | \(.severity // "moderate") | \(.cyclomatic) | \(.cognitive) | \(.coverage_tier // "-") | \(if .crap == null then "-" else (.crap | tostring) end) |"
+    "| `\(.path):\(.line)` | `\(.name)` | \(if .attribution == "worsened" then "worsened" else introduced(.introduced) end) | \(.severity // "moderate") | \(.cyclomatic) | \(.cognitive) | \(.coverage_tier // "-") | \(if .crap == null then "-" else (.crap | tostring) end) |"
   ] | join("\n")) +
   (if ($complex_findings | length) > 15 then "\n\n> \(($complex_findings | length) - 15) more complexity findings in the full audit report" else "" end) +
   ((.complexity.summary.coverage_model // null) as $model |

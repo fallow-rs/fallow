@@ -213,7 +213,23 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
     };
 
     for finding in &report.findings {
-        issues.push(ctx.complexity_issue(finding));
+        let mut issue = ctx.complexity_issue(finding);
+        // Audit only: name the measured values that grew against the base
+        // finding. The fingerprint does not read the description.
+        if !finding.worsened_metrics.is_empty() {
+            let class =
+                if finding.attribution == Some(fallow_output::AuditFindingAttribution::Worsened) {
+                    "worsened"
+                } else {
+                    "introduced"
+                };
+            issue.description = format!(
+                "{} ({class} against the base: {})",
+                issue.description,
+                fallow_output::describe_worsened_metrics(&finding.worsened_metrics)
+            );
+        }
+        issues.push(issue);
     }
     for finding in &report.styling_findings {
         issues.push(ctx.styling_issue(finding));

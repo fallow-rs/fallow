@@ -2337,6 +2337,16 @@
           ]
         },
         {
+          "name": "--worsened",
+          "type": "string",
+          "required": false,
+          "description": "How a worsened complexity finding affects the audit verdict",
+          "possible_values": [
+            "warn",
+            "error"
+          ]
+        },
+        {
           "name": "--runtime-coverage",
           "type": "string",
           "required": false,

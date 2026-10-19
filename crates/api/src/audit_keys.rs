@@ -9,7 +9,8 @@ use fallow_types::envelope::AuditIntroduced;
 use fallow_types::identity::{IdentifiedFinding, IdentityPaths, dead_code_occurrence_keys};
 
 pub use crate::audit_complexity::{
-    ComplexityBaseline, ComplexityMetrics, classify_complexity_findings,
+    ComplexityBaseline, ComplexityClass, ComplexityMetrics, classify_complexity_attribution,
+    classify_complexity_attribution_against_all, classify_complexity_findings,
     classify_complexity_findings_against_all, complexity_baseline, complexity_baseline_keys,
     complexity_ledger_keys, remap_complexity_baseline_for_renames,
 };
@@ -415,6 +416,9 @@ pub struct AuditComparison {
     pub dead_code: DeadCodeAuditLedger,
     /// Complexity finding membership.
     pub health: AuditDomainLedger,
+    /// Attribution class of each complexity finding, in report order. Empty
+    /// without a base snapshot.
+    pub health_classes: Vec<crate::audit_complexity::ComplexityClass>,
     /// Duplication group membership.
     pub dupes: AuditDomainLedger,
     /// Styling finding membership.

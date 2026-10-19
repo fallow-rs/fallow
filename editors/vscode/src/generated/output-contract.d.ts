@@ -887,6 +887,14 @@ export type ThresholdSource = "override"
  */
 export type HealthFindingActionType = ("refactor-function" | "add-tests" | "increase-coverage" | "suppress-file" | "suppress-line")
 /**
+ * Audit-mode class of a complexity finding against the base snapshot.
+ */
+export type AuditFindingAttribution = ("introduced" | "worsened" | "inherited")
+/**
+ * A measured metric of a complexity finding.
+ */
+export type WorsenedMetricKind = ("cyclomatic" | "cognitive" | "crap" | "line_count")
+/**
  * Coverage model used for CRAP score computation.
  */
 export type CoverageModel = ("static_binary" | "static_estimated" | "istanbul")
@@ -1892,6 +1900,10 @@ styling_introduced: number
 styling_inherited: number
 duplication_demoted: number
 diff_risk_introduced: number
+/**
+ * Complexity findings whose `attribution` is `worsened`: already in the base snapshot, with a higher measured value now. Also counted in `complexity_inherited`.
+ */
+complexity_worsened?: number
 }
 /**
  * The verdict of every gate a run evaluated, keyed by name.
@@ -8052,6 +8064,20 @@ actions: HealthFindingAction[]
  * value than in that base finding.
  */
 introduced?: (boolean | null)
+/**
+ * Audit-mode class of the finding against the base snapshot:
+ * `introduced`, `worsened` or `inherited`. A worsened finding matches a
+ * base finding, is not introduced, and has a higher value in at least one
+ * measured metric. Absent outside an audit with a base snapshot.
+ */
+attribution?: (AuditFindingAttribution | null)
+/**
+ * Audit-mode list of the measured metrics that are higher than in the
+ * matched base finding, with the base value and the head value. Present
+ * on a worsened finding, and on an introduced finding that matches a base
+ * finding. Absent when no metric grew.
+ */
+worsened_metrics?: WorsenedMetric[]
 }
 /**
  * Per-component React hook profile derived from the cached `hook_uses` IR at
@@ -8322,6 +8348,21 @@ placement?: (string | null)
  * Absent when the action's target is the finding's own file.
  */
 target_path?: (string | null)
+}
+/**
+ * One measured metric that is higher at head than in the matched base
+ * finding.
+ */
+export interface WorsenedMetric {
+metric: WorsenedMetricKind
+/**
+ * Value in the matched base finding.
+ */
+base: number
+/**
+ * Value in the head finding. Always higher than `base`.
+ */
+head: number
 }
 /**
  * Summary statistics for the health report.

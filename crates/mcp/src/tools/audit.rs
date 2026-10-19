@@ -4,14 +4,14 @@ use std::sync::atomic::AtomicBool;
 use crate::params::AuditParams;
 
 use fallow_api::{
-    AnalysisOptions, AuditGate, AuditOptions, CoverageInputs, ProgrammaticError,
+    AnalysisOptions, AuditGate, AuditOptions, AuditWorsened, CoverageInputs, ProgrammaticError,
     run_audit as run_audit_api, serialize_audit_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
-    VALID_AUDIT_GATES,
+    VALID_AUDIT_GATES, VALID_AUDIT_WORSENED,
     api_runtime::{
         EnvScope, call_cancellation, non_empty_path, non_empty_string,
         resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
@@ -109,6 +109,13 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
             "Invalid gate '{gate}'. Valid values: new-only, all"
         )));
     }
+    if let Some(ref worsened) = params.worsened
+        && !VALID_AUDIT_WORSENED.contains(&worsened.as_str())
+    {
+        return Err(validation_error_body(format!(
+            "Invalid worsened '{worsened}'. Valid values: warn, error"
+        )));
+    }
     validate_audit_selection(params)?;
 
     let mut args = vec![
@@ -148,6 +155,7 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     }
     push_str_flag(&mut args, "--group-by", params.group_by.as_deref());
     push_str_flag(&mut args, "--gate", params.gate.as_deref());
+    push_str_flag(&mut args, "--worsened", params.worsened.as_deref());
     push_audit_baseline_flags(&mut args, params);
     if params.explain_skipped == Some(true) {
         args.push("--explain-skipped".to_string());
@@ -280,12 +288,17 @@ fn push_selection(args: &mut Vec<String>, flag: &str, values: Option<&[String]>)
     }
 }
 
-/// An invalid `gate` also takes the CLI, so the CLI reports the error. A
+/// An invalid `gate` or `worsened` also takes the CLI, so the CLI reports the
+/// error. A
 /// sub-analysis selection takes the CLI too, so `only` and `skip` keep the
 /// exact bare `fallow` semantics, including `architecture`.
 fn requires_cli_fallback(params: &AuditParams) -> bool {
     let gate = params.gate.as_deref().unwrap_or("new-only");
     !VALID_AUDIT_GATES.contains(&gate)
+        || params
+            .worsened
+            .as_deref()
+            .is_some_and(|worsened| !VALID_AUDIT_WORSENED.contains(&worsened))
         || params
             .only
             .as_ref()
@@ -315,6 +328,7 @@ fn audit_options_from_params(
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<AuditOptions, String> {
     let gate = audit_gate_from_param(params.gate.as_deref())?;
+    let worsened = audit_worsened_from_param(params.worsened.as_deref())?;
     Ok(AuditOptions {
         analysis: AnalysisOptions {
             production: params.production.unwrap_or(false),
@@ -339,6 +353,7 @@ fn audit_options_from_params(
         css: params.css,
         css_deep: params.css_deep,
         gate,
+        worsened,
         max_crap: params.max_crap,
         coverage: non_empty_path(params.coverage.as_deref()),
         coverage_root: non_empty_path(params.coverage_root.as_deref()),
@@ -358,6 +373,20 @@ fn audit_gate_from_param(value: Option<&str>) -> Result<Option<AuditGate>, Strin
             "all" => Ok(AuditGate::All),
             other => Err(validation_error_body(format!(
                 "Invalid gate '{other}'. Valid values: new-only, all"
+            ))),
+        })
+        .transpose()
+}
+
+/// An absent `worsened` stays `None`, so the typed route defers to
+/// `audit.worsened` in config, as `fallow audit` without `--worsened` does.
+fn audit_worsened_from_param(value: Option<&str>) -> Result<Option<AuditWorsened>, String> {
+    value
+        .map(|worsened| match worsened {
+            "warn" => Ok(AuditWorsened::Warn),
+            "error" => Ok(AuditWorsened::Error),
+            other => Err(validation_error_body(format!(
+                "Invalid worsened '{other}'. Valid values: warn, error"
             ))),
         })
         .transpose()

@@ -50,6 +50,12 @@ struct SavedHealthFinding {
     coverage_pct: Option<f64>,
     #[serde(default)]
     introduced: Option<bool>,
+    /// Audit class and grown metrics, so a `report --from` re-render keeps
+    /// the SARIF properties and CodeClimate text of the direct run.
+    #[serde(default)]
+    attribution: Option<crate::AuditFindingAttribution>,
+    #[serde(default)]
+    worsened_metrics: Vec<crate::WorsenedMetric>,
     /// Carried through so a `report --from` re-render describes the finding
     /// against the ceiling it was measured with. Absent in envelopes written by
     /// an older fallow, which then fall back to the summary (issue #2163).
@@ -235,7 +241,7 @@ impl From<SavedHealthReport> for HealthReport {
 
 impl From<SavedHealthFinding> for HealthFinding {
     fn from(saved: SavedHealthFinding) -> Self {
-        Self::new(
+        let mut finding = Self::new(
             ComplexityViolation {
                 path: saved.path,
                 name: saved.name,
@@ -265,7 +271,10 @@ impl From<SavedHealthFinding> for HealthFinding {
             },
             Vec::new(),
             saved.introduced,
-        )
+        );
+        finding.attribution = saved.attribution;
+        finding.worsened_metrics = saved.worsened_metrics;
+        finding
     }
 }
 

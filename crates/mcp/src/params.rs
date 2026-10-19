@@ -1862,6 +1862,11 @@ pub struct AuditParams {
     /// Passed through to the CLI's `--gate` flag.
     pub gate: Option<String>,
 
+    /// Verdict effect of an inherited complexity finding whose measured value
+    /// grew: "warn" (default) or "error" (counts as introduced). Unset uses
+    /// `audit.worsened`.
+    pub worsened: Option<String>,
+
     /// Path to a dead-code baseline file (produced by `fallow dead-code
     /// --save-baseline`). When set, dead-code issues present in the
     /// baseline are excluded from the audit verdict. Passed through to

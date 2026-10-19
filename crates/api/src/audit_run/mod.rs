@@ -28,7 +28,7 @@ mod tests;
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{AuditGate, ResolvedConfig, RulesConfig};
+use fallow_config::{AuditGate, AuditWorsened, ResolvedConfig, RulesConfig};
 use fallow_engine::changed_files::RenamedFile;
 use fallow_engine::repo_refs::{BaseAnalysisRoot, resolve_base_analysis_root};
 use fallow_output::HealthReport;
@@ -221,6 +221,8 @@ pub struct AuditRunInput<'a> {
     pub root: &'a Path,
     /// Gate mode. `new-only` compares with the base snapshot.
     pub gate: AuditGate,
+    /// How a worsened complexity finding affects the verdict.
+    pub worsened: AuditWorsened,
     /// Resolved base ref.
     pub base_ref: &'a str,
     /// Cache directory of the run. A changed file inside it never blocks the
@@ -252,6 +254,8 @@ pub struct AuditAttributionInput<'a> {
     pub root: &'a Path,
     /// Gate mode.
     pub gate: AuditGate,
+    /// How a worsened complexity finding affects the verdict.
+    pub worsened: AuditWorsened,
     /// Resolved base ref, for the demotion diff.
     pub base_ref: &'a str,
     /// The base snapshot.
@@ -337,6 +341,7 @@ pub fn run<B: AuditBackend>(
     let AuditRunInput {
         root,
         gate,
+        worsened,
         base_ref,
         cache_dir,
         changed_files,
@@ -412,6 +417,7 @@ pub fn run<B: AuditBackend>(
         AuditAttributionInput {
             root,
             gate,
+            worsened,
             base_ref,
             base,
             renames: &renames,
@@ -443,6 +449,7 @@ pub fn attribute<A: AuditAnalyses>(
     let AuditAttributionInput {
         root,
         gate,
+        worsened,
         base_ref,
         base,
         renames,
@@ -484,7 +491,7 @@ pub fn attribute<A: AuditAnalyses>(
             base_ref,
             shared_diff,
         );
-        let result = outcome(gate, &view, &comparison, base_snapshot.is_some());
+        let result = outcome(gate, worsened, &view, &comparison, base_snapshot.is_some());
         (comparison, source, result)
     };
 
@@ -493,12 +500,15 @@ pub fn attribute<A: AuditAnalyses>(
             comparison.dead_code.annotate_results(results);
         }
         if let Some(report) = analyses.health_report_mut() {
-            for (finding, introduced) in report
+            for ((finding, introduced), class) in report
                 .findings
                 .iter_mut()
                 .zip(comparison.health.introduced())
+                .zip(&comparison.health_classes)
             {
                 finding.introduced = Some(introduced);
+                finding.attribution = Some(class.attribution());
+                finding.worsened_metrics.clone_from(&class.worsened_metrics);
             }
         }
     }

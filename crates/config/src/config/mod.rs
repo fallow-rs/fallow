@@ -732,6 +732,10 @@ pub struct AuditConfig {
     #[serde(default, skip_serializing_if = "AuditGate::is_default")]
     pub gate: AuditGate,
 
+    /// Selects how a worsened complexity finding affects the `fallow audit` verdict under `gate: new-only`. A worsened finding was already in the base snapshot, and a measured value (cyclomatic, cognitive, CRAP or line count) is higher now. `warn` (default) makes the verdict at least `warn` and does not fail the run. `error` treats a worsened finding like an introduced finding, so its `complexity-*` rule decides the verdict. A finding whose exceeded metric grew is introduced in both modes. The `--worsened` CLI flag overrides this.
+    #[serde(default, skip_serializing_if = "AuditWorsened::is_default")]
+    pub worsened: AuditWorsened,
+
     /// Toggles the dead-code sub-analysis in `fallow audit` (unused files, exports, types, members and dependencies, plus boundary violations and circular dependencies, which come from the same pass). Defaults to on when unset; set `false` to leave it out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dead-code` turns it off for one run and `--only` replaces this selection. The review brief (`--brief`, `fallow review`) keeps every sub-analysis because it reads the module graph.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code: Option<bool>,
@@ -778,6 +782,7 @@ impl AuditConfig {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.gate.is_default()
+            && self.worsened.is_default()
             && self.dead_code.is_none()
             && self.health.is_none()
             && self.dupes.is_none()
@@ -808,6 +813,27 @@ impl AuditGate {
     #[must_use]
     pub const fn is_default(&self) -> bool {
         matches!(self, Self::NewOnly)
+    }
+}
+
+/// Value of `audit.worsened`: how a worsened complexity finding affects the
+/// `fallow audit` verdict.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuditWorsened {
+    /// A worsened finding makes the verdict at least `warn` and does not fail
+    /// the run. The default.
+    #[default]
+    Warn,
+    /// A worsened finding counts like an introduced finding.
+    Error,
+}
+
+impl AuditWorsened {
+    /// True for the default `warn` mode, so serialization can omit it.
+    #[must_use]
+    pub const fn is_default(&self) -> bool {
+        matches!(self, Self::Warn)
     }
 }
 

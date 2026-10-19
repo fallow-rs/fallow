@@ -100,6 +100,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         AuditRunInput {
             root: resolved.root(),
             gate: options.gate.unwrap_or_default(),
+            worsened: options.worsened.unwrap_or_default(),
             base_ref: &resolved_base.git_ref,
             cache_dir: Some(&config.cache_dir),
             changed_files,
@@ -330,6 +331,7 @@ fn options_with_audit_config(
 ) -> AuditOptions {
     let fallow_config::AuditConfig {
         gate,
+        worsened,
         dead_code,
         health,
         dupes,
@@ -350,6 +352,7 @@ fn options_with_audit_config(
     let css_deep = css && options.css_deep.or(*css_deep).unwrap_or(true);
     AuditOptions {
         gate: Some(options.gate.unwrap_or(*gate)),
+        worsened: Some(options.worsened.unwrap_or(*worsened)),
         dead_code: Some(
             options
                 .dead_code

@@ -8,9 +8,15 @@
 //! exceeds has a higher value than in its matched base finding. Unchanged and
 //! decreased metrics stay inherited, also when the exceeded category changes
 //! (#3277).
+//!
+//! A matched finding that is not introduced is worsened when a measured value
+//! (cyclomatic, cognitive, CRAP or line count) is strictly higher than in its
+//! matched base finding. The `audit.worsened` setting decides how a worsened
+//! finding affects the verdict.
 
 use std::path::Path;
 
+use fallow_output::{AuditFindingAttribution, WorsenedMetric, WorsenedMetricKind};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::audit_keys::{health_finding_key, remap_key_for_renames};
@@ -26,6 +32,8 @@ pub struct ComplexityMetrics {
     pub cognitive: u16,
     /// CRAP score, when coverage data exists.
     pub crap: Option<f64>,
+    /// Lines of code in the function body.
+    pub line_count: u32,
 }
 
 impl ComplexityMetrics {
@@ -37,16 +45,100 @@ impl ComplexityMetrics {
             cyclomatic: finding.cyclomatic,
             cognitive: finding.cognitive,
             crap: finding.crap,
+            line_count: finding.line_count,
         }
     }
 
-    /// Whether both findings have the same metric values. The line is not
-    /// compared.
+    /// Whether both findings have the same complexity values. The line and
+    /// the line count are not compared.
     fn same_values(&self, other: &Self) -> bool {
         self.cyclomatic == other.cyclomatic
             && self.cognitive == other.cognitive
             && self.crap.map(f64::to_bits) == other.crap.map(f64::to_bits)
     }
+}
+
+/// Attribution of one head complexity finding against the base findings.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ComplexityClass {
+    /// `true` when no base finding matches, or when a metric that the finding
+    /// exceeds grew (the new-only gate rule since #3277).
+    pub introduced: bool,
+    /// The measured metrics that are higher than in the matched base finding.
+    /// Empty when no base finding matches or when no metric grew.
+    pub worsened_metrics: Vec<WorsenedMetric>,
+}
+
+impl ComplexityClass {
+    /// `true` when a base finding matches, the finding is not introduced, and
+    /// a measured metric grew.
+    #[must_use]
+    pub fn is_worsened(&self) -> bool {
+        !self.introduced && !self.worsened_metrics.is_empty()
+    }
+
+    /// The audit-mode class of the finding.
+    #[must_use]
+    pub fn attribution(&self) -> AuditFindingAttribution {
+        if self.introduced {
+            AuditFindingAttribution::Introduced
+        } else if self.worsened_metrics.is_empty() {
+            AuditFindingAttribution::Inherited
+        } else {
+            AuditFindingAttribution::Worsened
+        }
+    }
+
+    fn of_match(
+        head: &fallow_output::ComplexityViolation,
+        base: Option<&ComplexityMetrics>,
+    ) -> Self {
+        base.map_or(
+            Self {
+                introduced: true,
+                worsened_metrics: Vec::new(),
+            },
+            |base| Self {
+                introduced: exceeded_metric_increased(head, base),
+                worsened_metrics: grown_metrics(head, base),
+            },
+        )
+    }
+}
+
+/// The measured metrics of `head` that are strictly higher than in `base`.
+///
+/// CRAP compares only when both sides have a score, because a score that
+/// only one side has reflects the coverage input, not the code.
+fn grown_metrics(
+    head: &fallow_output::ComplexityViolation,
+    base: &ComplexityMetrics,
+) -> Vec<WorsenedMetric> {
+    let mut grown = Vec::new();
+    let mut push = |metric, base: f64, head: f64| {
+        if head > base {
+            grown.push(WorsenedMetric { metric, base, head });
+        }
+    };
+    push(
+        WorsenedMetricKind::Cyclomatic,
+        f64::from(base.cyclomatic),
+        f64::from(head.cyclomatic),
+    );
+    push(
+        WorsenedMetricKind::Cognitive,
+        f64::from(base.cognitive),
+        f64::from(head.cognitive),
+    );
+    if let (Some(base_crap), Some(head_crap)) = (base.crap, head.crap) {
+        push(WorsenedMetricKind::Crap, base_crap, head_crap);
+    }
+    push(
+        WorsenedMetricKind::LineCount,
+        f64::from(base.line_count),
+        f64::from(head.line_count),
+    );
+    grown
 }
 
 /// Base complexity findings by identity key (`complexity:<path>:<function>`),
@@ -126,16 +218,30 @@ fn exceeded_metric_increased(
 }
 
 /// Classify each head complexity finding as introduced (`true`) or inherited
-/// (`false`), in report order.
+/// (`false`), in report order. See [`classify_complexity_attribution`].
+#[must_use]
+pub fn classify_complexity_findings(
+    findings: &[fallow_output::HealthFinding],
+    root: &Path,
+    base: &ComplexityBaseline,
+) -> Vec<bool> {
+    classify_complexity_attribution(findings, root, base)
+        .into_iter()
+        .map(|class| class.introduced)
+        .collect()
+}
+
+/// Classify each head complexity finding against one base, in report order.
 ///
 /// Head and base findings match by identity key. When one key holds several
 /// findings on one side (same-named class methods or anonymous functions in
 /// one file), the match is ambiguous. This conservative rule then applies, per
 /// key:
 ///
-/// 1. A head finding with the same metric values as an unmatched base finding
-///    takes that base finding and is inherited. This keeps unchanged findings
-///    inherited when a same-named finding is added, removed or edited.
+/// 1. A head finding with the same complexity values as an unmatched base
+///    finding takes that base finding and is inherited. This keeps unchanged
+///    findings inherited when a same-named finding is added, removed or
+///    edited. Among such base findings, one with the same line count wins.
 /// 2. The remaining head findings, in line order, take the remaining base
 ///    findings, in line order. Each pair compares the exceeded metrics.
 /// 3. A head finding without a base finding is introduced.
@@ -144,12 +250,15 @@ fn exceeded_metric_increased(
 /// finding cannot hide behind an existing one. The rule does not identify
 /// functions beyond path and name (see #2010). Two same-named findings that
 /// swap their metric values in one change stay inherited.
+///
+/// Each matched pair also lists the measured metrics that grew, so an
+/// inherited finding that got worse is visible.
 #[must_use]
-pub fn classify_complexity_findings(
+pub fn classify_complexity_attribution(
     findings: &[fallow_output::HealthFinding],
     root: &Path,
     base: &ComplexityBaseline,
-) -> Vec<bool> {
+) -> Vec<ComplexityClass> {
     let mut groups: FxHashMap<String, Vec<usize>> = FxHashMap::default();
     for (index, finding) in findings.iter().enumerate() {
         groups
@@ -157,7 +266,7 @@ pub fn classify_complexity_findings(
             .or_default()
             .push(index);
     }
-    let mut introduced = vec![true; findings.len()];
+    let mut matches: Vec<Option<&ComplexityMetrics>> = vec![None; findings.len()];
     for (key, mut heads) in groups {
         let Some(bases) = base.get(&key) else {
             continue;
@@ -167,25 +276,28 @@ pub fn classify_complexity_findings(
         let mut unmatched_heads = Vec::new();
         for index in heads {
             let head = ComplexityMetrics::of(&findings[index]);
-            let same = unmatched_bases
-                .iter_mut()
-                .find(|slot| slot.is_some_and(|base| base.same_values(&head)));
+            let same_values =
+                |slot: Option<&ComplexityMetrics>| slot.is_some_and(|base| base.same_values(&head));
+            let same_lines = unmatched_bases.iter().position(|&slot| {
+                same_values(slot) && slot.is_some_and(|base| base.line_count == head.line_count)
+            });
+            let same =
+                same_lines.or_else(|| unmatched_bases.iter().position(|&slot| same_values(slot)));
             match same {
-                Some(slot) => {
-                    *slot = None;
-                    introduced[index] = false;
-                }
+                Some(position) => matches[index] = unmatched_bases[position].take(),
                 None => unmatched_heads.push(index),
             }
         }
         let mut remaining_bases = unmatched_bases.into_iter().flatten();
         for index in unmatched_heads {
-            if let Some(base) = remaining_bases.next() {
-                introduced[index] = exceeded_metric_increased(&findings[index], base);
-            }
+            matches[index] = remaining_bases.next();
         }
     }
-    introduced
+    findings
+        .iter()
+        .zip(matches)
+        .map(|(finding, base)| ComplexityClass::of_match(finding, base))
+        .collect()
 }
 
 /// Classify each head complexity finding against several bases, in report
@@ -197,16 +309,47 @@ pub fn classify_complexity_findings_against_all<'a>(
     root: &Path,
     bases: impl IntoIterator<Item = &'a ComplexityBaseline>,
 ) -> Vec<bool> {
-    let mut introduced = vec![true; findings.len()];
-    for base in bases {
-        for (flag, against) in introduced
-            .iter_mut()
-            .zip(classify_complexity_findings(findings, root, base))
-        {
-            *flag &= against;
-        }
-    }
-    introduced
+    classify_complexity_attribution_against_all(findings, root, bases)
+        .into_iter()
+        .map(|class| class.introduced)
+        .collect()
+}
+
+/// Classify each head complexity finding against several bases, in report
+/// order.
+///
+/// A finding is introduced only when it is introduced against every base. A
+/// finding that is not introduced takes the smallest list of grown metrics of
+/// the bases that it is not introduced against, so a finding that one base
+/// already has with the same values is inherited, not worsened. An introduced
+/// finding keeps the grown metrics of the first base that matches it.
+#[must_use]
+pub fn classify_complexity_attribution_against_all<'a>(
+    findings: &[fallow_output::HealthFinding],
+    root: &Path,
+    bases: impl IntoIterator<Item = &'a ComplexityBaseline>,
+) -> Vec<ComplexityClass> {
+    let per_base: Vec<Vec<ComplexityClass>> = bases
+        .into_iter()
+        .map(|base| classify_complexity_attribution(findings, root, base))
+        .collect();
+    (0..findings.len())
+        .map(|index| {
+            let classes = per_base.iter().map(|classes| &classes[index]);
+            let inherited = classes
+                .clone()
+                .filter(|class| !class.introduced)
+                .min_by_key(|class| class.worsened_metrics.len());
+            inherited.cloned().unwrap_or_else(|| ComplexityClass {
+                introduced: true,
+                worsened_metrics: classes
+                    .map(|class| &class.worsened_metrics)
+                    .find(|metrics| !metrics.is_empty())
+                    .cloned()
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 /// The ledger key of each complexity finding, in report order.
@@ -418,6 +561,133 @@ mod tests {
             ),
             [true, false]
         );
+    }
+
+    fn with_lines(mut finding: HealthFinding, line_count: u32) -> HealthFinding {
+        finding.violation.line_count = line_count;
+        finding
+    }
+
+    fn attribution(base: Vec<HealthFinding>, head: &[HealthFinding]) -> Vec<ComplexityClass> {
+        classify_complexity_attribution(head, &root(), &baseline(base))
+    }
+
+    fn metric(kind: WorsenedMetricKind, base: f64, head: f64) -> WorsenedMetric {
+        WorsenedMetric {
+            metric: kind,
+            base,
+            head,
+        }
+    }
+
+    #[test]
+    fn grown_line_count_is_worsened_not_introduced() {
+        let classes = attribution(
+            vec![with_lines(finding("f", 1, 17, 16), 80)],
+            &[with_lines(finding("f", 1, 17, 16), 300)],
+        );
+        assert!(!classes[0].introduced);
+        assert!(classes[0].is_worsened());
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::LineCount, 80.0, 300.0)]
+        );
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Worsened);
+    }
+
+    #[test]
+    fn grown_metric_that_the_finding_does_not_exceed_is_worsened() {
+        // Only cyclomatic is exceeded; cognitive grows below the limit.
+        let classes = attribution(vec![finding("f", 1, 20, 5)], &[finding("f", 1, 20, 9)]);
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Worsened);
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::Cognitive, 5.0, 9.0)]
+        );
+    }
+
+    #[test]
+    fn grown_exceeded_metric_is_introduced_with_values() {
+        let classes = attribution(vec![finding("f", 1, 17, 16)], &[finding("f", 1, 40, 16)]);
+        assert_eq!(
+            classes[0].attribution(),
+            AuditFindingAttribution::Introduced
+        );
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::Cyclomatic, 17.0, 40.0)]
+        );
+        assert!(!classes[0].is_worsened());
+    }
+
+    #[test]
+    fn improved_and_moved_functions_are_inherited() {
+        let improved = attribution(
+            vec![with_lines(finding("f", 1, 30, 30), 90)],
+            &[with_lines(finding("f", 1, 20, 18), 60)],
+        );
+        assert_eq!(
+            improved[0].attribution(),
+            AuditFindingAttribution::Inherited
+        );
+        assert!(improved[0].worsened_metrics.is_empty());
+        let moved = attribution(vec![finding("f", 1, 17, 16)], &[finding("f", 400, 17, 16)]);
+        assert_eq!(moved[0].attribution(), AuditFindingAttribution::Inherited);
+    }
+
+    #[test]
+    fn new_function_is_introduced_without_values() {
+        let classes = attribution(vec![finding("f", 1, 17, 16)], &[finding("g", 1, 17, 16)]);
+        assert_eq!(
+            classes[0].attribution(),
+            AuditFindingAttribution::Introduced
+        );
+        assert!(classes[0].worsened_metrics.is_empty());
+    }
+
+    #[test]
+    fn crap_compares_only_when_both_sides_have_a_score() {
+        let mut head = finding("f", 1, 20, 5);
+        head.violation.crap = Some(50.0);
+        let classes = attribution(vec![finding("f", 1, 20, 5)], std::slice::from_ref(&head));
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Inherited);
+        let mut base = finding("f", 1, 20, 5);
+        base.violation.crap = Some(40.0);
+        let classes = attribution(vec![base], &[head]);
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::Crap, 40.0, 50.0)]
+        );
+    }
+
+    #[test]
+    fn same_named_findings_prefer_the_base_with_equal_line_count() {
+        // Two same-valued findings; the second one grew in lines.
+        let base = vec![
+            with_lines(finding("run", 1, 17, 16), 10),
+            with_lines(finding("run", 30, 17, 16), 40),
+        ];
+        let head = [
+            with_lines(finding("run", 1, 17, 16), 40),
+            with_lines(finding("run", 50, 17, 16), 25),
+        ];
+        let classes = attribution(base, &head);
+        // The first head finding takes the 40-line base finding; the second one
+        // takes the 10-line base finding and grew.
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Inherited);
+        assert_eq!(classes[1].attribution(), AuditFindingAttribution::Worsened);
+    }
+
+    #[test]
+    fn a_base_with_the_same_values_keeps_the_finding_inherited() {
+        let primary = baseline(vec![with_lines(finding("f", 1, 17, 16), 20)]);
+        let merged = baseline(vec![with_lines(finding("f", 1, 17, 16), 60)]);
+        let head = [with_lines(finding("f", 1, 17, 16), 60)];
+        let classes =
+            classify_complexity_attribution_against_all(&head, &root(), [&primary, &merged]);
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Inherited);
+        let classes = classify_complexity_attribution_against_all(&head, &root(), [&primary]);
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Worsened);
     }
 
     #[test]
