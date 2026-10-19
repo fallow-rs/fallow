@@ -538,7 +538,7 @@ fn parse_store(content: &str, path: &Path) -> ImpactStore {
         Ok(store) => {
             if store.schema_version > STORE_SCHEMA_VERSION {
                 tracing::warn!(
-                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort, fields this build does not know are dropped on the next write. Upgrade fallow to read it fully.",
+                    "fallow impact: store at {} has schema_version {} but this build understands up to {}; reading it as best-effort. This build does not write to it, so the store stays unchanged. Upgrade fallow to read it fully.",
                     path.display(),
                     store.schema_version,
                     STORE_SCHEMA_VERSION,
@@ -547,13 +547,92 @@ fn parse_store(content: &str, path: &Path) -> ImpactStore {
             store
         }
         Err(err) => {
-            tracing::warn!(
-                "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
-                path.display()
-            );
+            if let Some(newer) = newer_schema_in(content, path) {
+                tracing::warn!("{}", newer.message());
+            } else {
+                tracing::warn!(
+                    "fallow impact: ignoring unreadable store at {} ({err}); run `fallow impact enable` to reset it",
+                    path.display()
+                );
+            }
             ImpactStore::default()
         }
     }
+}
+
+/// An Impact store written by a newer Fallow. This build refuses to write it,
+/// because a typed round trip through the older [`ImpactStore`] drops every
+/// field and every record shape that this build does not know.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewerStoreSchema {
+    path: PathBuf,
+    schema_version: u32,
+    writer_version: Option<String>,
+}
+
+impl NewerStoreSchema {
+    /// The user-facing explanation, with the next step.
+    #[must_use]
+    pub fn message(&self) -> String {
+        let writer = self
+            .writer_version
+            .as_deref()
+            .map_or_else(String::new, |version| {
+                format!(" (newest record by fallow {version})")
+            });
+        format!(
+            "fallow impact: the store at {} has schema_version {}{writer}, but this build supports up to schema_version {}. The store is unchanged. Upgrade fallow, or use the newer fallow binary, to change or record Impact data for this project.",
+            self.path.display(),
+            self.schema_version,
+            STORE_SCHEMA_VERSION,
+        )
+    }
+}
+
+/// Read only the schema marker and the newest writer version of a raw store.
+/// This works when the typed parse fails, because a newer schema can change
+/// the shape of a known field. Returns `None` for a supported or corrupt store.
+fn newer_schema_in(content: &str, path: &Path) -> Option<NewerStoreSchema> {
+    let raw: serde_json::Value = serde_json::from_str(content).ok()?;
+    let schema_version = raw.get("schema_version")?.as_u64()?;
+    if schema_version <= u64::from(STORE_SCHEMA_VERSION) {
+        return None;
+    }
+    Some(NewerStoreSchema {
+        path: path.to_path_buf(),
+        schema_version: u32::try_from(schema_version).unwrap_or(u32::MAX),
+        writer_version: newest_writer_version(&raw),
+    })
+}
+
+/// The fallow version on the newest record of either track, when present.
+fn newest_writer_version(raw: &serde_json::Value) -> Option<String> {
+    ["records", "project_records"]
+        .iter()
+        .filter_map(|track| raw.get(*track)?.as_array()?.last())
+        .filter_map(|record| {
+            let timestamp = record.get("timestamp")?.as_str()?;
+            let version = record.get("version")?.as_str()?;
+            Some((timestamp, version))
+        })
+        .max_by(|a, b| a.0.cmp(b.0))
+        .map(|(_, version)| version.to_owned())
+}
+
+/// Load the store for a load, mutate, and save cycle. Refuses a store that a
+/// newer Fallow wrote, so the caller leaves the file unchanged. Every write
+/// path must use this instead of [`load`].
+fn load_for_write(root: &Path) -> Result<ImpactStore, NewerStoreSchema> {
+    let Some(path) = store_path(root) else {
+        return Ok(ImpactStore::default());
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Ok(migrate_legacy_store(root));
+    };
+    if let Some(newer) = newer_schema_in(&content, &path) {
+        return Err(newer);
+    }
+    Ok(parse_store(&content, &path))
 }
 
 /// Persist the store best-effort using atomic replace. No-op when no config dir
@@ -710,8 +789,13 @@ fn migrate_legacy_store(root: &Path) -> ImpactStore {
 /// Enable Impact tracking for THIS project (an explicit per-repo decision that
 /// overrides the user-global default). Writes nothing into the repo: the store
 /// lives in the user config dir.
-pub fn enable(root: &Path) -> bool {
-    let mut store = load(root);
+///
+/// # Errors
+///
+/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
+/// Fallow wrote it.
+pub fn enable(root: &Path) -> Result<bool, NewerStoreSchema> {
+    let mut store = load_for_write(root)?;
     let was_enabled = store.enabled;
     store.enabled = true;
     store.explicit_decision = true;
@@ -719,15 +803,20 @@ pub fn enable(root: &Path) -> bool {
         store.schema_version = STORE_SCHEMA_VERSION;
     }
     save(&store, root);
-    !was_enabled
+    Ok(!was_enabled)
 }
 
 /// Disable Impact tracking. Retains existing history. Returns whether it was
 /// newly disabled (false if already off). Also records the explicit decision,
 /// so declining the impact opt-in on a never-enabled project (`impact
 /// disable`) persists "asked and said no" for the agent skill.
-pub fn disable(root: &Path) -> bool {
-    let mut store = load(root);
+///
+/// # Errors
+///
+/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
+/// Fallow wrote it. This keeps the retained-history promise for that store.
+pub fn disable(root: &Path) -> Result<bool, NewerStoreSchema> {
+    let mut store = load_for_write(root)?;
     let was_enabled = store.enabled;
     store.enabled = false;
     store.explicit_decision = true;
@@ -735,7 +824,7 @@ pub fn disable(root: &Path) -> bool {
         store.schema_version = STORE_SCHEMA_VERSION;
     }
     save(&store, root);
-    was_enabled
+    Ok(was_enabled)
 }
 
 /// A due periodic value digest: the headline counters for "what has fallow
@@ -757,7 +846,7 @@ const DIGEST_INTERVAL_SECS: u64 = 7 * 24 * 60 * 60;
 /// happened). Best-effort like the rest of the store: a clean run that drops
 /// the emitted step simply defers the digest to the next interval.
 pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
-    let mut store = load(root);
+    let mut store = load_for_write(root).ok()?;
     if !resolve_enabled(&store).0 {
         return None;
     }
@@ -784,15 +873,20 @@ pub fn take_due_digest(root: &Path) -> Option<ImpactDigest> {
 
 /// Persist that the local user declined the agent onboarding prompt. Writes
 /// only to the user store; nothing is written into the repo.
-pub fn decline_onboarding(root: &Path) -> bool {
-    let mut store = load(root);
+///
+/// # Errors
+///
+/// Returns [`NewerStoreSchema`] and leaves the store unchanged when a newer
+/// Fallow wrote it.
+pub fn decline_onboarding(root: &Path) -> Result<bool, NewerStoreSchema> {
+    let mut store = load_for_write(root)?;
     let was_declined = store.onboarding_declined;
     store.onboarding_declined = true;
     if store.schema_version == 0 {
         store.schema_version = STORE_SCHEMA_VERSION;
     }
     save(&store, root);
-    !was_declined
+    Ok(!was_declined)
 }
 
 /// The user-global Impact default, stored at `<config-dir>/fallow/impact.json`
@@ -932,7 +1026,11 @@ pub fn record_audit_run(
     // Serialise the load -> mutate -> save window so two worktrees of the same
     // repo (same store key) cannot lost-update each other's record.
     let _lock = ImpactStoreLock::acquire(root);
-    let mut store = load(root);
+    let mut store = load_for_write(root).map_err(|newer| {
+        let message = newer.message();
+        tracing::warn!("{message}");
+        message
+    })?;
     if !resolve_enabled(&store).0 {
         return Ok(());
     }
@@ -999,7 +1097,11 @@ pub fn record_combined_run(
         return Ok(());
     }
     let _lock = ImpactStoreLock::acquire(root);
-    let mut store = load(root);
+    let mut store = load_for_write(root).map_err(|newer| {
+        let message = newer.message();
+        tracing::warn!("{message}");
+        message
+    })?;
     if !resolve_enabled(&store).0 {
         return Ok(());
     }
@@ -3002,7 +3104,7 @@ mod tests {
         assert!(!load(root).explicit_decision, "fresh store: never asked");
 
         // Declining on a never-enabled project is an explicit decision too.
-        disable(root);
+        disable(root).unwrap();
         let store = load(root);
         assert!(!store.enabled);
         assert!(store.explicit_decision);
@@ -3016,7 +3118,7 @@ mod tests {
 
         // Disabled, or enabled with zero value: never due.
         assert!(take_due_digest(root).is_none());
-        enable(root);
+        enable(root).unwrap();
         assert!(take_due_digest(root).is_none(), "zero counters never nag");
 
         let mut store = load(root);
@@ -3049,8 +3151,8 @@ mod tests {
         let (_config, dir) = test_env();
         let root = dir.path();
 
-        assert!(decline_onboarding(root));
-        assert!(!decline_onboarding(root));
+        assert!(decline_onboarding(root).unwrap());
+        assert!(!decline_onboarding(root).unwrap());
 
         let store = load(root);
         assert!(store.onboarding_declined);
@@ -3065,8 +3167,8 @@ mod tests {
     fn enable_then_record_accrues_history() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        assert!(enable(root));
-        assert!(!enable(root)); // second enable is a no-op-ish (already on)
+        assert!(enable(root).unwrap());
+        assert!(!enable(root).unwrap()); // second enable is a no-op-ish (already on)
         record_v1(
             root,
             &summary(2, 1, 0),
@@ -3094,7 +3196,7 @@ mod tests {
         // record on every CI run.
         let (_config, dir) = test_env();
         let root = dir.path();
-        assert!(enable(root));
+        assert!(enable(root).unwrap());
         TEST_FORCE_CI.with(|c| c.set(true));
         record_v1(
             root,
@@ -3114,7 +3216,7 @@ mod tests {
     fn enable_writes_nothing_into_the_repo() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         // The user-store relocation means enable never touches the repo: no
         // .gitignore mutation and no in-repo .fallow/ dir.
         assert!(
@@ -3322,7 +3424,7 @@ mod tests {
     fn containment_blocked_then_cleared_records_one_event() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         record_v1(
             root,
             &summary(2, 0, 0),
@@ -3356,7 +3458,7 @@ mod tests {
     fn non_gate_run_never_creates_containment() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         record_v1(
             root,
             &summary(2, 0, 0),
@@ -3492,11 +3594,121 @@ mod tests {
         );
     }
 
+    /// A store written by a newer Fallow, with a field and a record shape that
+    /// this build does not know.
+    fn future_store_json() -> String {
+        format!(
+            r#"{{"schema_version":{},"enabled":true,"explicit_decision":false,"records":[{{"timestamp":"2026-10-01T00:00:00Z","version":"99.1.0","verdict":"pass","counts":{{"total_issues":0,"dead_code":0,"complexity":0,"duplication":0}},"future_record_field":1}}],"project_records":[{{"timestamp":"2026-09-01T00:00:00Z","version":"99.0.0","verdict":"pass","counts":{{"total_issues":0,"dead_code":0,"complexity":0,"duplication":0}}}}],"containment":[],"future_field":{{"sentinel":"preserve"}}}}"#,
+            STORE_SCHEMA_VERSION + 1
+        )
+    }
+
+    fn raw_store(root: &Path) -> String {
+        std::fs::read_to_string(store_path(root).expect("test config dir set")).unwrap()
+    }
+
+    #[test]
+    fn future_schema_store_survives_every_write_path_unchanged() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        let future = future_store_json();
+        seed_store_raw(root, future.as_bytes());
+
+        assert!(disable(root).is_err(), "disable must refuse a newer store");
+        assert!(enable(root).is_err(), "enable must refuse a newer store");
+        assert!(decline_onboarding(root).is_err());
+        assert!(take_due_digest(root).is_none());
+        let audit = record_audit_run(
+            root,
+            &summary(1, 0, 0),
+            &AuditRunRecord {
+                verdict: AuditVerdict::Fail,
+                gate_source: Some(GateSource::Unknown),
+                git_sha: Some("abc1234"),
+                version: "2.0.0",
+                timestamp: "2026-10-02T00:00:00Z",
+                attribution: None,
+                analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            },
+        );
+        assert!(
+            audit.is_err(),
+            "an audit record must not rewrite a newer store"
+        );
+        let combined = record_combined_run(
+            root,
+            ImpactCounts::default(),
+            Some("abc1234"),
+            "2.0.0",
+            "2026-10-02T00:00:00Z",
+            None,
+            &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+        );
+        assert!(
+            combined.is_err(),
+            "a combined record must not rewrite a newer store"
+        );
+
+        let after = raw_store(root);
+        assert_eq!(
+            after, future,
+            "a newer store must stay byte-for-byte unchanged"
+        );
+        let value: serde_json::Value = serde_json::from_str(&after).unwrap();
+        assert_eq!(value["future_field"]["sentinel"], "preserve");
+        assert_eq!(value["records"][0]["future_record_field"], 1);
+        assert!(load(root).enabled, "reads stay best-effort");
+    }
+
+    #[test]
+    fn newer_store_refusal_names_schema_and_newest_writer_version() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        seed_store_raw(root, future_store_json().as_bytes());
+
+        let message = disable(root).unwrap_err().message();
+        assert!(
+            message.contains(&format!("schema_version {}", STORE_SCHEMA_VERSION + 1)),
+            "{message}"
+        );
+        assert!(
+            message.contains("fallow 99.1.0"),
+            "newest record wins: {message}"
+        );
+        assert!(message.contains("The store is unchanged"), "{message}");
+    }
+
+    #[test]
+    fn future_schema_store_with_unknown_shape_is_not_reset() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        // A newer schema may change the type of a known field. The typed
+        // parse then fails, but the store must not be reset to defaults.
+        let future = format!(
+            r#"{{"schema_version":{},"enabled":"per-worktree","records":{{"v2":[]}}}}"#,
+            STORE_SCHEMA_VERSION + 1
+        );
+        seed_store_raw(root, future.as_bytes());
+
+        assert!(enable(root).is_err());
+        assert!(disable(root).is_err());
+        assert_eq!(raw_store(root), future);
+    }
+
+    #[test]
+    fn corrupt_supported_store_is_still_reset_by_enable() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        seed_store_raw(root, b"{not json");
+        assert!(enable(root).unwrap());
+        assert!(load(root).enabled);
+    }
+
     #[test]
     fn removed_finding_is_credited_as_resolved() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         run(
             root,
@@ -3525,7 +3737,7 @@ mod tests {
     fn suppressed_finding_is_not_a_win() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         run(
             root,
@@ -3555,7 +3767,7 @@ mod tests {
     fn fix_and_suppress_same_kind_credits_zero_resolved() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         run(
             root,
@@ -3585,7 +3797,7 @@ mod tests {
     fn within_file_move_is_not_resolved() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         run(
             root,
@@ -3612,7 +3824,7 @@ mod tests {
     fn cross_file_move_in_same_run_is_not_resolved() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         let b = touch(root, "src/b.ts");
         run(
@@ -3642,7 +3854,7 @@ mod tests {
     fn cross_run_move_uncredits_the_prior_resolution() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         let b = touch(root, "src/b.ts");
         run(
@@ -3682,7 +3894,7 @@ mod tests {
     fn resolved_complexity_finding_and_suppressed_complexity() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         run(
             root,
@@ -3714,7 +3926,7 @@ mod tests {
     fn resolved_duplication_clone_group() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         let b = touch(root, "src/b.ts");
         let clone = CloneInput {
@@ -3732,7 +3944,7 @@ mod tests {
     fn blanket_suppression_covers_any_kind() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         run(
             root,
@@ -3779,7 +3991,7 @@ mod tests {
     fn gate_marker_is_recorded_and_counted_per_source() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
 
         record_gate(root, Some("agent"), "t0");
         record_gate(root, Some("agent"), "t1");
@@ -3804,7 +4016,7 @@ mod tests {
     fn report_omits_gate_runs_when_no_gate_recorded() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         record_gate(root, None, "t0");
 
         let report = build_report(&load(root));
@@ -3850,7 +4062,7 @@ mod tests {
     fn human_report_names_where_gate_runs_come_from() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         record_gate(root, Some("agent"), "t0");
         record_gate(root, Some("pre-commit"), "t1");
 
@@ -3909,7 +4121,7 @@ mod tests {
     fn frontier_prunes_deleted_files() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         run(
             root,
@@ -4031,7 +4243,7 @@ mod tests {
     fn whole_project_run_does_not_double_credit_after_audit() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         let b = touch(root, "src/b.ts");
         run(
@@ -4060,7 +4272,7 @@ mod tests {
     fn whole_project_run_credits_suppressed_not_resolved() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let util = touch(root, "src/util.ts");
         run(
             root,
@@ -4088,7 +4300,7 @@ mod tests {
     fn clone_reshape_three_to_two_not_credited_as_resolved() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         let b = touch(root, "src/b.ts");
         let c = touch(root, "src/c.ts");
@@ -4382,7 +4594,7 @@ mod tests {
     fn reset_removes_only_this_project() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         record_v1(
             root,
             &summary(1, 0, 0),
@@ -4403,7 +4615,7 @@ mod tests {
         let (_config, dir) = test_env();
         let root = dir.path();
         set_global_default(true);
-        enable(root);
+        enable(root).unwrap();
         assert!(load(root).enabled);
         assert!(reset_all());
         // The global default toggle survives a data wipe.
@@ -4606,7 +4818,7 @@ mod tests {
     fn record_audit_run_captures_basename_label() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         record_v1(
             root,
             &summary(1, 0, 0),
@@ -4637,7 +4849,7 @@ mod tests {
     fn store_lock_acquire_drop_then_record_roundtrips() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         // Acquiring + dropping the lock around a record must not deadlock and
         // the record must persist.
         {
@@ -4864,7 +5076,7 @@ mod tests {
     fn containment_events_are_bounded_at_max_containment() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         // Directly pre-fill the store with MAX_CONTAINMENT events.
         let mut store = load(root);
         for i in 0..MAX_CONTAINMENT {
@@ -4916,8 +5128,8 @@ mod tests {
     fn disable_from_enabled_state_sets_schema_version() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
-        let was_newly_disabled = disable(root);
+        enable(root).unwrap();
+        let was_newly_disabled = disable(root).unwrap();
         assert!(
             was_newly_disabled,
             "disable returns true when previously enabled"
@@ -4928,7 +5140,7 @@ mod tests {
         assert_eq!(store.schema_version, STORE_SCHEMA_VERSION);
 
         // A second disable is a no-op (already off).
-        let again = disable(root);
+        let again = disable(root).unwrap();
         assert!(!again, "disable returns false when already off");
     }
 
@@ -4939,7 +5151,7 @@ mod tests {
     fn record_combined_run_is_noop_in_ci() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         TEST_FORCE_CI.with(|c| c.set(true));
         record_combined_run(
             root,
@@ -4985,7 +5197,7 @@ mod tests {
     fn record_combined_run_rejects_incompatible_analysis_history() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         record_combined_run(
             root,
             ImpactCounts::from_combined(1, 0, 0),
@@ -5025,7 +5237,7 @@ mod tests {
     fn record_combined_run_project_records_bounded_at_max() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         // Pre-fill to MAX_RECORDS.
         let mut store = load(root);
         for i in 0..MAX_RECORDS {
@@ -5070,7 +5282,7 @@ mod tests {
     fn suppressed_clone_disappearance_credits_suppressed_not_resolved() {
         let (_config, dir) = test_env();
         let root = dir.path();
-        enable(root);
+        enable(root).unwrap();
         let a = touch(root, "src/a.ts");
         let b = touch(root, "src/b.ts");
         let clone = CloneInput {

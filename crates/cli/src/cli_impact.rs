@@ -91,8 +91,8 @@ pub fn dispatch_impact(
         return render_impact_all(quiet, output, json_style, sort, limit);
     }
     match subcommand {
-        Some(ImpactCli::Enable) => impact_enable(root, quiet),
-        Some(ImpactCli::Disable) => impact_disable(root, quiet),
+        Some(ImpactCli::Enable) => impact_enable(root, quiet, output),
+        Some(ImpactCli::Disable) => impact_disable(root, quiet, output),
         Some(ImpactCli::Default { state }) => impact_set_default(state, quiet),
         Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
         Some(ImpactCli::Statusline) => render_impact_statusline(root),
@@ -116,8 +116,11 @@ pub fn render_impact_statusline(root: &Path) -> ExitCode {
 }
 
 /// Enable Fallow Impact for this project; print the first-enable guidance.
-fn impact_enable(root: &Path, quiet: bool) -> ExitCode {
-    let newly = impact::enable(root);
+fn impact_enable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
+    let newly = match impact::enable(root) {
+        Ok(newly) => newly,
+        Err(newer) => return refuse_newer_store(&newer, output),
+    };
     if !quiet {
         if newly {
             println!(
@@ -137,9 +140,25 @@ fn impact_enable(root: &Path, quiet: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Report a store that a newer Fallow wrote. The store stays unchanged.
+fn refuse_newer_store(
+    newer: &impact::NewerStoreSchema,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
+    crate::emit_known_failure(
+        &newer.message(),
+        2,
+        output,
+        telemetry::FailureReason::Validation,
+    )
+}
+
 /// Disable Fallow Impact for this project; history is retained.
-fn impact_disable(root: &Path, quiet: bool) -> ExitCode {
-    let was_enabled = impact::disable(root);
+fn impact_disable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) -> ExitCode {
+    let was_enabled = match impact::disable(root) {
+        Ok(was_enabled) => was_enabled,
+        Err(newer) => return refuse_newer_store(&newer, output),
+    };
     if !quiet {
         println!(
             "{}",

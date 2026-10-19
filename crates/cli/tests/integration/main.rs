@@ -68,6 +68,7 @@ mod health_group_trend_tests;
 mod health_mutation_report_tests;
 mod health_score_baseline_summary_tests;
 mod health_tests;
+mod impact_store_schema_tests;
 mod init_tests;
 mod inspect_tests;
 mod json_format_tests;

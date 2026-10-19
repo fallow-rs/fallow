@@ -1012,6 +1012,18 @@ These are documented for the rare CI script that depended on the old behavior. N
   fallow reading a schema 7 store degrades the way it always has: the
   statusline reports the store as written by a newer build rather than as off.
 
+- **An older fallow does not write an Impact store that a newer fallow wrote.**
+  When the local store has a `schema_version` above the version this build
+  supports, every write path leaves the file unchanged. `fallow impact enable`,
+  `fallow impact disable`, and `fallow init --decline` exit with code 2 and an
+  error that names the store schema and the fallow version of the newest
+  record. An audit or combined run does not record and logs the same message.
+  The periodic digest does not appear. Reads (`fallow impact`, `fallow impact
+  status`, the statusline) stay best-effort. Before this change, an older
+  build rewrote the store through its own typed model and dropped every field
+  it did not know. Refusal is safer than a round trip of unknown keys, because
+  a newer schema can also change the meaning or the shape of a known field.
+
 - **`code_execute` bounds the value a snippet returns, not only the fallow JSON
   it reads.** `max_output_bytes` previously capped host-call output alone, and
   any snippet result was returned whole with `ok:true`. The serialized result is

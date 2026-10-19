@@ -709,7 +709,13 @@ pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
 /// (no new state file); this neither enables Impact tracking nor writes a
 /// config file.
 fn run_init_decline(root: &Path, quiet: bool) -> ExitCode {
-    let newly = crate::impact::decline_onboarding(root);
+    let newly = match crate::impact::decline_onboarding(root) {
+        Ok(newly) => newly,
+        Err(newer) => {
+            eprintln!("{}", newer.message());
+            return ExitCode::from(2);
+        }
+    };
     if !quiet {
         println!(
             "{}",
