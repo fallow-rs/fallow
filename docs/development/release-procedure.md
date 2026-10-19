@@ -539,6 +539,9 @@ checks:
 4. The multicall binary, which npm ships as `fallow`, does the same analysis
    and answers `--version`, `mcp-server --version`, and
    `lsp-server --version`.
+5. `fallow-similar-code --version` shows the release version, and
+   `fallow-similar-code status --json` with an empty cache exits with success
+   and reports `model_ready` false. It needs no model and no network.
 
 Alpine has no JSON parser, so the job parses each report with `jq` on the
 runner. `release-verified` needs `musl-smoke`, so a failed leg blocks every
