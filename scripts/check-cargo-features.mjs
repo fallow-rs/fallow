@@ -5,7 +5,8 @@
 // its dependents. After each edit, a switch between the two commands then
 // compiles the fallow crates again. This check fails when the feature sets
 // differ, so the feature-only pins in Cargo.toml and crates/cli/Cargo.toml
-// stay complete.
+// stay complete. It reads normal and build edges only: features that a
+// dev-dependency adds for `cargo test` are out of scope.
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
