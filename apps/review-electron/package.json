@@ -31,7 +31,7 @@
   },
   "devDependencies": {
     "@babel/core": "^8.0.7",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.0",
     "@types/node": "^24.19.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.3.0",
