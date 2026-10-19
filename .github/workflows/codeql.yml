@@ -11,9 +11,12 @@ on:
     - cron: '45 4 * * 1'
   workflow_dispatch:
 
+# A cancelled analysis uploads a failed run to code scanning, which shows as a
+# configuration error. Let a started run finish. A newer push replaces only the
+# run that waits in the queue.
 concurrency:
   group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions: {}
 
