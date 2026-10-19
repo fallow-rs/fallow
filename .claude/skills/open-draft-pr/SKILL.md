@@ -14,7 +14,7 @@ Workflow:
 1. Review the changed files and confirm the scope.
 2. Run the smallest relevant validation for the touched area.
 3. Prepare a concise conventional commit message.
-4. Commit with signing if committing is requested.
+4. Commit with `-S -s` (signature and DCO sign-off) if committing is requested.
 5. Push the branch. GitHub refuses a PR for a branch with no commits; make an
    intentional empty coordination commit before the first push when the
    branch is fresh.
@@ -22,7 +22,7 @@ Workflow:
 
 Requirements:
 - Use conventional commits.
-- Use signed commits.
+- Use signed commits with a DCO sign-off: `git commit -S -s`.
 - Use a descriptive non-`codex/` branch name, for example `feat/<slug>`,
   `fix/<slug>`, `refactor/<slug>`, `docs/<slug>`, or `chore/<slug>`.
 - Do not pass `--draft` to `gh pr create` unless the user explicitly asks for a draft.
