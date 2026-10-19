@@ -328,7 +328,35 @@ npm run generate:contracts:check
 - **Conventional commits**: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
 - **Commit linting**: `npm run commitlint -- --last --verbose` uses the same rule set as CI
 - **Signed commits**: `git commit -S`
+- **Sign-off**: `git commit -s` (see [Developer Certificate of Origin](#developer-certificate-of-origin))
 - Pre-commit hooks run `cargo fmt` and `cargo clippy` automatically
+
+## Developer Certificate of Origin
+
+Fallow uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO). With a sign-off, you confirm that you wrote the change or have the right to submit it under the project license.
+
+Add a `Signed-off-by` line to every commit with the `-s` flag:
+
+```bash
+git commit -s -m "fix: describe the change"
+```
+
+The line uses your `user.name` and `user.email` from git config:
+
+```text
+Signed-off-by: Your Name <you@example.com>
+```
+
+The email must match the commit author. The sign-off is separate from `-S`, which adds a cryptographic signature. You can use both: `git commit -S -s`.
+
+To add a sign-off to the commits you already made:
+
+```bash
+git rebase --signoff origin/main
+git push --force-with-lease
+```
+
+The `Commit messages` check fails a pull request that has a commit without a sign-off. Pull requests from bots are exempt.
 
 ## Code style
 

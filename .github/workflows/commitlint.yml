@@ -57,6 +57,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/scripts/check-pr-deferrals.mjs
 
+      # Every commit in a pull request needs a Signed-off-by line (DCO). A push
+      # to main is a squash commit that GitHub writes, so only pull requests
+      # are checked. Bot pull requests do not carry a sign-off.
+      - name: Check DCO sign-off
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node .github/scripts/check-dco.mjs
+
       - name: Lint commit messages
         env:
           BEFORE_SHA: ${{ github.event.before }}
