@@ -625,6 +625,17 @@ test("Miri cfg guard runs for commits and on every pull request", () => {
   assert.match(jsLint, /node --test scripts\/\*\.test\.mjs/u);
 });
 
+test("file-size guard runs for commits and on every pull request", () => {
+  const preCommit = readFileSync("hk.pkl", "utf8");
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const jsLint = /\n  js-lint:\n[\s\S]*?(?=\n  [\w-]+:\n)/u.exec(ci)?.[0] ?? "";
+
+  assert.match(preCommit, /node scripts\/check-file-size\.mjs --staged/u);
+  // A path filter on the job would let a pull request skip the step.
+  assert.doesNotMatch(jsLint.split("steps:")[0], /^\s+if:/mu);
+  assert.match(jsLint, /node scripts\/check-file-size\.mjs --base "origin\/\$BASE_REF"/u);
+});
+
 /**
  * The envelope named `name` and every envelope embedding it, mapped to the numeric
  * `schema_version` it publishes. An envelope is a definition whose
