@@ -130,6 +130,46 @@ jobs:
       - name: Check for uncommitted changes
         run: git diff --exit-code
 
+  # The release builds the arm64 binaries on x86 runners and never runs them.
+  # This job runs the tests natively on Linux arm64 and Apple Silicon, so an
+  # architecture-specific bug cannot ship. Example: a hard-coded open flag
+  # that is O_NOFOLLOW only on x86-64 Linux (#3539).
+  arm64-verify:
+    name: arm64 correctness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: release-arm64-verify-${{ matrix.os }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install type-aware sidecar dependencies
+        run: npm ci --prefix tools/type-aware-sidecar --no-audit --no-fund --ignore-scripts
+
+      # Without --no-fail-fast, cargo stops at the first failing test binary.
+      - name: Run workspace tests
+        run: cargo test --workspace --no-fail-fast --lib --bins --tests --examples
+
+      - name: Run runtime-coverage integration tests
+        run: cargo test -p fallow-cli --no-fail-fast --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
+
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
+
   vscode-package-targets:
     name: Package VS Code target artifacts
     runs-on: ubuntu-26.04

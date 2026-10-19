@@ -555,6 +555,19 @@ test("release runs Windows correctness and lifecycle verification without creden
   assert.match(job, /run_fallow_timeout_terminates_and_reaps_windows_job_tree/);
 });
 
+test("release runs the test suite natively on arm64 Linux and Apple Silicon", () => {
+  const validationWorkflow = readWorkflow(".github/workflows/release-validation.yml");
+  const job = indentedBlock(validationWorkflow, "arm64-verify", 2);
+
+  // The release cross-compiles the arm64 binaries, so this job is the only
+  // native arm64 test run before publication.
+  assert.match(job, /os: \[ubuntu-24\.04-arm, macos-15\]/);
+  assert.match(job, /fail-fast: false/);
+  assert.match(job, /permissions:\n\s+contents: read/);
+  assert.doesNotMatch(job, /id-token: write|contents: write|secrets\./);
+  assert.match(job, /cargo test --workspace --no-fail-fast --lib --bins --tests --examples/);
+});
+
 test("NAPI builds preserve the maintained native loader", () => {
   const packageJson = JSON.parse(readFileSync("crates/napi/package.json", "utf8"));
   for (const script of [packageJson.scripts.build, packageJson.scripts["build:debug"]]) {

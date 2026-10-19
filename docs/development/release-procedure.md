@@ -131,7 +131,9 @@ invariants in this file.
 5. Dispatch the reusable release-validation workflow against `main` and require
    a completed successful result before changing versions or creating a tag.
    It includes the similar-code sidecar dependency audit, so a new upstream
-   advisory fails here and not after the release dispatch.
+   advisory fails here and not after the release dispatch. It also runs the
+   test suite natively on Linux arm64 and Apple Silicon (`arm64-verify`),
+   because the release cross-compiles the arm64 binaries and never runs them.
 
 ## Prepare
 
