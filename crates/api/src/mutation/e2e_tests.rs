@@ -870,4 +870,126 @@ mod end_to_end {
         assert_eq!(runner.runtime.name, "bun");
         assert_math_statuses(&report);
     }
+
+    /// The fixture of #3596: the root Vitest config includes only the unit
+    /// test, and a second config includes the integration test. The runner
+    /// does not list the integration test, so its tests never run.
+    fn two_config_project(package: &Path, root_include: &str) -> (tempfile::TempDir, PathBuf) {
+        let project = tempfile::tempdir().expect("dir");
+        let root = dunce::canonicalize(project.path()).expect("root");
+        let files = [
+            (
+                "package.json",
+                r#"{"name":"mutation-discovery-repro","private":true,"type":"module","scripts":{"test":"vitest run","test:integration":"vitest run --config vitest.integration.config.mjs"},"devDependencies":{"vitest":"5.0.4"}}"#
+                    .to_owned(),
+            ),
+            (
+                "src/math.ts",
+                "export const add = (a: number, b: number): number => a + b;\n".to_owned(),
+            ),
+            (
+                "test/unit.test.ts",
+                "import { expect, test } from \"vitest\";\nimport { add } from \"../src/math\";\ntest(\"nonnegative\", () => { expect(add(2, 2)).toBeGreaterThanOrEqual(0); });\n"
+                    .to_owned(),
+            ),
+            (
+                "test/integration.test.ts",
+                "import { expect, test } from \"vitest\";\nimport { add } from \"../src/math\";\ntest(\"adds exactly\", () => { expect(add(2, 2)).toBe(4); });\n"
+                    .to_owned(),
+            ),
+            (
+                "vitest.config.mjs",
+                format!("export default {{ test: {{ include: [\"{root_include}\"] }} }};\n"),
+            ),
+            (
+                "vitest.integration.config.mjs",
+                "export default { test: { include: [\"test/integration.test.ts\"] } };\n"
+                    .to_owned(),
+            ),
+            (".gitignore", "node_modules\n".to_owned()),
+        ];
+        for (file, content) in files {
+            let target = root.join(file);
+            fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+            fs::write(&target, content).expect("write");
+        }
+        fs::create_dir_all(root.join("node_modules")).expect("dir");
+        std::os::unix::fs::symlink(
+            package.join("node_modules/vitest"),
+            root.join("node_modules/vitest"),
+        )
+        .expect("symlink");
+        commit_all(&root);
+        (project, root)
+    }
+
+    fn arithmetic_run(root: &Path) -> fallow_output::MutationReport {
+        let mut run = options(
+            root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        );
+        run.operators = Some(vec![fallow_engine::mutation::Operator::ArithmeticOperator]);
+        run_mutation(&run).expect("the run completes")
+    }
+
+    fn has_discovery_error(report: &fallow_output::MutationReport) -> bool {
+        report.errors.iter().any(|error| {
+            error.code == "test-files-not-discovered"
+                && error.message.contains("test/integration.test.ts")
+        })
+    }
+
+    #[test]
+    fn a_test_file_that_vitest_does_not_list_makes_the_run_partial() {
+        use fallow_output::MutationIncompleteReason;
+        let Some(package) = companion_fixture() else {
+            return;
+        };
+        let (_project, root) = two_config_project(&package, "test/unit.test.ts");
+        let report = arithmetic_run(&root);
+        assert!(has_discovery_error(&report), "{:#?}", report.errors);
+        assert!(
+            report
+                .mutants
+                .iter()
+                .any(|mutant| mutant.status == MutantStatus::Survived),
+            "{:#?}",
+            report.mutants
+        );
+        assert_eq!(report.completion.status, MutationCompletionStatus::Partial);
+        assert_eq!(
+            report.completion.reasons,
+            vec![MutationIncompleteReason::TestFilesNotDiscovered]
+        );
+
+        // No listed test reaches the mutant, so the survivor list is empty.
+        // The list is still not conclusive.
+        let (_project, root) = two_config_project(&package, "test/missing.test.ts");
+        let report = arithmetic_run(&root);
+        assert!(has_discovery_error(&report), "{:#?}", report.errors);
+        assert!(
+            report
+                .mutants
+                .iter()
+                .all(|mutant| mutant.status == MutantStatus::NoCoverage),
+            "{:#?}",
+            report.mutants
+        );
+        assert_eq!(report.completion.status, MutationCompletionStatus::Partial);
+        assert_eq!(
+            report.completion.reasons,
+            vec![MutationIncompleteReason::TestFilesNotDiscovered]
+        );
+
+        // The control: the root config lists both tests, and the run is
+        // complete.
+        let (_project, root) = two_config_project(&package, "test/*.test.ts");
+        let report = arithmetic_run(&root);
+        assert!(!has_discovery_error(&report), "{:#?}", report.errors);
+        assert_eq!(
+            report.completion.status,
+            MutationCompletionStatus::Complete,
+            "{report:#?}"
+        );
+    }
 }

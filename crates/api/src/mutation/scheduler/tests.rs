@@ -1245,6 +1245,11 @@ fn a_planned_test_file_that_the_runner_does_not_list_is_a_run_issue() {
     assert_eq!(issues[0].0, "test-files-not-discovered");
     assert!(issues[0].1.contains("test/types.test-d.ts"), "{issues:?}");
     assert!(!issues[0].1.contains("test/a.test.ts"), "{issues:?}");
+    assert_eq!(
+        outcome.undiscovered_test_files,
+        vec!["test/types.test-d.ts".to_owned()],
+        "the completion reads the undiscovered files from the outcome"
+    );
 }
 
 #[test]

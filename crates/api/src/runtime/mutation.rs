@@ -809,6 +809,8 @@ pub fn run_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutation
         worktree_unchecked: check_error.is_some(),
         unretried: outcome.is_some_and(|outcome| !outcome.unretried.is_empty()),
         unloaded_paths: outcome.map_or(&[], |outcome| outcome.unloaded_paths.as_slice()),
+        undiscovered_test_files: outcome
+            .map_or(&[], |outcome| outcome.undiscovered_test_files.as_slice()),
         typecheck_failed: typecheck.issue.is_some(),
         promoted: outcome.map_or(&[], |outcome| outcome.promoted.as_slice()),
     });

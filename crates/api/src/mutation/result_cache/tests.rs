@@ -296,6 +296,7 @@ fn outcome(results: &[(&str, MutantStatus, bool)], keys: &[(&str, &str)]) -> Sch
             .collect(),
         baseline_failures: Vec::new(),
         unloaded_paths: Vec::new(),
+        undiscovered_test_files: Vec::new(),
         issues: Vec::new(),
         unretried: Vec::new(),
         timings: ScheduleTimings::default(),

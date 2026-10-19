@@ -1691,7 +1691,7 @@ export type MutationSchemaVersion = "1"
 /**
  * Why a run is partial.
  */
-export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "baseline-failure" | "worktree-changed" | "typecheck-failed" | "worktree-unchecked")
+export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "test-files-not-discovered" | "baseline-failure" | "worktree-changed" | "typecheck-failed" | "worktree-unchecked")
 /**
  * Which code a run mutates.
  */

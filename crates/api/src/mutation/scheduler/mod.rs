@@ -175,6 +175,9 @@ pub struct ScheduleOutcome {
     pub results: FxHashMap<String, MutantOutcome>,
     pub baseline_failures: Vec<BaselineFailure>,
     pub unloaded_paths: Vec<String>,
+    /// The static test files that the runner does not list, in plan order. Their
+    /// tests never ran, so the result of their mutants is not conclusive.
+    pub undiscovered_test_files: Vec<String>,
     pub issues: Vec<ScheduleIssue>,
     /// The survivors and timeouts that kept their first status without a
     /// retry because the time budget ended, sorted.
@@ -196,6 +199,7 @@ impl ScheduleOutcome {
             results: FxHashMap::default(),
             baseline_failures: Vec::new(),
             unloaded_paths: Vec::new(),
+            undiscovered_test_files: Vec::new(),
             issues: Vec::new(),
             unretried: Vec::new(),
             timings: ScheduleTimings::default(),
@@ -2018,6 +2022,7 @@ pub fn run_schedule(
         undiscovered,
     } = start_primary(spawner, plan, config)?;
     outcome.issues.extend(undiscovered_issue(&undiscovered));
+    outcome.undiscovered_test_files = undiscovered;
     let memo = ControlMemo::default();
     let mut runner = PhaseRunner {
         spawner,

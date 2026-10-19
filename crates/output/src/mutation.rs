@@ -197,6 +197,11 @@ pub enum MutationIncompleteReason {
     /// The runner never loaded at least one instrumented file that has a
     /// planned mutant and a static test file.
     UnloadedFiles,
+    /// The runner does not list at least one static test file, so its tests
+    /// never ran. A mutant that only such a file reaches is `no_coverage` or
+    /// `survived` without proof. The `errors` entry
+    /// `test-files-not-discovered` names the files.
+    TestFilesNotDiscovered,
     /// A test or a test file failed before any mutant was active.
     BaselineFailure,
     /// The run changed the git worktree.

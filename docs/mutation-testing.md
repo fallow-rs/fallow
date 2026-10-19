@@ -262,6 +262,15 @@ shows as `pending`.
   `mutation.minScore` use percent.
 - Only `completion.status: "complete"` makes an empty survivor list
   conclusive.
+- The runner can leave out a static test file, for example a test that only
+  a second Vitest config includes. The tests of that file never run. The
+  `errors` entry `test-files-not-discovered` names each such file, and the
+  completion is `partial` (`test-files-not-discovered`). A survivor or a
+  `no_coverage` mutant that such a file reaches is then not proof of a
+  test gap.
+- A `partial` completion does not change the exit code. The run exits `0`,
+  or `1` when the score is under `--min-score`, or `2` when baseline
+  failures leave each mutant without a test result (see Exit codes).
 
 ## Retries
 

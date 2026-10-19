@@ -249,6 +249,8 @@ pub struct CompletionFacts<'a> {
     pub unretried: bool,
     /// The `path_map` keys that the runner did not load in the dry run.
     pub unloaded_paths: &'a [String],
+    /// The static test files that the runner does not list.
+    pub undiscovered_test_files: &'a [String],
     /// The type check of the survivors failed.
     pub typecheck_failed: bool,
     /// The pending mutants that the scheduler ran in the place of an
@@ -291,6 +293,9 @@ pub fn completion(facts: &CompletionFacts<'_>) -> MutationCompletion {
     }
     if has_unloaded_reached_file(facts.plan, facts.unloaded_paths, &promoted) {
         reasons.push(MutationIncompleteReason::UnloadedFiles);
+    }
+    if !facts.undiscovered_test_files.is_empty() {
+        reasons.push(MutationIncompleteReason::TestFilesNotDiscovered);
     }
     if !facts.baseline_failures.is_empty() {
         reasons.push(MutationIncompleteReason::BaselineFailure);
@@ -446,6 +451,7 @@ mod tests {
         FunctionFacts, Mutant, MutantId, MutationPlanCounts, Operator, PlannedFile, PruneCounts,
         SkipReason, SkippedFile,
     };
+    use fallow_output::MutationCompletionStatus;
     use rustc_hash::FxHashMap;
 
     fn function(name: &str, line: u32) -> FunctionFacts {
@@ -541,6 +547,7 @@ mod tests {
                 .collect::<FxHashMap<_, _>>(),
             baseline_failures: Vec::new(),
             unloaded_paths: Vec::new(),
+            undiscovered_test_files: Vec::new(),
             issues: Vec::new(),
             unretried: Vec::new(),
             timings: ScheduleTimings::default(),
@@ -612,6 +619,7 @@ mod tests {
                 worktree_unchecked: false,
                 unretried: false,
                 unloaded_paths: &[],
+                undiscovered_test_files: &[],
                 typecheck_failed: false,
                 promoted: &outcome.promoted,
             })
@@ -764,6 +772,7 @@ mod tests {
             worktree_unchecked: false,
             unretried: false,
             unloaded_paths: &[],
+            undiscovered_test_files: &[],
             typecheck_failed: false,
             promoted: &[],
         });
@@ -849,6 +858,7 @@ mod tests {
                 worktree_unchecked: false,
                 unretried: false,
                 unloaded_paths: &[],
+                undiscovered_test_files: &[],
                 typecheck_failed: false,
                 promoted: &[],
             })
@@ -883,6 +893,7 @@ mod tests {
             worktree_unchecked: false,
             unretried: false,
             unloaded_paths: &[],
+            undiscovered_test_files: &[],
             typecheck_failed: false,
             promoted: &[],
         });
@@ -914,6 +925,7 @@ mod tests {
             worktree_unchecked: true,
             unretried: true,
             unloaded_paths: &[],
+            undiscovered_test_files: &[],
             typecheck_failed: false,
             promoted: &[],
         });
@@ -948,6 +960,7 @@ mod tests {
                 worktree_unchecked: false,
                 unretried: false,
                 unloaded_paths: unloaded,
+                undiscovered_test_files: &[],
                 typecheck_failed: false,
                 promoted: &[],
             })
@@ -962,6 +975,40 @@ mod tests {
             reasons(&["src/b.ts".to_owned()]),
             Vec::new(),
             "no static test reaches src/b.ts, so it is a fact, not a fault"
+        );
+    }
+
+    #[test]
+    fn a_static_test_file_that_the_runner_does_not_list_makes_a_run_partial() {
+        let plan = plan(
+            vec![planned("m1", Some(1), MutantDisposition::Planned, None)],
+            0,
+        );
+        let results = mutant_results(&plan, Some(&outcome(&[("m1", MutantStatus::Survived)])));
+        let completion_with = |undiscovered: &[String]| {
+            completion(&CompletionFacts {
+                plan: &plan,
+                results: &results,
+                baseline_failures: &[],
+                worktree_changed: false,
+                worktree_unchecked: false,
+                unretried: false,
+                unloaded_paths: &[],
+                undiscovered_test_files: undiscovered,
+                typecheck_failed: false,
+                promoted: &[],
+            })
+        };
+        let partial = completion_with(&["test/integration.test.ts".to_owned()]);
+        assert_eq!(partial.status, MutationCompletionStatus::Partial);
+        assert_eq!(
+            partial.reasons,
+            vec![MutationIncompleteReason::TestFilesNotDiscovered],
+            "a test that never ran can kill the survivor, so the survivor list is not conclusive"
+        );
+        assert_eq!(
+            completion_with(&[]).status,
+            MutationCompletionStatus::Complete
         );
     }
 

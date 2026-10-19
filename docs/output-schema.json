@@ -33067,6 +33067,11 @@
         },
         {
           "type": "string",
+          "const": "test-files-not-discovered",
+          "description": "The runner does not list at least one static test file, so its tests\nnever ran. A mutant that only such a file reaches is `no_coverage` or\n`survived` without proof. The `errors` entry\n`test-files-not-discovered` names the files."
+        },
+        {
+          "type": "string",
           "const": "baseline-failure",
           "description": "A test or a test file failed before any mutant was active."
         },
