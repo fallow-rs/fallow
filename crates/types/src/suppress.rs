@@ -1028,6 +1028,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "too slow under Miri: edit distance over every issue kind in safe code"
+    )]
     fn closest_known_kind_name_finds_near_misses() {
         assert_eq!(
             closest_known_kind_name("unused-exports"),
@@ -1038,6 +1042,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "too slow under Miri: edit distance over every issue kind in safe code"
+    )]
     fn closest_known_kind_name_rejects_novel_strings() {
         assert_eq!(closest_known_kind_name("xyzzy"), None);
         assert_eq!(closest_known_kind_name("foo"), None);
@@ -1045,6 +1053,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "too slow under Miri: edit distance over every issue kind in safe code"
+    )]
     fn closest_known_kind_name_skips_exact_match() {
         assert_eq!(closest_known_kind_name("unused-export"), None);
     }
