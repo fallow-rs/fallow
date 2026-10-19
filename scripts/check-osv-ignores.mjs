@@ -31,23 +31,17 @@ export const parseIgnoredIds = (toml) =>
     .map((block) => /^id\s*=\s*"([^"]+)"/mu.exec(block)?.[1])
     .filter((id) => id !== undefined);
 
+const entryIds = (entry) => [entry.id, ...(entry.ids ?? []), ...(entry.aliases ?? [])];
+
 /** Return every advisory id and alias in an osv-scanner JSON report. */
-export const collectAdvisoryIds = (report) => {
-  const ids = new Set();
-  for (const result of report.results ?? []) {
-    for (const pkg of result.packages ?? []) {
-      for (const vuln of pkg.vulnerabilities ?? []) {
-        ids.add(vuln.id);
-        for (const alias of vuln.aliases ?? []) ids.add(alias);
-      }
-      for (const group of pkg.groups ?? []) {
-        for (const id of group.ids ?? []) ids.add(id);
-        for (const alias of group.aliases ?? []) ids.add(alias);
-      }
-    }
-  }
-  return ids;
-};
+export const collectAdvisoryIds = (report) =>
+  new Set(
+    (report.results ?? [])
+      .flatMap((result) => result.packages ?? [])
+      .flatMap((pkg) => [...(pkg.vulnerabilities ?? []), ...(pkg.groups ?? [])])
+      .flatMap(entryIds)
+      .filter((id) => id !== undefined),
+  );
 
 /** Return the ignore ids that match no advisory in the given reports. */
 export const findStaleIgnores = (ignoredIds, reports) => {
