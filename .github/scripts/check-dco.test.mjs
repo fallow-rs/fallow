@@ -54,8 +54,20 @@ test("parseLog splits records into commits", () => {
   assert.deepEqual(checkDco(commits), { ok: false, missing: ["bbb"] });
 });
 
+// A git variable from the caller (for example GIT_AUTHOR_EMAIL, or GIT_DIR
+// from a hook) would change the author that the script reads.
+const cleanEnv = (extra = {}) => {
+  const env = { ...process.env, ...extra };
+  for (const key of Object.keys(env)) {
+    if (/^GIT_(AUTHOR|COMMITTER)_/u.test(key) || key === "GIT_DIR" || key === "GIT_INDEX_FILE") {
+      delete env[key];
+    }
+  }
+  return env;
+};
+
 const git = (cwd, args) => {
-  const run = spawnSync("git", args, { cwd, encoding: "utf8" });
+  const run = spawnSync("git", args, { cwd, env: cleanEnv(), encoding: "utf8" });
   assert.equal(run.status, 0, run.stderr);
   return run.stdout.trim();
 };
@@ -77,7 +89,7 @@ const withRepo = (callback) => {
 const runScript = (cwd, base) =>
   spawnSync(process.execPath, [SCRIPT_PATH], {
     cwd,
-    env: { ...process.env, BASE_SHA: base },
+    env: cleanEnv({ BASE_SHA: base }),
     encoding: "utf8",
   });
 
@@ -111,6 +123,7 @@ const runOnMessage = (cwd, message) => {
   writeFileSync(file, message);
   return spawnSync(process.execPath, [SCRIPT_PATH, "--message-file", file], {
     cwd,
+    env: cleanEnv(),
     encoding: "utf8",
   });
 };

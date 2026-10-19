@@ -554,7 +554,14 @@ const restoreCacheBumps = (cwd, { oldBase, oldTip, baseTip, hooks }) => {
     git(cwd, ["add", "--", ...new Set(bumped.map(({ file }) => file))]);
     run(
       "git",
-      [...hooks, "commit", "--quiet", "-m", "chore: bump cache versions above the base branch"],
+      [
+        ...hooks,
+        "commit",
+        "-s",
+        "--quiet",
+        "-m",
+        "chore: bump cache versions above the base branch",
+      ],
       {
         cwd,
       },

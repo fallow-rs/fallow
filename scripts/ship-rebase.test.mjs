@@ -206,6 +206,11 @@ test("a cache bump that the base already made gets the base value + 1", (t) => {
     repo.git("log", "-1", "--format=%s", tip),
     "chore: bump cache versions above the base branch",
   );
+  // The Commit messages workflow and the commit-msg hook need a DCO sign-off.
+  assert.match(
+    repo.git("log", "-1", "--format=%(trailers:key=Signed-off-by)", tip),
+    /^Signed-off-by: .+ <.+>/mu,
+  );
   assert.match(result.output, /src\/lib\.rs: GRAPH_CACHE_VERSION set to the base value \+ 1/u);
 });
 
