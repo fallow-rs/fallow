@@ -55,6 +55,12 @@ hooks {
         glob = List("**/*.rs")
         check = "if command -v node >/dev/null 2>&1; then node scripts/check-miri-cfg.mjs; else sh scripts/hook-tool-hint.sh node; fi"
       }
+      // A source file over 2000 lines must not grow. The step measures the
+      // staged blob. See docs/development/quality-gates.md#file-size.
+      ["file-size"] {
+        glob = List("**/*.rs", "**/*.mjs", "**/*.ts")
+        check = "if command -v node >/dev/null 2>&1; then node scripts/check-file-size.mjs --staged; else sh scripts/hook-tool-hint.sh node; fi"
+      }
       // The `lint:js` script in package.json holds the scope list. The helper
       // reads it from there, so this step holds no copy of the list.
       ["js-lint"] {
