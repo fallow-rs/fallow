@@ -861,6 +861,69 @@ jobs:
           name: napi-${{ matrix.npm_dir }}
           path: crates/napi/fallow-node.${{ matrix.npm_dir }}.node
 
+  # The build job checks the musl binaries only statically. This job executes
+  # the exact unsigned-binaries-<platform> artifact on its own architecture in
+  # Alpine, which has no glibc. Signing does not change the bytes, so these are
+  # the binaries that the GitHub release and the npm musl packages ship. The
+  # aarch64 leg is the only leg that cargo-zigbuild links without PGO.
+  # Read only, no secrets, and no network inside the container.
+  musl-smoke:
+    name: musl smoke (${{ matrix.npm_dir }})
+    if: ${{ !inputs.auth_check }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            npm_dir: linux-x64-musl
+            os: ubuntu-26.04
+            platform: linux/amd64
+          - target: aarch64-unknown-linux-musl
+            npm_dir: linux-arm64-musl
+            os: ubuntu-24.04-arm
+            platform: linux/arm64
+    env:
+      # alpine:3.24.2, multi-arch index digest (linux/amd64 and linux/arm64).
+      ALPINE_IMAGE: alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download exact unsigned binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: unsigned-binaries-${{ matrix.npm_dir }}
+          path: ${{ runner.temp }}/musl-bin
+
+      - name: Run the shipped musl binaries in Alpine
+        shell: bash
+        env:
+          FALLOW_NPM_DIR: ${{ matrix.npm_dir }}
+          FALLOW_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/musl-smoke-out"
+          mkdir -p "$out"
+          docker run --rm --network none --platform "$FALLOW_PLATFORM" \
+            -e FALLOW_SMOKE_VERSION="${RELEASE_TAG#v}" \
+            -v "$RUNNER_TEMP/musl-bin:/smoke/bin:ro" \
+            -v "$GITHUB_WORKSPACE/tests/fixtures/basic-project:/smoke/fixture:ro" \
+            -v "$GITHUB_WORKSPACE/scripts/musl-smoke.sh:/smoke/musl-smoke.sh:ro" \
+            -v "$out:/smoke/out" \
+            "$ALPINE_IMAGE" \
+            sh /smoke/musl-smoke.sh /smoke/bin "$FALLOW_NPM_DIR" /smoke/fixture /smoke/out
+          # Alpine has no JSON parser, so parse each report on the runner.
+          for report in dead-code dead-code-multicall; do
+            jq -e 'type == "object"' "$out/$report.json" >/dev/null
+            echo "$report.json parses as a JSON object"
+          done
+
   # Fresh runners keep build scripts and dependency execution away from the key.
   sign:
     name: Sign (${{ matrix.npm_dir }})
@@ -1193,7 +1256,7 @@ jobs:
   release-verified:
     name: Release verified
     if: ${{ !inputs.auth_check }}
-    needs: [build, sign, validate, similar-code-conformance]
+    needs: [build, sign, validate, similar-code-conformance, musl-smoke]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions: {}

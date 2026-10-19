@@ -461,7 +461,9 @@ invariants in this file.
     `status=completed` and `conclusion=success`; a successful watch command
     alone is not sufficient evidence. Require `similar-code-conformance` to have
     validated the exact Linux x64 sidecar artifact against the committed F32
-    Candle baseline before `release-verified`, and require the `Publish VS Code Marketplace
+    Candle baseline before `release-verified`. Also require both `musl smoke`
+    legs to pass before `release-verified` (see [musl smoke](#musl-smoke)),
+    and require the `Publish VS Code Marketplace
     targets`, `Publish Open VSX targets`, `Verify public VS Code registry
     targets`, and `Release ready for signed tag` jobs to pass. The
     public verifier requires the exact universal plus six platform tuples and
@@ -509,6 +511,64 @@ invariants in this file.
     exists, and retry release creation. Never recreate or move the signed tag.
     Update the rolling Action tags from maintainer credentials only after the
     immutable release is published.
+
+## musl smoke
+
+The `build` job checks the musl binaries only statically, with `readelf`.
+The `musl-smoke` job in `release.yml` executes them before publication. It
+has two legs:
+
+| Leg | Runner | Container platform |
+|---|---|---|
+| `linux-x64-musl` | `ubuntu-26.04` | `linux/amd64` |
+| `linux-arm64-musl` | `ubuntu-24.04-arm` | `linux/arm64` |
+
+Each leg downloads the exact `unsigned-binaries-<platform>` artifact of its
+target. Signing does not change the bytes, so these are the binaries that the
+GitHub release and the npm musl packages ship. The leg mounts the binaries,
+the `tests/fixtures/basic-project` fixture, and `scripts/musl-smoke.sh`
+read-only into an Alpine container. The image is pinned by its multi-arch
+index digest, and the container has no network. The script does these
+checks:
+
+1. `fallow --version` shows the release version.
+2. `fallow dead-code --format json --quiet` on a copy of the fixture exits
+   with 0 or 1 and reports the unused fixture file `src/orphan.ts`.
+3. `fallow-mcp --version` and `fallow-lsp --version` show the release
+   version.
+4. The multicall binary, which npm ships as `fallow`, does the same analysis
+   and answers `--version`, `mcp-server --version`, and
+   `lsp-server --version`.
+
+Alpine has no JSON parser, so the job parses each report with `jq` on the
+runner. `release-verified` needs `musl-smoke`, so a failed leg blocks every
+publication job. The job has `contents: read` only and no secrets.
+
+The aarch64 leg is the important one. It is the only build that links with
+`cargo zigbuild`, it compiles C code (mimalloc, and QuickJS in MCP and
+multicall), and it has no PGO profile.
+
+To run the script outside Actions, download the musl assets of a release and
+run the script in the pinned image for each platform. The GitHub release does
+not ship the multicall binary, so set `FALLOW_SMOKE_SKIP_MULTICALL=1` or copy
+`fallow` from the matching `@fallow-cli/<platform>` npm package to
+`fallow-multicall-<platform>`:
+
+```bash
+docker run --rm --network none --platform linux/arm64 \
+  -e FALLOW_SMOKE_VERSION="$VERSION" -e FALLOW_SMOKE_SKIP_MULTICALL=1 \
+  -v "$ASSET_DIR:/smoke/bin:ro" \
+  -v "$PWD/tests/fixtures/basic-project:/smoke/fixture:ro" \
+  -v "$PWD/scripts/musl-smoke.sh:/smoke/musl-smoke.sh:ro" \
+  -v "$OUT_DIR:/smoke/out" \
+  "alpine@sha256:<digest from release.yml>" \
+  sh /smoke/musl-smoke.sh /smoke/bin linux-arm64-musl /smoke/fixture /smoke/out
+jq -e 'type == "object"' "$OUT_DIR/dead-code.json"
+```
+
+A local Docker daemon without the containerd image store can refuse a second
+platform of the same index digest with `cannot overwrite digest`. Remove the
+local image before you run the other platform.
 
 ## Profile-guided optimization
 

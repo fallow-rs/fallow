@@ -577,6 +577,62 @@ test("NAPI builds preserve the maintained native loader", () => {
   }
 });
 
+test("release runs the shipped musl binaries in Alpine before publication", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const job = indentedBlock(workflow, "musl-smoke", 2);
+  const gate = indentedBlock(workflow, "release-verified", 2);
+  const build = indentedBlock(workflow, "build", 2);
+  const script = readFileSync("scripts/musl-smoke.sh", "utf8");
+  const legs = Array.from(
+    job.matchAll(/- target: (\S+)\n\s+npm_dir: (\S+)\n\s+os: (\S+)\n\s+platform: (\S+)/gu),
+    (match) => match.slice(1),
+  );
+
+  assert.deepEqual(legs, [
+    ["x86_64-unknown-linux-musl", "linux-x64-musl", "ubuntu-26.04", "linux/amd64"],
+    ["aarch64-unknown-linux-musl", "linux-arm64-musl", "ubuntu-24.04-arm", "linux/arm64"],
+  ]);
+  for (const [target, npmDir] of legs) {
+    assert.match(build, new RegExp(`target: ${target}\\n[\\s\\S]*?npm_dir: ${npmDir}\\n`, "u"));
+  }
+  assert.match(job, /^    if: \$\{\{ !inputs.auth_check \}\}$/mu);
+  assert.match(job, /^    needs: build$/mu);
+  assert.match(job, /^    runs-on: \$\{\{ matrix\.os \}\}$/mu);
+  assert.match(job, /^    permissions:\n {6}contents: read\n {4}strategy:/mu);
+  assert.doesNotMatch(job, /secrets\.|id-token|: write|environment:/u);
+  assert.match(job, /persist-credentials: false/u);
+  assert.match(job, /^ {6}ALPINE_IMAGE: alpine@sha256:[0-9a-f]{64}$/mu);
+  assert.match(job, /# alpine:\d+\.\d+\.\d+, multi-arch index digest/u);
+  assert.match(job, /name: unsigned-binaries-\$\{\{ matrix\.npm_dir \}\}/u);
+  assert.match(job, /docker run --rm --network none --platform "\$FALLOW_PLATFORM"/u);
+  assert.match(job, /\/smoke\/bin:ro/u);
+  assert.match(job, /tests\/fixtures\/basic-project:\/smoke\/fixture:ro/u);
+  assert.match(job, /"\$ALPINE_IMAGE" \\\n\s+sh \/smoke\/musl-smoke\.sh /u);
+  assert.match(job, /jq -e 'type == "object"'/u);
+  assert.doesNotMatch(
+    job,
+    /FALLOW_SMOKE_SKIP_MULTICALL/u,
+    "release runs must test the multicall binary",
+  );
+  assert.doesNotMatch(job, /cargo |npm (?:ci|install)|pnpm/u);
+  assert.match(gate, /needs: \[[^\]]*\bmusl-smoke\b[^\]]*\]/u);
+
+  assert.match(script, /^#!\/bin\/sh$/mu);
+  assert.doesNotMatch(script, /^#!\/.*bash/mu, "Alpine has no bash");
+  for (const check of [
+    /check_version "fallow" "fallow"/u,
+    /check_analysis "fallow" "dead-code"/u,
+    /check_version "fallow-mcp" "fallow-mcp"/u,
+    /check_version "fallow-lsp" "fallow-lsp"/u,
+    /check_version "fallow-multicall mcp-server" "fallow-mcp"/u,
+    /check_version "fallow-multicall lsp-server" "fallow-lsp"/u,
+    /dead-code --format json --quiet/u,
+    /"\$status" -ne 0 \] && \[ "\$status" -ne 1 \]/u,
+  ]) {
+    assert.match(script, check);
+  }
+});
+
 test("release runs Zed verification on macOS and Windows without credentials", () => {
   const workflow = readWorkflow(".github/workflows/release-validation.yml");
   const job = indentedBlock(workflow, "zed-verify", 2);
@@ -645,7 +701,7 @@ test("release publication waits for the aggregate verification gate", () => {
     /cargo deny[\s\S]*tools\/similar-code-sidecar\/Cargo\.toml[\s\S]*check licenses/u,
   );
   assert.match(similarCodeConformance, /semantic-clone-candle-conformance\.mjs/);
-  assert.match(gate, /needs: \[build, sign, validate, similar-code-conformance\]/);
+  assert.match(gate, /needs: \[build, sign, validate, similar-code-conformance, musl-smoke\]/);
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
   assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke\]/);

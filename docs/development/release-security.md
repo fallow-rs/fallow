@@ -14,7 +14,8 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `build` | Build unsigned binaries, archives, and NAPI addons | Read only |
 | `sign` | Sign downloaded raw binaries and stage npm binary payloads on fresh runners | Artifact signing only |
 | `validate` | Reusable release validation, including the similar-code sidecar dependency audit | Read only |
-| `release-verified` | Join build, signing, validation, and `similar-code-conformance` | None |
+| `musl-smoke` | Run the exact unsigned musl binaries in a digest-pinned Alpine container on x64 and arm64 | Read only |
+| `release-verified` | Join build, signing, validation, `similar-code-conformance`, and `musl-smoke` | None |
 | `release-assets` | Flatten and store the complete GitHub asset bundle, including all VSIX targets | Read only |
 | `release-ready` | Join publication jobs and prove the tag is still absent | Read only |
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
@@ -214,6 +215,12 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   release artifact names and npm multicall payload names. Every consumer of
   signed binaries must wait for `sign`, including npm preparation and
   similar-code conformance.
+- Keep `musl-smoke` outside the `release` environment, with `contents: read`
+  only and no secrets. It executes the downloaded `unsigned-binaries-<platform>`
+  artifact, so it must never receive a credential. It runs the binaries in an
+  Alpine image pinned by digest, with read-only mounts and no container
+  network. `release-verified` must need it, so a musl binary that cannot run
+  blocks every publication job.
 - Keep every checkout at `persist-credentials: false`.
 - Keep repository dependency installation out of `npm-publish`, both VSIX
   publisher jobs, and `publish-crates`.
