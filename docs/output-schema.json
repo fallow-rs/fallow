@@ -8635,6 +8635,10 @@
           "description": "Configured gate: `new-only` fails only on introduced findings,\n`all` also fails on inherited ones.",
           "$ref": "#/definitions/AuditGate"
         },
+        "worsened": {
+          "description": "How a worsened complexity finding affects the verdict under the\n`new-only` gate. `warn` gives at least a `warn` verdict. `error` counts\nthe finding like an introduced finding.",
+          "$ref": "#/definitions/AuditWorsened"
+        },
         "dead_code_introduced": {
           "type": "integer",
           "description": "Dead-code findings absent from the base snapshot."
@@ -8650,6 +8654,10 @@
         "complexity_inherited": {
           "type": "integer",
           "description": "Complexity findings already present in the base snapshot."
+        },
+        "complexity_worsened": {
+          "type": "integer",
+          "description": "Complexity findings whose `attribution` is `worsened`. These findings\nare in the base snapshot, and a measured value is higher now. They are\nalso counted in `complexity_inherited`."
         },
         "duplication_introduced": {
           "type": "integer",
@@ -8670,10 +8678,6 @@
         },
         "diff_risk_introduced": {
           "type": "integer"
-        },
-        "complexity_worsened": {
-          "type": "integer",
-          "description": "Complexity findings whose `attribution` is `worsened`: already in the base snapshot, with a higher measured value now. Also counted in `complexity_inherited`."
         }
       },
       "required": [
@@ -34283,6 +34287,21 @@
         }
       ],
       "description": "A measured metric of a complexity finding."
+    },
+    "AuditWorsened": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "warn",
+          "description": "A worsened finding makes the verdict at least `warn` and does not fail\nthe run. The default."
+        },
+        {
+          "type": "string",
+          "const": "error",
+          "description": "A worsened finding counts like an introduced finding."
+        }
+      ],
+      "description": "Value of `audit.worsened`: how a worsened complexity finding affects the\n`fallow audit` verdict."
     }
   }
 }

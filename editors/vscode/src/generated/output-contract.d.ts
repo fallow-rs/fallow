@@ -150,6 +150,11 @@ export type ElapsedMs = number
  */
 export type AuditGate = ("new-only" | "all")
 /**
+ * Value of `audit.worsened`: how a worsened complexity finding affects the
+ * `fallow audit` verdict.
+ */
+export type AuditWorsened = ("warn" | "error")
+/**
  * What a gate concluded on this run.
  *
  * Four-valued rather than a boolean because audit's verdict has a warn tier
@@ -1872,6 +1877,7 @@ duplication_clone_groups: number
  */
 export interface AuditAttribution {
 gate: AuditGate
+worsened?: AuditWorsened
 /**
  * Dead-code findings absent from the base snapshot.
  */
@@ -1889,6 +1895,12 @@ complexity_introduced: number
  */
 complexity_inherited: number
 /**
+ * Complexity findings whose `attribution` is `worsened`. These findings
+ * are in the base snapshot, and a measured value is higher now. They are
+ * also counted in `complexity_inherited`.
+ */
+complexity_worsened?: number
+/**
  * Clone groups absent from the base snapshot.
  */
 duplication_introduced: number
@@ -1900,10 +1912,6 @@ styling_introduced: number
 styling_inherited: number
 duplication_demoted: number
 diff_risk_introduced: number
-/**
- * Complexity findings whose `attribution` is `worsened`: already in the base snapshot, with a higher measured value now. Also counted in `complexity_inherited`.
- */
-complexity_worsened?: number
 }
 /**
  * The verdict of every gate a run evaluated, keyed by name.

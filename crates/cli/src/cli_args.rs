@@ -1877,8 +1877,10 @@ pub enum Command {
         /// How a worsened complexity finding affects the audit verdict.
         ///
         /// A worsened finding was already in the base snapshot, and a measured
-        /// value (cyclomatic, cognitive, CRAP or line count) is higher now.
-        /// warn (default): the verdict is at least warn, the run does not
+        /// value is higher now. Any growth of cyclomatic, cognitive or CRAP
+        /// counts. The line count must grow by at least 5 lines and 10
+        /// percent. It includes comments and blank lines in the function.
+        /// warn (default): the verdict is at least warn, and the run does not
         /// fail. error: a worsened finding counts like an introduced finding.
         /// Overrides `audit.worsened` in config. Has no effect with
         /// `--gate all`, which counts every finding.

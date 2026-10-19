@@ -728,7 +728,7 @@ fn audit_worsened_lines(result: &AuditResult, health: &crate::health::HealthResu
                     == Some(fallow_output::AuditFindingAttribution::Worsened),
                 metrics: &finding.worsened_metrics,
             };
-            render_worsened_row(&row, result.output, result.worsened)
+            render_worsened_row(&row, result.output, result.attribution.worsened)
         })
         .collect()
 }
@@ -791,17 +791,6 @@ fn render_worsened_row(row: &WorsenedRow<'_>, output: OutputFormat, mode: AuditW
             )
         }
     }
-}
-
-/// The number of complexity findings whose attribution is `worsened`.
-fn audit_worsened_count(result: &AuditResult) -> usize {
-    result.comparison.as_ref().map_or(0, |comparison| {
-        comparison
-            .health_classes
-            .iter()
-            .filter(|class| class.is_worsened())
-            .count()
-    })
 }
 
 /// How a worsened finding takes part in the verdict, for human output.
@@ -1237,10 +1226,12 @@ fn print_audit_verdict_line(result: &AuditResult, files_str: &str, elapsed_str: 
 /// The dimmed note about inherited findings that the audit gate left out.
 fn print_audit_inherited_note(result: &AuditResult) {
     if !matches!(result.attribution.gate, AuditGate::All) {
-        let worsened = audit_worsened_count(result);
-        // Under `--worsened error` the worsened findings take part in the
-        // gate, so the note does not count them as excluded.
-        let gated_worsened = if result.worsened == AuditWorsened::Error {
+        // The same classification gives `complexity_worsened` and
+        // `complexity_inherited`, and every worsened finding is also counted
+        // as inherited. Under `--worsened error` the worsened findings take
+        // part in the gate, so the note does not count them as excluded.
+        let worsened = result.attribution.complexity_worsened;
+        let gated_worsened = if result.attribution.worsened == AuditWorsened::Error {
             worsened
         } else {
             0
@@ -1256,7 +1247,7 @@ fn print_audit_inherited_note(result: &AuditResult) {
                     "{worsened} inherited complexity finding{} got worse since {} ({})",
                     plural(worsened),
                     short_base_ref(&result.base_ref),
-                    worsened_class_label(result.worsened),
+                    worsened_class_label(result.attribution.worsened),
                 )
                 .yellow()
             );
@@ -1660,7 +1651,6 @@ mod tests {
                 gate: AuditGate::NewOnly,
                 ..AuditAttribution::default()
             },
-            worsened: fallow_config::AuditWorsened::Warn,
             dupe_demotion_diff_source: None,
             base_snapshot: None,
             comparison: None,

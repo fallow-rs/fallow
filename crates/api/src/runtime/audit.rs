@@ -519,6 +519,7 @@ fn empty_audit_output(
         },
         attribution: AuditAttribution {
             gate: options.gate.unwrap_or_default(),
+            worsened: options.worsened.unwrap_or_default(),
             ..AuditAttribution::default()
         },
         changed_files_count,

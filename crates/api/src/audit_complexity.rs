@@ -9,10 +9,11 @@
 //! decreased metrics stay inherited, also when the exceeded category changes
 //! (#3277).
 //!
-//! A matched finding that is not introduced is worsened when a measured value
-//! (cyclomatic, cognitive, CRAP or line count) is strictly higher than in its
-//! matched base finding. The `audit.worsened` setting decides how a worsened
-//! finding affects the verdict.
+//! A matched finding that is not introduced is worsened when its cyclomatic,
+//! cognitive or CRAP value is higher than in its matched base finding. A line
+//! count must grow by a minimum (see [`line_count_grew`]). The
+//! `audit.worsened` setting decides how a worsened finding affects the
+//! verdict.
 
 use std::path::Path;
 
@@ -55,6 +56,12 @@ impl ComplexityMetrics {
         self.cyclomatic == other.cyclomatic
             && self.cognitive == other.cognitive
             && self.crap.map(f64::to_bits) == other.crap.map(f64::to_bits)
+    }
+
+    /// Whether both findings have the same complexity values and the same
+    /// line count.
+    fn same_values_and_lines(&self, other: &Self) -> bool {
+        self.same_values(other) && self.line_count == other.line_count
     }
 }
 
@@ -106,9 +113,10 @@ impl ComplexityClass {
     }
 }
 
-/// The measured metrics of `head` that are strictly higher than in `base`.
+/// The measured metrics of `head` that are higher than in `base`.
 ///
-/// CRAP compares only when both sides have a score, because a score that
+/// The line count must grow by a minimum, see [`line_count_grew`]. CRAP
+/// compares only when both sides have a score, because a score that
 /// only one side has reflects the coverage input, not the code.
 fn grown_metrics(
     head: &fallow_output::ComplexityViolation,
@@ -133,12 +141,34 @@ fn grown_metrics(
     if let (Some(base_crap), Some(head_crap)) = (base.crap, head.crap) {
         push(WorsenedMetricKind::Crap, base_crap, head_crap);
     }
-    push(
-        WorsenedMetricKind::LineCount,
-        f64::from(base.line_count),
-        f64::from(head.line_count),
-    );
+    if line_count_grew(base.line_count, head.line_count) {
+        grown.push(WorsenedMetric {
+            metric: WorsenedMetricKind::LineCount,
+            base: f64::from(base.line_count),
+            head: f64::from(head.line_count),
+        });
+    }
     grown
+}
+
+/// The smallest line count growth, in lines, that makes a finding worsened.
+const LINE_COUNT_MIN_GROWTH_LINES: u32 = 5;
+
+/// The smallest line count growth, in percent of the base line count, that
+/// makes a finding worsened.
+const LINE_COUNT_MIN_GROWTH_PERCENT: u32 = 10;
+
+/// Whether the line count grew by at least
+/// [`LINE_COUNT_MIN_GROWTH_LINES`] lines and at least
+/// [`LINE_COUNT_MIN_GROWTH_PERCENT`] percent of the base line count.
+///
+/// The line count is the physical span of the function, so comments and blank
+/// lines in the body count. The minimum keeps a comment or a formatter rewrap
+/// from making a finding worsened.
+fn line_count_grew(base: u32, head: u32) -> bool {
+    let growth = head.saturating_sub(base);
+    growth >= LINE_COUNT_MIN_GROWTH_LINES
+        && u64::from(growth) * 100 >= u64::from(base) * u64::from(LINE_COUNT_MIN_GROWTH_PERCENT)
 }
 
 /// Base complexity findings by identity key (`complexity:<path>:<function>`),
@@ -238,13 +268,16 @@ pub fn classify_complexity_findings(
 /// one file), the match is ambiguous. This conservative rule then applies, per
 /// key:
 ///
-/// 1. A head finding with the same complexity values as an unmatched base
-///    finding takes that base finding and is inherited. This keeps unchanged
+/// 1. Each head finding, in line order, takes an unmatched base finding with
+///    the same complexity values and the same line count.
+/// 2. Each remaining head finding, in line order, takes an unmatched base
+///    finding with the same complexity values. Rules 1 and 2 keep unchanged
 ///    findings inherited when a same-named finding is added, removed or
-///    edited. Among such base findings, one with the same line count wins.
-/// 2. The remaining head findings, in line order, take the remaining base
+///    edited. Rule 1 runs for all head findings first, so an earlier head
+///    finding cannot take the exact match of a later one.
+/// 3. The remaining head findings, in line order, take the remaining base
 ///    findings, in line order. Each pair compares the exceeded metrics.
-/// 3. A head finding without a base finding is introduced.
+/// 4. A head finding without a base finding is introduced.
 ///
 /// Every base finding matches at most one head finding, so a new same-named
 /// finding cannot hide behind an existing one. The rule does not identify
@@ -273,24 +306,29 @@ pub fn classify_complexity_attribution(
         };
         heads.sort_by_key(|&index| (findings[index].line, findings[index].col));
         let mut unmatched_bases: Vec<Option<&ComplexityMetrics>> = bases.iter().map(Some).collect();
-        let mut unmatched_heads = Vec::new();
-        for index in heads {
-            let head = ComplexityMetrics::of(&findings[index]);
-            let same_values =
-                |slot: Option<&ComplexityMetrics>| slot.is_some_and(|base| base.same_values(&head));
-            let same_lines = unmatched_bases.iter().position(|&slot| {
-                same_values(slot) && slot.is_some_and(|base| base.line_count == head.line_count)
-            });
-            let same =
-                same_lines.or_else(|| unmatched_bases.iter().position(|&slot| same_values(slot)));
-            match same {
-                Some(position) => matches[index] = unmatched_bases[position].take(),
-                None => unmatched_heads.push(index),
+        let rules: [fn(&ComplexityMetrics, &ComplexityMetrics) -> bool; 2] = [
+            ComplexityMetrics::same_values_and_lines,
+            ComplexityMetrics::same_values,
+        ];
+        for rule in rules {
+            for &index in &heads {
+                if matches[index].is_some() {
+                    continue;
+                }
+                let head = ComplexityMetrics::of(&findings[index]);
+                if let Some(slot) = unmatched_bases
+                    .iter_mut()
+                    .find(|slot| slot.is_some_and(|base| rule(base, &head)))
+                {
+                    matches[index] = slot.take();
+                }
             }
         }
         let mut remaining_bases = unmatched_bases.into_iter().flatten();
-        for index in unmatched_heads {
-            matches[index] = remaining_bases.next();
+        for &index in &heads {
+            if matches[index].is_none() {
+                matches[index] = remaining_bases.next();
+            }
         }
     }
     findings
@@ -676,6 +714,66 @@ mod tests {
         // takes the 10-line base finding and grew.
         assert_eq!(classes[0].attribution(), AuditFindingAttribution::Inherited);
         assert_eq!(classes[1].attribution(), AuditFindingAttribution::Worsened);
+    }
+
+    #[test]
+    fn an_exact_match_of_a_later_head_is_not_taken_by_an_earlier_head() {
+        // The 10-line function moved up and grew to 30 lines. The 40-line
+        // function did not change, but it now comes later in line order.
+        let base = vec![
+            with_lines(finding("run", 1, 17, 16), 40),
+            with_lines(finding("run", 50, 17, 16), 10),
+        ];
+        let head = [
+            with_lines(finding("run", 1, 17, 16), 30),
+            with_lines(finding("run", 20, 17, 16), 40),
+        ];
+        let classes = attribution(base, &head);
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Worsened);
+        assert_eq!(
+            classes[0].worsened_metrics,
+            [metric(WorsenedMetricKind::LineCount, 10.0, 30.0)]
+        );
+        assert_eq!(classes[1].attribution(), AuditFindingAttribution::Inherited);
+        assert!(classes[1].worsened_metrics.is_empty());
+    }
+
+    #[test]
+    fn small_line_growth_is_not_worsened() {
+        // A comment line or a formatter rewrap adds a few physical lines.
+        let classes = attribution(
+            vec![with_lines(finding("f", 1, 17, 16), 80)],
+            &[with_lines(finding("f", 1, 17, 16), 87)],
+        );
+        assert_eq!(classes[0].attribution(), AuditFindingAttribution::Inherited);
+        assert!(classes[0].worsened_metrics.is_empty());
+    }
+
+    #[test]
+    fn line_growth_needs_both_the_line_and_the_percent_minimum() {
+        // 4 lines on a 20-line function is 20 percent, but below 5 lines.
+        let short = attribution(
+            vec![with_lines(finding("f", 1, 17, 16), 20)],
+            &[with_lines(finding("f", 1, 17, 16), 24)],
+        );
+        assert_eq!(short[0].attribution(), AuditFindingAttribution::Inherited);
+        // 5 lines on a 20-line function passes both minimums.
+        let grown = attribution(
+            vec![with_lines(finding("f", 1, 17, 16), 20)],
+            &[with_lines(finding("f", 1, 17, 16), 25)],
+        );
+        assert_eq!(grown[0].attribution(), AuditFindingAttribution::Worsened);
+        // 9 lines on a 100-line function is below 10 percent.
+        let long = attribution(
+            vec![with_lines(finding("f", 1, 17, 16), 100)],
+            &[with_lines(finding("f", 1, 17, 16), 109)],
+        );
+        assert_eq!(long[0].attribution(), AuditFindingAttribution::Inherited);
+        let long = attribution(
+            vec![with_lines(finding("f", 1, 17, 16), 100)],
+            &[with_lines(finding("f", 1, 17, 16), 110)],
+        );
+        assert_eq!(long[0].attribution(), AuditFindingAttribution::Worsened);
     }
 
     #[test]

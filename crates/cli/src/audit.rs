@@ -25,8 +25,6 @@ pub struct AuditResult {
     pub verdict: AuditVerdict,
     pub summary: AuditSummary,
     pub attribution: AuditAttribution,
-    /// How a worsened complexity finding affected the verdict.
-    pub worsened: AuditWorsened,
     /// Which diff decided the new-only duplication demotion check; `None`
     /// when the check never ran.
     pub dupe_demotion_diff_source: Option<DupeDemotionDiffSource>,
@@ -686,7 +684,6 @@ struct AuditResultParts {
     verdict: AuditVerdict,
     summary: AuditSummary,
     attribution: AuditAttribution,
-    worsened: AuditWorsened,
     dupe_demotion_diff_source: Option<DupeDemotionDiffSource>,
     base_snapshot: Option<AuditKeySnapshot>,
     comparison: Option<keys::AuditComparison>,
@@ -1376,7 +1373,6 @@ fn finish_audit_result(
         verdict: outcome.verdict,
         summary,
         attribution: outcome.attribution,
-        worsened: opts.worsened,
         dupe_demotion_diff_source: outcome.dupe_demotion_diff_source,
         base_snapshot: outcome.base_snapshot,
         comparison: Some(outcome.comparison),
@@ -2406,7 +2402,6 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         verdict: parts.verdict,
         summary: parts.summary,
         attribution: parts.attribution,
-        worsened: parts.worsened,
         dupe_demotion_diff_source: parts.dupe_demotion_diff_source,
         base_snapshot: parts.base_snapshot,
         comparison: parts.comparison,
@@ -2475,9 +2470,9 @@ fn empty_audit_result(
         },
         attribution: AuditAttribution {
             gate: opts.gate,
+            worsened: opts.worsened,
             ..AuditAttribution::default()
         },
-        worsened: opts.worsened,
         dupe_demotion_diff_source: None,
         base_snapshot: None,
         comparison: None,

@@ -74,8 +74,7 @@ mod type_aware;
 pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
-    AuditSarifOutputInput, AuditSummary, AuditVerdict,
-    attach_audit_complexity_worsened_attribution, attach_audit_diff_risk_attribution,
+    AuditSarifOutputInput, AuditSummary, AuditVerdict, attach_audit_diff_risk_attribution,
     attach_audit_duplication_demotion_attribution, attach_audit_styling_attribution,
     attach_audit_wire_attribution, build_audit_codeclimate, build_audit_codeclimate_issues,
     build_audit_header_json, build_audit_header_map, build_audit_sarif,

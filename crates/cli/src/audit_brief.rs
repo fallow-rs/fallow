@@ -2278,7 +2278,6 @@ mod tests {
                 gate: AuditGate::NewOnly,
                 ..AuditAttribution::default()
             },
-            worsened: fallow_config::AuditWorsened::Warn,
             dupe_demotion_diff_source: None,
             base_snapshot: None,
             comparison: None,

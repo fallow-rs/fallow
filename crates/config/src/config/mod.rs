@@ -732,7 +732,7 @@ pub struct AuditConfig {
     #[serde(default, skip_serializing_if = "AuditGate::is_default")]
     pub gate: AuditGate,
 
-    /// Selects how a worsened complexity finding affects the `fallow audit` verdict under `gate: new-only`. A worsened finding was already in the base snapshot, and a measured value (cyclomatic, cognitive, CRAP or line count) is higher now. `warn` (default) makes the verdict at least `warn` and does not fail the run. `error` treats a worsened finding like an introduced finding, so its `complexity-*` rule decides the verdict. A finding whose exceeded metric grew is introduced in both modes. The `--worsened` CLI flag overrides this.
+    /// Selects how a worsened complexity finding affects the `fallow audit` verdict under `gate: new-only`. A worsened finding was already in the base snapshot, and a measured value is higher now. Any growth of cyclomatic, cognitive or CRAP counts. The line count must grow by at least 5 lines and 10 percent, and it includes comments and blank lines. `warn` (default) makes the verdict at least `warn` and does not fail the run. `error` counts a worsened finding like an introduced finding. A finding whose exceeded metric grew is introduced in both modes. The `--worsened` CLI flag overrides this.
     #[serde(default, skip_serializing_if = "AuditWorsened::is_default")]
     pub worsened: AuditWorsened,
 

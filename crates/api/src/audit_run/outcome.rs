@@ -210,7 +210,7 @@ pub fn outcome(
 ) -> (AuditAttribution, AuditVerdict, AuditSummary) {
     let summary = summary(view, comparison);
     (
-        attribution(gate, comparison, has_base),
+        attribution(gate, worsened, comparison, has_base),
         verdict(gate, worsened, view, comparison, &summary),
         summary,
     )
@@ -326,15 +326,23 @@ fn dead_code_has_errors(view: &AuditAnalysesView<'_>) -> bool {
     })
 }
 
-fn attribution(gate: AuditGate, comparison: &AuditComparison, has_base: bool) -> AuditAttribution {
+fn attribution(
+    gate: AuditGate,
+    worsened: AuditWorsened,
+    comparison: &AuditComparison,
+    has_base: bool,
+) -> AuditAttribution {
     if !has_base {
         return AuditAttribution {
             gate,
+            worsened,
             ..AuditAttribution::default()
         };
     }
     AuditAttribution {
         gate,
+        worsened,
+        complexity_worsened: comparison.complexity_worsened_count(),
         dead_code_introduced: comparison.dead_code.introduced_count(),
         dead_code_inherited: comparison.dead_code.inherited_count(),
         complexity_introduced: comparison.health.introduced_count(),

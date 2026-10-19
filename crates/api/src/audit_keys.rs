@@ -425,6 +425,17 @@ pub struct AuditComparison {
     pub styling: AuditDomainLedger,
 }
 
+impl AuditComparison {
+    /// Number of complexity findings whose attribution is `worsened`.
+    #[must_use]
+    pub fn complexity_worsened_count(&self) -> usize {
+        self.health_classes
+            .iter()
+            .filter(|class| class.is_worsened())
+            .count()
+    }
+}
+
 /// Remap root-relative path tokens inside base-snapshot attribution keys so a
 /// finding on a renamed file matches its base counterpart under the old path.
 ///

@@ -971,6 +971,79 @@ mod tests {
         project
     }
 
+    /// A function with `branches` early returns and `padding` plain lines.
+    fn hotspot_source(branches: usize, padding: usize) -> String {
+        use std::fmt::Write as _;
+        let mut source =
+            String::from("export function work(x: number): number {\n  let total = 0;\n");
+        for line in 0..padding {
+            let _ = writeln!(source, "  total += {line};");
+        }
+        for branch in 0..branches {
+            let _ = writeln!(source, "  if (x === {branch}) return {branch} + total;");
+        }
+        source.push_str("  return -1;\n}\nconsole.log(work(1));\n");
+        source
+    }
+
+    #[test]
+    fn audit_api_value_applies_the_worsened_param() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::create_dir_all(project.path().join("src")).expect("create src");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"audit-mcp-worsened","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"health":{"maxCyclomatic":15,"maxCognitive":15,"maxCrap":999999999,"maxUnitSize":999999}}"#,
+        )
+        .expect("write config");
+        std::fs::write(project.path().join("src/index.ts"), hotspot_source(20, 2))
+            .expect("write base");
+        git(project.path(), &["init"]);
+        git(project.path(), &["add", "."]);
+        git(
+            project.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        // Only the line count grows, so the finding is worsened, not introduced.
+        std::fs::write(project.path().join("src/index.ts"), hotspot_source(20, 40))
+            .expect("write grown function");
+        let params = |worsened: Option<&str>| AuditParams {
+            root: Some(project.path().display().to_string()),
+            base: Some("HEAD".to_string()),
+            worsened: worsened.map(str::to_string),
+            no_cache: Some(true),
+            css: Some(false),
+            ..AuditParams::default()
+        };
+
+        let default = run_audit_api_value(&params(None))
+            .expect("default MCP API value")
+            .expect("typed API path");
+        assert_eq!(default["verdict"], "warn", "{default:#}");
+        assert_eq!(default["attribution"]["worsened"], "warn");
+        assert_eq!(default["attribution"]["complexity_worsened"], 1);
+
+        let error = run_audit_api_value(&params(Some("error")))
+            .expect("error MCP API value")
+            .expect("typed API path");
+        assert_eq!(error["verdict"], "fail", "{error:#}");
+        assert_eq!(error["attribution"]["worsened"], "error");
+    }
+
     fn audit_styling_fixture() -> tempfile::TempDir {
         let project = tempfile::tempdir().expect("project");
         std::fs::create_dir_all(project.path().join("src")).expect("create src");

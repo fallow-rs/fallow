@@ -2006,6 +2006,22 @@ fn introduced_label(item: &Value) -> &'static str {
     }
 }
 
+/// Status of a complexity finding: `worsened` when its audit attribution says
+/// so, otherwise the introduced flag.
+fn complexity_status_label(item: &Value) -> &'static str {
+    if item.get("attribution").and_then(Value::as_str) == Some("worsened") {
+        "worsened"
+    } else {
+        introduced_label(item)
+    }
+}
+
+/// Whether the run counts a worsened complexity finding like an introduced
+/// finding (`--worsened error`).
+fn worsened_gates(env: &Value) -> bool {
+    env["attribution"]["worsened"] == "error"
+}
+
 fn audit_rule_severity(item: &Value) -> &'static str {
     match item
         .get("effective_severity")
@@ -2027,8 +2043,10 @@ fn audit_priority(env: &Value, severity: &str, status: &str) -> (u8, u8) {
     let status = if env["attribution"]["gate"] == "new-only" {
         match status {
             "new" => 0,
-            "inherited" => 1,
-            _ => 2,
+            "worsened" if worsened_gates(env) => 0,
+            "worsened" => 1,
+            "inherited" => 2,
+            _ => 3,
         }
     } else {
         0
@@ -2039,11 +2057,11 @@ fn audit_priority(env: &Value, severity: &str, status: &str) -> (u8, u8) {
 fn sorted_audit_findings<'a>(env: &Value, section: &'a Value, key: &str) -> Vec<&'a Value> {
     let mut findings: Vec<&Value> = arr(section, key).collect();
     findings.sort_by(|a, b| {
-        audit_priority(env, audit_rule_severity(a), introduced_label(a))
+        audit_priority(env, audit_rule_severity(a), complexity_status_label(a))
             .cmp(&audit_priority(
                 env,
                 audit_rule_severity(b),
-                introduced_label(b),
+                complexity_status_label(b),
             ))
             .then_with(|| s(a, "path").cmp(s(b, "path")))
             .then_with(|| u(a, "line").cmp(&u(b, "line")))
@@ -2503,7 +2521,7 @@ fn audit_complexity_section(env: &Value) -> String {
                 "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                 path_line_cell(it),
                 code_cell(it, "name"),
-                introduced_label(it),
+                complexity_status_label(it),
                 audit_rule_severity(it),
                 markdown_table_text(str_or(it, "severity", "moderate")),
                 num(it, "cyclomatic"),
@@ -2752,6 +2770,31 @@ fn audit_category_row(
     )
 }
 
+/// A note under the category table when inherited complexity findings got
+/// worse. The Introduced column does not count them, so the note says how
+/// they take part in the verdict.
+fn audit_worsened_note(env: &Value, attribution: &Value) -> String {
+    let count = attribution
+        .get("complexity_worsened")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if count == 0 {
+        return String::new();
+    }
+    let effect = if worsened_gates(env) {
+        "`--worsened error` counts them like introduced findings"
+    } else {
+        "they make the verdict at least warn and do not fail it"
+    };
+    format!(
+        "> {} got worse than the base (status `worsened`): {effect}.\n\n",
+        plural_n(
+            usize::try_from(count).unwrap_or(usize::MAX),
+            "inherited complexity finding"
+        ),
+    )
+}
+
 /// Port of `summary-audit.jq`.
 #[must_use]
 fn render_audit_summary(env: &Value) -> String {
@@ -2816,6 +2859,7 @@ fn render_audit_summary(env: &Value) -> String {
         plural_n(u(env, "changed_files_count") as usize, "changed file"),
         num(env, "elapsed_ms"),
     );
+    out.push_str(&audit_worsened_note(env, &attribution));
     if !dead_rows.is_empty() {
         let rows = dead_rows
             .iter()
@@ -2847,6 +2891,9 @@ fn render_audit_summary(env: &Value) -> String {
     out.push_str(&audit_diff_risk_section(env));
     out.push_str(match s(&attribution, "gate") {
         "all" => "*Audit gate: all. Every finding in changed files affects the verdict.*",
+        "new-only" if worsened_gates(env) => {
+            "*Audit gate: new-only, worsened: error. Inherited findings that got worse fail the verdict like introduced findings. Other inherited findings do not fail the verdict.*"
+        }
         "new-only" => {
             "*Audit gate: new-only. Inherited findings are reported but do not fail the verdict.*"
         }
@@ -3750,6 +3797,65 @@ mod tests {
         assert!(out.contains("| Complexity | skipped | - | - |"), "{out}");
         assert!(out.contains("| Duplication | skipped | - | - |"), "{out}");
         assert!(out.contains("| Styling | skipped | - | - |"), "{out}");
+    }
+
+    #[test]
+    fn audit_summary_names_worsened_findings_and_their_mode() {
+        let audit = |mode: &str, verdict: &str| {
+            serde_json::json!({
+                "command": "audit",
+                "verdict": verdict,
+                "changed_files_count": 1,
+                "elapsed_ms": 3,
+                "summary": {"dead_code_issues": 0, "complexity_findings": 1, "duplication_clone_groups": 0},
+                "attribution": {
+                    "gate": "new-only",
+                    "worsened": mode,
+                    "dead_code_introduced": 0,
+                    "dead_code_inherited": 0,
+                    "complexity_introduced": 0,
+                    "complexity_inherited": 1,
+                    "complexity_worsened": 1,
+                    "duplication_introduced": 0,
+                    "duplication_inherited": 0
+                },
+                "complexity": {"findings": [{
+                    "path": "src/a.ts",
+                    "line": 1,
+                    "name": "run",
+                    "introduced": false,
+                    "attribution": "worsened",
+                    "effective_severity": "error",
+                    "cyclomatic": 30,
+                    "cognitive": 20
+                }]}
+            })
+        };
+        let out = render_audit_summary(&audit("error", "fail"));
+        assert!(out.contains("| `run` | worsened |"), "{out}");
+        assert!(
+            out.contains("> 1 inherited complexity finding got worse than the base (status `worsened`): `--worsened error` counts them like introduced findings."),
+            "{out}"
+        );
+        assert!(
+            out.contains("*Audit gate: new-only, worsened: error."),
+            "{out}"
+        );
+        assert!(
+            !out.contains("Inherited findings are reported but"),
+            "{out}"
+        );
+
+        let out = render_audit_summary(&audit("warn", "warn"));
+        assert!(out.contains("| `run` | worsened |"), "{out}");
+        assert!(
+            out.contains("they make the verdict at least warn and do not fail it."),
+            "{out}"
+        );
+        assert!(
+            out.contains("*Audit gate: new-only. Inherited findings are reported but do not fail the verdict.*"),
+            "{out}"
+        );
     }
 
     /// With a baseline, the headline counts the functions after the

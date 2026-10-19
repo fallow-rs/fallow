@@ -276,6 +276,9 @@ inputs:
   gate:
     description: 'Audit verdict gate: new-only (default) fails only introduced findings, all fails on every finding in changed files.'
     required: false
+  worsened:
+    description: 'Audit effect of an inherited complexity finding that got worse under gate new-only: warn (default) gives at least a warn verdict, error counts it like an introduced finding.'
+    required: false
   security-gate:
     description: 'Security regression gate: new fails on candidates introduced on changed lines, newly-reachable fails on existing candidates that became reachable from entry points.'
     required: false
@@ -332,7 +335,7 @@ outputs:
     description: 'Path to SARIF results file'
     value: ${{ steps.analyze.outputs.sarif }}
   issues:
-    description: 'Number of issues (dead-code and architecture), clone groups (dupes), security candidates (security), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals. Security count is gate-aware when `security-gate` is set. For audit, prefer `outputs.verdict` for severity-aware gating.'
+    description: 'Number of issues (dead-code and architecture), clone groups (dupes), security candidates (security), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced, plus attribution.complexity_worsened when `worsened: error`; with `gate: all` it sums summary.* totals. Security count is gate-aware when `security-gate` is set. For audit, prefer `outputs.verdict` for severity-aware gating.'
     value: ${{ steps.analyze.outputs.issues }}
   verdict:
     description: 'Audit verdict (pass/warn/fail). Empty when command is not audit. The threshold step gates on this for audit so warn-tier findings do not fail CI.'
@@ -509,6 +512,7 @@ runs:
         INPUT_TYPE_AWARE_PROJECTS: ${{ inputs.type-aware-projects }}
         INPUT_TYPE_AWARE_REQUIRE: ${{ inputs.type-aware-require }}
         INPUT_GATE: ${{ inputs.gate }}
+        INPUT_WORSENED: ${{ inputs.worsened }}
         INPUT_SECURITY_GATE: ${{ inputs.security-gate }}
         INPUT_DEAD_CODE_BASELINE: ${{ inputs.dead-code-baseline }}
         INPUT_HEALTH_BASELINE: ${{ inputs.health-baseline }}

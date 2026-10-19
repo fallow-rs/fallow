@@ -18,7 +18,7 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use crate::common::{commit_all, git, parse_json, run_fallow_raw};
+use crate::common::{commit_all, git, parse_json, run_fallow_raw, run_fallow_raw_with_env};
 
 const CONFIG: &str = r#"{"entry": ["src/*.js"], "health": {"maxCyclomatic": 15, "maxCognitive": 15, "maxCrap": 999999999, "maxUnitSize": 999999}}"#;
 
@@ -312,4 +312,173 @@ fn sarif_and_codeclimate_carry_the_attribution() {
                 .contains("(worsened against the base: lines ")),
         "{codeclimate:#}"
     );
+}
+
+/// `hotspot` with `comments` comment lines at the top of the body.
+fn commented_hotspot(name: &str, branches: usize, padding: usize, comments: usize) -> String {
+    let source = hotspot(name, branches, padding);
+    let (head, body) = source.split_once('\n').unwrap();
+    let mut out = format!("{head}\n");
+    for line in 0..comments {
+        writeln!(out, "  // note {line}").unwrap();
+    }
+    out.push_str(body);
+    out
+}
+
+#[test]
+fn comment_only_edit_stays_inherited() {
+    // Comments count in the physical line count. A small edit stays below
+    // the line growth minimum, so the finding stays inherited.
+    let base = hotspot("work", 20, 40);
+    let head = commented_hotspot("work", 20, 40, 3);
+    let tmp = fixture(&base, &head, CONFIG);
+    let run = audit(tmp.path(), &["--worsened", "error"]);
+    let finding = run.finding("work");
+    assert!(
+        finding["line_count"].as_u64().unwrap() > 60,
+        "the comment lines count: {:#}",
+        run.json
+    );
+    assert_eq!(finding["attribution"], "inherited", "{:#}", run.json);
+    assert_eq!(run.worsened_count(), 0);
+    assert_eq!(run.verdict(), "pass");
+    assert_eq!(run.code, 0);
+}
+
+#[test]
+fn attribution_publishes_the_worsened_mode() {
+    let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 20, 40), CONFIG);
+    assert_eq!(
+        audit(tmp.path(), &[]).json["attribution"]["worsened"],
+        "warn"
+    );
+    let run = audit(tmp.path(), &["--worsened", "error"]);
+    assert_eq!(run.json["attribution"]["worsened"], "error");
+    assert_eq!(run.json["attribution"]["complexity_introduced"], 0);
+    assert_eq!(run.worsened_count(), 1);
+    assert_eq!(run.verdict(), "fail");
+}
+
+#[test]
+fn report_from_a_saved_run_keeps_the_worsened_values() {
+    let tmp = fixture(&hotspot("work", 20, 2), &hotspot("work", 20, 40), CONFIG);
+    let dir = tmp.path();
+    let run = audit(dir, &[]);
+    let saved = dir.join("saved-audit.json");
+    fs::write(&saved, serde_json::to_string(&run.json).unwrap()).unwrap();
+    let report = |format: &str| {
+        parse_json(&run_fallow_raw(&[
+            "report",
+            "--from",
+            saved.to_str().unwrap(),
+            "--root",
+            dir.to_str().unwrap(),
+            "--format",
+            format,
+            "--quiet",
+        ]))
+    };
+    let sarif = report("sarif");
+    let result = sarif["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|run| run["results"].as_array().unwrap())
+        .find(|result| result["properties"]["attribution"] == "worsened")
+        .unwrap_or_else(|| panic!("no worsened SARIF result: {sarif:#}"));
+    assert_eq!(
+        result["properties"]["worsened_metrics"][0]["metric"],
+        "line_count"
+    );
+    let codeclimate = report("codeclimate");
+    assert!(
+        codeclimate
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["description"]
+                .as_str()
+                .unwrap()
+                .contains("(worsened against the base: lines ")),
+        "{codeclimate:#}"
+    );
+    let summary = run_fallow_raw(&[
+        "report",
+        "--from",
+        saved.to_str().unwrap(),
+        "--root",
+        dir.to_str().unwrap(),
+        "--format",
+        "github-summary",
+        "--quiet",
+    ])
+    .stdout;
+    assert!(summary.contains("| `work` | worsened |"), "{summary}");
+    assert!(
+        summary.contains("1 inherited complexity finding got worse than the base"),
+        "{summary}"
+    );
+}
+
+/// A feature branch merges the default branch, and the default branch grew
+/// `work` after the merge base. The merge brings the grown function in, so it
+/// is inherited from the merged commit, not worsened.
+#[test]
+fn growth_that_a_merge_brings_in_from_main_is_not_worsened() {
+    let base = hotspot("work", 20, 2);
+    let tmp = fixture(&base, &format!("{base}{}", simple("unused")), CONFIG);
+    let dir = tmp.path();
+    git(dir, &["checkout", "-q", "main"]);
+    git(dir, &["branch", "-D", "head"]);
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(
+        dir,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+    git(dir, &["checkout", "-q", "-b", "feature"]);
+    fs::write(dir.join("src/other.js"), simple("other")).unwrap();
+    commit_all(dir, "feature: other work");
+    git(dir, &["checkout", "-q", "main"]);
+    fs::write(dir.join("src/index.js"), hotspot("work", 20, 40)).unwrap();
+    commit_all(dir, "main: work grew");
+    git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(dir, &["checkout", "-q", "feature"]);
+    git(dir, &["merge", "--no-commit", "--no-ff", "origin/main"]);
+
+    let output = run_fallow_raw_with_env(
+        &[
+            "audit",
+            "--root",
+            dir.to_str().unwrap(),
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+            "--no-css",
+            "--skip",
+            "dupes",
+            "--worsened",
+            "error",
+        ],
+        &[("FALLOW_AUDIT_BASE", "")],
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["base_description"], "merge-base with origin/main",
+        "{json:#}"
+    );
+    let finding = json["complexity"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "work")
+        .unwrap_or_else(|| panic!("no work finding: {json:#}"));
+    assert_eq!(finding["attribution"], "inherited", "{json:#}");
+    assert_eq!(json["attribution"]["complexity_worsened"], 0);
+    assert_eq!(json["verdict"], "pass", "{json:#}");
 }

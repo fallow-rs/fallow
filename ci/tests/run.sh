@@ -427,6 +427,7 @@ OUT=$(cd "$RUNNER_TMP" && env \
   FALLOW_SAVE_SNAPSHOT= \
   FALLOW_TREND=false \
   FALLOW_AUDIT_GATE= \
+  FALLOW_AUDIT_WORSENED= \
   FALLOW_AUDIT_DEAD_CODE_BASELINE= \
   FALLOW_AUDIT_HEALTH_BASELINE= \
   FALLOW_AUDIT_DUPES_BASELINE= \
@@ -2199,6 +2200,51 @@ for diff_risk_gate in new-only all; do
   assert_contains "$OUT" "Found 2 issues" \
     "audit count: the $diff_risk_gate gate counts diff-risk findings"
 done
+
+# A worsened complexity finding counts under new-only only when the run used
+# `--worsened error`. Under `warn` it gives a warn verdict and no count.
+for worsened_mode in warn error; do
+  if [ "$worsened_mode" = "error" ]; then worsened_verdict=fail; else worsened_verdict=warn; fi
+  printf '{"command":"audit","verdict":"%s","attribution":{"gate":"new-only","worsened":"%s","dead_code_introduced":0,"complexity_introduced":0,"complexity_inherited":1,"complexity_worsened":1,"duplication_introduced":0},"summary":{"dead_code_issues":0,"complexity_findings":1,"duplication_clone_groups":0}}\n' \
+    "$worsened_verdict" "$worsened_mode" > "$GATE_WORK/audit-worsened.json"
+  WORSENED_EXIT=0
+  OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+    MOCK_GATE_ENVELOPE="$GATE_WORK/audit-worsened.json" \
+    FALLOW_COMMAND=audit \
+    FALLOW_FAIL_ON_ISSUES=true 2>&1) || WORSENED_EXIT=$?
+  if [ "$worsened_mode" = "error" ]; then
+    assert_contains "$OUT" "Fallow audit failed (gate: new-only, 1 finding(s) at error severity" \
+      "audit count: worsened error counts the worsened finding in the failure"
+    [ "$WORSENED_EXIT" -ne 0 ] && pass "audit count: worsened error fails the pipeline" \
+      || fail "audit count: worsened error fails the pipeline" "exit $WORSENED_EXIT"
+  else
+    assert_contains "$OUT" "Found 0 issues" \
+      "audit count: worsened warn does not count the worsened finding"
+    [ "$WORSENED_EXIT" -eq 0 ] && pass "audit count: worsened warn passes the pipeline" \
+      || fail "audit count: worsened warn passes the pipeline" "exit $WORSENED_EXIT"
+  fi
+done
+
+# FALLOW_AUDIT_WORSENED reaches audit as --worsened, and a bad value stops the job.
+WORSENED_WORK="$RUNNER_TMP/audit-worsened"
+mkdir -p "$WORSENED_WORK"
+run_generated_gitlab_fixture "$WORSENED_WORK" \
+  FALLOW_COMMAND=audit \
+  FALLOW_AUDIT_WORSENED=error >/dev/null
+WORSENED_ARGS=""
+while IFS= read -r -d '' arg; do
+  WORSENED_ARGS+="${arg} "
+done < "$WORSENED_WORK/fallow-analysis-args.bin"
+assert_contains "$WORSENED_ARGS" "--worsened error" "audit worsened: FALLOW_AUDIT_WORSENED reaches audit"
+WORSENED_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$WORSENED_WORK" \
+  FALLOW_COMMAND=audit \
+  FALLOW_AUDIT_WORSENED=strict) || WORSENED_EXIT=$?
+assert_contains "$OUT" "FALLOW_AUDIT_WORSENED must be 'warn' or 'error', got: strict" \
+  "audit worsened: a bad FALLOW_AUDIT_WORSENED value is rejected"
+[ "$WORSENED_EXIT" -eq 2 ] && pass "audit worsened: a bad value exits 2" \
+  || fail "audit worsened: a bad value exits 2" "exit $WORSENED_EXIT"
+rm -rf "$WORSENED_WORK"
 
 # Styling findings count like the GitHub Action counts them: every styling
 # finding under the all gate, and the introduced ones under new-only.

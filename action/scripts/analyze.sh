@@ -324,6 +324,7 @@ build_command_args() {
       [ -n "${INPUT_COVERAGE:-}" ] && ARGS+=(--coverage "$INPUT_COVERAGE")
       [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
       [ -n "${INPUT_GATE:-}" ] && ARGS+=(--gate "$INPUT_GATE")
+      [ -n "${INPUT_WORSENED:-}" ] && ARGS+=(--worsened "$INPUT_WORSENED")
       [ "${INPUT_INCLUDE_ENTRY_EXPORTS:-}" = "true" ] && ARGS+=(--include-entry-exports)
       [ -n "${INPUT_ONLY:-}" ] && ARGS+=(--only "$INPUT_ONLY")
       [ -n "${INPUT_SKIP:-}" ] && ARGS+=(--skip "$INPUT_SKIP")
@@ -535,6 +536,9 @@ fi
 
 if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
   echo "::error::gate must be 'new-only' or 'all', got: ${INPUT_GATE}"; exit 2
+fi
+if [ -n "${INPUT_WORSENED:-}" ] && [ "$INPUT_WORSENED" != "warn" ] && [ "$INPUT_WORSENED" != "error" ]; then
+  echo "::error::worsened must be 'warn' or 'error', got: ${INPUT_WORSENED}"; exit 2
 fi
 if [ -n "${INPUT_SECURITY_GATE:-}" ] && [ "$INPUT_SECURITY_GATE" != "new" ] && [ "$INPUT_SECURITY_GATE" != "newly-reachable" ]; then
   echo "::error::security-gate must be 'new' or 'newly-reachable', got: ${INPUT_SECURITY_GATE}"; exit 2
@@ -2045,7 +2049,7 @@ case "$INPUT_COMMAND" in
   dead-code|check|architecture) ISSUES=$(jq -r '.total_issues' "$RESULTS_FILE") ;;
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' "$RESULTS_FILE") ;;
   health)          ISSUES=$(jq -r '((.summary.baseline_staleness.remaining_findings // .summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;
-  audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0) + ((.complexity.styling_findings // []) | length) + (.attribution.diff_risk_introduced // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0) + (.attribution.styling_introduced // 0) + (.attribution.diff_risk_introduced // 0)) end' "$RESULTS_FILE") ;;
+  audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0) + ((.complexity.styling_findings // []) | length) + (.attribution.diff_risk_introduced // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (if (.attribution.worsened // "warn") == "error" then (.attribution.complexity_worsened // 0) else 0 end) + (.attribution.duplication_introduced // 0) + (.attribution.styling_introduced // 0) + (.attribution.diff_risk_introduced // 0)) end' "$RESULTS_FILE") ;;
   security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' "$RESULTS_FILE") ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' "$RESULTS_FILE") ;;
   "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (((.dupes.clone_groups // []) | length) + (.dupes.clone_groups_omitted // 0)) + (.health.summary.baseline_staleness.remaining_findings // .health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' "$RESULTS_FILE") ;;

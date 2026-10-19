@@ -5252,6 +5252,35 @@ else
   fail "count: an audit warn verdict still passes" "got $GATE_EXIT: $GATE_STDOUT"
 fi
 
+# A worsened complexity finding counts under new-only only with `worsened: error`.
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"fail","enforced":true}}' '"verdict":"fail","attribution":{"gate":"new-only","worsened":"error","dead_code_introduced":0,"complexity_introduced":0,"complexity_inherited":1,"complexity_worsened":1,"duplication_introduced":0,"styling_introduced":0}')" \
+  INPUT_COMMAND="audit" INPUT_FAIL_ON_ISSUES="true" INPUT_WORSENED="error"
+assert_contains "$GATE_STDOUT" "Fallow audit failed (gate: new-only, 1 finding(s) at error severity" \
+  "count: worsened error counts the worsened finding in the failure"
+assert_contains "$GATE_OUTPUTS" "issues=1" "count: worsened error counts the worsened finding in issues"
+assert_contains "$GATE_ARGV" "--worsened error" "count: the worsened input reaches audit"
+if [ "$GATE_EXIT" != "0" ]; then
+  pass "count: worsened error fails the job"
+else
+  fail "count: worsened error fails the job" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"warn","enforced":true}}' '"verdict":"warn","attribution":{"gate":"new-only","worsened":"warn","dead_code_introduced":0,"complexity_introduced":0,"complexity_inherited":1,"complexity_worsened":1,"duplication_introduced":0,"styling_introduced":0}')" \
+  INPUT_COMMAND="audit" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_OUTPUTS" "issues=0" "count: worsened warn does not count the worsened finding"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "count: worsened warn passes the job"
+else
+  fail "count: worsened warn passes the job" "got $GATE_EXIT: $GATE_STDOUT"
+fi
+run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="audit" INPUT_WORSENED="strict"
+assert_contains "$GATE_STDOUT" "worsened must be 'warn' or 'error', got: strict" \
+  "count: a bad worsened input is rejected"
+if [ "$GATE_EXIT" = "2" ]; then
+  pass "count: a bad worsened input exits 2"
+else
+  fail "count: a bad worsened input exits 2" "got $GATE_EXIT"
+fi
+
 # And the duplicate the advisory was moved to avoid stays avoided.
 run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true" \
   MOCK_GATE_EXIT=1

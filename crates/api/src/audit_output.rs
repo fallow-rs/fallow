@@ -1,6 +1,6 @@
 //! Shared audit JSON payload contracts for programmatic consumers.
 
-use fallow_config::AuditGate;
+use fallow_config::{AuditGate, AuditWorsened};
 use fallow_output::{AuditCommand, CodeClimateIssue, codeclimate_issues_to_value};
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
@@ -59,6 +59,11 @@ pub struct AuditAttribution {
     /// Configured gate: `new-only` fails only on introduced findings,
     /// `all` also fails on inherited ones.
     pub gate: AuditGate,
+    /// How a worsened complexity finding affects the verdict under the
+    /// `new-only` gate. `warn` gives at least a `warn` verdict. `error` counts
+    /// the finding like an introduced finding.
+    #[serde(default)]
+    pub worsened: AuditWorsened,
     /// Dead-code findings absent from the base snapshot.
     pub dead_code_introduced: usize,
     /// Dead-code findings already present in the base snapshot.
@@ -67,6 +72,11 @@ pub struct AuditAttribution {
     pub complexity_introduced: usize,
     /// Complexity findings already present in the base snapshot.
     pub complexity_inherited: usize,
+    /// Complexity findings whose `attribution` is `worsened`. These findings
+    /// are in the base snapshot, and a measured value is higher now. They are
+    /// also counted in `complexity_inherited`.
+    #[serde(default)]
+    pub complexity_worsened: usize,
     /// Clone groups absent from the base snapshot.
     pub duplication_introduced: usize,
     /// Clone groups already present in the base snapshot.
@@ -287,38 +297,6 @@ pub fn attach_audit_wire_attribution(value: &mut serde_json::Value) {
     attach_audit_styling_attribution(value);
     attach_audit_duplication_demotion_attribution(value);
     attach_audit_diff_risk_attribution(value);
-    attach_audit_complexity_worsened_attribution(value);
-}
-
-/// Add `attribution.complexity_worsened`, the number of serialized
-/// `complexity.findings[]` entries whose `attribution` is `worsened`.
-///
-/// A worsened finding is also counted in `complexity_inherited`, so the
-/// existing counts keep their meaning. Always inserted when an `attribution`
-/// object is present: an integer, `0` without a base snapshot or a
-/// complexity section. Wire-only, like the styling counts.
-pub fn attach_audit_complexity_worsened_attribution(value: &mut serde_json::Value) {
-    let worsened = value
-        .get("complexity")
-        .and_then(|complexity| complexity.get("findings"))
-        .and_then(serde_json::Value::as_array)
-        .map_or(0, |items| {
-            items
-                .iter()
-                .filter(|item| {
-                    item.get("attribution").and_then(serde_json::Value::as_str) == Some("worsened")
-                })
-                .count()
-        });
-    if let Some(attribution) = value
-        .get_mut("attribution")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        attribution.insert(
-            "complexity_worsened".to_string(),
-            serde_json::json!(worsened),
-        );
-    }
 }
 
 /// Add `attribution.diff_risk_introduced`, the number of serialized
