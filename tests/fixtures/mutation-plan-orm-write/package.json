@@ -1,0 +1,14 @@
+{
+  "name": "mutation-plan-orm-write",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@libsql/client": "^0.15.0",
+    "drizzle-orm": "^0.44.0",
+    "kysely": "^0.28.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

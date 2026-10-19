@@ -204,7 +204,19 @@ or relational mutant, so it adds little test-strength signal for its run time.
   or database sink are pruned (`side-effect-sink`). A mutant in top-level code
   is pruned when the module calls a sink at the top level. The pruning does
   not follow calls: a mutant in a function that calls a helper, which then
-  calls a sink, still runs. `--allow-side-effects` keeps the pruned mutants.
+  calls a sink, still runs. The sinks come from the security catalogue, which
+  matches injection shapes only. A database write call with safe arguments,
+  such as `db.insert(table)`, `db.insertInto("person")` or
+  `prisma.user.create(...)`, is a sink too. The call must be a member call
+  with a write method name (`insert`, `update`, `delete`, `create`, `upsert`,
+  `save`, `transaction` and similar). The module must import a database
+  client package (`drizzle-orm`, `@prisma/client`, `kysely`, `pg`, `mongodb`
+  and similar), or import a project module that imports one. The check
+  follows one import only. A client that a module reaches through two or more
+  project imports does not count, and a package that is not in the list does
+  not count. In a module with database reach, `map.delete(key)` is also a sink:
+  the plan does not know the type of the receiver.
+  `--allow-side-effects` keeps the pruned mutants.
   This override is a flag only: the config rejects `allowSideEffects`, so a
   project config cannot widen what a run executes.
 - Mutants in framework config are pruned (`framework-config`). Framework

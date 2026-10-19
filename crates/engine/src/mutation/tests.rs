@@ -889,6 +889,41 @@ fn each_response_shaping_row_names_a_catalogue_row_with_an_io_effect() {
 }
 
 #[test]
+fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
+    let root = fixture("mutation-plan-orm-write");
+    let mut allowed = MutationPlanRequest::new(MutationScope::All);
+    allowed.allow_side_effects = true;
+    let [default, allowed] = plans(
+        &root,
+        None,
+        &[MutationPlanRequest::new(MutationScope::All), allowed],
+    )
+    .try_into()
+    .expect("two plans");
+    let pruned = MutantDisposition::Pruned(PruneReason::SideEffectSink);
+    assert_eq!(
+        function_dispositions(&default, "src/save.ts"),
+        BTreeMap::from([("clamp".to_owned(), PLANNED), ("save".to_owned(), pruned)])
+    );
+    assert_eq!(
+        function_dispositions(&default, "src/person.ts"),
+        BTreeMap::from([("addPerson".to_owned(), pruned)])
+    );
+    assert_eq!(
+        function_dispositions(&default, "src/cache.ts"),
+        BTreeMap::from([("evict".to_owned(), PLANNED)])
+    );
+    assert_eq!(
+        function_dispositions(&allowed, "src/save.ts"),
+        BTreeMap::from([("clamp".to_owned(), PLANNED), ("save".to_owned(), PLANNED)])
+    );
+    assert_eq!(
+        function_dispositions(&allowed, "src/person.ts"),
+        BTreeMap::from([("addPerson".to_owned(), PLANNED)])
+    );
+}
+
+#[test]
 fn a_provenance_row_prunes_only_the_calls_of_its_import_source() {
     let plan = plan_all(&fixture("mutation-plan-provenance"));
     let pruned = MutantDisposition::Pruned(PruneReason::SideEffectSink);

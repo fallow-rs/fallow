@@ -55,6 +55,58 @@ pub(super) const RESPONSE_SHAPING_ROWS: [&str; 5] = [
     "permissive-cors",
 ];
 
+/// Method names of ORM and query builder calls that write to a database:
+/// `db.insert(table)`, `db.insertInto("person")`, `prisma.user.create(...)`.
+/// The security catalogue matches only injection shapes, so a parameterized
+/// write matches no catalogue row. These names count as a database sink
+/// only in a module that reaches a database client package.
+const DATABASE_WRITE_METHODS: [&str; 18] = [
+    "batch",
+    "bulkCreate",
+    "create",
+    "createMany",
+    "delete",
+    "deleteFrom",
+    "deleteMany",
+    "destroy",
+    "insert",
+    "insertInto",
+    "remove",
+    "save",
+    "transaction",
+    "truncate",
+    "update",
+    "updateMany",
+    "updateTable",
+    "upsert",
+];
+
+/// Import sources of database clients, ORMs and query builders. A subpath
+/// such as `drizzle-orm/libsql` matches its package.
+const DATABASE_PACKAGES: [&str; 18] = [
+    "@libsql/client",
+    "@neondatabase/serverless",
+    "@planetscale/database",
+    "@prisma/client",
+    "@vercel/postgres",
+    "better-sqlite3",
+    "drizzle-orm",
+    "knex",
+    "kysely",
+    "mongodb",
+    "mongoose",
+    "mysql",
+    "mysql2",
+    "pg",
+    "postgres",
+    "sequelize",
+    "sqlite3",
+    "typeorm",
+];
+
+/// Receivers of the language runtime. `Object.create(proto)` makes no write.
+const RUNTIME_RECEIVERS: [&str; 2] = ["Object", "Reflect"];
+
 /// One file that the scope selects.
 struct Candidate<'a> {
     file_id: FileId,
@@ -71,6 +123,7 @@ struct Context<'a> {
     inputs: &'a MutationPlanInputs<'a>,
     request: &'a MutationPlanRequest,
     graph: &'a ModuleGraph,
+    modules: FxHashMap<FileId, &'a ModuleInfo>,
     dead_files: FxHashSet<&'a Path>,
     options: MutationOptions,
     /// The test entry points that reach each selected test-reachable file,
@@ -104,6 +157,11 @@ pub(super) fn build(
         inputs,
         request,
         graph,
+        modules: inputs
+            .modules
+            .iter()
+            .map(|module| (module.file_id, module))
+            .collect(),
         dead_files: inputs
             .results
             .unused_files
@@ -189,12 +247,6 @@ pub(super) fn build(
 /// The second value holds the `Paths` scope entries that select no file.
 fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<String>) {
     let root = context.inputs.root;
-    let modules: FxHashMap<FileId, &ModuleInfo> = context
-        .inputs
-        .modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
     let mut matched = match &context.request.scope {
         MutationScope::Paths(paths) => vec![false; paths.len()],
         _ => Vec::new(),
@@ -239,7 +291,7 @@ fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<String>) 
                 path: &node.path,
                 rel,
                 layout,
-                module: modules.get(&node.file_id).copied(),
+                module: context.modules.get(&node.file_id).copied(),
                 added_lines,
             })
         })
@@ -434,13 +486,17 @@ impl<'a> FileFacts<'a> {
         let sink_starts = if context.request.allow_side_effects {
             Vec::new()
         } else {
-            module
+            let mut starts: Vec<u32> = module
                 .security_sinks
                 .iter()
                 .filter(|site| is_side_effect_sink(module, site))
                 .map(|site| site.span_start)
-                .filter(|&start| in_script(start))
-                .collect()
+                .collect();
+            if has_database_reach(context, candidate.file_id, module) {
+                starts.extend(database_write_starts(source, candidate.layout));
+            }
+            starts.retain(|&start| in_script(start));
+            starts
         };
         let top_level_sink =
             !sink_starts.is_empty() && has_top_level_site(&sink_starts, source, candidate.layout);
@@ -713,6 +769,62 @@ fn is_side_effect_sink(module: &ModuleInfo, site: &SinkSite) -> bool {
                     ProvenanceBindings::ReleasedModule,
                 )
         })
+}
+
+/// Whether the module imports a database client package, or imports a
+/// project module that imports one. One hop covers the common layout where
+/// a `db` module creates the client and the other modules import it.
+fn has_database_reach(context: &Context<'_>, file_id: FileId, module: &ModuleInfo) -> bool {
+    imports_database(module)
+        || context.graph.edges_for(file_id).iter().any(|target| {
+            context
+                .modules
+                .get(target)
+                .is_some_and(|module| imports_database(module))
+        })
+}
+
+fn imports_database(module: &ModuleInfo) -> bool {
+    module
+        .imports
+        .iter()
+        .map(|import| import.source.as_str())
+        .chain(module.re_exports.iter().map(|re| re.source.as_str()))
+        .any(|source| {
+            DATABASE_PACKAGES
+                .iter()
+                .any(|package| fallow_security::import_source_matches(source, package))
+        })
+}
+
+/// The start offsets of the calls whose callee is a static member with a
+/// database write method name. The parse reads all calls, also calls with
+/// only literal arguments, which the security capture does not record.
+fn database_write_starts(source: &str, layout: Layout) -> Vec<u32> {
+    use oxc_ast::ast::{CallExpression, Expression};
+    use oxc_ast_visit::Visit;
+
+    #[derive(Default)]
+    struct Writes(Vec<u32>);
+    impl<'a> Visit<'a> for Writes {
+        fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+            if let Expression::StaticMemberExpression(member) = &it.callee
+                && DATABASE_WRITE_METHODS.contains(&member.property.name.as_str())
+                && !matches!(&member.object, Expression::Identifier(receiver)
+                    if RUNTIME_RECEIVERS.contains(&receiver.name.as_str()))
+            {
+                self.0.push(it.span.start);
+            }
+            oxc_ast_visit::walk::walk_call_expression(self, it);
+        }
+    }
+
+    let (text, kind) = layout.parse_view(source);
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, &text, kind.source_type()).parse();
+    let mut writes = Writes::default();
+    writes.visit_program(&parsed.program);
+    writes.0
 }
 
 /// Whether one of the offsets lies outside every function and arrow
