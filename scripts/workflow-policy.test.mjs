@@ -710,7 +710,7 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.match(gate, /needs: \[build, sign, validate, similar-code-conformance, musl-smoke\]/);
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
-  assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke\]/);
+  assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke, sbom\]/);
   assert.match(releaseAssets, /permissions:\n\s+contents: read/);
   assert.match(releaseAssets, /pattern: fallow-\*/);
   assert.match(npmPublish, /needs: \[npm-prep, release-assets\]/);

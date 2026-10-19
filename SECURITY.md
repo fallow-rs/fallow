@@ -10,6 +10,27 @@ You should receive a response within 48 hours. Please include:
 - Steps to reproduce it
 - Any relevant version or configuration information
 
+## Supported versions
+
+Only the latest minor release of fallow receives security fixes. A fix ships as a patch release of that minor. When a new minor release ships, the previous minor no longer receives security fixes. To get a fix, upgrade to the latest release.
+
+## Code scanning policy
+
+CodeQL analyzes every pull request and every push to `main`. The `Analyze` checks are required on `main`, so a pull request cannot merge while CodeQL reports a new high or critical finding.
+
+- High and critical findings block the merge. The author fixes them before the pull request merges.
+- Medium findings are fixed, or dismissed with a written reason, within 30 days.
+- Low findings are fixed or dismissed during routine maintenance.
+- A dismissal always states the reason in the alert, for example "false positive" or "used in tests only".
+
+## Vulnerability exploitability (VEX)
+
+The file [`.vex/openvex.json`](.vex/openvex.json) is an OpenVEX document. It states that fallow is not affected by each advisory that the repository ignores in its `osv-scanner.toml` files, with the reason for each. Run `node scripts/generate-vex.mjs` to regenerate it after you change an ignore entry. The `deny.toml` file ignores no advisories.
+
+## Software bill of materials
+
+Each release publishes one CycloneDX SBOM per target platform on the GitHub Release, named `fallow-<target>.cdx.json`.
+
 ## Scope
 
 fallow analyzes source files and `package.json` without running project code. Analysis can write caches and requested reports; `fallow fix` edits files only in the analyzed project. Ordinary analysis makes no config network requests. A host must explicitly trust remote config inheritance with `--allow-remote-extends` or the typed `ConfigLoadOptions` API before fallow fetches an `https://` extends target.

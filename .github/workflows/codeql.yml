@@ -2,7 +2,7 @@ name: CodeQL
 
 # Static analysis for the Rust crates, the JavaScript and TypeScript tools and
 # the workflows. It runs on GitHub-hosted runners, so it costs no paid minutes.
-# It is not a required check: findings show as code scanning alerts.
+# The Analyze checks are required on `main`, and findings show as code scanning alerts.
 on:
   pull_request:
   push:

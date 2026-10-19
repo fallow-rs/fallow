@@ -371,7 +371,7 @@ The `Commit messages` check fails a pull request that has a commit without a sig
 1. Fork the repository
 2. Create a feature branch from `main`
 3. Make your changes with conventional commit messages
-4. Ensure `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass
+4. Every feature or fix must add or update automated tests. Ensure `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` pass
 5. For a user-visible change, add a changelog fragment: a new file in
    [`changelog.d/`](changelog.d/README.md). Do not edit `CHANGELOG.md`. The
    release collects the fragments into it.

@@ -1153,10 +1153,61 @@ jobs:
           retention-days: 30
           include-hidden-files: false
 
+  # One CycloneDX SBOM per target. `cargo cyclonedx` reads Cargo.lock and
+  # resolves the dependency graph for that target, so each SBOM lists the
+  # crates that the matching release binary links. The `fallow-*` artifact
+  # name makes `release-assets` stage it with the binaries.
+  sbom:
+    name: SBOM (${{ matrix.target }})
+    if: ${{ !inputs.auth_check }}
+    needs: [release-context]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --version 0.5.9 --locked
+
+      - name: Generate SBOM
+        shell: bash
+        env:
+          FALLOW_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          cargo cyclonedx --manifest-path crates/cli/Cargo.toml \
+            --format json --spec-version 1.5 --target "$FALLOW_TARGET" \
+            --override-filename "fallow-${FALLOW_TARGET}.cdx"
+          mkdir sbom
+          cp "crates/cli/fallow-${FALLOW_TARGET}.cdx.json" sbom/
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fallow-sbom-${{ matrix.target }}
+          path: sbom/fallow-${{ matrix.target }}.cdx.json
+          if-no-files-found: error
+
   release-assets:
     name: Stage GitHub Release assets
     if: ${{ !inputs.auth_check }}
-    needs: [release-verified, vscode-prep, vscode-host-smoke]
+    needs: [release-verified, vscode-prep, vscode-host-smoke, sbom]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
