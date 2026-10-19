@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -104,4 +104,36 @@ test("the script exits 2 without BASE_SHA", () => {
   delete env.BASE_SHA;
   const run = spawnSync(process.execPath, [SCRIPT_PATH], { env, encoding: "utf8" });
   assert.equal(run.status, 2);
+});
+
+const runOnMessage = (cwd, message) => {
+  const file = join(cwd, "COMMIT_MSG");
+  writeFileSync(file, message);
+  return spawnSync(process.execPath, [SCRIPT_PATH, "--message-file", file], {
+    cwd,
+    encoding: "utf8",
+  });
+};
+
+test("the commit-msg mode exits 1 for a message without the author sign-off", () => {
+  withRepo((dir) => {
+    const run = runOnMessage(dir, "fix: unsigned\n");
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /git commit -s/u);
+  });
+});
+
+test("the commit-msg mode exits 0 for a message signed off by the author", () => {
+  withRepo((dir) => {
+    const run = runOnMessage(dir, "fix: signed\n\nSigned-off-by: Dev One <dev@example.com>\n");
+    assert.equal(run.status, 0, run.stderr);
+  });
+});
+
+test("the commit-msg mode skips a merge commit", () => {
+  withRepo((dir, base) => {
+    writeFileSync(join(dir, ".git", "MERGE_HEAD"), `${base}\n`);
+    const run = runOnMessage(dir, "Merge branch 'main'\n");
+    assert.equal(run.status, 0, run.stderr);
+  });
 });

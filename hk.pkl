@@ -68,6 +68,11 @@ hooks {
       ["commitlint"] {
         check = "if [ -x node_modules/.bin/commitlint ]; then node_modules/.bin/commitlint --edit \"{{commit_msg_file}}\"; else echo 'commit-msg: commitlint is not installed, skipping local check (CI still enforces it). Run: npm ci' >&2; fi"
       }
+      // The Commit messages workflow fails a pull request commit without a
+      // Signed-off-by line for its author. Check it before the push.
+      ["dco-signoff"] {
+        check = "if command -v node >/dev/null 2>&1; then node .github/scripts/check-dco.mjs --message-file \"{{commit_msg_file}}\"; else sh scripts/hook-tool-hint.sh node; fi"
+      }
     }
   }
   // Test and Miri run in CI on pull requests, on Linux runners. To run the

@@ -356,7 +356,7 @@ git rebase --signoff origin/main
 git push --force-with-lease
 ```
 
-The `Commit messages` check fails a pull request that has a commit without a sign-off. Pull requests from bots are exempt.
+The `Commit messages` check fails a pull request that has a commit without a sign-off. Pull requests from bots are exempt. After `hk install`, the `commit-msg` hook runs the same check on each commit, so a missing sign-off stops the commit before the push.
 
 ## Code style
 

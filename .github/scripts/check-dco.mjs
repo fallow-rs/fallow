@@ -3,8 +3,10 @@
 // matches the commit author. Merge commits are skipped.
 //
 // Run: BASE_SHA=<sha> node .github/scripts/check-dco.mjs
+//      node .github/scripts/check-dco.mjs --message-file <path>  (commit-msg hook)
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -44,7 +46,43 @@ export const parseLog = (output) =>
       return { sha, authorEmail, message: rest.join(FIELD_SEPARATOR) };
     });
 
+const git = (args) => execFileSync("git", args, { encoding: "utf8" }).trim();
+
+/**
+ * Checks one commit message before the commit exists, for the commit-msg hook.
+ * A merge commit is skipped, as in the pull request check.
+ * @param {string} messageFile
+ * @returns {number} the exit code
+ */
+const checkMessageFile = (messageFile) => {
+  const merging = spawnSync("git", ["rev-parse", "-q", "--verify", "MERGE_HEAD"], {
+    stdio: "ignore",
+  });
+  if (merging.status === 0) {
+    return 0;
+  }
+  const ident = git(["var", "GIT_AUTHOR_IDENT"]);
+  const authorEmail = ident.match(/<([^<>]+)>/u)?.[1] ?? "";
+  const message = readFileSync(messageFile, "utf8");
+  if (checkDco([{ sha: "HEAD", authorEmail, message }]).ok) {
+    return 0;
+  }
+  console.error(`commit-msg: no Signed-off-by line for the author <${authorEmail}>.`);
+  console.error("Commit with `git commit -S -s`, or add the line with `git commit -s --amend`.");
+  console.error("See the Developer Certificate of Origin section in CONTRIBUTING.md.");
+  return 1;
+};
+
 const main = () => {
+  const flag = process.argv.indexOf("--message-file");
+  if (flag !== -1) {
+    const messageFile = process.argv[flag + 1];
+    if (!messageFile) {
+      console.error("--message-file needs a path.");
+      return 2;
+    }
+    return checkMessageFile(messageFile);
+  }
   const base = process.env.BASE_SHA;
   if (!base) {
     console.error("BASE_SHA is not set.");
