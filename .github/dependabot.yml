@@ -152,3 +152,12 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+
+  # The hash-pinned cargo-zigbuild and ziglang wheels that release.yml installs.
+  - package-ecosystem: pip
+    directory: /.github
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
