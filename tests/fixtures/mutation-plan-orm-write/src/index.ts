@@ -1,9 +1,15 @@
 export { evict } from "./cache";
 export { cjsSave } from "./cjs.cjs";
+export { addComputed } from "./computed";
 export { lazySave } from "./lazy";
+export { clearValues, insertPrepared, insertValue } from "./lite";
 export { addRecord } from "./mongo";
 export { addPerson } from "./person";
+export { addRow } from "./pg";
+export { addUser, countUsers } from "./pgjs";
 export { clearAll, runAll } from "./prisma";
 export { removeRecord } from "./remove";
+export { runTask } from "./runner";
 export { clamp, save } from "./save";
 export { insertRow } from "./typed";
+export { addValue } from "./vercel";

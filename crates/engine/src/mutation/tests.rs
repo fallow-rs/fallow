@@ -913,6 +913,16 @@ fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
         function_dispositions(&default, "src/cache.ts"),
         BTreeMap::from([("evict".to_owned(), PLANNED)])
     );
+    assert_eq!(
+        function_dispositions(&default, "src/pgjs.ts").get("countUsers"),
+        Some(&PLANNED),
+        "a read template is not a write"
+    );
+    assert_eq!(
+        function_dispositions(&default, "src/runner.ts"),
+        BTreeMap::from([("runTask".to_owned(), PLANNED)]),
+        "`run` counts only in a module that loads a database package itself"
+    );
     for (file, function) in [
         ("src/cjs.cjs", "cjsSave"),
         ("src/lazy.ts", "lazySave"),
@@ -921,6 +931,13 @@ fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
         ("src/prisma.ts", "runAll"),
         ("src/prisma.ts", "clearAll"),
         ("src/typed.ts", "insertRow"),
+        ("src/pgjs.ts", "addUser"),
+        ("src/vercel.ts", "addValue"),
+        ("src/lite.ts", "insertValue"),
+        ("src/lite.ts", "clearValues"),
+        ("src/lite.ts", "insertPrepared"),
+        ("src/pg.ts", "addRow"),
+        ("src/computed.ts", "addComputed"),
     ] {
         assert_eq!(
             function_dispositions(&default, file).get(function),

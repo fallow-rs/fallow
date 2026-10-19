@@ -207,22 +207,29 @@ or relational mutant, so it adds little test-strength signal for its run time.
   calls a sink, still runs. The sinks come from the security catalogue, which
   matches injection shapes only. A database write call with safe arguments,
   such as `db.insert(table)`, `db.insertInto("person")` or
-  `prisma.user.create(...)`, is a sink too. The call must be a member call
-  or a tagged template with a write method name (`insert`, `insertOne`,
-  `update`, `delete`, `del`, `create`, `upsert`, `save`, `$transaction`,
-  `$executeRaw` and similar). The module must load a database client package
-  (`drizzle-orm`, `@prisma/client`, `kysely`, `knex`, `pg`, `mongodb` and
-  similar), or load a project module that loads one. An ES import, a
-  `require()` call and an `import()` call with a literal source each count.
-  A type-only import counts too, because a function that takes the client
-  as a parameter often imports only its type. The check
-  follows one import only. A client that a module reaches through two or more
-  project imports does not count, and a package that is not in the list does
-  not count. In a module with database reach, `map.delete(key)` is also a sink:
-  the plan does not know the type of the receiver.
-  `--allow-side-effects` keeps the pruned mutants.
-  This override is a flag only: the config rejects `allowSideEffects`, so a
-  project config cannot widen what a run executes.
+  `prisma.user.create(...)`, is a sink too. The call must be a member call or
+  a tagged template with a write method name (`insert`, `insertOne`, `update`,
+  `delete`, `del`, `create`, `upsert`, `save`, `$transaction`, `$executeRaw`
+  and similar). In a module that loads a database client package itself, `run`
+  and `exec` count too, for a prepared statement such as `insert.run(value)`.
+  A computed member with a string key, such as the callee `db["insert"]`,
+  counts too. A tagged template, or a call whose first argument is a string or
+  a template, is also a sink when its first SQL text starts with a write verb
+  (`insert`, `update`, `delete`, `merge`, `replace`, `upsert`, `truncate`,
+  `create`, `drop`, `alter`): ``sql`insert into ...` ``, `pool.query("DELETE
+  ...")`, `lite.prepare("INSERT ...").run(value)`. The module must load a
+  database client package (`drizzle-orm`, `@prisma/client`, `kysely`, `knex`,
+  `pg`, `mongodb` and similar), or load a project module that loads one. An ES
+  import, a `require()` call and an `import()` call with a literal source each
+  count. A type-only import counts too, because a function that takes the
+  client as a parameter often imports only its type. The check follows one
+  import only. A client that a module reaches through two or more project
+  imports does not count, and a package that is not in the list does not
+  count. In a module with database reach, `map.delete(key)` and
+  `log.info("update done")` are also sinks: the plan does not know the type of
+  the receiver or the purpose of the text. `--allow-side-effects` keeps the
+  pruned mutants. This override is a flag only: the config rejects
+  `allowSideEffects`, so a project config cannot widen what a run executes.
 - Mutants in framework config are pruned (`framework-config`). Framework
   config is an export that an active plugin marks as used, for example
   `export const revalidate = 60` in a Next.js page. It is also the default

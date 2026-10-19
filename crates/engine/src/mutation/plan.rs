@@ -96,6 +96,22 @@ const DATABASE_WRITE_METHODS: [&str; 33] = [
     "upsert",
 ];
 
+/// Method names that run a prepared statement or a SQL script, such as
+/// `insert.run(value)` and `lite.exec("DELETE FROM t")` in `better-sqlite3`.
+/// The names are common outside databases (`deadline.run(task)`,
+/// `pattern.exec(text)`), so they count only in a module that loads a
+/// database client package itself.
+const STATEMENT_RUN_METHODS: [&str; 2] = ["exec", "run"];
+
+/// SQL verbs that start a write statement. In a module with database reach,
+/// a tagged template or a call whose first static SQL text starts with one of
+/// these verbs is a sink: ``sql`insert into ...` ``,
+/// `pool.query("DELETE FROM t")`, `lite.prepare("INSERT ...")`.
+const SQL_WRITE_VERBS: [&str; 10] = [
+    "alter", "create", "delete", "drop", "insert", "merge", "replace", "truncate", "update",
+    "upsert",
+];
+
 /// Import sources of database clients, ORMs and query builders. A subpath
 /// such as `drizzle-orm/libsql` matches its package.
 const DATABASE_PACKAGES: [&str; 19] = [
@@ -512,7 +528,8 @@ impl<'a> FileFacts<'a> {
                 .map(|site| site.span_start)
                 .collect();
             if has_database_reach(context, candidate.file_id) {
-                starts.extend(database_write_starts(source, candidate.layout));
+                let direct = context.database_files.contains(&candidate.file_id);
+                starts.extend(database_write_starts(source, candidate.layout, direct));
             }
             starts.retain(|&start| in_script(start));
             starts
@@ -821,34 +838,70 @@ fn database_files(graph: &ModuleGraph) -> FxHashSet<FileId> {
         .collect()
 }
 
-/// The start offsets of the calls and tagged templates whose callee is a
-/// static member with a database write method name, such as
-/// ``prisma.$executeRaw`DELETE ...` ``. The parse reads all calls, also calls
-/// with only literal arguments, which the security capture does not record.
-fn database_write_starts(source: &str, layout: Layout) -> Vec<u32> {
-    use oxc_ast::ast::{CallExpression, Expression, TaggedTemplateExpression};
+/// The start offsets of the database write calls and tagged templates. A
+/// write has a member callee or tag with a database write method name, such
+/// as ``prisma.$executeRaw`DELETE ...` `` or `db["insert"](table)`, or SQL
+/// text that starts with a write verb, such as ``sql`insert ...` `` or
+/// `pool.query("INSERT ...")`. When `direct` is true, the module loads a
+/// database client package itself, and `STATEMENT_RUN_METHODS` count too.
+/// The parse reads all calls, also calls with only literal arguments, which
+/// the security capture does not record.
+fn database_write_starts(source: &str, layout: Layout, direct: bool) -> Vec<u32> {
+    use oxc_ast::ast::{Argument, CallExpression, Expression, TaggedTemplateExpression};
     use oxc_ast_visit::Visit;
 
-    fn is_write(callee: &Expression<'_>) -> bool {
-        matches!(callee, Expression::StaticMemberExpression(member)
-            if DATABASE_WRITE_METHODS.contains(&member.property.name.as_str())
-                && !matches!(&member.object, Expression::Identifier(receiver)
-                    if RUNTIME_RECEIVERS.contains(&receiver.name.as_str())))
+    fn is_write(callee: &Expression<'_>, direct: bool) -> bool {
+        callee.as_member_expression().is_some_and(|member| {
+            member.static_property_name().is_some_and(|name| {
+                DATABASE_WRITE_METHODS.contains(&name)
+                    || (direct && STATEMENT_RUN_METHODS.contains(&name))
+            }) && !matches!(member.object(), Expression::Identifier(receiver)
+                    if RUNTIME_RECEIVERS.contains(&receiver.name.as_str()))
+        })
     }
 
-    #[derive(Default)]
-    struct Writes(Vec<u32>);
+    fn is_sql_write(text: &str) -> bool {
+        let text = text.trim_start();
+        let verb_end = text
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(text.len());
+        let verb = &text[..verb_end];
+        SQL_WRITE_VERBS
+            .iter()
+            .any(|write| write.eq_ignore_ascii_case(verb))
+    }
+
+    fn has_sql_write_argument(call: &CallExpression<'_>) -> bool {
+        match call.arguments.first() {
+            Some(Argument::StringLiteral(literal)) => is_sql_write(&literal.value),
+            Some(Argument::TemplateLiteral(template)) => template
+                .quasis
+                .first()
+                .is_some_and(|quasi| is_sql_write(&quasi.value.raw)),
+            _ => false,
+        }
+    }
+
+    struct Writes {
+        direct: bool,
+        starts: Vec<u32>,
+    }
     impl<'a> Visit<'a> for Writes {
         fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-            if is_write(&it.callee) {
-                self.0.push(it.span.start);
+            if is_write(&it.callee, self.direct) || has_sql_write_argument(it) {
+                self.starts.push(it.span.start);
             }
             oxc_ast_visit::walk::walk_call_expression(self, it);
         }
 
         fn visit_tagged_template_expression(&mut self, it: &TaggedTemplateExpression<'a>) {
-            if is_write(&it.tag) {
-                self.0.push(it.span.start);
+            let sql_write = it
+                .quasi
+                .quasis
+                .first()
+                .is_some_and(|quasi| is_sql_write(&quasi.value.raw));
+            if is_write(&it.tag, self.direct) || sql_write {
+                self.starts.push(it.span.start);
             }
             oxc_ast_visit::walk::walk_tagged_template_expression(self, it);
         }
@@ -857,9 +910,12 @@ fn database_write_starts(source: &str, layout: Layout) -> Vec<u32> {
     let (text, kind) = layout.parse_view(source);
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, &text, kind.source_type()).parse();
-    let mut writes = Writes::default();
+    let mut writes = Writes {
+        direct,
+        starts: Vec::new(),
+    };
     writes.visit_program(&parsed.program);
-    writes.0
+    writes.starts
 }
 
 /// Whether one of the offsets lies outside every function and arrow
