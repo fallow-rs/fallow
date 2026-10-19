@@ -779,7 +779,7 @@ test("release publication waits for the aggregate verification gate", () => {
   ]) {
     assert.match(
       job,
-      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep\]/,
+      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved\]/,
       registry,
     );
     assert.match(job, /permissions:\n\s+contents: read/, registry);
@@ -812,7 +812,7 @@ test("release publication waits for the aggregate verification gate", () => {
       /echo "::warning::[^\n]*\$\{remaining\[\*\]\}[^\n]*"\n\s+sleep "\$delay"/u,
       registry,
     );
-    assert.match(job, /^ {4}timeout-minutes: 360$/mu, registry);
+    assert.match(job, /^ {4}timeout-minutes: 60$/mu, registry);
   }
 
   assert.match(
@@ -894,12 +894,21 @@ test("release publishes no VSIX before the approved fallow root is public", () =
   assert.match(releaseReady, /needs: \[[^\]]*\bnpm-root-approved\b[^\]]*\]/u);
   const gateWait = waitStepBody(gate);
   assert.ok(gateWait, "npm-root-approved must run the public root wait");
+  assert.doesNotMatch(gateWait, /Waiting for the maintainer/u, "the wait body stays neutral");
+  const announce = gate.indexOf("- name: Ask for the npm approval of the staged fallow root");
+  assert.ok(announce !== -1 && announce < gate.indexOf(`- name: ${WAIT_STEP}`));
+  assert.match(gate.slice(announce), /Verify the stage against sha256/u);
   for (const publisher of [marketplace, openVsx]) {
-    // The publishers start in the same wave as npm-publish, so one review of
-    // the release environment covers every publication job. Each publisher
-    // then waits for the approved root itself, before it uploads anything.
-    assert.match(publisher, /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep\]/u);
-    assert.doesNotMatch(publisher, /needs: \[[^\]]*\b(?:npm-publish|npm-root-approved)\b/u);
+    // npm-root-approved is the only job that waits for the npm approval. The
+    // publishers need it, so they hold no runner while the approval is
+    // pending. Each publisher still checks the public bytes itself before it
+    // uploads anything, with a short bound instead of a long poll.
+    assert.match(
+      publisher,
+      /needs: \[vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved\]/u,
+    );
+    assert.doesNotMatch(publisher, /needs: \[[^\]]*\bnpm-publish\b/u);
+    assert.match(publisher, /^ {4}timeout-minutes: 60$/mu);
     assert.equal(waitStepBody(publisher), gateWait, "publishers reuse the exact wait logic");
     const steps = publisher.split(/^ {6}- /mu).slice(1);
     const waitIndex = steps.findIndex((step) => step.startsWith(`name: ${WAIT_STEP}`));
@@ -912,10 +921,10 @@ test("release publishes no VSIX before the approved fallow root is public", () =
     assert.match(digest, /name: npm-tarballs/u);
     assert.match(digest, /sha256sum "\$NPM_TARBALLS\/20-cli-root\/fallow-\$\{VERSION\}\.tgz"/u);
     assert.match(digest, /EXPECTED_SHA256=\$digest" >> "\$GITHUB_ENV"/u);
-    assert.match(steps[waitIndex], /WAIT_MINUTES: '3[0-4][0-9]'/u);
+    assert.match(steps[waitIndex], /WAIT_MINUTES: '[1-9]'/u);
   }
   assert.match(security, /Publish no VSIX before the approved `fallow` root is public/u);
-  assert.match(security, /same wave as\s+`npm-publish`/u);
+  assert.match(security, /`npm-root-approved` is the only job that waits/u);
   assert.match(procedure, /Wait for the approved fallow root/u);
   assert.match(procedure, /Do this right after\s+`release-ready` without other work in between/u);
 });

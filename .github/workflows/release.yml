@@ -1802,9 +1802,11 @@ jobs:
   # own version and purges an installed binary of another version, so a VSIX
   # that is public before that release exists breaks every auto-updating
   # install. The release is created after the maintainer approves the staged
-  # `fallow` root, so both VSIX publishers wait here until that approval has
-  # made `fallow@<version>` public, and until the public bytes are the ones
-  # this run staged. No credentials: this job only reads the public registry.
+  # `fallow` root. This is the only job that waits for that approval: it runs
+  # until the approval has made `fallow@<version>` public, and until the public
+  # bytes are the ones this run staged. Both VSIX publishers need this job, so
+  # they hold no runner while the approval is pending. No credentials: this job
+  # only reads the public registry.
   npm-root-approved:
     name: Wait for the approved fallow root
     if: ${{ !inputs.auth_check }}
@@ -1821,6 +1823,16 @@ jobs:
       WAIT_MINUTES: '350'
       POLL_SECONDS: '30'
     steps:
+      - name: Ask for the npm approval of the staged fallow root
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
+          {
+            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Wait until fallow@version is public with the staged bytes
         shell: bash
         run: |
@@ -1831,10 +1843,6 @@ jobs:
             echo "::error::The sha256 of the staged fallow tarball is missing"
             exit 1
           fi
-          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
-          {
-            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
-          } >> "$GITHUB_STEP_SUMMARY"
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           body=""
           while :; do
@@ -2120,19 +2128,18 @@ jobs:
   vscode-publish-marketplace:
     name: Publish VS Code Marketplace targets
     if: ${{ !inputs.auth_check }}
-    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved]
     environment: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 360
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
     steps:
-      # The publisher starts in the same wave as npm-publish and
-      # publish-crates, so one review of the release environment covers every
-      # publication job. It uploads nothing before the maintainer-approved
-      # fallow root is public with the bytes that this run staged. The steps
-      # below use no credential.
+      # The publisher starts after npm-root-approved has seen the approved
+      # fallow root public with the bytes that this run staged. It checks
+      # those public bytes again against its own copy of the staged tarball
+      # before it uploads anything. The steps below use no credential.
       - name: Download npm tarballs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -2154,8 +2161,9 @@ jobs:
         shell: bash
         working-directory: ${{ runner.temp }}
         env:
-          # The job limit is 360 minutes. The rest is for the publication.
-          WAIT_MINUTES: '300'
+          # npm-root-approved did the long wait, so the root is already
+          # public. This short bound only covers a lagging registry read.
+          WAIT_MINUTES: '5'
           POLL_SECONDS: '30'
         run: |
           set -euo pipefail
@@ -2165,10 +2173,6 @@ jobs:
             echo "::error::The sha256 of the staged fallow tarball is missing"
             exit 1
           fi
-          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
-          {
-            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
-          } >> "$GITHUB_STEP_SUMMARY"
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           body=""
           while :; do
@@ -2362,19 +2366,18 @@ jobs:
   vscode-publish-open-vsx:
     name: Publish Open VSX targets
     if: ${{ !inputs.auth_check }}
-    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep]
+    needs: [vscode-prep, vscode-host-smoke, release-assets, npm-prep, npm-root-approved]
     environment: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 360
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
     steps:
-      # The publisher starts in the same wave as npm-publish and
-      # publish-crates, so one review of the release environment covers every
-      # publication job. It uploads nothing before the maintainer-approved
-      # fallow root is public with the bytes that this run staged. The steps
-      # below use no credential.
+      # The publisher starts after npm-root-approved has seen the approved
+      # fallow root public with the bytes that this run staged. It checks
+      # those public bytes again against its own copy of the staged tarball
+      # before it uploads anything. The steps below use no credential.
       - name: Download npm tarballs
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -2396,8 +2399,9 @@ jobs:
         shell: bash
         working-directory: ${{ runner.temp }}
         env:
-          # The job limit is 360 minutes. The rest is for the publication.
-          WAIT_MINUTES: '300'
+          # npm-root-approved did the long wait, so the root is already
+          # public. This short bound only covers a lagging registry read.
+          WAIT_MINUTES: '5'
           POLL_SECONDS: '30'
         run: |
           set -euo pipefail
@@ -2407,10 +2411,6 @@ jobs:
             echo "::error::The sha256 of the staged fallow tarball is missing"
             exit 1
           fi
-          echo "::notice::Waiting for the maintainer to approve fallow@${VERSION} on npm (sha256 ${EXPECTED_SHA256}${STAGE_ID:+, stage ${STAGE_ID}})"
-          {
-            echo "- Waiting for \`fallow@${VERSION}\` to become public. Verify the stage against sha256 \`${EXPECTED_SHA256}\`, then approve it on npm. This job continues when the public tarball matches."
-          } >> "$GITHUB_STEP_SUMMARY"
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           body=""
           while :; do
