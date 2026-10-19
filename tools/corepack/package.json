@@ -6,6 +6,6 @@
     "check": "corepack --version"
   },
   "dependencies": {
-    "corepack": "0.35.0"
+    "corepack": "0.36.0"
   }
 }
