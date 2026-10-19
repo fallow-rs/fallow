@@ -1,0 +1,11 @@
+<script lang="ts">
+export interface SplitProps {
+  label: string;
+}
+</script>
+
+<script setup lang="ts">
+const props = defineProps<SplitProps>();
+</script>
+
+<template><span>{{ props.label }}</span></template>

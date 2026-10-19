@@ -1,0 +1,19 @@
+@if (state === 'playing') {
+  @for (player of players; track player.id) {
+    @switch (player.status) {
+      @case ('active') {
+        <player-card [name]="player.name" />
+      }
+      @case ('away') {
+        <player-card [name]="player.name" [dim]="true" />
+      }
+      @default {
+        <placeholder />
+      }
+    }
+  }
+} @else {
+  @if (state === 'paused') {
+    <pause-overlay />
+  }
+}

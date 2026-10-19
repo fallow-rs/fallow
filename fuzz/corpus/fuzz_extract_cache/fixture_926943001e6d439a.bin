@@ -1,0 +1,6 @@
+---
+import { Header } from "../components/Header.astro";
+---
+<html>
+  <body><Header /></body>
+</html>

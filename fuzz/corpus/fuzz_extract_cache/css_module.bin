@@ -1,0 +1,4 @@
+@import './base.css';
+@theme { --color-brand: #f00; }
+.button { composes: base from './base.css'; @apply px-4 py-2; }
+:global(.x) .local:hover { color: var(--color-brand); }

@@ -16,6 +16,8 @@ on:
       - 'crates/graph/**'
       - 'crates/config/**'
       - 'crates/security/**'
+      - 'crates/engine/src/codeowners.rs'
+      - 'scripts/fuzz-seed-extract.mjs'
       - 'rust-toolchain.toml'
       - '.github/workflows/fuzz-smoke.yml'
   schedule:
@@ -73,11 +75,15 @@ jobs:
         shell: bash
         run: |
           set -u
-          targets=(fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts fuzz_extract fuzz_config_glob fuzz_workspace_manifests fuzz_config_files)
+          targets=(fuzz_sfc fuzz_mdx fuzz_astro fuzz_css fuzz_scripts fuzz_extract fuzz_config_glob fuzz_workspace_manifests fuzz_config_files fuzz_extract_cache fuzz_codeowners)
           failed=0
           for target in "${targets[@]}"; do
             echo "::group::Fuzz ${target}"
-            if ! cargo +nightly-2026-07-20 fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" -- -max_total_time="$FUZZ_TIME_SECONDS" -timeout=10; then
+            dict_args=()
+            if [ -f "fuzz/dicts/${target}.dict" ]; then
+              dict_args=(-dict="$PWD/fuzz/dicts/${target}.dict")
+            fi
+            if ! cargo +nightly-2026-07-20 fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" -- -max_total_time="$FUZZ_TIME_SECONDS" -timeout=10 "${dict_args[@]}"; then
               failed=1
             fi
             echo "::endgroup::"

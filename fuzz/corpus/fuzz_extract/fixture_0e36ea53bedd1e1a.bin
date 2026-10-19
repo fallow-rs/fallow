@@ -1,0 +1,5 @@
+<div>
+  <label>Input Field</label>
+  <input [formControl]="control" (blur)="trimValue()" />
+  <div [class]="tooltipClass">Help text goes here</div>
+</div>

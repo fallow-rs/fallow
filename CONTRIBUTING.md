@@ -111,17 +111,28 @@ Each target uses seed inputs from `fuzz/corpus/<target-name>/`. Pushes to
 scheduled workflow runs every target for five minutes each week and can also
 be started manually. Crashing inputs are retained as workflow artifacts.
 
-Most targets check that a parser does not panic or hang. `fuzz_config_glob`
-and `fuzz_config_files` also check a security property: when glob validation
-accepts a pattern, the pattern cannot name a path outside the project root.
+Most targets check that a parser does not panic or hang. Some targets also
+check a property:
+
+- `fuzz_config_glob` and `fuzz_config_files`: when glob validation accepts a
+  pattern, the pattern cannot name a path outside the project root.
+- `fuzz_extract_cache`: two parses of one source give the same cache bytes,
+  and a cache save and load cycle does not change a module.
+
 To add a target, add a `[[bin]]` entry to `fuzz/Cargo.toml`, add seed inputs
 to `fuzz/corpus/<target-name>/`, and add the name to the target list in
-`.github/workflows/fuzz-smoke.yml`. When you run a target locally, give a
-scratch directory as the first corpus argument, so that new inputs do not go
-into the committed seed corpus:
+`.github/workflows/fuzz-smoke.yml`. A target can have a libFuzzer dictionary
+at `fuzz/dicts/<target-name>.dict`; the smoke workflow and OSS-Fuzz use it.
+`node scripts/fuzz-seed-extract.mjs` writes the `fixture_*` seeds of the
+extraction targets from `tests/fixtures/`.
+
+When you run a target locally, give a scratch directory as the first corpus
+argument, so that new inputs do not go into the committed seed corpus. With
+`-O`, also pass `-a`: the `bitcode` crate reads past the end of a buffer for
+speed when debug assertions are off, and the sanitizer reports that read.
 
 ```bash
-cargo +nightly fuzz run fuzz_extract /tmp/fuzz-extract fuzz/corpus/fuzz_extract
+cargo +nightly fuzz run -O -a fuzz_extract /tmp/fuzz-extract fuzz/corpus/fuzz_extract -- -dict=fuzz/dicts/fuzz_extract.dict
 ```
 
 ### Running locally

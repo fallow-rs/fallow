@@ -1,0 +1,3 @@
+fragment orphan on Story {
+  id
+}

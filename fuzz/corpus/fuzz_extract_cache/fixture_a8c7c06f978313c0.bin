@@ -1,0 +1,20 @@
+import * as Alchemy from "alchemy";
+import * as Cloudflare from "alchemy/Cloudflare";
+import * as Effect from "effect/Effect";
+import Api from "./src/api.ts";
+import { Site } from "./src/site/infra.ts";
+
+export const Async = Cloudflare.Worker("Async", {
+  main: "./src/async-worker.ts",
+});
+
+export default Alchemy.Stack(
+  "Fixture",
+  {},
+  Effect.gen(function* () {
+    const api = yield* Api;
+    const site = yield* Site;
+    const async = yield* Async;
+    return { api: api.url, site: site.url, async: async.url };
+  }),
+);

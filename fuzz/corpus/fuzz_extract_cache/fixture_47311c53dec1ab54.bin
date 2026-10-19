@@ -1,0 +1,4 @@
+---
+export const title = "My Site";
+---
+<header><h1>{title}</h1></header>

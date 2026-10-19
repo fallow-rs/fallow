@@ -1,0 +1,9 @@
+// Angular CLI resolves `@import 'variables'` by searching
+// stylePreprocessorOptions.includePaths: ["src/styles"]
+// So 'variables' resolves to src/styles/_variables.scss.
+@import 'variables';
+@use 'mixins';
+
+.app {
+  color: $primary-color;
+}

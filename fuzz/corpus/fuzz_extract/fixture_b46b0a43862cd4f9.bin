@@ -1,0 +1,52 @@
+import { Component, signal } from "@angular/core";
+
+interface Player {
+  id: string;
+  name: string;
+}
+
+interface Game {
+  state: "lobby" | "question" | "answer" | "results";
+  code: string;
+  players: Player[];
+  scores: Record<string, number>;
+  hasAdmin: boolean;
+}
+
+@Component({
+  selector: "host-game",
+  template: `
+    @if (game(); as g) {
+      @if (g.state === "lobby") {
+        <host-lobby [code]="g.code" [players]="g.players" />
+      } @else if (g.state === "question") {
+        @for (player of g.players; track player.id) {
+          <player-tile
+            [player]="player"
+            [score]="g.scores[player.id] ?? 0" />
+        }
+      } @else if (g.state === "answer") {
+        @switch (g.players.length) {
+          @case (0) {
+            <empty-state />
+          }
+          @case (1) {
+            <single-player [player]="g.players[0]" />
+          }
+          @default {
+            <player-grid [players]="g.players" />
+          }
+        }
+      } @else {
+        @if (g.hasAdmin) {
+          <admin-panel />
+        } @else {
+          <results-summary [scores]="g.scores" />
+        }
+      }
+    }
+  `,
+})
+export class HostGameComponent {
+  readonly game = signal<Game | null>(null);
+}

@@ -1,0 +1,5 @@
+import React, { useState } from 'react';
+export const App = ({ items }: { items: string[] }) => {
+  const [n, setN] = useState(0);
+  return <ul className="list">{items.map((i) => <li key={i} onClick={() => setN(n + 1)}>{i}</li>)}</ul>;
+};

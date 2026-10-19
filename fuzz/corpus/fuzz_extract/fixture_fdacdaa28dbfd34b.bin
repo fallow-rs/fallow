@@ -1,0 +1,37 @@
+@if (user) {
+  @if (user.isAdmin) {
+    @for (item of user.permissions; track item.id) {
+      @switch (item.status) {
+        @case ('active') {
+          <badge [color]="item.level > 3 ? 'red' : 'green'" />
+        }
+        @case ('pending') {
+          <spinner />
+        }
+        @default {
+          <placeholder />
+        }
+      }
+    }
+  } @else {
+    @if (user.canRequest) {
+      <request-form [data]="user.profile?.settings ?? defaults" />
+    }
+  }
+}
+
+@let displayName = user?.firstName && user?.lastName
+  ? user.firstName + ' ' + user.lastName
+  : user?.email ?? 'Anonymous';
+
+@defer (when user?.isAdmin && featureFlags.heavyDashboard) {
+  <admin-dashboard
+    [config]="user.preferences?.dashboard ?? defaultDashboardConfig"
+    [mode]="user.settings?.darkMode ? 'dark' : 'light'" />
+} @placeholder {
+  <skeleton-loader />
+} @loading (minimum 300ms) {
+  <spinner [size]="isCompact ? 'sm' : 'lg'" />
+} @error {
+  <error-banner [retry]="canRetry && !isOffline" />
+}

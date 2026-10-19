@@ -1,0 +1,10 @@
+[Documentation] @docs-team
+docs/
+README.md
+
+^[Optional review][2] @reviewers
+*.md @writer
+
+[Backend] @backend
+/app/**/*.rb
+lib/ @lead

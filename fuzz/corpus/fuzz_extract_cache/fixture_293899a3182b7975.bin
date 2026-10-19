@@ -1,0 +1,30 @@
+import { Component, inject } from "@angular/core";
+
+class UserService {
+  currentUser = {
+    isAdmin: true,
+    canRequest: false,
+    permissions: [{ id: "read", status: "active", level: 4 }],
+    profile: { settings: {} },
+    preferences: { dashboard: {} },
+    settings: { darkMode: false },
+  };
+}
+
+class ConfigService {
+  defaults = {};
+}
+
+class FeatureFlagService {
+  heavyDashboard = true;
+}
+
+@Component({
+  selector: "app-permissions",
+  templateUrl: "./permissions.component.html",
+})
+export class PermissionsComponent {
+  user = inject(UserService).currentUser;
+  defaults = inject(ConfigService).defaults;
+  featureFlags = inject(FeatureFlagService);
+}

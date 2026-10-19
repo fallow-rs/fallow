@@ -1,0 +1,11 @@
+.header {
+  display: flex;
+}
+
+.footer {
+  padding: 20px;
+}
+
+.sidebar {
+  width: 250px;
+}

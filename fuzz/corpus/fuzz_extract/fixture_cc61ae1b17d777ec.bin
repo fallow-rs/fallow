@@ -1,0 +1,9 @@
+<script setup lang="ts">
+export interface ComponentSlots {
+  default(props: { item: string }): unknown;
+}
+
+defineSlots<ComponentSlots>();
+</script>
+
+<template><slot item="x" /></template>

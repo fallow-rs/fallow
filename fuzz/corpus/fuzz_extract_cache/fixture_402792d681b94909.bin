@@ -1,0 +1,3 @@
+import { createOrder } from '../../core/src/order';
+
+export const login = (): string => createOrder('ack');

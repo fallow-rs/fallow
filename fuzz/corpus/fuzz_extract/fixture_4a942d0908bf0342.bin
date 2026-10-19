@@ -1,0 +1,9 @@
+<script setup lang="ts">
+export interface DefaultedProps {
+  size?: number;
+}
+
+const props = withDefaults(defineProps<DefaultedProps>(), { size: 1 });
+</script>
+
+<template><span>{{ props.size }}</span></template>

@@ -1,0 +1,13 @@
+import { Component } from '@angular/core';
+import { InputFieldComponent } from './input-field.component';
+import { DataViewComponent } from './data-view.component';
+
+@Component({
+  selector: 'app-root',
+  imports: [InputFieldComponent, DataViewComponent],
+  template: `
+    <app-input-field />
+    <app-data-view />
+  `,
+})
+export class AppComponent {}

@@ -1,0 +1,7 @@
+import { a, type B } from './a';
+import * as ns from "pkg/sub";
+export const x: B = a(ns.y);
+export default class Foo<T> { #p = 1; static { void import('./lazy'); } }
+export { z as w } from './z';
+// fallow-ignore-next-line unused-export
+export function used(this: void, ...args: unknown[]): void { if (args.length) { for (const v of args) { switch (typeof v) { case 'string': break; default: } } } }

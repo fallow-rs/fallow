@@ -1,0 +1,22 @@
+import { Component } from "@angular/core";
+
+@Component({
+  selector: "app-host-game",
+  templateUrl: "./host-game.component.html",
+})
+export class HostGameComponent {
+  state: "idle" | "playing" | "paused" | "ended" = "idle";
+
+  handleClick(event: { target: string }): string {
+    if (event.target === "start") {
+      if (this.state === "idle") {
+        return "starting";
+      }
+      return "already-started";
+    }
+    if (event.target === "pause") {
+      return this.state === "playing" ? "paused" : "ignored";
+    }
+    return "noop";
+  }
+}

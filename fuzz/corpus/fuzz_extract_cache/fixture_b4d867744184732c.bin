@@ -1,0 +1,7 @@
+import { render } from "./render.ts";
+
+export default {
+  async fetch(): Promise<Response> {
+    return new Response(render());
+  },
+};

@@ -1,0 +1,13 @@
+---
+export function getStaticPaths() {
+  return [{ params: { slug: "hello-world" } }];
+}
+
+export const prerender = true;
+export const partial = true;
+export function unusedPageHelper() {
+  return "dead";
+}
+---
+
+<p>Astro convention coverage</p>

@@ -1,0 +1,9 @@
+#import "./content"
+# import "./leaf.gql"
+
+fragment MyStory on Story {
+  field {
+    ...content
+    ...leaf
+  }
+}

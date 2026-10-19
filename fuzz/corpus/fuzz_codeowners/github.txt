@@ -1,0 +1,7 @@
+# Default owners
+*       @org/core
+/docs/  @org/docs @alice
+*.ts    @org/frontend
+/packages/**/package.json @org/release
+src/components/ @bob
+!src/components/legacy/

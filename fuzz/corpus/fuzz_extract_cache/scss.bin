@@ -1,0 +1,5 @@
+@use 'sass:math';
+@forward './tokens';
+$size: 4px;
+@mixin pad($n) { padding: math.div($n, 2); }
+.card { @include pad($size); &__title { font-weight: bold; } }

@@ -1,0 +1,4 @@
+---
+export const orphanedValue = "not imported";
+---
+<div>Orphaned component</div>

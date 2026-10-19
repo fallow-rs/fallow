@@ -15,6 +15,10 @@ libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
 fallow-config = { path = "../crates/config" }
 fallow-core = { path = "../crates/core" }
+fallow-engine = { path = "../crates/engine" }
+fallow-extract = { path = "../crates/extract" }
+fallow-types = { path = "../crates/types" }
+bitcode = "0.6"
 dunce = "1"
 serde_json = "1"
 toml = "1.1"
@@ -54,3 +58,11 @@ path = "fuzz_targets/fuzz_workspace_manifests.rs"
 [[bin]]
 name = "fuzz_config_files"
 path = "fuzz_targets/fuzz_config_files.rs"
+
+[[bin]]
+name = "fuzz_extract_cache"
+path = "fuzz_targets/fuzz_extract_cache.rs"
+
+[[bin]]
+name = "fuzz_codeowners"
+path = "fuzz_targets/fuzz_codeowners.rs"

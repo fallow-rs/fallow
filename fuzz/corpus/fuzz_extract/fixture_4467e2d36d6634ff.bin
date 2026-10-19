@@ -1,0 +1,9 @@
+import { DurableObject } from "cloudflare:workers";
+
+export class Room extends DurableObject {}
+
+export default {
+  async fetch(): Promise<Response> {
+    return new Response("ok");
+  },
+};

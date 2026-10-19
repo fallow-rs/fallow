@@ -1,0 +1,7 @@
+.primary {
+  background: blue;
+}
+
+.secondary {
+  background: gray;
+}

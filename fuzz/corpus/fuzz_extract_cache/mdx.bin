@@ -1,0 +1,6 @@
+import { Chart } from '../components/Chart';
+export const meta = { title: 'Doc' };
+
+# Heading
+
+<Chart data={[1, 2, 3]} />
