@@ -59,5 +59,8 @@
       ],
       "category": "public.app-category.developer-tools"
     }
+  },
+  "overrides": {
+    "global-agent": "^4.1.3"
   }
 }
