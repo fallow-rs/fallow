@@ -451,3 +451,20 @@ fn trend_shows_no_dead_export_change_across_the_flag() {
         assert_eq!(metric["delta"], 0.0, "{extra:?}: {metric}");
     }
 }
+
+/// Tests on the shared fixture write `.fallow` cache files while other tests
+/// copy that fixture, so the copy must leave the cache out.
+#[test]
+fn fixture_copy_skips_the_fallow_cache() {
+    let source = tempfile::tempdir().expect("source dir");
+    std::fs::create_dir_all(source.path().join(".fallow/cache")).expect("cache dir");
+    std::fs::write(source.path().join(".fallow/cache/entry.bin"), b"x").expect("cache file");
+    std::fs::create_dir_all(source.path().join("src")).expect("src dir");
+    std::fs::write(source.path().join("src/index.ts"), "export {};\n").expect("source file");
+
+    let target = tempfile::tempdir().expect("target dir");
+    super::common::copy_fixture_tree(source.path(), target.path());
+
+    assert!(target.path().join("src/index.ts").is_file());
+    assert!(!target.path().join(".fallow").exists());
+}

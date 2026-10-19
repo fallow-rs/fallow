@@ -48,21 +48,28 @@ pub fn fixture_path(name: &str) -> PathBuf {
 /// Copy a test fixture into a new temporary directory, so a test can write
 /// files (for example a saved baseline) inside the project root.
 pub fn copy_fixture(name: &str) -> tempfile::TempDir {
-    fn copy(from: &Path, to: &Path) {
-        std::fs::create_dir_all(to).expect("create fixture copy dir");
-        for entry in std::fs::read_dir(from).expect("read fixture dir") {
-            let entry = entry.expect("fixture entry");
-            let target = to.join(entry.file_name());
-            if entry.file_type().expect("fixture entry type").is_dir() {
-                copy(&entry.path(), &target);
-            } else {
-                std::fs::copy(entry.path(), &target).expect("copy fixture file");
-            }
+    let dir = tempfile::tempdir().expect("create fixture copy");
+    copy_fixture_tree(&fixture_path(name), dir.path());
+    dir
+}
+
+/// Copy a fixture tree without its `.fallow` cache directory. Other tests run
+/// fallow directly on the shared fixture and write cache files there in
+/// parallel, so a cache file can disappear between the listing and the copy.
+pub fn copy_fixture_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create fixture copy dir");
+    for entry in std::fs::read_dir(from).expect("read fixture dir") {
+        let entry = entry.expect("fixture entry");
+        if entry.file_name() == ".fallow" {
+            continue;
+        }
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("fixture entry type").is_dir() {
+            copy_fixture_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).expect("copy fixture file");
         }
     }
-    let dir = tempfile::tempdir().expect("create fixture copy");
-    copy(&fixture_path(name), dir.path());
-    dir
 }
 
 /// Drop the variables a developer shell may export that change what a run
