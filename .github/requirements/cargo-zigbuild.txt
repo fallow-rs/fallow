@@ -1,0 +1,14 @@
+# Hash-pinned tools for the aarch64-musl build leg in release.yml.
+# Install with: python3 -m pip install --require-hashes -r <this file>
+# The hashes cover the Linux x86_64, Linux aarch64 and macOS wheels.
+# Both projects publish wheels only (no sdist). To update, bump both versions
+# and copy the sha256 values from https://pypi.org/pypi/<name>/<version>/json.
+cargo-zigbuild==0.23.4 \
+    --hash=sha256:0a149a2a07b9513d422efa9cc23e1add9741f08abe86845fa418eaeb4cca7931 \
+    --hash=sha256:9f848addf9ca16e8df52b4a86eb41f7555bb4205aea117ad521f501a307129f5 \
+    --hash=sha256:bc39e63ec1b4a34784b9bfcea90b11f42f8cc0b9f31b14e77522bc45dbb72430
+ziglang==0.16.0 \
+    --hash=sha256:9fcda73f62b851dd72a54b710ad40a209896db14cfb13649e62191243556342b \
+    --hash=sha256:e27d409812b11e0fb89ed0200cf2e55b6464d43f9461553104e4a4f9a94a1fd5 \
+    --hash=sha256:b61e5413c49508d9d62e5dcea543e3af491594154d74a00ff52f84ed508260cc \
+    --hash=sha256:18e14f6b25678d7b7c65708c82501ee6090fe39ed5c783477d56267af1fa5629

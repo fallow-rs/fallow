@@ -555,11 +555,12 @@ jobs:
       # the `--fix-cortex-a53-843419` linker arg that rustc 1.98 passes for
       # this target and that zig rejects. x86_64-musl (native musl-gcc) and
       # aarch64-gnu (glibc cross-gcc against a glibc target) keep the plain
-      # cargo build.
+      # cargo build. The versions and wheel hashes live in
+      # .github/requirements/cargo-zigbuild.txt.
       - name: Install cargo-zigbuild for aarch64-musl C cross-compile
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          python3 -m pip install --user --break-system-packages cargo-zigbuild==0.23.4 ziglang==0.16.0
+          python3 -m pip install --user --break-system-packages --require-hashes --only-binary=:all: -r .github/requirements/cargo-zigbuild.txt
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cargo-zigbuild" --version
           python3 -m ziglang version
