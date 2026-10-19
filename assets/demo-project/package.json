@@ -5,7 +5,7 @@
     "moment": "^2.30.0"
   },
   "devDependencies": {
-    "@faker-js/faker": "^9.0.0",
+    "@faker-js/faker": "^10.5.0",
     "typescript": "^5.4.0"
   }
 }
