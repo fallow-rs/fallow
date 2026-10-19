@@ -4,6 +4,7 @@ allowBuilds:
 
 overrides:
   "brace-expansion@5": 5.0.12
+  "serialize-javascript@6": 7.1.2
 
 supportedArchitectures:
   os:
