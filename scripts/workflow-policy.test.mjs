@@ -3032,6 +3032,12 @@ test("the Dependabot caller pins the org-wide workflow and passes only what it n
     /^    uses: fallow-rs\/\.github\/\.github\/workflows\/dependabot\.yml@[0-9a-f]{40} # main$/mu,
   );
   assert.doesNotMatch(workflow, /secrets: inherit/u, "pass each secret by name");
+  // The reusable workflow checks the source repository too, but the caller
+  // must not hand secrets to a run that a fork started.
+  assert.match(
+    workflow,
+    /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/u,
+  );
   assert.doesNotMatch(
     workflow,
     /^\s+(?:contents|id-token): write$/mu,

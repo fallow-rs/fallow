@@ -26,6 +26,11 @@ concurrency:
 
 jobs:
   dependabot:
+    # Pass no secret to a run that a fork or another event started.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.event == 'pull_request')
     uses: fallow-rs/.github/.github/workflows/dependabot.yml@c2aa294638fe85770df6c71343d32114c79ec8fb # main
     permissions:
       actions: write
