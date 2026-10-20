@@ -20,6 +20,8 @@ const CONFIG_PATTERNS: &[&str] = &["postcss.config.{ts,js,cjs,mjs}"];
 
 const ALWAYS_USED: &[&str] = &["postcss.config.{ts,js,cjs,mjs}"];
 
+const CONFIG_EXPORTS: &[&str] = &["default"];
+
 const TOOLING_DEPENDENCIES: &[&str] = &["postcss", "postcss-cli"];
 
 /// Built-in plugin for `PostCSS` configs.
@@ -46,6 +48,10 @@ impl Plugin for PostCssPlugin {
 
     fn always_used(&self) -> &'static [&'static str] {
         ALWAYS_USED
+    }
+
+    fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
+        vec![(CONFIG_PATTERNS[0], CONFIG_EXPORTS)]
     }
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
@@ -92,6 +98,15 @@ impl Plugin for PostCssPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn used_exports_credits_default_of_config_files() {
+        let exports = PostCssPlugin.used_exports();
+        assert_eq!(
+            exports,
+            vec![("postcss.config.{ts,js,cjs,mjs}", &["default"][..])]
+        );
+    }
 
     #[test]
     fn resolve_config_string_array_plugins() {

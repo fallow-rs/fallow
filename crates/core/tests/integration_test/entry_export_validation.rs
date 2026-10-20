@@ -152,6 +152,46 @@ fn vite_config_default_export_is_framework_used_with_include_entry_exports() {
 }
 
 #[test]
+fn postcss_config_default_export_is_framework_used_with_include_entry_exports() {
+    // Issue #3691: PostCSS reads only the default export of postcss.config.*,
+    // so under includeEntryExports it is used and a named export is not.
+    let root = fixture_path("postcss-include-entry-exports");
+    let mut config = create_config(root);
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            (
+                export
+                    .export
+                    .path
+                    .strip_prefix(&config.root)
+                    .unwrap_or(&export.export.path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                export.export.export_name.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(path, export)| path == "postcss.config.mjs" && export == "default"),
+        "PostCSS config default export should be framework-used, found: {unused_exports:?}"
+    );
+    assert!(
+        unused_exports
+            .iter()
+            .any(|(path, export)| path == "postcss.config.mjs" && export == "unusedHelper"),
+        "a named export of postcss.config.mjs is not read by PostCSS, found: {unused_exports:?}"
+    );
+}
+
+#[test]
 fn storybook_exports_are_framework_used_with_include_entry_exports() {
     let root = fixture_path("storybook-include-entry-exports");
     let mut config = create_config(root);

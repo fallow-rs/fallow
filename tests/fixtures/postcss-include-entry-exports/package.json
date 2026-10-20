@@ -1,0 +1,7 @@
+{
+  "name": "postcss-include-entry-exports",
+  "private": true,
+  "devDependencies": {
+    "postcss": "^8.5.0"
+  }
+}
