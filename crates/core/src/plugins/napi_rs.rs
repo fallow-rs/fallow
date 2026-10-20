@@ -8,6 +8,11 @@
 //! at publish time, so a source repository has none. The plugin therefore
 //! activates on the `napi` field and its `targets`, and credits the imports of the
 //! generated loader and WASI worker.
+//!
+//! The generated loader and `browser.js` are support entry points. Their
+//! exports mirror the Rust bindings, so a hand-written wrapper that reuses a
+//! binding name is not a duplicate export, and an unused binding is not an
+//! unused export of the generated file.
 
 use std::io::Read;
 use std::path::Path;
@@ -86,6 +91,7 @@ impl Plugin for NapiRsPlugin {
             ));
         let platform_prefix = format!("{base}-");
         for loader in generated_loaders(root) {
+            result.push_entry_pattern(loader.clone());
             result
                 .provided_dependencies
                 .push(ProvidedDependencyRule::new(
@@ -95,6 +101,7 @@ impl Plugin for NapiRsPlugin {
                 ));
         }
         if is_generated_browser_entry(&root.join(BROWSER_ENTRY), base) {
+            result.push_entry_pattern(BROWSER_ENTRY);
             result
                 .provided_dependencies
                 .push(ProvidedDependencyRule::new(
