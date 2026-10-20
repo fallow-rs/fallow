@@ -107,8 +107,8 @@ use unrendered_component::{
     find_unrendered_lit_elements,
 };
 use unused_catalog::{
-    find_empty_catalog_groups, find_unresolved_catalog_references, find_unused_catalog_entries,
-    gather_pnpm_catalog_state,
+    can_prove_unused_catalog_entries, find_empty_catalog_groups,
+    find_unresolved_catalog_references, find_unused_catalog_entries, gather_pnpm_catalog_state,
 };
 use unused_component_emit::find_unused_component_emits;
 use unused_component_input::find_unused_component_inputs;
@@ -2287,15 +2287,7 @@ fn populate_pnpm_catalog_findings(
         return;
     };
 
-    // A workspace pattern whose directory is missing hides packages that can
-    // consume catalog entries, so no entry can be proven unused in this run.
-    // Discovery reports the pattern as `workspace-pattern-dir-missing`.
-    if need_unused
-        && !fallow_config::has_missing_workspace_pattern_dirs(
-            &config.root,
-            &config.workspace_patterns,
-        )
-    {
+    if need_unused && can_prove_unused_catalog_entries(config) {
         results.unused_catalog_entries = find_unused_catalog_entries(&state)
             .into_iter()
             .map(UnusedCatalogEntryFinding::with_actions)

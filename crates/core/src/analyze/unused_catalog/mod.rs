@@ -148,6 +148,15 @@ pub fn report_malformed_pnpm_workspace_yaml(root: &Path, yaml_path: &Path, error
     );
 }
 
+/// Whether this run can prove a catalog entry unused.
+///
+/// A workspace pattern whose directory is missing hides packages that can
+/// consume catalog entries, so no entry can be proven unused in this run.
+/// Discovery reports the pattern as `workspace-pattern-dir-missing`.
+pub fn can_prove_unused_catalog_entries(config: &ResolvedConfig) -> bool {
+    !fallow_config::has_missing_workspace_pattern_dirs(&config.root, &config.workspace_patterns)
+}
+
 /// Emit one `UnusedCatalogEntry` for every catalog entry not referenced by any
 /// workspace `package.json` via the `catalog:` protocol.
 pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
